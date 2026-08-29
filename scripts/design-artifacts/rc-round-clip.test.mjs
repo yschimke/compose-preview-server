@@ -24,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const BUNDLE = path.resolve(HERE, "../../cli/serve/src/main/resources/rc-player/bundle.js");
+const BUNDLE = path.resolve(HERE, "../../server/src/main/resources/rc-player/bundle.js");
 const FIXTURE = path.join(HERE, "fixtures", "watch-screen-round-clip.rc");
 // The fixture's own generation size; the document is a 227dp round watch face at density 2.
 const WIDTH = 454;

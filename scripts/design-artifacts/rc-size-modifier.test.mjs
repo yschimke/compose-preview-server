@@ -40,7 +40,7 @@ import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const BUNDLE = path.resolve(HERE, "../../cli/serve/src/main/resources/rc-player/bundle.js");
+const BUNDLE = path.resolve(HERE, "../../server/src/main/resources/rc-player/bundle.js");
 const FIXTURE = path.join(HERE, "fixtures", "icon-remote-size.rc");
 const BAKED = path.join(HERE, "fixtures", "icon-remote-size.baked.png");
 // The fixture's own generation size: a 200 dp square sticker at dpi 320 (density 2).

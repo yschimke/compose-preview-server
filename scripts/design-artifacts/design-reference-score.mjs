@@ -40,7 +40,7 @@ import { fileURLToPath } from "node:url";
  */
 const COMPARE_ASSET = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../cli/serve/src/main/resources/ee/schimke/composeai/cli/serve/assets/format-compare.js",
+  "../../server/src/main/resources/ee/schimke/composeai/cli/serve/assets/format-compare.js",
 );
 
 /**

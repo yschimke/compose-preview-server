@@ -43,7 +43,7 @@ export const FONT_FACES = [
  */
 export const DEFAULT_FONTS_DIR = path.resolve(
   HERE,
-  "../../samples/cmp-wasm-catalog/src/wasmJsMain/resources/fonts",
+  "../../assets/rc-fonts",
 );
 
 /**
