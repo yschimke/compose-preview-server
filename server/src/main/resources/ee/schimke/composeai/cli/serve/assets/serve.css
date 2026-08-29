@@ -540,6 +540,20 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
   font-size: var(--md-sys-typescale-label-medium-size);
   font-family: var(--md-sys-typescale-mono-font); }
 .cp-shot-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.cp-markup { grid-column: 1 / -1; display: grid; gap: 8px; margin-top: 6px; padding-top: 10px;
+  border-top: 1px solid var(--cp-border); }
+.cp-markup-tools, .cp-markup-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cp-markup-tool[aria-pressed="true"] { color: var(--md-sys-color-on-primary);
+  border-color: var(--md-sys-color-primary); background: var(--md-sys-color-primary); }
+.cp-markup-colour { width: 36px; height: 32px; padding: 2px; cursor: pointer;
+  border: 1px solid var(--cp-border); border-radius: var(--md-sys-shape-corner-small);
+  background: transparent; }
+.cp-markup-text { min-width: 120px; min-height: 32px; box-sizing: border-box; padding: 5px 9px;
+  font: inherit; color: var(--cp-fg); border: 1px solid var(--cp-border);
+  border-radius: var(--md-sys-shape-corner-small); background: var(--md-sys-color-surface); }
+.cp-markup-canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: 65vh;
+  cursor: crosshair; touch-action: none; border: 1px solid var(--cp-border);
+  border-radius: var(--md-sys-shape-corner-small); background: #fff; }
 .cp-shots { display: grid; gap: 10px; margin: 0 0 20px; }
 .cp-shots .cp-shot-list { max-width: 640px; }
 .cp-shots-empty { margin: 0; }
@@ -1063,7 +1077,7 @@ html.cp-js .cp-tree-link[aria-expanded="false"] + .cp-tree-children { display: n
    each claiming a five-column row and painting four of them blank — 28 of 33 rows were using at
    most 2 of the 5 columns they declared (issue #4423). The headings still mark every boundary;
    what they no longer do is force a grid break. */
-.cp-section, .cp-grid-groups { display: flex; flex-wrap: wrap; align-items: flex-start;
+.cp-section, .cp-grid-groups { display: flex; flex-wrap: wrap; align-items: stretch;
   --cp-card-w: 212px; --cp-card-gap: 18px; gap: 0 var(--cp-card-gap, 18px); }
 .cp-section { margin: 0; scroll-margin-top: calc(var(--cp-sticky-tools, 64px) + 16px); }
 .cp-section[hidden] { display: none; }
@@ -1091,6 +1105,7 @@ html.cp-js.cp-multi-section .cp-section-head { display: block; }
    the heading a visitor asked for lands at viewport zero, under the sticky toolbar; the same
    reason `.cp-section` above carries one for `#cp-panel-<slug>`. */
 .cp-subgroup {
+  display: flex; flex-direction: column;
   flex: 0 1 calc(var(--cp-n, 1) * var(--cp-card-w, 212px)
     + (var(--cp-n, 1) - 1) * var(--cp-card-gap, 18px));
   min-width: 0; max-width: 100%;
@@ -1105,8 +1120,16 @@ html.cp-js.cp-multi-section .cp-section-head { display: block; }
    indefinite, which is exactly the measurement the cluster's flex basis above is taken from — the
    whole sheet would stack into a single column. A wrapping flex row measures as the sum of its
    cards, which is the number the basis wants. */
-.cp-cards { display: flex; flex-wrap: wrap; gap: var(--cp-card-gap, 18px); }
-.cp-cards > .cp-card { flex: 0 0 var(--cp-card-w, 212px); max-width: 100%; }
+.cp-cards { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: stretch;
+  gap: var(--cp-card-gap, 18px); }
+/* Every family on a flex line inherits the tallest family's height. Carry that height through the
+   subgroup and card, then let the image well consume the spare space: short components sit in the
+   vertical centre of the same full-height tile as a tall screen, while every metadata footer stays
+   aligned at the bottom (issue #4784). Scoped to catalog preview cards; front-door `.cp-sys` cards
+   use their own fixed hero row. */
+.cp-cards > .cp-card { flex: 0 0 var(--cp-card-w, 212px); max-width: 100%;
+  display: flex; flex-direction: column; }
+.cp-cards > .cp-card > .cp-imgwrap { flex: 1 1 auto; }
 /* The Theme picker carries one chip per configured theme (the baked light/dark pair plus any
    app-declared @ThemeCatalog theme), so it wraps rather than overflowing a narrow viewport.
    That is exactly why it is NOT an M3 segmented button: a segmented track is specified for a
@@ -1133,11 +1156,11 @@ html.cp-js.cp-multi-section .cp-section-head { display: block; }
   background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
 .cp-state-btn[aria-current="page"] { background: var(--md-sys-color-secondary-container);
   border-color: transparent; color: var(--md-sys-color-on-secondary-container); font-weight: 500; }
-/* `<cp-bg-toggle>` (serve-components.js) renders the Transparent button into its own light DOM.
+/* `<cp-bg-toggle>` (the catalog/viewer component bundle) renders the Transparent button into light DOM.
    `display: contents` drops the wrapper out of layout entirely, so the .cp-bg-btn inside stays the
    toolbar's own flex item and the upgraded control lays out exactly as the bare button did. */
 cp-bg-toggle { display: contents; }
-/* The controller elements (serve-components.js): each only wires behaviour onto markup the server
+/* The controller elements (surface component bundles): each only wires behaviour onto markup the server
    already rendered — remembered fold state, the phone's toolbar reflow, the viewer's drawers — and
    none of them has anything to draw. An autonomous custom element defaults to `display: inline`,
    so without this each would sit in its page's flow as an empty inline box. */

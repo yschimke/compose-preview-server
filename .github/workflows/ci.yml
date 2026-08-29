@@ -27,7 +27,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
         with:
           cache-provider: basic
-      - run: ./gradlew check ktfmtCheckAll
+      - run: ./gradlew check ktfmtCheckAll :server:distTar
+      - name: Smoke-test standalone distribution
+        run: |
+          mkdir -p "${RUNNER_TEMP}/compose-preview-server"
+          tar -xzf server/build/distributions/*.tar.gz -C "${RUNNER_TEMP}/compose-preview-server"
+          "${RUNNER_TEMP}"/compose-preview-server/*/bin/compose-preview-server --help
+
+  deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify deployment scripts
+        run: |
+          for test_script in deploy/image/test-*.sh; do
+            bash "${test_script}"
+          done
 
   serve-web:
     runs-on: ubuntu-latest

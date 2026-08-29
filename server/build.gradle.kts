@@ -3,6 +3,8 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.tasks.ClasspathNormalizer
 import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.bundling.Compression
+import org.gradle.api.tasks.bundling.Tar
 import org.gradle.process.CommandLineArgumentProvider
 
 // `compose-preview serve` — the preview server, as its own module.
@@ -22,6 +24,7 @@ import org.gradle.process.CommandLineArgumentProvider
 // and usage text live in this module; `:cli` keeps only the thin adapter that supplies Gradle build
 // operations and the tool-wide preview matcher.
 plugins {
+  application
   alias(libs.plugins.kotlin.jvm)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.ktfmt)
@@ -60,6 +63,24 @@ version =
 // `serve.jar` (the default from the project name) says nothing and could collide. Same naming as
 // `:cli`'s `compose-preview` and `:mcp`'s `compose-preview-mcp`.
 base { archivesName.set("compose-preview-serve") }
+
+application {
+  applicationName = "compose-preview-server"
+  mainClass.set("ee.schimke.composeai.cli.serve.StandaloneServerMainKt")
+}
+
+evaluationDependsOn(":wasm-ui")
+
+distributions {
+  main {
+    contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("preview-ui") } }
+  }
+}
+
+tasks.named<Tar>("distTar") {
+  compression = Compression.GZIP
+  archiveExtension.set("tar.gz")
+}
 
 // Published, because after #3824's repo split `:cli` cannot reach the server any other way.
 //
