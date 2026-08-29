@@ -18,7 +18,7 @@ kotlin {
       @Suppress("DEPRECATION") implementation(compose.ui)
       @Suppress("DEPRECATION") implementation(compose.components.resources)
       implementation(libs.graphics.shapes)
-      implementation(libs.composeai.slot.preview.runtime)
+      api(project(":slot-preview-runtime"))
     }
   }
 }

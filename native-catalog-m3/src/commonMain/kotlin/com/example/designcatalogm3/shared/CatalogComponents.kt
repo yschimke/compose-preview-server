@@ -54,7 +54,6 @@ import com.example.designcatalogm3.shared.generated.resources.m3_body_overflow
 import com.example.designcatalogm3.shared.generated.resources.slot_headline
 import com.example.designcatalogm3.shared.generated.resources.slot_supporting
 import com.example.designcatalogm3.shared.generated.resources.textfield_label
-import ee.schimke.composeai.preview.slots.PreviewSlot
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -163,16 +162,31 @@ fun CatalogComponent(id: String) {
     "card-slots" ->
       ElevatedCard {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-          PreviewSlot("leadingIcon", Modifier.size(40.dp)) {
+          CatalogPreviewSlot(
+            "leadingIcon",
+            Modifier.size(40.dp),
+            horizontal = CatalogSlotSizing.Fixed,
+            vertical = CatalogSlotSizing.Fixed,
+          ) {
             Box(
               Modifier.size(40.dp).background(catalogOverrideColor("iconColor", Color(0xFF6750A4)))
             )
           }
           Column(Modifier.padding(start = 12.dp)) {
-            PreviewSlot("headline", Modifier.size(140.dp, 20.dp)) {
+            CatalogPreviewSlot(
+              "headline",
+              Modifier.width(140.dp),
+              horizontal = CatalogSlotSizing.Fixed,
+              vertical = CatalogSlotSizing.Hug,
+            ) {
               Text(catalogOverrideString("headline", stringResource(Res.string.slot_headline)))
             }
-            PreviewSlot("supporting", Modifier.size(140.dp, 16.dp)) {
+            CatalogPreviewSlot(
+              "supporting",
+              Modifier.width(140.dp),
+              horizontal = CatalogSlotSizing.Fixed,
+              vertical = CatalogSlotSizing.Hug,
+            ) {
               Text(catalogOverrideString("supporting", stringResource(Res.string.slot_supporting)))
             }
           }

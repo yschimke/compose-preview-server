@@ -836,6 +836,63 @@ async function settleScroll(page) {
 
 const FIXTURE_STATES = [
   {
+    // A capture on the report page with its markup editor open. The editor is built entirely by
+    // `report-capture.js` from sessionStorage — neither the committed HTML fixture nor the page's
+    // default shot contains one pixel of it — so without this state the box/arrow/pen/text surface
+    // could lose its layout or styling while every ordinary report-page baseline stayed green.
+    fixture: "serve-report-bug",
+    suffix: "capture-markup",
+    parkPointer: true,
+    apply: async (page) => {
+      const dataUrl = await page.evaluate(async () => {
+        const blob = await fetch("/render/markup-fixture.png").then((r) =>
+          r.blob(),
+        );
+        return await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.addEventListener("load", () => resolve(reader.result));
+          reader.addEventListener("error", reject);
+          reader.readAsDataURL(blob);
+        });
+      });
+      await page.evaluate((picture) => {
+        sessionStorage.setItem(
+          "cp-report-captures",
+          JSON.stringify([
+            {
+              id: "shot-1",
+              label: "Region · broken comparison",
+              dataUrl: picture,
+              width: 200,
+              height: 420,
+              page: location.pathname,
+            },
+          ]),
+        );
+      }, dataUrl);
+      // The capture bundle reads the pile at install time. Reloading is the real navigation shape:
+      // the pixels were taken on the previous page and `/report-bug` starts with them already in
+      // this tab's sessionStorage.
+      await page.reload();
+      await page.waitForSelector("html[data-cp-capture-ready]");
+      await page.getByRole("button", { name: "Mark up" }).click();
+      await expect(page.locator(".cp-markup-canvas")).toBeVisible();
+      await expect(page.locator(".cp-markup-tools")).toContainText(
+        "BoxArrowPenText",
+      );
+      // Exercise the default tool as well as displaying it: a toolbar over unchanged pixels would
+      // keep passing if pointer coordinates or the canvas redraw path broke. Draw around the first
+      // card so the visual baseline contains actual red markup from the production gesture path.
+      const canvas = page.locator(".cp-markup-canvas");
+      const bounds = await canvas.boundingBox();
+      if (!bounds) throw new Error("markup canvas has no box");
+      await page.mouse.move(bounds.x + 9, bounds.y + 10);
+      await page.mouse.down();
+      await page.mouse.move(bounds.x + bounds.width - 9, bounds.y + 60);
+      await page.mouse.up();
+    },
+  },
+  {
     // The report launcher OPEN, which is the only state in which it says anything. Closed it is a
     // 40px button, and everything the affordance is for — that there are two trackers, which one
     // owns a wrong-looking preview versus a wrong-behaving page, which repository each files
@@ -1542,6 +1599,47 @@ const FIXTURE_STATES = [
           kept.length === 1
         );
       });
+    },
+  },
+  {
+    // Mixed-height preview families are the shape that exposed #4784: a short control beside a
+    // tall screen left a half-height card pinned to the top of the row. The ordinary fixture image
+    // stub is intentionally one size, so make the FAB short while its neighbouring cards remain
+    // tall. This gives the visual-diff bot the missing shape and measures the contract before the
+    // shot: equal card bottoms, with the short render centred inside its expanded image well.
+    fixture: "serve-landing-grouped",
+    suffix: "mixed-preview-heights",
+    apply: async (page) => {
+      await filterTo(page, "");
+      await page.click('.cp-pane-tab[data-pane="components"]');
+      await page.waitForSelector("#cp-pane-components:not([hidden])");
+      await page.evaluate(() => {
+        const image = document.querySelector("#cp-group-fab .cp-imgwrap img");
+        image.style.maxHeight = "96px";
+      });
+      const geometry = await page.evaluate(() => {
+        const shortCard = document.querySelector("#cp-group-fab .cp-card");
+        const tallCard = document.querySelector("#cp-group-card .cp-card");
+        const well = shortCard?.querySelector(".cp-imgwrap");
+        const image = well?.querySelector("img");
+        if (!shortCard || !tallCard || !well || !image) return null;
+        const shortRect = shortCard.getBoundingClientRect();
+        const tallRect = tallCard.getBoundingClientRect();
+        const wellRect = well.getBoundingClientRect();
+        const imageRect = image.getBoundingClientRect();
+        return {
+          heightDelta: Math.abs(shortRect.height - tallRect.height),
+          bottomDelta: Math.abs(shortRect.bottom - tallRect.bottom),
+          centerDelta: Math.abs(
+            imageRect.top + imageRect.height / 2 -
+              (wellRect.top + wellRect.height / 2),
+          ),
+        };
+      });
+      expect(geometry).not.toBeNull();
+      expect(geometry.heightDelta).toBeLessThan(1);
+      expect(geometry.bottomDelta).toBeLessThan(1);
+      expect(geometry.centerDelta).toBeLessThan(1);
     },
   },
   {
