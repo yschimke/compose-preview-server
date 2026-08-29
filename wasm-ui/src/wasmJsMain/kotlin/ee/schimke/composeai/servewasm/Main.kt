@@ -35,6 +35,7 @@ data class ClientConfig(
   val token: String?,
   val initialPreview: String?,
   val initialLive: Boolean,
+  val initialComposer: Boolean,
 ) {
   fun query(extra: Map<String, String> = emptyMap()): String {
     val values = buildMap {
@@ -58,6 +59,7 @@ data class ClientConfig(
         token = params["token"]?.takeIf { it.isNotBlank() },
         initialPreview = params["preview"]?.takeIf { it.isNotBlank() },
         initialLive = params["live"] == "1" || params["live"] == "true",
+        initialComposer = params["compose"] == "1" || params["compose"] == "true",
       )
     }
   }
@@ -76,6 +78,7 @@ data class PreviewSummary(
   val modes: List<String>,
   val liveOnly: Boolean,
   val views: Long,
+  val nativeTarget: NativeCatalogTarget?,
 )
 
 data class LiveFrame(
@@ -100,6 +103,7 @@ class BrowserPreviewClient(private val config: ClientConfig) {
 
   suspend fun catalog(): Catalog {
     val root = json.parseToJsonElement(fetchText("/api/previews${config.suffix()}")).jsonObject
+    val module = root.string("module") ?: config.session ?: "Preview server"
     val previews =
       root["previews"]?.jsonArray.orEmpty().mapNotNull { value ->
         val item = value as? JsonObject ?: return@mapNotNull null
@@ -110,10 +114,16 @@ class BrowserPreviewClient(private val config: ClientConfig) {
           modes = item["modes"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull },
           liveOnly = item["liveOnly"]?.jsonPrimitive?.booleanOrNull ?: false,
           views = item["views"]?.jsonPrimitive?.longOrNull ?: 0,
+          nativeTarget =
+            nativeCatalogTarget(
+              system = config.session,
+              previewId = id,
+              knobSeeds = item.overrideSeeds(),
+            ),
         )
       }
     return Catalog(
-      module = root.string("module") ?: config.session ?: "Preview server",
+      module = module,
       trust = root.string("trust"),
       degradations =
         root["degradations"]?.jsonArray.orEmpty().mapNotNull {
@@ -138,6 +148,17 @@ class BrowserPreviewClient(private val config: ClientConfig) {
       config.session?.let { put("session", it) }
       config.token?.let { put("token", it) }
       previewId?.let { put("preview", it) }
+    }
+    replaceBrowserQuery(
+      query.entries.joinToString("&") { "${encodeComponent(it.key)}=${encodeComponent(it.value)}" }
+    )
+  }
+
+  fun replaceComposerLocation() {
+    val query = buildMap {
+      config.session?.let { put("session", it) }
+      config.token?.let { put("token", it) }
+      put("compose", "1")
     }
     replaceBrowserQuery(
       query.entries.joinToString("&") { "${encodeComponent(it.key)}=${encodeComponent(it.value)}" }
@@ -211,6 +232,23 @@ class BrowserPreviewClient(private val config: ClientConfig) {
 
   private fun JsonObject.int(key: String): Int? =
     this[key]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+
+  private fun JsonObject.overrideSeeds(): Map<String, String> =
+    this["overrides"]
+      ?.jsonArray
+      .orEmpty()
+      .mapNotNull { value ->
+        val declaration = value as? JsonObject ?: return@mapNotNull null
+        val key = declaration.string("key")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        val index = declaration.int("index")
+        val encoded =
+          ((declaration["current"] ?: declaration["default"]) as? JsonObject)
+            ?.get("value")
+            ?.jsonPrimitive
+            ?.contentOrNull ?: return@mapNotNull null
+        (if (index == null) key else "$key[$index]") to encoded
+      }
+      .toMap()
 }
 
 internal fun parseQuery(search: String): Map<String, String> {

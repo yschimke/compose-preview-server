@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="label_filled">Gevuld</string>
+  <string name="slot_headline">Kop</string>
+  <string name="slot_supporting">Ondersteunende tekst</string>
+  <string name="textfield_label">Label</string>
+  <string name="label_pressed">Ingedrukt</string>
+  <string name="label_focused">Gefocust</string>
+  <string name="m3_body_overflow">Deze tekst is bewust lang zodat hij over twee regels loopt en wordt afgekapt.</string>
+  <string name="template_title">Postvak IN</string>
+  <string name="msg_lunch">Morgen lunchen?</string>
+  <string name="msg_specs">De specs staan klaar voor review</string>
+  <string name="msg_diff">Render-diff verzonden</string>
+  <string name="msg_merged">Bedankt, samengevoegd</string>
+  <string name="msg_deploy">Deploy netjes afgerond</string>
+</resources>
