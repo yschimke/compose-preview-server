@@ -27,9 +27,7 @@ const pagesDir = resolve(harnessDir, "fixtures", "pages");
 const serveAssetsDir = resolve(
   harnessDir,
   "..",
-  "..",
-  "cli",
-  "serve",
+  "server",
   "src",
   "main",
   "resources",
