@@ -32,11 +32,25 @@ snapshot, legacy-viewer, and WebSocket requests. Use `?token=...&session=...&pre
 link directly into a preview. Add `&live=1` to connect its live stream immediately (handy for a
 saved development URL or browser smoke test).
 
+Open the native UI Composer directly with `?token=...&session=compose-m3&compose=1`.
+
 Implemented in the prototype:
 
 - catalog loading, filtering, responsive preview cards, and direct preview deep links;
+- in-process Compose Multiplatform rendering for the built-in `compose-m3` catalog: its cards and
+  detail stage call the shared catalog composables directly inside this Wasm runtime, with no PNG
+  or live-daemon round trip;
+- native interaction plus dark mode, font scale, RTL locale, transparent background, and published
+  override-variant seeds for those `compose-m3` components;
+- a native UI Composer workspace: drag or add compiled catalog components onto a phone canvas,
+  reorder/duplicate/remove them, tune spacing and padding, switch themes, then hide the editing
+  chrome and interact with the assembled screen in preview mode;
 - baked PNG previews through `/render/{id}.png`;
 - persistent live preview frames through `/ws/{id}` with connection/error state;
 - light/dark, font-scale, locale, and transparent-background render overrides;
 - pointer taps forwarded into live compositions; and
 - links back to the existing viewer for advanced inspection surfaces.
+
+Native rendering is an additive catalog registry. A catalog/component without a compiled-in CMP
+implementation automatically keeps the snapshot and server-live behaviour; currently that includes
+Wear (whose Compose artifacts have no Wasm target) and the `compose-m3` full-app template.

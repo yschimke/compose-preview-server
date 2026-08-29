@@ -19,6 +19,7 @@ kotlin {
 
   sourceSets {
     commonMain.dependencies {
+      implementation(project(":native-catalog-m3"))
       @Suppress("DEPRECATION") implementation(compose.runtime)
       @Suppress("DEPRECATION") implementation(compose.foundation)
       @Suppress("DEPRECATION") implementation(compose.material3)
@@ -26,6 +27,7 @@ kotlin {
       implementation(libs.kotlinx.coroutines.core)
       implementation(libs.kotlinx.serialization.json)
     }
+    wasmJsTest.dependencies { implementation(kotlin("test")) }
   }
 }
 
@@ -36,12 +38,16 @@ tasks.register<Sync>("wasmFrontendDist") {
   description = "Assemble the experimental preview-server Wasm frontend."
   group = "distribution"
   dependsOn("wasmJsDevelopmentExecutableCompileSync", "processSkikoRuntimeForKWasm")
+  dependsOn("wasmJsProcessResources")
   from(layout.buildDirectory.dir("compileSync/wasmJs/main/developmentExecutable/kotlin"))
   from(layout.buildDirectory.dir("compose/skiko-runtime-processed-wasmjs")) {
     include("skiko.mjs", "skiko.wasm")
   }
   from(layout.projectDirectory.dir("src/wasmJsMain/resources")) {
     include("index.html", "js-joda.esm.js")
+  }
+  from(layout.buildDirectory.dir("processedResources/wasmJs/main")) {
+    include("composeResources/**")
   }
   into(layout.buildDirectory.dir("wasmDist"))
 }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="label_filled">Filled</string>
+  <string name="slot_headline">Headline</string>
+  <string name="slot_supporting">Supporting text</string>
+  <string name="textfield_label">Label</string>
+  <string name="label_pressed">Pressed</string>
+  <string name="label_focused">Focused</string>
+  <string name="m3_body_overflow">This body text is deliberately long so it overflows two lines and truncates.</string>
+  <string name="template_title">Inbox</string>
+  <string name="msg_lunch">Lunch tomorrow?</string>
+  <string name="msg_specs">Specs are ready for review</string>
+  <string name="msg_diff">Sent the render diff</string>
+  <string name="msg_merged">Thanks — merged it</string>
+  <string name="msg_deploy">Deploy finished cleanly</string>
+</resources>

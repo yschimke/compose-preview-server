@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="label_filled">Dolu</string>
+  <string name="slot_headline">Başlık</string>
+  <string name="slot_supporting">Destekleyici metin</string>
+  <string name="textfield_label">Etiket</string>
+  <string name="label_pressed">Basılı</string>
+  <string name="label_focused">Odaklı</string>
+  <string name="m3_body_overflow">Bu metin bilerek uzun tutuldu; böylece iki satırı aşar ve kısaltılır.</string>
+  <string name="template_title">Gelen kutusu</string>
+  <string name="msg_lunch">Yarın öğle yemeği?</string>
+  <string name="msg_specs">Özellikler incelemeye hazır</string>
+  <string name="msg_diff">Render farkını gönderdim</string>
+  <string name="msg_merged">Teşekkürler, birleştirdim</string>
+  <string name="msg_deploy">Dağıtım sorunsuz tamamlandı</string>
+</resources>
