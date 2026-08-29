@@ -228,6 +228,17 @@ class ServeHttpServer(
    */
   private val catalogAdmin: ServeCatalogAdmin? = null,
   /**
+   * One-step GitHub project onboarding ([ServeOnboarding]) — `POST /admin/onboard` takes a
+   * repository URL, discovers the delivery branches it already publishes, and registers each
+   * through [catalogAdmin]. Gated by the same [adminToken]; null ⇒ the route is **not registered at
+   * all**, so it 404s like any unknown path.
+   *
+   * Separate from [catalogAdmin] only so a server can be built with one and not the other (the
+   * tests do); `serve` wires them together, because onboarding without an administrator to publish
+   * through would have nothing to do.
+   */
+  private val onboarding: ServeOnboarding? = null,
+  /**
    * Runtime producer-trust administration ([ServeTrustAdmin]) — adding and removing trusted
    * branches / keys / CI identities without an image rebuild. Gated by the same [adminToken] as
    * [catalogAdmin]; null ⇒ the `/admin/trust` routes are **not registered at all**.
@@ -569,6 +580,9 @@ class ServeHttpServer(
 
   /** As [adminEnabled], for the `/admin/sites` routes. Same token, separately supplied admin. */
   private val siteAdminEnabled: Boolean = siteAdmin != null && !adminToken.isNullOrBlank()
+
+  /** As [adminEnabled], for `POST /admin/onboard`. Same token, separately supplied onboarder. */
+  private val onboardingEnabled: Boolean = onboarding != null && !adminToken.isNullOrBlank()
 
   /**
    * As [adminEnabled], for `DELETE /admin/catalog-cache`.
@@ -1246,6 +1260,18 @@ class ServeHttpServer(
             if (rejectBadAdminToken()) return@delete
             val id = call.parameters["id"].orEmpty()
             respondAdminResult(withContext(Dispatchers.IO) { admin.removeGroup(id) })
+          }
+        }
+
+        // One-step project onboarding: `POST /admin/onboard` with a GitHub repository URL
+        // publishes every `design-artifacts/` delivery branch that repository already delivers.
+        // Nothing it
+        // does is unavailable through `POST /admin/catalogs` — it just doesn't require the caller
+        // to already know the delivery contract well enough to spell each catalog id out (#4789).
+        if (onboardingEnabled) {
+          post("/admin/onboard") {
+            if (rejectBadAdminToken()) return@post
+            handleAdminOnboard(onboarding!!)
           }
         }
 
@@ -4223,6 +4249,72 @@ class ServeHttpServer(
         return
       }
     respondAdminResult(withContext(Dispatchers.IO) { admin.upsertGroup(group) })
+  }
+
+  /**
+   * `POST /admin/onboard`: publish every catalog a GitHub repository delivers, from its URL alone.
+   *
+   * Answers 200 as long as *something* is serving as a result — including the idempotent re-post of
+   * a project already onboarded here — with the per-catalog outcomes in the body, so a repository
+   * whose second catalog wouldn't fetch doesn't hide the first one that did. Only a repository
+   * where nothing at all ended up serving is an error status.
+   */
+  private suspend fun RoutingContext.handleAdminOnboard(onboarding: ServeOnboarding) {
+    val body =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_ADMIN_BODY_BYTES) }
+      }
+    if (body == null) {
+      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+      return
+    }
+    val request = runCatching {
+      JSON.decodeFromString(AdminOnboardRequest.serializer(), body.decodeToString())
+    }
+      .getOrElse {
+        call.respondText(
+          "invalid onboarding request: ${it.message}",
+          status = HttpStatusCode.BadRequest,
+        )
+        return
+      }
+    // Discovery is a `git ls-remote` and each publish clones a delivery branch, so the whole thing
+    // runs off the request dispatcher exactly as `POST /admin/catalogs` does.
+    val result =
+      withContext(Dispatchers.IO) {
+        onboarding.onboard(request.url, group = request.group, listed = request.listed)
+      }
+    when (result) {
+      is ServeOnboarding.Result.Invalid ->
+        call.respondText(result.reason, status = HttpStatusCode.BadRequest)
+      is ServeOnboarding.Result.Unreachable ->
+        call.respondText(
+          "could not onboard ${result.repo}: ${result.reason}",
+          status = HttpStatusCode.BadGateway,
+        )
+      is ServeOnboarding.Result.Empty ->
+        call.respondText(
+          "${result.repo} publishes no ${result.branchPrefix}* branches — run " +
+            "`compose-preview publish` in that project first",
+          status = HttpStatusCode.NotFound,
+        )
+      is ServeOnboarding.Result.Ok -> {
+        val payload =
+          AdminOnboardResponse(
+            repo = result.repo,
+            catalogs =
+              result.catalogs.map { AdminOnboardCatalogDto(it.system, it.status, it.detail) },
+          )
+        call.respondText(
+          JSON.encodeToString(AdminOnboardResponse.serializer(), payload),
+          ContentType.Application.Json,
+          // Every discovered branch failed to publish: the request was well-formed and the
+          // repository readable, so the fault is upstream — the same bad-gateway reading a failed
+          // `POST /admin/catalogs` gets.
+          status = if (result.served.isEmpty()) HttpStatusCode.BadGateway else HttpStatusCode.OK,
+        )
+      }
+    }
   }
 
   /** `GET /admin/sites`: the hostnames this server serves a single catalog on. */
@@ -11314,6 +11406,38 @@ private data class AdminGroupDto(
 private data class AdminGroupsResponse(
   val schema: String = "compose-preview-serve/admin-groups/v1",
   val groups: List<AdminGroupDto> = emptyList(),
+)
+
+/**
+ * `POST /admin/onboard`'s body: the GitHub project URL, plus the presentation choices that apply to
+ * every catalog it turns out to deliver.
+ */
+@Serializable
+private data class AdminOnboardRequest(
+  /** Anything that names a GitHub repository — see [GithubProject.parse]. */
+  val url: String,
+  /** Front-page section for the discovered catalogs; null ⇒ grouped by the source repo's owner. */
+  val group: String? = null,
+  /** On the front-page index (vs. served-but-unlisted). */
+  val listed: Boolean = true,
+)
+
+/** What became of one discovered delivery branch. */
+@Serializable
+private data class AdminOnboardCatalogDto(
+  val system: String,
+  /**
+   * `published` / `already-published` / `invalid` / `failed` ([ServeOnboarding.Catalog.status]).
+   */
+  val status: String,
+  val detail: String? = null,
+)
+
+@Serializable
+private data class AdminOnboardResponse(
+  val schema: String = "compose-preview-serve/admin-onboard/v1",
+  val repo: String,
+  val catalogs: List<AdminOnboardCatalogDto> = emptyList(),
 )
 
 /** One configured hostname on `GET /admin/sites`. */

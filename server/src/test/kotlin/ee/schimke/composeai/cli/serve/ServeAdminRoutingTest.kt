@@ -92,6 +92,25 @@ class ServeAdminRoutingTest {
     )
 
   /**
+   * The delivery branches each repository publishes, as the onboarding flow will see them. Keyed by
+   * `<owner>/<repo>`; a repository absent from the map is one `git ls-remote` couldn't read at all,
+   * which is a different answer from one that publishes nothing (see [ServeOnboarding]).
+   */
+  private val remoteBranches =
+    mutableMapOf(
+      "yschimke/cadence" to listOf("main", "design-artifacts/cadence"),
+      "yschimke/empty" to listOf("main"),
+    )
+
+  private val onboarding =
+    ServeOnboarding(
+      admin = admin,
+      branchPrefix = "design-artifacts/",
+      listDeliveryBranches = { remoteBranches[it] },
+      onLog = {},
+    )
+
+  /**
    * The in-browser Wasm apps, as the server sees them: a LIVE map, empty at boot. A catalog
    * published at runtime can carry one, so the `/wasm/` route has to exist and read through to the
    * current contents rather than a boot-time snapshot.
@@ -136,6 +155,7 @@ class ServeAdminRoutingTest {
         catalogSessions = listOf("compose-m3"),
         catalogLoads = tracker,
         catalogAdmin = admin,
+        onboarding = onboarding,
         trustAdmin = trustAdmin,
         sites = siteRegistry,
         siteAdmin = siteAdmin,
@@ -198,6 +218,59 @@ class ServeAdminRoutingTest {
     assertEquals(404, send("/admin/catalogs", token = "wrong").first)
     assertEquals(404, send("/admin/catalogs", method = "POST", body = "{}", token = null).first)
     assertEquals(200, send("/admin/catalogs").first)
+  }
+
+  @Test
+  fun `onboarding a project publishes the catalogs its repository already delivers`() {
+    // The whole point of the flow: a URL, and nothing about the delivery contract.
+    val (code, body) =
+      send(
+        "/admin/onboard",
+        method = "POST",
+        body = """{"url":"https://github.com/yschimke/cadence"}""",
+      )
+
+    assertEquals(200, code)
+    assertTrue(body.contains("\"system\":\"cadence\""), body)
+    assertTrue(body.contains("\"status\":\"published\""), body)
+    // It is an ordinary catalog from here on: listed by the admin API, and on the front page.
+    assertTrue(send("/admin/catalogs").second.contains("\"system\":\"cadence\""))
+    assertEquals(200, send("/", token = null).first)
+
+    // Re-posting the same URL converges rather than erroring — the property that makes it safe to
+    // paste a link twice, or to re-run a deployment reconcile.
+    val (again, againBody) =
+      send(
+        "/admin/onboard",
+        method = "POST",
+        body = """{"url":"yschimke/cadence"}""",
+      )
+    assertEquals(200, again)
+    assertTrue(againBody.contains("already-published"), againBody)
+  }
+
+  @Test
+  fun `onboarding is gated by the admin token, and reports repository trouble upstream`() {
+    assertEquals(
+      404,
+      send("/admin/onboard", method = "POST", body = """{"url":"yschimke/cadence"}""", token = null)
+        .first,
+    )
+    // Not a GitHub project at all — the caller's mistake.
+    assertEquals(
+      400,
+      send("/admin/onboard", method = "POST", body = """{"url":"https://gitlab.com/a/b"}""").first,
+    )
+    // Readable, but nothing published yet: a 404 that says what to run.
+    val (emptyCode, emptyBody) =
+      send("/admin/onboard", method = "POST", body = """{"url":"yschimke/empty"}""")
+    assertEquals(404, emptyCode)
+    assertTrue(emptyBody.contains("design-artifacts/"), emptyBody)
+    // Unreadable: upstream, not the caller.
+    assertEquals(
+      502,
+      send("/admin/onboard", method = "POST", body = """{"url":"yschimke/gone"}""").first,
+    )
   }
 
   @Test

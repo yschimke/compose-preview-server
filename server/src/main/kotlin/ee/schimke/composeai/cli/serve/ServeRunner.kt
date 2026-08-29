@@ -2245,6 +2245,12 @@ public class ServeRunner(
       } else {
         null
       }
+    // One-step project onboarding, on exactly the same terms as the administrator it publishes
+    // through: it exists when that does, because everything it can do is a `catalogAdmin.register`
+    // whose arguments were read off the repository's refs instead of typed by the caller.
+    val onboarding = catalogAdmin?.let {
+      ServeOnboarding(admin = it, branchPrefix = catalogBranchPrefix)
+    }
     // Runtime site administration. Needs only the admin token and the live map: publishing a
     // hostname adds no catalog and fetches nothing, it re-points an existing one. What it does need
     // is the CURRENT served set, read through the tracker rather than captured here, so a site may
@@ -2338,6 +2344,7 @@ public class ServeRunner(
         catalogRefreshSeconds = catalogRefreshSeconds,
         acceptBundlesEnabled = acceptBundles,
         catalogAdmin = catalogAdmin,
+        onboarding = onboarding,
         siteAdmin = siteAdmin,
         trustAdmin = trustAdmin,
         adminToken = adminToken,

@@ -69,6 +69,34 @@ The image also serves its release-matched Compose/Wasm preview browser at
 application (`system=/path`) or deliberately replacing the built-in `preview-ui` mapping; every
 path named there must exist inside the container.
 
+### Onboarding a GitHub project (paste a URL)
+
+Publishing a catalog by hand means knowing the delivery contract: a catalog is a
+`design-artifacts/<system>` branch, and `<system>` is simultaneously the branch suffix, the
+`/<system>/` route and the id in `catalogs.json`. A project that has run `compose-preview publish`
+has already written all of that down — in its refs — so the box can read it instead of asking you
+to restate it:
+
+```bash
+curl -sX POST -H "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" \
+  -d '{"url":"https://github.com/yschimke/cadence"}' \
+  https://<host>/admin/onboard
+# {"repo":"yschimke/cadence","catalogs":[{"system":"cadence","status":"published"}]}
+```
+
+One `git ls-remote` enumerates the repository's delivery branches and each one is published through
+the same path `POST /admin/catalogs` takes — so an onboarded catalog is an ordinary one, written
+back to `catalogs.json` and served again after a restart. Any spelling of the URL works (`.git`, an
+SSH remote, a `/tree/…` deep link, or a bare `owner/repo`), and `{"group":"design-systems"}` /
+`{"listed":false}` apply this box's presentation choices to everything discovered.
+
+Outcomes are **per catalog**, because a repository can deliver several and they fail independently:
+`published`, `already-published` (re-posting a URL converges rather than erroring), `failed` (the
+branch would not fetch), `invalid` (a branch whose suffix this server could never route). A
+repository that has never published answers `404` — there is nothing to serve yet, and onboarding
+does not build it. Onboarding grants **no trust**: the catalog badges `unverified` until its
+producer is added with `POST /admin/trust`, exactly as a hand-published one does.
+
 ### Serving a catalog on its own hostname
 
 A published catalog can additionally be served on a hostname of its own, where it presents as the
