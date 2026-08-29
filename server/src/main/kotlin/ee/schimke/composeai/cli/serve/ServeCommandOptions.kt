@@ -470,10 +470,10 @@ public class ServeCommandOptions(
   }
 
   /**
-   * Shared secret for the runtime admin routes (`--admin-token`; env `SERVE_ADMIN_TOKEN`) — both
-   * `/admin/catalogs` and `/admin/trust`. Absent ⇒ neither is registered at all, so a server that
-   * didn't opt in has no admin surface. Deliberately distinct from the browse token: a `--public`
-   * box hands that one out to every visitor.
+   * Shared secret for the runtime admin routes (`--admin-token`; env `SERVE_ADMIN_TOKEN`) —
+   * `/admin/catalogs`, `/admin/onboard` and `/admin/trust`. Absent ⇒ none of them is registered at
+   * all, so a server that didn't opt in has no admin surface. Deliberately distinct from the browse
+   * token: a `--public` box hands that one out to every visitor.
    *
    * On a server running `--allow-render-trusted`, treat this as a code-execution credential:
    * `/admin/trust` can make a producer's Compose eligible for server-side re-render here.
@@ -929,6 +929,13 @@ public class ServeCommandOptions(
                           published on a running box; re-POSTing one whose system changed re-points
                           it in place. The edge still has to route the name and hold a certificate
                           for it (see --sites).
+                          And onboarding — POST /admin/onboard ({"url","group","listed"}) takes a
+                          GitHub project URL in any spelling, discovers the delivery branches that
+                          repository already publishes, and registers each one exactly as POST
+                          /admin/catalogs would, so a project is onboarded without spelling out its
+                          catalog ids. Per-catalog outcomes come back in the body; re-posting the
+                          same URL converges rather than erroring. A repository that has never run
+                          `compose-preview publish` has nothing to serve yet and answers 404.
                           Mutations are applied live AND written back to --catalogs-file /
                           --trust-store, so they survive a restart. Separate from --token on purpose
                           (a --public box hands that one to every visitor); omitted = the admin
