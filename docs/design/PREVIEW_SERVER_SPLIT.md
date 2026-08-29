@@ -1,5 +1,10 @@
 # Preparing `compose-preview serve` for extraction
 
+> Historical design record. The user-authorized extraction was carried out after this measurement:
+> the server now lives in this repository and consumes released `compose-ai-tools` and
+> `compose-preview-contracts` coordinates. The red traffic gate remains useful for measuring the
+> cross-repository release cost; it is no longer a condition that keeps the source co-located.
+
 Issue [#3824](https://github.com/yschimke/compose-ai-tools/issues/3824) asks whether the preview
 server should live in its own repository, measures the coupling, and answers: **not yet, and here is
 what to do meanwhile.** This document is the "meanwhile" — what the preparation is, what has landed,

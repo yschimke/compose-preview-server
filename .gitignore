@@ -46,12 +46,12 @@ node_modules/
 
 # The preview-server harness (the serve page captures + the lane/playground/bundle-upload specs),
 # moved out of the extension's harness. Same artifacts, new home.
-preview-server/preview-harness/node_modules/
-preview-server/preview-harness/out/
-preview-server/preview-harness/test-results/
-preview-server/preview-harness/test-results-serve-lanes/
-preview-server/preview-harness/playwright-report/
-preview-server/preview-harness/.last-run.json
+preview-harness/node_modules/
+preview-harness/out/
+preview-harness/test-results/
+preview-harness/test-results-serve-lanes/
+preview-harness/playwright-report/
+preview-harness/.last-run.json
 *.vsix
 
 # Python (for .github/actions/lib/ scripts and their tests)

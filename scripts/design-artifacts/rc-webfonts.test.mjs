@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import { DEFAULT_FONTS_DIR } from "./rc-fonts.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const BUNDLE = path.resolve(HERE, "../../cli/serve/src/main/resources/rc-player/bundle.js");
+const BUNDLE = path.resolve(HERE, "../../server/src/main/resources/rc-player/bundle.js");
 
 // A vendored face with unmistakably non-Roboto metrics, so "did the named family take effect?" is a
 // measurable question rather than a subjective one.
