@@ -46,7 +46,7 @@ const COMPARE_ASSET = path.resolve(
 /**
  * Below this a content-box proportion difference is rasteriser noise.
  *
- * MIRRORED from `cli/serve-web/src/compare/thresholds.ts`, which the ported browser surfaces share.
+ * MIRRORED from `serve-web/src/compare/thresholds.ts`, which the ported browser surfaces share.
  * This driver runs at publish time under plain node with no build step, so it cannot import from
  * `src/` — the copy stays, and so does this pointer.
  */
@@ -168,7 +168,7 @@ export async function openScorer({ executablePath, log = () => {} } = {}) {
     const page = await browser.newPage();
     // A blank document, not a served page: the scorer needs a canvas and an `Image`, nothing else.
     // `format-compare.js` is now nothing BUT the API — the page-specific blocks it used to carry
-    // are Lit elements in `serve-components.js` — so it assigns `window.ComposePreviewCompare` and
+    // are custom elements in the surface bundles — so it assigns `window.ComposePreviewCompare` and
     // touches no DOM at all.
     await page.setContent("<!doctype html><meta charset=\"utf-8\"><title>score</title>");
     await page.addScriptTag({ content: fs.readFileSync(COMPARE_ASSET, "utf8") });
