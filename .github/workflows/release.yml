@@ -9,7 +9,19 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  # Quoted: the `chore(main): release ` literal contains `: `, which YAML would otherwise read as a
+  # nested mapping. A merged release PR gets its own slot so an ordinary push cannot replace it
+  # while the publish is still pending.
+  group: "release-${{ github.ref }}-${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore(main): release ') && github.sha || 'updates' }}"
+  cancel-in-progress: false
+
 jobs:
+  # The release half. `skip-github-pull-request` is deliberate — the PR half is `update-release-pr`
+  # below. A single invocation computes the next candidate PR in the same run that cuts the
+  # release, and because our releases are drafts (`"draft": true` in release-please-config.json)
+  # that half reads the PREVIOUS release as its baseline and re-proposes the version being
+  # released. That produced a phantom PR in compose-preview-vscode#5.
   release-please:
     runs-on: ubuntu-latest
     permissions:
@@ -24,6 +36,29 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+      # A draft release does not create its tag — GitHub writes the ref only on publish — and
+      # `publish` below checks out `ref: <tag>`, then addresses the release by that tag for the
+      # asset upload and the un-drafting. Without this the first release cuts a draft and then
+      # dies at checkout. Idempotent, and `!cancelled()` so a late failure in the action cannot
+      # leave the manifest naming a version with no tag.
+      - name: Ensure the release tag exists for the draft
+        if: ${{ !cancelled() && steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/{owner}/{repo}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "tag ${TAG} already exists"
+            exit 0
+          fi
+          gh api --method POST "repos/{owner}/{repo}/git/refs" \
+            -f "ref=refs/tags/${TAG}" -f "sha=${SHA}" >/dev/null
+          echo "created tag ${TAG} at ${SHA}"
 
   publish:
     needs: release-please
@@ -80,3 +115,27 @@ jobs:
     secrets:
       DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
       SERVE_ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
+
+  # The PR half, split out so it never runs against a half-published release. Runs on an ordinary
+  # push (the normal case) or straight after a SUCCESSFUL publish, so the next release PR opens
+  # against a baseline that includes the release just made. Deliberately not after a failed
+  # publish: the baseline is stale in exactly the way that produces a phantom PR.
+  #
+  # `!cancelled()` rather than `success()` because `publish` is skipped on an ordinary push, and a
+  # skipped dependency would otherwise skip this job too.
+  update-release-pr:
+    needs: [release-please, publish]
+    if: >-
+      ${{ !cancelled()
+      && (needs.release-please.outputs.release_created != 'true'
+      || needs.publish.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
