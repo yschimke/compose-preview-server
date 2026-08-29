@@ -63,6 +63,41 @@ DOMAIN=preview.example.com ./setup.sh
 Pin a version with `IMAGE_TAG=0.16.33` in `.env` (a bare tag; defaults to the
 `latest` tag when unset).
 
+### Moving an existing box off the compose-ai-tools checkout
+
+`preview.coo.ee` was set up before the split and runs `docker compose` from a
+**compose-ai-tools** checkout (`/root/compose-ai-tools/deploy/image`). That directory is
+being removed from that repository, so the box needs re-pointing here. Nothing about the
+*running* service depends on it — `rollout.sh` only does `docker compose pull`, which is
+the image, never `git pull` — so this is not urgent and causes no downtime. What breaks is
+the next manual `git pull` over there: `docker-compose.yml`, `rollout.sh`, `docker-rollout`
+and the `Caddyfile` disappear, and `docker compose` stops working on that host.
+
+The move is close to free because the files the box executes are byte-identical between the
+two repositories — only the `Dockerfile`, `entrypoint.sh` (baked into the image, not run
+from the checkout), this README and two CI test scripts ever differed:
+
+```bash
+cd /root
+git clone https://github.com/yschimke/compose-preview-server.git
+cp compose-ai-tools/deploy/image/.env compose-preview-server/deploy/image/.env
+cd compose-preview-server/deploy/image
+docker compose config >/dev/null && docker compose ps   # must list the RUNNING containers
+```
+
+That last check is the proof it worked. `docker-compose.yml` pins `name: compose-preview`
+rather than deriving the project name from the directory, so the new checkout addresses the
+**existing** stack: no container is recreated and the named volumes (`preview_cache` and
+friends) are retained. If `ps` comes back empty, stop — the project name is not resolving
+and continuing would start a second stack alongside the live one.
+
+`.env` is gitignored, so it is not in either clone and must be copied across; it carries the
+box's tokens. While editing it, `SERVE_IMAGE_UPLOAD_REPO` is worth checking: on
+`preview.coo.ee` it still reads `yschimke/compose-ai-tools`, which is where bug-report image
+uploads are gated, and that should now be `yschimke/compose-preview-server`.
+
+Once `ps` is right, operate from the new directory and delete the old checkout at leisure.
+
 The image also serves its release-matched Compose/Wasm preview browser at
 `/wasm/preview-ui/`. It is packaged inside the server distribution and enabled automatically: no
 `.env` entry or host directory is required. `SERVE_WASM_DIR` is only for adding another static Wasm
