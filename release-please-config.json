@@ -6,7 +6,13 @@
   "packages": {
     ".": {
       "package-name": "compose-preview-server",
-      "include-component-in-tag": false
+      "include-component-in-tag": false,
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "deploy/image/Dockerfile"
+        }
+      ]
     }
   }
 }

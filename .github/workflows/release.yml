@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   release-please:
@@ -53,6 +54,29 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
-      - run: ./gradlew :server:publishAndReleaseToMavenCentral
+      - name: Build distribution and publish Maven artifacts
+        run: >-
+          ./gradlew :server:distTar
+          :server:publishAndReleaseToMavenCentral
+      - name: Upload standalone server distribution
+        run: >-
+          gh release upload "${{ needs.release-please.outputs.tag_name }}"
+          "server/build/distributions/compose-preview-server-${PLUGIN_VERSION}.tar.gz"
+          --clobber
       - name: Publish the draft GitHub release
         run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false --latest
+
+  preview-host-image:
+    needs: [release-please, publish]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    uses: ./.github/workflows/preview-host-image.yml
+    with:
+      server_version: ${{ needs.release-please.outputs.tag_name }}
+      tools_version: ${{ vars.COMPOSE_AI_TOOLS_VERSION || '1.53.0' }}
+    secrets:
+      DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
+      SERVE_ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
