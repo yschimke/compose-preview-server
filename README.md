@@ -27,6 +27,19 @@ npm --prefix serve-web run verify
 The independently installable visual harness lives in `preview-harness/`. The experimental
 Compose/Wasm frontend lives in `wasm-ui/`.
 
+Build and run the standalone distribution with:
+
+```shell
+./gradlew :server:distTar
+tar -xzf server/build/distributions/compose-preview-server-*.tar.gz
+./compose-preview-server-*/bin/compose-preview-server --help
+```
+
+Releases publish that distribution beside the Maven library, then build the production
+`ghcr.io/yschimke/compose-preview-host` image. The canonical Docker and `preview.coo.ee`
+configuration lives in [`deploy/image`](deploy/image/) and
+[`deploy/preview.coo.ee`](deploy/preview.coo.ee/).
+
 ## Repository boundary
 
 `checkServeModuleBoundary` walks the resolved runtime classpath, transitives included. It rejects
