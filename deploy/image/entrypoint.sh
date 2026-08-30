@@ -111,6 +111,13 @@ fi
 [[ -n "${SERVE_CATALOGS:-}" && "${SERVE_CATALOGS}" != "none" ]] && args+=(--catalogs "${SERVE_CATALOGS}")
 [[ -n "${SERVE_CATALOGS_UNLISTED:-}" && "${SERVE_CATALOGS_UNLISTED}" != "none" ]] &&
   args+=(--catalogs-unlisted "${SERVE_CATALOGS_UNLISTED}")
+# Catalog REGISTRY projects: <owner>/<repo>, comma-separated. Each nominated project publishes
+# `.compose-preview/catalogs.json` on its default branch listing the catalogs it serves, and this
+# box serves all of them — so a project onboarded there by pull request needs no edit here at all.
+# Re-read on the SERVE_CATALOG_REFRESH cadence, so a catalog listed after boot is picked up without
+# a restart. Entries may only serve from the nominated project's own branches.
+[[ -n "${SERVE_CATALOG_REGISTRY:-}" && "${SERVE_CATALOG_REGISTRY}" != "none" ]] &&
+  args+=(--catalog-registry "${SERVE_CATALOG_REGISTRY}")
 # Top-level sites: <host>=<system>, comma-separated. A catalog this box already serves is ALSO
 # reachable on a hostname of its own, where it presents as the only thing here (its landing at /,
 # links inside the domain, no front door, /status scoped to it). Same sessions and same baked

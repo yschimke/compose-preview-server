@@ -603,6 +603,52 @@ public class ServeRunner(
       }
 
   /**
+   * The nominated catalog registry projects (`--catalog-registry`), validated. Empty ⇒ the feature
+   * is off and nothing is fetched.
+   */
+  private val catalogRegistryRepos: List<String> by lazy {
+    ServeCatalogRegistry.parseRepos(catalogRegistryRaw) { System.err.println("serve: $it") }
+  }
+
+  /**
+   * Each registry project's document, read **once** at startup.
+   *
+   * Fetched eagerly, on the boot thread, rather than left to [ServeCatalogRegistrySync]: the
+   * entries have to be in [catalogRefs] before the tracker is built, so a registry catalog loads
+   * through the ordinary startup path — fetch order, readiness, `/status`, the home index — and not
+   * as a runtime publish a second or two after the box says it is up. The sync is for what lands
+   * *after* boot.
+   *
+   * Best-effort per registry, like every other catalog read: an unreachable document costs its
+   * catalogs and nothing else. The next sync pass picks them up.
+   */
+  private val catalogRegistryContributions: List<ServeCatalogRegistry.Contribution> by lazy {
+    catalogRegistryRepos.mapNotNull { repo ->
+      ServeCatalogRegistry.fetch(repo, ::fetchRegistryDocument) { System.err.println("serve: $it") }
+    }
+  }
+
+  /**
+   * Read one registry document off the network. A seam so the sync and the boot fold-in share it.
+   */
+  private fun fetchRegistryDocument(url: String, maxBytes: Long): ByteArray? =
+    ServeCatalogStore.httpFetchOutcome(url, maxBytes).bytesOrNull
+
+  /** The registry-contributed entries as refs, in registry order. */
+  private fun registryCatalogRefs(): List<CatalogRef> =
+    catalogRegistryContributions.flatMap { contribution ->
+      contribution.entries.map { entry ->
+        CatalogRef(
+          system = entry.system,
+          repo = contribution.repo,
+          listed = entry.listed,
+          group = contribution.homeGroup(entry),
+          loadPriority = entry.loadPriority,
+        )
+      }
+    }
+
+  /**
    * Whether this server needs the catalog machinery (store + load tracker) even with **no**
    * configured catalogs: an `--admin-token` server publishes its first catalog at runtime, so the
    * store it fetches through and the tracker it registers into have to exist before any request
@@ -620,7 +666,10 @@ public class ServeRunner(
   private val catalogRefs: List<CatalogRef> by lazy {
     (configCatalogRefs() +
         parseCatalogRefs(catalogsRaw, listed = true) +
-        parseCatalogRefs(catalogsUnlistedRaw, listed = false))
+        parseCatalogRefs(catalogsUnlistedRaw, listed = false) +
+        // Last, so first-wins de-duplication means a registry can add catalogs the operator hasn't
+        // named but can never re-attribute one they have. See [ServeCatalogRegistry].
+        registryCatalogRefs())
       .distinctBy { it.system }
   }
 
@@ -2245,6 +2294,16 @@ public class ServeRunner(
       } else {
         null
       }
+    // Keep the catalog set in step with the nominated registry projects, so a catalog listed
+    // after boot is imported without a restart ([ServeCatalogRegistrySync]). Independent of the
+    // admin token: nominating a registry is the operator's opt-in, and a box that serves registry
+    // catalogs but can only pick up new ones by restarting is the gap this closes.
+    val catalogRegistrySync =
+      if (catalogStore != null && catalogLoads != null) {
+        buildCatalogRegistrySync(registry, catalogStore, catalogLoads, wasmCatalogs, sites)
+      } else {
+        null
+      }
     // One-step project onboarding, on exactly the same terms as the administrator it publishes
     // through: it exists when that does, because everything it can do is a `catalogAdmin.register`
     // whose arguments were read off the repository's refs instead of typed by the caller.
@@ -2465,6 +2524,7 @@ public class ServeRunner(
           runCatching { advertiser?.close() }
           runCatching { server.stop() }
           runCatching { catalogFeed?.close() }
+          runCatching { catalogRegistrySync?.close() }
           runCatching { registry.close() }
           closeables.forEach { c -> runCatching { c?.close() } }
           done.countDown()
@@ -2472,6 +2532,9 @@ public class ServeRunner(
       )
 
     server.start()
+    // Cadence only — the boot fold-in already read every registry once, so the first pass is a
+    // reconciliation, not the initial import.
+    catalogRegistrySync?.start()
     onStarted()
     printBanner(bannerLabel, server.port, token, bannerPreviewCount)
     if (openBrowser) openBrowser(server.port, token)
@@ -2983,21 +3046,9 @@ public class ServeRunner(
         }
       },
       unload = { system ->
-        synchronized(catalogRegistrationLock) {
-          registry.unregister(system)
-          catalogPerPreviewPools.remove(system)?.let { runCatching { it.close() } }
-          catalogLiveBundles.remove(system)
-          registeredCatalogs.remove(system)
-          registeredUnlistedCatalogs.remove(system)
-          // Stop serving the retired catalog's in-browser app too — but never drop a local
-          // `--wasm-dir` the operator configured, which isn't the catalog's to remove.
-          if (system !in localWasm) wasmCatalogs.remove(system)
-        }
-        // And forget its branch head, for the reason a trust revocation does: the poller
-        // short-circuits on an unchanged SHA, so a system retired and later republished at the
-        // same commit would keep the head recorded from before it was retired — and the republished
-        // copy would never be re-read, however it loaded.
-        activeRefresher?.forgetHeads(listOf(system))
+        // Shared with the registry sync's retirement ([unloadCatalog]) so the two cannot forget
+        // different things.
+        unloadCatalog(registry, wasmCatalogs, system)
       },
     )
 
@@ -3009,6 +3060,111 @@ public class ServeRunner(
    * place (the registry closes the replaced daemon) and rewrites the on-disk `web/wasm/` dir the
    * `/wasm/<system>/` route serves.
    */
+  /**
+   * Build the reconciler that keeps the catalog set in step with the nominated registry projects
+   * ([ServeCatalogRegistrySync]). Null when no registry was nominated.
+   *
+   * The publish seam is deliberately the tracker + store pair directly rather than
+   * [ServeCatalogAdmin]: a registry entry is *derived* state, and writing it into the operator's
+   * `catalogs.json` (which is what the admin path does, by design) would leave it behind on the
+   * next boot after the registry stopped listing it — a catalog nobody can explain and nobody asked
+   * for. The registry document is the record; the box holds it only while it is running.
+   */
+  private fun buildCatalogRegistrySync(
+    registry: ServeSessionRegistry,
+    store: ServeCatalogStore,
+    loads: CatalogLoadTracker,
+    wasmCatalogs: MutableMap<String, File>,
+    sites: ServeSiteRegistry,
+  ): ServeCatalogRegistrySync? {
+    if (catalogRegistryRepos.isEmpty()) return null
+    val sync =
+      ServeCatalogRegistrySync(
+        repos = catalogRegistryRepos,
+        read = { repo ->
+          ServeCatalogRegistry.fetch(repo, ::fetchRegistryDocument) {
+            System.err.println("serve: $it")
+          }
+        },
+        tracked = { loads.snapshot().mapTo(linkedSetOf()) { it.config.system } },
+        publish = { contribution, entry ->
+          val config =
+            CatalogLoadTracker.Config(
+              system = entry.system,
+              listed = entry.listed,
+              repo = contribution.repo,
+              branch = "$catalogBranchPrefix${entry.system}",
+              group = contribution.homeGroup(entry),
+              loadPriority = entry.loadPriority,
+            )
+          if (!loads.add(config)) {
+            "already published"
+          } else {
+            val failure = backgroundWork.whileLoadingCatalog {
+              synchronized(catalogRegistrationLock) {
+                val result = store.load(entry.system, sourceRepo = contribution.repo)
+                loads.record(result)
+                (result as? ServeCatalogStore.Result.Failed)?.reason
+              }
+            }
+            // Never leave a half-published catalog behind — the same rollback the admin path does
+            // for a failed fetch. Without it, a registry entry whose delivery branch has not been
+            // built yet would sit in the tracker as a permanently-failed card, and the retry the
+            // next pass is supposed to make would be refused as "already published".
+            if (failure != null) {
+              loads.remove(entry.system)
+              runCatching { unloadCatalog(registry, wasmCatalogs, entry.system) }
+            }
+            failure
+          }
+        },
+        retire = { system ->
+          // A hostname published onto this catalog outranks the registry: dropping the session
+          // would strand the site exactly as an admin retire would, so leave it and say so.
+          val host = sites.hostFor(system)
+          if (host != null) {
+            System.err.println(
+              "serve: catalog $system is no longer listed by its registry but is published as " +
+                "the top-level site '$host' — keeping it"
+            )
+          } else {
+            loads.remove(system)
+            unloadCatalog(registry, wasmCatalogs, system)
+          }
+        },
+        intervalMillis = catalogRefreshSeconds * 1000,
+      )
+    // The boot fold-in already registered these, so the sync owns them from the start — otherwise
+    // the first pass would see them as somebody else's catalogs and never withdraw them.
+    sync.adopt(registryCatalogRefs().map { it.system })
+    return sync
+  }
+
+  /**
+   * Drop a registered catalog's session, pools, live bundles, nav entries and in-browser app — the
+   * `unload` half of a retirement, shared by the admin API and the registry sync so the two cannot
+   * forget different things.
+   */
+  private fun unloadCatalog(
+    registry: ServeSessionRegistry,
+    wasmCatalogs: MutableMap<String, File>,
+    system: String,
+  ) {
+    synchronized(catalogRegistrationLock) {
+      registry.unregister(system)
+      catalogPerPreviewPools.remove(system)?.let { runCatching { it.close() } }
+      catalogLiveBundles.remove(system)
+      registeredCatalogs.remove(system)
+      registeredUnlistedCatalogs.remove(system)
+      // Never drop a local `--wasm-dir` the operator configured; it isn't the catalog's to remove.
+      if (system !in localWasm) wasmCatalogs.remove(system)
+    }
+    // Forget its branch head, for the reason a trust revocation does: the poller short-circuits on
+    // an unchanged SHA, so a system retired and later re-listed at the same commit would keep the
+    // head recorded from before, and never be re-read.
+    activeRefresher?.forgetHeads(listOf(system))
+  }
+
   private fun buildCatalogRefresher(
     store: ServeCatalogStore,
     loads: CatalogLoadTracker,

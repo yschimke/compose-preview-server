@@ -160,14 +160,55 @@ other than the default. `--onboard-cache` moves those checkouts off the containe
 branch in the import staging repository naming the upstream project, its ref and its modules; its
 workflow checks that project out on a GitHub Actions runner, injects the preview plugin with the
 CLI's init script, renders, and force-pushes an ordinary `design-artifacts/<slug>` branch. This box
-then serves it through `POST /admin/onboard` exactly as it serves any other published catalog —
-refreshed on push by `SERVE_CATALOG_REFRESH` like the rest.
+then serves it as it serves any other published catalog — refreshed on push by
+`SERVE_CATALOG_REFRESH` like the rest. Nominate the staging repository as a **catalog registry**
+(below) and that last step needs nothing from you at all: merging the import's pull request is the
+whole import.
 
 That split is deliberate. Building a pasted repository means running its build scripts, and the
 runner is a better place for that than the preview box in every dimension: it is ephemeral and
 isolated, it already has the JDK and Android SDK, its concurrency and timeouts are GitHub's problem,
 and the import's pull request is a human reviewing what is about to be built. **This server has no
 route that executes a pasted repository**, and adding one is not on the roadmap.
+
+### Serving every catalog a project publishes (`SERVE_CATALOG_REGISTRY`)
+
+Everything above onboards catalogs **one at a time, against this box** — a `curl`, or an entry in
+`catalogs.json`. That is right when the box is choosing what to put on its front door. It is wrong
+when the choosing already happened somewhere else: `yschimke/compose-preview-imports` exists so
+that importing a third-party project is a reviewed pull request, and a merged import that still
+needs a second, manual, out-of-band request here is an import that silently 404s until somebody
+remembers.
+
+So a box can nominate one or more **registry projects** instead:
+
+```bash
+SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports
+```
+
+Each nominated project publishes `.compose-preview/catalogs.json` on its default branch — the same
+document this box's own `catalogs.json` is, `groups` and `catalogs` included — and every catalog it
+lists is served from that project's `design-artifacts/<system>` branch. The file is re-read on the
+`SERVE_CATALOG_REFRESH` cadence, so a catalog the project starts listing is imported without a
+restart, and one it stops listing is retired.
+
+What nominating a registry delegates is **which of that project's catalogs are served, and how they
+are grouped**. It deliberately does not delegate where bytes may come from:
+
+* an entry may only be served from the nominated project's own branches — one naming another
+  repository is dropped with a log line, because pointing this box at a third party stays your
+  decision (`SERVE_CATALOGS=<system>@<owner>/<repo>`, or `POST /admin/catalogs`);
+* group claims resolve against the registry document's **own** `groups`, never this box's, so a
+  registry cannot file its catalogs under a heading you reserved for first-party design systems;
+* your configuration wins every id collision, so nominating a registry can never re-attribute a
+  catalog `catalogs.json` already names.
+
+A registry entry is *derived* state and is never written back to `/config/catalogs.json`: the
+registry document is the record, and the box holds its catalogs only while it is running. A
+registry that is unreachable, absent or malformed costs its catalogs for that pass and nothing else
+— it never retires anything, because a timeout is not a statement that a catalog is gone. Trust is
+unaffected: a registry catalog badges `unverified` until its producer is added with
+`POST /admin/trust`, exactly like a hand-published one.
 
 ### Serving a catalog on its own hostname
 

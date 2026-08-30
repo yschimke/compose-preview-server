@@ -383,6 +383,22 @@ public interface ServeOptions {
   public val catalogsUnlistedRaw: String?
 
   /**
+   * **Catalog registry projects** (`--catalog-registry yschimke/compose-preview-imports,…`; env
+   * `SERVE_CATALOG_REGISTRY`): GitHub projects that publish their own served set, rather than the
+   * operator naming each catalog here.
+   *
+   * Each nominated project publishes `.compose-preview/catalogs.json` on its default branch, and
+   * every catalog it lists is served from that project's `design-artifacts/<system>` branch as if
+   * it had been named in [catalogsRaw]. Re-read on the [catalogRefreshSeconds] cadence, so a
+   * catalog the project starts listing is imported without a restart — which is what makes "merging
+   * the pull request IS the import" true for `yschimke/compose-preview-imports`.
+   *
+   * What this delegates, and the three things it deliberately does not, are in
+   * [ServeCatalogRegistry].
+   */
+  public val catalogRegistryRaw: String?
+
+  /**
    * **Top-level sites** (`--sites m3.preview.coo.ee=m3-catalog,…`; also `catalogs.json`'s `sites`):
    * host names on which one already-served catalog is presented as the whole server — its landing
    * at `/`, its links inside the custom domain, no front door and no neighbours. See [ServeSites];

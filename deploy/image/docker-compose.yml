@@ -77,6 +77,10 @@ services:
       # <system>@<owner>/<repo>, comma-separated. Empty (the default) = the file decides.
       SERVE_CATALOGS: "${SERVE_CATALOGS:-}"
       SERVE_CATALOGS_UNLISTED: "${SERVE_CATALOGS_UNLISTED:-}"
+      # Catalog registry projects: <owner>/<repo>, comma-separated. Each publishes its own served
+      # set in `.compose-preview/catalogs.json`, so onboarding a project there (a merged pull
+      # request) is all it takes to reach this box. Empty (the default) = no registries.
+      SERVE_CATALOG_REGISTRY: "${SERVE_CATALOG_REGISTRY:-}"
       # Maximum catalog images registered by the server. Images remain lazily fetched; raise this
       # when a catalog set legitimately exceeds the CLI default.
       SERVE_CATALOG_MAX_IMAGES: "${SERVE_CATALOG_MAX_IMAGES:-}"
