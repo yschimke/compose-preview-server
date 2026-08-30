@@ -107,7 +107,8 @@ internal suspend fun loadCatalogFonts(
 ): CatalogFonts.Ready {
   val entries = runCatching {
     parseFontsManifest(fetchText(base + "fonts.json"))
-  }.getOrDefault(emptyList())
+  }
+    .getOrDefault(emptyList())
   if (entries.isEmpty()) return CatalogFonts.Ready()
 
   suspend fun load(faces: List<ManifestFont>): FontFamily =
@@ -124,7 +125,8 @@ internal suspend fun loadCatalogFonts(
 
   suspend fun familyOrNull(faces: List<ManifestFont>): FontFamily? = runCatching {
     load(faces)
-  }.getOrNull()
+  }
+    .getOrNull()
 
   // `role: "default"` is the whole M3 type scale — the one that decides whether a button's label
   // wraps where the snapshot's does.
