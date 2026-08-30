@@ -2,5 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>yschimke/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "The design-parity packages are published in lockstep from one monorepo, so update them together in a single PR.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["@design-parity/**"],
+      "groupName": "design-parity packages",
+      "groupSlug": "design-parity"
+    }
   ]
 }
