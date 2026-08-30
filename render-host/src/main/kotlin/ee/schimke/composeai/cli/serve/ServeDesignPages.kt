@@ -92,6 +92,10 @@ private constructor(
     const val MAX_NODES_PER_PAGE = 500
 
     private val SAFE_ID = Regex("[A-Za-z0-9._-]{1,160}")
+
+    /** Suffixes that name something ABOUT a page on its own route. See [isDrawable]. */
+    private val RESERVED_SUFFIXES = listOf(".svg", ".json")
+
     private val SVG_SIGNATURE =
       Regex("""\A\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--.*?-->\s*)*<svg\b""", RegexOption.DOT_MATCHES_ALL)
 
@@ -155,15 +159,15 @@ private constructor(
     fun isSafeFileKey(value: String): Boolean = Regex("[A-Za-z0-9_-]{1,64}").matches(value)
 
     /**
-     * `.svg` is **reserved**, because the export comes off the same route as the view with that
-     * suffix. A page legitimately id'd `shape.svg` would be unreachable — `/pages/shape.svg` reads
-     * as "the export of the page `shape`" — so it is refused here rather than published and
-     * half-broken. Reserving the suffix keeps the URL shape; a separate asset path would only move
-     * the ambiguity.
+     * `.svg` and `.json` are **reserved**, because the export and the page's data come off the same
+     * route as the view with those suffixes. A page legitimately id'd `shape.svg` would be
+     * unreachable — `/pages/shape.svg` reads as "the export of the page `shape`" — so it is refused
+     * here rather than published and half-broken. Reserving the suffixes keeps the URL shape; a
+     * separate asset path would only move the ambiguity.
      */
     private fun isDrawable(page: DesignPage): Boolean =
       SAFE_ID.matches(page.id) &&
-        !page.id.endsWith(".svg", ignoreCase = true) &&
+        RESERVED_SUFFIXES.none { page.id.endsWith(it, ignoreCase = true) } &&
         page.id != "." &&
         page.id != ".." &&
         page.image.format.equals(PageImage.SVG, ignoreCase = true) &&

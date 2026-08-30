@@ -1391,8 +1391,16 @@ class ServeHttpServer(
         // Design pages (see [ServeDesignPages]). One route per level rather than a
         // separate asset path: `{name}` ending in `.png` is the backdrop image, anything else is
         // the screen's own view — the same suffix convention `/reference/{name}` already uses.
+        //
+        // `.json` joins `.svg` on the same suffix convention, at both levels: the pages lane
+        // carries the node → code join, which is a distinct fact from `parity.json`'s coverage and
+        // derivable from no other endpoint, and reading it out of the view meant parsing markup.
+        // Both ids reserve the suffix ([ServeDesignPageStore.isDrawable]), so a page cannot be
+        // published under a name that would shadow its own data.
         get("/pages") { handleDesignPageIndex(sessionInPath = false) }
         get("/{system}/pages") { handleDesignPageIndex(sessionInPath = true) }
+        get("/pages.json") { handleDesignPageIndex(sessionInPath = false, json = true) }
+        get("/{system}/pages.json") { handleDesignPageIndex(sessionInPath = true, json = true) }
         get("/pages/{name}") { handleDesignPage(sessionInPath = false) }
         get("/{system}/pages/{name}") { handleDesignPage(sessionInPath = true) }
 
@@ -1523,6 +1531,30 @@ class ServeHttpServer(
     // previews out through `/api/previews?session=wear-m3` while `/wear-m3/` 404s — the isolation
     // undone by the older spelling of the same request.
     else siteSystem() ?: call.request.queryParameters["session"] ?: defaultSessionId
+
+  /** `?format=json` — the spelling `/status` established and every page-with-data route reuses. */
+  private fun RoutingContext.wantsJson(): Boolean =
+    call.request.queryParameters["format"].equals("json", ignoreCase = true)
+
+  /**
+   * Refuses a `?format=` this route does not understand, instead of quietly serving the default.
+   *
+   * A silent fallback makes `?format=jsonn` — or a caller's `?format=yaml` — look like a working
+   * request that returned HTML, which a consumer then parses as data. The negotiation is only ever
+   * between the page and its data here, so the allowlist is fixed: absent, `html`, or `json`.
+   * Returns true when it has already answered the call.
+   */
+  private suspend fun RoutingContext.rejectUnknownFormat(): Boolean {
+    val format = call.request.queryParameters["format"] ?: return false
+    if (format.equals("json", ignoreCase = true) || format.equals("html", ignoreCase = true)) {
+      return false
+    }
+    call.respondText(
+      "unsupported format: expected `json` or `html`",
+      status = HttpStatusCode.BadRequest,
+    )
+    return true
+  }
 
   /**
    * A catalog's RSS document. The request itself is the subscription signal: [catalogFeed] renews
@@ -3319,8 +3351,8 @@ class ServeHttpServer(
    */
   private suspend fun RoutingContext.handleParity(sessionInPath: Boolean, json: Boolean) {
     if (rejectBadToken()) return
-    @Suppress("NAME_SHADOWING")
-    val json = json || call.request.queryParameters["format"].equals("json", ignoreCase = true)
+    @Suppress("NAME_SHADOWING") val json = json || wantsJson()
+    if (rejectUnknownFormat()) return
     val sessionId = selectedSessionId(sessionInPath)
     val (webSessionId, basePath) = webSessionAndBase(sessionInPath)
     withLeasedSession(
@@ -3705,17 +3737,41 @@ class ServeHttpServer(
     }
   }
 
-  private suspend fun RoutingContext.handleDesignPageIndex(sessionInPath: Boolean) {
+  private suspend fun RoutingContext.handleDesignPageIndex(
+    sessionInPath: Boolean,
+    json: Boolean = false,
+  ) {
     if (rejectBadToken()) return
+    @Suppress("NAME_SHADOWING") val json = json || wantsJson()
+    if (rejectUnknownFormat()) return
     val sessionId = selectedSessionId(sessionInPath)
     val (webSessionId, basePath) = webSessionAndBase(sessionInPath)
     withLeasedSession(
       sessionId,
-      onMissing = { respondNotFoundHtml("That design system was not found on this server.") },
+      onMissing = {
+        if (json) call.respond(HttpStatusCode.NotFound)
+        else respondNotFoundHtml("That design system was not found on this server.")
+      },
     ) { renderHost ->
       val pages = renderHost.designPages().pages
       if (pages.isEmpty()) {
-        respondNotFoundHtml("This design system publishes no design pages.")
+        // 404 in both spellings, for the reason the HTML form does it: a catalog that publishes no
+        // sheets has no coverage to report, and `{"pages":[]}` reads as "measured, nothing there"
+        // to exactly the check that would gate on it.
+        if (json) call.respond(HttpStatusCode.NotFound)
+        else respondNotFoundHtml("This design system publishes no design pages.")
+        return@withLeasedSession
+      }
+      if (json) {
+        markGeneration("design-page", pageCacheControl())
+        call.respondText(
+          ServeDesignPagesPayload.index(
+            system = sessionId,
+            module = renderHost.label,
+            pages = pages,
+          ),
+          ContentType.Application.Json,
+        )
         return@withLeasedSession
       }
       markGeneration("static-page", pageCacheControl())
@@ -3753,30 +3809,50 @@ class ServeHttpServer(
    * and two different answers for one URL is how a check gets bypassed.
    */
   private suspend fun RoutingContext.handleDesignPage(sessionInPath: Boolean) {
-    if (rejectBadToken()) return
+    if (rejectBadToken() || rejectUnknownFormat()) return
     val sessionId = selectedSessionId(sessionInPath)
     val (webSessionId, basePath) = webSessionAndBase(sessionInPath)
     val name = call.parameters["name"].orEmpty()
     val isImage = name.endsWith(".svg")
-    val pageId = if (isImage) name.removeSuffix(".svg") else name
+    // `.json` is the third spelling of the same page, and `?format=json` on the view is the fourth
+    // — the `/status` convention, so a caller that already knows it doesn't have to learn a path.
+    // Neither applies to the export: `.svg?format=json` names bytes, not a document about them.
+    val isJson = !isImage && (name.endsWith(".json") || wantsJson())
+    val pageId = name.removeSuffix(".svg").removeSuffix(".json")
+    // A machine caller gets machine answers all the way down, misses included.
+    val respondMissing: suspend (String) -> Unit = { message ->
+      if (isImage || isJson) call.respond(HttpStatusCode.NotFound) else respondNotFoundHtml(message)
+    }
     withLeasedSession(
       sessionId,
-      onMissing = {
-        if (isImage) call.respond(HttpStatusCode.NotFound)
-        else respondNotFoundHtml("That design system was not found on this server.")
-      },
+      onMissing = { respondMissing("That design system was not found on this server.") },
     ) { renderHost ->
       val store = renderHost.designPages()
       val page = store.page(pageId)
       val svg = page?.let { renderHost.designPageSvg(pageId) }
       if (page == null || svg == null) {
-        if (isImage) call.respond(HttpStatusCode.NotFound)
-        else respondNotFoundHtml("That page was not found in this design system.")
+        respondMissing("That page was not found in this design system.")
         return@withLeasedSession
       }
       if (isImage) {
         markGeneration("design-page", "private, max-age=300")
         call.respondText(svg, ContentType.Image.SVG)
+        return@withLeasedSession
+      }
+      if (isJson) {
+        markGeneration("design-page", pageCacheControl())
+        call.respondText(
+          ServeDesignPagesPayload.page(
+            system = sessionId,
+            module = renderHost.label,
+            page = page,
+            refFor = store::refFor,
+            // Resolved against what this session actually publishes, exactly as the view resolves
+            // it before drawing a render — see [PageNodeDto.renderable].
+            renderablePreviewIds = renderHost.previews.mapTo(HashSet()) { it.id },
+          ),
+          ContentType.Application.Json,
+        )
         return@withLeasedSession
       }
       markGeneration("static-page", pageCacheControl())
@@ -5199,8 +5275,8 @@ class ServeHttpServer(
    * surface for a monitor / Home Assistant sensor; the HTML form is its human face.
    */
   private suspend fun RoutingContext.handleStatus(json: Boolean) {
-    if (rejectBadToken()) return
-    val wantJson = json || call.request.queryParameters["format"].equals("json", ignoreCase = true)
+    if (rejectBadToken() || rejectUnknownFormat()) return
+    val wantJson = json || wantsJson()
     // Operational state must reach browsers and monitors immediately in both directions: neither
     // a healthy snapshot after failure nor a stale failure after recovery is useful status.
     markGeneration("status", DYNAMIC_RESOURCE_CACHE_CONTROL)
