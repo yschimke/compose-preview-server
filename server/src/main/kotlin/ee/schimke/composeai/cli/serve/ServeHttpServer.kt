@@ -239,6 +239,16 @@ class ServeHttpServer(
    */
   private val onboarding: ServeOnboarding? = null,
   /**
+   * Onboarding a project with **nothing published yet** ([ServeSourceOnboarding]) — `POST
+   * /admin/onboard/scan` reports the Compose modules in a pasted repository by reading a shallow
+   * clone of it. Gated by the same [adminToken]; null ⇒ the route is not registered.
+   *
+   * Separate from [onboarding] because the two answer different questions: that one registers what
+   * a repository already delivers, this one works out what is in it. Neither builds anything — that
+   * happens on a runner in the import staging repository.
+   */
+  private val sourceOnboarding: ServeSourceOnboarding? = null,
+  /**
    * Runtime producer-trust administration ([ServeTrustAdmin]) — adding and removing trusted
    * branches / keys / CI identities without an image rebuild. Gated by the same [adminToken] as
    * [catalogAdmin]; null ⇒ the `/admin/trust` routes are **not registered at all**.
@@ -583,6 +593,10 @@ class ServeHttpServer(
 
   /** As [adminEnabled], for `POST /admin/onboard`. Same token, separately supplied onboarder. */
   private val onboardingEnabled: Boolean = onboarding != null && !adminToken.isNullOrBlank()
+
+  /** As [onboardingEnabled], for the `/admin/onboard/scan` route. */
+  private val sourceOnboardingEnabled: Boolean =
+    sourceOnboarding != null && !adminToken.isNullOrBlank()
 
   /**
    * As [adminEnabled], for `DELETE /admin/catalog-cache`.
@@ -1272,6 +1286,17 @@ class ServeHttpServer(
           post("/admin/onboard") {
             if (rejectBadAdminToken()) return@post
             handleAdminOnboard(onboarding!!)
+          }
+        }
+
+        // Onboarding a project that publishes nothing yet (#12): report what Compose previews a
+        // pasted repository holds, by reading a shallow clone of it. Building it is deliberately
+        // NOT this box's job — that happens on a runner in the import staging repository, and its
+        // output arrives here as an ordinary `design-artifacts/` branch through the route above.
+        if (sourceOnboardingEnabled) {
+          post("/admin/onboard/scan") {
+            if (rejectBadAdminToken()) return@post
+            handleAdminOnboardScan(sourceOnboarding!!)
           }
         }
 
@@ -4314,6 +4339,70 @@ class ServeHttpServer(
           status = if (result.served.isEmpty()) HttpStatusCode.BadGateway else HttpStatusCode.OK,
         )
       }
+    }
+  }
+
+  /**
+   * `POST /admin/onboard/scan`: what Compose previews are in a pasted repository.
+   *
+   * Answers 200 even when the repository holds no previews — that is a *finding*, not an error, and
+   * the body says which modules were looked at and why each was passed over. Only a URL that isn't
+   * one (400) or a repository that couldn't be cloned (502) is a failure status.
+   */
+  private suspend fun RoutingContext.handleAdminOnboardScan(onboarding: ServeSourceOnboarding) {
+    val request = receiveOnboardSourceRequest() ?: return
+    // A shallow clone of an arbitrary repository, so off the request dispatcher — but still
+    // in-request: a scan is bounded work and the caller wants the answer, not a job to poll.
+    val result = withContext(Dispatchers.IO) { onboarding.scan(request.url, request.ref) }
+    respondOnboardScan(result)
+  }
+
+  /** Read and parse the scan route's body; null once it has already answered the call. */
+  private suspend fun RoutingContext.receiveOnboardSourceRequest(): AdminOnboardSourceRequest? {
+    val body =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_ADMIN_BODY_BYTES) }
+      }
+    if (body == null) {
+      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+      return null
+    }
+    return runCatching {
+      JSON.decodeFromString(AdminOnboardSourceRequest.serializer(), body.decodeToString())
+    }
+      .getOrElse {
+        call.respondText(
+          "invalid onboarding request: ${it.message}",
+          status = HttpStatusCode.BadRequest,
+        )
+        null
+      }
+  }
+
+  /** The one mapping of a scan verdict to a status, shared by both routes that can produce one. */
+  private suspend fun RoutingContext.respondOnboardScan(result: ServeSourceOnboarding.ScanResult) {
+    when (result) {
+      is ServeSourceOnboarding.ScanResult.Invalid ->
+        call.respondText(result.reason, status = HttpStatusCode.BadRequest)
+      is ServeSourceOnboarding.ScanResult.Unreachable ->
+        call.respondText(
+          "could not read ${result.repo}: ${result.reason}",
+          status = HttpStatusCode.BadGateway,
+        )
+      is ServeSourceOnboarding.ScanResult.Ok ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminOnboardScanResponse.serializer(),
+            AdminOnboardScanResponse(
+              repo = result.repo,
+              ref = result.ref,
+              sha = result.sha,
+              modules = result.modules.map { it.toDto() },
+              notes = result.notes,
+            ),
+          ),
+          ContentType.Application.Json,
+        )
     }
   }
 
@@ -11439,6 +11528,53 @@ private data class AdminOnboardResponse(
   val repo: String,
   val catalogs: List<AdminOnboardCatalogDto> = emptyList(),
 )
+
+/** `POST /admin/onboard/scan`'s body: which repository, at which ref. */
+@Serializable
+private data class AdminOnboardSourceRequest(
+  /** Anything that names a GitHub repository — see [GithubProject.parse]. */
+  val url: String,
+  /** Branch or tag; null takes the repository's default branch. */
+  val ref: String? = null,
+)
+
+/** One Gradle module a scan looked at. */
+@Serializable
+private data class AdminOnboardModuleDto(
+  val gradlePath: String,
+  val previewCount: Int,
+  /** Whether a build of this module is worth attempting — not a promise that it succeeds. */
+  val buildable: Boolean,
+  /** Plugin ids the preview plugin would be injected beside. */
+  val hostPlugins: List<String> = emptyList(),
+  val pluginPreApplied: Boolean = false,
+  /** Why the module was passed over, when it was. */
+  val skipReason: String? = null,
+  /** A bounded sample of the preview function names, so the report is readable. */
+  val previewFunctions: List<String> = emptyList(),
+)
+
+@Serializable
+private data class AdminOnboardScanResponse(
+  val schema: String = "compose-preview-serve/admin-onboard-scan/v1",
+  val repo: String,
+  val ref: String,
+  val sha: String,
+  val modules: List<AdminOnboardModuleDto> = emptyList(),
+  /** Human-readable remarks, chiefly why an apparently-Compose repository yielded nothing. */
+  val notes: List<String> = emptyList(),
+)
+
+private fun ServeSourceModule.toDto() =
+  AdminOnboardModuleDto(
+    gradlePath = gradlePath,
+    previewCount = previewCount,
+    buildable = buildable,
+    hostPlugins = hostPlugins,
+    pluginPreApplied = pluginPreApplied,
+    skipReason = skipReason,
+    previewFunctions = previewFunctions,
+  )
 
 /** One configured hostname on `GET /admin/sites`. */
 @Serializable private data class AdminSiteDto(val host: String, val system: String)

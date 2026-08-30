@@ -109,6 +109,16 @@ public interface ServeOptions {
   public val catalogSourceRoot: File?
 
   /**
+   * Where the read-only checkouts of pasted repositories live (`--onboard-cache`), for `POST
+   * /admin/onboard/scan`. One directory per repository, reused across requests. Defaults to a
+   * temporary directory, which is the right default for a scratch tree a restart may forget.
+   *
+   * Nothing in these checkouts is ever executed — the scan reads them as text, and building an
+   * imported project happens on a runner in the import staging repository, not here.
+   */
+  public val onboardCacheDir: File
+
+  /**
    * Project mode revision policy (SECURITY/RCE): comma-separated refs whose history a requested
    * `?session=<rev>` must be reachable from to be checked out and built. Empty = nothing builds
    * (fail closed), since building runs that revision's Gradle. e.g. `--revisions-allow

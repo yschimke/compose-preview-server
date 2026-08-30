@@ -132,6 +132,43 @@ repository that has never published answers `404` — there is nothing to serve 
 does not build it. Onboarding grants **no trust**: the catalog badges `unverified` until its
 producer is added with `POST /admin/trust`, exactly as a hand-published one does.
 
+### Onboarding a project that has published nothing
+
+The flow above reads what a repository already delivers, which is nothing at all for a project that
+has never run `compose-preview publish` — and those are exactly the projects a URL gets pasted for.
+Two things cover that case, and neither of them builds anything on this box.
+
+**Scan, here.** `POST /admin/onboard/scan` reads a shallow clone of the repository and reports what
+is in it. It executes nothing, so it needs no switch beyond the admin token:
+
+```bash
+curl -sX POST -H "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" \
+  -d '{"url":"https://github.com/joreilly/PeopleInSpace"}' \
+  https://<host>/admin/onboard/scan
+# {"repo":"joreilly/PeopleInSpace","ref":"main",
+#  "modules":[{"gradlePath":"shared","previewCount":12,"buildable":true,
+#              "hostPlugins":["org.jetbrains.compose"]}, …]}
+```
+
+Every module in `settings.gradle[.kts]` is reported, with its `@Preview` count, the plugin ids the
+preview plugin would be injected beside (version-catalog `alias(libs.plugins.…)` entries resolved
+through `gradle/libs.versions.toml`), and a `skipReason` for each module passed over. A repository
+with no previews is a *finding* with a `200`, not an error. `{"ref":"…"}` scans a branch or tag
+other than the default. `--onboard-cache` moves those checkouts off the container's scratch space.
+
+**Build, elsewhere.** The scan's output is what you write an *import* down from. An import is a
+branch in the import staging repository naming the upstream project, its ref and its modules; its
+workflow checks that project out on a GitHub Actions runner, injects the preview plugin with the
+CLI's init script, renders, and force-pushes an ordinary `design-artifacts/<slug>` branch. This box
+then serves it through `POST /admin/onboard` exactly as it serves any other published catalog —
+refreshed on push by `SERVE_CATALOG_REFRESH` like the rest.
+
+That split is deliberate. Building a pasted repository means running its build scripts, and the
+runner is a better place for that than the preview box in every dimension: it is ephemeral and
+isolated, it already has the JDK and Android SDK, its concurrency and timeouts are GitHub's problem,
+and the import's pull request is a human reviewing what is about to be built. **This server has no
+route that executes a pasted repository**, and adding one is not on the roadmap.
+
 ### Serving a catalog on its own hostname
 
 A published catalog can additionally be served on a hostname of its own, where it presents as the

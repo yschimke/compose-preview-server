@@ -136,6 +136,20 @@ public class ServeCommandOptions(
     args.flagValue("--catalog-source-root")?.takeIf { it.isNotBlank() }?.let { File(it) }
 
   /**
+   * Where the read-only checkouts of pasted repositories live (`--onboard-cache`), for `POST
+   * /admin/onboard/scan`. One directory per repository, reused across requests. Defaults to a
+   * temporary directory, which is the right default for a scratch tree a restart may forget.
+   *
+   * Nothing in these checkouts is ever executed — the scan reads them as text, and building an
+   * imported project happens on a runner in the import staging repository, not here.
+   */
+  override val onboardCacheDir: File =
+    args.flagValue("--onboard-cache")?.takeIf { it.isNotBlank() }?.let(::File)
+      ?: java.nio.file.Files.createTempDirectory("serve-onboard-sources").toFile().also {
+        it.deleteOnExit()
+      }
+
+  /**
    * Project mode revision policy (SECURITY/RCE): comma-separated refs whose history a requested
    * `?session=<rev>` must be reachable from to be checked out and built. Empty = nothing builds
    * (fail closed), since building runs that revision's Gradle. e.g. `--revisions-allow
@@ -936,12 +950,23 @@ public class ServeCommandOptions(
                           catalog ids. Per-catalog outcomes come back in the body; re-posting the
                           same URL converges rather than erroring. A repository that has never run
                           `compose-preview publish` has nothing to serve yet and answers 404.
+                          Onboarding a project that has NEVER published a catalog starts with POST
+                          /admin/onboard/scan ({"url","ref"}), which shallow-clones the repository
+                          and REPORTS which Gradle modules hold @Preview functions and which the
+                          preview plugin can be injected into — it reads the checkout and executes
+                          nothing. Building such a project is not this server's job: that runs on a
+                          GitHub Actions runner in the import staging repository, which publishes an
+                          ordinary design-artifacts/<system> branch this box then onboards above.
                           Mutations are applied live AND written back to --catalogs-file /
                           --trust-store, so they survive a restart. Separate from --token on purpose
                           (a --public box hands that one to every visitor); omitted = the admin
                           routes don't exist at all. NB with --allow-render-trusted this token can
                           grant server-side execution, since trusting a branch makes that
                           producer's Compose eligible for re-render here.
+        --onboard-cache <dir>
+                          Where POST /admin/onboard/scan checks repositories out to read them (one
+                          directory per repo, reused). Nothing in them is executed. Default: a
+                          temporary directory, forgotten on restart.
         --engagement-file <path>
                           Persist privacy-minimal aggregate catalog/app and per-preview view counts
                           as JSON. No IPs, cookies, user agents, or referrers are stored. Omitted =

@@ -111,6 +111,53 @@ class ServeAdminRoutingTest {
     )
 
   /**
+   * The source-onboarding lane: a read of a pasted repository, and nothing more. There is no build
+   * route to drive, by design — an imported project is built on a runner in the import staging
+   * repository and arrives here as an ordinary `design-artifacts/` branch.
+   */
+  private val sourceOnboarding =
+    ServeSourceOnboarding(
+      checkouts =
+        ServeSourceCheckouts(
+          cacheRoot =
+            Files.createTempDirectory("admin-onboard-src").toFile().also { it.deleteOnExit() },
+          git =
+            GitRunner { _, args ->
+              when (args.first()) {
+                "clone" ->
+                  if (args[args.size - 2].contains("joreilly/PeopleInSpace")) {
+                    File(args.last(), ".git").apply { mkdirs() }
+                    GitResult(0, "")
+                  } else {
+                    GitResult(128, "repository not found")
+                  }
+                "rev-parse" -> GitResult(0, "deadbee\n")
+                "symbolic-ref" -> GitResult(0, "origin/main\n")
+                else -> GitResult(0, "")
+              }
+            },
+          onLog = {},
+        ),
+      scanner = {
+        ServeSourceScanResult(
+          listOf(
+            ServeSourceModule(
+              gradlePath = "shared",
+              relativePath = "shared",
+              previewCount = 4,
+              previewFunctions = listOf("HomePreview"),
+              hostPlugins = listOf("org.jetbrains.compose"),
+              pluginPreApplied = false,
+              buildable = true,
+              skipReason = null,
+            )
+          )
+        )
+      },
+      onLog = {},
+    )
+
+  /**
    * The in-browser Wasm apps, as the server sees them: a LIVE map, empty at boot. A catalog
    * published at runtime can carry one, so the `/wasm/` route has to exist and read through to the
    * current contents rather than a boot-time snapshot.
@@ -156,6 +203,7 @@ class ServeAdminRoutingTest {
         catalogLoads = tracker,
         catalogAdmin = admin,
         onboarding = onboarding,
+        sourceOnboarding = sourceOnboarding,
         trustAdmin = trustAdmin,
         sites = siteRegistry,
         siteAdmin = siteAdmin,
@@ -270,6 +318,32 @@ class ServeAdminRoutingTest {
     assertEquals(
       502,
       send("/admin/onboard", method = "POST", body = """{"url":"yschimke/gone"}""").first,
+    )
+  }
+
+  @Test
+  fun `scanning a project that publishes nothing reports its modules`() {
+    // The gap this closes: `POST /admin/onboard` answers 404 for a repository with no delivery
+    // branch, which is every repository the first time. Scanning it answers the question the person
+    // pasting the URL actually has.
+    val (code, body) =
+      send(
+        "/admin/onboard/scan",
+        method = "POST",
+        body = """{"url":"https://github.com/joreilly/PeopleInSpace"}""",
+      )
+
+    assertEquals(200, code)
+    assertTrue(body.contains("\"gradlePath\":\"shared\""), body)
+    assertTrue(body.contains("\"previewCount\":4"), body)
+    // Gated like every other admin route, and upstream trouble is still upstream.
+    assertEquals(
+      404,
+      send("/admin/onboard/scan", method = "POST", body = """{"url":"a/b"}""", token = null).first,
+    )
+    assertEquals(
+      502,
+      send("/admin/onboard/scan", method = "POST", body = """{"url":"someone/private"}""").first,
     )
   }
 

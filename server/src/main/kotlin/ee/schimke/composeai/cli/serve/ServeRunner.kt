@@ -2251,6 +2251,12 @@ public class ServeRunner(
     val onboarding = catalogAdmin?.let {
       ServeOnboarding(admin = it, branchPrefix = catalogBranchPrefix)
     }
+    // Onboarding a project that has published nothing at all (#12) — a separate component because
+    // it answers a different question with a different risk. It needs no catalog store (there is no
+    // branch to fetch) and no administrator (nothing is written to catalogs.json), only the admin
+    // token that makes the route exist and, for the build half, this box's opt-in to executing
+    // foreign build scripts.
+    val sourceOnboarding = if (adminToken != null) buildSourceOnboarding() else null
     // Runtime site administration. Needs only the admin token and the live map: publishing a
     // hostname adds no catalog and fetches nothing, it re-points an existing one. What it does need
     // is the CURRENT served set, read through the tracker rather than captured here, so a site may
@@ -2345,6 +2351,7 @@ public class ServeRunner(
         acceptBundlesEnabled = acceptBundles,
         catalogAdmin = catalogAdmin,
         onboarding = onboarding,
+        sourceOnboarding = sourceOnboarding,
         siteAdmin = siteAdmin,
         trustAdmin = trustAdmin,
         adminToken = adminToken,
@@ -2551,6 +2558,24 @@ public class ServeRunner(
       onLog = { System.err.println("[serve worktree] $it") },
     )
   }
+
+  /**
+   * The URL-scan lane ([ServeSourceOnboarding]): read a pasted repository, never run it.
+   *
+   * There is no build half by design. Building an imported project happens on a GitHub Actions
+   * runner in the import staging repository, which publishes an ordinary `design-artifacts/<slug>`
+   * branch that this box picks up through [ServeOnboarding] like any other catalog — so the preview
+   * server keeps no path from a pasted URL to executing that repository's build scripts.
+   */
+  private fun buildSourceOnboarding(): ServeSourceOnboarding =
+    ServeSourceOnboarding(
+      checkouts =
+        ServeSourceCheckouts(
+          cacheRoot = onboardCacheDir,
+          onLog = { System.err.println("[serve onboard] $it") },
+        ),
+      onLog = { System.err.println("[serve onboard] $it") },
+    )
 
   /** The project-mode factory: a git revision (`?session=<rev>`) → a built [ServeSessionState]. */
   private fun revisionFactory(

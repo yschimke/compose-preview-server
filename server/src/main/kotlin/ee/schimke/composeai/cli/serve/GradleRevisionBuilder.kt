@@ -34,11 +34,10 @@ class GradleRevisionBuilder(
       onLog("serve: no executable gradlew in ${worktreeDir.absolutePath}")
       return null
     }
-    val tasks =
-      listOf(
-        ":${module.gradlePath}:composePreviewDiscover",
-        ":${module.gradlePath}:composePreviewDaemonStart",
-      )
+    // The root project is a module too — a single-module repository onboarded from its URL is one
+    // ([ServeSourceScan]) — and its task path is `:composePreviewDiscover`, not `::…`.
+    val prefix = if (module.gradlePath.isEmpty()) ":" else ":${module.gradlePath}:"
+    val tasks = listOf("${prefix}composePreviewDiscover", "${prefix}composePreviewDaemonStart")
     if (!runGradle(worktreeDir, gradlew, tasks + extraArgs)) return null
 
     val descriptor = File(moduleDir, "build/compose-previews/daemon-launch.json")
