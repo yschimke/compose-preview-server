@@ -760,6 +760,25 @@ class ServeWebFixtureTest {
         ServePreview("badge__ideal__default__dark", "Badge (dark)", theme = "dark"),
       )
 
+  /** One published typography row, as a catalog's `annotations/index.json` carries it. */
+  private fun fixtureTypography(text: String, label: String, detail: Map<String, String>) =
+    DesignAnnotation(
+      kind = AnnotationKind.TYPOGRAPHY,
+      bounds = AnnotationBounds(0, 0, 120, 24),
+      label = label,
+      role = text,
+      detail = detail,
+    )
+
+  private fun fixtureLayout(role: String, label: String, detail: Map<String, String>) =
+    DesignAnnotation(
+      kind = AnnotationKind.LAYOUT,
+      bounds = AnnotationBounds(0, 0, 200, 56),
+      label = label,
+      role = role,
+      detail = detail,
+    )
+
   @Test
   fun `serve web fixtures are in sync with ServeWeb`() {
     val pagesDir = File(repoRoot(), "preview-harness/fixtures/pages")
@@ -2583,6 +2602,83 @@ class ServeWebFixtureTest {
           fixturePageReportIssue("https://preview.coo.ee/compose-m3/motion", "this motion browser"),
       )
 
+    // The cross-catalog LAYER diff (issue #4838): what two catalogs of one design system each
+    // resolved for the same cell. Captured because it is the surface a reader actually acts on —
+    // a font family that fell back on one runtime, a token that resolved to a different value, a
+    // node one side draws and the other does not — and none of it is visible in a pixel diff.
+    val parallelLayers =
+      ServeWeb.parallelLayersPage(
+        moduleLabel = "remote-m3",
+        preview =
+          ServePreview(
+            "button-child__disabled",
+            "Button · Child (disabled)",
+            state = "disabled",
+            componentId = "Button/Child",
+          ),
+        siblingLabel = "wear-m3-catalog",
+        siblingPreviewId = "child-button__not-enabled",
+        siblingHref = "/wear-m3-catalog/p/child-button__not-enabled",
+        pairedOn = ", paired on the design-kit node both catalogs map this cell to",
+        cell = "state=disabled",
+        diff =
+          ServeParallelLayers.diff(
+            here =
+              listOf(
+                fixtureTypography(
+                  "Continue",
+                  "16.0sp/24.0sp · Inter · 500",
+                  mapOf(
+                    "token" to "bodyLarge",
+                    "fontFamily" to "Inter",
+                    "fontSize" to "16.0sp",
+                    "lineHeight" to "24.0sp",
+                    "fontWeight" to "500",
+                  ),
+                ),
+                fixtureTypography(
+                  "Skip",
+                  "14.0sp/20.0sp · Inter · 400",
+                  mapOf("token" to "labelLarge", "fontFamily" to "Inter", "fontSize" to "14.0sp"),
+                ),
+                fixtureLayout(
+                  "Row",
+                  "pad 16dp · gap 8dp",
+                  mapOf("padding" to "16dp", "gap" to "8dp"),
+                ),
+              ),
+            there =
+              listOf(
+                fixtureTypography(
+                  "Continue",
+                  "16.0sp/24.0sp · Roboto · 500",
+                  mapOf(
+                    "token" to "bodyLarge",
+                    "fontFamily" to "Roboto",
+                    "fontSize" to "16.0sp",
+                    "lineHeight" to "24.0sp",
+                    "fontWeight" to "500",
+                  ),
+                ),
+                fixtureLayout(
+                  "Row",
+                  "pad 12dp · gap 8dp",
+                  mapOf("padding" to "12dp", "gap" to "8dp"),
+                ),
+              ),
+          ),
+        token = token,
+        sessionId = "remote-m3",
+        isPublic = true,
+        version = version,
+        displayTitle = "Remote Compose M3",
+        reportIssue =
+          fixturePageReportIssue(
+            "https://preview.coo.ee/remote-m3/parallel/button-child__disabled",
+            "this cross-catalog layer comparison",
+          ),
+      )
+
     val designPageIndex =
       ServeWeb.designPagesIndexPage(
         moduleLabel = "compose-m3",
@@ -3769,6 +3865,7 @@ class ServeWebFixtureTest {
         "serve-viewer-pinned-lanes.html" to viewerPinnedLanes,
         "serve-design-page.html" to designPageHtml,
         "serve-design-page-index.html" to designPageIndex,
+        "serve-parallel-layers.html" to parallelLayers,
         "serve-motion-index.html" to motionIndex,
         "serve-parity.html" to parity,
         "serve-landing-declared-themes.html" to landingDeclaredThemes,
