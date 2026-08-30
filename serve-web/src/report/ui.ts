@@ -30,6 +30,7 @@ import {
 } from "./store.js";
 import {
     hostedCaptureUrl,
+    stillHosted,
     uploadCapture,
     withUploadedCaptures,
 } from "./upload.js";
@@ -132,6 +133,10 @@ function handOff(): void {
     const latest = mine[mine.length - 1];
     if (!latest) return;
     const embedded = applyHostedCaptures(mine);
+    // `hostedCaptureUrl`, not `needsUpload`. By the time a submit reaches here the upload flow has
+    // already either confirmed each restored URL or replaced it, so re-deriving "unverified" would
+    // only mis-fire on the page that has no image lane at all — where nothing can be uploaded and
+    // the clipboard is already the path.
     if (
         embedded &&
         mine.every((capture) => !!hostedCaptureUrl(capture.uploadedUrl))
@@ -241,6 +246,29 @@ const originalBodies = new WeakMap<HTMLInputElement, string>();
 const lastWritten = new WeakMap<HTMLInputElement, string>();
 let uploadGeneration = 0;
 
+/**
+ * Image URLs this page has seen resolve — minted by an upload here, or re-checked with a HEAD.
+ *
+ * A capture read back from `sessionStorage` can carry a `uploadedUrl` this page never obtained.
+ * `hostedCaptureUrl` vouches for its *shape* — this origin, the `/i/` lane — which is a security
+ * check, not an existence one: the pile outlives the server, so a restart of the image store or the
+ * lane's retention TTL leaves a syntactically perfect URL behind whose bytes are gone. Trusting it
+ * embeds a 404 in the filed issue AND skips the clipboard fallback, because {@link handOff} reads
+ * "every capture hosted" as "every capture embedded". So the URL is checked once per page, and a
+ * capture whose URL cannot be vouched for is treated as un-uploaded.
+ *
+ * Per page rather than per report: the bytes cannot vanish out from under a URL this page has
+ * already confirmed within the life of that page, and re-checking on every knob change would spend
+ * a request to learn nothing.
+ */
+const verifiedUrls = new Set<string>();
+
+/** True when this capture has no hosted URL, or one this page cannot vouch for. */
+function needsUpload(capture: Capture): boolean {
+    const url = hostedCaptureUrl(capture.uploadedUrl);
+    return !url || !verifiedUrls.has(url);
+}
+
 /** Upload this report's captures in the background while the reporter writes the summary. */
 async function uploadReportCaptures(): Promise<void> {
     const generation = ++uploadGeneration;
@@ -248,9 +276,10 @@ async function uploadReportCaptures(): Promise<void> {
     const mine = readCaptures(sessionStore()).filter(
         (capture) => !!capture.page && capture.page === page,
     );
-    const pending = mine.filter(
-        (capture) => !hostedCaptureUrl(capture.uploadedUrl),
-    );
+    // Includes a capture whose restored URL has not been re-checked yet, so Submit stays down
+    // while that check runs — the reporter must not be able to file a report whose evidence this
+    // page has not confirmed is there.
+    const pending = mine.filter(needsUpload);
     // An edit clears `uploadedUrl`. Remove the old embed immediately, before the replacement
     // upload begins; if that upload fails, falling back to the clipboard must not leave the issue
     // body pointing at the unannotated pixels.
@@ -274,10 +303,25 @@ async function uploadReportCaptures(): Promise<void> {
     );
     try {
         for (const capture of pending) {
-            const uploaded = await uploadCapture(capture);
+            const restored = hostedCaptureUrl(capture.uploadedUrl);
+            if (restored && (await stillHosted(restored))) {
+                // Still there — keep the URL and skip the upload. This is the common case for a
+                // pile that rode a navigation within one server's lifetime, and re-uploading it
+                // would spend a request, and a slice of the rate-limit budget, to learn nothing.
+                if (generation !== uploadGeneration) return;
+                verifiedUrls.add(restored);
+                continue;
+            }
+            // `uploadCapture` short-circuits on a present `uploadedUrl`, which is exactly the
+            // stale one we just failed to confirm — so ask for a genuine upload.
+            const uploaded = await uploadCapture({
+                ...capture,
+                uploadedUrl: undefined,
+            });
             // An edit or removal starts a new generation. Never let this older request restore its
             // pre-edit pixels (and URL) after the replacement has reached sessionStorage.
             if (generation !== uploadGeneration) return;
+            verifiedUrls.add(uploaded.url);
             replaceCapture(sessionStore(), {
                 ...capture,
                 uploadedUrl: uploaded.url,

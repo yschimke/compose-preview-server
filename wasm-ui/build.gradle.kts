@@ -49,5 +49,17 @@ tasks.register<Sync>("wasmFrontendDist") {
   from(layout.buildDirectory.dir("processedResources/wasmJs/main")) {
     include("composeResources/**")
   }
+  // The typefaces the native catalog lane composes with (#4821). Taken from the repository's own
+  // `assets/rc-fonts` — the same files the server serves to the client-side Remote Compose lanes
+  // and the offline parity harness registers — rather than a second vendored copy under
+  // `src/wasmJsMain/resources`, so the two can never drift onto different outlines.
+  //
+  // Without these the lane fell back to the CMP bundled font while claiming to reproduce snapshots
+  // the Android renderer rasterized with Roboto, so text metrics and wrapping differed in the
+  // default lane.
+  from(rootProject.layout.projectDirectory.dir("assets/rc-fonts")) {
+    include("*.ttf", "fonts.json", "*OFL.txt", "LICENSE.txt")
+    into("fonts")
+  }
   into(layout.buildDirectory.dir("wasmDist"))
 }

@@ -24,15 +24,9 @@ class NativeCatalogTest {
   }
 
   @Test
-  fun `interaction captures select their native component`() {
-    assertEquals(
-      "button-filled-pressed",
-      nativeCatalogTarget("compose-m3", "button-filled__ideal__pressed__light")?.componentId,
-    )
-    assertEquals(
-      "button-filled-focused",
-      nativeCatalogTarget("compose-m3", "button-filled__ideal__keyboard-focus__dark")?.componentId,
-    )
+  fun `a content axis is reproducible here and selects its native component`() {
+    // Not a state: the icon-label variant is the same composable with different content, so this
+    // frontend draws exactly what the snapshot does.
     assertEquals(
       "button-filled-icon-label",
       nativeCatalogTarget(
@@ -41,6 +35,20 @@ class NativeCatalogTest {
         )
         ?.componentId,
     )
+  }
+
+  @Test
+  fun `a harness-driven variant keeps its server snapshot`() {
+    // #4821. `button-filled-pressed` / `-focused` compose a plain Button — since #3672 the state is
+    // supplied by `@FocusedPreview`, which walks real focus and dispatches a real pointer press.
+    // Nothing here can do that, so composing them natively drew an ordinary unpressed, unfocused
+    // button under the label "Pressed" / "Focused": the wrong picture, presented as the right one.
+    // The lane must decline and let the snapshot serve it.
+    assertNull(nativeCatalogTarget("compose-m3", "button-filled__ideal__pressed__light"))
+    assertNull(nativeCatalogTarget("compose-m3", "button-filled__ideal__keyboard-focus__dark"))
+    // Same shape one level down: this fell through to `card-slots` without providing
+    // `LocalSlotMode`, so the labelled placeholders the variant exists to show were not drawn.
+    assertNull(nativeCatalogTarget("compose-m3", "card-slots__ideal__slot-mode__light"))
   }
 
   @Test

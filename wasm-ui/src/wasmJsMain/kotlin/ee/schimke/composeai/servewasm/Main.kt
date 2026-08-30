@@ -295,9 +295,9 @@ private fun jsonString(value: String): String = buildString {
   append('"')
 }
 
-private suspend fun fetchText(url: String): String = awaitPromise(fetchTextPromise(url))
+internal suspend fun fetchText(url: String): String = awaitPromise(fetchTextPromise(url))
 
-private suspend fun fetchBase64(url: String): String = awaitPromise(fetchBase64Promise(url))
+internal suspend fun fetchBase64(url: String): String = awaitPromise(fetchBase64Promise(url))
 
 private suspend fun awaitPromise(promise: Promise<JsString>): String =
   suspendCancellableCoroutine { continuation ->
