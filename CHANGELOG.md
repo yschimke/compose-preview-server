@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.3.0](https://github.com/yschimke/compose-preview-server/compare/v2.2.0...v2.3.0) (2026-08-30)
+
+
+### Features
+
+* **serve:** diff the derived layers across a cross-catalog pair ([#40](https://github.com/yschimke/compose-preview-server/issues/40)) ([e544e22](https://github.com/yschimke/compose-preview-server/commit/e544e22dfb2d017c765bc3584cf829c5257b5c7b))
+* **serve:** discover catalogs from a nominated GitHub project ([#43](https://github.com/yschimke/compose-preview-server/issues/43)) ([d32c0e4](https://github.com/yschimke/compose-preview-server/commit/d32c0e4a4b578bbf467cdb23c4011819dbe687d6))
+
+
+### Bug Fixes
+
+* **wasm-ui:** skip a malformed font family instead of dropping every family ([#42](https://github.com/yschimke/compose-preview-server/issues/42)) ([f8c398b](https://github.com/yschimke/compose-preview-server/commit/f8c398b28147af5a1b4d4f0dad8936799a19348d))
+
 ## [2.2.0](https://github.com/yschimke/compose-preview-server/compare/v2.1.0...v2.2.0) (2026-08-30)
 
 
