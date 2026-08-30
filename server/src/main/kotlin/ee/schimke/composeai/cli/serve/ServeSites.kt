@@ -273,6 +273,10 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "compare",
         "reference",
         "pages",
+        // `GET /pages.json` — the design-pages index as data, beside `parity.json` and
+        // `status.json` below. Reserved for the same reason its HTML neighbour is: the segment is
+        // routed, so a catalog that claimed it would be unreachable at its canonical path.
+        "pages.json",
         // `GET /tags/<previewId>` — the published element tag index (see [ServeTagIndex]), which
         // the focused comparison's element selector fetches. Reserved beside its neighbours for the
         // same reason: a site host that had claimed the prefix would answer its own styled 404 and
