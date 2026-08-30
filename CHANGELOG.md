@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.1.0](https://github.com/yschimke/compose-preview-server/compare/v2.0.0...v2.1.0) (2026-08-30)
+
+
+### Features
+
+* **serve:** onboard a GitHub project from its URL ([#10](https://github.com/yschimke/compose-preview-server/issues/10)) ([d010680](https://github.com/yschimke/compose-preview-server/commit/d010680892016547e35490ce24920811018140f6))
+* **serve:** report the Compose previews in a pasted repository ([#34](https://github.com/yschimke/compose-preview-server/issues/34)) ([9c9c620](https://github.com/yschimke/compose-preview-server/commit/9c9c6202890e5b1083c6a2cebff42b2e154b88ab))
+
+
+### Bug Fixes
+
+* close the serve-web and native-catalog gaps re-homed from compose-ai-tools ([#32](https://github.com/yschimke/compose-preview-server/issues/32)) ([f2390d9](https://github.com/yschimke/compose-preview-server/commit/f2390d95dad5b20b9177c3a07aeb15a2b8f33ef2))
+* **deps:** pin dependencies ([#19](https://github.com/yschimke/compose-preview-server/issues/19)) ([a523cd9](https://github.com/yschimke/compose-preview-server/commit/a523cd940043f626d655579276cfd746965277f6))
+* **deps:** update composeai.tools to v1.53.1 ([#23](https://github.com/yschimke/compose-preview-server/issues/23)) ([4bce49c](https://github.com/yschimke/compose-preview-server/commit/4bce49c60fcedce712a6a1f06fe116f31161137d))
+* publish the test fixtures under the artifactId's capability ([#22](https://github.com/yschimke/compose-preview-server/issues/22)) ([ddf65ef](https://github.com/yschimke/compose-preview-server/commit/ddf65efaf1609d258404037bd088c0cca216bfe5))
+
 ## [2.0.0](https://github.com/yschimke/compose-preview-server/compare/v1.51.0...v2.0.0) (2026-08-29)
 
 
