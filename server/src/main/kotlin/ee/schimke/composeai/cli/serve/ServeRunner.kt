@@ -625,8 +625,18 @@ public class ServeRunner(
   private val catalogRegistryContributions: List<ServeCatalogRegistry.Contribution> by lazy {
     catalogRegistryRepos.mapNotNull { nomination ->
       ServeCatalogRegistry.fetch(nomination, ::fetchRegistryDocument) {
-        System.err.println("serve: $it")
-      }
+          System.err.println("serve: $it")
+        }
+        // Say what each registry gave us, not only when it gives us nothing. The boot fold-in
+        // registered its catalogs without a word, so "the registry contributed two catalogs" and
+        // "the flag never reached the server" produced identical logs — and an operator reading
+        // them has no way to tell a working registry from an absent one until a catalog 404s.
+        ?.also { contribution ->
+          System.err.println(
+            "serve: catalog registry ${nomination}: ${contribution.entries.size} catalog(s) — " +
+              contribution.entries.joinToString(", ") { it.system }
+          )
+        }
     }
   }
 
