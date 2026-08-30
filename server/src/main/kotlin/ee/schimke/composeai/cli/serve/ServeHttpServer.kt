@@ -4691,15 +4691,37 @@ class ServeHttpServer(
     val componentId = preview.componentId?.takeIf { it.isNotBlank() } ?: return null
     val parallelId = bundle.parallelByComponentId[componentId] ?: return null
     val siblingHost = sessions.peekHost(siblingSystem) ?: return null
-    // The sibling's OWN preview for that component. First match, like the design-reference lane
-    // above: a component with several previews has one canonical sticker and the manifest's order
-    // is the producer's.
-    val siblingPreview =
-      siblingHost.previews.firstOrNull { it.componentId == parallelId } ?: return null
+    // The sibling's own render OF THIS CELL, and only then its canonical sticker. Which cell a
+    // render is — the design-kit node it is specified by, else its own state/props/size — is the
+    // one key that survives two catalogs spelling their preview ids differently; see
+    // [ServeParallelPairing], which also carries why the fallback has to be said out loud.
+    val pairing =
+      ServeParallelPairing.pair(
+        preview = preview,
+        kitNodes = ServeParallelPairing.kitNodesOf(host.designReferencesFor(preview.id)),
+        candidates = siblingHost.previews.filter { it.componentId == parallelId },
+        kitNodesFor = { ServeParallelPairing.kitNodesOf(siblingHost.designReferencesFor(it.id)) },
+      ) ?: return null
+    val siblingPreview = pairing.preview
     val siblingBundle = catalogBundleHost(siblingHost)
     val siblingLabel =
       siblingBundle?.title?.takeIf { it.isNotBlank() }
         ?: siblingHost.label.ifBlank { siblingSystem }
+    val cell = ServeParallelPairing.cellLabel(preview)
+    // What was actually put beside this render, in one clause. A cell the sibling does not draw is
+    // a finding about the two systems rather than an inconvenience to hide: pairing it with the
+    // component's default silently would make the two catalogs look MORE aligned the further they
+    // have diverged, which is the wrong direction for a parity surface.
+    val pairedOn =
+      when {
+        pairing.basis == ServeParallelPairing.Basis.KIT_CELL ->
+          ", paired on the design-kit node both catalogs map this cell to"
+        pairing.basis == ServeParallelPairing.Basis.VARIANT_CELL && cell.isNotEmpty() ->
+          ", paired on the $cell cell"
+        pairing.basis == ServeParallelPairing.Basis.CANONICAL && cell.isNotEmpty() ->
+          " — its default render, because that catalog publishes no $cell cell for this component"
+        else -> ""
+      }
     return ServeWeb.SpecSource(
       id = "parallel",
       label = siblingLabel,
@@ -4725,7 +4747,7 @@ class ServeHttpServer(
       // that produced the render beside it. Saying so is the difference between a comparison and an
       // implied equivalence.
       provenance =
-        "$siblingLabel's own render of ${siblingPreview.componentId ?: parallelId}, " +
+        "$siblingLabel's own render of ${siblingPreview.componentId ?: parallelId}$pairedOn, " +
           "under that catalog's theme and knobs — not this page's.",
     )
   }
