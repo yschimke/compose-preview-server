@@ -451,6 +451,14 @@ public class ServeCommandOptions(
   override val catalogsUnlistedRaw: String? = args.flagValue("--catalogs-unlisted")
 
   /**
+   * **Catalog registry projects** (`--catalog-registry <owner>/<repo>,…`): projects that publish
+   * their own served set in `.compose-preview/catalogs.json`, instead of the operator naming each
+   * catalog. See `ServeCatalogRegistry`; the image passes `SERVE_CATALOG_REGISTRY` through to it.
+   */
+  override val catalogRegistryRaw: String? =
+    args.flagValue("--catalog-registry")?.takeIf { it.isNotBlank() }
+
+  /**
    * **Top-level sites** (`--sites m3.preview.coo.ee=m3-catalog,…`; also `catalogs.json`'s `sites`):
    * host names on which one already-served catalog is presented as the whole server — its landing
    * at `/`, its links inside the custom domain, no front door and no neighbours. See `ServeSites`;
