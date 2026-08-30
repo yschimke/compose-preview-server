@@ -138,9 +138,8 @@ object PreviewHistoryManifest {
    * stores `renders/<module>/<basename>` and needs `baselines.json` to say which preview each file
    * belongs to. A **design catalog** branch (`design-artifacts/<system>`) stores
    * `images/<slug>/<variant>.png` and needs no sidecar at all: the id the viewer addresses a
-   * preview by *is* the path, flattened — which is exactly what
-   * [ServeCatalogStore.previewIdFor][ee.schimke.composeai.cli.serve.ServeCatalogStore.Companion.previewIdFor]
-   * computes for its routes.
+   * preview by *is* the path, flattened — which is exactly what [CatalogImagePaths.previewIdFor]
+   * computes for the serve routes.
    *
    * Reusing that function rather than restating the rule is the point: a manifest keyed by anything
    * other than the id the routes use is a manifest the viewer silently finds nothing in, and a
@@ -150,7 +149,7 @@ object PreviewHistoryManifest {
     /** `renders/<module>/<basename>`, joined through `baselines.json`. */
     RENDERS("renders"),
     /** `images/<slug>/<variant>.png`, joined by flattening the path. */
-    IMAGES(ServeCatalogStore.IMAGES_DIR);
+    IMAGES(CatalogImagePaths.IMAGES_DIR);
 
     companion object {
       /** Parse a `--layout` value, or null when it names neither layout. */
@@ -171,9 +170,9 @@ object PreviewHistoryManifest {
   fun imagePathsToPreviewIds(paths: Iterable<String>): Map<String, String> {
     val byPath = LinkedHashMap<String, String>()
     for (path in paths) {
-      if (!path.startsWith("${ServeCatalogStore.IMAGES_DIR}/") || !path.endsWith(".png")) continue
+      if (!path.startsWith("${CatalogImagePaths.IMAGES_DIR}/") || !path.endsWith(".png")) continue
       if (".." in path.split("/")) continue
-      byPath[path] = ServeCatalogStore.previewIdFor(path)
+      byPath[path] = CatalogImagePaths.previewIdFor(path)
     }
     return byPath
   }

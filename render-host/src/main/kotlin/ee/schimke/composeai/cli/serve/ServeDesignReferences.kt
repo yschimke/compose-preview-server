@@ -239,13 +239,17 @@ private constructor(
         (match.changedPercent?.let { it.isFinite() && it in 0.0..100.0 } ?: true) &&
         (match.geometry?.let { it.isFinite() && it >= 0.0 } ?: true)
 
-    internal fun isSafeRelativePath(value: String): Boolean {
+    // Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+    // and the `:server` call sites are in a different module now. Not a widened API by intent.
+    fun isSafeRelativePath(value: String): Boolean {
       if (value.isBlank() || value.startsWith('/') || value.startsWith('\\')) return false
       if (Regex("^[A-Za-z]:").containsMatchIn(value)) return false
       return value.replace('\\', '/').split('/').none { it.isBlank() || it == "." || it == ".." }
     }
 
-    internal fun isValid(reference: DesignReference, bytes: ByteArray): Boolean =
+    // Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+    // and the `:server` call sites are in a different module now. Not a widened API by intent.
+    fun isValid(reference: DesignReference, bytes: ByteArray): Boolean =
       hasValidMetadata(reference) && hasValidRaster(reference, bytes)
 
     private fun hasValidMetadata(reference: DesignReference): Boolean =

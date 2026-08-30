@@ -63,6 +63,24 @@ internal object ServeFigmaSpec {
   }
 
   /**
+   * The design-kit node [reference] specifies, as `<fileKey>/<nodeId>`, or null when it is not
+   * Figma-backed or its handle doesn't parse.
+   *
+   * The same strict parse [of] links with, exposed as an IDENTITY rather than a URL: two catalogs
+   * reproducing one kit publish this handle for the cell they both draw, which is what lets
+   * [ServeParallelPairing] pair their renders cell by cell without either naming its previews the
+   * same. Canonical on `:` — the API/handle spelling — because a producer may write either
+   * separator and the two must not read as two different nodes.
+   */
+  fun nodeHandle(reference: DesignReference): String? {
+    val source = reference.source
+    if (!source.provider.trim().equals("figma", ignoreCase = true)) return null
+    val (key, node) = fileKeyAndNode(source) ?: return null
+    if (!FILE_KEY.matches(key) || !NODE_ID.matches(node)) return null
+    return "$key/${node.replace('-', ':')}"
+  }
+
+  /**
    * A deep link to one node of one file, or null when either part is shaped wrong.
    *
    * The same literal-origin reassembly as [of], exposed for the callers that already hold the pair

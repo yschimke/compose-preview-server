@@ -38,7 +38,9 @@ import java.util.concurrent.TimeUnit
  * When either sidecar is absent (a build that didn't stage them, or a headless host that dropped
  * the desktop lane) [isAvailable] is false and the viewer never lights the chip.
  */
-internal object RcJvmServerRenderer {
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+object RcJvmServerRenderer {
 
   private const val MAIN_CLASS = "ee.schimke.composeai.rcembedded.jvm.RcJvmRenderMainKt"
   private const val RENDER_TIMEOUT_SECONDS = 120L
@@ -333,7 +335,9 @@ internal object RcJvmServerRenderer {
    * without it a six-digit value becomes `0x00RRGGBB`, fully transparent), and accept only a
    * resulting 8 hex digits. Null when it won't parse.
    */
-  internal fun rcColorToArgb(raw: String): Int? {
+  // Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+  // and the `:server` call sites are in a different module now. Not a widened API by intent.
+  fun rcColorToArgb(raw: String): Int? {
     val hex = raw.removePrefix("%23").removePrefix("#")
     val opaque = if (hex.length == 6) "FF$hex" else hex
     return opaque.takeIf { it.length == 8 }?.toLongOrNull(16)?.toInt()

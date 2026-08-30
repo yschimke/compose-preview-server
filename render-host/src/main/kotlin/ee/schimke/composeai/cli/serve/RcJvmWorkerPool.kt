@@ -64,7 +64,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * Thread-safe: [maxWorkers] permits gate admission, and a worker is only ever checked out to one
  * thread at a time, so a worker's streams are never touched concurrently.
  */
-internal class RcJvmWorkerPool(
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+class RcJvmWorkerPool(
   private val classpath: List<File>,
   private val javaBin: String,
   private val extraJvmArgs: List<String>,
@@ -462,7 +464,9 @@ internal class RcJvmWorkerPool(
     }
   }
 
-  internal companion object {
+  // Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+  // and the `:server` call sites are in a different module now. Not a widened API by intent.
+  companion object {
     const val WORKER_MAIN_CLASS = "ee.schimke.composeai.rcembedded.jvm.RcJvmRenderWorkerMainKt"
 
     // Mirrors `RcJvmRenderWorkerMain.kt`. The cli cannot depend on the player module (its Skiko

@@ -25,7 +25,9 @@ private val FIGMA_RASTER_HREF = Regex("href=\"([^\"]*figma-raster/[^\"]+)\"")
 /**
  * The figma-raster hrefs a hybrid SVG references (external crop paths, relative to the SVG's dir).
  */
-internal fun figmaRasterHrefs(svg: String): List<String> =
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+fun figmaRasterHrefs(svg: String): List<String> =
   FIGMA_RASTER_HREF.findAll(svg).map { it.groupValues[1] }.toList()
 
 /**
@@ -49,7 +51,9 @@ internal const val MAX_INLINE_RASTER_EDGE_PX: Int = MAX_FIGMA_RASTER_EDGE_PX
  * [MAX_INLINE_RASTER_EDGE_PX]); pass [Int.MAX_VALUE] to embed full-resolution bytes. A vector-only
  * SVG passes through; a crop missing on disk is left as a plain ref.
  */
-internal fun inlineFigmaRasters(
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+fun inlineFigmaRasters(
   fileSystem: FileSystem,
   dir: Path,
   svg: String,
@@ -77,7 +81,9 @@ internal fun inlineFigmaRasters(
  * traversing href (`..` / absolute) is left untouched, exactly like [inlineFigmaRasters]'s
  * containment. A vector-only SVG passes through.
  */
-internal fun linkFigmaRasters(svg: String, baseUrl: String): String {
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+fun linkFigmaRasters(svg: String, baseUrl: String): String {
   if (!svg.contains("figma-raster/")) return svg
   val base = baseUrl.trimEnd('/')
   return FIGMA_RASTER_HREF.replace(svg) { match ->
@@ -115,7 +121,9 @@ private val FONT_FACE_BLOCK = Regex("@font-face\\{[^}]*\\}")
  * carrying their bytes. A vector-only SVG, or one with no parseable `@font-face`, passes through
  * unchanged. Rasters are untouched (still inlined). Pure — unit-testable without a served host.
  */
-internal fun webModeSvg(svg: String): String {
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+fun webModeSvg(svg: String): String {
   val faces = FONT_FACE_BLOCK.findAll(svg).mapNotNull { parseWebFontFace(it.value) }.toList()
   if (faces.isEmpty()) return svg
   val importUrl = googleFontsImportUrl(faces) ?: return svg

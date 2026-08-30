@@ -452,7 +452,7 @@ class ServeBackgroundWork(
       pressure = pressure,
       serverIdleMillis = serverIdle,
       idleBlockedBy = idleBlockedBy,
-      idleThresholdMillis = ServeCatalogLiveHost.themeOptimizationIdleMillisDefault(),
+      idleThresholdMillis = themeOptimizationIdleMillisDefault(),
     )
   }
 
@@ -471,6 +471,21 @@ class ServeBackgroundWork(
   }
 
   companion object {
+    /**
+     * Whole-server quiet the idle theme-optimizer gate requires before a cold pass may start.
+     *
+     * Read through a function rather than held in a `val` so the system property is still honoured
+     * when it is set after this class loads. It lives here rather than on `ServeCatalogLiveHost`,
+     * which is the class that gates on it, because this class is the one that publishes it on
+     * `/status.json` and this module cannot see that one — the gate keeps an alias so both sides
+     * still read the single number.
+     *
+     * Public rather than `internal`: `ServeCatalogLiveHost` is in `:server` now, and `internal` is
+     * module-scoped.
+     */
+    fun themeOptimizationIdleMillisDefault(): Long =
+      System.getProperty("composeai.serve.themeOptimizationIdleMillis")?.toLongOrNull() ?: 60_000L
+
     /**
      * The historical lane: one background render server-wide. Still the right answer when nothing
      * else bounds daemon count — see [renderLaneFor].

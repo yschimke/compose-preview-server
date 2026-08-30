@@ -1968,13 +1968,15 @@ class ServeCatalogLiveHost(
     /**
      * Whole-server quiet the idle gate requires before a cold pass may start.
      *
-     * Read through a function rather than held in a `val` so the system property is still honoured
-     * when it is set after this class loads, and so [ServeBackgroundWork] can publish the same
-     * number on `/status.json` without restating the default. A gate whose threshold is invisible
-     * is one nobody can tell from a gate that is simply never reached.
+     * The number itself now lives on [ServeBackgroundWork], which moved to `:render-host` with the
+     * rest of the render plumbing (yschimke/compose-ai-tools#4832). Ownership went with it rather
+     * than the call inverting, because `ServeBackgroundWork` is the side that PUBLISHES this
+     * threshold on `/status.json` — a gate whose threshold is invisible is one nobody can tell from
+     * a gate that is simply never reached — and this class is only the side that gates on it. Kept
+     * as an alias here so the constructor default and the tests still read in one place.
      */
     internal fun themeOptimizationIdleMillisDefault(): Long =
-      System.getProperty("composeai.serve.themeOptimizationIdleMillis")?.toLongOrNull() ?: 60_000L
+      ServeBackgroundWork.themeOptimizationIdleMillisDefault()
 
     /** Default lane slice — see the `optimizerSliceMillis` constructor parameter for the trade. */
     internal const val DEFAULT_OPTIMIZER_SLICE_MILLIS = 5 * 60_000L
