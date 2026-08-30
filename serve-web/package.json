@@ -15,11 +15,11 @@
         "verify": "npm run typecheck && npm run test && npm run build && node scripts/check-bundle-budgets.mjs && node scripts/check-committed-bundle.mjs"
     },
     "devDependencies": {
-        "@happy-dom/global-registrator": "20.11.15",
+        "@happy-dom/global-registrator": "20.12.0",
         "@types/mocha": "10.0.10",
         "@types/node": "24.13.3",
         "esbuild": "0.28.2",
-        "happy-dom": "20.11.15",
+        "happy-dom": "20.12.0",
         "mocha": "11.8.0",
         "prettier": "3.9.6",
         "tsx": "4.23.13",
