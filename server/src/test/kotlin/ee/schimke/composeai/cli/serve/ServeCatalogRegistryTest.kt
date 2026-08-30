@@ -165,11 +165,12 @@ class ServeCatalogRegistryTest {
   }
 
   @Test
-  fun `the document is read from the first ref that answers, never HEAD alone`() {
-    // `raw.githubusercontent.com`'s HEAD alias serves a STALE default-branch commit: the document
-    // 404'd there for minutes after it landed on main. A registry read that depended on HEAD would
-    // report a live registry as absent, so main/master are tried first and HEAD is the catch-all.
-    assertEquals(listOf("main", "master", "HEAD"), nomination("a/b").refs)
+  fun `the document is read from the first ref that answers, HEAD first`() {
+    // HEAD is raw's alias for the default branch, which is the question being asked, so it goes
+    // first. main/master follow for the case that bit once: a registry repo whose default branch
+    // pointed elsewhere, so HEAD faithfully served a tree without the freshly-merged document and
+    // the box reported a live registry as absent. They are never reached when HEAD answers.
+    assertEquals(listOf("HEAD", "main", "master"), nomination("a/b").refs)
     assertEquals(listOf("v1"), ServeCatalogRegistry.Nomination("a/b", "v1").refs)
 
     val asked = mutableListOf<String>()
@@ -185,6 +186,7 @@ class ServeCatalogRegistryTest {
 
     assertEquals(
       listOf(
+        "https://raw.githubusercontent.com/a/b/HEAD/${ServeCatalogRegistry.FILE_PATH}",
         "https://raw.githubusercontent.com/a/b/main/${ServeCatalogRegistry.FILE_PATH}",
         "https://raw.githubusercontent.com/a/b/master/${ServeCatalogRegistry.FILE_PATH}",
       ),
