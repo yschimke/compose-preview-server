@@ -111,6 +111,55 @@ class ServeAdminRoutingTest {
     )
 
   /**
+   * The source-onboarding lane, wired **without a builder** — the shape every box has by default.
+   * That is the interesting configuration to drive over HTTP: the scan route still answers, and the
+   * build route must refuse in a way that names the deployment decision rather than looking broken.
+   */
+  private val sourceOnboarding =
+    ServeSourceOnboarding(
+      checkouts =
+        ServeSourceCheckouts(
+          cacheRoot =
+            Files.createTempDirectory("admin-onboard-src").toFile().also { it.deleteOnExit() },
+          git =
+            GitRunner { _, args ->
+              when (args.first()) {
+                "clone" ->
+                  if (args[args.size - 2].contains("joreilly/PeopleInSpace")) {
+                    File(args.last(), ".git").apply { mkdirs() }
+                    GitResult(0, "")
+                  } else {
+                    GitResult(128, "repository not found")
+                  }
+                "rev-parse" -> GitResult(0, "deadbee\n")
+                "symbolic-ref" -> GitResult(0, "origin/main\n")
+                else -> GitResult(0, "")
+              }
+            },
+          onLog = {},
+        ),
+      builder = null,
+      register = { _, _ -> },
+      scanner = {
+        ServeSourceScanResult(
+          listOf(
+            ServeSourceModule(
+              gradlePath = "shared",
+              relativePath = "shared",
+              previewCount = 4,
+              previewFunctions = listOf("HomePreview"),
+              hostPlugins = listOf("org.jetbrains.compose"),
+              pluginPreApplied = false,
+              buildable = true,
+              skipReason = null,
+            )
+          )
+        )
+      },
+      onLog = {},
+    )
+
+  /**
    * The in-browser Wasm apps, as the server sees them: a LIVE map, empty at boot. A catalog
    * published at runtime can carry one, so the `/wasm/` route has to exist and read through to the
    * current contents rather than a boot-time snapshot.
@@ -156,6 +205,7 @@ class ServeAdminRoutingTest {
         catalogLoads = tracker,
         catalogAdmin = admin,
         onboarding = onboarding,
+        sourceOnboarding = sourceOnboarding,
         trustAdmin = trustAdmin,
         sites = siteRegistry,
         siteAdmin = siteAdmin,
@@ -271,6 +321,55 @@ class ServeAdminRoutingTest {
       502,
       send("/admin/onboard", method = "POST", body = """{"url":"yschimke/gone"}""").first,
     )
+  }
+
+  @Test
+  fun `scanning a project that publishes nothing reports its modules without building them`() {
+    // The gap this closes: `POST /admin/onboard` answers 404 for a repository with no delivery
+    // branch, which is every repository the first time. Scanning it answers the question the person
+    // pasting the URL actually has.
+    val (code, body) =
+      send(
+        "/admin/onboard/scan",
+        method = "POST",
+        body = """{"url":"https://github.com/joreilly/PeopleInSpace"}""",
+      )
+
+    assertEquals(200, code)
+    assertTrue(body.contains("\"gradlePath\":\"shared\""), body)
+    assertTrue(body.contains("\"previewCount\":4"), body)
+    // This box has no build lane, and says so rather than letting the caller find out by POSTing.
+    assertTrue(body.contains("\"buildEnabled\":false"), body)
+
+    // Gated like every other admin route, and upstream trouble is still upstream.
+    assertEquals(
+      404,
+      send("/admin/onboard/scan", method = "POST", body = """{"url":"a/b"}""", token = null).first,
+    )
+    assertEquals(
+      502,
+      send("/admin/onboard/scan", method = "POST", body = """{"url":"someone/private"}""").first,
+    )
+  }
+
+  @Test
+  fun `a box that never opted into building foreign code refuses to`() {
+    val (code, body) =
+      send(
+        "/admin/onboard/build",
+        method = "POST",
+        body = """{"url":"https://github.com/joreilly/PeopleInSpace"}""",
+      )
+
+    // 403, not 404 or 500: the route exists, the request was fine, and the answer is a deployment
+    // decision the operator can change — so the message names the switch.
+    assertEquals(403, code)
+    assertTrue(body.contains("--onboard-build"), body)
+    // And nothing was queued, so there is no job to poll.
+    val jobs = send("/admin/onboard/jobs")
+    assertEquals(200, jobs.first)
+    assertFalse(jobs.second.contains("\"id\""), jobs.second)
+    assertEquals(404, send("/admin/onboard/jobs/job-1").first)
   }
 
   @Test

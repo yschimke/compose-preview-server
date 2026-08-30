@@ -23,6 +23,14 @@ public object ServeDefaults {
   const val DEFAULT_CATALOG_REFRESH_SECONDS = 600L
 
   /**
+   * How long one **foreign** module's Gradle build may run when a repository is onboarded by URL
+   * (`--onboard-build-timeout`). Longer than the project-mode default because the first build of a
+   * pasted project is cold in every sense — no daemon, no dependency cache, no warm configuration —
+   * and the caller is polling a job rather than holding a request open.
+   */
+  const val DEFAULT_ONBOARD_BUILD_TIMEOUT_SECONDS = 1_800L
+
+  /**
    * Requests per minute per address on the two ungated `/agent-access/…` routes. A well-behaved
    * agent polls every three seconds — 20/min — so this leaves room for the ask, a couple of retries
    * and a `whoami`, while keeping an anonymous caller from churning the request map.

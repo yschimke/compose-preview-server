@@ -136,6 +136,49 @@ public class ServeCommandOptions(
     args.flagValue("--catalog-source-root")?.takeIf { it.isNotBlank() }?.let { File(it) }
 
   /**
+   * **Onboarding a pasted repository by building it** (SECURITY/RCE, opt-in, default off).
+   *
+   * `POST /admin/onboard/scan` reads a foreign checkout and never runs it, so it needs no switch.
+   * This one enables `POST /admin/onboard/build`, which runs the pasted repository's own
+   * `./gradlew` as the server user — arbitrary code from a project nobody has vouched for. It is
+   * therefore gated twice over: the admin token (the routes don't exist without one) and this flag,
+   * which additionally requires [allowRenderTrusted] — the box's existing statement that it may
+   * execute producer code. Setting it without that is refused at startup rather than honoured
+   * quietly.
+   */
+  override val onboardBuild: Boolean = "--onboard-build" in args
+
+  /**
+   * Where foreign checkouts live (`--onboard-cache`). One directory per repository, reused across
+   * requests. Defaults to a temporary directory, which is the right default for a scratch tree that
+   * a restart is free to forget.
+   */
+  override val onboardCacheDir: File =
+    args.flagValue("--onboard-cache")?.takeIf { it.isNotBlank() }?.let(::File)
+      ?: java.nio.file.Files.createTempDirectory("serve-onboard-sources").toFile().also {
+        it.deleteOnExit()
+      }
+
+  /**
+   * Extra `--init-script` arguments for a foreign build (`--onboard-init-script <path>`,
+   * repeatable).
+   *
+   * The CLI injects the preview plugin through an init script it materialises itself
+   * (`ServeBuildHost.autoInjectInitScriptArgs`); the standalone distribution has no CLI behind it
+   * and injects nothing, so without this it could only build a project that already applies the
+   * plugin — precisely the project this feature is not for. Point this at a script materialised by
+   * `compose-preview init-script --path` and a standalone box onboards an unmodified upstream
+   * project too.
+   */
+  override val onboardInitScripts: List<File> =
+    args.flagValuesAll("--onboard-init-script").filter { it.isNotBlank() }.map(::File)
+
+  /** How long one foreign module's Gradle build may run (`--onboard-build-timeout`, seconds). */
+  override val onboardBuildTimeoutSeconds: Long =
+    args.flagValue("--onboard-build-timeout")?.toLongOrNull()?.takeIf { it > 0 }
+      ?: ServeDefaults.DEFAULT_ONBOARD_BUILD_TIMEOUT_SECONDS
+
+  /**
    * Project mode revision policy (SECURITY/RCE): comma-separated refs whose history a requested
    * `?session=<rev>` must be reachable from to be checked out and built. Empty = nothing builds
    * (fail closed), since building runs that revision's Gradle. e.g. `--revisions-allow
@@ -936,12 +979,37 @@ public class ServeCommandOptions(
                           catalog ids. Per-catalog outcomes come back in the body; re-posting the
                           same URL converges rather than erroring. A repository that has never run
                           `compose-preview publish` has nothing to serve yet and answers 404.
+                          Onboarding a project that has NEVER published a catalog is a separate
+                          pair of routes: POST /admin/onboard/scan ({"url","ref"}) shallow-clones
+                          the repository and REPORTS which Gradle modules hold @Preview functions
+                          and which the preview plugin can be injected into — it reads the checkout
+                          and executes nothing. POST /admin/onboard/build ({"url","ref","modules"})
+                          then builds those modules from source and serves each as its own session;
+                          it needs --onboard-build (see there) and answers 202 with a job id to
+                          poll at GET /admin/onboard/jobs/<id>.
                           Mutations are applied live AND written back to --catalogs-file /
                           --trust-store, so they survive a restart. Separate from --token on purpose
                           (a --public box hands that one to every visitor); omitted = the admin
                           routes don't exist at all. NB with --allow-render-trusted this token can
                           grant server-side execution, since trusting a branch makes that
                           producer's Compose eligible for re-render here.
+        --onboard-build   SECURITY (RCE): allow POST /admin/onboard/build to run a PASTED
+                          repository's own ./gradlew as the server user, so a project that never
+                          applied the preview plugin can be served from source. Requires
+                          --allow-render-trusted as well (the box's existing statement that it may
+                          execute producer code) and an --admin-token; refused at startup without
+                          them. Off by default: without it the scan route still works and the build
+                          route answers 403.
+        --onboard-cache <dir>
+                          Where onboarded repositories are checked out (one directory per repo,
+                          reused). Default: a temporary directory, forgotten on restart.
+        --onboard-init-script <path>
+                          Extra --init-script passed to every onboarded build; repeatable. Point it
+                          at a script materialised by `compose-preview init-script --path` so a
+                          standalone box injects the preview plugin into projects that don't apply
+                          it. Without one, only projects that already apply the plugin can build.
+        --onboard-build-timeout <seconds>
+                          Ceiling on one onboarded module's Gradle build (default 1800).
         --engagement-file <path>
                           Persist privacy-minimal aggregate catalog/app and per-preview view counts
                           as JSON. No IPs, cookies, user agents, or referrers are stored. Omitted =
