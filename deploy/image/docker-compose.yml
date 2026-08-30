@@ -186,6 +186,19 @@ services:
       SERVE_CATALOG_REFRESH: "${SERVE_CATALOG_REFRESH:-}"
       # RSS feed history work sleeps after this many seconds without a feed request. Empty ⇒ 7 days.
       SERVE_CATALOG_FEED_IDLE: "${SERVE_CATALOG_FEED_IDLE:-}"
+      # Onboarding a project that has published NOTHING: POST /admin/onboard/scan reads a shallow
+      # clone and needs no switch, but POST /admin/onboard/build runs the PASTED repository's own
+      # ./gradlew inside this container. SERVE_ONBOARD_BUILD=1 opts in, and serve refuses it unless
+      # SERVE_ALLOW_RENDER_TRUSTED is on too (the box's existing statement that it may execute
+      # producer code). Leave it empty unless you specifically want to build foreign repositories
+      # here. SERVE_ONBOARD_INIT_SCRIPT points at a `compose-preview init-script --path` script
+      # mounted into the container; without one, only projects that already apply the preview plugin
+      # can build. SERVE_ONBOARD_CACHE moves the checkouts off the container's scratch space and
+      # SERVE_ONBOARD_BUILD_TIMEOUT caps one module's build (empty ⇒ 1800s).
+      SERVE_ONBOARD_BUILD: "${SERVE_ONBOARD_BUILD:-}"
+      SERVE_ONBOARD_CACHE: "${SERVE_ONBOARD_CACHE:-}"
+      SERVE_ONBOARD_INIT_SCRIPT: "${SERVE_ONBOARD_INIT_SCRIPT:-}"
+      SERVE_ONBOARD_BUILD_TIMEOUT: "${SERVE_ONBOARD_BUILD_TIMEOUT:-}"
       # Warmed theme renders (the per-catalog theme cache) survive container recreation, which is
       # what the rolling update below performs — so a restart no longer discards hours of background
       # warming. Points at the dedicated `preview_theme_cache` volume mounted below; set
