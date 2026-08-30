@@ -59,6 +59,32 @@ export async function uploadCapture(
     return { url };
 }
 
+/**
+ * Does a previously-returned image URL still resolve?
+ *
+ * `uploadedUrl` rides in `sessionStorage`, which outlives the server: the pile survives a restart
+ * of the image store and the lane's own retention TTL, and `hostedCaptureUrl` only says the string
+ * is shaped like one of our `/i/` URLs — it cannot say the bytes are still there. Embedding an
+ * unchecked one puts a 404 in the filed issue, which is worse than no screenshot, because the
+ * clipboard fallback is skipped on the strength of the URL being present.
+ *
+ * A HEAD, so the check costs headers rather than the picture. Anything but a 2xx — gone, expired,
+ * or a network error — is "cannot vouch for it", and the caller re-uploads. A needless re-upload
+ * costs one request; a wrongly-trusted URL costs the report its evidence.
+ */
+export async function stillHosted(url: string): Promise<boolean> {
+    try {
+        const response = await fetch(url, {
+            method: "HEAD",
+            credentials: "same-origin",
+            cache: "no-store",
+        });
+        return response.ok;
+    } catch {
+        return false;
+    }
+}
+
 /** Return a canonical URL only for an image hosted by this page's image lane. */
 export function hostedCaptureUrl(value: unknown): string | null {
     if (typeof value !== "string") return null;
