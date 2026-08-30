@@ -142,11 +142,14 @@ class ServeDesignPageStoreTest {
   }
 
   @Test
-  fun `a page id ending in svg is refused — that suffix is the export route`() {
-    // `/{system}/pages/shape.svg` reads as "the export of the page `shape`", so a page genuinely
-    // id'd `shape.svg` would be unreachable behind it while only its export resolved.
-    val shadowing = shape.replace("\"id\":\"shape\"", "\"id\":\"styles.svg\"")
-    assertTrue(store(manifest(shadowing)).pages.isEmpty())
+  fun `a page id ending in svg or json is refused — those suffixes are the page's own routes`() {
+    // `/{system}/pages/shape.svg` reads as "the export of the page `shape`" and `…/shape.json` as
+    // "its node join", so a page genuinely id'd either way would be unreachable behind them while
+    // only the thing about it resolved.
+    for (id in listOf("styles.svg", "styles.json")) {
+      val shadowing = shape.replace("\"id\":\"shape\"", "\"id\":\"$id\"")
+      assertTrue(store(manifest(shadowing)).pages.isEmpty(), "page id '$id' must not be advertised")
+    }
   }
 
   @Test

@@ -9,6 +9,12 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -331,6 +337,135 @@ class ServeDesignPageRoutingTest {
     } finally {
       java.util.Locale.setDefault(original)
     }
+  }
+
+  /**
+   * The pages index as data: the sheets, and the fraction each one claims.
+   *
+   * The counts are the CARD's, not the manifest's node count — `total` is what a catalog could
+   * implement, so the three exclusions the sheet applies (a container, a private component, a base
+   * part) are already gone by the time a consumer reads it. A reader who had to re-derive them from
+   * the raw manifest would get `2 of 5` and file three bugs, which is exactly what scraping the
+   * page used to cost.
+   */
+  @Test
+  fun `the pages index has a json form carrying each sheet's coverage`() {
+    val (code, type, body) = get("/m3-catalog/pages.json")
+    assertEquals(200, code)
+    assertTrue(type.startsWith("application/json"), type)
+    val index = Json.parseToJsonElement(body).jsonObject
+    assertEquals("compose-preview-serve/pages/v1", index.getValue("schema").jsonPrimitive.content)
+    assertEquals("m3-catalog", index.getValue("system").jsonPrimitive.content)
+    val pages = index.getValue("pages").jsonArray.map { it.jsonObject }
+    assertEquals(listOf("shape", "icons"), pages.map { it.getValue("page").jsonPrimitive.content })
+    val shape = pages.first()
+    assertEquals(2, shape.getValue("implemented").jsonPrimitive.int)
+    assertEquals(3, shape.getValue("total").jsonPrimitive.int)
+    assertEquals(6, shape.getValue("nodes").jsonPrimitive.int)
+    // The icon sheet states what it is the only way JSON can: a fraction with no denominator.
+    val icons = pages.last()
+    assertFalse(icons.getValue("inventory").jsonPrimitive.boolean)
+    assertEquals(0, icons.getValue("total").jsonPrimitive.int)
+  }
+
+  /**
+   * One sheet's node → code join as data — the reading the whole endpoint exists for.
+   *
+   * Every row the view marks is a field here: which nodes count (`component`), which are the work
+   * left (`gap`), what implements each (`code`, `previewId`), and whether this catalog can actually
+   * draw it (`renderable`). Reading those off the HTML meant matching a red or blue dot deep in the
+   * DOM.
+   */
+  @Test
+  fun `a page has a json form carrying the node to code join`() {
+    val (code, type, body) = get("/m3-catalog/pages/shape.json")
+    assertEquals(200, code)
+    assertTrue(type.startsWith("application/json"), type)
+    val page = Json.parseToJsonElement(body).jsonObject
+    assertEquals("shape", page.getValue("page").jsonPrimitive.content)
+    assertEquals("Shape", page.getValue("name").jsonPrimitive.content)
+    assertEquals(2, page.getValue("implemented").jsonPrimitive.int)
+    assertEquals(3, page.getValue("total").jsonPrimitive.int)
+    val nodes = page.getValue("nodes").jsonArray.map { it.jsonObject }
+    val byId = nodes.associateBy { it.getValue("nodeId").jsonPrimitive.content }
+    assertEquals(6, nodes.size, body)
+
+    val circle = byId.getValue("1:1")
+    assertEquals("manifest", circle.getValue("link").jsonPrimitive.content)
+    assertEquals("ui/Shapes.kt#CircleShape", circle.getValue("code").jsonPrimitive.content)
+    assertEquals("com.example.Circle", circle.getValue("previewId").jsonPrimitive.content)
+    assertEquals("high", circle.getValue("confidence").jsonPrimitive.content)
+    assertEquals(
+      "figma:ocdacdEsnHipMJD3egzxKb/1:1",
+      circle.getValue("ref").jsonPrimitive.content,
+    )
+    assertTrue(circle.getValue("component").jsonPrimitive.boolean)
+    assertFalse(circle.getValue("gap").jsonPrimitive.boolean)
+    assertTrue(circle.getValue("renderable").jsonPrimitive.boolean)
+
+    // Mapped by the producer, but this catalog publishes no such render: the mapping stays true and
+    // the picture is not fetchable, which is a different answer from "no code behind this".
+    val pill = byId.getValue("1:3")
+    assertEquals("com.example.NotPublished", pill.getValue("previewId").jsonPrimitive.content)
+    assertFalse(pill.getValue("renderable").jsonPrimitive.boolean)
+    assertTrue(pill.getValue("cell").jsonPrimitive.boolean)
+
+    // The one real gap, and the three unlinked nodes that are not gaps — the distinction the view
+    // draws with `data-cp-gap` and the number the header states.
+    assertTrue(byId.getValue("1:12").getValue("gap").jsonPrimitive.boolean)
+    for (id in listOf("1:8", "1:9", "1:20")) {
+      val node = byId.getValue(id)
+      assertFalse(node.getValue("gap").jsonPrimitive.boolean, id)
+      assertFalse(node.getValue("component").jsonPrimitive.boolean, id)
+    }
+    assertTrue(byId.getValue("1:8").getValue("container").jsonPrimitive.boolean)
+  }
+
+  /** `?format=json` on the view answers the same document the `.json` path does. */
+  @Test
+  fun `the format query is the second spelling of both json surfaces`() {
+    assertEquals(get("/m3-catalog/pages.json").third, get("/m3-catalog/pages?format=json").third)
+    assertEquals(
+      get("/m3-catalog/pages/shape.json").third,
+      get("/m3-catalog/pages/shape?format=json").third,
+    )
+    // …and the export is bytes, not a document about them: the suffix wins over the query.
+    val (code, type, _) = get("/m3-catalog/pages/shape.svg?format=json")
+    assertEquals(200, code)
+    assertTrue(type.startsWith("image/svg+xml"), type)
+  }
+
+  /**
+   * A typo'd format is refused rather than answered with the default.
+   *
+   * `?format=jsonn` silently rendering HTML is a request that looks like it worked, and the caller
+   * that wrote it is by definition parsing the answer as data.
+   */
+  @Test
+  fun `an unknown format is a bad request, not a silent fallback`() {
+    assertEquals(400, get("/m3-catalog/pages?format=bogus").first)
+    assertEquals(400, get("/m3-catalog/pages/shape?format=jsonn").first)
+    assertEquals(400, get("/m3-catalog/pages.json?format=xml").first)
+    // The explicit spelling of the default still works.
+    assertTrue(get("/m3-catalog/pages?format=html").second.startsWith("text/html"))
+  }
+
+  @Test
+  fun `the json surfaces 404 as json, never as a styled page`() {
+    // A catalog publishing no sheets has no fraction to report, so it 404s rather than answering
+    // an empty list a check would read as "measured, nothing missing".
+    assertEquals(404, get("/plain/pages.json").first)
+    assertEquals(404, get("/plain/pages/shape.json").first)
+    assertEquals(404, get("/m3-catalog/pages/ghost.json").first)
+    assertEquals(404, get("/nope/pages.json").first)
+    val (_, type, _) = get("/m3-catalog/pages/ghost.json")
+    assertFalse(type.startsWith("text/html"), type)
+  }
+
+  @Test
+  fun `the session-query form serves the same json`() {
+    assertEquals(200, get("/pages.json?session=m3-catalog").first)
+    assertEquals(200, get("/pages/shape.json?session=m3-catalog").first)
   }
 
   @Test
