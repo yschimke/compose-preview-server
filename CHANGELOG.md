@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.1](https://github.com/yschimke/compose-preview-server/compare/v2.3.0...v2.3.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **serve:** do not read a catalog registry through raw's stale HEAD alias ([#44](https://github.com/yschimke/compose-preview-server/issues/44)) ([1fb3fb0](https://github.com/yschimke/compose-preview-server/commit/1fb3fb03736390b3985ed02204e94dec539f81c0))
+* **serve:** read a catalog registry from HEAD first, and correct why ([#46](https://github.com/yschimke/compose-preview-server/issues/46)) ([7daee12](https://github.com/yschimke/compose-preview-server/commit/7daee1243839c125ff3b38228e0c5d02a6397d83))
+
 ## [2.3.0](https://github.com/yschimke/compose-preview-server/compare/v2.2.0...v2.3.0) (2026-08-30)
 
 
