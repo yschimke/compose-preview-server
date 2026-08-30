@@ -13,7 +13,7 @@
   "dependencies": {
     "@design-parity/adapter-figma": "0.1.56",
     "@design-parity/candidate": "0.1.56",
-    "@design-parity/catalog-export": "0.1.56",
+    "@design-parity/catalog-export": "0.1.76",
     "fflate": "0.8.3",
     "pixelmatch": "7.2.0",
     "playwright": "1.62.1",
