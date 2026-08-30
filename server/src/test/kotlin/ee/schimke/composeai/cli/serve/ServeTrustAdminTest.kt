@@ -274,4 +274,47 @@ class ServeTrustAdminTest {
     // subset would reach disk.
     assertEquals(8, file.load().branches.size)
   }
+
+  @Test
+  fun `adding trust fires the grant hook with the before and after stores`() {
+    val (_, _, file) =
+      fixture(TrustStore(branches = listOf(TrustedBranch("a/one", "design-artifacts/*"))))
+    val seen = mutableListOf<Pair<TrustStore, TrustStore>>()
+    val admin =
+      ServeTrustAdmin(
+        MutableTrustStore(file.load()),
+        file,
+        onGrant = { before, updated -> seen += before to updated },
+        onLog = {},
+      )
+
+    admin.add(AdminTrustEntry(kind = "branch", repo = "b/two", branch = "design-artifacts/*"))
+
+    // The DELTA is the point. "Trusted now" alone would have the caller re-fetch every catalog on
+    // the box on every trust add; only the newly-trusted branch can have a verdict that changed.
+    val (before, updated) = seen.single()
+    assertFalse(before.trustsBranch("b/two", "design-artifacts/x"))
+    assertTrue(updated.trustsBranch("b/two", "design-artifacts/x"))
+    // The already-trusted producer is in BOTH, so a caller diffing them leaves it alone.
+    assertTrue(before.trustsBranch("a/one", "design-artifacts/x"))
+    assertTrue(updated.trustsBranch("a/one", "design-artifacts/x"))
+  }
+
+  @Test
+  fun `a revocation is not mistaken for a grant`() {
+    val (_, _, file) =
+      fixture(TrustStore(branches = listOf(TrustedBranch("a/one", "design-artifacts/*"))))
+    var granted = 0
+    val admin =
+      ServeTrustAdmin(
+        MutableTrustStore(file.load()),
+        file,
+        onGrant = { _, _ -> granted++ },
+        onLog = {},
+      )
+
+    admin.remove(AdminTrustEntry(kind = "branch", repo = "a/one", branch = "design-artifacts/*"))
+
+    assertEquals(0, granted)
+  }
 }

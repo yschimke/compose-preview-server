@@ -152,6 +152,25 @@ class ServeTrustAdmin(
    * so without this the producer stays executable until its branch moves or the box restarts.
    */
   private val onRevoke: (TrustStore) -> Unit = {},
+  /**
+   * Called with the store **before** and **after** trust is added, so the caller can re-verify a
+   * catalog that is already loaded under the narrower one.
+   *
+   * The mirror image of [onRevoke], and needed for the same reason. A verdict is computed when a
+   * catalog loads and then baked into its registered session; the branch refresher short-circuits
+   * on an unchanged SHA. So a catalog that loaded as `unverified` keeps serving as `unverified`
+   * after its producer is trusted — until the branch moves or the box restarts. Revocation was
+   * given this treatment because an over-trusted catalog is a security problem; the grant direction
+   * was left out because, until a catalog could arrive *before* its trust, it never happened.
+   * `--catalog-registry` is exactly that case: the registry contributes a catalog the operator
+   * never listed, so trust is necessarily added afterwards (issue seen on preview.coo.ee —
+   * joreilly-peopleinspace stayed `unverified` through a successful `POST /admin/trust` reconcile).
+   *
+   * Both stores are handed over rather than just the new one, because the caller needs the
+   * **delta**. "Everything trusted now" would re-fetch every catalog on the box on every trust add;
+   * "trusted now and not before" is the only set whose verdict can actually have changed.
+   */
+  private val onGrant: (before: TrustStore, updated: TrustStore) -> Unit = { _, _ -> },
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   /**
@@ -306,6 +325,13 @@ class ServeTrustAdmin(
       if (isReduction(current, updated)) {
         runCatching { onRevoke(updated) }
           .onFailure { onLog("serve: revocation cleanup after $summary failed: ${it.message}") }
+      } else {
+        // The grant direction, same discipline: a catalog already loaded under the narrower store
+        // has to be re-verified, not left on the verdict it happened to load with. Failures are
+        // logged rather than thrown for the same reason — the trust change itself has taken
+        // effect, and refusing the request afterwards would misreport that.
+        runCatching { onGrant(current, updated) }
+          .onFailure { onLog("serve: re-verification after $summary failed: ${it.message}") }
       }
       Result.Ok(summary, warning)
     }
