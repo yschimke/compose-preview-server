@@ -1416,6 +1416,15 @@ cp-parity-scores { display: contents; }
   letter-spacing: 0.06em; white-space: nowrap; }
 .cp-parity-lane--code { background: light-dark(#d7f0dd, #0d3a1c); color: light-dark(#10521f, #86dc9d); border: 0; }
 .cp-parity-lane--figma { background: light-dark(#e5deff, #372b70); color: light-dark(#3c2b80, #c9c0ff); border: 0; }
+/* Cross-catalog layer diff (`/parallel/<preview>`) — see ServeWeb.parallelLayersPage. Three small
+   rules on top of `.cp-table`, deliberately: the page is a table of resolved values, and the only
+   thing it needs styling to say is which rows are findings. */
+.cp-layer-only { display: inline-block; margin-left: 8px; padding: 2px 8px;
+  border-radius: var(--md-sys-shape-corner-full); background: light-dark(#fdeacc, #4a3413);
+  color: light-dark(#7a4b06, #f6c982);
+  font-size: var(--md-sys-typescale-label-small-size); white-space: nowrap; }
+.cp-layer-field { font-size: var(--md-sys-typescale-label-medium-size); }
+.cp-layer-row--notable td:first-child { font-weight: 500; }
 .cp-parity-feed { list-style: none; margin: 0; padding: 0; max-width: 860px; }
 .cp-parity-entry { display: flex; gap: 16px; padding: 12px 0;
   border-bottom: 1px solid var(--cp-surface-2); }

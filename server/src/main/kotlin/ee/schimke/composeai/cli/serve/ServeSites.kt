@@ -261,6 +261,12 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "api",
         "ws",
         "p",
+        // `GET /parallel/<previewId>` — the cross-catalog layer diff (issue #4838). Reserved like
+        // every other routed segment: a site host that claimed it would answer its own styled 404
+        // where the route resolves, and this lane in particular WORKS on a site (the diff is joined
+        // server-side and needs no URL into the neighbour catalog), so losing it there would be the
+        // one avoidable gap.
+        "parallel",
         // `GET /usage/<previewId>` — the viewer's Source panel.
         "usage",
         "render",

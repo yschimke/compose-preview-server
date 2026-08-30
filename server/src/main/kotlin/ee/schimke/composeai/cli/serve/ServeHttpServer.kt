@@ -1478,6 +1478,13 @@ class ServeHttpServer(
 
         get("/p/{name}") { handleViewer(sessionInPath = false) }
         get("/{system}/p/{name}") { handleViewer(sessionInPath = true) }
+        // The cross-catalog LAYER diff for one render (issue #4838) — what this catalog and its
+        // `compareWith` sibling each resolved for the same cell. A page of its own rather than a
+        // lane of the viewer, because it compares two catalogs rather than instrumenting one
+        // render, and `?format=json` because "do our two runtimes resolve the same family here?"
+        // is a question CI should be able to gate on without parsing markup.
+        get("/parallel/{name}") { handleParallelLayers(sessionInPath = false) }
+        get("/{system}/parallel/{name}") { handleParallelLayers(sessionInPath = true) }
 
         get("/usage/{name}") { handleUsage(sessionInPath = false) }
         get("/{system}/usage/{name}") { handleUsage(sessionInPath = true) }
@@ -4753,15 +4760,46 @@ class ServeHttpServer(
    * daemon per page view. A suspended sibling therefore offers no lane — fail-soft, like the rest
    * of this surface.
    */
-  private fun RoutingContext.parallelSpecSource(
-    host: ServeHost,
-    preview: ServePreview,
-  ): ServeWeb.SpecSource? {
-    // One catalog per hostname: on a site host the interceptor above answers `/{system}/…` for any
-    // system but this one with the site's own 404, so the sibling's render is unreachable from this
-    // page however well the pairing resolves. Offering the source anyway would put a button on the
-    // stage whose only possible outcome is "the design spec could not be loaded".
-    if (siteSystem() != null) return null
+  /**
+   * The counterpart render this preview is paired with in the `compareWith` sibling, or null when
+   * any half of the pairing does not resolve.
+   *
+   * Split out of [parallelSpecSource] because two surfaces need the same walk and only one of them
+   * needs a URL: the spec lane puts the sibling's raster on the stage, while the cross-catalog
+   * layer diff ([handleParallelLayers]) reads both sides' annotations server-side and paints no
+   * foreign image at all. Which is why the site-host guard lives in the caller rather than here —
+   * see [parallelSpecSource].
+   */
+  private data class ResolvedParallel(
+    val system: String,
+    val host: ServeHost,
+    val preview: ServePreview,
+    /** The counterpart component the pairing named, for naming the pair where a render doesn't. */
+    val componentId: String,
+    val label: String,
+    val basis: ServeParallelPairing.Basis,
+    /** This render's own cell, as a reader is told it — empty for the component's default. */
+    val cell: String,
+  ) {
+    /**
+     * How the pair came to be, in one clause for a provenance line. A cell the sibling does not
+     * draw is a finding about the two systems rather than an inconvenience to hide: pairing it with
+     * the component's default silently would make the two catalogs look MORE aligned the further
+     * they have diverged, which is the wrong direction for a parity surface.
+     */
+    val pairedOn: String =
+      when {
+        basis == ServeParallelPairing.Basis.KIT_CELL ->
+          ", paired on the design-kit node both catalogs map this cell to"
+        basis == ServeParallelPairing.Basis.VARIANT_CELL && cell.isNotEmpty() ->
+          ", paired on the $cell cell"
+        basis == ServeParallelPairing.Basis.CANONICAL && cell.isNotEmpty() ->
+          " — its default render, because that catalog publishes no $cell cell for this component"
+        else -> ""
+      }
+  }
+
+  private fun resolveParallel(host: ServeHost, preview: ServePreview): ResolvedParallel? {
     val bundle = catalogBundleHost(host) ?: return null
     val siblingSystem = bundle.compareWithSystem?.takeIf { it.isNotBlank() } ?: return null
     val componentId = preview.componentId?.takeIf { it.isNotBlank() } ?: return null
@@ -4778,26 +4816,34 @@ class ServeHttpServer(
         candidates = siblingHost.previews.filter { it.componentId == parallelId },
         kitNodesFor = { ServeParallelPairing.kitNodesOf(siblingHost.designReferencesFor(it.id)) },
       ) ?: return null
-    val siblingPreview = pairing.preview
     val siblingBundle = catalogBundleHost(siblingHost)
-    val siblingLabel =
-      siblingBundle?.title?.takeIf { it.isNotBlank() }
-        ?: siblingHost.label.ifBlank { siblingSystem }
-    val cell = ServeParallelPairing.cellLabel(preview)
-    // What was actually put beside this render, in one clause. A cell the sibling does not draw is
-    // a finding about the two systems rather than an inconvenience to hide: pairing it with the
-    // component's default silently would make the two catalogs look MORE aligned the further they
-    // have diverged, which is the wrong direction for a parity surface.
-    val pairedOn =
-      when {
-        pairing.basis == ServeParallelPairing.Basis.KIT_CELL ->
-          ", paired on the design-kit node both catalogs map this cell to"
-        pairing.basis == ServeParallelPairing.Basis.VARIANT_CELL && cell.isNotEmpty() ->
-          ", paired on the $cell cell"
-        pairing.basis == ServeParallelPairing.Basis.CANONICAL && cell.isNotEmpty() ->
-          " — its default render, because that catalog publishes no $cell cell for this component"
-        else -> ""
-      }
+    return ResolvedParallel(
+      system = siblingSystem,
+      host = siblingHost,
+      preview = pairing.preview,
+      componentId = parallelId,
+      label =
+        siblingBundle?.title?.takeIf { it.isNotBlank() }
+          ?: siblingHost.label.ifBlank { siblingSystem },
+      basis = pairing.basis,
+      cell = ServeParallelPairing.cellLabel(preview),
+    )
+  }
+
+  private fun RoutingContext.parallelSpecSource(
+    host: ServeHost,
+    preview: ServePreview,
+  ): ServeWeb.SpecSource? {
+    // One catalog per hostname: on a site host the interceptor above answers `/{system}/…` for any
+    // system but this one with the site's own 404, so the sibling's render is unreachable from this
+    // page however well the pairing resolves. Offering the source anyway would put a button on the
+    // stage whose only possible outcome is "the design spec could not be loaded".
+    if (siteSystem() != null) return null
+    val parallel = resolveParallel(host, preview) ?: return null
+    val siblingSystem = parallel.system
+    val siblingPreview = parallel.preview
+    val siblingLabel = parallel.label
+    val pairedOn = parallel.pairedOn
     return ServeWeb.SpecSource(
       id = "parallel",
       label = siblingLabel,
@@ -4823,9 +4869,130 @@ class ServeHttpServer(
       // that produced the render beside it. Saying so is the difference between a comparison and an
       // implied equivalence.
       provenance =
-        "$siblingLabel's own render of ${siblingPreview.componentId ?: parallelId}$pairedOn, " +
+        "$siblingLabel's own render of ${siblingPreview.componentId ?: parallel.componentId}" +
+          "$pairedOn, " +
           "under that catalog's theme and knobs — not this page's.",
     )
+  }
+
+  /**
+   * `GET /{system}/parallel/{preview}` — the **cross-catalog layer diff** for one render, as a page
+   * or (with `?format=json`) as data.
+   *
+   * The pairing lane has always been able to put the sibling's *raster* beside this one
+   * ([parallelSpecSource]). This is the half a raster cannot answer: two Compose runtimes drawing
+   * one design system disagree about the family a text node actually resolved, the value behind a
+   * token, the insets of a box — none of which survives a 227dp pixel comparison as anything a
+   * reader can act on, and all of which is stated outright one layer up. See [ServeParallelLayers].
+   *
+   * Read-only and cheap: both sides' layers come from `annotations/index.json`, which each catalog
+   * publishes measured over the very frame it serves. Nothing is rendered, no daemon is stood up
+   * ([ServeSessionRegistry.peekHost], like the pairing itself), and no bytes leave the box.
+   *
+   * Unlike the spec lane, this works on a **top-level site** too: the diff is joined server-side,
+   * so it needs no URL into the neighbour catalog — only the link to the counterpart's own viewer
+   * is withheld there, because that is the one thing a site host would answer with its own 404.
+   */
+  private suspend fun RoutingContext.handleParallelLayers(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    val json = wantsJson()
+    if (rejectUnknownFormat()) return
+    val sessionId = selectedSessionId(sessionInPath)
+    val (webSessionId, basePath) = webSessionAndBase(sessionInPath)
+    suspend fun missing(message: String) {
+      if (json) call.respond(HttpStatusCode.NotFound) else respondNotFoundHtml(message)
+    }
+    withLeasedSession(
+      sessionId,
+      onMissing = { missing("That design system was not found on this server.") },
+    ) { renderHost ->
+      val previewId = call.parameters["name"].orEmpty()
+      val preview = renderHost.previews.firstOrNull { it.id == previewId }
+      if (preview == null) {
+        missing("That preview was not found in this design system.")
+        return@withLeasedSession
+      }
+      val parallel = resolveParallel(renderHost, preview)
+      if (parallel == null) {
+        // Three different silences share this answer — the catalog declares no `compareWith`, the
+        // component names no `parallel`, or the sibling is not served here — and none of them is a
+        // property of THIS preview that the page could helpfully describe. What they have in common
+        // is the only thing worth saying: there is no counterpart to diff against.
+        missing("This render has no counterpart in a sibling design system on this server.")
+        return@withLeasedSession
+      }
+      val diff =
+        ServeParallelLayers.diff(
+          here = renderHost.annotationsForPreview(preview.id),
+          there = parallel.host.annotationsForPreview(parallel.preview.id),
+        )
+      if (diff.isEmpty) {
+        // Neither catalog publishes a layer for this cell. 404 in both spellings, exactly as the
+        // design-pages index does it: an empty document reads as "compared, and they agree", which
+        // is the one thing this must never say when nothing was compared at all.
+        missing(
+          "Neither this catalog nor its sibling publishes annotation layers for this render, " +
+            "so there is nothing to compare."
+        )
+        return@withLeasedSession
+      }
+      if (json) {
+        markGeneration("static-page", pageCacheControl())
+        call.respondText(
+          ServeParallelLayersPayload.encode(
+            system = sessionId,
+            previewId = preview.id,
+            componentId = preview.componentId,
+            cell = parallel.cell,
+            sibling =
+              ServeParallelLayersPayload.Sibling(
+                system = parallel.system,
+                label = parallel.label,
+                previewId = parallel.preview.id,
+                componentId = parallel.preview.componentId ?: parallel.componentId,
+                pairedBy = ServeParallelLayersPayload.pairedByWire(parallel.basis),
+              ),
+            diff = diff,
+          ),
+          ContentType.Application.Json,
+        )
+        return@withLeasedSession
+      }
+      markGeneration("static-page", pageCacheControl())
+      call.respondText(
+        ServeWeb.parallelLayersPage(
+          moduleLabel = renderHost.label,
+          preview = preview,
+          siblingLabel = parallel.label,
+          siblingPreviewId = parallel.preview.id,
+          // Withheld on a site host, where a neighbour's `/{system}/…` is this site's own 404.
+          siblingHref =
+            if (siteSystem() != null) ""
+            else
+              "/" +
+                WebEscaping.urlEncodeSegment(parallel.system) +
+                "/p/" +
+                WebEscaping.urlEncodeSegment(parallel.preview.id) +
+                if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken()),
+          pairedOn = parallel.pairedOn,
+          cell = parallel.cell,
+          diff = diff,
+          token = linkToken(),
+          sessionId = webSessionId,
+          basePath = basePath,
+          isPublic = isPublic,
+          themeCss = catalogBundleHost(renderHost)?.webThemeCss.orEmpty(),
+          version = SERVE_VERSION,
+          displayTitle = catalogBundleHost(renderHost)?.title,
+          sessionInOrigin = siteSystem() != null,
+          changelogHref = changelogHref(sessionId, basePath, webSessionId),
+          reportIssue =
+            pageScopedReportIssue(renderHost, sessionId, "this cross-catalog layer comparison"),
+          unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
+        ),
+        ContentType.Text.Html,
+      )
+    }
   }
 
   /**
@@ -8026,6 +8193,10 @@ class ServeHttpServer(
           // and we host the other side of it. A second SOURCE for that same lane rather than a mode
           // of its own, so the four views are unchanged (issue #4621).
           parallelSource = parallelSpecSource(renderHost, preview),
+          // Whether this render HAS a counterpart, which is a weaker condition than being able to
+          // put its raster on the stage: the layer diff is joined server-side, so it answers on a
+          // top-level site too, where the sibling's own render is that site's 404.
+          parallelLayers = resolveParallel(renderHost, preview) != null,
           referenceAnnotations =
             if (revisions.pinned != null) emptyList()
             else

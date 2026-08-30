@@ -1170,11 +1170,13 @@ ${captureControlsHtml().prependIndent("          ")}
     figmaSpec: FigmaSpec?,
     playgroundHref: String?,
     executableBundleHref: String?,
+    parallelLayersHref: String,
   ): String {
     val links =
       sourceLinkHtml(sourceHref, sourcePath) +
         playgroundLinkHtml(playgroundHref) +
         executableBundleLinkHtml(executableBundleHref) +
+        parallelLayersLinkHtml(parallelLayersHref) +
         reportIssueHtml(report) +
         figmaSpecHtml(figmaSpec)
     if (links.isBlank()) return ""
@@ -1201,6 +1203,24 @@ ${captureControlsHtml().prependIndent("          ")}
     return "\n      <p class=\"cp-source\">" +
       "<a class=\"cp-source-link\" href=\"${WebEscaping.htmlEscape(url)}\" " +
       "title=\"Open this preview's source in the playground\">▶ playground</a></p>"
+  }
+
+  /**
+   * "cross-catalog layers" — the derived-layer diff against the counterpart render in the
+   * `compareWith` sibling (issue #4838).
+   *
+   * In the provenance row rather than in the spec lane, and that is not cosmetic: the lane exists
+   * only for a catalog that publishes design references, while this pairing needs none. Hanging the
+   * link there would have hidden it from exactly the catalogs that have a sibling and no kit import
+   * — and the row is where a per-preview "where does this come from, and what else is it" link
+   * belongs anyway. Empty (no sibling, or a pinned page) renders nothing.
+   */
+  private fun parallelLayersLinkHtml(href: String): String {
+    val url = href.takeIf { it.isNotBlank() } ?: return ""
+    return "\n      <p class=\"cp-source\">" +
+      "<a class=\"cp-source-link\" href=\"${WebEscaping.htmlEscape(url)}\" " +
+      "title=\"What this catalog and its sibling each resolved for this cell — typography, " +
+      "layout and theme\">⇄ cross-catalog layers</a></p>"
   }
 
   /**
@@ -12260,6 +12280,21 @@ ${scriptTag("known-differences.js")}
      */
     parallelSource: SpecSource? = null,
     /**
+     * `/parallel/<preview>` — the **cross-catalog layer diff** for this render, offered beside the
+     * lane's own spec-diff link whenever [parallelSource] resolved (issue #4838).
+     *
+     * A separate affordance rather than a fifth view of the lane, because it is a different kind of
+     * answer. The lane's four views put two rasters together, and two rasterisers of one design
+     * system differ mostly in antialiasing; the layer diff states what each side *resolved* — the
+     * family, the token, the insets — which is where a two-runtime disagreement is actually
+     * legible. False leaves the lane byte-identical to what a catalog with no pairing renders.
+     *
+     * Gated on the PAIRING rather than on [parallelSource], which is not the same condition: the
+     * raster source is withheld on a top-level site (a neighbour catalog's render is that site's
+     * own 404), while the layer diff is joined server-side and answers there like anywhere else.
+     */
+    parallelLayers: Boolean = false,
+    /**
      * Typography/layout facts captured from [designReference]'s own raster. The default Figma lane
      * draws these over the spec image; Diff/Triptych pair them with the current render and reduce
      * the legend to changed typography only.
@@ -12635,6 +12670,14 @@ ${scriptTag("known-differences.js")}
       // reading rather than silently landing on the live one.
       withPin("$basePath/compare/$idSeg${querySuffix(query)}", pinned)
     }
+    // The cross-catalog layer diff for this render. No pin: the layers are the tip catalog's, and
+    // pointing a historical page at them would state today's facts under a publish that never
+    // measured them — so a pinned page simply doesn't offer the link.
+    val parallelLayersHref =
+      if (!parallelLayers || pinned != null) ""
+      else
+        "$basePath/parallel/$idSeg" +
+          querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     // The four ways to look at the render/spec pair, offered on the stage itself the moment the
     // spec lane is up. The lane used to be a flip — spec on the stage instead of the render — which
     // answers "are these different?" only by asking the eye to hold one frame while looking at the
@@ -13998,6 +14041,7 @@ ${scriptTag("known-differences.js")}
         figmaSpec,
         playgroundHref,
         executableBundleHref,
+        parallelLayersHref,
       )
     // Every disclosure the page has, in one group, at the end of the identity row: the component
     // list, the state/variant axes, the theme chips, the overrides drawer. They were scattered —
@@ -14270,6 +14314,161 @@ ${scriptTag("known-differences.js")}
       </aside>
       """
       .trimIndent()
+  }
+
+  /** `1 row` / `4 rows` — the counts this page states in prose rather than in a table header. */
+  private fun rowCount(n: Int): String = if (n == 1) "1 row" else "$n rows"
+
+  /**
+   * The **cross-catalog layer diff** for one render: what this catalog and its `compareWith`
+   * sibling each resolved for the same cell, layer by layer (issue #4838).
+   *
+   * Not a picture. A pixel diff of two rasterisers is mostly antialiasing, and the disagreements
+   * that matter between two runtimes of one design system — a font family that fell back, a token
+   * that resolved to a different value, a box that grew an inset — are invisible at 227dp and
+   * stated outright in a row of text. So this page is a table, and every number on it is one the
+   * two catalogs already published.
+   *
+   * Rows only one side draws are kept and labelled rather than dropped, for the reason
+   * [ServeParallelLayers] gives: hiding them makes two catalogs look more aligned the further they
+   * have diverged.
+   */
+  fun parallelLayersPage(
+    moduleLabel: String,
+    preview: ServePreview,
+    /** The counterpart, as the pairing resolved it — its catalog's label and its render's id. */
+    siblingLabel: String,
+    siblingPreviewId: String,
+    /**
+     * The sibling render's own viewer URL, when this page can offer one. Empty on a top-level site
+     * host, where a neighbour catalog's `/{system}/…` is answered with this site's own 404 — the
+     * pairing still resolves and the diff is still real (it is read server-side), so the row names
+     * the counterpart in plain text rather than linking somewhere that cannot answer.
+     */
+    siblingHref: String = "",
+    /** One clause naming how the pair was arrived at; see `ResolvedParallel.pairedOn`. */
+    pairedOn: String,
+    cell: String,
+    diff: ServeParallelLayers.Diff,
+    token: String,
+    sessionId: String? = null,
+    basePath: String = "",
+    isPublic: Boolean = false,
+    themeCss: String = "",
+    version: String? = null,
+    displayTitle: String? = null,
+    sessionInOrigin: Boolean = false,
+    changelogHref: String = "",
+    reportIssue: ReportIssue? = null,
+    unfurl: UnfurlMetadata? = null,
+  ): String {
+    fun esc(s: String) = WebEscaping.htmlEscape(s)
+    val linkSessionId = if (sessionInOrigin) null else sessionId
+    val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
+    val navSuffix =
+      querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+    val heading = catalogHeading(displayTitle, moduleLabel)
+    val subject = preview.componentId ?: preview.label
+    val cellSuffix = if (cell.isEmpty()) "" else " · $cell"
+    val layers =
+      diff.layers.joinToString("\n") { layer ->
+        val counts =
+          listOfNotNull(
+              "${layer.paired} paired".takeIf { layer.paired > 0 },
+              "${layer.differing} differing".takeIf { layer.differing > 0 },
+              "${layer.onlyHere} only here".takeIf { layer.onlyHere > 0 },
+              "${layer.onlyThere} only there".takeIf { layer.onlyThere > 0 },
+            )
+            .joinToString(" · ")
+        val rows =
+          layer.rows.joinToString("\n") { row ->
+            // The differing fields, spelled out. Two kinds of silence here, both deliberate: an
+            // agreement is the layer's count rather than a line of its own (printing every equal
+            // field buries the two that are not under thirty that are), and a ONE-SIDED row lists
+            // nothing at all — every field of it would read as a difference when the finding is
+            // simply that the other catalog draws no such node, which the badge already says.
+            val notes =
+              if (row.presence != ServeParallelLayers.Presence.BOTH) ""
+              else
+                row.fields
+                  .filter { it.differs }
+                  .joinToString("") { field ->
+                    val here = field.here ?: "—"
+                    val there = field.there ?: "—"
+                    "<div class=\"cp-layer-field\"><code>${esc(field.name)}</code> " +
+                      "${esc(here)} <span class=\"cp-muted\">→</span> ${esc(there)}</div>"
+                  }
+            val badge =
+              when (row.presence) {
+                ServeParallelLayers.Presence.ONLY_HERE ->
+                  "<span class=\"cp-layer-only\">only in $heading</span>"
+                ServeParallelLayers.Presence.ONLY_THERE ->
+                  "<span class=\"cp-layer-only\">only in ${esc(siblingLabel)}</span>"
+                ServeParallelLayers.Presence.BOTH -> ""
+              }
+            val rowClass = if (row.notable) " class=\"cp-layer-row--notable\"" else ""
+            "<tr$rowClass><td>${esc(row.subject)}$badge</td>" +
+              "<td class=\"cp-muted\">${esc(row.here ?: "—")}</td>" +
+              "<td class=\"cp-muted\">${esc(row.there ?: "—")}</td>" +
+              "<td>$notes</td></tr>"
+          }
+        """
+        <h2 class="cp-status-sec">${esc(layer.kind.replaceFirstChar { it.uppercase() })}</h2>
+        <p class="cp-muted">${esc(counts)}</p>
+        <div class="cp-status-scroll">
+          <table class="cp-table">
+            <thead><tr><th>Node</th><th>${esc(heading)}</th><th>${esc(siblingLabel)}</th>
+              <th>Differences</th></tr></thead>
+            <tbody>
+            $rows
+            </tbody>
+          </table>
+        </div>
+        """
+          .trimIndent()
+      }
+    val siblingLink =
+      if (siblingHref.isEmpty()) esc(siblingPreviewId)
+      else "<a href=\"${esc(siblingHref)}\">${esc(siblingPreviewId)}</a>"
+    val summary =
+      when {
+        diff.differing == 0 && diff.unpaired == 0 ->
+          "Every layer row the two catalogs publish for this cell resolves to the same values."
+        else ->
+          listOfNotNull(
+              "${rowCount(diff.differing)} resolve differently".takeIf { diff.differing > 0 },
+              "${rowCount(diff.unpaired)} drawn by one catalog only".takeIf { diff.unpaired > 0 },
+            )
+            .joinToString(", ") + "."
+      }
+    return document(
+      changelogHref = changelogHref,
+      title = "$heading — $subject layers",
+      unfurlTitle = "$subject — cross-catalog layers",
+      unfurlDescription =
+        "What $heading and $siblingLabel each resolved for this cell: typography, layout and theme",
+      unfurl = unfurl,
+      version = version,
+      navSuffix = navSuffix,
+      headerBreadcrumb =
+        crumbHtml("$basePath/p/${WebEscaping.urlEncodeSegment(preview.id)}$q", subject, "Layers"),
+      themeCss = themeCss,
+      siteName = heading,
+      body =
+        """
+        <h1 class="cp-head cp-catalog-head">Cross-catalog layers</h1>
+        <p class="cp-sub">${esc(subject)}$cellSuffix — what <strong>${esc(heading)}</strong> and
+        <strong>${esc(siblingLabel)}</strong> each <em>resolved</em>, rather than what either
+        claims. Both sides are read from what the catalogs already publish; nothing is re-rendered
+        and no pixels are compared.</p>
+        <p class="cp-muted">Against ${esc(siblingLabel)}'s ${siblingLink}${esc(pairedOn)}.
+        ${esc(summary)}</p>
+        <p class="cp-muted"><a class="cp-format-link" href="?format=json">this page as JSON →</a></p>
+        ${pageReportRowHtml(reportIssue, "cp-page-links")}
+        $layers
+        """
+          .trimIndent(),
+    )
   }
 
   private fun document(
