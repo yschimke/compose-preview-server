@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.0](https://github.com/yschimke/compose-preview-server/compare/v2.1.0...v2.2.0) (2026-08-30)
+
+
+### Features
+
+* extract the render host and preview history into :render-host ([#38](https://github.com/yschimke/compose-preview-server/issues/38)) ([78220db](https://github.com/yschimke/compose-preview-server/commit/78220db9317aea09d785f4d8ac895c326386eaed))
+* **serve:** publish the design-pages join as JSON ([#36](https://github.com/yschimke/compose-preview-server/issues/36)) ([5cb4976](https://github.com/yschimke/compose-preview-server/commit/5cb497647614adcc2bca541a2c142f1b8be507ab))
+
+
+### Bug Fixes
+
+* **serve:** pair a cross-catalog sibling cell by cell ([#37](https://github.com/yschimke/compose-preview-server/issues/37)) ([2b3604f](https://github.com/yschimke/compose-preview-server/commit/2b3604f4e4844728d5f6e0dec634bca1ac78364a))
+
 ## [2.1.0](https://github.com/yschimke/compose-preview-server/compare/v2.0.0...v2.1.0) (2026-08-30)
 
 
