@@ -90,8 +90,14 @@ jobs:
           cache-provider: basic
           cache-read-only: true
       - name: Build distribution and publish Maven artifacts
+        # `:render-host` publishes too, and must: `:server`'s POM declares an `api` dependency on
+        # `ee.schimke.composeai:compose-preview-render-host` at the same version, so a release that
+        # ships only `:server` ships a POM naming a coordinate that does not exist. Consumers get an
+        # unresolvable dependency rather than a missing feature, which is the loud failure — but only
+        # AFTER the release is out. Both, or neither.
         run: >-
           ./gradlew :server:distTar
+          :render-host:publishAndReleaseToMavenCentral
           :server:publishAndReleaseToMavenCentral
       - name: Upload standalone server distribution
         run: >-

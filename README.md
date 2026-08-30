@@ -5,11 +5,22 @@ and the browser viewer surfaces. Its history was extracted from
 [`yschimke/compose-ai-tools`](https://github.com/yschimke/compose-ai-tools); the CLI remains there and
 consumes this repository's published library.
 
-The JVM API is published as:
+The JVM API is published as two artifacts:
 
 ```kotlin
+// The server: catalog hosting, the HTTP routes, the playground, the viewer surfaces.
 implementation("ee.schimke.composeai:compose-preview-serve:<version>")
+
+// Just the render host, the bundle daemon and the git-backed preview history — no web server.
+// What an OFFLINE caller (`compose-preview bundle render`, `compose-preview history manifest`)
+// needs. `compose-preview-serve` depends on this, so depending on the server still gets you both.
+implementation("ee.schimke.composeai:compose-preview-render-host:<version>")
 ```
+
+`:render-host` exists because rendering a packed bundle and reading a preview timeline out of git
+open no sockets, and a caller doing only that should not link `ktor-server-*`, `jmdns` and
+`kotlin-reflect` to do it. `render-host/build.gradle.kts` records the measured before/after and the
+transitives it deliberately cannot drop; `checkRenderHostIsServerFree` keeps the claim honest.
 
 The build is intentionally repository-independent. Compose Preview implementation artifacts resolve
 from Maven Central at the version in `gradle/libs.versions.toml`; wire contracts resolve separately

@@ -18,7 +18,9 @@ import kotlinx.serialization.json.encodeToJsonElement
  * encoding is the kind of drift nothing fails on: the overlay simply draws nothing for whichever
  * lane's key it does not recognise, which reads as a broken layer rather than a wrong response.
  */
-internal object ServeAnnotationsPayload {
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+object ServeAnnotationsPayload {
 
   private val json = Json { ignoreUnknownKeys = true }
 

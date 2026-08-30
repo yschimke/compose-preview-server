@@ -105,6 +105,16 @@ tasks.named<Tar>("distTar") {
 // turning the gate on, is its own change.
 
 dependencies {
+  // The render host, the bundle daemon and the git-backed preview history, split out so the CLI's
+  // OFFLINE `bundle render` / `history manifest` can reach them without a web server on the
+  // classpath (yschimke/compose-ai-tools#4832). `api`, because those types are all over this
+  // module's own signatures — `ServeHost` is the interface every catalog/live host implements, and
+  // `RenderOutcome` is the return type of the render lane the HTTP routes call.
+  //
+  // The sources kept their `ee.schimke.composeai.cli.serve` package, so nothing in this module
+  // changed at the call sites; only the module that compiles them did.
+  api(project(":render-host"))
+
   api(libs.composeai.common.web.escaping)
   // Published wire-format DTOs and the bundle format. `api` because they appear in this module's
   // own signatures, which `:cli` reads.
@@ -148,8 +158,22 @@ dependencies {
 
   // The fixture source set compiles against the module's own API and the render-session contract
   // it fakes.
-  testFixturesImplementation(kotlin("test"))
-  testFixturesApi(libs.composeai.render.session.api)
+  // `FakeRenderSession` moved to `:render-host` with `ServeRenderHost`, which is the thing it
+  // fakes. This module's live-host, session-registry and stream tests still drive it.
+  testImplementation(testFixtures(project(":render-host")))
+
+  // Re-exported so this module's PUBLISHED test-fixtures variant keeps carrying `FakeRenderSession`
+  // for consumers that already ask for it by the `compose-preview-serve` spelling —
+  // compose-ai-tools'
+  // `:cli` `BundleRenderKnobTest` does, and that dependency resolves against the released artifact,
+  // not against this build. Without the re-export, moving the fixture out would publish an EMPTY
+  // fixtures jar under an artifactId that still advertises the capability: the consumer resolves,
+  // compiles nothing, and finds out at the call site. `api`, not `implementation`, because the
+  // consumer compiles against the type.
+  //
+  // This source set now holds no sources of its own. It stays declared for exactly this
+  // compatibility hop, and can go once `:cli` asks `:render-host` for the fixture directly.
+  testFixturesApi(testFixtures(project(":render-host")))
 
   // In-memory FileSystem for the playground and store tests, which assert on-disk output without
   // touching the real FS. Okio itself is on the compile classpath via `:common-io`; the fake ships
@@ -308,12 +332,27 @@ abstract class CheckServeModuleBoundary : DefaultTask() {
 
   @get:Input abstract val allowedComposeAiModules: SetProperty<String>
 
+  /**
+   * Projects in this build that this module is allowed to depend on.
+   *
+   * Until #4832 the answer was "none", and the check said so by treating EVERY project dependency
+   * as a hit — which was right while `:server` was the only Kotlin module here. `:render-host` is a
+   * deliberate exception: the server sits ON TOP of the render host, not beside it, and the
+   * direction is enforced by Gradle's own acyclicity. An allowlist rather than dropping the project
+   * rule, because the rule's real target — `:cli` or a renderer arriving as a project — is still
+   * exactly what must not happen.
+   */
+  @get:Input abstract val allowedProjects: SetProperty<String>
+
   @TaskAction
   fun checkBoundary() {
     val forbidden =
       forbiddenProjects.get().map { "project $it" } + forbiddenModules.get().map { "module $it" }
     val resolved = resolvedComponents.get()
-    val projectDependencies = resolved.filter { it.startsWith("project ") }
+    val projectDependencies =
+      resolved
+        .filter { it.startsWith("project ") }
+        .filterNot { it.removePrefix("project ") in allowedProjects.get() }
     val unexpectedComposeAi =
       resolved
         .filter { it.startsWith("module ee.schimke.composeai:") }
@@ -348,6 +387,11 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       }
     }
   )
+
+  // The render host, split out of this module so the CLI's offline commands can reach it without a
+  // web server (#4832). The only project dependency this module may have; everything else in this
+  // build reaching its classpath is still a failure.
+  allowedProjects.set(listOf(":render-host"))
 
   // The same implementations named twice, because they can arrive by two different routes and the
   // identity differs between them.

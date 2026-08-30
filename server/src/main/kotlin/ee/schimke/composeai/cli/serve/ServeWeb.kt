@@ -3253,10 +3253,13 @@ ${captureControlsHtml().prependIndent("          ")}
     val sizeKey = switcherSizeKey(current)
     val bySize = LinkedHashMap<String, ServePreview>()
     for (p in all) {
-      if (p.size == null) continue
+      // Bound to a local rather than smart-cast through `p.size`: `ServePreview` is in
+      // `:render-host` now, and Kotlin will not smart-cast a public property declared in another
+      // module (it cannot see that nothing reassigns it).
+      val size = p.size ?: continue
       if (!listed(p)) continue
       if (switcherSizeKey(p) != sizeKey || themeLane(p, darkFirst) != lane) continue
-      bySize.putIfAbsent(p.size, p)
+      bySize.putIfAbsent(size, p)
     }
     if (byState.size > 1) {
       byState.entries

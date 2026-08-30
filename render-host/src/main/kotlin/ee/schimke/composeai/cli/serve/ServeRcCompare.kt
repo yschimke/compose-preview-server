@@ -99,7 +99,9 @@ data class RcCompareCell(
  * is the reference everything was scored against) but it is a first-class column and a first-class
  * reference choice, so it lives in the same list.
  */
-internal data class RcLaneSource(
+// Public with `ServeRcCompare` above, which exposes `LANES: List<RcLaneSource>`: `internal` is
+// module-scoped and the `:server` call sites moved out of this module.
+data class RcLaneSource(
   val id: String,
   val label: String,
   val short: String,
@@ -114,7 +116,9 @@ internal data class RcLaneSource(
   val note: (RcSummaryRow) -> String?,
 )
 
-internal object ServeRcCompare {
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+object ServeRcCompare {
   /** Staged subdir under the served catalog root, and the URL segment it is served at. */
   const val DIRECTORY = "rc-compare"
   const val INDEX_FILE = "index.json"
@@ -378,7 +382,9 @@ internal object ServeRcCompare {
 }
 
 /** The manifest to stage plus the branch assets (`source path → staged name`) it references. */
-internal data class RcComparePlan(val manifest: RcCompareManifest, val assets: Map<String, String>)
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+data class RcComparePlan(val manifest: RcCompareManifest, val assets: Map<String, String>)
 
 /**
  * A published `rc-compare-summary.json`, cut down to the per-row verdicts the serve page replays.

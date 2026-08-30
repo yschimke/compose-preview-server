@@ -3237,7 +3237,13 @@ class ServeCatalogStore(
     const val DEFAULT_REPO = "yschimke/compose-ai-tools"
     const val DEFAULT_BRANCH_PREFIX = "design-artifacts/"
     const val CATALOG_FILE = "catalog.json"
-    const val IMAGES_DIR = "images"
+    /**
+     * The baked-image directory and [previewIdFor] below now live in [CatalogImagePaths], because
+     * `history manifest` needs the same convention without the catalog store. Re-exported here
+     * rather than replaced at the call sites: this spelling is used across the routes and the web
+     * surfaces, and a rename is not what #4832 is about.
+     */
+    const val IMAGES_DIR = CatalogImagePaths.IMAGES_DIR
 
     /** The delivery branch's directory of published animated captures, beside `images/`. */
     const val MOTION_DIR = "motion"
@@ -3309,8 +3315,7 @@ class ServeCatalogStore(
      * route-safe id like `button-filled__ideal__default__dark`. The design-parity catalog exporter
      * derives the `livePreview` deep link the same way so the link resolves to this id.
      */
-    fun previewIdFor(imagePath: String): String =
-      imagePath.removePrefix("$IMAGES_DIR/").removeSuffix(".png").replace("/", "__")
+    fun previewIdFor(imagePath: String): String = CatalogImagePaths.previewIdFor(imagePath)
 
     /**
      * Maximum baked previews loaded from one published catalog unless the server overrides it.
