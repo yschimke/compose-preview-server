@@ -245,6 +245,15 @@ tasks.withType<Test>().configureEach {
     .withPropertyName("sharedWireFixtures")
     .withPathSensitivity(PathSensitivity.RELATIVE)
 
+  // The image Dockerfile, which `ImageSandboxCountMirrorTest` reads off disk for the same reason
+  // and with the same hazard: undeclared, editing `JAVA_TOOL_OPTIONS` could be served UP-TO-DATE or
+  // from the build cache with the assertion never re-running — which is precisely the silent drift
+  // that test exists to catch.
+  inputs
+    .files(rootProject.layout.projectDirectory.file("deploy/image/Dockerfile"))
+    .withPropertyName("imageDockerfile")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+
   jvmArgumentProviders.add(
     CommandLineArgumentProvider {
       listOf(
