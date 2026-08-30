@@ -606,7 +606,7 @@ public class ServeRunner(
    * The nominated catalog registry projects (`--catalog-registry`), validated. Empty ⇒ the feature
    * is off and nothing is fetched.
    */
-  private val catalogRegistryRepos: List<String> by lazy {
+  private val catalogRegistryRepos: List<ServeCatalogRegistry.Nomination> by lazy {
     ServeCatalogRegistry.parseRepos(catalogRegistryRaw) { System.err.println("serve: $it") }
   }
 
@@ -623,8 +623,10 @@ public class ServeRunner(
    * catalogs and nothing else. The next sync pass picks them up.
    */
   private val catalogRegistryContributions: List<ServeCatalogRegistry.Contribution> by lazy {
-    catalogRegistryRepos.mapNotNull { repo ->
-      ServeCatalogRegistry.fetch(repo, ::fetchRegistryDocument) { System.err.println("serve: $it") }
+    catalogRegistryRepos.mapNotNull { nomination ->
+      ServeCatalogRegistry.fetch(nomination, ::fetchRegistryDocument) {
+        System.err.println("serve: $it")
+      }
     }
   }
 
@@ -3081,8 +3083,8 @@ public class ServeRunner(
     val sync =
       ServeCatalogRegistrySync(
         repos = catalogRegistryRepos,
-        read = { repo ->
-          ServeCatalogRegistry.fetch(repo, ::fetchRegistryDocument) {
+        read = { nomination ->
+          ServeCatalogRegistry.fetch(nomination, ::fetchRegistryDocument) {
             System.err.println("serve: $it")
           }
         },

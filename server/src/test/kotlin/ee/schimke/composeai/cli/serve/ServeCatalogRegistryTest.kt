@@ -13,12 +13,14 @@ class ServeCatalogRegistryTest {
 
   private fun bytesOf(json: String): (String, Long) -> ByteArray? = { _, _ -> json.toByteArray() }
 
+  private fun nomination(repo: String) = ServeCatalogRegistry.Nomination(repo)
+
   @Test
   fun `a registry contributes its listed catalogs, pinned to its own repo`() {
     val problems = mutableListOf<String>()
     val contribution =
       ServeCatalogRegistry.fetch(
-        "yschimke/compose-preview-imports",
+        nomination("yschimke/compose-preview-imports"),
         bytesOf(
           """
           {
@@ -130,10 +132,12 @@ class ServeCatalogRegistryTest {
   @Test
   fun `an unreadable or absent document contributes nothing rather than failing the boot`() {
     val problems = mutableListOf<String>()
-    assertNull(ServeCatalogRegistry.fetch("a/b", { _, _ -> null }, problems::add))
+    assertNull(ServeCatalogRegistry.fetch(nomination("a/b"), { _, _ -> null }, problems::add))
     assertEquals(emptyList(), problems)
 
-    assertNull(ServeCatalogRegistry.fetch("a/b", bytesOf("not json at all"), problems::add))
+    assertNull(
+      ServeCatalogRegistry.fetch(nomination("a/b"), bytesOf("not json at all"), problems::add)
+    )
     assertTrue(problems.single().contains("not readable"))
   }
 
@@ -141,12 +145,51 @@ class ServeCatalogRegistryTest {
   fun `only well-formed owner slash repo values are nominated`() {
     val problems = mutableListOf<String>()
     assertEquals(
-      listOf("yschimke/compose-preview-imports", "a/b"),
+      listOf(nomination("yschimke/compose-preview-imports"), nomination("a/b")),
       ServeCatalogRegistry.parseRepos(
         " yschimke/compose-preview-imports , a/b , not-a-repo , a/b ",
         problems::add,
       ),
     )
     assertTrue(problems.single().contains("not-a-repo"))
+  }
+
+  @Test
+  fun `a nomination may name its own ref, and a traversal is not a ref`() {
+    val problems = mutableListOf<String>()
+    assertEquals(
+      listOf(ServeCatalogRegistry.Nomination("a/b", "release/2.x")),
+      ServeCatalogRegistry.parseRepos("a/b@release/2.x , a/b@../../etc", problems::add),
+    )
+    assertTrue(problems.single().contains("usable ref"))
+  }
+
+  @Test
+  fun `the document is read from the first ref that answers, never HEAD alone`() {
+    // `raw.githubusercontent.com`'s HEAD alias serves a STALE default-branch commit: the document
+    // 404'd there for minutes after it landed on main. A registry read that depended on HEAD would
+    // report a live registry as absent, so main/master are tried first and HEAD is the catch-all.
+    assertEquals(listOf("main", "master", "HEAD"), nomination("a/b").refs)
+    assertEquals(listOf("v1"), ServeCatalogRegistry.Nomination("a/b", "v1").refs)
+
+    val asked = mutableListOf<String>()
+    val contribution =
+      ServeCatalogRegistry.fetch(
+        nomination("a/b"),
+        fetch = { url, _ ->
+          asked += url
+          if (url.contains("/master/")) """{ "catalogs": [ { "system": "ok" } ] }""".toByteArray()
+          else null
+        },
+      )!!
+
+    assertEquals(
+      listOf(
+        "https://raw.githubusercontent.com/a/b/main/${ServeCatalogRegistry.FILE_PATH}",
+        "https://raw.githubusercontent.com/a/b/master/${ServeCatalogRegistry.FILE_PATH}",
+      ),
+      asked,
+    )
+    assertEquals(listOf("ok"), contribution.entries.map { it.system })
   }
 }

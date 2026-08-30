@@ -115,7 +115,9 @@ fi
 # `.compose-preview/catalogs.json` on its default branch listing the catalogs it serves, and this
 # box serves all of them — so a project onboarded there by pull request needs no edit here at all.
 # Re-read on the SERVE_CATALOG_REFRESH cadence, so a catalog listed after boot is picked up without
-# a restart. Entries may only serve from the nominated project's own branches.
+# a restart. Entries may only serve from the nominated project's own branches. The document is read
+# from main, then master, then HEAD (raw.githubusercontent's HEAD alias lags a fresh commit); append
+# @<ref> to a nomination for a project whose default branch is neither.
 [[ -n "${SERVE_CATALOG_REGISTRY:-}" && "${SERVE_CATALOG_REGISTRY}" != "none" ]] &&
   args+=(--catalog-registry "${SERVE_CATALOG_REGISTRY}")
 # Top-level sites: <host>=<system>, comma-separated. A catalog this box already serves is ALSO

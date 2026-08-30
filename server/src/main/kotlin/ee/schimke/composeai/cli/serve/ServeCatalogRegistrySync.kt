@@ -37,8 +37,8 @@ import java.util.concurrent.TimeUnit
  * @param intervalMillis poll cadence; the first tick fires one interval after [start].
  */
 class ServeCatalogRegistrySync(
-  private val repos: List<String>,
-  private val read: (repo: String) -> ServeCatalogRegistry.Contribution?,
+  private val repos: List<ServeCatalogRegistry.Nomination>,
+  private val read: (ServeCatalogRegistry.Nomination) -> ServeCatalogRegistry.Contribution?,
   private val tracked: () -> Set<String>,
   private val publish: (ServeCatalogRegistry.Contribution, ServeCatalogsConfig.Entry) -> String?,
   private val retire: (system: String) -> Unit,
@@ -85,8 +85,9 @@ class ServeCatalogRegistrySync(
   fun syncOnce() {
     val listed = linkedSetOf<String>()
     var readAny = false
-    for (repo in repos) {
-      val contribution = read(repo) ?: continue
+    for (nomination in repos) {
+      val repo = nomination.repo
+      val contribution = read(nomination) ?: continue
       readAny = true
       val known = tracked()
       for (entry in contribution.entries) {
