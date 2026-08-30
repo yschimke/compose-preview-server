@@ -188,7 +188,9 @@ private constructor(
  * beside it. Taken from the enum's `@SerialName` rather than `name.lowercase()` so the CSS and the
  * wire can never drift apart on a hyphen.
  */
-internal val PageNodeLink.wire: String
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+val PageNodeLink.wire: String
   get() =
     when (this) {
       PageNodeLink.CODE_CONNECT -> "code-connect"

@@ -1875,7 +1875,9 @@ internal constructor(
   }
 
   companion object {
-    internal const val SCROLL_LONG_KIND = "render/scroll/long"
+    // Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+    // and the `:server` call sites are in a different module now. Not a widened API by intent.
+    const val SCROLL_LONG_KIND = "render/scroll/long"
     internal const val SCROLL_EXTENSION_ID = "scroll"
 
     // The accessibility extension + its three product kinds, spelled here rather than imported

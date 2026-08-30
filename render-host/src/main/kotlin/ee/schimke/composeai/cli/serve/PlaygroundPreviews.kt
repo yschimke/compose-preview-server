@@ -11,7 +11,9 @@ import kotlinx.serialization.json.Json
  * ([PlaygroundAndroidRenderService]) stand a daemon over the snippet's own classes and need the
  * identical manifest, so the synthesis lives here rather than in either service.
  */
-internal object PlaygroundPreviews {
+// Public rather than `internal` since the move to `:render-host`: `internal` is module-scoped,
+// and the `:server` call sites are in a different module now. Not a widened API by intent.
+object PlaygroundPreviews {
 
   private val json = Json {
     encodeDefaults = true
