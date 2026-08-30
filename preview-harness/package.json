@@ -12,6 +12,6 @@
         "harness:bundle-upload": "playwright test -c bundle-upload.config.mjs"
     },
     "devDependencies": {
-        "@playwright/test": "~1.62.0"
+        "@playwright/test": "1.62.1"
     }
 }
