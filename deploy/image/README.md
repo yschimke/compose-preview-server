@@ -192,6 +192,12 @@ lists is served from that project's `design-artifacts/<system>` branch. The file
 `SERVE_CATALOG_REFRESH` cadence, so a catalog the project starts listing is imported without a
 restart, and one it stops listing is retired.
 
+The document is read from `main`, then `master`, then `HEAD` — the first ref that answers wins.
+`HEAD` is not tried first on purpose: `raw.githubusercontent.com` serves that alias from a *stale*
+default-branch commit, so a document that has just landed 404s there for minutes while `main`
+already has it, and a box booting against a registry would report it as absent. A project whose
+default branch is neither `main` nor `master` can say so — `SERVE_CATALOG_REGISTRY=owner/repo@ref`.
+
 What nominating a registry delegates is **which of that project's catalogs are served, and how they
 are grouped**. It deliberately does not delegate where bytes may come from:
 

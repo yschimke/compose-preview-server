@@ -393,6 +393,10 @@ public interface ServeOptions {
    * catalog the project starts listing is imported without a restart — which is what makes "merging
    * the pull request IS the import" true for `yschimke/compose-preview-imports`.
    *
+   * An entry may name the ref its document is read from as `<owner>/<repo>@<ref>`; without one,
+   * `main`, `master` and then `HEAD` are tried ([ServeCatalogRegistry.DEFAULT_REF_CANDIDATES] says
+   * why `HEAD` is not enough on its own).
+   *
    * What this delegates, and the three things it deliberately does not, are in
    * [ServeCatalogRegistry].
    */

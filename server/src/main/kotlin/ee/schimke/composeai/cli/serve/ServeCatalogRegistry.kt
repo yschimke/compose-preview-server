@@ -50,6 +50,26 @@ object ServeCatalogRegistry {
   /** Where a registry project publishes its served set, on its default branch. */
   const val FILE_PATH: String = ".compose-preview/catalogs.json"
 
+  /**
+   * Refs tried, in order, for a nomination that names none — **not** `HEAD` alone.
+   *
+   * `raw.githubusercontent.com` exposes a `HEAD` alias for a repository's default branch, and it is
+   * the obvious thing to read when the whole point is "whatever that project calls its default
+   * branch". It is also, in practice, served from a *stale* default-branch commit: minutes after
+   * `.compose-preview/catalogs.json` landed on `yschimke/compose-preview-imports@main`,
+   * `…/HEAD/.compose-preview/catalogs.json` was still answering 404 (cache-busted, repeatedly)
+   * while `…/main/…` answered 200 and `…/HEAD/README.md` — a path that existed in the older commit
+   * — answered 200. A box booting against a registry cannot wait out somebody's CDN: it would serve
+   * nothing and report the registry as absent.
+   *
+   * So the common names are tried first and `HEAD` is kept as the catch-all for a project whose
+   * default branch is neither. The first ref that answers wins, which is one request in the
+   * ordinary case. A project whose default is something else *and* which still has a stale `main`
+   * or `master` branch lying around is the case this ordering gets wrong, and the reason a
+   * nomination may name its ref explicitly: `<owner>/<repo>@<ref>`.
+   */
+  val DEFAULT_REF_CANDIDATES: List<String> = listOf("main", "master", "HEAD")
+
   /** Read envelope for the document. Generous for a config file, tiny for a fetch. */
   const val MAX_BYTES: Long = 256L * 1024
 
@@ -61,6 +81,24 @@ object ServeCatalogRegistry {
   const val MAX_ENTRIES: Int = 200
 
   private val REPO_RE = Regex("[A-Za-z0-9._-]{1,64}/[A-Za-z0-9._-]{1,64}")
+
+  /**
+   * A ref goes into a URL path unescaped, so it stays in the conservative branch/tag alphabet —
+   * slashes allowed (`release/2.x` is an ordinary branch name), `..` and whitespace not.
+   */
+  private val REF_RE = Regex("[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
+
+  /**
+   * One nominated registry project: the repository, and optionally the ref its document is read
+   * from. A null [ref] means [DEFAULT_REF_CANDIDATES] — see there for why that is not just `HEAD`.
+   */
+  data class Nomination(val repo: String, val ref: String? = null) {
+    /** The refs to try, in order. */
+    val refs: List<String>
+      get() = ref?.let { listOf(it) } ?: DEFAULT_REF_CANDIDATES
+
+    override fun toString(): String = ref?.let { "$repo@$it" } ?: repo
+  }
 
   /** One registry project's contribution: its validated, repo-normalised entries. */
   data class Contribution(
@@ -74,24 +112,36 @@ object ServeCatalogRegistry {
   }
 
   /**
-   * Parse `--catalog-registry` (comma-separated `<owner>/<repo>`), reporting anything malformed
-   * rather than failing the boot: a typo'd registry should cost that registry's catalogs, not the
-   * server.
+   * Parse `--catalog-registry` (comma-separated `<owner>/<repo>`, each optionally `@<ref>`),
+   * reporting anything malformed rather than failing the boot: a typo'd registry should cost that
+   * registry's catalogs, not the server.
    */
-  fun parseRepos(raw: String?, onProblem: (String) -> Unit = {}): List<String> =
+  fun parseRepos(raw: String?, onProblem: (String) -> Unit = {}): List<Nomination> =
     raw
       ?.split(",")
       ?.map { it.trim() }
       ?.filter { it.isNotEmpty() }
-      ?.filter {
-        REPO_RE.matches(it).also { ok ->
-          if (!ok) onProblem("--catalog-registry '$it' is not an <owner>/<repo>")
+      ?.mapNotNull { entry ->
+        val at = entry.indexOf('@')
+        val repo = if (at < 0) entry else entry.substring(0, at).trim()
+        val ref = if (at < 0) null else entry.substring(at + 1).trim().ifEmpty { null }
+        when {
+          !REPO_RE.matches(repo) -> {
+            onProblem("--catalog-registry '$entry' is not an <owner>/<repo>")
+            null
+          }
+          ref != null && !REF_RE.matches(ref) -> {
+            onProblem("--catalog-registry '$entry' does not name a usable ref")
+            null
+          }
+          else -> Nomination(repo, ref)
         }
       }
       ?.distinct() ?: emptyList()
 
-  /** The raw URL [FILE_PATH] is read from — the project's default branch, whatever it is called. */
-  fun documentUrl(repo: String): String = "https://raw.githubusercontent.com/$repo/HEAD/$FILE_PATH"
+  /** The raw URL [FILE_PATH] is read from on one ref. */
+  fun documentUrl(repo: String, ref: String): String =
+    "https://raw.githubusercontent.com/$repo/$ref/$FILE_PATH"
 
   /**
    * Fetch and normalise one registry project's document, or null when it has none / it could not be
@@ -104,19 +154,26 @@ object ServeCatalogRegistry {
    * catalogs away would take them away every time GitHub hiccuped.
    */
   fun fetch(
-    repo: String,
+    nomination: Nomination,
     fetch: (url: String, maxBytes: Long) -> ByteArray?,
     onProblem: (String) -> Unit = {},
   ): Contribution? {
-    val url = documentUrl(repo)
-    val bytes =
-      runCatching { fetch(url, MAX_BYTES) }
-        .getOrElse {
-          onProblem("catalog registry $repo: could not read $FILE_PATH (${it.message})")
-          null
-        } ?: return null
+    val repo = nomination.repo
+    // First ref that answers wins — one request for a project on `main`, and no dependence on the
+    // `HEAD` alias being current. See [DEFAULT_REF_CANDIDATES].
+    var bytes: ByteArray? = null
+    for (ref in nomination.refs) {
+      bytes =
+        runCatching { fetch(documentUrl(repo, ref), MAX_BYTES) }
+          .getOrElse {
+            onProblem("catalog registry $repo: could not read $FILE_PATH at $ref (${it.message})")
+            null
+          }
+      if (bytes != null) break
+    }
+    val body = bytes ?: return null
     val parsed = runCatching {
-      ServeCatalogsConfig.parse(bytes.toString(Charsets.UTF_8))
+      ServeCatalogsConfig.parse(body.toString(Charsets.UTF_8))
     }
       .getOrElse {
         onProblem("catalog registry $repo: $FILE_PATH is not readable (${it.message})")

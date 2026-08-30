@@ -30,7 +30,7 @@ class ServeCatalogRegistrySyncTest {
     document: () -> ServeCatalogRegistry.Contribution?,
   ): ServeCatalogRegistrySync =
     ServeCatalogRegistrySync(
-      repos = listOf("yschimke/compose-preview-imports"),
+      repos = listOf(ServeCatalogRegistry.Nomination("yschimke/compose-preview-imports")),
       read = { document() },
       tracked = { box.tracked.toSet() },
       publish = { _, entry ->
