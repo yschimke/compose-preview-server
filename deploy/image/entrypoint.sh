@@ -559,21 +559,6 @@ fi
 # boot snapshot until the container recycles). This is what lets a `design-artifacts.yml` regen
 # reach preview.coo.ee on its own — Watchtower only rolls the *image*, never the branch content.
 [[ -n "${SERVE_CATALOG_REFRESH:-}" ]] && args+=(--catalog-refresh-interval "${SERVE_CATALOG_REFRESH}")
-# Onboarding a project that has published NOTHING (POST /admin/onboard/scan|build). The scan half
-# reads a shallow clone and needs no flag; the build half runs the PASTED repository's own ./gradlew
-# here, so it is off unless SERVE_ONBOARD_BUILD is set AND the box already opted into executing
-# producer code (SERVE_ALLOW_RENDER_TRUSTED, above) — serve refuses the combination otherwise.
-# The image has no CLI to materialise the plugin-injecting init script, so an unmodified upstream
-# project only builds when SERVE_ONBOARD_INIT_SCRIPT points at one mounted into the container
-# (produce it with `compose-preview init-script --path`).
-if [[ "${SERVE_ONBOARD_BUILD:-}" == "1" || "${SERVE_ONBOARD_BUILD:-}" == "true" ]]; then
-  args+=(--onboard-build)
-  [[ -n "${SERVE_ONBOARD_CACHE:-}" ]] && args+=(--onboard-cache "${SERVE_ONBOARD_CACHE}")
-  [[ -n "${SERVE_ONBOARD_INIT_SCRIPT:-}" ]] &&
-    args+=(--onboard-init-script "${SERVE_ONBOARD_INIT_SCRIPT}")
-  [[ -n "${SERVE_ONBOARD_BUILD_TIMEOUT:-}" ]] &&
-    args+=(--onboard-build-timeout "${SERVE_ONBOARD_BUILD_TIMEOUT}")
-fi
 # RSS history is demand-activated: each feed request renews this inactivity lease. Once it expires,
 # its branch worker sleeps while retaining the generated XML + shallow Git cache under /config.
 [[ -n "${SERVE_CATALOG_FEED_IDLE:-}" ]] &&

@@ -132,20 +132,20 @@ repository that has never published answers `404` — there is nothing to serve 
 does not build it. Onboarding grants **no trust**: the catalog badges `unverified` until its
 producer is added with `POST /admin/trust`, exactly as a hand-published one does.
 
-### Onboarding a project that has published nothing (build it here)
+### Onboarding a project that has published nothing
 
 The flow above reads what a repository already delivers, which is nothing at all for a project that
 has never run `compose-preview publish` — and those are exactly the projects a URL gets pasted for.
-Two further routes cover that case, split apart because they carry very different risk.
+Two things cover that case, and neither of them builds anything on this box.
 
-**Scan.** Reads a shallow clone and reports what is in it. It executes nothing, so it needs no
-switch beyond the admin token:
+**Scan, here.** `POST /admin/onboard/scan` reads a shallow clone of the repository and reports what
+is in it. It executes nothing, so it needs no switch beyond the admin token:
 
 ```bash
 curl -sX POST -H "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" \
   -d '{"url":"https://github.com/joreilly/PeopleInSpace"}' \
   https://<host>/admin/onboard/scan
-# {"repo":"joreilly/PeopleInSpace","ref":"main","buildEnabled":false,
+# {"repo":"joreilly/PeopleInSpace","ref":"main",
 #  "modules":[{"gradlePath":"shared","previewCount":12,"buildable":true,
 #              "hostPlugins":["org.jetbrains.compose"]}, …]}
 ```
@@ -154,37 +154,20 @@ Every module in `settings.gradle[.kts]` is reported, with its `@Preview` count, 
 preview plugin would be injected beside (version-catalog `alias(libs.plugins.…)` entries resolved
 through `gradle/libs.versions.toml`), and a `skipReason` for each module passed over. A repository
 with no previews is a *finding* with a `200`, not an error. `{"ref":"…"}` scans a branch or tag
-other than the default.
+other than the default. `--onboard-cache` moves those checkouts off the container's scratch space.
 
-**Build.** Runs the pasted repository's own `./gradlew` for the modules the scan found, then serves
-each built module at `/<id>/`:
+**Build, elsewhere.** The scan's output is what you write an *import* down from. An import is a
+branch in the import staging repository naming the upstream project, its ref and its modules; its
+workflow checks that project out on a GitHub Actions runner, injects the preview plugin with the
+CLI's init script, renders, and force-pushes an ordinary `design-artifacts/<slug>` branch. This box
+then serves it through `POST /admin/onboard` exactly as it serves any other published catalog —
+refreshed on push by `SERVE_CATALOG_REFRESH` like the rest.
 
-```bash
-curl -sX POST -H "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" \
-  -d '{"url":"https://github.com/joreilly/PeopleInSpace","modules":["shared"]}' \
-  https://<host>/admin/onboard/build          # 202 Accepted
-curl -s -H "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" \
-  https://<host>/admin/onboard/jobs/job-1     # poll: queued → running → succeeded
-```
-
-The response is a job because a cold build of a project the box has never seen takes minutes; the
-request never blocks on it, and one build runs at a time server-wide.
-
-**Nothing upstream changes.** The preview plugin is *injected* into the build with an init script,
-so the project needs no fork, no pull request, and no `plugins {}` edit. The container has no CLI to
-materialise that script, so point `SERVE_ONBOARD_INIT_SCRIPT` at one produced by
-`compose-preview init-script --path` and mounted into the container. Without it only a project that
-already applies `ee.schimke.composeai.preview` can be built, and the server says so at startup.
-
-**This is code execution and is gated as such.** `SERVE_ONBOARD_BUILD=1` (passing
-`--onboard-build`) enables the route and is refused unless the box also runs
-`--allow-render-trusted` (`SERVE_ALLOW_RENDER_TRUSTED`, on by default here) — its existing
-statement that it may execute producer code. `SERVE_ONBOARD_CACHE` moves the checkouts off the
-container's scratch space and `SERVE_ONBOARD_BUILD_TIMEOUT` caps one module's build (default
-1800s). Without the opt-in the scan route still works and the build route answers `403` naming the
-switch. Building grants no trust either: a built session badges exactly as an unverified one does,
-and it is held in memory only, so a restart forgets it rather than resurrecting a session whose
-build tree is gone.
+That split is deliberate. Building a pasted repository means running its build scripts, and the
+runner is a better place for that than the preview box in every dimension: it is ephemeral and
+isolated, it already has the JDK and Android SDK, its concurrency and timeouts are GitHub's problem,
+and the import's pull request is a human reviewing what is about to be built. **This server has no
+route that executes a pasted repository**, and adding one is not on the roadmap.
 
 ### Serving a catalog on its own hostname
 

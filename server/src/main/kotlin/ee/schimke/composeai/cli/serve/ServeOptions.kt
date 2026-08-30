@@ -109,40 +109,14 @@ public interface ServeOptions {
   public val catalogSourceRoot: File?
 
   /**
-   * **Onboarding a pasted repository by building it** (SECURITY/RCE, opt-in, default off).
+   * Where the read-only checkouts of pasted repositories live (`--onboard-cache`), for `POST
+   * /admin/onboard/scan`. One directory per repository, reused across requests. Defaults to a
+   * temporary directory, which is the right default for a scratch tree a restart may forget.
    *
-   * `POST /admin/onboard/scan` reads a foreign checkout and never runs it, so it needs no switch.
-   * This one enables `POST /admin/onboard/build`, which runs the pasted repository's own
-   * `./gradlew` as the server user — arbitrary code from a project nobody has vouched for. It is
-   * therefore gated twice over: the admin token (the routes don't exist without one) and this flag,
-   * which additionally requires [allowRenderTrusted] — the box's existing statement that it may
-   * execute producer code. Setting it without that is refused at startup rather than honoured
-   * quietly.
-   */
-  public val onboardBuild: Boolean
-
-  /**
-   * Where foreign checkouts live (`--onboard-cache`). One directory per repository, reused across
-   * requests. Defaults to a temporary directory, which is the right default for a scratch tree that
-   * a restart is free to forget.
+   * Nothing in these checkouts is ever executed — the scan reads them as text, and building an
+   * imported project happens on a runner in the import staging repository, not here.
    */
   public val onboardCacheDir: File
-
-  /**
-   * Extra `--init-script` arguments for a foreign build (`--onboard-init-script <path>`,
-   * repeatable).
-   *
-   * The CLI injects the preview plugin through an init script it materialises itself
-   * ([ServeBuildHost.autoInjectInitScriptArgs]); the standalone distribution has no CLI behind it
-   * and injects nothing, so without this it could only build a project that already applies the
-   * plugin — precisely the project this feature is not for. Point this at a script materialised by
-   * `compose-preview init-script --path` and a standalone box onboards an unmodified upstream
-   * project too.
-   */
-  public val onboardInitScripts: List<File>
-
-  /** How long one foreign module's Gradle build may run (`--onboard-build-timeout`, seconds). */
-  public val onboardBuildTimeoutSeconds: Long
 
   /**
    * Project mode revision policy (SECURITY/RCE): comma-separated refs whose history a requested

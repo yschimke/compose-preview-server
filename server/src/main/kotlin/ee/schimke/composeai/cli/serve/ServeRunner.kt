@@ -2256,7 +2256,7 @@ public class ServeRunner(
     // branch to fetch) and no administrator (nothing is written to catalogs.json), only the admin
     // token that makes the route exist and, for the build half, this box's opt-in to executing
     // foreign build scripts.
-    val sourceOnboarding = if (adminToken != null) buildSourceOnboarding(registry) else null
+    val sourceOnboarding = if (adminToken != null) buildSourceOnboarding() else null
     // Runtime site administration. Needs only the admin token and the live map: publishing a
     // hostname adds no catalog and fetches nothing, it re-points an existing one. What it does need
     // is the CURRENT served set, read through the tracker rather than captured here, so a site may
@@ -2560,66 +2560,22 @@ public class ServeRunner(
   }
 
   /**
-   * The URL-onboarding lane ([ServeSourceOnboarding]): scan always, build only when the operator
-   * said so.
+   * The URL-scan lane ([ServeSourceOnboarding]): read a pasted repository, never run it.
    *
-   * The build half is deliberately constructed as *absent* rather than disabled when the box hasn't
-   * opted in, so there is no code path from a request to a `./gradlew` on a box that never agreed
-   * to run foreign build scripts. `--onboard-build` on its own is not that agreement:
-   * `--allow-render-trusted` is this server's existing statement that it may execute producer code,
-   * and asking for one without the other is a misconfiguration worth saying out loud rather than
-   * resolving silently in either direction.
+   * There is no build half by design. Building an imported project happens on a GitHub Actions
+   * runner in the import staging repository, which publishes an ordinary `design-artifacts/<slug>`
+   * branch that this box picks up through [ServeOnboarding] like any other catalog — so the preview
+   * server keeps no path from a pasted URL to executing that repository's build scripts.
    */
-  private fun buildSourceOnboarding(registry: ServeSessionRegistry): ServeSourceOnboarding {
-    val optedIn = onboardBuild && allowRenderTrusted
-    if (onboardBuild && !allowRenderTrusted) {
-      System.err.println(
-        "serve: --onboard-build ignored without --allow-render-trusted — building a pasted " +
-          "repository runs its build scripts here, so the box must opt into executing producer " +
-          "code first. POST /admin/onboard/scan still works."
-      )
-    }
-    val builder =
-      if (optedIn) {
-        // The auto-inject init script is what makes an UNMODIFIED upstream project buildable, so
-        // it is resolved against the onboarding cache root rather than any one checkout: the script
-        // itself is project-independent (it applies the plugin to whatever applies AGP or Compose
-        // Multiplatform), and the project-root argument only decides the CLI's own opt-out, which
-        // must never fire for a foreign repository. `--onboard-init-script` adds to it, and is the
-        // only injection a standalone box (whose build host injects nothing) has.
-        val injected =
-          autoInjectInitScriptArgs(projectRoot = onboardCacheDir) +
-            onboardInitScripts.flatMap { listOf("--init-script", it.absolutePath) }
-        if (injected.isEmpty()) {
-          System.err.println(
-            "serve: --onboard-build has no init script to inject the preview plugin with; only " +
-              "projects that already apply ee.schimke.composeai.preview will build. Pass " +
-              "--onboard-init-script <path> (materialise one with `compose-preview init-script`)."
-          )
-        }
-        GradleRevisionBuilder(
-          extraArgs = injected,
-          timeoutSeconds = onboardBuildTimeoutSeconds,
-          onLog = { System.err.println("[serve onboard build] $it") },
-        )
-      } else {
-        null
-      }
-    return ServeSourceOnboarding(
+  private fun buildSourceOnboarding(): ServeSourceOnboarding =
+    ServeSourceOnboarding(
       checkouts =
         ServeSourceCheckouts(
           cacheRoot = onboardCacheDir,
           onLog = { System.err.println("[serve onboard] $it") },
         ),
-      builder = builder,
-      // A built module becomes an ordinary project session, so it suspends, resumes and shows up
-      // on /status like the server's own checkout does. Not pinned: an onboarded project nobody
-      // is looking at should release its daemon like anything else.
-      register = { id, state -> registry.register(id, state) },
-      isTaken = { registry.isKnownSession(it) },
       onLog = { System.err.println("[serve onboard] $it") },
     )
-  }
 
   /** The project-mode factory: a git revision (`?session=<rev>`) → a built [ServeSessionState]. */
   private fun revisionFactory(

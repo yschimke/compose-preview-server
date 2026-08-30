@@ -111,9 +111,9 @@ class ServeAdminRoutingTest {
     )
 
   /**
-   * The source-onboarding lane, wired **without a builder** — the shape every box has by default.
-   * That is the interesting configuration to drive over HTTP: the scan route still answers, and the
-   * build route must refuse in a way that names the deployment decision rather than looking broken.
+   * The source-onboarding lane: a read of a pasted repository, and nothing more. There is no build
+   * route to drive, by design — an imported project is built on a runner in the import staging
+   * repository and arrives here as an ordinary `design-artifacts/` branch.
    */
   private val sourceOnboarding =
     ServeSourceOnboarding(
@@ -138,8 +138,6 @@ class ServeAdminRoutingTest {
             },
           onLog = {},
         ),
-      builder = null,
-      register = { _, _ -> },
       scanner = {
         ServeSourceScanResult(
           listOf(
@@ -324,7 +322,7 @@ class ServeAdminRoutingTest {
   }
 
   @Test
-  fun `scanning a project that publishes nothing reports its modules without building them`() {
+  fun `scanning a project that publishes nothing reports its modules`() {
     // The gap this closes: `POST /admin/onboard` answers 404 for a repository with no delivery
     // branch, which is every repository the first time. Scanning it answers the question the person
     // pasting the URL actually has.
@@ -338,9 +336,6 @@ class ServeAdminRoutingTest {
     assertEquals(200, code)
     assertTrue(body.contains("\"gradlePath\":\"shared\""), body)
     assertTrue(body.contains("\"previewCount\":4"), body)
-    // This box has no build lane, and says so rather than letting the caller find out by POSTing.
-    assertTrue(body.contains("\"buildEnabled\":false"), body)
-
     // Gated like every other admin route, and upstream trouble is still upstream.
     assertEquals(
       404,
@@ -350,26 +345,6 @@ class ServeAdminRoutingTest {
       502,
       send("/admin/onboard/scan", method = "POST", body = """{"url":"someone/private"}""").first,
     )
-  }
-
-  @Test
-  fun `a box that never opted into building foreign code refuses to`() {
-    val (code, body) =
-      send(
-        "/admin/onboard/build",
-        method = "POST",
-        body = """{"url":"https://github.com/joreilly/PeopleInSpace"}""",
-      )
-
-    // 403, not 404 or 500: the route exists, the request was fine, and the answer is a deployment
-    // decision the operator can change — so the message names the switch.
-    assertEquals(403, code)
-    assertTrue(body.contains("--onboard-build"), body)
-    // And nothing was queued, so there is no job to poll.
-    val jobs = send("/admin/onboard/jobs")
-    assertEquals(200, jobs.first)
-    assertFalse(jobs.second.contains("\"id\""), jobs.second)
-    assertEquals(404, send("/admin/onboard/jobs/job-1").first)
   }
 
   @Test
