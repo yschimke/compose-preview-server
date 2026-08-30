@@ -51,24 +51,28 @@ object ServeCatalogRegistry {
   const val FILE_PATH: String = ".compose-preview/catalogs.json"
 
   /**
-   * Refs tried, in order, for a nomination that names none — **not** `HEAD` alone.
+   * Refs tried, in order, for a nomination that names none: the project's default branch first,
+   * then the two names it is almost always called.
    *
-   * `raw.githubusercontent.com` exposes a `HEAD` alias for a repository's default branch, and it is
-   * the obvious thing to read when the whole point is "whatever that project calls its default
-   * branch". It is also, in practice, served from a *stale* default-branch commit: minutes after
-   * `.compose-preview/catalogs.json` landed on `yschimke/compose-preview-imports@main`,
-   * `…/HEAD/.compose-preview/catalogs.json` was still answering 404 (cache-busted, repeatedly)
-   * while `…/main/…` answered 200 and `…/HEAD/README.md` — a path that existed in the older commit
-   * — answered 200. A box booting against a registry cannot wait out somebody's CDN: it would serve
-   * nothing and report the registry as absent.
+   * `raw.githubusercontent.com` exposes a `HEAD` alias for a repository's default branch, which is
+   * exactly the question being asked — "whatever that project calls its default branch" — so it
+   * goes first and answers in one request.
    *
-   * So the common names are tried first and `HEAD` is kept as the catch-all for a project whose
-   * default branch is neither. The first ref that answers wins, which is one request in the
-   * ordinary case. A project whose default is something else *and* which still has a stale `main`
-   * or `master` branch lying around is the case this ordering gets wrong, and the reason a
-   * nomination may name its ref explicitly: `<owner>/<repo>@<ref>`.
+   * The fallbacks exist for the case that actually bit: `yschimke/compose-preview-imports` had its
+   * default branch pointing at something other than `main`, so `HEAD` faithfully served a tree that
+   * did not contain the freshly-merged document, and the first box to boot against it would have
+   * reported a live registry as absent. (That looked like a stale CDN and was described as one when
+   * these candidates were introduced — it was not. `HEAD` was correct about a repository that was
+   * misconfigured, and reading `…/HEAD/README.md` returned 200 only because that path exists on the
+   * other branch too.)
+   *
+   * Trying `main` and `master` after it recovers that specific misconfiguration without ever
+   * overriding a correctly-set default branch — `HEAD` having answered, the fallbacks are not
+   * reached — which is why the order is this way round and not the other. A project whose default
+   * branch is genuinely neither, and which needs a ref pinned anyway (a tag, a release branch), can
+   * say so: `<owner>/<repo>@<ref>`.
    */
-  val DEFAULT_REF_CANDIDATES: List<String> = listOf("main", "master", "HEAD")
+  val DEFAULT_REF_CANDIDATES: List<String> = listOf("HEAD", "main", "master")
 
   /** Read envelope for the document. Generous for a config file, tiny for a fetch. */
   const val MAX_BYTES: Long = 256L * 1024
