@@ -101,8 +101,10 @@ jobs:
         working-directory: preview-harness
       - run: npx playwright install --with-deps chromium
         working-directory: preview-harness
-      - run: ./gradlew :ui-builder:wasmFrontendDist --no-daemon
+      - run: ./gradlew :ui-builder:wasmFrontendDist :ui-builder-reference-jetcaster:wasmFrontendDist --no-daemon
       - run: npm run harness:ui-builder
+        working-directory: preview-harness
+      - run: npm run harness:ui-builder-jetcaster
         working-directory: preview-harness
       - run: npm run harness:pages
         working-directory: preview-harness
