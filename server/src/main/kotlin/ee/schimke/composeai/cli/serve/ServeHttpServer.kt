@@ -7023,6 +7023,9 @@ class ServeHttpServer(
         views = views.getValue(system),
         trust = meta.trust,
         sourceRepo = meta.provenance?.repo,
+        // Attribution for an imported catalog: the project it was rendered from, which is neither
+        // the serving repo nor anything the catalog's own provenance records.
+        importedFrom = catalogLoads?.configFor(system)?.importedFrom,
         heroPreviewId = meta.heroPreviewId,
         heroCrop = meta.heroCrop,
         // The prebaked thumbnail, when the catalog has one: the card then points at the static

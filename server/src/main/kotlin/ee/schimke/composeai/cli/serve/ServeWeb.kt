@@ -5355,6 +5355,15 @@ ${captureControlsHtml().prependIndent("          ")}
     val trust: String?,
     /** Repository that supplied this catalog; used for publisher attribution on the homepage. */
     val sourceRepo: String? = null,
+    /**
+     * The upstream project this catalog's previews were rendered FROM, when the catalog is served
+     * from somewhere else — see [ServeCatalogsConfig.Entry.importedFrom]. Drives two things on the
+     * card: which owner's section it falls into (the upstream's, so an import sits beside that
+     * owner's other catalogs rather than under the staging repo's owner), and an "imported" badge
+     * naming the project, because a reader otherwise has no way to tell whose work they are looking
+     * at.
+     */
+    val importedFrom: String? = null,
     val heroPreviewId: String?,
     /** Content-crop for the hero thumbnail (frames a Wear sticker to its component); null ⇒ raw. */
     val heroCrop: ContentCrop? = null,
@@ -5702,6 +5711,16 @@ ${captureControlsHtml().prependIndent("          ")}
             ?.let {
               "\n            <div class=\"cp-browser-provenance\">${WebEscaping.htmlEscape(it)}</div>"
             } ?: ""
+      // Says whose work this is. An imported catalog is rendered from someone else's project and
+      // served from a staging repo, and nothing else on the card carries that: its id, title and
+      // provenance line all describe the catalog, not its origin.
+      val importedBadge =
+        s.importedFrom
+          ?.takeIf { it.isNotBlank() }
+          ?.let {
+            "\n            <div class=\"cp-sys-badge cp-sys-imported\">" +
+              "imported from ${WebEscaping.htmlEscape(it)}</div>"
+          } ?: ""
       val technicalId =
         if (componentBrowser) "" else "\n            <div class=\"cp-id\">$sysId</div>"
       val totals =
@@ -5720,7 +5739,7 @@ ${captureControlsHtml().prependIndent("          ")}
       <div class="cp-card cp-sys"$bg$searchAttr>
         <div class="cp-imgwrap">$img</div>
         <div class="cp-meta">
-          <div class="cp-sys-title"><a class="cp-sys-open" href="/$sysSeg/$suffix">$title</a>${homeTrustBadge(s.trust)}</div>$technicalId$desc$provenance${compareAction(s, sysSeg)}$totals
+          <div class="cp-sys-title"><a class="cp-sys-open" href="/$sysSeg/$suffix">$title</a>${homeTrustBadge(s.trust)}</div>$technicalId$desc$importedBadge$provenance${compareAction(s, sysSeg)}$totals
         </div>
       </div>
       """
@@ -5892,7 +5911,9 @@ ${captureControlsHtml().prependIndent("          ")}
     for (s in systems) {
       // The claim only holds when the bytes came from a repo the operator named for this entry.
       val claimed = s.group?.takeIf { g -> s.sourceRepo != null && s.sourceRepo in g.repos }
-      val heading = claimed?.heading ?: ownerHeading(s.sourceRepo)
+      // An import is grouped by the project it came FROM, not the staging repo serving it —
+      // otherwise every import, whatever it wraps, piles into the staging repo owner's section.
+      val heading = claimed?.heading ?: ownerHeading(s.importedFrom ?: s.sourceRepo)
       grouped.getOrPut(heading) { mutableListOf() } += s
       nouns.putIfAbsent(heading, claimed?.noun ?: ServeCatalogsConfig.DEFAULT_NOUN)
       // Sections merge on the HEADING, which is operator text and neither unique nor validated as

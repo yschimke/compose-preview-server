@@ -4328,6 +4328,14 @@ cp-page-zoom button:focus-visible {
 .cp-browser-provenance { margin-top: 7px; color: var(--md-sys-color-on-surface-variant);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--md-sys-typescale-body-small-size); overflow-wrap: anywhere; }
+/* An imported catalog: rendered from someone else's project, served from a staging repo. Reads as
+   a quiet chip rather than a status pill — it is attribution, not a warning, and it sits on every
+   card in an imported section, so it must not out-shout the title. */
+.cp-sys-badge { display: inline-block; margin-top: 7px; padding: 2px 8px; border-radius: 999px;
+  background: var(--md-sys-color-surface-container-highest);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-small-size); line-height: 1.5;
+  overflow-wrap: anywhere; }
 .cp-browser-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 7px;
   margin: 0 0 12px; color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-body-medium-size); }

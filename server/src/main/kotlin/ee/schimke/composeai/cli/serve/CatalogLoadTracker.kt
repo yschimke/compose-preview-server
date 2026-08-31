@@ -37,6 +37,12 @@ class CatalogLoadTracker(
      */
     val group: ServeWeb.HomeGroup? = null,
     /**
+     * Upstream project this catalog was rendered from, when it is not [repo] — see
+     * [ServeCatalogsConfig.Entry.importedFrom]. Carried here for the same reason [group] is: the
+     * home index reads this tracker, and attribution has to be config rather than code.
+     */
+    val importedFrom: String? = null,
+    /**
      * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]). Kept beside
      * the rest of the configured entry because [loadOrder] is the one consumer, and it reads the
      * same snapshot every other consumer does.
