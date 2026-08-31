@@ -208,11 +208,51 @@ async function measureEdit(observer, revision) {
                     ?.slice()
                     .reverse()
                     .find((marker) => marker.revision === expectedRevision);
+                const reduction = performanceState?.phases
+                    ?.slice()
+                    .reverse()
+                    .find(
+                        (marker) =>
+                            marker.revision === expectedRevision &&
+                            marker.name.startsWith("verifiedPropertyDelta"),
+                    );
+                const projection = performanceState?.phases
+                    ?.slice()
+                    .reverse()
+                    .find(
+                        (marker) =>
+                            marker.revision === expectedRevision &&
+                            marker.name === "propertyDeltaProjection",
+                    );
+                const hash = performanceState?.phases
+                    ?.slice()
+                    .reverse()
+                    .find(
+                        (marker) =>
+                            marker.revision === expectedRevision &&
+                            marker.name === "propertyDeltaHash",
+                    );
+                const inspectionEncode = performanceState?.phases
+                    ?.slice()
+                    .reverse()
+                    .find(
+                        (marker) =>
+                            marker.revision === expectedRevision &&
+                            marker.name === "inspectionEncode",
+                    );
+                const inspectionInvalidated = performanceState?.phases
+                    ?.slice()
+                    .reverse()
+                    .find(
+                        (marker) =>
+                            marker.revision === expectedRevision &&
+                            marker.name === "inspectionInvalidated",
+                    );
                 if (writerResult?.error) throw new Error(writerResult.error);
                 if (writerResult && writerResult.status !== 200) {
                     throw new Error(JSON.stringify(writerResult));
                 }
-                if (writerResult && protocolReceipt && canvasApply) {
+                if (writerResult && protocolReceipt && canvasApply && reduction) {
                     channel.close();
                     return {
                         revision: expectedRevision,
@@ -221,6 +261,13 @@ async function measureEdit(observer, revision) {
                         snapshotRefreshMs:
                             canvasApply.receiptAtMs - protocolReceipt.receivedAtMs,
                         authoritativeToCanvasMs: canvasApply.latencyMs,
+                        localReductionMs: reduction.durationMs,
+                        localReductionPath: reduction.name,
+                        propertyDeltaProjectionMs: projection?.durationMs,
+                        propertyDeltaHashMs: hash?.durationMs,
+                        inspectionEncodeMs: inspectionEncode?.durationMs,
+                        receiptToInspectionInvalidatedMs:
+                            inspectionInvalidated?.startedAtMs - canvasApply.receiptAtMs,
                         markers: {
                             startedAtMs,
                             protocolReceivedAtMs: protocolReceipt.receivedAtMs,
@@ -290,6 +337,19 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
         const authoritativeToCanvas = summary(
             editMeasurements.map((item) => item.authoritativeToCanvasMs),
         );
+        const localReduction = summary(editMeasurements.map((item) => item.localReductionMs));
+        const propertyDeltaProjection = summary(
+            editMeasurements.map((item) => item.propertyDeltaProjectionMs),
+        );
+        const propertyDeltaHash = summary(
+            editMeasurements.map((item) => item.propertyDeltaHashMs),
+        );
+        const inspectionEncode = summary(
+            editMeasurements.map((item) => item.inspectionEncodeMs),
+        );
+        const receiptToInspectionInvalidated = summary(
+            editMeasurements.map((item) => item.receiptToInspectionInvalidatedMs),
+        );
         const reopen = summary(reopenMeasurements.map((item) => item.completedAtMs));
         const results = {
             schema: "compose-ui-builder-performance-results/v1",
@@ -303,7 +363,15 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
                 propagation,
                 canvasApply,
                 cachedReopen: reopen,
-                diagnostics: { snapshotRefresh, authoritativeToCanvas },
+                diagnostics: {
+                    snapshotRefresh,
+                    localReduction,
+                    propertyDeltaProjection,
+                    propertyDeltaHash,
+                    inspectionEncode,
+                    receiptToInspectionInvalidated,
+                    authoritativeToCanvas,
+                },
             },
             samples: { edits: editMeasurements, cachedReopens: reopenMeasurements },
             environment: {
@@ -371,6 +439,11 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
         expect(reopen.count).toBe(reopenSamples);
         expect(editMeasurements.every((item) => item.propagationMs >= 0)).toBe(true);
         expect(editMeasurements.every((item) => item.canvasApplyMs >= 0)).toBe(true);
+        expect(
+            editMeasurements.every(
+                (item) => item.localReductionPath === "verifiedPropertyDeltaAccepted",
+            ),
+        ).toBe(true);
         expect(reopenMeasurements.every((item) => item.completedAtMs > 0)).toBe(true);
         if (perfMode) {
             expect(propagation.p95).toBeLessThan(250);
