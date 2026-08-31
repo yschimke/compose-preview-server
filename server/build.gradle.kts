@@ -77,9 +77,12 @@ application {
 
 evaluationDependsOn(":wasm-ui")
 
+evaluationDependsOn(":ui-builder")
+
 distributions {
   main {
     contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
+    contents { from(project(":ui-builder").tasks.named("wasmFrontendDist")) { into("ui-builder") } }
   }
 }
 

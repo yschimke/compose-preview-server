@@ -41,6 +41,9 @@ Compose/Wasm frontend lives in `wasm-ui/`. The UI builder incubates in the depen
 fixture and code exporter so that it can later move out without pulling server implementation with
 it. `ui-builder-reference-jetcaster/` is a separately compiled, provenance-pinned Compose/Wasm
 oracle for the primary Jetcaster visual benchmark and has no dependency on the builder module.
+The server distribution packages the builder's Jetcaster benchmark preview as a separate app at
+`/ui-builder/`; the existing catalog-scoped `/wasm/<system>/` preview application remains a
+distinct feature and route. Interactive editor controls are a subsequent builder milestone.
 
 ## Spatial and WebXR previews
 

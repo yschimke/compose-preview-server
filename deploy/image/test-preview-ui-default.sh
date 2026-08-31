@@ -55,4 +55,12 @@ expect $'--wasm-ui-dir\n'"${built_in}" "the packaged UI is enabled as a fallback
 expect $'--wasm-ui-dir\n'"${built_in}"$'\n--wasm-dir\nextra=/srv/extra' \
   "operator apps are appended to the fallback" "extra=/srv/extra"
 
-echo "PASS: the packaged Wasm UI is catalog-scoped and SERVE_WASM_DIR remains an override"
+mkdir -p "${install}/ui-builder"
+touch "${install}/ui-builder/index.html"
+built_in_builder="${install}/ui-builder"
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}" \
+  "the packaged builder is enabled at its distinct route"
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--wasm-dir\nextra=/srv/extra' \
+  "the builder, catalog fallback, and operator app remain additive" "extra=/srv/extra"
+
+echo "PASS: the packaged Wasm UI and standalone builder remain distinct and additive"

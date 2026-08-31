@@ -225,6 +225,11 @@ fi
 if [[ -f /opt/compose-preview-server/wasm-ui/index.html ]]; then
   args+=(--wasm-ui-dir /opt/compose-preview-server/wasm-ui)
 fi
+# The Compose UI builder is an independent application and route. Do not register it as a
+# `preview-ui` catalog or as the `/wasm/<system>/` fallback above.
+if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
+  args+=(--ui-builder-dir /opt/compose-preview-server/ui-builder)
+fi
 # Explicit per-catalog apps remain additive and take precedence over the packaged fallback.
 [[ -n "${SERVE_WASM_DIR:-}" ]] && args+=(--wasm-dir "${SERVE_WASM_DIR}")
 # Trusted server-side re-render — ON by default, and cheap: for a Trusted catalog

@@ -32,7 +32,12 @@ jobs:
         run: |
           mkdir -p "${RUNNER_TEMP}/compose-preview-server"
           tar -xzf server/build/distributions/*.tar.gz -C "${RUNNER_TEMP}/compose-preview-server"
-          "${RUNNER_TEMP}"/compose-preview-server/*/bin/compose-preview-server --help
+          dist_root=$(find "${RUNNER_TEMP}/compose-preview-server" -mindepth 1 -maxdepth 1 -type d -print -quit)
+          test -f "${dist_root}/wasm-ui/index.html"
+          test -f "${dist_root}/ui-builder/index.html"
+          test -f "${dist_root}/ui-builder/uiBuilder.mjs"
+          test -f "${dist_root}/ui-builder/uiBuilder.wasm"
+          "${dist_root}/bin/compose-preview-server" --help
 
   deployment:
     runs-on: ubuntu-latest

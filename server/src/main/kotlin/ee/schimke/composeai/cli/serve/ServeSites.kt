@@ -224,6 +224,7 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "favicon.ico",
         "apple-touch-icon.png",
         "assets",
+        "ui-builder",
         "wasm",
         // `GET /wasm-private/<access>/<system>/…` — the token-in-path twin of `/wasm/…` for
         // auto-discovered local apps. A site host is normally public, but the segment is a route
