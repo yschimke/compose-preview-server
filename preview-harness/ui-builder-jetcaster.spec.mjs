@@ -47,6 +47,26 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
     });
     expect(provenance).toMatchObject({
         referenceId: "jetcaster-discover-expanded-v1",
+        responsiveVariants: [
+            {
+                id: "expanded-two-pane",
+                widthDp: 1280,
+                heightDp: 800,
+                density: 1,
+            },
+            {
+                id: "compact-main-pane",
+                widthDp: 412,
+                heightDp: 800,
+                density: 1,
+            },
+        ],
+        comparisonFixture: {
+            resource: "jetcaster-discover-operations-v1.json",
+            revision: 99,
+            documentHash:
+                "09b7af04ab546421f72b81b1c49564f044790b8f2db4d2304dc66ff73c148643",
+        },
         source: {
             repository: "android/compose-samples",
             commit: "018c5207fb63c4f78e5841bd8ddd4faabdf19d3a",
@@ -110,8 +130,9 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
     });
 
     // The same-browser oracle comparison above is the semantic fidelity gate. Committed PNGs are
-    // review evidence and retain a separate bound for macOS/Linux Chromium/Skia raster drift; the
-    // independently authored reference differs by 3% on the pinned Linux runner.
+    // review evidence and retain a separate bound for macOS/Linux Chromium/Skia raster drift. The
+    // bound is intentionally separate from the same-browser semantic gate and must be remeasured
+    // before it is tightened.
     expect(reference).toMatchSnapshot("jetcaster-discover-reference.png", {
         threshold: 0,
         maxDiffPixelRatio: 0.04,
@@ -123,7 +144,106 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
 
     // This is an honest convergence guard against a separately compiled reference. Tighten it as
     // the catalog adapters replace the remaining approximations; the release gate remains exact.
-    expect(mismatchRatio, "independent-oracle mismatch ratio").toBeLessThan(0.08);
+    expect(mismatchRatio, "independent-oracle mismatch ratio").toBeLessThan(0.02);
+});
+
+test("the same Jetcaster document renders the compact single-pane reference", async ({
+    page,
+}, testInfo) => {
+    await page.setViewportSize({ width: 412, height: 800 });
+    const reference = await capture(
+        page,
+        "/ui-builder-reference-jetcaster/build/wasmDist/index.html",
+        () => globalThis.__uiBuilderReferenceJetcasterReady === true,
+    );
+    const builder = await capture(
+        page,
+        "/ui-builder/build/wasmDist/index.html?mode=jetcaster-builder",
+        () =>
+            globalThis.__uiBuilderInspection?.documentRevision === 99 &&
+            globalThis.__uiBuilderInspection?.generation?.key ===
+                "fixture-jetcaster-discover-expanded@99" &&
+            globalThis.__uiBuilderInspection?.generation?.completed === true,
+    );
+    const manifest = await page.evaluate(
+        () => globalThis.__uiBuilderInspection,
+    );
+
+    const referencePng = PNG.sync.read(reference);
+    const builderPng = PNG.sync.read(builder);
+    expect([referencePng.width, referencePng.height]).toEqual([412, 800]);
+    expect([builderPng.width, builderPng.height]).toEqual([412, 800]);
+    const diff = new PNG({ width: 412, height: 800 });
+    const mismatch = pixelmatch(
+        referencePng.data,
+        builderPng.data,
+        diff.data,
+        412,
+        800,
+        { threshold: 0.1, includeAA: false },
+    );
+    const mismatchRatio = mismatch / (412 * 800);
+    console.info(
+        `Jetcaster compact-oracle mismatch: ${mismatch} pixels (${(
+            mismatchRatio * 100
+        ).toFixed(3)}%)`,
+    );
+
+    expect(manifest.generation.expectedAuthoredNodeIds).toHaveLength(99);
+    expect(manifest.nodes.find((node) => node.nodeId === "root-surface").bounds).toEqual(
+        { x: 0, y: 0, width: 412, height: 800 },
+    );
+    expect(manifest.nodes.find((node) => node.nodeId === "main-background").bounds).toEqual(
+        { x: 0, y: 0, width: 412, height: 800 },
+    );
+    expect(
+        manifest.nodes.find((node) => node.nodeId === "detail-scaffold").bounds,
+        "supporting pane stays uncomposed at compact width",
+    ).toBeNull();
+
+    const news = manifest.nodes.find((node) => node.nodeId === "chip-news");
+    await page.mouse.click(
+        news.bounds.x + news.bounds.width / 2,
+        news.bounds.y + news.bounds.height / 2,
+    );
+    await page.waitForFunction(
+        () =>
+            globalThis.__uiBuilderInspection?.generation?.completed === true &&
+            globalThis.__uiBuilderInspection.nodes.find(
+                (node) => node.nodeId === "chip-news",
+            )?.semantics?.selected === true,
+    );
+    const selected = await page.evaluate(() => ({
+        crime: globalThis.__uiBuilderInspection.nodes.find(
+            (node) => node.nodeId === "chip-crime",
+        ).semantics.selected,
+        news: globalThis.__uiBuilderInspection.nodes.find(
+            (node) => node.nodeId === "chip-news",
+        ).semantics.selected,
+    }));
+    expect(selected).toEqual({ crime: false, news: true });
+
+    await testInfo.attach("jetcaster-compact-reference.png", {
+        body: reference,
+        contentType: "image/png",
+    });
+    await testInfo.attach("jetcaster-compact-builder.png", {
+        body: builder,
+        contentType: "image/png",
+    });
+    await testInfo.attach("jetcaster-compact-diff.png", {
+        body: PNG.sync.write(diff),
+        contentType: "image/png",
+    });
+    expect(reference).toMatchSnapshot("jetcaster-discover-compact-reference.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+    expect(builder).toMatchSnapshot("jetcaster-discover-compact-builder.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+    expect(mismatchRatio, "compact independent-oracle mismatch ratio").toBeLessThan(0.02);
 });
 
 test("editor overlay preserves clean design pixels and the inspection manifest", async ({
@@ -195,13 +315,13 @@ test("editor overlay preserves clean design pixels and the inspection manifest",
     const paddedTitle = cleanManifest.nodes.find(
         (node) => node.nodeId === "podcast-card-android-title",
     );
-    expect(paddedTitle.bounds).toEqual({ x: 8, y: 217, width: 128, height: 56 });
+    expect(paddedTitle.bounds).toEqual({ x: 8, y: 224, width: 128, height: 56 });
     expect(paddedTitle.text).toMatchObject({
         text: "Android Developers Backstage",
         lineCount: 2,
     });
-    expect(paddedTitle.text.firstBaselineY).toBeCloseTo(231.578125, 4);
-    expect(paddedTitle.text.lastBaselineY).toBeCloseTo(251.578125, 4);
+    expect(paddedTitle.text.firstBaselineY).toBeCloseTo(238.578125, 4);
+    expect(paddedTitle.text.lastBaselineY).toBeCloseTo(258.578125, 4);
     expect(paddedTitle.text.firstBaselineY).toBeGreaterThan(
         paddedTitle.bounds.y,
     );
