@@ -107,16 +107,24 @@ jobs:
             live=$(printf '%s' "${version_json}" | tr -d ' \n' | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
             loaded=$(printf '%s' "${status_json}" | jq -r '.catalogs.loaded // -1' 2>/dev/null || echo -1)
             total=$(printf '%s' "${status_json}" | jq -r '.catalogs.total // -1' 2>/dev/null || echo -1)
-            if [ "${live}" = "${{ steps.versions.outputs.server }}" ] && [ "${total}" -ge 0 ] && [ "${loaded}" -ge 0 ]; then
+            builder_html=$(curl -fsS -m 10 "${base}/ui-builder/" 2>/dev/null || true)
+            builder_mjs=$(curl -sS -o /dev/null -w '%{http_code}:%{content_type}' -m 10 "${base}/ui-builder/uiBuilder.mjs" 2>/dev/null || true)
+            builder_wasm=$(curl -sS -o /dev/null -w '%{http_code}:%{content_type}' -m 10 "${base}/ui-builder/uiBuilder.wasm" 2>/dev/null || true)
+            builder_ok=0
+            case "${builder_html}:${builder_mjs}:${builder_wasm}" in
+              *"<title>Compose UI Builder Preview</title>"*:200:text/javascript*:200:application/wasm*) builder_ok=1 ;;
+            esac
+            if [ "${live}" = "${{ steps.versions.outputs.server }}" ] && [ "${total}" -ge 0 ] && [ "${loaded}" -ge 0 ] && [ "${builder_ok}" -eq 1 ]; then
               {
                 echo "deployed=true"
                 echo "base_url=${base}"
+                echo "ui_builder_url=${base}/ui-builder/"
                 echo "catalogs_loaded=${loaded}"
                 echo "catalogs_total=${total}"
               } >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "waiting for preview.coo.ee: version=${live:-?}/${{ steps.versions.outputs.server }}, catalogs=${loaded}/${total} (attempt ${i}/30)"
+            echo "waiting for preview.coo.ee: version=${live:-?}/${{ steps.versions.outputs.server }}, catalogs=${loaded}/${total}, ui-builder=${builder_ok} (attempt ${i}/30)"
             sleep 20
           done
           echo "::error::preview.coo.ee did not converge within ~10 min"
@@ -129,6 +137,7 @@ jobs:
           MILESTONE_KEY: server-deployed
           MILESTONE_TAG: v${{ steps.versions.outputs.server }}
           BASE_URL: ${{ steps.rollout.outputs.base_url }}
+          UI_BUILDER_URL: ${{ steps.rollout.outputs.ui_builder_url }}
           LOADED: ${{ steps.rollout.outputs.catalogs_loaded }}
           TOTAL: ${{ steps.rollout.outputs.catalogs_total }}
           V: ${{ steps.versions.outputs.server }}
@@ -137,6 +146,7 @@ jobs:
           {
             printf '### Server deployed — `%s` is running `%s`\n\n' "${BASE_URL#https://}" "${V}"
             printf -- '- Live version: [%s/version](%s/version)\n' "${BASE_URL}" "${BASE_URL}"
+            printf -- '- UI builder preview: [%s](%s)\n' "${UI_BUILDER_URL}" "${UI_BUILDER_URL}"
             printf -- '- Catalogs: %s/%s loaded\n' "${LOADED}" "${TOTAL}"
             printf -- '- Image: `ghcr.io/%s/compose-preview-host:%s`\n' "${GITHUB_REPOSITORY_OWNER}" "${V}"
           } > "$md"

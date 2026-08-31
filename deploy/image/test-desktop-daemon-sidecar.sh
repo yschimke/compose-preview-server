@@ -12,7 +12,7 @@
 # `-Dcomposeai.cli.libDaemonAndroidDir`) was baked and every `backend: "android"` catalog was live,
 # while the desktop pair was in neither the image nor JAVA_TOOL_OPTIONS and every
 # `backend: "desktop"` catalog — m3-catalog among them — served snapshots. The server distribution
-# carries only `bin/`, `lib/` and `wasm-ui/`; both sidecars ride in compose-ai-tools' `:cli`
+# carries only `bin/`, `lib/`, `wasm-ui/` and `ui-builder/`; both sidecars ride in compose-ai-tools' `:cli`
 # distribution, so `$APP_HOME/lib-daemon-desktop` resolves to nothing and the fallback is silent.
 #
 # So: for each backend, assert the directory is produced by a build stage, copied into the runtime

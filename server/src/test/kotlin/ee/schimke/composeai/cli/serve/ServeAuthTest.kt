@@ -204,6 +204,7 @@ class ServeAuthTest {
       ServeHttpServer.wasmContentType("custom-formatters.js").toString(),
     )
     assertEquals("text/html", ServeHttpServer.wasmContentType("index.html").toString())
+    assertEquals("font/ttf", ServeHttpServer.wasmContentType("Roboto-Regular.ttf").toString())
     assertEquals(
       "application/json",
       ServeHttpServer.wasmContentType("composeApp.wasm.map").toString(),

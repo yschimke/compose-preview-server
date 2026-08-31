@@ -110,6 +110,12 @@ app or `SERVE_WASM_DIR` mapping (`system=/path`) takes precedence at the same UR
 path must exist inside the container. Old `/wasm/preview-ui/?session=<system>` links redirect to the
 catalog-scoped form.
 
+The Compose UI builder's Jetcaster benchmark preview is packaged alongside that browser and served
+at `/ui-builder/`. It is not a `compose=1` mode, a fake catalog, or a replacement for
+`/wasm/<system>/`; both apps are installed and routed independently. The static preview shell is
+public like other Wasm assets. Interactive editing and independently authenticated design
+read/write/export APIs are subsequent builder milestones.
+
 ### Onboarding a GitHub project (paste a URL)
 
 Publishing a catalog by hand means knowing the delivery contract: a catalog is a

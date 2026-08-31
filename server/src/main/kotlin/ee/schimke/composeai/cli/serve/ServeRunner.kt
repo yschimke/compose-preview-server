@@ -2239,6 +2239,14 @@ public class ServeRunner(
     return null
   }
 
+  /** Validate the independently packaged builder once; it is not a catalog Wasm fallback. */
+  private fun usableUiBuilderDir(): File? {
+    val dir = uiBuilderDir ?: return null
+    if (File(dir, "index.html").isFile) return dir
+    System.err.println("serve: --ui-builder-dir ${dir.path} has no index.html — skipping")
+    return null
+  }
+
   /**
    * Find conventional executable CMP/Wasm browser projects and associate them with the preview
    * modules they depend on. This covers the usual split (`:shared:ui` plus `:webApp`) while also
@@ -2464,6 +2472,7 @@ public class ServeRunner(
         componentBrowser = componentBrowser,
         wasmCatalogs = wasmCatalogs,
         wasmUiDir = usableWasmUiDir(),
+        uiBuilderDir = usableUiBuilderDir(),
         privateWasmCatalogs = privateWasmCatalogs,
         rcPlayerWasmDir = rcPlayerWasmDir,
         // Preserve the CONFIGURED set, not only startup successes. Failed rows then stay visible on

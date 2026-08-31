@@ -668,6 +668,10 @@ public class ServeCommandOptions(
   override val wasmUiDir: File? =
     args.flagValue("--wasm-ui-dir")?.takeIf { it.isNotBlank() }?.let(::File)
 
+  /** Standalone Compose UI builder; deliberately separate from the catalog-scoped Wasm viewer. */
+  override val uiBuilderDir: File? =
+    args.flagValue("--ui-builder-dir")?.takeIf { it.isNotBlank() }?.let(::File)
+
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   override val rcPlayerWasmDir: File? =
     args
@@ -1064,6 +1068,9 @@ public class ServeCommandOptions(
                           Catalog browser fallback served at /wasm/<system>/ for every known
                           catalog that does not publish its own Wasm app. The catalog id comes from
                           the path; /wasm/preview-ui/ redirects to this catalog-scoped form.
+        --ui-builder-dir <dir>
+                          Standalone Compose UI builder distribution served at /ui-builder/.
+                          This is additive and does not replace or alter /wasm/<system>/.
         --rc-player-wasm-dir <dir>
                           Experimental non-JVM Remote Compose player produced by
                           :rc-player-wasm:wasmPlayerDist. Serves it at /rc-player-wasm/ and enables

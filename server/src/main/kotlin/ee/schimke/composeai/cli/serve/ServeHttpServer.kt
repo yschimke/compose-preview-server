@@ -80,8 +80,8 @@ import kotlinx.serialization.json.Json
  * [defaultSessionId]); the registry forks the tenant behind its factory on first use. Unknown
  * sessions 404 like a bad token.
  *
- * Endpoints (all token-gated except `/healthz`, `/readyz`, `/version`, and the `/wasm/` static
- * assets):
+ * Endpoints (all token-gated except `/healthz`, `/readyz`, `/version`, and the `/wasm/` and
+ * `/ui-builder/` static assets):
  * - `GET /` landing page, `GET /p/{id}` viewer page,
  * - `GET /{system}/feed.xml` demand-activated catalog change feed,
  * - `GET /render/{id}.png` PNG bytes, `GET /api/previews` JSON, `GET /healthz` liveness,
@@ -131,6 +131,8 @@ class ServeHttpServer(
   private val wasmCatalogs: Map<String, File> = emptyMap(),
   /** Shared browser fallback projected at `/wasm/<system>/` for known catalog sessions. */
   private val wasmUiDir: File? = null,
+  /** Independent Compose UI builder app. It is never projected as a catalog Wasm viewer. */
+  private val uiBuilderDir: File? = null,
   /** Local auto-discovered apps that must use the credential-carrying `/wasm-private/` route. */
   private val privateWasmCatalogs: Set<String> = emptySet(),
   /**
@@ -866,6 +868,15 @@ class ServeHttpServer(
         // `/wasm/` was designed for. Put the token in the path so relative JS/Wasm requests retain
         // it, and reject the ordinary route for the same system to prevent a token-free bypass.
         get("/wasm-private/{access}/{system}/{path...}") { handleWasmAsset(privateRoute = true) }
+
+        // The builder is a distinct product surface, not a mode of the catalog-scoped Wasm
+        // preview app. Its static shell is public like the existing Wasm assets; design data and
+        // mutations remain separately authenticated API concerns.
+        get("/ui-builder") {
+          if (uiBuilderDir == null) call.respondText("not found", status = HttpStatusCode.NotFound)
+          else call.respondRedirect("/ui-builder/")
+        }
+        get("/ui-builder/{path...}") { handleUiBuilderAsset() }
 
         // The CMP/Wasm Remote Compose player is a single shared app rather than a per-catalog app.
         // Keep it opt-in while operation coverage is incomplete; an unset directory simply makes
@@ -10014,6 +10025,31 @@ class ServeHttpServer(
     call.respondBytes(bytes, wasmContentType(file.name))
   }
 
+  private suspend fun RoutingContext.handleUiBuilderAsset() {
+    val dir = uiBuilderDir
+    if (dir == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val segments = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
+    val rel = if (segments.isEmpty()) "index.html" else segments.joinToString("/")
+    val base = dir.canonicalFile.toPath()
+    val file = File(dir, rel).canonicalFile
+    if (!file.toPath().startsWith(base) || !file.isFile) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
+    call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    call.response.headers.append(HttpHeaders.ETag, etag)
+    if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    val bytes = withContext(Dispatchers.IO) { file.readBytes() }
+    call.respondBytes(bytes, wasmContentType(file.name))
+  }
+
   // ------------------------------------------------------------ agent grants
 
   /**
@@ -11097,6 +11133,11 @@ class ServeHttpServer(
         name.endsWith(".mjs") || name.endsWith(".js") -> ContentType.parse("text/javascript")
         name.endsWith(".wasm") -> ContentType.parse("application/wasm")
         name.endsWith(".json") || name.endsWith(".map") -> ContentType.Application.Json
+        name.endsWith(".ttf") -> ContentType.parse("font/ttf")
+        name.endsWith(".woff2") -> ContentType.parse("font/woff2")
+        name.endsWith(".css") -> ContentType.Text.CSS
+        name.endsWith(".svg") -> ContentType.Image.SVG
+        name.endsWith(".png") -> ContentType.Image.PNG
         else -> ContentType.Application.OctetStream
       }
 

@@ -586,6 +586,10 @@ public interface ServeOptions {
    */
   public val wasmUiDir: File?
 
+  /** Standalone Compose UI builder app served at `/ui-builder/`. */
+  public val uiBuilderDir: File?
+    get() = null
+
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   public val rcPlayerWasmDir: File?
 

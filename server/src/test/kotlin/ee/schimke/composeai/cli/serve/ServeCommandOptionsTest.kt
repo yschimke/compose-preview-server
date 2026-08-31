@@ -26,6 +26,8 @@ class ServeCommandOptionsTest {
           "2500",
           "--wasm-ui-dir",
           "/srv/wasm-ui",
+          "--ui-builder-dir",
+          "/srv/ui-builder",
         )
       )
 
@@ -39,6 +41,7 @@ class ServeCommandOptionsTest {
     assertEquals(45L, options.idleExitSeconds)
     assertEquals(2500, options.catalogMaxImages)
     assertEquals("/srv/wasm-ui", options.wasmUiDir?.path)
+    assertEquals("/srv/ui-builder", options.uiBuilderDir?.path)
   }
 
   @Test

@@ -1687,6 +1687,92 @@ class ServeHttpRoutingTest {
   }
 
   @Test
+  fun `the standalone UI builder is additive to the catalog Wasm app`() {
+    val builderDir =
+      Files.createTempDirectory("serve-ui-builder").toFile().also { it.deleteOnExit() }
+    File(builderDir, "index.html")
+      .writeText(
+        "<!doctype html><title>Compose UI builder</title><script src=builder.mjs></script>"
+      )
+    File(builderDir, "builder.mjs").writeText("window.composeUiBuilder = true")
+    File(builderDir, "builder.wasm").writeBytes(byteArrayOf(0, 97, 115, 109))
+    File(builderDir, "builder.ttf").writeBytes(byteArrayOf(0, 1, 0, 0))
+    val outsideSecret = Files.createTempFile("serve-ui-builder-secret", ".txt")
+    Files.writeString(outsideSecret, "must not be public")
+    Files.createSymbolicLink(builderDir.toPath().resolve("linked-secret.txt"), outsideSecret)
+    val catalogDir =
+      Files.createTempDirectory("serve-ui-builder-catalog").toFile().also { it.deleteOnExit() }
+    File(catalogDir, "index.html").writeText("<!doctype html><title>existing Wasm app</title>")
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register("compose-m3", host = bundle("m3"), pinned = true)
+    val builderServer =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "private-token",
+          sessions = registry,
+          defaultSessionId = "compose-m3",
+          isPublic = false,
+          wasmCatalogs = mapOf("compose-m3" to catalogDir),
+          uiBuilderDir = builderDir,
+        )
+        .also { it.start() }
+    val noRedirects = OkHttpClient.Builder().followRedirects(false).build()
+    fun fetch(path: String, client: OkHttpClient = this.client): Pair<Int, okhttp3.Response> {
+      val request = Request.Builder().url("http://127.0.0.1:${builderServer.port}$path").build()
+      val response = client.newCall(request).execute()
+      return response.code to response
+    }
+    try {
+      fetch("/ui-builder", noRedirects).let { (code, response) ->
+        response.use {
+          assertEquals(302, code)
+          assertEquals("/ui-builder/", response.header("Location"))
+        }
+      }
+      fetch("/ui-builder/").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertTrue(response.body.string().contains("Compose UI builder"))
+          assertEquals("no-cache", response.header("Cache-Control"))
+        }
+      }
+      fetch("/ui-builder/builder.mjs").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertEquals("window.composeUiBuilder = true", response.body.string())
+          assertEquals("text/javascript", response.header("Content-Type"))
+        }
+      }
+      fetch("/ui-builder/builder.wasm").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertEquals("application/wasm", response.header("Content-Type"))
+        }
+      }
+      fetch("/ui-builder/builder.ttf").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertEquals("font/ttf", response.header("Content-Type"))
+        }
+      }
+      assertEquals(404, fetch("/ui-builder/../secret").second.use { it.code })
+      assertEquals(404, fetch("/ui-builder/linked-secret.txt").second.use { it.code })
+
+      // The existing feature is still independently registered at its original route.
+      fetch("/wasm/compose-m3/").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertTrue(response.body.string().contains("existing Wasm app"))
+        }
+      }
+    } finally {
+      builderServer.stop()
+      registry.close()
+    }
+  }
+
+  @Test
   fun `private wasm route keeps auto-discovered local assets behind the path token`() {
     val appDir = Files.createTempDirectory("serve-wasm-private").toFile().also { it.deleteOnExit() }
     File(appDir, "index.html").writeText("<!doctype html><script src=app.js></script>")
