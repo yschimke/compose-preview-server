@@ -26,6 +26,7 @@ import { viewParam } from "./spec/views.js";
 import {
     activeSource,
     changesSource,
+    isSpecSource,
     offersChoice,
     sourceNote,
     type SpecSource,
@@ -1945,6 +1946,34 @@ function specRasterSrc() {
 function specAvailable() {
     return !!(specImg && specRasterSrc());
 }
+/**
+ * The picked source, in the shape `<cp-spec-compare>` needs to put it on the stage.
+ *
+ * The raster goes through [specRasterSrc] rather than straight off the button, so the comparison
+ * canvases are handed the same origin-checked URL the `<img>` is — one guard, one answer, and a
+ * `data-spec-src` that somehow arrived off-origin cannot reach a canvas by the side door.
+ *
+ * A lane with no picker reports the kit: a catalog that declares no `compareWith` pairing has only
+ * ever compared against its imported reference, and this must not tell the element otherwise.
+ */
+/** Whether the panel beside the render is the imported spec rather than a sibling's render. */
+function specSourceIsSpec() {
+    return isSpecSource(activeSource(specSourceList(), specPressedId()));
+}
+/** What the picked source calls itself, for the surfaces that have to name it. */
+function specSourceLabel() {
+    var active = activeSource(specSourceList(), specPressedId());
+    return active ? active.label : "";
+}
+function specSourceState() {
+    return {
+        reference: specRasterSrc(),
+        label:
+            specSourceLabel() ||
+            (specLane ? specLane.getAttribute("data-spec-label") || "" : ""),
+        spec: specSourceIsSpec(),
+    };
+}
 function specActive() {
     return !!(specToggle && specToggle.checked);
 }
@@ -1980,7 +2009,8 @@ function openSpec() {
     // stage there is no pair to choose a source for.
     if (specSourceGroup && offersChoice(specSourceList()))
         specSourceGroup.hidden = false;
-    if (window.cpSpecCompare) window.cpSpecCompare.open(specActualUrl());
+    if (window.cpSpecCompare)
+        window.cpSpecCompare.open(specActualUrl(), specSourceState());
 }
 /**
  * Switch which source the lane compares against.
@@ -2015,6 +2045,10 @@ function pickSpecSource(button: HTMLButtonElement) {
     // the switch has one path into the stage rather than a second copy of it.
     specImg.hidden = false;
     openSpec();
+    // The stage's own hint reads off the source too — "not a render" is false of a paired
+    // catalog's render — and nothing else on this path reconciles it: a source switch is not a
+    // lane transition, so `enterMode` never runs.
+    updateLiveToggle();
 }
 function closeSpec() {
     if (window.cpSpecCompare) window.cpSpecCompare.close();
@@ -3873,7 +3907,14 @@ function updateLiveToggle() {
             : motionActive()
               ? "recorded interaction — not a live render"
               : specActive()
-                ? "imported design spec — not a render"
+                ? // The one lane whose hint depends on WHICH pair it is showing. "Not a render" is
+                  // the whole point of the sentence and it stops being true the moment the picker
+                  // points at a paired catalog: that panel is a render, just not this catalog's.
+                  specSourceIsSpec()
+                    ? "imported design spec — not a render"
+                    : specSourceLabel()
+                      ? specSourceLabel() + "'s render — not this catalog's"
+                      : "a paired catalog's render — not this catalog's"
                 : interactive
                   ? "interactive — click / scroll the preview"
                   : // "no live lane" is only true when there is genuinely nothing to switch to. When the lane

@@ -84,9 +84,10 @@ async function mount(options: { baseline?: boolean } = {}): Promise<void> {
         <label><input class="cp-inspect" data-cp-inspect="typography" type="checkbox">Typography</label>
         <div class="cp-spec-compare" id="cp-spec-compare" hidden data-view="spec"
              data-reference="/reference/Button.png">
-          <figure data-cp-spec-panel="reference"><canvas id="cp-spec-reference"></canvas></figure>
-          <figure data-cp-spec-panel="diff"><canvas id="cp-spec-diff"></canvas></figure>
-          <figure data-cp-spec-panel="actual"><canvas id="cp-spec-actual"></canvas></figure>
+          <figure data-cp-spec-panel="reference"><canvas id="cp-spec-reference"
+            aria-label="Imported design spec"></canvas><figcaption>Spec</figcaption></figure>
+          <figure data-cp-spec-panel="diff"><canvas id="cp-spec-diff"></canvas><figcaption>Diff</figcaption></figure>
+          <figure data-cp-spec-panel="actual"><canvas id="cp-spec-actual"></canvas><figcaption>Render</figcaption></figure>
           <div class="cp-spec-wipe">
             <canvas id="cp-spec-wipe-canvas"></canvas>
             <input id="cp-spec-wipe-range" type="range" min="0" max="100" value="50">
@@ -469,6 +470,143 @@ describe("<cp-spec-compare>", () => {
         await flush();
         assert.equal(lane().view(), "slider");
         assert.equal(viewer().getAttribute("data-spec-view"), "slider");
+    });
+
+    // ---- The source picker (issue #4895) ------------------------------------------------------
+    //
+    // The picker is `viewer.js`'s: it owns the buttons, the pressed state and the raster's
+    // origin check, and names the winner on `open()`. What this element owes it is that naming a
+    // source actually MOVES the pair — the reported bug was a picker whose button latched and
+    // whose canvases went on showing the comparison they had already normalised.
+
+    const sibling = {
+        reference: "https://preview.example/wear-m3/render/AppCard.png",
+        label: "wear-m3-catalog",
+        spec: false,
+    };
+    const kit = {
+        reference: "https://preview.example/reference/Button.png",
+        label: "Figma",
+        spec: true,
+    };
+    const caption = () =>
+        document.querySelector('[data-cp-spec-panel="reference"] figcaption')
+            ?.textContent;
+
+    it("compares against the source it was opened with, not the served reference", async () => {
+        const stub = stubCompare({ percent: 62.5, geometry: 0 });
+        await mount();
+        lane().open("/render/AppCard.png", sibling);
+        for (let i = 0; i < 5; i++) await flush();
+        assert.deepEqual(stub.normalise, [
+            `${sibling.reference}|https://preview.example/render/AppCard.png`,
+        ]);
+    });
+
+    it("re-normalises the pair when the picker switches source", async () => {
+        // The bug: the reference was latched at install off `data-reference`, so a switch
+        // re-pointed the hidden raster and left every canvas painting the first pair.
+        const stub = stubCompare({ percent: 62.5, geometry: 0 });
+        await mount();
+        lane().open("/render/AppCard.png", kit);
+        for (let i = 0; i < 5; i++) await flush();
+        lane().open("/render/AppCard.png", sibling);
+        for (let i = 0; i < 5; i++) await flush();
+        assert.deepEqual(stub.normalise, [
+            `${kit.reference}|https://preview.example/render/AppCard.png`,
+            `${sibling.reference}|https://preview.example/render/AppCard.png`,
+        ]);
+    });
+
+    it("names the sibling on the panel it is showing, and gives the caption back", async () => {
+        stubCompare();
+        await mount();
+        lane().open("/render/AppCard.png", sibling);
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(caption(), "wear-m3-catalog");
+        assert.equal(
+            document
+                .getElementById("cp-spec-reference")!
+                .getAttribute("aria-label"),
+            "wear-m3-catalog's own render of this component",
+        );
+
+        lane().open("/render/AppCard.png", kit);
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(caption(), "Spec", "the served caption returns");
+        assert.equal(
+            document
+                .getElementById("cp-spec-reference")!
+                .getAttribute("aria-label"),
+            "Imported design spec",
+        );
+    });
+
+    it("keeps the design-spec chip out of a sibling comparison", async () => {
+        // The pair is scored — two renders is a real pixel comparison, and it is the number the
+        // cross-system parity surfaces report. What it is not is a SPEC match, and the chip is
+        // named for the kit's provider, so putting 62.5% there would be one comparison wearing
+        // another's label.
+        const stub = stubCompare({ percent: 62.5, geometry: 0 });
+        await mount();
+        lane().open("/render/AppCard.png", sibling);
+        press("diff");
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(score().textContent, "62.5% match · 18.75% pixels differ");
+        assert.equal(stub.scores.length, 1, "the pair is still measured");
+        assert.equal(chip().textContent, "Button", "just the provider label");
+        assert.equal(chip().getAttribute("data-spec-match"), null);
+
+        lane().close();
+        assert.equal(chip().textContent, "Button 97.1%");
+        assert.equal(caption(), "Spec");
+    });
+
+    it("withholds the kit's typography from a sibling's panel", async () => {
+        // `#cp-spec-annotations` describes the imported reference. With another catalog's render in
+        // the panel there is nothing those markers were measured on.
+        stubCompare();
+        globalThis.fetch = (async () => ({
+            ok: true,
+            json: async () => ({
+                annotations: [
+                    {
+                        kind: "typography",
+                        bounds: { x: 1, y: 1, width: 4, height: 2 },
+                        role: "Label",
+                        label: "labelLarge",
+                        detail: { token: "m3/label/large", fontWeight: "600" },
+                    },
+                ],
+            }),
+        })) as unknown as typeof fetch;
+        await mount();
+        document.querySelector<HTMLInputElement>(
+            '[data-cp-inspect="typography"]',
+        )!.checked = true;
+        lane().open("/render/AppCard.png", sibling);
+        press("diff");
+        for (let i = 0; i < 8; i++) await flush();
+        assert.equal(
+            document.querySelectorAll(
+                '[data-cp-spec-panel="diff"] .cp-spec-type-box',
+            ).length,
+            0,
+        );
+    });
+
+    it("says which side is baseline-only when a sibling is off the baseline", async () => {
+        const stub = stubCompare({ percent: 88.9, geometry: 0 });
+        await mount({ baseline: false });
+        lane().open("/render/AppCard.png?themeProvider=HighContrast", sibling);
+        press("diff");
+        for (let i = 0; i < 5; i++) await flush();
+        assert.deepEqual(stub.scores, []);
+        assert.equal(
+            score().textContent,
+            "18.75% pixels differ · wear-m3-catalog's render is baseline-only, " +
+                "so this is not a match score — clear the overrides to compare",
+        );
     });
 
     it("stays silent on a preview with no published reference", async () => {
