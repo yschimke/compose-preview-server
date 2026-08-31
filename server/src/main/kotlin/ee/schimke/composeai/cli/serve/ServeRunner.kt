@@ -17,7 +17,7 @@ import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
-import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderRenderExecutor
+import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedComposeExportExecutor
 import java.awt.Desktop
 import java.io.File
@@ -2278,7 +2278,7 @@ public class ServeRunner(
     }
     System.err.println("serve: UI-builder design API persisting to ${directory.absolutePath}")
     val renderer = runCatching {
-      ProductionUiBuilderRenderExecutor.open(directory.resolve("renderer").toPath())
+      ServeUiBuilderRenderPort.open(directory.resolve("renderer").toPath())
     }
       .onFailure { failure ->
         System.err.println(
@@ -2287,11 +2287,12 @@ public class ServeRunner(
         )
       }
       .getOrNull()
-    val exporter = renderer ?: RevisionPinnedComposeExportExecutor()
+    val exporter =
+      renderer?.let(::ProductionUiBuilderExportExecutor) ?: RevisionPinnedComposeExportExecutor()
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         exportCapabilities =
-          renderer?.capabilities
+          (exporter as? ProductionUiBuilderExportExecutor)?.capabilities
             ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
               composeCode = true,
               svg = false,

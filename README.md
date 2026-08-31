@@ -5,7 +5,7 @@ and the browser viewer surfaces. Its history was extracted from
 [`yschimke/compose-ai-tools`](https://github.com/yschimke/compose-ai-tools); the CLI remains there and
 consumes this repository's published library.
 
-The JVM API is published as two artifacts:
+The JVM API is published as three lockstep artifacts:
 
 ```kotlin
 // The server: catalog hosting, the HTTP routes, the playground, the viewer surfaces.
@@ -15,12 +15,21 @@ implementation("ee.schimke.composeai:compose-preview-serve:<version>")
 // What an OFFLINE caller (`compose-preview bundle render`, `compose-preview history manifest`)
 // needs. `compose-preview-serve` depends on this, so depending on the server still gets you both.
 implementation("ee.schimke.composeai:compose-preview-render-host:<version>")
+
+// Persistent collaborative design service, catalog validation and export orchestration. It has no
+// Ktor server, daemon/render-host implementation, MCP SDK or Compose UI dependency.
+implementation("ee.schimke.composeai:compose-preview-ui-builder-runtime:<version>")
 ```
 
 `:render-host` exists because rendering a packed bundle and reading a preview timeline out of git
 open no sockets, and a caller doing only that should not link `ktor-server-*`, `jmdns` and
 `kotlin-reflect` to do it. `render-host/build.gradle.kts` records the measured before/after and the
 transitives it deliberately cannot drop; `checkRenderHostIsServerFree` keeps the claim honest.
+
+`:ui-builder-runtime` owns authoritative persistent design state, exact catalog validation and
+revision-pinned export orchestration. `:server` supplies HTTP/authentication and adapts its narrow
+render request onto `:render-host`. The runtime therefore has no Ktor, daemon/render-host, MCP or
+Compose UI dependency, while the offline render host has no UI-builder protocol or service edge.
 
 The build is intentionally repository-independent. Compose Preview implementation artifacts resolve
 from Maven Central at the version in `gradle/libs.versions.toml`; wire contracts resolve separately
@@ -36,10 +45,10 @@ npm --prefix serve-web run verify
 ```
 
 The independently installable visual harness lives in `preview-harness/`. The experimental
-Compose/Wasm frontend lives in `wasm-ui/`. The UI builder incubates in the dependency-isolated
-`ui-builder/` module; it has its own reducer, native Compose renderer, standalone Wasm visual
-fixture and code exporter so that it can later move out without pulling server implementation with
-it. `ui-builder-reference-jetcaster/` is a separately compiled, provenance-pinned Compose/Wasm
+Compose/Wasm frontend lives in `wasm-ui/`. The UI builder frontend incubates in the
+dependency-isolated `ui-builder/` module; its native Compose renderer and standalone Wasm visual
+fixture remain separate from the published JVM runtime. `ui-builder-reference-jetcaster/` is a
+separately compiled, provenance-pinned Compose/Wasm
 oracle for the primary Jetcaster visual benchmark and has no dependency on the builder module.
 The server distribution packages the builder's Jetcaster benchmark preview as a separate app at
 `/ui-builder/`; the existing catalog-scoped `/wasm/<system>/` preview application remains a

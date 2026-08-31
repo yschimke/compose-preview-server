@@ -1,10 +1,7 @@
 package ee.schimke.composeai.uibuilder.service
 
-import ee.schimke.composeai.cli.serve.FakeRenderSession
-import ee.schimke.composeai.cli.serve.ServePreview
-import ee.schimke.composeai.cli.serve.ServeRenderHost
 import ee.schimke.composeai.uibuilder.protocol.*
-import java.io.File
+import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.Base64
@@ -21,7 +18,6 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
 
 class ProductionUiBuilderRuntimeTest {
@@ -50,6 +46,16 @@ class ProductionUiBuilderRuntimeTest {
               ("text" to document().nodes.getValue("text").copy(componentId = "m3/not-real"))
         )
     assertEquals("UNKNOWN_COMPONENT", catalogs.validate(invalid, catalog)?.code)
+  }
+
+  @Test
+  fun `runtime owns one deterministic packaged renderer bundle`() {
+    val first = PackagedUiBuilderRenderBundle.copyTo(stateDirectory.resolve("bundle"))
+    val repeated = PackagedUiBuilderRenderBundle.copyTo(stateDirectory.resolve("bundle"))
+
+    assertEquals(first, repeated)
+    assertTrue(Files.size(first) > 0)
+    assertTrue(first.startsWith(stateDirectory.resolve("bundle")))
   }
 
   @Test
@@ -168,21 +174,25 @@ class ProductionUiBuilderRuntimeTest {
   }
 
   @Test
-  fun `daemon adapter sends exact saved document to deterministic png and svg renders`() {
-    val renderRoot = File(stateDirectory.toFile(), "fake-render")
-    val session = FakeRenderSession(renderRoot, includeNamedOverridesInArtifacts = true)
-    val host =
-      ServeRenderHost(
-        session = session,
-        previews =
-          listOf(
-            ServePreview(
-              ProductionUiBuilderRenderExecutor.PREVIEW_ID,
-              "Production UI builder",
-            )
-          ),
-      )
-    ProductionUiBuilderRenderExecutor.forHost(host).use { exporter ->
+  fun `render port receives exact saved document and returns deterministic png and svg`() {
+    val requests = mutableListOf<UiBuilderRenderRequest>()
+    val renderer =
+      object : UiBuilderRenderPort {
+        override val supportsSvg = true
+
+        override fun renderPng(request: UiBuilderRenderRequest): ByteArray {
+          requests += request
+          return "png:${request.encodedDocument}".toByteArray()
+        }
+
+        override fun renderSvg(request: UiBuilderRenderRequest): ByteArray {
+          requests += request
+          return "<svg>${request.encodedDocument}</svg>".toByteArray()
+        }
+
+        override fun close() = Unit
+      }
+    ProductionUiBuilderExportExecutor(renderer).use { exporter ->
       val catalog =
         CurrentM3UiBuilderCatalogExecutor(exportCapabilities = exporter.capabilities)
           .listCatalogs()
@@ -220,82 +230,11 @@ class ProductionUiBuilderRuntimeTest {
           .contains("Exact edited document")
       )
       assertTrue(editedSvg.content.contains("Exact edited document"))
-      assertEquals(4, session.renderCount.get(), "one render for each distinct PNG/SVG override")
-      assertEquals(400, session.lastRenderOverrides?.widthPx)
-      assertEquals(800, session.lastRenderOverrides?.heightPx)
-      assertEquals(1f, session.lastRenderOverrides?.density)
-    }
-  }
-
-  @Test
-  fun `packaged bundle renders deterministic png and figma svg with real daemon`() {
-    val appHome = System.getenv("UI_BUILDER_REAL_RENDER_APP_HOME")?.let(::File)
-    assumeTrue(
-      appHome?.resolve("lib-daemon-desktop")?.isDirectory == true &&
-        appHome.resolve("lib-renderer").isDirectory,
-      "Run with UI_BUILDER_REAL_RENDER_APP_HOME pointing at a compose-preview install to " +
-        "exercise the real daemon",
-    )
-
-    val realAppHome = requireNotNull(appHome)
-    val previousAppHome = System.getProperty("composeai.cli.appHome")
-    System.setProperty("composeai.cli.appHome", realAppHome.absolutePath)
-    try {
-      ProductionUiBuilderRenderExecutor.open(stateDirectory.resolve("real-render")).use { exporter
-        ->
-        assertTrue(exporter.capabilities.png)
-        assertTrue(exporter.capabilities.svg)
-        val catalog =
-          CurrentM3UiBuilderCatalogExecutor(exportCapabilities = exporter.capabilities)
-            .listCatalogs()
-            .single()
-        val renderDocument =
-          document()
-            .copy(
-              environment =
-                document().environment.copy(widthDp = 1280, heightDp = 800, density = 1.0)
-            )
-        val initial = pinned(renderDocument, catalog)
-        val edited =
-          pinned(
-            renderDocument.copy(
-              revision = 1,
-              nodes =
-                renderDocument.nodes +
-                  ("text" to
-                    renderDocument.nodes
-                      .getValue("text")
-                      .copy(
-                        properties = mapOf("text" to StringValueV1("Rendered by real daemon"))
-                      )),
-            ),
-            catalog,
-          )
-
-        val png = exporter.export(initial.copy(format = ExportFormatV1.PNG))
-        val repeatedPng = exporter.export(initial.copy(format = ExportFormatV1.PNG))
-        val editedPng = exporter.export(edited.copy(format = ExportFormatV1.PNG))
-        val svg = exporter.export(initial.copy(format = ExportFormatV1.SVG))
-        val repeatedSvg = exporter.export(initial.copy(format = ExportFormatV1.SVG))
-        val editedSvg = exporter.export(edited.copy(format = ExportFormatV1.SVG))
-
-        assertEquals(png.contentDigest, repeatedPng.contentDigest)
-        assertEquals(svg.contentDigest, repeatedSvg.contentDigest)
-        assertNotEquals(png.contentDigest, editedPng.contentDigest)
-        assertNotEquals(svg.contentDigest, editedSvg.contentDigest)
-        val pngBytes = Base64.getDecoder().decode(png.content)
-        assertTrue(pngBytes.copyOfRange(0, PNG_SIGNATURE.size).contentEquals(PNG_SIGNATURE))
-        assertEquals(1280, pngBytes.pngDimension(16))
-        assertEquals(800, pngBytes.pngDimension(20))
-        assertTrue(svg.content.startsWith("<svg"))
-        assertTrue(editedSvg.content.contains("Rendered by real daemon"))
-      }
-    } finally {
-      if (previousAppHome == null) {
-        System.clearProperty("composeai.cli.appHome")
-      } else {
-        System.setProperty("composeai.cli.appHome", previousAppHome)
-      }
+      assertEquals(6, requests.size)
+      assertEquals(400, requests.last().widthPx)
+      assertEquals(800, requests.last().heightPx)
+      assertEquals(1f, requests.last().density)
+      assertTrue(requests.last().encodedDocument.contains("Exact edited document"))
     }
   }
 
@@ -357,14 +296,6 @@ class ProductionUiBuilderRuntimeTest {
         ),
     )
 }
-
-private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
-
-private fun ByteArray.pngDimension(offset: Int): Int =
-  ((this[offset].toInt() and 0xff) shl 24) or
-    ((this[offset + 1].toInt() and 0xff) shl 16) or
-    ((this[offset + 2].toInt() and 0xff) shl 8) or
-    (this[offset + 3].toInt() and 0xff)
 
 private object PersistentUiBuilderServiceJsonForTest {
   private val json = kotlinx.serialization.json.Json { encodeDefaults = true }

@@ -105,7 +105,6 @@ dependencies {
   api(libs.composeai.render.session.subprocess)
   api(libs.composeai.data.layoutinspector.core)
   api(libs.composeai.data.theme.core)
-  api(libs.composeai.ui.builder.protocol)
   // Both reached by FULLY-QUALIFIED name rather than an import, so they are easy to miss when
   // reading the sources for what this module needs: `ServePreview.overrides` and
   // `ServePreview.remoteComposeKnobs` are declared as
@@ -128,24 +127,6 @@ dependencies {
   // `FakeRenderSession` implements `RenderSession`, so the interface is part of the fixture's own
   // signature, not an implementation detail of it.
   testFixturesApi(libs.composeai.render.session.api)
-}
-
-// The first production UI-builder catalog is the provenance-pinned M3/Jetcaster capability
-// document. Package the reviewed source into the published render-host artifact so startup never
-// reaches back into a checkout or over the network. Keeping this as an explicit single-file input
-// also prevents an accidental second catalog from becoming part of the production surface.
-tasks.processResources {
-  from(
-    rootProject.file("docs/design/fixtures/ui-builder/jetcaster-discover-capabilities-v1.json")
-  ) {
-    into("ee/schimke/composeai/uibuilder/catalogs")
-    rename { "m3-catalog-v1.json" }
-  }
-  dependsOn(project(":ui-builder").tasks.named("composePreviewBundle"))
-  from(project(":ui-builder").layout.buildDirectory.file("compose-previews/bundle.png")) {
-    into("ee/schimke/composeai/uibuilder/renderer")
-    rename { "ui-builder-renderer.bundle.png" }
-  }
 }
 
 // Publish the test fixtures under the capability a consumer's `testFixtures(...)` actually asks
@@ -282,6 +263,9 @@ tasks.register<CheckRenderHostIsServerFree>("checkRenderHostIsServerFree") {
       // "no web server", and an exact list would pass the first time someone swaps CIO for Netty.
       "io.ktor:ktor-server",
       "org.jmdns:",
+      // UI-builder service and protocol ownership moved to its own published runtime. Offline
+      // render/history callers must not regain that product surface transitively.
+      "ee.schimke.composeai:ui-builder-protocol",
       // The Kotlin compiler frontend behind the playground's in-process compile. `:server` loads it
       // through an isolated classloader and keeps it off its own runtime classpath too; on this
       // module it should not appear by any route. Note this is NOT `kotlin-build-tools-api`, which
