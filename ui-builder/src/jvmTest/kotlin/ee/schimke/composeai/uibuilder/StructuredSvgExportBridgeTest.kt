@@ -45,9 +45,8 @@ class StructuredSvgExportBridgeTest {
     assertEquals(4, Regex("<image\\b").findAll(firstRaw.svg).count())
     assertTrue(firstRaw.rasterRecords.isEmpty())
     assertFalse(Regex("(?:href|src)=\"https?://").containsMatchIn(firstRaw.svg))
-    val textElements =
-      checkNotNull(parseStrictSvg(firstRaw.svg).document).elements.filter { it.name == "text" }
-    assertEquals(38, textElements.size)
+    val elements = checkNotNull(parseStrictSvg(firstRaw.svg).document).elements
+    val textElements = elements.filter { it.name == "text" }
     assertTrue(textElements.all { it.attributes["font-family"] == "Inter" })
     assertTrue(textElements.all { it.attributes["font-style"] == "normal" })
     assertTrue(textElements.all { it.attributes["data-compose-node-id"] in document.nodes })
@@ -66,6 +65,9 @@ class StructuredSvgExportBridgeTest {
     )
     val emittedTextNodeIds =
       textElements.map { it.attributes.getValue("data-compose-node-id") }.toSet()
+    // Skia may split a wrapped text node into a different number of line fragments across its
+    // Linux and macOS backends. Authored node identity is the stable structural contract.
+    assertEquals(26, emittedTextNodeIds.size)
     assertEquals(
       document.nodes.values.filter { it.componentId == "m3/text" }.map { it.id }.toSet() -
         "detail-episode-139-meta",
@@ -73,6 +75,7 @@ class StructuredSvgExportBridgeTest {
     )
     assertFalse("detail-episode-139-meta" in emittedTextNodeIds)
     assertEquals(textElements.size, textElements.map { it.attributes.getValue("id") }.toSet().size)
+    assertEquals(34, elements.count { it.name == "path" })
 
     val result = executeSavedDocumentSvgExport(job, catalog, JvmSkiaStructuredSvgRecorder)
     val exported = assertIs<SavedDocumentSvgExportResult.Ok>(result, result.toString())
