@@ -17,22 +17,26 @@ data class DesignValidators(
 sealed interface DesignServiceUpdate {
   val designId: String
   val revision: Int
+  val sequence: Long
   val documentHash: String
 
-  /** Replacement state sent when a client's requested revision is no longer retained. */
+  /** Replacement state sent when a client's requested sequence is no longer retained. */
   data class Snapshot(
     val document: UiBuilderDocument,
-    val firstRetainedRevision: Int,
+    val lastSequence: Long,
+    val retainedFromSequence: Long,
     override val documentHash: String = sha256Hex(canonicalDocument(document)),
   ) : DesignServiceUpdate {
     override val designId: String = document.id
     override val revision: Int = document.revision
+    override val sequence: Long = lastSequence
   }
 
   /** One server-ordered accepted mutation. Rejected mutations are returned only to their caller. */
   data class Committed(
     override val designId: String,
     override val revision: Int,
+    override val sequence: Long,
     override val documentHash: String,
     val event: CollaborationEvent,
   ) : DesignServiceUpdate
@@ -67,6 +71,7 @@ class InMemoryDesignService(
 ) {
   private data class DesignEntry(
     var state: CollaborationState,
+    var lastSequence: Long = 0,
     val history: ArrayDeque<DesignServiceUpdate.Committed> = ArrayDeque(),
     val subscribers: MutableMap<Long, (DesignServiceUpdate) -> Unit> = linkedMapOf(),
   )
@@ -96,7 +101,7 @@ class InMemoryDesignService(
     val state = CollaborationState(document)
     initialDocumentSink(document)
     designs[document.id] = DesignEntry(state)
-    CreateDesignResult.Created(snapshot(state, firstRetainedRevision = document.revision))
+    CreateDesignResult.Created(snapshot(designs.getValue(document.id)))
   }
 
   /**
@@ -111,6 +116,10 @@ class InMemoryDesignService(
       throw DesignStoreCorruptionException(issue.message)
     }
     var state = CollaborationState(initial)
+    var lastSequence = recovery.snapshotLastSequence
+    if (lastSequence < 0) {
+      throw DesignStoreCorruptionException("negative snapshot sequence for ${initial.id}")
+    }
     val history = ArrayDeque<DesignServiceUpdate.Committed>()
     recovery.events.forEachIndexed { index, event ->
       val application =
@@ -136,27 +145,27 @@ class InMemoryDesignService(
       state = application.state
       val accepted = event.outcome as? CommandOutcome.Accepted
       if (accepted != null && !accepted.idempotentReplay) {
+        lastSequence = nextSequence(lastSequence, initial.id)
         history +=
           DesignServiceUpdate.Committed(
             designId = initial.id,
             revision = accepted.committedRevision,
+            sequence = lastSequence,
             documentHash = sha256Hex(accepted.canonicalDocument),
             event = event,
           )
         while (history.size > retainedCommittedUpdates) history.removeFirst()
       }
     }
-    val entry = DesignEntry(state, history)
+    val entry = DesignEntry(state, lastSequence, history)
     designs[initial.id] = entry
-    snapshot(state, firstRevision(entry))
+    snapshot(entry)
   }
 
-  fun list(): List<DesignServiceUpdate.Snapshot> = lock.withLock {
-    designs.values.map { entry -> snapshot(entry.state, firstRevision(entry)) }
-  }
+  fun list(): List<DesignServiceUpdate.Snapshot> = lock.withLock { designs.values.map(::snapshot) }
 
   fun open(designId: String): DesignServiceUpdate.Snapshot? = lock.withLock {
-    designs[designId]?.let { entry -> snapshot(entry.state, firstRevision(entry)) }
+    designs[designId]?.let(::snapshot)
   }
 
   fun apply(command: DesignCommand): DesignSubmission =
@@ -175,13 +184,13 @@ class InMemoryDesignService(
     }
 
   /**
-   * Subscribes atomically with catch-up. A retained revision receives only later commits; an old or
-   * future revision receives a replacement snapshot. The callback is never invoked under the
+   * Subscribes atomically with catch-up. A retained sequence receives only later commits; an old or
+   * future sequence receives a replacement snapshot. The callback is never invoked under the
    * reducer lock.
    */
   fun subscribe(
     designId: String,
-    afterRevision: Int?,
+    afterSequence: Long?,
     listener: (DesignServiceUpdate) -> Unit,
   ): Closeable? {
     val initial: List<DesignServiceUpdate>
@@ -189,7 +198,7 @@ class InMemoryDesignService(
     lock.withLock {
       val entry = designs[designId] ?: return null
       subscriberId = nextSubscriberId++
-      initial = catchUp(entry, afterRevision)
+      initial = catchUp(entry, afterSequence)
       entry.subscribers[subscriberId] = listener
     }
     initial.forEach(listener)
@@ -230,15 +239,18 @@ class InMemoryDesignService(
         return DesignSubmission(application)
       }
       val event = CollaborationEvent(mutation, accepted)
+      val sequence = nextSequence(entry.lastSequence, designId)
       eventSink(designId, event)
       val update =
         DesignServiceUpdate.Committed(
           designId = designId,
           revision = accepted.committedRevision,
+          sequence = sequence,
           documentHash = sha256Hex(accepted.canonicalDocument),
           event = event,
         )
       entry.state = application.state
+      entry.lastSequence = sequence
       entry.history += update
       while (entry.history.size > retainedCommittedUpdates) entry.history.removeFirst()
       listeners = entry.subscribers.values.toList()
@@ -250,24 +262,35 @@ class InMemoryDesignService(
 
   private fun catchUp(
     entry: DesignEntry,
-    afterRevision: Int?,
+    afterSequence: Long?,
   ): List<DesignServiceUpdate> {
-    val current = entry.state.document.revision
-    val first = firstRevision(entry)
+    val earliestRetainedCursor =
+      entry.history.firstOrNull()?.sequence?.minus(1) ?: entry.lastSequence
     return when {
-      afterRevision == null || afterRevision < first - 1 || afterRevision > current ->
-        listOf(snapshot(entry.state, first))
-      else -> entry.history.filter { it.revision > afterRevision }
+      afterSequence == null ||
+        afterSequence < earliestRetainedCursor ||
+        afterSequence > entry.lastSequence -> listOf(snapshot(entry))
+      else -> entry.history.filter { it.sequence > afterSequence }
     }
   }
 
-  private fun firstRevision(entry: DesignEntry): Int =
-    entry.history.firstOrNull()?.revision ?: entry.state.document.revision
+  private fun retainedFromSequence(entry: DesignEntry): Long =
+    entry.history.firstOrNull()?.sequence
+      ?: if (entry.lastSequence == Long.MAX_VALUE) Long.MAX_VALUE else entry.lastSequence + 1
 
-  private fun snapshot(
-    state: CollaborationState,
-    firstRetainedRevision: Int,
-  ) = DesignServiceUpdate.Snapshot(state.document, firstRetainedRevision)
+  private fun snapshot(entry: DesignEntry) =
+    DesignServiceUpdate.Snapshot(
+      document = entry.state.document,
+      lastSequence = entry.lastSequence,
+      retainedFromSequence = retainedFromSequence(entry),
+    )
+
+  private fun nextSequence(current: Long, designId: String): Long {
+    if (current == Long.MAX_VALUE) {
+      throw DesignStoreCorruptionException("accepted sequence exhausted for $designId")
+    }
+    return current + 1
+  }
 
   private fun missingDocument(designId: String) =
     UiBuilderDocument(
@@ -320,9 +343,9 @@ class PersistentDesignService(
 
   fun subscribe(
     designId: String,
-    afterRevision: Int?,
+    afterSequence: Long?,
     listener: (DesignServiceUpdate) -> Unit,
-  ): Closeable? = delegate.subscribe(designId, afterRevision, listener)
+  ): Closeable? = delegate.subscribe(designId, afterSequence, listener)
 }
 
 private fun validateTopology(document: UiBuilderDocument): String? {

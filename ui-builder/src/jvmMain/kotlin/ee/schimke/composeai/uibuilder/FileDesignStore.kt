@@ -23,6 +23,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 class DesignStoreCorruptionException(message: String, cause: Throwable? = null) :
@@ -43,6 +44,8 @@ data class DesignStoreLimits(
 
 data class StoredDesignRecovery(
   val initialDocument: UiBuilderDocument,
+  /** Accepted-commit cursor represented by [initialDocument], before replaying [events]. */
+  val snapshotLastSequence: Long,
   val events: List<CollaborationEvent>,
   val ignoredPartialTailBytes: Int = 0,
 )
@@ -90,6 +93,7 @@ class FileDesignStore(
         if (Files.exists(snapshot)) throw IllegalStateException("design $designId already exists")
         val payload = buildJsonObject {
           put("schema", SNAPSHOT_SCHEMA)
+          put("lastSequence", 0)
           put("initialDocument", json.encodeToJsonElement(initialDocument))
         }
         val bytes = encodeEnvelope(payload).toByteArray(StandardCharsets.UTF_8)
@@ -156,8 +160,17 @@ class FileDesignStore(
         if (!Files.isRegularFile(snapshot)) return@withLock null
         requireFileWithinLimit(snapshot, limits.maxSnapshotBytes, "$safeId/$SNAPSHOT_FILE")
         val snapshotPayload = decodeEnvelope(Files.readString(snapshot), "$safeId/$SNAPSHOT_FILE")
-        if (snapshotPayload.string("schema") != SNAPSHOT_SCHEMA) {
-          throw DesignStoreCorruptionException("unsupported snapshot schema for $safeId")
+        when (val schema = snapshotPayload.string("schema")) {
+          SNAPSHOT_SCHEMA -> Unit
+          LEGACY_SNAPSHOT_SCHEMA ->
+            throw DesignStoreCorruptionException(
+              "snapshot schema $schema for $safeId has no durable sequence; migration required"
+            )
+          else -> throw DesignStoreCorruptionException("unsupported snapshot schema for $safeId")
+        }
+        val snapshotLastSequence = snapshotPayload.requiredLong("lastSequence")
+        if (snapshotLastSequence < 0) {
+          throw DesignStoreCorruptionException("negative snapshot sequence for $safeId")
         }
         val initial =
           try {
@@ -168,7 +181,9 @@ class FileDesignStore(
             throw DesignStoreCorruptionException("invalid initial document for $safeId", failure)
           }
         val eventFile = directory.resolve(EVENTS_FILE)
-        if (!Files.exists(eventFile)) return@withLock StoredDesignRecovery(initial, emptyList())
+        if (!Files.exists(eventFile)) {
+          return@withLock StoredDesignRecovery(initial, snapshotLastSequence, emptyList())
+        }
         requireFileWithinLimit(eventFile, limits.maxEventLogBytes, "$safeId/$EVENTS_FILE")
         val bytes = Files.readAllBytes(eventFile)
         val events = mutableListOf<CollaborationEvent>()
@@ -187,6 +202,7 @@ class FileDesignStore(
         }
         StoredDesignRecovery(
           initialDocument = initial,
+          snapshotLastSequence = snapshotLastSequence,
           events = events,
           ignoredPartialTailBytes = bytes.size - lineStart,
         )
@@ -392,6 +408,10 @@ class FileDesignStore(
     this[name]?.jsonPrimitive?.intOrNull
       ?: throw IllegalArgumentException("$name must be an integer")
 
+  private fun JsonObject.requiredLong(name: String): Long =
+    this[name]?.jsonPrimitive?.longOrNull
+      ?: throw DesignStoreCorruptionException("$name must be a long integer")
+
   private fun JsonObject.optionalInt(name: String): Int? = this[name]?.jsonPrimitive?.intOrNull
 
   private fun JsonObject.requiredBoolean(name: String): Boolean =
@@ -401,7 +421,8 @@ class FileDesignStore(
   companion object {
     private const val SNAPSHOT_FILE = "snapshot.json"
     private const val EVENTS_FILE = "events.jsonl"
-    private const val SNAPSHOT_SCHEMA = "compose-ui-builder-store-snapshot/v1"
+    private const val SNAPSHOT_SCHEMA = "compose-ui-builder-store-snapshot/v2"
+    private const val LEGACY_SNAPSHOT_SCHEMA = "compose-ui-builder-store-snapshot/v1"
     private const val EVENT_SCHEMA = "compose-ui-builder-store-event/v1"
     private val json = Json { encodeDefaults = true }
   }

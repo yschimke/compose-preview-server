@@ -11,6 +11,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
 class FileDesignStoreTest {
@@ -41,6 +42,7 @@ class FileDesignStoreTest {
 
     val recovered = assertNotNull(FileDesignStore(root).load("design"))
     assertEquals(0, recovered.ignoredPartialTailBytes)
+    assertEquals(0L, recovered.snapshotLastSequence)
     assertEquals(listOf("accepted", "rejected"), recovered.events.map { it.mutation.operationId })
     val replayed =
       CollaborationReducer.replayEvents(
@@ -224,6 +226,28 @@ class FileDesignStoreTest {
         )
         .load("design")
     }
+  }
+
+  @Test
+  fun `legacy snapshots without a durable sequence fail with a migration diagnostic`() {
+    val root = Files.createTempDirectory("ui-builder-store-legacy-sequence")
+    val store = FileDesignStore(root)
+    store.create(document())
+    val snapshot = root.resolve("design/snapshot.json")
+    val encoded = kotlinx.serialization.json.Json.parseToJsonElement(Files.readString(snapshot))
+    val currentPayload = encoded.jsonObject.getValue("payload").jsonObject
+    val legacyPayload = buildJsonObject {
+      put("schema", "compose-ui-builder-store-snapshot/v1")
+      put("initialDocument", currentPayload.getValue("initialDocument"))
+    }
+    val legacyEnvelope = buildJsonObject {
+      put("checksumSha256", sha256Hex(canonicalJson(legacyPayload)))
+      put("payload", legacyPayload)
+    }
+    Files.writeString(snapshot, canonicalJson(legacyEnvelope))
+
+    val failure = assertFailsWith<DesignStoreCorruptionException> { store.load("design") }
+    assertTrue(failure.message.orEmpty().contains("migration required"))
   }
 
   private fun command(operationId: String, revision: Int, value: JsonObject) =

@@ -41,24 +41,38 @@ class DesignServiceTest {
     assertEquals(1, accepted.committedRevision)
     val retry = assertIs<CommandOutcome.Accepted>(service.apply(insert).application.outcome)
     assertTrue(retry.idempotentReplay)
+    val rejection =
+      service.apply(
+        command(
+          operationId = "browser-rejected",
+          revision = 99,
+          operation = DesignOperation.SetProperty("text", "text", literal("ignored")),
+        )
+      )
+    assertIs<CommandOutcome.Rejected>(rejection.application.outcome)
 
     assertEquals(listOf(1), browserUpdates.map(DesignServiceUpdate::revision))
+    assertEquals(listOf(1L), browserUpdates.map(DesignServiceUpdate::sequence))
     assertEquals(browserUpdates, mcpUpdates)
-    assertEquals(service.open("design")!!.documentHash, browserUpdates.single().documentHash)
+    val snapshot = service.open("design")!!
+    assertEquals(1L, snapshot.sequence, "retry and rejection must not advance the cursor")
+    assertEquals(snapshot.documentHash, browserUpdates.single().documentHash)
     browser.close()
     mcp.close()
   }
 
   @Test
-  fun `reconnect receives deltas while retained and snapshot after compaction`() {
+  fun `catch-up uses sequence and falls back to snapshot after retained history compaction`() {
     val service = service(retained = 2)
-    assertIs<CreateDesignResult.Created>(service.create(document()))
+    val created = assertIs<CreateDesignResult.Created>(service.create(document(revision = 10)))
+    assertEquals(10, created.snapshot.revision)
+    assertEquals(0L, created.snapshot.lastSequence)
     repeat(3) { index ->
       val result =
         service.apply(
           command(
             operationId = "write-$index",
-            revision = index,
+            revision = 10 + index,
             operation = DesignOperation.SetProperty("text", "text", literal("value-$index")),
           )
         )
@@ -69,15 +83,17 @@ class DesignServiceTest {
     }
 
     val retained = mutableListOf<DesignServiceUpdate>()
-    assertNotNull(service.subscribe("design", 1, retained::add)).close()
-    assertEquals(listOf(2, 3), retained.map(DesignServiceUpdate::revision))
+    assertNotNull(service.subscribe("design", 1L, retained::add)).close()
+    assertEquals(listOf(12, 13), retained.map(DesignServiceUpdate::revision))
+    assertEquals(listOf(2L, 3L), retained.map(DesignServiceUpdate::sequence))
     assertTrue(retained.all { it is DesignServiceUpdate.Committed })
 
     val compacted = mutableListOf<DesignServiceUpdate>()
-    assertNotNull(service.subscribe("design", 0, compacted::add)).close()
+    assertNotNull(service.subscribe("design", 0L, compacted::add)).close()
     val snapshot = assertIs<DesignServiceUpdate.Snapshot>(compacted.single())
-    assertEquals(3, snapshot.revision)
-    assertEquals(2, snapshot.firstRetainedRevision)
+    assertEquals(13, snapshot.revision)
+    assertEquals(3L, snapshot.lastSequence)
+    assertEquals(2L, snapshot.retainedFromSequence)
     assertEquals("value-2", snapshot.document.nodes.getValue("text").literalText("text"))
   }
 
@@ -132,6 +148,7 @@ class DesignServiceTest {
         operation = DesignOperation.SetProperty("text", "text", literal("persisted")),
       )
     assertIs<CommandOutcome.Accepted>(first.apply(command).application.outcome)
+    assertEquals(1L, first.open("design")!!.sequence)
 
     val restarted =
       PersistentDesignService(
@@ -142,6 +159,7 @@ class DesignServiceTest {
       "persisted",
       restarted.open("design")!!.document.nodes.getValue("text").literalText("text"),
     )
+    assertEquals(1L, restarted.open("design")!!.sequence)
     val retry = assertIs<CommandOutcome.Accepted>(restarted.apply(command).application.outcome)
     assertTrue(retry.idempotentReplay)
     val rejectedCommand =
@@ -152,6 +170,7 @@ class DesignServiceTest {
       )
     val rejection =
       assertIs<CommandOutcome.Rejected>(restarted.apply(rejectedCommand).application.outcome)
+    assertEquals(1L, restarted.open("design")!!.sequence)
 
     val secondRestart =
       PersistentDesignService(
@@ -159,7 +178,17 @@ class DesignServiceTest {
         DesignValidationProvider { DesignValidators(property = propertyValidator) },
       )
     assertEquals(rejection, secondRestart.apply(rejectedCommand).application.outcome)
-    assertEquals(2, FileDesignStore(root).load("design")!!.events.size)
+    assertEquals(1L, secondRestart.open("design")!!.sequence)
+    val secondAccepted =
+      secondRestart.apply(
+        command(
+          operationId = "durable-second",
+          revision = 1,
+          operation = DesignOperation.SetProperty("text", "text", literal("again")),
+        )
+      )
+    assertEquals(2L, assertNotNull(secondAccepted.update).sequence)
+    assertEquals(3, FileDesignStore(root).load("design")!!.events.size)
   }
 
   @Test
@@ -185,6 +214,7 @@ class DesignServiceTest {
     }
     val snapshot = service.open("design")!!
     assertEquals(0, snapshot.revision)
+    assertEquals(0L, snapshot.sequence)
     assertEquals("Initial", snapshot.document.nodes.getValue("text").literalText("text"))
     assertTrue(updates.isEmpty())
   }
@@ -210,12 +240,12 @@ class DesignServiceTest {
       operations = listOf(operation),
     )
 
-  private fun document() =
+  private fun document(revision: Int = 0) =
     UiBuilderDocument(
       schema = "compose-ui-builder-document/v1",
       id = "design",
       title = "Service",
-      revision = 0,
+      revision = revision,
       catalogPin = JsonObject(emptyMap()),
       environment = JsonObject(emptyMap()),
       stateVariables = JsonObject(emptyMap()),
