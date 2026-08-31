@@ -372,6 +372,9 @@ const STYLED_FIXTURES = new Set([
   // one are the same screenshot.
   "serve-reference-compare-round-device",
   "serve-viewer",
+  // The WebGL/WebXR stage is a separate, selectively-loaded renderer. This fixture keeps its
+  // desktop orbit presentation and headset affordance in the normal visual-diff workflow.
+  "serve-viewer-spatial",
   "serve-parity",
   "serve-viewer-catalog-knobs",
   "serve-landing-catalog-palette",
@@ -525,6 +528,7 @@ const SERVE_ASSETS = [
   ["remote-compose.js", "text/javascript"],
   ["codemirror.js", "text/javascript"],
   ["viewer.js", "text/javascript"],
+  ["spatial-view.js", "text/javascript"],
   ["format-compare.js", "text/javascript"],
   // Fetched by `chrome/reportLauncher.ts` when the report launcher's panel is first opened, and
   // immediately on `/report-bug`. Routed here so the `report-menu` state below shoots the real
@@ -558,6 +562,7 @@ const COMPONENT_ASSETS = {
   "cp-revision-runs": ["viewer-components.js"],
   "cp-spec-compare": ["viewer-components.js"],
   "cp-viewer-drawers": ["viewer-components.js"],
+  "cp-spatial-view": ["spatial-view.js"],
   "cp-acceptance": ["known-differences.js"],
   "cp-acceptance-audit": ["known-differences.js"],
   "cp-report-classification": ["serve-chrome.js"],
@@ -3529,6 +3534,52 @@ for (const fixture of listPageFixtures()) {
           body: JSON.stringify(TAG_INDEX_PAYLOAD),
         }),
       );
+      await page.route("**/spatial/**", (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname.endsWith("/scene.json")) {
+          return route.fulfill({
+            contentType: "application/json",
+            body: JSON.stringify({
+              version: 1,
+              units: "dp",
+              camera: {
+                kind: "orbit",
+                target: { x: 0, y: 0, z: 0 },
+                distance: 1200,
+                yawDeg: -16,
+                pitchDeg: -4,
+              },
+              panels: [
+                {
+                  id: "now-playing",
+                  label: "Now playing",
+                  poseInRoot: {
+                    translation: { x: -270, y: 90, z: 0 },
+                    rotation: { x: 0, y: 0.13, z: 0, w: 0.9915 },
+                  },
+                  sizeDp: { width: 420, height: 300 },
+                  texture: "now-playing.png",
+                },
+                {
+                  id: "queue",
+                  label: "Queue",
+                  poseInRoot: {
+                    translation: { x: 250, y: -70, z: -120 },
+                    rotation: { x: 0, y: -0.13, z: 0, w: 0.9915 },
+                  },
+                  sizeDp: { width: 360, height: 420 },
+                  texture: "queue.png",
+                },
+              ],
+              environment: { kind: "gradient", preset: "warm-room" },
+            }),
+          });
+        }
+        return route.fulfill({
+          path: renderPlaceholder,
+          contentType: "image/png",
+        });
+      });
       await page.emulateMedia({ colorScheme: theme });
       // Before the navigation, so the page's own scripts see the instant-scroll shim (#4392).
       await pinScrollsInstant(page);

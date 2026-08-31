@@ -410,6 +410,30 @@ class ServeWebTest {
     )
   }
 
+  @Test
+  fun `spatial viewer loads only for a preview with a scene`() {
+    val spatial = ServePreview(id = "com.example.Xr", label = "XR preview", spatial = true)
+    val html =
+      ServeWeb.viewerPage(
+        spatial,
+        token = "t",
+        basePath = "/bundle",
+        spatialSceneUrl = "/bundle/spatial/com.example.Xr/scene.json?token=t",
+      )
+
+    assertTrue(html.contains("<cp-spatial-view"), html)
+    assertTrue(
+      html.contains("scene-url=\"/bundle/spatial/com.example.Xr/scene.json?token=t\""),
+      html,
+    )
+    assertTrue(html.contains("spatial-view.js"), html)
+    assertFalse(html.contains("/viewer.js"), html)
+
+    val flat = ServeWeb.viewerPage(ServePreview("flat", "Flat"), token = "t")
+    assertFalse(flat.contains("<cp-spatial-view"), flat)
+    assertFalse(flat.contains("spatial-view.js"), flat)
+  }
+
   // Button/Filled with its default render plus two props-axis variants (an RTL render and an ar-XB
   // pseudo-locale), each in light + dark — the shape the compose-m3 catalog folds via `variants`.
   private val buttonVariants =

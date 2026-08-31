@@ -12181,6 +12181,8 @@ ${scriptTag("known-differences.js")}
      * links are exactly as before.
      */
     basePath: String = "",
+    /** Same-origin portable scene document; non-null replaces the flat stage with WebGL/WebXR. */
+    spatialSceneUrl: String? = null,
     /**
      * Public mode: drop the `token=` param from the server-rendered "← previews" link (every route
      * is open, so the token gates nothing). The viewer's own `/render` + `/ws` requests read the
@@ -13427,7 +13429,7 @@ ${scriptTag("known-differences.js")}
         else -> "size, locale, font scale"
       }
     val snapshotNote =
-      if (componentBrowser) ""
+      if (componentBrowser || spatialSceneUrl != null) ""
       else
         when {
           overridesLive -> ""
@@ -13903,25 +13905,28 @@ ${scriptTag("known-differences.js")}
     // "go compare this elsewhere" links, then the SVG format toggle for whatever the chip is
     // currently showing.
     val primaryControls =
-      listOf(
-          browserPreviewTab,
-          liveToggleHtml.takeUnless { componentBrowser }.orEmpty(),
-          laneSelectHtml,
-          specChipHtml,
-          sourceChipHtml,
-          motionChipHtml,
-          comparePlayersLink,
-          specSelector,
-          motionSelector,
-          svgFmtToggle,
-          explodeToggle,
-          svgMatch,
-          bgPickerHtml("Show the transparent checkerboard behind the preview"),
-          "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
-            "title=\"Show the preview at full width instead of fitting it to the screen\">Fit width</button>",
-        )
-        .filter { it.isNotBlank() }
-        .joinToString("\n")
+      if (spatialSceneUrl != null)
+        "<span class=\"cp-spatial-mode\">WebGL spatial · headset mode available over HTTPS</span>"
+      else
+        listOf(
+            browserPreviewTab,
+            liveToggleHtml.takeUnless { componentBrowser }.orEmpty(),
+            laneSelectHtml,
+            specChipHtml,
+            sourceChipHtml,
+            motionChipHtml,
+            comparePlayersLink,
+            specSelector,
+            motionSelector,
+            svgFmtToggle,
+            explodeToggle,
+            svgMatch,
+            bgPickerHtml("Show the transparent checkerboard behind the preview"),
+            "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
+              "title=\"Show the preview at full width instead of fitting it to the screen\">Fit width</button>",
+          )
+          .filter { it.isNotBlank() }
+          .joinToString("\n")
     val pinnedControlsNote =
       if (pinned == null) ""
       else
@@ -14029,7 +14034,8 @@ ${scriptTag("known-differences.js")}
     val compareScriptTags =
       listOfNotNull(
           scriptTag("format-compare.js").takeIf {
-            (hasSvgExport && !componentBrowser) || specRasterUrl != null
+            spatialSceneUrl == null &&
+              ((hasSvgExport && !componentBrowser) || specRasterUrl != null)
           }
         )
         .joinToString("") { "$it\n      " }
@@ -14039,10 +14045,11 @@ ${scriptTag("known-differences.js")}
     // viewer.js still paints a plain <pre><code> first, so either asset failing leaves readable
     // source rather than turning an optional highlighter into a lane dependency.
     val sourceCodeStylesheet =
-      if (usageAvailable)
+      if (usageAvailable && spatialSceneUrl == null)
         "<link rel=\"stylesheet\" href=\"${assetHref("codemirror.css")}\">\n      "
       else ""
-    val sourceCodeScriptTag = if (usageAvailable) "${scriptTag("codemirror.js")}\n      " else ""
+    val sourceCodeScriptTag =
+      if (usageAvailable && spatialSceneUrl == null) "${scriptTag("codemirror.js")}\n      " else ""
     // The provenance row (source / playground / report an issue / figma spec) no longer sits under
     // the title. It is *about* the preview rather than a control over it, and four lines of small
     // links between the heading and the renderer controls is four lines of chrome between the
@@ -14079,9 +14086,14 @@ ${scriptTag("known-differences.js")}
     // no-history case rather than an empty control.
     val historyMenu = if (historyAttrs.isEmpty()) "" else "<cp-history-menu></cp-history-menu>"
     val headToggles =
-      listOf(navToggle, themeToggle, revisionMenu, historyMenu, controlsToggle).filter {
-        it.isNotBlank()
-      }
+      listOf(
+          navToggle,
+          themeToggle,
+          revisionMenu,
+          historyMenu,
+          controlsToggle.takeIf { spatialSceneUrl == null }.orEmpty(),
+        )
+        .filter { it.isNotBlank() }
     val headTogglesHtml =
       if (headToggles.isEmpty()) ""
       else "\n        <div class=\"cp-head-toggles\">${headToggles.joinToString("")}</div>"
@@ -14120,7 +14132,7 @@ ${scriptTag("known-differences.js")}
       $historyInlineHtml
       <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel" data-render-density="$RENDER_DENSITY" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$unseededAttr$wasmAttr$rcAttr$historyAttrs$pinnedAttr$generationAttr>
         $navDrawer
-        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"><canvas id="cp-canvas" hidden></canvas>$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>
+        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>
         $inspectLegendHtml
         <div class="cp-controls" id="cp-controls">
           <!-- No "Appearance" group. Its only ever-visible control was a Background select
@@ -14175,7 +14187,7 @@ ${scriptTag("known-differences.js")}
       <div class="cp-below">
         $snapshotNote
       </div>$previewLinks
-      ${downloadLinksHtml(hasSvgExport)}${if (browserComponentNav.isBlank()) "" else "\n      $browserComponentNav"}
+      ${if (spatialSceneUrl == null) downloadLinksHtml(hasSvgExport) else ""}${if (browserComponentNav.isBlank()) "" else "\n      $browserComponentNav"}
       <!-- Backdrop shown behind an open drawer on mobile (drawers become bottom sheets there);
            tapping it dismisses the sheet. Inert on desktop. -->
       <div class="cp-scrim" id="cp-scrim" aria-hidden="true"></div>
@@ -14190,7 +14202,7 @@ ${scriptTag("known-differences.js")}
            filter. Renders nothing; `serve.css` hides the tag. -->
       <cp-viewer-drawers></cp-viewer-drawers>
       ${presenceScriptTag(presenceUrl)}
-      $compareScriptTags$sourceCodeScriptTag${scriptTag("viewer.js")}$browserTabsScript
+      $compareScriptTags$sourceCodeScriptTag${if (spatialSceneUrl == null) scriptTag("viewer.js") else scriptTag("spatial-view.js")}$browserTabsScript
       """
         .trimIndent()
         .lineSequence()

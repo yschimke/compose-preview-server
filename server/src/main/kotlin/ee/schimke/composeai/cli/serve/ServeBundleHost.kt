@@ -509,7 +509,14 @@ class ServeBundleHost(
     // `render` finds the bytes.
     (previewsDir
         .walkTopDown()
-        .filter { it.isFile && it.name.endsWith(PNG_SUFFIX) }
+        .filter {
+          it.isFile &&
+            it.name.endsWith(PNG_SUFFIX) &&
+            it.parentFile.relativeTo(previewsDir).invariantSeparatorsPath.split('/').none { segment
+              ->
+              segment.endsWith(SPATIAL_SUFFIX)
+            }
+        }
         .map { it.relativeTo(previewsDir).invariantSeparatorsPath.removeSuffix(PNG_SUFFIX) }
         .toList() +
         previewsDir
@@ -517,6 +524,20 @@ class ServeBundleHost(
           .filter { it.isFile && it.name.endsWith(RENDER_ERROR_SUFFIX) }
           .map {
             it.relativeTo(previewsDir).invariantSeparatorsPath.removeSuffix(RENDER_ERROR_SUFFIX)
+          }
+          .toList() +
+        previewsDir
+          .walkTopDown()
+          .filter {
+            it.isFile &&
+              it.name == SPATIAL_SCENE_FILE &&
+              it.parentFile.name.endsWith(SPATIAL_SUFFIX)
+          }
+          .map {
+            it.parentFile
+              .relativeTo(previewsDir)
+              .invariantSeparatorsPath
+              .removeSuffix(SPATIAL_SUFFIX)
           }
           .toList() +
         declaredBakedIds +
@@ -529,6 +550,7 @@ class ServeBundleHost(
         ServePreview(
           id = id,
           label = id,
+          spatial = spatialFile(id, SPATIAL_SCENE_FILE)?.isFile == true,
           componentId = meta?.componentId,
           // Only captures this host can actually land. A manifest entry with no fetch seam behind
           // it (a plain bundle, or a catalog whose store didn't register the lane) would offer the
@@ -633,6 +655,34 @@ class ServeBundleHost(
     }
     val file = File(previewsDir, id + suffix)
     return file.takeIf { it.canonicalFile.toPath().startsWith(previewsRoot) }
+  }
+
+  private fun spatialFile(id: String, relativePath: String): File? {
+    val base = previewFile(id, SPATIAL_SUFFIX) ?: return null
+    if (
+      relativePath.isBlank() ||
+        relativePath.startsWith('/') ||
+        '\\' in relativePath ||
+        relativePath.split('/').any { it == "." || it == ".." }
+    ) {
+      return null
+    }
+    val root = base.canonicalFile.toPath()
+    return File(base, relativePath).takeIf { it.canonicalFile.toPath().startsWith(root) }
+  }
+
+  override fun spatialAsset(previewId: String, relativePath: String): ServeSpatialAsset? {
+    val contentType =
+      when {
+        relativePath == SPATIAL_SCENE_FILE -> "application/json"
+        relativePath.endsWith(".png", ignoreCase = true) -> "image/png"
+        relativePath.endsWith(".jpg", ignoreCase = true) ||
+          relativePath.endsWith(".jpeg", ignoreCase = true) -> "image/jpeg"
+        relativePath.endsWith(".webp", ignoreCase = true) -> "image/webp"
+        else -> return null
+      }
+    val file = spatialFile(previewId, relativePath)?.takeIf { it.isFile } ?: return null
+    return ServeSpatialAsset(file.readBytes(), contentType)
   }
 
   /** Renderer error sidecar for an error-only uploaded/URL bundle preview. */
@@ -1462,6 +1512,8 @@ class ServeBundleHost(
   companion object {
     private const val PREVIEWS_SUBDIR = "previews"
     private const val PNG_SUFFIX = ".png"
+    private const val SPATIAL_SUFFIX = ".spatial"
+    private const val SPATIAL_SCENE_FILE = "scene.json"
 
     /**
      * Extensions a published capture may be served under — closed, and checked on every request.

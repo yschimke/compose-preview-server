@@ -17,6 +17,9 @@ interface ServeHost : AutoCloseable {
   /** The whole servable preview set for this session. */
   val previews: List<ServePreview>
 
+  /** One same-origin asset from a preview's portable spatial scene, or null when unavailable. */
+  fun spatialAsset(previewId: String, relativePath: String): ServeSpatialAsset? = null
+
   /** Whether the server can return a self-contained executable bundle for this preview. */
   fun canDownloadExecutableBundle(previewId: String): Boolean = false
 

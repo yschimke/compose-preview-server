@@ -289,6 +289,11 @@ data class ServePreview(
    * Also last in the parameter list, for the reason [motion] is.
    */
   val deviceFrame: ServeDeviceFrame? = null,
+  /**
+   * Whether this preview carries a portable `scene.json` plus panel textures for the browser's
+   * spatial/WebXR viewer. Last for positional-call compatibility; see [motion].
+   */
+  val spatial: Boolean = false,
 )
 
 /**
