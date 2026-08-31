@@ -134,7 +134,8 @@ The checked-in candidate contracts are:
   100 public operations reducing to 99 semantic nodes and canonical document hash
   `09b7af04ab546421f72b81b1c49564f044790b8f2db4d2304dc66ff73c148643`.
 - [`jetcaster-discover-capabilities-v1.json`](fixtures/ui-builder/jetcaster-discover-capabilities-v1.json):
-  24 generic component capabilities, including explicit planned/unsupported Wasm and SVG states.
+  24 generic component capabilities, including explicit planned/unsupported Wasm states and SVG
+  evidence scoped to each authored usage in this frozen benchmark.
 
 The acceptance test starts with an empty design and replays only public operations (the same batch
 shape used by MCP):
@@ -194,7 +195,9 @@ Confetti stays in CI as the fast, no-network compact regression. Jetcaster is th
   checked-in source has a stale-generation verification task. Remaining source gaps are adaptive
   motion, carousel masking/gestures, saved scroll/stable keys, parent semantics, and selected-state
   styling.
-- A saved-revision JVM `ComposeScene -> Skia SVGCanvas` bridge now proves deterministic structured
-  text export and same-engine raster parity for vector-only subsets. Full Jetcaster export fails
-  closed because filtered Compose icons currently become undeclared embedded PNG images. Font
-  pinning, a declared icon fallback/vector path, and actual Figma import parity remain open.
+- A saved-revision JVM `ComposeScene -> Skia SVGCanvas` bridge exports the full frozen Jetcaster
+  document under its checked-in capability catalog. Known `iconKey` assets remain vector paths; the
+  four authored images are named embedded-raster fallbacks with measured bounds and payload
+  provenance. The current images are deterministic generated placeholders, and the claim remains
+  scoped to the pinned same-runtime JVM recorder. Production asset bytes, font pinning, and actual
+  Figma import parity remain open.
