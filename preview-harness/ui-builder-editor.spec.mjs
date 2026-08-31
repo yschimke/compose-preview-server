@@ -305,8 +305,8 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
     );
     await page.mouse.up();
     await waitForEditor(page, 102);
-    const finalState = await page.evaluate(() => globalThis.__uiBuilderEditor);
-    expect(finalState).toMatchObject({
+    const reorderedState = await page.evaluate(() => globalThis.__uiBuilderEditor);
+    expect(reorderedState).toMatchObject({
         revision: 102,
         nodeCount: 100,
         selectedNodeId: "main-scrim",
@@ -314,7 +314,78 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
         outcome: "accepted",
         mainBackgroundChildren: ["main-scaffold", "main-scrim"],
     });
-    expect(finalState.documentHash).not.toBe(editedState.documentHash);
+    expect(reorderedState.documentHash).not.toBe(editedState.documentHash);
+
+    // Duplicate is one existing reducer batch, and history targets only wasm-editor operations.
+    await page.keyboard.press("Control+d");
+    await waitForEditor(page, 103);
+    const duplicatedState = await page.evaluate(() => globalThis.__uiBuilderEditor);
+    expect(duplicatedState).toMatchObject({
+        revision: 103,
+        nodeCount: 101,
+        selectedNodeId: "main-scrim-copy-004",
+        operationSequence: 4,
+        mainBackgroundChildren: ["main-scaffold", "main-scrim", "main-scrim-copy-004"],
+    });
+    await page.keyboard.press("Control+z");
+    await waitForEditor(page, 104);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        nodeCount: 100,
+        selectedNodeId: "main-scrim",
+        operationSequence: 5,
+    });
+    const redoButton = page.getByRole("button", { name: /Redo \(Ctrl\/⌘\+Shift\+Z\)/ });
+    await expect(redoButton).toBeEnabled();
+    await page.keyboard.press("Control+Shift+z");
+    await waitForEditor(page, 105);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        nodeCount: 101,
+        selectedNodeId: "main-scrim-copy-004",
+        operationSequence: 6,
+    });
+
+    // Delete/undo/redo use DeleteNode, UndoCommand and RedoCommand; no editor-only wire command.
+    await page.keyboard.press("Backspace");
+    await waitForEditor(page, 106);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        nodeCount: 100,
+        selectedNodeId: "main-background",
+        operationSequence: 7,
+    });
+    await page.keyboard.press("Control+z");
+    await waitForEditor(page, 107);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        nodeCount: 101,
+        selectedNodeId: "main-scrim-copy-004",
+        operationSequence: 8,
+    });
+    await page.keyboard.press("Control+y");
+    await waitForEditor(page, 108);
+    const undoButton = page.getByRole("button", { name: /Undo \(Ctrl\/⌘\+Z\)/ });
+    await expect(undoButton).toBeEnabled();
+    const undoBounds = await undoButton.boundingBox();
+    expect(undoBounds).not.toBeNull();
+    await page.mouse.click(
+        undoBounds.x + undoBounds.width / 2,
+        undoBounds.y + undoBounds.height / 2,
+    );
+    await waitForEditor(page, 109);
+    const redoBounds = await redoButton.boundingBox();
+    expect(redoBounds).not.toBeNull();
+    await page.mouse.click(
+        redoBounds.x + redoBounds.width / 2,
+        redoBounds.y + redoBounds.height / 2,
+    );
+    await waitForEditor(page, 110);
+    const finalState = await page.evaluate(() => globalThis.__uiBuilderEditor);
+    expect(finalState).toMatchObject({
+        revision: 110,
+        nodeCount: 100,
+        selectedNodeId: "main-background",
+        operationSequence: 11,
+        outcome: "accepted",
+        mainBackgroundChildren: ["main-scaffold", "main-scrim"],
+    });
     expect(errors).toEqual([]);
 
     const after = await page.screenshot();
