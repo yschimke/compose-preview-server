@@ -440,6 +440,8 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:preview-data-api",
       "ee.schimke.composeai:render-session-api",
       "ee.schimke.composeai:render-session-subprocess",
+      "ee.schimke.composeai:ui-builder-protocol",
+      "ee.schimke.composeai:ui-builder-protocol-jvm",
     )
   )
 }

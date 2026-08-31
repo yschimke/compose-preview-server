@@ -105,6 +105,7 @@ dependencies {
   api(libs.composeai.render.session.subprocess)
   api(libs.composeai.data.layoutinspector.core)
   api(libs.composeai.data.theme.core)
+  api(libs.composeai.ui.builder.protocol)
   // Both reached by FULLY-QUALIFIED name rather than an import, so they are easy to miss when
   // reading the sources for what this module needs: `ServePreview.overrides` and
   // `ServePreview.remoteComposeKnobs` are declared as
