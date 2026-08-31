@@ -5,9 +5,14 @@ the host**. It installs the released server distribution and serves published ca
 bundles without a local Gradle project. Built once in CI and pushed to GHCR, so hosts just pull it.
 
 - **Image:** `ghcr.io/yschimke/compose-preview-host:<version>` (and `:latest`)
-- **Render targets:** Compose **Desktop** live bundles (Skiko software GL), **plus** a baked
+- **Render targets:** Compose **Desktop** live bundles (Skiko software GL) through a baked
+  `lib-daemon-desktop/` + `lib-renderer/` sidecar pair, **plus** a baked
   **Android/Robolectric** daemon + minimal Android SDK so a served Android **Wear** catalog
-  (`wear-m3`) renders live server-side. Lighting the Android live lane needs the catalog's stickers to
+  (`wear-m3`) renders live server-side. Both pairs are lifted from the matching
+  `compose-ai-tools` release and located through `-Dcomposeai.cli.libDaemon*Dir` /
+  `-Dcomposeai.cli.libRendererDir`; the server distribution itself carries neither, so a
+  backend whose sidecar is absent publishes baked PNGs with `livebundle-unavailable`
+  instead of failing loudly (guarded by `test-desktop-daemon-sidecar.sh`). Lighting the Android live lane needs the catalog's stickers to
   carry the `previewId` daemon mapping **and** the bundle to carry the app's resource table under
   `android/`; both shipped in **0.16.50** (previewId #2492, app-resource carriage #2498 + missing-
   resource placeholder fallback #2499), so `wear-m3` renders live once the box rolls that image and
