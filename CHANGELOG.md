@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.5.0](https://github.com/yschimke/compose-preview-server/compare/v2.4.0...v2.5.0) (2026-08-31)
+
+
+### Features
+
+* **publish-config:** retire what the committed config no longer declares ([#75](https://github.com/yschimke/compose-preview-server/issues/75)) ([c3b5697](https://github.com/yschimke/compose-preview-server/commit/c3b5697394492e35f70f60bacc4343840119f78c))
+* **wasm-ui:** add permalink navigation history ([#73](https://github.com/yschimke/compose-preview-server/issues/73)) ([274a105](https://github.com/yschimke/compose-preview-server/commit/274a105c7dee4cceb942d8eea7fc9b9205aae0c3))
+* **wasm-ui:** preserve preview controls in permalinks ([#76](https://github.com/yschimke/compose-preview-server/issues/76)) ([75e54b2](https://github.com/yschimke/compose-preview-server/commit/75e54b2080f8929d1fdb9295b07b7023dce452d9))
+* **wasm-ui:** scope browser routes to catalogs ([#71](https://github.com/yschimke/compose-preview-server/issues/71)) ([f7484e8](https://github.com/yschimke/compose-preview-server/commit/f7484e81d301d857a9e386f145ea6b4538093504))
+
+
+### Bug Fixes
+
+* **ci:** re-publish config when the reconcile script itself changes ([#77](https://github.com/yschimke/compose-preview-server/issues/77)) ([27d8df7](https://github.com/yschimke/compose-preview-server/commit/27d8df7f94ee0c9d9ea5096ba4509b42befc4f98))
+
 ## [2.4.0](https://github.com/yschimke/compose-preview-server/compare/v2.3.4...v2.4.0) (2026-08-31)
 
 
