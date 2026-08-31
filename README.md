@@ -39,7 +39,8 @@ The independently installable visual harness lives in `preview-harness/`. The ex
 Compose/Wasm frontend lives in `wasm-ui/`. The UI builder incubates in the dependency-isolated
 `ui-builder/` module; it has its own reducer, native Compose renderer, standalone Wasm visual
 fixture and code exporter so that it can later move out without pulling server implementation with
-it.
+it. `ui-builder-reference-jetcaster/` is a separately compiled, provenance-pinned Compose/Wasm
+oracle for the primary Jetcaster visual benchmark and has no dependency on the builder module.
 
 ## Spatial and WebXR previews
 
