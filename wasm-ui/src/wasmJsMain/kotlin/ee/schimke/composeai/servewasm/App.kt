@@ -84,7 +84,6 @@ fun PreviewServerApp(client: BrowserPreviewClient) {
       var catalog by remember { mutableStateOf<Catalog?>(null) }
       var loadError by remember { mutableStateOf<String?>(null) }
       var location by remember { mutableStateOf(client.initialLocation()) }
-      var filter by remember { mutableStateOf("") }
       DisposableEffect(client) {
         val stop = client.observeHistory { location = it }
         onDispose(stop)
@@ -110,6 +109,15 @@ fun PreviewServerApp(client: BrowserPreviewClient) {
         loaded == null -> LoadingScreen()
         else -> {
           val selected = loaded.previews.firstOrNull { it.id == location.previewId }
+          LaunchedEffect(loaded.module, selected?.id, location.composing) {
+            client.setDocumentTitle(
+              when {
+                location.composing -> "UI Composer · ${loaded.module}"
+                selected != null -> "${selected.label} · ${loaded.module}"
+                else -> "${loaded.module} · Compose Preview"
+              }
+            )
+          }
           BoxWithConstraints(Modifier.fillMaxSize()) {
             val compact = maxWidth < 760.dp
             Column(Modifier.fillMaxSize()) {
@@ -135,8 +143,28 @@ fun PreviewServerApp(client: BrowserPreviewClient) {
                   client = client,
                   compact = compact,
                   initiallyLive = location.live,
+                  initialUiMode = location.uiMode,
+                  initiallyTransparent = location.transparent,
+                  initialFontScale = location.fontScale,
+                  initialLocale = location.localeTag,
                   onLivePermalink = { enabled ->
                     location = location.copy(live = enabled)
+                    client.pushLocation(location)
+                  },
+                  onUiModePermalink = { uiMode ->
+                    location = location.copy(uiMode = uiMode)
+                    client.pushLocation(location)
+                  },
+                  onTransparentPermalink = { transparent ->
+                    location = location.copy(transparent = transparent)
+                    client.pushLocation(location)
+                  },
+                  onFontScalePermalink = { fontScale ->
+                    location = location.copy(fontScale = fontScale)
+                    client.replaceLocation(location)
+                  },
+                  onLocalePermalink = { locale ->
+                    location = location.copy(localeTag = locale)
                     client.replaceLocation(location)
                   },
                   onBack = {
@@ -147,10 +175,13 @@ fun PreviewServerApp(client: BrowserPreviewClient) {
               } else {
                 CatalogBrowser(
                   catalog = loaded,
-                  filter = filter,
+                  filter = location.filter,
                   compact = compact,
                   client = client,
-                  onFilter = { filter = it },
+                  onFilter = {
+                    location = location.copy(filter = it)
+                    client.replaceLocation(location)
+                  },
                   onSelect = {
                     location = AppLocation(previewId = it.id)
                     client.pushLocation(location)
@@ -396,16 +427,31 @@ private fun PreviewDetail(
   client: BrowserPreviewClient,
   compact: Boolean,
   initiallyLive: Boolean?,
+  initialUiMode: String?,
+  initiallyTransparent: Boolean,
+  initialFontScale: Float?,
+  initialLocale: String,
   onLivePermalink: (Boolean) -> Unit,
+  onUiModePermalink: (String) -> Unit,
+  onTransparentPermalink: (Boolean) -> Unit,
+  onFontScalePermalink: (Float) -> Unit,
+  onLocalePermalink: (String) -> Unit,
   onBack: () -> Unit,
 ) {
   val nativeTarget = preview.nativeTarget
   var live by
     remember(preview.id, initiallyLive) { mutableStateOf(initiallyLive ?: (nativeTarget != null)) }
-  var dark by remember(preview.id) { mutableStateOf(nativeTarget?.dark ?: false) }
-  var transparent by remember(preview.id) { mutableStateOf(false) }
-  var fontScale by remember(preview.id) { mutableStateOf(nativeTarget?.fontScale ?: 1f) }
-  var locale by remember(preview.id) { mutableStateOf("") }
+  var dark by
+    remember(preview.id, initialUiMode) {
+      mutableStateOf(initialUiMode?.let { it == "dark" } ?: (nativeTarget?.dark ?: false))
+    }
+  var transparent by
+    remember(preview.id, initiallyTransparent) { mutableStateOf(initiallyTransparent) }
+  var fontScale by
+    remember(preview.id, initialFontScale) {
+      mutableStateOf(initialFontScale ?: (nativeTarget?.fontScale ?: 1f))
+    }
+  var locale by remember(preview.id, initialLocale) { mutableStateOf(initialLocale) }
   var bitmap by remember(preview.id) { mutableStateOf<ImageBitmap?>(null) }
   var frameSize by remember(preview.id) { mutableStateOf(IntSize.Zero) }
   var stageSize by remember { mutableStateOf(IntSize.Zero) }
@@ -494,10 +540,22 @@ private fun PreviewDetail(
         live = it
         onLivePermalink(it)
       },
-      onDark = { dark = it },
-      onTransparent = { transparent = it },
-      onFontScale = { fontScale = it },
-      onLocale = { locale = it },
+      onDark = {
+        dark = it
+        onUiModePermalink(if (it) "dark" else "light")
+      },
+      onTransparent = {
+        transparent = it
+        onTransparentPermalink(it)
+      },
+      onFontScale = {
+        fontScale = it
+        onFontScalePermalink(it)
+      },
+      onLocale = {
+        locale = it
+        onLocalePermalink(it)
+      },
       onBack = onBack,
     )
   }
