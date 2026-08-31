@@ -416,8 +416,11 @@ The first executable vertical slice now lives behind the isolated `:ui-builder` 
 test consumes `confetti-schedule-operations-v1.json` directly and proves that the Kotlin and
 JavaScript reducers produce the same canonical document hash. The module's standalone Wasm fixture
 then renders that reduced document and an independently authored compact Confetti Schedule.
-`preview-harness/ui-builder.spec.mjs` performs a zero-tolerance PNG pixel diff at 411×914 and retains
-the developer-authored reference as a committed golden. The fixture contains a real Scaffold and
+`preview-harness/ui-builder.spec.mjs` performs a zero-tolerance same-browser PNG pixel diff at
+411×914 and retains the developer-authored reference as a committed golden. The cross-platform
+golden comparison separately permits at most 2% raster drift because Chromium/Skia text and icon
+edges differ between macOS and Linux; it does not weaken the exact operations-vs-oracle assertion.
+The fixture contains a real Scaffold and
 app bar, five track filters, two day tabs, a bounded lazy schedule, sticky-style time headers, talk
 and lightning rows, dividers, bookmark/icon states, and a shaped break surface. It does not yet
 claim pager interaction, bounds/baseline capture, or the SVG leg is complete.
