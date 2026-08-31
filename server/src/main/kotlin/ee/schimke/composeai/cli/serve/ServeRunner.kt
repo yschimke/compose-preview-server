@@ -2268,6 +2268,11 @@ public class ServeRunner(
   }
 
   private fun openUiBuilderService(appDirectory: File?): UiBuilderLane? {
+    if (uiBuilderMigrateState && (appDirectory == null || uiBuilderStateDirFlag == "none")) {
+      throw IllegalStateException(
+        "--ui-builder-migrate-state requires an enabled UI-builder app and durable state"
+      )
+    }
     if (appDirectory == null || uiBuilderStateDirFlag == "none") return null
     val directory =
       uiBuilderStateDirFlag?.let(::File)
@@ -2299,13 +2304,27 @@ public class ServeRunner(
               png = false,
             )
       )
+    val service =
+      PersistentUiBuilderService(
+        storage = FileUiBuilderStateStorage(directory.toPath()),
+        catalogs = catalogs,
+        exporter = exporter,
+      )
+    if (uiBuilderMigrateState) {
+      try {
+        val migration = service.migratePersistenceToLatest()
+        System.err.println(
+          "serve: UI-builder persistence ${migration.fromFormat} -> ${migration.toFormat} " +
+            if (migration.migrated) "completed (${migration.persistedBytes} bytes)"
+            else "already current"
+        )
+      } catch (failure: Throwable) {
+        runCatching { renderer?.close() }
+        throw failure
+      }
+    }
     return UiBuilderLane(
-      service =
-        PersistentUiBuilderService(
-          storage = FileUiBuilderStateStorage(directory.toPath()),
-          catalogs = catalogs,
-          exporter = exporter,
-        ),
+      service = service,
       renderer = renderer,
     )
   }

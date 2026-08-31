@@ -265,6 +265,7 @@ class ServeStatusTest {
         rejectedAssetBytes = 37,
         timedOutExports = 41,
         activeMutationBuckets = 43,
+        persistenceMigrations = 47,
       )
     val uiBuilder =
       object : UiBuilderServicePort, UiBuilderServiceDiagnosticsSource {
@@ -296,6 +297,7 @@ class ServeStatusTest {
     assertEquals(29, pressure.getValue("rejectedMutationRate").jsonPrimitive.long)
     assertEquals(41, pressure.getValue("timedOutExports").jsonPrimitive.long)
     assertEquals(43, pressure.getValue("activeMutationBuckets").jsonPrimitive.int)
+    assertEquals(47, pressure.getValue("persistenceMigrations").jsonPrimitive.long)
     assertFalse(body.contains("actorId"), body)
     assertFalse(body.contains("designId"), body)
   }

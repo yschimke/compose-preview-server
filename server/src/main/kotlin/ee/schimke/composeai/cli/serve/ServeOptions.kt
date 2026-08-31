@@ -604,6 +604,10 @@ public interface ServeOptions {
   public val uiBuilderStateDirFlag: String?
     get() = null
 
+  /** Explicitly migrate a validated v1 UI-builder store to the latest recoverable format. */
+  public val uiBuilderMigrateState: Boolean
+    get() = false
+
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   public val rcPlayerWasmDir: File?
 

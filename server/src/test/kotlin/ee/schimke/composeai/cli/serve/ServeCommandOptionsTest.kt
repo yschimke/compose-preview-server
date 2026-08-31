@@ -34,6 +34,7 @@ class ServeCommandOptionsTest {
           "m3-2026.09=/srv/runtime-one,m3-2026.10=/srv/runtime-two",
           "--ui-builder-state-dir",
           "/srv/ui-builder-state",
+          "--ui-builder-migrate-state",
         )
       )
 
@@ -56,6 +57,7 @@ class ServeCommandOptionsTest {
       options.uiBuilderRuntimeDirs,
     )
     assertEquals("/srv/ui-builder-state", options.uiBuilderStateDirFlag)
+    assertTrue(options.uiBuilderMigrateState)
   }
 
   @Test
@@ -69,6 +71,7 @@ class ServeCommandOptionsTest {
     assertFalse(options.allowRenderTrusted)
     assertEquals(ServeCatalogStore.DEFAULT_MAX_IMAGES, options.catalogMaxImages)
     assertNull(options.uiBuilderStateDirFlag)
+    assertFalse(options.uiBuilderMigrateState)
     assertEquals(
       "none",
       options(listOf("--ui-builder-state-dir=none")).uiBuilderStateDirFlag,
