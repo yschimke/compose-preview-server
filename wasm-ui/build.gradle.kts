@@ -32,7 +32,7 @@ kotlin {
 }
 
 // Keep the prototype webpack-free, matching the catalog and Remote Compose Wasm apps. This makes
-// the output a plain static directory that `serve --wasm-dir preview-ui=<dir>` can host through the
+// the output a plain static directory that `serve --wasm-ui-dir <dir>` can project per catalog
 // server's existing same-origin Wasm asset lane.
 tasks.register<Sync>("wasmFrontendDist") {
   description = "Assemble the experimental preview-server Wasm frontend."

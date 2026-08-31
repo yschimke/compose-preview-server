@@ -1621,6 +1621,61 @@ class ServeHttpRoutingTest {
   }
 
   @Test
+  fun `the packaged wasm browser is projected per catalog and old links redirect`() {
+    val uiDir = Files.createTempDirectory("serve-wasm-ui").toFile().also { it.deleteOnExit() }
+    File(uiDir, "index.html").writeText("<!doctype html><title>catalog browser</title>")
+    File(uiDir, "app.js").writeText("window.catalogBrowser = true")
+    val ownDir = Files.createTempDirectory("serve-wasm-own").toFile().also { it.deleteOnExit() }
+    File(ownDir, "index.html").writeText("<!doctype html><title>catalog-owned app</title>")
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register("compose-m3", host = bundle("m3"), pinned = true)
+    registry.register("owned", host = bundle("owned"), pinned = true)
+    val scopedServer =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "unused-in-public",
+          sessions = registry,
+          defaultSessionId = "compose-m3",
+          isPublic = true,
+          wasmCatalogs = mapOf("owned" to ownDir),
+          wasmUiDir = uiDir,
+        )
+        .also { it.start() }
+    fun fetch(path: String): Pair<Int, String> {
+      val req = Request.Builder().url("http://127.0.0.1:${scopedServer.port}$path").build()
+      client.newCall(req).execute().use { response ->
+        return response.code to response.body.string()
+      }
+    }
+    try {
+      assertTrue(fetch("/wasm/compose-m3/").second.contains("catalog browser"))
+      assertEquals("window.catalogBrowser = true", fetch("/wasm/compose-m3/app.js").second)
+      assertTrue(fetch("/wasm/owned/").second.contains("catalog-owned app"))
+      assertEquals(404, fetch("/wasm/not-a-catalog/").first)
+
+      val noRedirects = OkHttpClient.Builder().followRedirects(false).build()
+      val oldUrl =
+        Request.Builder()
+          .url(
+            "http://127.0.0.1:${scopedServer.port}/wasm/preview-ui/" +
+              "?session=compose-m3&token=secret&preview=button"
+          )
+          .build()
+      noRedirects.newCall(oldUrl).execute().use { response ->
+        assertEquals(302, response.code)
+        assertEquals(
+          "/wasm/compose-m3/?token=secret&preview=button",
+          response.header("Location"),
+        )
+      }
+    } finally {
+      scopedServer.stop()
+      registry.close()
+    }
+  }
+
+  @Test
   fun `private wasm route keeps auto-discovered local assets behind the path token`() {
     val appDir = Files.createTempDirectory("serve-wasm-private").toFile().also { it.deleteOnExit() }
     File(appDir, "index.html").writeText("<!doctype html><script src=app.js></script>")

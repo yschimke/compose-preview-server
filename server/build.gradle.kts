@@ -79,7 +79,7 @@ evaluationDependsOn(":wasm-ui")
 
 distributions {
   main {
-    contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("preview-ui") } }
+    contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
   }
 }
 

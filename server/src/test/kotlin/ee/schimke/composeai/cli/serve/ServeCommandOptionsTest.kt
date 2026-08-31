@@ -24,6 +24,8 @@ class ServeCommandOptionsTest {
           "--exit-when-idle=45",
           "--catalog-max-images",
           "2500",
+          "--wasm-ui-dir",
+          "/srv/wasm-ui",
         )
       )
 
@@ -36,6 +38,7 @@ class ServeCommandOptionsTest {
     assertTrue(options.exitWhenIdle)
     assertEquals(45L, options.idleExitSeconds)
     assertEquals(2500, options.catalogMaxImages)
+    assertEquals("/srv/wasm-ui", options.wasmUiDir?.path)
   }
 
   @Test

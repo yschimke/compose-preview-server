@@ -25,7 +25,7 @@ import kotlinx.serialization.json.longOrNull
 import org.jetbrains.skia.Image
 
 fun main() {
-  val config = ClientConfig.fromLocation(locationSearch())
+  val config = ClientConfig.fromLocation(locationSearch(), locationPathname())
   val client = BrowserPreviewClient(config)
   ComposeViewport(viewportContainerId = "composeApp") { PreviewServerApp(client, config) }
 }
@@ -36,10 +36,12 @@ data class ClientConfig(
   val initialPreview: String?,
   val initialLive: Boolean,
   val initialComposer: Boolean,
+  /** True when `/wasm/<catalog>/` selected [session], rather than the legacy query parameter. */
+  val sessionInPath: Boolean,
 ) {
   fun query(extra: Map<String, String> = emptyMap()): String {
     val values = buildMap {
-      session?.let { put("session", it) }
+      if (!sessionInPath) session?.let { put("session", it) }
       token?.let { put("token", it) }
       putAll(extra)
     }
@@ -51,15 +53,21 @@ data class ClientConfig(
   fun suffix(extra: Map<String, String> = emptyMap()): String =
     query(extra).takeIf { it.isNotEmpty() }?.let { "?$it" } ?: ""
 
+  /** Existing server routes with the catalog promoted into their canonical path form. */
+  fun serverPath(path: String): String =
+    if (sessionInPath && session != null) "/${encodeComponent(session)}$path" else path
+
   companion object {
-    fun fromLocation(search: String): ClientConfig {
+    fun fromLocation(search: String, pathname: String = ""): ClientConfig {
       val params = parseQuery(search)
+      val pathSession = catalogFromWasmPath(pathname)
       return ClientConfig(
-        session = params["session"]?.takeIf { it.isNotBlank() },
+        session = pathSession ?: params["session"]?.takeIf { it.isNotBlank() },
         token = params["token"]?.takeIf { it.isNotBlank() },
         initialPreview = params["preview"]?.takeIf { it.isNotBlank() },
         initialLive = params["live"] == "1" || params["live"] == "true",
         initialComposer = params["compose"] == "1" || params["compose"] == "true",
+        sessionInPath = pathSession != null,
       )
     }
   }
@@ -102,7 +110,10 @@ class BrowserPreviewClient(private val config: ClientConfig) {
   private val json = Json { ignoreUnknownKeys = true }
 
   suspend fun catalog(): Catalog {
-    val root = json.parseToJsonElement(fetchText("/api/previews${config.suffix()}")).jsonObject
+    val root =
+      json
+        .parseToJsonElement(fetchText("${config.serverPath("/api/previews")}${config.suffix()}"))
+        .jsonObject
     val module = root.string("module") ?: config.session ?: "Preview server"
     val previews =
       root["previews"]?.jsonArray.orEmpty().mapNotNull { value ->
@@ -136,16 +147,17 @@ class BrowserPreviewClient(private val config: ClientConfig) {
   suspend fun snapshot(previewId: String, overrides: Map<String, String>): ImageBitmap =
     decodeImage(
       fetchBase64(
-        "/render/${encodeComponent(previewId)}${config.suffix(overrides + ("format" to "png"))}"
+        "${config.serverPath("/render/${encodeComponent(previewId)}")}" +
+          config.suffix(overrides + ("format" to "png"))
       )
     )
 
   fun legacyViewerUrl(previewId: String): String =
-    "/p/${encodeComponent(previewId)}${config.suffix()}"
+    "${config.serverPath("/p/${encodeComponent(previewId)}")}${config.suffix()}"
 
   fun replaceLocation(previewId: String?) {
     val query = buildMap {
-      config.session?.let { put("session", it) }
+      if (!config.sessionInPath) config.session?.let { put("session", it) }
       config.token?.let { put("token", it) }
       previewId?.let { put("preview", it) }
     }
@@ -156,7 +168,7 @@ class BrowserPreviewClient(private val config: ClientConfig) {
 
   fun replaceComposerLocation() {
     val query = buildMap {
-      config.session?.let { put("session", it) }
+      if (!config.sessionInPath) config.session?.let { put("session", it) }
       config.token?.let { put("token", it) }
       put("compose", "1")
     }
@@ -171,7 +183,8 @@ class BrowserPreviewClient(private val config: ClientConfig) {
     // stream on its connecting frame.
     val query = config.query(overrides + ("codec" to "png"))
     val path =
-      "/ws/${encodeComponent(previewId)}${query.takeIf { it.isNotEmpty() }?.let { "?$it" } ?: ""}"
+      config.serverPath("/ws/${encodeComponent(previewId)}") +
+        (query.takeIf { it.isNotEmpty() }?.let { "?$it" } ?: "")
     openBrowserStream(path)
   }
 
@@ -278,6 +291,13 @@ internal fun parseQuery(search: String): Map<String, String> {
           decodeComponent(pair.substring(separator + 1))
     }
     .toMap()
+}
+
+/** `/wasm/<catalog>/...` is the Wasm counterpart of the server's existing `/<catalog>/...`. */
+internal fun catalogFromWasmPath(pathname: String): String? {
+  val segments = pathname.split('/').filter { it.isNotEmpty() }
+  if (segments.size < 2 || segments[0] != "wasm") return null
+  return decodeComponent(segments[1]).takeIf { it.isNotBlank() && it != "preview-ui" }
 }
 
 private fun jsonString(value: String): String = buildString {
@@ -391,6 +411,8 @@ private fun replaceBrowserQuery(query: String): Unit =
   js("window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''))")
 
 private fun locationSearch(): String = js("window.location.search")
+
+private fun locationPathname(): String = js("window.location.pathname")
 
 private fun encodeComponent(value: String): String = js("encodeURIComponent(value)")
 
