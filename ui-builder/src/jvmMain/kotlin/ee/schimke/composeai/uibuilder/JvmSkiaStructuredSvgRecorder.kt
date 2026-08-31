@@ -28,7 +28,9 @@ import org.jetbrains.skia.svg.SVGCanvas
  * claim is scoped to the same Compose/Skiko/font/OS/architecture runtime. Generic Skia-created
  * images remain anonymous and fail closed. Declared asset images are correlated by re-rendering
  * that exact node through the same pinned raster provider and matching the unique embedded payload
- * digest, never by assigning document nodes to SVG image order.
+ * digest, never by assigning document nodes to SVG image order. `matchParentSize` assets use bounds
+ * from a clean Compose inspection pass, and those bounds must remain identical during SVG
+ * recording.
  */
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
 object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
@@ -39,8 +41,16 @@ object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
 
   override fun record(request: StructuredSvgRecordingRequest): StructuredSvgRecording {
     val document = request.document
+    val layoutProvenance =
+      request.declaredRasterFallbackNodeIds.takeIf(List<String>::isNotEmpty)?.let {
+        measureLayout(document)
+      }
     val rasterAssets =
-      JvmStructuredSvgRasterAssets.create(document, request.declaredRasterFallbackNodeIds)
+      JvmStructuredSvgRasterAssets.create(
+        document,
+        request.declaredRasterFallbackNodeIds,
+        layoutProvenance?.nodeBounds.orEmpty(),
+      )
     return try {
       val expectedPayloads =
         request.declaredRasterFallbackNodeIds.associateWith { nodeId ->
@@ -66,7 +76,13 @@ object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
       require(expectedPayloads.values.toSet().size == expectedPayloads.size) {
         "declared raster asset payloads are not unique enough for node correlation"
       }
-      val svg = recordRaw(document, rasterAssets)
+      var recordedLayout: UiBuilderInspectionSnapshot? = null
+      val svg =
+        recordRaw(document, rasterAssets) { if (layoutProvenance != null) recordedLayout = it }
+      layoutProvenance?.requireStableRasterBounds(
+        checkNotNull(recordedLayout) { "SVG recording produced no layout inspection snapshot" },
+        request.declaredRasterFallbackNodeIds,
+      )
       val emittedDigests =
         parseStrictSvg(svg).document?.images.orEmpty().mapNotNull {
           it.embeddedImagePayloadDigest()
@@ -100,6 +116,7 @@ object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
   private fun recordRaw(
     document: UiBuilderDocument,
     rasterAssets: JvmStructuredSvgRasterAssets,
+    onInspectionSnapshot: ((UiBuilderInspectionSnapshot) -> Unit)? = null,
   ): String {
     val widthDp = document.environmentNumber("widthDp")
     val heightDp = document.environmentNumber("heightDp")
@@ -130,7 +147,11 @@ object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
       try {
         scene.setContent {
           CompositionLocalProvider(LocalUiBuilderExportRasterAssets provides rasterAssets.bitmaps) {
-            UiBuilderSurface(document = document, editorOverlay = false)
+            UiBuilderSurface(
+              document = document,
+              editorOverlay = false,
+              onInspectionSnapshot = onInspectionSnapshot,
+            )
           }
         }
         scene.render(skiaCanvas.asComposeCanvas(), document.fixedFrameNanos())
@@ -148,6 +169,76 @@ object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
       output.close()
     }
   }
+
+  private fun measureLayout(document: UiBuilderDocument): JvmStructuredSvgLayoutProvenance {
+    val widthDp = document.environmentNumber("widthDp")
+    val heightDp = document.environmentNumber("heightDp")
+    val density = document.environmentNumber("density")
+    val fontScale = document.environmentNumber("fontScale")
+    val widthPx = (widthDp * density).roundToInt()
+    val heightPx = (heightDp * density).roundToInt()
+    val layoutDirection =
+      if (document.environmentText("layoutDirection") == "rtl") LayoutDirection.Rtl
+      else LayoutDirection.Ltr
+    val surface = Surface.makeRasterN32Premul(widthPx, heightPx)
+    val scene =
+      CanvasLayersComposeScene(
+        density = Density(density, fontScale),
+        layoutDirection = layoutDirection,
+        size = IntSize(widthPx, heightPx),
+        coroutineContext = EmptyCoroutineContext,
+        invalidate = {},
+      )
+    var snapshot: UiBuilderInspectionSnapshot? = null
+    return try {
+      scene.setContent {
+        UiBuilderSurface(
+          document = document,
+          editorOverlay = false,
+          onInspectionSnapshot = { snapshot = it },
+        )
+      }
+      scene.render(surface.canvas.asComposeCanvas(), document.fixedFrameNanos())
+      val measured =
+        checkNotNull(snapshot) { "layout provenance pass produced no inspection snapshot" }
+      require(
+        measured.documentId == document.id && measured.documentRevision == document.revision
+      ) {
+        "layout provenance does not match the saved document revision"
+      }
+      JvmStructuredSvgLayoutProvenance(
+        documentId = measured.documentId,
+        documentRevision = measured.documentRevision,
+        nodeBounds =
+          measured.nodes.mapNotNull { node -> node.bounds?.let { node.nodeId to it } }.toMap(),
+      )
+    } finally {
+      scene.close()
+      surface.close()
+    }
+  }
+}
+
+internal data class JvmStructuredSvgLayoutProvenance(
+  val documentId: String,
+  val documentRevision: Int,
+  val nodeBounds: Map<String, UiBuilderPixelBounds>,
+) {
+  fun requireStableRasterBounds(
+    recorded: UiBuilderInspectionSnapshot,
+    rasterNodeIds: List<String>,
+  ) {
+    require(recorded.documentId == documentId && recorded.documentRevision == documentRevision) {
+      "SVG layout inspection does not match measured layout provenance"
+    }
+    val recordedBounds =
+      recorded.nodes.mapNotNull { node -> node.bounds?.let { node.nodeId to it } }.toMap()
+    rasterNodeIds.forEach { nodeId ->
+      require(nodeBounds[nodeId] == recordedBounds[nodeId]) {
+        "raster node $nodeId changed bounds between provenance and SVG recording"
+      }
+    }
+  }
 }
 
 internal class JvmStructuredSvgRasterAssets
@@ -161,7 +252,11 @@ private constructor(
   }
 
   companion object {
-    fun create(document: UiBuilderDocument, nodeIds: List<String>): JvmStructuredSvgRasterAssets {
+    fun create(
+      document: UiBuilderDocument,
+      nodeIds: List<String>,
+      layoutBounds: Map<String, UiBuilderPixelBounds> = emptyMap(),
+    ): JvmStructuredSvgRasterAssets {
       val images = mutableListOf<Image>()
       return try {
         val identities = nodeIds.associateWith { nodeId ->
@@ -170,7 +265,7 @@ private constructor(
             "raster export node $nodeId is not an asset/image"
           }
           val assetKey = node.stringProperty("assetKey")
-          val (widthPx, heightPx) = node.explicitRasterPixelSize(document)
+          val (widthPx, heightPx) = node.rasterPixelSize(document, layoutBounds[nodeId])
           val sourceIdentity = "generated-placeholder/v1/$assetKey/${widthPx}x$heightPx"
           val sourceRecipe =
             "$sourceIdentity|argb=${pinnedAssetColors(assetKey).joinToString(",") { it.toUInt().toString(16) }}"
@@ -233,17 +328,36 @@ private fun pinnedAssetColors(assetKey: String): IntArray =
     else -> error("no pinned JVM raster asset for '$assetKey'")
   }
 
-private fun UiBuilderNode.explicitRasterPixelSize(document: UiBuilderDocument): Pair<Int, Int> {
+private fun UiBuilderNode.rasterPixelSize(
+  document: UiBuilderDocument,
+  layoutBounds: UiBuilderPixelBounds?,
+): Pair<Int, Int> {
   val size =
     modifiers
       .mapNotNull { it as? JsonObject }
       .singleOrNull { modifier -> (modifier["type"] as? JsonPrimitive)?.content == "size" }
-      ?: error("raster node $id needs one explicit size modifier for deterministic export")
-  val widthDp = (size["widthDp"] as? JsonPrimitive)?.content?.toFloatOrNull()
-  val heightDp = (size["heightDp"] as? JsonPrimitive)?.content?.toFloatOrNull()
-  val density = document.environmentNumber("density")
-  val widthPx = ((widthDp ?: error("raster node $id has no widthDp")) * density).roundToInt()
-  val heightPx = ((heightDp ?: error("raster node $id has no heightDp")) * density).roundToInt()
+  val (widthPx, heightPx) =
+    if (size != null) {
+      val widthDp = (size["widthDp"] as? JsonPrimitive)?.content?.toFloatOrNull()
+      val heightDp = (size["heightDp"] as? JsonPrimitive)?.content?.toFloatOrNull()
+      val density = document.environmentNumber("density")
+      ((widthDp ?: error("raster node $id has no widthDp")) * density).roundToInt() to
+        ((heightDp ?: error("raster node $id has no heightDp")) * density).roundToInt()
+    } else {
+      require(
+        modifiers.count { modifier ->
+          (modifier as? JsonObject)?.get("type")?.let { it as? JsonPrimitive }?.content ==
+            "matchParentSize"
+        } == 1
+      ) {
+        "raster node $id needs one explicit size or matchParentSize modifier for deterministic export"
+      }
+      val bounds =
+        requireNotNull(layoutBounds) {
+          "raster node $id has no measured layout provenance for matchParentSize"
+        }
+      bounds.width.roundToInt() to bounds.height.roundToInt()
+    }
   require(widthPx > 0 && heightPx > 0) { "raster node $id has a non-positive pixel size" }
   return widthPx to heightPx
 }

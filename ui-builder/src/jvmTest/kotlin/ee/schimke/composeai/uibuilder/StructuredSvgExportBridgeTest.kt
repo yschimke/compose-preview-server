@@ -9,6 +9,7 @@ import ee.schimke.composeai.uibuilder.capability.CapabilityCatalogParser
 import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -50,9 +51,75 @@ class StructuredSvgExportBridgeTest {
     assertFalse(Regex("(?:href|src)=\"https?://").containsMatchIn(firstRaw.svg))
 
     val result = executeSavedDocumentSvgExport(job, verified, JvmSkiaStructuredSvgRecorder)
-    val failed = assertIs<SavedDocumentSvgExportResult.Failed>(result)
-    assertEquals("SVG_RECORDER_FAILED", failed.code)
-    assertTrue(failed.message.contains("needs one explicit size modifier"))
+    val rejected = assertIs<SavedDocumentSvgExportResult.Rejected>(result)
+    assertTrue(rejected.blockers.any { it.code == "RASTER_RECORD_COUNT_MISMATCH" })
+    assertTrue(rejected.blockers.any { it.code == "RASTER_RECORD_PAYLOAD_MISMATCH" })
+  }
+
+  @Test
+  fun `match parent raster size comes from stable Compose layout provenance`() {
+    val card =
+      document.nodes
+        .getValue("podcast-card-android")
+        .copy(slots = mapOf("content" to listOf("podcast-card-android-image")))
+    val image = document.nodes.getValue("podcast-card-android-image")
+    val matchParentDocument =
+      document.copy(
+        id = "match-parent-raster-provenance",
+        revision = 42,
+        roots = listOf(card.id),
+        nodes = mapOf(card.id to card, image.id to image),
+      )
+    val matchParentCatalog =
+      catalog
+        .copy(
+          components =
+            catalog.components.filter { it.componentId in setOf("m3/card", "asset/image") }
+        )
+        .asVectorVerified()
+        .withComponentSvg("asset/image") { svg ->
+          svg.copy(
+            status = "raster-fallback-required",
+            fallback = "embedded-raster",
+            blocksExport = false,
+          )
+        }
+
+    val result =
+      assertIs<SavedDocumentSvgExportResult.Ok>(
+        executeSavedDocumentSvgExport(
+          matchParentDocument.job(StructuredSvgRecorderKind.JVM_SKIA_SVG_CANVAS),
+          matchParentCatalog,
+          JvmSkiaStructuredSvgRecorder,
+        )
+      )
+
+    assertEquals(1, Regex("<image\\b").findAll(result.svg).count())
+    assertTrue(result.svg.contains("data-compose-node-id=\"podcast-card-android-image\""))
+    assertTrue(result.svg.contains("data-compose-raster-size-px=\"128x128\""))
+    assertTrue(
+      result.svg.contains(
+        "generated-placeholder/v1/jetcaster.cover.android-developers-backstage/128x128"
+      )
+    )
+  }
+
+  @Test
+  fun `match parent raster refuses to infer missing layout provenance`() {
+    val matchParent = document.nodes.getValue("podcast-card-android-image")
+    val isolated =
+      document.copy(
+        id = "unmeasured-match-parent-raster",
+        roots = listOf(matchParent.id),
+        nodes = mapOf(matchParent.id to matchParent),
+      )
+
+    val failure =
+      assertFailsWith<IllegalArgumentException> {
+        JvmStructuredSvgRasterAssets.create(isolated, listOf(matchParent.id))
+      }
+
+    assertTrue(failure.message.orEmpty().contains("no measured layout provenance"))
   }
 
   @Test
