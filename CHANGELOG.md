@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.4](https://github.com/yschimke/compose-preview-server/compare/v2.3.3...v2.3.4) (2026-08-31)
+
+
+### Bug Fixes
+
+* **deps:** update design-parity packages to v1 ([#59](https://github.com/yschimke/compose-preview-server/issues/59)) ([ce3a611](https://github.com/yschimke/compose-preview-server/commit/ce3a611fe04fd7768c94b2054896a3ae348265c9))
+* **serve:** say why a catalog's live lane could not start ([#61](https://github.com/yschimke/compose-preview-server/issues/61)) ([b048dbe](https://github.com/yschimke/compose-preview-server/commit/b048dbefb26402b7903b6ec4d92c5ef6b9e63e3a))
+
 ## [2.3.3](https://github.com/yschimke/compose-preview-server/compare/v2.3.2...v2.3.3) (2026-08-31)
 
 
