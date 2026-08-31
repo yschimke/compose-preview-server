@@ -77,7 +77,7 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
 
     const builder = await capture(
         page,
-        "/ui-builder/build/wasmDist/index.html?mode=jetcaster-builder",
+        "/ui-builder/build/wasmDist/index.html",
         () => document.documentElement.dataset.uiBuilderReady === "true",
     );
     const capabilityValidation = await page.evaluate(
@@ -145,6 +145,56 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
     // This is an honest convergence guard against a separately compiled reference. Tighten it as
     // the catalog adapters replace the remaining approximations; the release gate remains exact.
     expect(mismatchRatio, "independent-oracle mismatch ratio").toBeLessThan(0.02);
+});
+
+test("capability-generated Jetcaster Compose compiles and renders the full document", async ({
+    page,
+}, testInfo) => {
+    const reference = await capture(
+        page,
+        "/ui-builder-reference-jetcaster/build/wasmDist/index.html",
+        () => globalThis.__uiBuilderReferenceJetcasterReady === true,
+    );
+    const generated = await capture(
+        page,
+        "/ui-builder-generated-jetcaster/build/wasmDist/index.html",
+        () =>
+            document.documentElement.dataset
+                .uiBuilderGeneratedJetcasterReady === "true",
+    );
+    const referencePng = PNG.sync.read(reference);
+    const generatedPng = PNG.sync.read(generated);
+    expect([generatedPng.width, generatedPng.height]).toEqual([1280, 800]);
+    const diff = new PNG({ width: 1280, height: 800 });
+    const mismatch = pixelmatch(
+        referencePng.data,
+        generatedPng.data,
+        diff.data,
+        1280,
+        800,
+        { threshold: 0.1, includeAA: false },
+    );
+    const mismatchRatio = mismatch / (1280 * 800);
+    console.info(
+        `Jetcaster generated-Compose mismatch: ${mismatch} pixels (${(
+            mismatchRatio * 100
+        ).toFixed(3)}%)`,
+    );
+    await testInfo.attach("jetcaster-generated-compose.png", {
+        body: generated,
+        contentType: "image/png",
+    });
+    await testInfo.attach("jetcaster-generated-compose-diff.png", {
+        body: PNG.sync.write(diff),
+        contentType: "image/png",
+    });
+    expect(generated).toMatchSnapshot("jetcaster-discover-generated-compose.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+    expect(mismatchRatio, "generated Compose independent-oracle mismatch").toBeLessThan(
+        0.021,
+    );
 });
 
 test("the same Jetcaster document renders the compact single-pane reference", async ({
