@@ -261,6 +261,10 @@ private fun LiveSessionApp() {
   var authoritativeGeneration by remember { mutableStateOf(0) }
 
   fun acceptSnapshot(response: SnapshotResponseV1) {
+    recordAuthoritativeReceipt(
+      response.snapshot.state.document.revision.toInt(),
+      response.snapshot.state.lastSequence,
+    )
     document = response.snapshot.state.document.toRendererDocument()
     authoritativeGeneration += 1
     sessionStatus = "Live · ${config.actorId} · seq ${response.snapshot.state.lastSequence}"
@@ -313,12 +317,30 @@ private fun LiveSessionApp() {
           ) { update ->
             when (update) {
               is UiBuilderClientUpdate.Snapshot -> {
+                recordProtocolReceipt(
+                  kind = "snapshot",
+                  revision = update.update.snapshot.state.document.revision.toInt(),
+                  sequence = update.update.snapshot.state.lastSequence,
+                )
+                recordAuthoritativeReceipt(
+                  update.update.snapshot.state.document.revision.toInt(),
+                  update.update.snapshot.state.lastSequence,
+                )
                 document = update.update.snapshot.state.document.toRendererDocument()
                 authoritativeGeneration += 1
                 sessionStatus =
                   "Live · ${config.actorId} · seq ${update.update.snapshot.state.lastSequence}"
               }
-              is UiBuilderClientUpdate.Delta -> refreshSnapshot("Syncing remote edits…")
+              is UiBuilderClientUpdate.Delta -> {
+                recordProtocolReceipt(
+                  kind = "delta",
+                  revision =
+                    update.update.delta.operations.lastOrNull()?.outcome?.committedRevision?.toInt()
+                      ?: -1,
+                  sequence = update.update.delta.throughSequence,
+                )
+                refreshSnapshot("Syncing remote edits…")
+              }
               is UiBuilderClientUpdate.Outcome -> refreshSnapshot("Confirming operation…")
               is UiBuilderClientUpdate.SnapshotRequired ->
                 refreshSnapshot("Snapshot recovery · after ${update.afterSequence ?: 0}")
@@ -743,6 +765,34 @@ private external fun liveConfigFlag(name: String): Boolean
 private external fun markReady()
 
 @JsFun(
+  """(kind, revision, sequence) => {
+    const state = globalThis.__uiBuilderPerformance || {
+      schema: 'compose-ui-builder-performance/v1',
+      protocolReceipts: [], authoritativeReceipts: [], canvasApplies: [], cleanRenders: []
+    };
+    state.protocolReceipts.push({ kind, revision, sequence, receivedAtMs: performance.now() });
+    if (state.protocolReceipts.length > 512) state.protocolReceipts.shift();
+    globalThis.__uiBuilderPerformance = state;
+  }"""
+)
+private external fun recordProtocolReceipt(kind: String, revision: Int, sequence: Long)
+
+@JsFun(
+  """(revision, sequence) => {
+    const state = globalThis.__uiBuilderPerformance || {
+      schema: 'compose-ui-builder-performance/v1',
+      protocolReceipts: [], authoritativeReceipts: [], canvasApplies: [], cleanRenders: []
+    };
+    state.authoritativeReceipts.push({
+      revision, sequence, receivedAtMs: performance.now(), consumed: false
+    });
+    if (state.authoritativeReceipts.length > 512) state.authoritativeReceipts.shift();
+    globalThis.__uiBuilderPerformance = state;
+  }"""
+)
+private external fun recordAuthoritativeReceipt(revision: Int, sequence: Long)
+
+@JsFun(
   """(structurallyValid, wasmRenderable, pendingIds) => {
     globalThis.__uiBuilderCapabilityValidation = {
       structurallyValid,
@@ -764,7 +814,28 @@ private external fun publishCapabilityDiagnostics(
     globalThis.__uiBuilderInspectionToken = token;
     manifest.generation.completed = false;
     globalThis.__uiBuilderInspection = manifest;
+    let canvasApplied = false;
     const settle = (frames) => requestAnimationFrame(() => {
+      const performanceState = globalThis.__uiBuilderPerformance;
+      if (performanceState && !canvasApplied) {
+        canvasApplied = true;
+        const receipt = [...performanceState.authoritativeReceipts]
+          .reverse()
+          .find((candidate) =>
+            candidate.revision === manifest.documentRevision && !candidate.consumed
+          );
+        if (receipt) {
+          receipt.consumed = true;
+          const completedAtMs = performance.now();
+          performanceState.canvasApplies.push({
+            revision: manifest.documentRevision,
+            receiptAtMs: receipt.receivedAtMs,
+            completedAtMs,
+            latencyMs: completedAtMs - receipt.receivedAtMs
+          });
+          if (performanceState.canvasApplies.length > 512) performanceState.canvasApplies.shift();
+        }
+      }
       if (globalThis.__uiBuilderInspectionToken !== token) return;
       if (frames > 1) {
         settle(frames - 1);
@@ -773,6 +844,17 @@ private external fun publishCapabilityDiagnostics(
       manifest.generation.completed = true;
       globalThis.__uiBuilderInspection = manifest;
       document.documentElement.dataset.uiBuilderInspectionGeneration = manifest.generation.key;
+      if (performanceState) {
+        const completedAtMs = performance.now();
+        const cleanRender = {
+          revision: manifest.documentRevision,
+          completedAtMs,
+          generationKey: manifest.generation.key
+        };
+        performanceState.cleanRenders.push(cleanRender);
+        if (performanceState.cleanRenders.length > 512) performanceState.cleanRenders.shift();
+        if (!performanceState.interactive) performanceState.interactive = cleanRender;
+      }
     });
     settle(manifest.generation.stabilityFrames);
   }"""
