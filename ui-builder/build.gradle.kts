@@ -63,6 +63,12 @@ kotlin {
   }
 }
 
+val collaborationSoakMinutes = providers.gradleProperty("uiBuilderCollaborationSoakMinutes")
+
+tasks.named<Test>("jvmTest") {
+  collaborationSoakMinutes.orNull?.let { systemProperty("uiBuilderCollaborationSoakMinutes", it) }
+}
+
 tasks.register<JavaExec>("generateJetcasterComposeFixture") {
   description = "Generate the standalone Jetcaster Compose source from the frozen public document."
   group = "code generation"
