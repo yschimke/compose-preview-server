@@ -680,6 +680,13 @@ entry *replaces* that whole string rather than adding to it. The container then 
 heap ceiling and without the paths the daemon lane needs, for the sake of one `-D`. Nothing in the
 resulting failure points back at the change.
 
+Since 2.3.5 the entrypoint re-adds any `-Dcomposeai.cli.lib*Dir` a replaced string dropped, and
+logs that it did: losing those is what silently turns every live render lane into baked snapshots.
+It cost preview.coo.ee its desktop catalogs, under a degradation that blamed a daemon which "could
+not be started". A path you set yourself is left alone. Everything else the baked string carries —
+the heap ceiling, the render timeouts, the sandbox boot budgets — is still yours to lose, so use
+`SERVE_JAVA_OPTS`.
+
 Use this instead. The entrypoint appends it to whatever the image already carries:
 
 ```

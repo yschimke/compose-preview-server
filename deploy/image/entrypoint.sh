@@ -624,5 +624,52 @@ if [[ -n "${SERVE_JAVA_OPTS:-}" ]]; then
   echo "entrypoint: appended SERVE_JAVA_OPTS to JAVA_TOOL_OPTIONS" >&2
 fi
 
+# Re-assert the daemon sidecar directories if the JAVA_TOOL_OPTIONS this container came up with
+# lost them.
+#
+# The trap the append above documents has a second half. An operator who sets JAVA_TOOL_OPTIONS
+# from the compose file replaces the baked string, and what that silently removes is not only the
+# heap ceiling: it is the `-Dcomposeai.cli.lib*Dir` flags that are the ONLY way the render lanes
+# find their sidecars. They live at /opt/lib-*, which is neither $APP_HOME (the start script does
+# not export it) nor a classpath-relative path, so nothing else can locate them.
+#
+# The failure that produces is silent and reads like a content problem: catalogs still serve, still
+# render, still look right — they just quietly stop offering live device/theme/knob controls, with
+# `livebundle-unavailable` naming a daemon that "could not be started". preview.coo.ee ran that way
+# with a stale JAVA_TOOL_OPTIONS carrying the Android flag alone: every Android catalog was live and
+# every desktop one was snapshots, which looks exactly like a desktop-lane bug and is not one.
+#
+# So: add back any sidecar flag that is missing AND whose directory this image actually has. Only
+# missing ones — an operator who points a flag at their own sidecar keeps it, which is the whole
+# reason this appends per-flag rather than re-appending the baked string wholesale.
+#
+# The directories are variables so the guard test can point them at fixtures; they default to the
+# paths the Dockerfile COPYs into.
+# >>> sidecar-restore
+: "${LIB_DAEMON_ANDROID_DIR:=/opt/lib-daemon-android}"
+: "${LIB_DAEMON_DESKTOP_DIR:=/opt/lib-daemon-desktop}"
+: "${LIB_RENDERER_DIR:=/opt/lib-renderer}"
+sidecar_restored=()
+restore_sidecar_flag() {
+  local prop="$1" dir="$2"
+  # A flag naming a directory this image does not carry would be worse than no flag: it is the
+  # FIRST candidate `locateBundleSidecarJars` tries, so it would mask the classpath-relative
+  # fallback that a source build legitimately resolves through.
+  [[ -d "${dir}" ]] || return 0
+  [[ "${JAVA_TOOL_OPTIONS:-}" == *"-D${prop}="* ]] && return 0
+  export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -D${prop}=${dir}"
+  sidecar_restored+=("${prop}")
+}
+restore_sidecar_flag composeai.cli.libDaemonAndroidDir "${LIB_DAEMON_ANDROID_DIR}"
+restore_sidecar_flag composeai.cli.libDaemonDesktopDir "${LIB_DAEMON_DESKTOP_DIR}"
+restore_sidecar_flag composeai.cli.libRendererDir "${LIB_RENDERER_DIR}"
+if ((${#sidecar_restored[@]})); then
+  echo "entrypoint: JAVA_TOOL_OPTIONS was missing ${sidecar_restored[*]} — restored from the" \
+    "image. Something replaced the baked JAVA_TOOL_OPTIONS (setting it in the compose file or" \
+    ".env does that); use SERVE_JAVA_OPTS to ADD options instead. Without this the live render" \
+    "lanes serve baked PNG snapshots only." >&2
+fi
+# <<< sidecar-restore
+
 echo "entrypoint: compose-preview-server on 0.0.0.0:${PORT}" >&2
 exec compose-preview-server "${args[@]}"
