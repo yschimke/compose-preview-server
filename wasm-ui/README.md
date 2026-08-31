@@ -31,9 +31,11 @@ The catalog id is part of the path. The app uses the matching canonical API, sna
 legacy-viewer, and WebSocket paths. Use `?token=...&preview=<id>` to deep link directly into a
 preview. Add `&live=1` to connect its live stream immediately, or `&live=0` to pin the snapshot
 (handy for a saved development URL or browser smoke test). Catalog, preview-detail, and composer
-navigation all stay in this one dynamic
-Wasm document: they push permalink query state into browser history, and Back/Forward restores that
-screen without a page load. Old `/wasm/preview-ui/?session=<catalog-id>` links redirect here.
+navigation all stay in this one dynamic Wasm document: they push permalink query state into browser
+history, and Back/Forward restores that screen without a page load. Catalog filtering and the detail
+screen's light/dark, background, font-scale, locale, and live/snapshot controls are part of the
+permalink too, matching the current web viewer's shareable-state behavior. Old
+`/wasm/preview-ui/?session=<catalog-id>` links redirect here.
 
 Open the native UI Composer directly at `/wasm/compose-m3/?token=...&compose=1`.
 

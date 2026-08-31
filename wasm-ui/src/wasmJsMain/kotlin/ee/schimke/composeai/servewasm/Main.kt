@@ -13,6 +13,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.io.encoding.Base64
 import kotlin.js.Promise
+import kotlin.math.roundToInt
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -64,6 +65,11 @@ data class ClientConfig(
     location.previewId?.let { put("preview", it) }
     if (location.composing) put("compose", "1")
     location.live?.let { put("live", if (it) "1" else "0") }
+    location.filter.takeIf { it.isNotBlank() }?.let { put("q", it) }
+    location.uiMode?.let { put("uiMode", it) }
+    if (location.transparent) put("background", "off")
+    location.fontScale?.let { put("fontScale", normalizeFontScale(it).toString()) }
+    location.localeTag.takeIf { it.isNotBlank() }?.let { put("localeTag", it) }
   }
     .entries
     .joinToString("&") { (key, value) -> "${encodeComponent(key)}=${encodeComponent(value)}" }
@@ -89,15 +95,31 @@ data class AppLocation(
   val previewId: String? = null,
   val composing: Boolean = false,
   val live: Boolean? = null,
+  val filter: String = "",
+  val uiMode: String? = null,
+  val transparent: Boolean = false,
+  val fontScale: Float? = null,
+  val localeTag: String = "",
 ) {
   companion object {
     fun fromSearch(search: String): AppLocation {
       val params = parseQuery(search)
       val composing = params["compose"] == "1" || params["compose"] == "true"
+      val previewId = params["preview"]?.takeIf { it.isNotBlank() && !composing }
       return AppLocation(
-        previewId = params["preview"]?.takeIf { it.isNotBlank() && !composing },
+        previewId = previewId,
         composing = composing,
-        live = params.booleanChoice("live"),
+        live = params.booleanChoice("live").takeIf { previewId != null },
+        filter = params["q"]?.takeIf { previewId == null && !composing }.orEmpty(),
+        uiMode = params["uiMode"]?.takeIf { previewId != null && (it == "light" || it == "dark") },
+        transparent = previewId != null && params["background"] == "off",
+        fontScale =
+          params["fontScale"]
+            ?.toFloatOrNull()
+            ?.takeIf { previewId != null && it.isFinite() }
+            ?.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+            ?.let(::normalizeFontScale),
+        localeTag = params["localeTag"]?.takeIf { previewId != null }.orEmpty(),
       )
     }
   }
@@ -208,12 +230,11 @@ class BrowserPreviewClient(private val config: ClientConfig) {
     return ::removeBrowserHistoryListener
   }
 
-  fun initialLocation(): AppLocation =
-    AppLocation(
-      previewId = config.initialPreview,
-      composing = config.initialComposer,
-      live = config.initialLive,
-    )
+  fun initialLocation(): AppLocation = AppLocation.fromSearch(locationSearch())
+
+  fun setDocumentTitle(title: String) {
+    setBrowserDocumentTitle(title)
+  }
 
   fun openStream(previewId: String, overrides: Map<String, String>) {
     // Decode through Skia in the Wasm process. PNG is supported by every Skiko browser runtime;
@@ -456,8 +477,14 @@ private fun closeBrowserStream(): Unit =
 
 private fun writeBrowserQuery(query: String, push: Boolean): Unit =
   js(
-    """(push ? window.history.pushState : window.history.replaceState)
-      .call(window.history, null, '', window.location.pathname + (query ? '?' + query : ''))"""
+    """(function () {
+      var url = window.location.pathname + (query ? '?' + query : '');
+      if (url === window.location.pathname + window.location.search) return;
+      try {
+        (push ? window.history.pushState : window.history.replaceState)
+          .call(window.history, null, '', url);
+      } catch (_) {}
+    })()"""
   )
 
 private fun installBrowserHistoryListener(listener: () -> Unit): Unit =
@@ -480,6 +507,8 @@ private fun removeBrowserHistoryListener(): Unit =
     })()"""
   )
 
+private fun setBrowserDocumentTitle(title: String): Unit = js("document.title = title")
+
 private fun locationSearch(): String = js("window.location.search")
 
 private fun locationPathname(): String = js("window.location.pathname")
@@ -492,3 +521,8 @@ private fun decodeComponent(value: String): String = runCatching {
   .getOrDefault(value)
 
 private fun decodeComponentUnsafe(value: String): String = js("decodeURIComponent(value)")
+
+private fun normalizeFontScale(value: Float): Float = (value * 100).roundToInt() / 100f
+
+private const val MIN_FONT_SCALE = 0.5f
+private const val MAX_FONT_SCALE = 2f

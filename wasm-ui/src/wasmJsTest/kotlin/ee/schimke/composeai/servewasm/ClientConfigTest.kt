@@ -24,6 +24,18 @@ class ClientConfigTest {
       "token=secret&preview=button&live=1",
       config.permalinkQuery(AppLocation(previewId = "button", live = true)),
     )
+    assertEquals(
+      "token=secret&preview=button&uiMode=dark&background=off&fontScale=1.3&localeTag=ar",
+      config.permalinkQuery(
+        AppLocation(
+          previewId = "button",
+          uiMode = "dark",
+          transparent = true,
+          fontScale = 1.3f,
+          localeTag = "ar",
+        )
+      ),
+    )
   }
 
   @Test
@@ -57,6 +69,23 @@ class ClientConfigTest {
     assertEquals(
       AppLocation(composing = true),
       AppLocation.fromSearch("?preview=ignored&compose=1"),
+    )
+    assertEquals(AppLocation(filter = "filled button"), AppLocation.fromSearch("?q=filled+button"))
+    assertEquals(
+      AppLocation(
+        previewId = "button",
+        uiMode = "dark",
+        transparent = true,
+        fontScale = 2f,
+        localeTag = "ar",
+      ),
+      AppLocation.fromSearch(
+        "?preview=button&uiMode=dark&background=off&fontScale=99&localeTag=ar"
+      ),
+    )
+    assertEquals(
+      AppLocation(previewId = "button"),
+      AppLocation.fromSearch("?preview=button&uiMode=sepia&fontScale=nope"),
     )
   }
 }
