@@ -198,6 +198,9 @@ Confetti stays in CI as the fast, no-network compact regression. Jetcaster is th
 - A saved-revision JVM `ComposeScene -> Skia SVGCanvas` bridge exports the full frozen Jetcaster
   document under its checked-in capability catalog. Known `iconKey` assets remain vector paths; the
   four authored images are named embedded-raster fallbacks with measured bounds and payload
-  provenance. The current images are deterministic generated placeholders, and the claim remains
-  scoped to the pinned same-runtime JVM recorder. Production asset bytes, font pinning, and actual
-  Figma import parity remain open.
+  provenance. A real Figma import retains exact 1280x800 root bounds, 37 editable text nodes, 83
+  vector nodes, and all four image paints. Its raster differs from the clean Wasm snapshot by
+  `5.597%` at threshold `0.1`, so the result is evidence of structural import—not visual parity.
+  The current generated fallback pixels do not match the Compose canvas artwork; font pinning and
+  Figma text metrics also remain open. See
+  `docs/design/fixtures/ui-builder/jetcaster-discover-figma-import-v1.json`.
