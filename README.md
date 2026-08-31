@@ -5,7 +5,7 @@ and the browser viewer surfaces. Its history was extracted from
 [`yschimke/compose-ai-tools`](https://github.com/yschimke/compose-ai-tools); the CLI remains there and
 consumes this repository's published library.
 
-The JVM API is published as three lockstep artifacts:
+The JVM API and hosted builder frontend are published as four lockstep artifacts:
 
 ```kotlin
 // The server: catalog hosting, the HTTP routes, the playground, the viewer surfaces.
@@ -19,6 +19,10 @@ implementation("ee.schimke.composeai:compose-preview-render-host:<version>")
 // Persistent collaborative design service, catalog validation and export orchestration. It has no
 // Ktor server, daemon/render-host implementation, MCP SDK or Compose UI dependency.
 implementation("ee.schimke.composeai:compose-preview-ui-builder-runtime:<version>")
+
+// Immutable Compose/Wasm application archive used by the standalone server distribution. This is
+// a deployment input rather than a JVM runtime dependency.
+// ee.schimke.composeai:compose-preview-ui-builder-web:<version>
 ```
 
 `:render-host` exists because rendering a packed bundle and reading a preview timeline out of git
@@ -54,6 +58,8 @@ The server distribution packages the builder's Jetcaster benchmark preview as a 
 `/ui-builder/`; the existing catalog-scoped `/wasm/<system>/` preview application remains a
 distinct feature and route. The builder route opens an interactive Wasm editor around the frozen
 Jetcaster design; clean benchmark modes remain available to the independent visual harness.
+The distribution consumes the frontend through the immutable `:ui-builder-web` archive variant;
+it no longer reaches into the frontend project's tasks or output directory.
 
 ## Spatial and WebXR previews
 
