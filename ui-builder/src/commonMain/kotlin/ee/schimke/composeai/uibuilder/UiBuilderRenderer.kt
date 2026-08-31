@@ -8,18 +8,33 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Coffee
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -30,13 +45,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
@@ -141,6 +159,23 @@ private fun RenderNode(
       )
     "layout/column" ->
       Column(measured) {
+        slot("children").forEach { childId ->
+          val childModifier =
+            if (document.nodes.getValue(childId).componentId == "layout/lazy-column") {
+              Modifier.fillMaxWidth().weight(1f)
+            } else {
+              Modifier
+            }
+          RenderNode(document, childId, selectedTrack, onSelectedTrack, onBounds, childModifier)
+        }
+      }
+    "layout/row" ->
+      Row(
+        modifier = measured,
+        horizontalArrangement =
+          Arrangement.spacedBy(node.propertyFloat("horizontalSpacingDp", 0f).dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+      ) {
         slot("children").forEach {
           RenderNode(document, it, selectedTrack, onSelectedTrack, onBounds)
         }
@@ -183,13 +218,95 @@ private fun RenderNode(
             },
       )
     }
+    "m3/primary-tab-row" ->
+      PrimaryTabRow(selectedTabIndex = node.propertyInt("selectedIndex", 0), modifier = measured) {
+        slot("tabs").forEach { RenderNode(document, it, selectedTrack, onSelectedTrack, onBounds) }
+      }
+    "m3/tab" ->
+      Tab(
+        selected = node.propertyBool("selected", false),
+        onClick = {},
+        modifier = measured,
+        text = {
+          slot("text").forEach {
+            RenderNode(document, it, selectedTrack, onSelectedTrack, onBounds)
+          }
+        },
+      )
+    "layout/lazy-column" ->
+      LazyColumn(modifier = measured) {
+        items(slot("items"), key = { it }) { id ->
+          RenderNode(document, id, selectedTrack, onSelectedTrack, onBounds)
+        }
+      }
+    "m3/list-item" -> {
+      val accent = parseArgb(node.propertyString("startAccentColor"))
+      ListItem(
+        modifier =
+          measured.drawBehind {
+            if (node.propertyString("startAccentColor").isNotEmpty()) {
+              drawRect(
+                Color(accent),
+                size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height),
+              )
+            }
+          },
+        headlineContent = {
+          slot("headline").forEach {
+            RenderNode(document, it, selectedTrack, onSelectedTrack, onBounds)
+          }
+        },
+        supportingContent =
+          slot("supporting")
+            .takeIf { it.isNotEmpty() }
+            ?.let { ids ->
+              { ids.forEach { RenderNode(document, it, selectedTrack, onSelectedTrack, onBounds) } }
+            },
+        trailingContent =
+          slot("trailing")
+            .takeIf { it.isNotEmpty() }
+            ?.let { ids ->
+              { ids.forEach { RenderNode(document, it, selectedTrack, onSelectedTrack, onBounds) } }
+            },
+      )
+    }
+    "m3/surface" ->
+      Surface(
+        modifier = measured,
+        color = node.propertyColorToken("containerColor"),
+        shape = RoundedCornerShape(node.propertyFloat("shapeDp", 0f).dp),
+      ) {
+        slot("content").forEach {
+          RenderNode(document, it, selectedTrack, onSelectedTrack, onBounds)
+        }
+      }
+    "m3/horizontal-divider" -> HorizontalDivider(modifier = measured)
+    "m3/icon" ->
+      Icon(
+        imageVector =
+          when (node.propertyString("iconKey")) {
+            "accessTime" -> Icons.Filled.AccessTime
+            "bookmark" -> Icons.Filled.Bookmark
+            "bookmarkBorder" -> Icons.Outlined.BookmarkBorder
+            "coffee" -> Icons.Filled.Coffee
+            else -> error("unsupported icon: ${node.propertyString("iconKey")}")
+          },
+        contentDescription = null,
+        modifier = measured.size(node.propertyFloat("sizeDp", 24f).dp),
+        tint = node.propertyTextColor(),
+      )
     "m3/text" ->
       Text(
         text = node.propertyString("text"),
         modifier = measured,
-        style =
-          if (node.propertyString("style") == "titleLarge") MaterialTheme.typography.titleLarge
-          else LocalTextStyle.current,
+        style = node.textStyle(),
+        fontWeight =
+          when (node.propertyString("fontWeight")) {
+            "bold" -> FontWeight.Bold
+            "semiBold" -> FontWeight.SemiBold
+            else -> null
+          },
+        color = node.propertyTextColor(),
         maxLines = node.propertyInt("maxLines", Int.MAX_VALUE),
         textAlign =
           if (node.propertyString("textAlign") == "center") TextAlign.Center else TextAlign.Start,
@@ -208,6 +325,7 @@ private fun RenderNode(
 private fun Modifier.applyModifier(value: kotlinx.serialization.json.JsonObject): Modifier =
   when (value.optionalString("type")) {
     "fillMaxSize" -> fillMaxSize()
+    "fillMaxWidth" -> fillMaxWidth()
     "padding" ->
       padding(
         start = value.float("startDp").dp,
@@ -229,6 +347,36 @@ private fun UiBuilderNode.propertyFloat(name: String, fallback: Float): Float =
 
 private fun UiBuilderNode.propertyInt(name: String, fallback: Int): Int =
   propertyObject(name)["value"]?.jsonPrimitive?.intOrNull ?: fallback
+
+private fun UiBuilderNode.propertyBool(name: String, fallback: Boolean): Boolean =
+  propertyObject(name)["value"]?.jsonPrimitive?.booleanOrNull ?: fallback
+
+@Composable
+private fun UiBuilderNode.textStyle() =
+  when (propertyString("style")) {
+    "titleLarge" -> MaterialTheme.typography.titleLarge
+    "titleMedium" -> MaterialTheme.typography.titleMedium
+    "titleSmall" -> MaterialTheme.typography.titleSmall
+    "bodyMedium" -> MaterialTheme.typography.bodyMedium
+    "labelSmall" -> MaterialTheme.typography.labelSmall
+    else -> LocalTextStyle.current
+  }
+
+@Composable
+private fun UiBuilderNode.propertyTextColor(): Color =
+  when (propertyString("color")) {
+    "primary" -> MaterialTheme.colorScheme.primary
+    "onSurfaceVariant" -> MaterialTheme.colorScheme.onSurfaceVariant
+    else -> Color.Unspecified
+  }
+
+@Composable
+private fun UiBuilderNode.propertyColorToken(name: String): Color =
+  when (propertyString(name)) {
+    "surfaceContainer" -> MaterialTheme.colorScheme.surfaceContainer
+    "surfaceContainerLow" -> MaterialTheme.colorScheme.surfaceContainerLow
+    else -> Color.Transparent
+  }
 
 private fun UiBuilderNode.stateEquals(name: String, actual: String?): Boolean {
   val expected = propertyObject(name)["value"]

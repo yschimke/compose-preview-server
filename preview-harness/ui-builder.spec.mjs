@@ -33,7 +33,7 @@ async function capture(page, mode) {
     return page.screenshot();
 }
 
-test("public operations render the developer-authored Confetti Wasm slice", async ({
+test("public operations render the developer-authored compact Confetti Schedule", async ({
     page,
 }, testInfo) => {
     const reference = await capture(page, "reference");
@@ -43,7 +43,7 @@ test("public operations render the developer-authored Confetti Wasm slice", asyn
         body: reference,
         contentType: "image/png",
     });
-    expect(reference).toMatchSnapshot("confetti-header-filter-reference.png", {
+    expect(reference).toMatchSnapshot("confetti-schedule-reference.png", {
         threshold: 0,
         maxDiffPixels: 0,
     });

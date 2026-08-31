@@ -19,13 +19,13 @@ class UiBuilderContractTest {
     val result = UiBuilderReducer.replay(fixture)
     val canonical = canonicalJson(json.parseToJsonElement(json.encodeToString(result.document)))
 
-    assertEquals(10, result.document.revision)
+    assertEquals(57, result.document.revision)
     assertEquals(
       fixture.getValue("expectedDocumentHash").toString().trim('"'),
       canonical.sha256(),
     )
     assertEquals(
-      listOf("chip-all", "chip-droidcon"),
+      listOf("chip-all", "chip-droidcon", "chip-swiftcon", "chip-fluttercon", "chip-reactcon"),
       result.document.nodes.getValue("track-filters").slots.getValue("items"),
     )
   }
@@ -78,15 +78,22 @@ class UiBuilderContractTest {
     assertTrue(code.contains("fun ConfettiScheduleHeader()"))
     assertTrue(code.contains("Scaffold("))
     assertTrue(code.contains("CenterAlignedTopAppBar"))
-    assertTrue(code.contains("Text(\"KotlinConf 2023\")"))
+    assertTrue(code.contains("Text(\"KotlinConf 2023\","))
     assertTrue(code.contains("LazyRow("))
     assertTrue(code.contains("FilterChip("))
     assertTrue(code.contains("Text(\"droidCon\")"))
     assertTrue(code.contains("Color(0xFF00FF4F)"))
+    assertTrue(code.contains("Text(\"reactCon\")"))
+    assertTrue(code.contains("PrimaryTabRow"))
+    assertTrue(code.contains("Text(\"Thu 13 Apr\")"))
+    assertTrue(code.contains("LazyColumn"))
+    assertTrue(code.contains("ScheduleSessionItem("))
+    assertTrue(code.contains("Confetti: building a Kotlin Multiplatform conference app"))
+    assertTrue(code.contains("ScheduleBreak(title = \"Coffee Break\""))
   }
 
   private fun fixture(): JsonObject {
-    val resource = checkNotNull(javaClass.getResource("/confetti-header-filter-operations-v1.json"))
+    val resource = checkNotNull(javaClass.getResource("/confetti-schedule-operations-v1.json"))
     return json.parseToJsonElement(resource.readText()).jsonObject
   }
 }

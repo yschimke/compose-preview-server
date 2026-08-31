@@ -93,7 +93,7 @@ jobs:
           node-version: 24.20.0
           cache: npm
           cache-dependency-path: preview-harness/package-lock.json
-      - uses: actions/setup-java@3b5b7b51d43c9d3a5a318e770984f57e52bb4b3c # v5.1.0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           distribution: temurin
           java-version: 17

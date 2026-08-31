@@ -22,6 +22,7 @@ kotlin {
       @Suppress("DEPRECATION") implementation(compose.runtime)
       @Suppress("DEPRECATION") implementation(compose.foundation)
       @Suppress("DEPRECATION") implementation(compose.material3)
+      @Suppress("DEPRECATION") implementation(compose.materialIconsExtended)
       @Suppress("DEPRECATION") implementation(compose.ui)
       implementation(libs.kotlinx.serialization.json)
     }
@@ -46,7 +47,7 @@ tasks.register<Sync>("wasmFrontendDist") {
     include("js-joda.esm.js")
   }
   from(rootProject.layout.projectDirectory.dir("docs/design/fixtures/ui-builder")) {
-    include("confetti-header-filter-operations-v1.json")
+    include("confetti-schedule-operations-v1.json")
   }
   from(rootProject.layout.projectDirectory.dir("assets/rc-fonts")) {
     include("*.ttf", "fonts.json", "*OFL.txt", "LICENSE.txt")
