@@ -3013,6 +3013,64 @@ class ServeCatalogStoreTest {
   }
 
   @Test
+  fun `a recorded launch reason is carried into the daemon-startup degradation`() {
+    // The failure this closes: every way a live lane can fail collapsed into one sentence — "the
+    // live bundle daemon could not be started" — while the launch's own explanation went to stderr
+    // and nowhere else. On preview.coo.ee that sentence was all a missing `lib-daemon-desktop/`
+    // ever said, so a deployment gap read exactly like a broken bundle, and telling them apart
+    // needed a shell on the box. The reason now rides the degradation into /status.json.
+    val bundleBytes =
+      polyglotBundle(
+        manifest =
+          """
+          {"schemaVersion":8,"backend":"desktop","previewIds":["FilledButton_Dark"],
+           "coverPreviewId":"FilledButton_Dark",
+           "classpath":[{"kind":"module","path":"classes/app.jar"}],
+           "modulePath":":m","producedBy":"test"}
+          """
+            .trimIndent()
+      )
+    val catalog =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3",
+       "liveBundle":{"path":"bundle/","file":"compose-m3-bundle.png"},
+       "components":[{"componentId":"Button/Filled","images":[
+         {"path":"images/button-filled/ideal__default__dark.png","theme":"dark","previewId":"FilledButton_Dark"}]}]}
+      """
+        .trimIndent()
+    val trust =
+      TrustStore(
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+      )
+    val store =
+      ServeCatalogStore(
+        root = tempRoot(),
+        register = { n, h -> registered[n] = h },
+        trust = { trust },
+        serverSideRenderEnabled = true,
+        liveLaneFailure = { system ->
+          if (system == "compose-m3") "catalog compose-m3: no daemon jars found (looked in X)"
+          else null
+        },
+        fetch = { url ->
+          when {
+            url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.toByteArray()
+            url.endsWith("bundle/compose-m3-bundle.png") -> bundleBytes
+            url.endsWith(".png") -> png()
+            else -> null
+          }
+        },
+        buildTrustedBundle = { _, _, _, _, _, _ -> false },
+      )
+
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+    val detail = registered.getValue("compose-m3").degradations.single().detail
+    // The generic half stays FIRST and unchanged — existing consumers match on it.
+    assertTrue(detail.contains("live bundle daemon could not be started"), detail)
+    assertTrue(detail.contains("no daemon jars found"), detail)
+  }
+
+  @Test
   fun `a same-size but corrupt cache entry is re-fetched, not trusted`() {
     // The cache key is a sha256, so a pre-existing cache file with the right size but wrong bytes
     // (a partial write / disk fault) must be re-fetched and repaired — not silently materialized.
