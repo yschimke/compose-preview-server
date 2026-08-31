@@ -57,9 +57,9 @@ private suspend fun awaitBrowserPromise(promise: Promise<JsString>): String =
         continuation.resume(value.toString())
         null
       }
-      .catch { failure ->
+      .catch {
         continuation.resumeWithException(
-          UiBuilderProtocolException("UI-builder browser transport failed: $failure")
+          UiBuilderProtocolException(browserUiBuilderTransportFailureMessage())
         )
         null
       }
@@ -90,6 +90,9 @@ private fun fetchUiBuilder(
       });
     })()"""
   )
+
+internal fun browserUiBuilderTransportFailureMessage(): String =
+  "UI-builder browser transport failed"
 
 internal fun browserUiBuilderWebSocketUrl(
   endpoint: String,
