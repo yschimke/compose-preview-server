@@ -35,6 +35,7 @@ const mimeByExt = {
     ".json": "application/json; charset=utf-8",
     ".png": "image/png",
     ".svg": "image/svg+xml",
+    ".wasm": "application/wasm",
     ".ttf": "font/ttf",
     ".map": "application/json; charset=utf-8",
 };

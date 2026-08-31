@@ -93,9 +93,16 @@ jobs:
           node-version: 24.20.0
           cache: npm
           cache-dependency-path: preview-harness/package-lock.json
+      - uses: actions/setup-java@3b5b7b51d43c9d3a5a318e770984f57e52bb4b3c # v5.1.0
+        with:
+          distribution: temurin
+          java-version: 17
       - run: npm ci
         working-directory: preview-harness
       - run: npx playwright install --with-deps chromium
+        working-directory: preview-harness
+      - run: ./gradlew :ui-builder:wasmFrontendDist --no-daemon
+      - run: npm run harness:ui-builder
         working-directory: preview-harness
       - run: npm run harness:pages
         working-directory: preview-harness

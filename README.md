@@ -36,7 +36,10 @@ npm --prefix serve-web run verify
 ```
 
 The independently installable visual harness lives in `preview-harness/`. The experimental
-Compose/Wasm frontend lives in `wasm-ui/`.
+Compose/Wasm frontend lives in `wasm-ui/`. The UI builder incubates in the dependency-isolated
+`ui-builder/` module; it has its own reducer, native Compose renderer, standalone Wasm visual
+fixture and code exporter so that it can later move out without pulling server implementation with
+it.
 
 ## Spatial and WebXR previews
 

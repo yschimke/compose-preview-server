@@ -412,6 +412,18 @@ supported text/groups, declares every raster fallback, and rasterizes within the
 
 ## 11. Operation-replay visual test
 
+The first executable vertical slice now lives behind the isolated `:ui-builder` module. Its JVM
+test consumes `confetti-header-filter-operations-v1.json` directly and proves that the Kotlin and
+JavaScript reducers produce the same canonical document hash. The module's standalone Wasm fixture
+then renders that reduced document and an independently authored Confetti header/filter composable.
+`preview-harness/ui-builder.spec.mjs` performs a zero-tolerance PNG pixel diff at 411×914 and retains
+the developer-authored reference as a committed golden. This closes the header/filter slice of the
+test architecture below; it does not claim the full Schedule screen or SVG leg is complete.
+
+The module deliberately has no dependency on `:server`, `:render-host`, or `:wasm-ui`. Server HTTP
+and MCP adapters can depend on its reducer API while it is incubating here; extraction later moves
+the whole module and visual fixture rather than separating state semantics from rendering.
+
 The golden test starts from an empty design. It must not load the expected final document as its
 input.
 
