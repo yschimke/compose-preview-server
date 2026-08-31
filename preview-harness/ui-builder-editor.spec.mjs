@@ -61,7 +61,7 @@ test("the pinned editor canvas preserves clean 1280x800 geometry and pixels", as
 
     await page.setViewportSize({ width: 1920, height: 900 });
     await page.goto("index.html?mode=interactive-editor-clean");
-    await waitForEditor(page, 99);
+    await waitForEditor(page, 108);
     const canvas = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
     const editorManifest = await page.evaluate(() => globalThis.__uiBuilderInspection);
     expect(canvas).toMatchObject({
@@ -151,18 +151,18 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
     });
 
     await page.goto("index.html?mode=interactive-editor");
-    await waitForEditor(page, 99);
+    await waitForEditor(page, 108);
     const initialState = await page.evaluate(() => globalThis.__uiBuilderEditor);
     expect(initialState).toMatchObject({
-        revision: 99,
-        nodeCount: 99,
+        revision: 108,
+        nodeCount: 108,
         selectedNodeId: "root-surface",
         operationSequence: 0,
         outcome: "idle",
         mainBackgroundChildren: ["main-scrim", "main-scaffold"],
     });
     expect(initialState.documentHash).toBe(
-        "09b7af04ab546421f72b81b1c49564f044790b8f2db4d2304dc66ff73c148643",
+        "5d58ee43992be772626f2fd6a7e1cae094fa25ca7babdf55418ad80bca702b39",
     );
     const canvas = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
     expect(canvas.scale).toBeCloseTo(0.625, 3);
@@ -233,7 +233,7 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
     );
     await page.mouse.up();
     await settle(page);
-    expect(await page.evaluate(() => globalThis.__uiBuilderEditor.revision)).toBe(99);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor.revision)).toBe(108);
 
     const destination = {
         x: canvas.bounds.left + canvas.bounds.width / 2,
@@ -251,11 +251,11 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
             globalThis.__uiBuilderEditorDropTarget?.label === "discover-grid.items",
     );
     await page.mouse.up();
-    await waitForEditor(page, 100);
+    await waitForEditor(page, 109);
     const insertedState = await page.evaluate(() => globalThis.__uiBuilderEditor);
     expect(insertedState).toMatchObject({
-        revision: 100,
-        nodeCount: 100,
+        revision: 109,
+        nodeCount: 109,
         selectedNodeId: "editor-m3-text-001",
         operationSequence: 1,
         outcome: "accepted",
@@ -270,10 +270,10 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
         sampleText.x + sampleText.width / 2,
         sampleText.y + sampleText.height / 2,
     );
-    await waitForEditor(page, 101);
+    await waitForEditor(page, 110);
     const editedState = await page.evaluate(() => globalThis.__uiBuilderEditor);
     expect(editedState).toMatchObject({
-        revision: 101,
+        revision: 110,
         selectedText: "Edited in Compose",
         operationSequence: 2,
         outcome: "accepted",
@@ -304,11 +304,11 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
         { steps: 8 },
     );
     await page.mouse.up();
-    await waitForEditor(page, 102);
+    await waitForEditor(page, 111);
     const reorderedState = await page.evaluate(() => globalThis.__uiBuilderEditor);
     expect(reorderedState).toMatchObject({
-        revision: 102,
-        nodeCount: 100,
+        revision: 111,
+        nodeCount: 109,
         selectedNodeId: "main-scrim",
         operationSequence: 3,
         outcome: "accepted",
@@ -318,49 +318,49 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
 
     // Duplicate is one existing reducer batch, and history targets only wasm-editor operations.
     await page.keyboard.press("Control+d");
-    await waitForEditor(page, 103);
+    await waitForEditor(page, 112);
     const duplicatedState = await page.evaluate(() => globalThis.__uiBuilderEditor);
     expect(duplicatedState).toMatchObject({
-        revision: 103,
-        nodeCount: 101,
+        revision: 112,
+        nodeCount: 110,
         selectedNodeId: "main-scrim-copy-004",
         operationSequence: 4,
         mainBackgroundChildren: ["main-scaffold", "main-scrim", "main-scrim-copy-004"],
     });
     await page.keyboard.press("Control+z");
-    await waitForEditor(page, 104);
+    await waitForEditor(page, 113);
     expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
-        nodeCount: 100,
+        nodeCount: 109,
         selectedNodeId: "main-scrim",
         operationSequence: 5,
     });
     const redoButton = page.getByRole("button", { name: /Redo \(Ctrl\/⌘\+Shift\+Z\)/ });
     await expect(redoButton).toBeEnabled();
     await page.keyboard.press("Control+Shift+z");
-    await waitForEditor(page, 105);
+    await waitForEditor(page, 114);
     expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
-        nodeCount: 101,
+        nodeCount: 110,
         selectedNodeId: "main-scrim-copy-004",
         operationSequence: 6,
     });
 
     // Delete/undo/redo use DeleteNode, UndoCommand and RedoCommand; no editor-only wire command.
     await page.keyboard.press("Backspace");
-    await waitForEditor(page, 106);
+    await waitForEditor(page, 115);
     expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
-        nodeCount: 100,
+        nodeCount: 109,
         selectedNodeId: "main-background",
         operationSequence: 7,
     });
     await page.keyboard.press("Control+z");
-    await waitForEditor(page, 107);
+    await waitForEditor(page, 116);
     expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
-        nodeCount: 101,
+        nodeCount: 110,
         selectedNodeId: "main-scrim-copy-004",
         operationSequence: 8,
     });
     await page.keyboard.press("Control+y");
-    await waitForEditor(page, 108);
+    await waitForEditor(page, 117);
     const undoButton = page.getByRole("button", { name: /Undo \(Ctrl\/⌘\+Z\)/ });
     await expect(undoButton).toBeEnabled();
     const undoBounds = await undoButton.boundingBox();
@@ -369,18 +369,18 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
         undoBounds.x + undoBounds.width / 2,
         undoBounds.y + undoBounds.height / 2,
     );
-    await waitForEditor(page, 109);
+    await waitForEditor(page, 118);
     const redoBounds = await redoButton.boundingBox();
     expect(redoBounds).not.toBeNull();
     await page.mouse.click(
         redoBounds.x + redoBounds.width / 2,
         redoBounds.y + redoBounds.height / 2,
     );
-    await waitForEditor(page, 110);
+    await waitForEditor(page, 119);
     const finalState = await page.evaluate(() => globalThis.__uiBuilderEditor);
     expect(finalState).toMatchObject({
-        revision: 110,
-        nodeCount: 100,
+        revision: 119,
+        nodeCount: 109,
         selectedNodeId: "main-background",
         operationSequence: 11,
         outcome: "accepted",
