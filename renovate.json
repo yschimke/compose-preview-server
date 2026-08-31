@@ -3,6 +3,7 @@
   "extends": [
     "github>yschimke/renovate-config"
   ],
+  "automerge": true,
   "packageRules": [
     {
       "description": "The design-parity packages are published in lockstep from one monorepo, so update them together in a single PR.",
