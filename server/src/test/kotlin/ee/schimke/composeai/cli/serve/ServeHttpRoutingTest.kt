@@ -1650,6 +1650,10 @@ class ServeHttpRoutingTest {
     }
     try {
       assertTrue(fetch("/wasm/compose-m3/").second.contains("catalog browser"))
+      assertTrue(
+        fetch("/wasm/compose-m3/?preview=button&live=1").second.contains("catalog browser"),
+        "a permalink returns the same dynamic Wasm document",
+      )
       assertEquals("window.catalogBrowser = true", fetch("/wasm/compose-m3/app.js").second)
       assertTrue(fetch("/wasm/owned/").second.contains("catalog-owned app"))
       assertEquals(404, fetch("/wasm/not-a-catalog/").first)

@@ -27,14 +27,15 @@ import org.jetbrains.skia.Image
 fun main() {
   val config = ClientConfig.fromLocation(locationSearch(), locationPathname())
   val client = BrowserPreviewClient(config)
-  ComposeViewport(viewportContainerId = "composeApp") { PreviewServerApp(client, config) }
+  ComposeViewport(viewportContainerId = "composeApp") { PreviewServerApp(client) }
 }
 
 data class ClientConfig(
   val session: String?,
   val token: String?,
   val initialPreview: String?,
-  val initialLive: Boolean,
+  /** Null keeps the screen's default; true/false are explicit live/snapshot permalink choices. */
+  val initialLive: Boolean?,
   val initialComposer: Boolean,
   /** True when `/wasm/<catalog>/` selected [session], rather than the legacy query parameter. */
   val sessionInPath: Boolean,
@@ -57,6 +58,16 @@ data class ClientConfig(
   fun serverPath(path: String): String =
     if (sessionInPath && session != null) "/${encodeComponent(session)}$path" else path
 
+  internal fun permalinkQuery(location: AppLocation): String = buildMap {
+    if (!sessionInPath) session?.let { put("session", it) }
+    token?.let { put("token", it) }
+    location.previewId?.let { put("preview", it) }
+    if (location.composing) put("compose", "1")
+    location.live?.let { put("live", if (it) "1" else "0") }
+  }
+    .entries
+    .joinToString("&") { (key, value) -> "${encodeComponent(key)}=${encodeComponent(value)}" }
+
   companion object {
     fun fromLocation(search: String, pathname: String = ""): ClientConfig {
       val params = parseQuery(search)
@@ -65,9 +76,28 @@ data class ClientConfig(
         session = pathSession ?: params["session"]?.takeIf { it.isNotBlank() },
         token = params["token"]?.takeIf { it.isNotBlank() },
         initialPreview = params["preview"]?.takeIf { it.isNotBlank() },
-        initialLive = params["live"] == "1" || params["live"] == "true",
+        initialLive = params.booleanChoice("live"),
         initialComposer = params["compose"] == "1" || params["compose"] == "true",
         sessionInPath = pathSession != null,
+      )
+    }
+  }
+}
+
+/** One navigable screen in the single Wasm document. Encoded in the query, never a server path. */
+data class AppLocation(
+  val previewId: String? = null,
+  val composing: Boolean = false,
+  val live: Boolean? = null,
+) {
+  companion object {
+    fun fromSearch(search: String): AppLocation {
+      val params = parseQuery(search)
+      val composing = params["compose"] == "1" || params["compose"] == "true"
+      return AppLocation(
+        previewId = params["preview"]?.takeIf { it.isNotBlank() && !composing },
+        composing = composing,
+        live = params.booleanChoice("live"),
       )
     }
   }
@@ -155,27 +185,35 @@ class BrowserPreviewClient(private val config: ClientConfig) {
   fun legacyViewerUrl(previewId: String): String =
     "${config.serverPath("/p/${encodeComponent(previewId)}")}${config.suffix()}"
 
-  fun replaceLocation(previewId: String?) {
-    val query = buildMap {
-      if (!config.sessionInPath) config.session?.let { put("session", it) }
-      config.token?.let { put("token", it) }
-      previewId?.let { put("preview", it) }
-    }
-    replaceBrowserQuery(
-      query.entries.joinToString("&") { "${encodeComponent(it.key)}=${encodeComponent(it.value)}" }
-    )
+  /** Push a navigable screen while keeping the one physical `/wasm/<catalog>/` document. */
+  fun pushLocation(location: AppLocation) {
+    writeLocation(location, push = true)
   }
 
-  fun replaceComposerLocation() {
-    val query = buildMap {
-      if (!config.sessionInPath) config.session?.let { put("session", it) }
-      config.token?.let { put("token", it) }
-      put("compose", "1")
-    }
-    replaceBrowserQuery(
-      query.entries.joinToString("&") { "${encodeComponent(it.key)}=${encodeComponent(it.value)}" }
-    )
+  /** Update transient state in the current permalink without adding a Back-button stop. */
+  fun replaceLocation(location: AppLocation) {
+    writeLocation(location, push = false)
   }
+
+  private fun writeLocation(location: AppLocation, push: Boolean) {
+    writeBrowserQuery(query = config.permalinkQuery(location), push = push)
+  }
+
+  /**
+   * Observe browser Back/Forward. The callback changes Compose state in place; the server is never
+   * asked for another HTML document because every permalink retains the same pathname.
+   */
+  fun observeHistory(onLocation: (AppLocation) -> Unit): () -> Unit {
+    installBrowserHistoryListener { onLocation(AppLocation.fromSearch(locationSearch())) }
+    return ::removeBrowserHistoryListener
+  }
+
+  fun initialLocation(): AppLocation =
+    AppLocation(
+      previewId = config.initialPreview,
+      composing = config.initialComposer,
+      live = config.initialLive,
+    )
 
   fun openStream(previewId: String, overrides: Map<String, String>) {
     // Decode through Skia in the Wasm process. PNG is supported by every Skiko browser runtime;
@@ -293,6 +331,15 @@ internal fun parseQuery(search: String): Map<String, String> {
     .toMap()
 }
 
+private fun Map<String, String>.booleanChoice(key: String): Boolean? =
+  when (this[key]?.lowercase()) {
+    "1",
+    "true" -> true
+    "0",
+    "false" -> false
+    else -> null
+  }
+
 /** `/wasm/<catalog>/...` is the Wasm counterpart of the server's existing `/<catalog>/...`. */
 internal fun catalogFromWasmPath(pathname: String): String? {
   val segments = pathname.split('/').filter { it.isNotEmpty() }
@@ -407,8 +454,31 @@ private fun closeBrowserStream(): Unit =
     })()"""
   )
 
-private fun replaceBrowserQuery(query: String): Unit =
-  js("window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''))")
+private fun writeBrowserQuery(query: String, push: Boolean): Unit =
+  js(
+    """(push ? window.history.pushState : window.history.replaceState)
+      .call(window.history, null, '', window.location.pathname + (query ? '?' + query : ''))"""
+  )
+
+private fun installBrowserHistoryListener(listener: () -> Unit): Unit =
+  js(
+    """(function () {
+      if (window.__cpWasmHistoryListener) {
+        window.removeEventListener('popstate', window.__cpWasmHistoryListener);
+      }
+      window.__cpWasmHistoryListener = function () { listener(); };
+      window.addEventListener('popstate', window.__cpWasmHistoryListener);
+    })()"""
+  )
+
+private fun removeBrowserHistoryListener(): Unit =
+  js(
+    """(function () {
+      if (!window.__cpWasmHistoryListener) return;
+      window.removeEventListener('popstate', window.__cpWasmHistoryListener);
+      window.__cpWasmHistoryListener = null;
+    })()"""
+  )
 
 private fun locationSearch(): String = js("window.location.search")
 
