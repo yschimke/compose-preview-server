@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.3.2](https://github.com/yschimke/compose-preview-server/compare/v2.3.1...v2.3.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* **deps:** update composeai.tools to v1.54.0 ([#51](https://github.com/yschimke/compose-preview-server/issues/51)) ([6f8613c](https://github.com/yschimke/compose-preview-server/commit/6f8613c096b5b70e7f5415fcb27545945b999f05))
+* **deps:** update design-parity packages to v0.1.76 ([#50](https://github.com/yschimke/compose-preview-server/issues/50)) ([ff50d0b](https://github.com/yschimke/compose-preview-server/commit/ff50d0bd480bd394bfaba7b0ca4b6acf57cbd4eb))
+* **serve:** re-verify a catalog when its producer becomes trusted ([#48](https://github.com/yschimke/compose-preview-server/issues/48)) ([4bf0809](https://github.com/yschimke/compose-preview-server/commit/4bf08094f7c84398465108df89b27e351361d4b2))
+* **serve:** say why a catalog registry contributed nothing ([#49](https://github.com/yschimke/compose-preview-server/issues/49)) ([6d85209](https://github.com/yschimke/compose-preview-server/commit/6d852091ba591f78dca0fd024e5220d1bc97cad3))
+
 ## [2.3.1](https://github.com/yschimke/compose-preview-server/compare/v2.3.0...v2.3.1) (2026-08-30)
 
 
