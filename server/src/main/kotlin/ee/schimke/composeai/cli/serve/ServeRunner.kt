@@ -2361,6 +2361,11 @@ public class ServeRunner(
           // `unverified`, serving baked data tiers only, instead of keeping a stale Trusted
           // verdict.
           onRevoke = { updated -> retireNewlyUntrusted(updated, catalogLoads, registry) },
+          // And the mirror: granting trust must re-verify what that trust now buys. A catalog
+          // that loaded as `unverified` keeps that verdict otherwise, because the refresher
+          // short-circuits on an unchanged branch SHA — so the catalog a registry contributed
+          // stays under-trusted through a successful trust reconcile.
+          onGrant = { before, updated -> reverifyNewlyTrusted(before, updated, catalogLoads) },
         )
       } else {
         null
@@ -3652,6 +3657,52 @@ public class ServeRunner(
         "(?session=$system)"
     )
     return true
+  }
+
+  /**
+   * Re-read every tracked catalog whose source branch [updated] trusts and [before] did not.
+   *
+   * The counterpart to [retireNewlyUntrusted], and the same reasoning read the other way round: a
+   * catalog's trust verdict is computed when it loads and then baked into its registered session,
+   * and [ServeCatalogRefresher] skips a reload while the branch SHA is unchanged. Revocation was
+   * always handled because keeping a stale `Trusted` verdict is a security problem. Keeping a stale
+   * `unverified` one is merely wrong, and it never happened while trust was always in place before
+   * the catalog was configured — but `--catalog-registry` reverses that order, because the registry
+   * contributes catalogs the operator never listed and whose producer is therefore trusted
+   * afterwards. Without this, `POST /admin/trust` succeeds, `producers.json` is correct, and the
+   * catalog goes on serving as `unverified` (no re-render, baked tiers only) until its branch moves
+   * or the box restarts.
+   *
+   * Deliberately **only forgets the heads**, where the revocation path also unregisters. An
+   * under-trusted catalog is serving correct content — there is nothing to tear down, and dropping
+   * a working session to upgrade a badge would turn a cosmetic gap into an outage window. The next
+   * refresher pass re-fetches and re-verifies it in place.
+   *
+   * Scoped to the delta rather than "everything trusted now": the latter would forget every head on
+   * the box on every trust add, re-fetching two dozen catalogs to fix one.
+   */
+  private fun reverifyNewlyTrusted(
+    before: TrustStore,
+    updated: TrustStore,
+    tracker: CatalogLoadTracker?,
+  ) {
+    val loads = tracker ?: return
+    val affected =
+      loads.snapshot().filter { state ->
+        val repo = state.config.repo
+        val branch = state.config.branch
+        updated.trustsBranch(repo, branch) && !before.trustsBranch(repo, branch)
+      }
+    if (affected.isEmpty()) return
+    for (state in affected) {
+      System.err.println(
+        "serve: re-verifying ${state.config.system} — ${state.config.repo}@${state.config.branch}" +
+          " is now trusted"
+      )
+    }
+    // Same lever the revocation path pulls, for the same reason: without clearing the remembered
+    // head the next pass short-circuits on an unchanged SHA and the new verdict never lands.
+    activeRefresher?.forgetHeads(affected.map { it.config.system })
   }
 
   /**
