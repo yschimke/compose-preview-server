@@ -1,0 +1,194 @@
+package ee.schimke.composeai.uibuilder
+
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+
+class FileDesignStoreTest {
+  private val propertyValidator = CollaborationPropertyValidator { _, _, _, _ -> null }
+
+  @Test
+  fun `acknowledged accepted and rejected operations replay after restart`() {
+    val root = Files.createTempDirectory("ui-builder-store")
+    val store = FileDesignStore(root)
+    val initial = document()
+    store.create(initial)
+    val acceptedCommand = command("accepted", 0, literal("saved"))
+    val accepted =
+      CollaborationReducer.apply(CollaborationState(initial), acceptedCommand, propertyValidator)
+    assertIs<CommandOutcome.Accepted>(accepted.outcome)
+    store.append(
+      "design",
+      CollaborationEvent(RejectedMutation.Design(acceptedCommand), accepted.outcome),
+    )
+
+    val rejectedCommand = command("rejected", 99, literal("ignored"))
+    val rejected = CollaborationReducer.apply(accepted.state, rejectedCommand, propertyValidator)
+    assertIs<CommandOutcome.Rejected>(rejected.outcome)
+    store.append(
+      "design",
+      CollaborationEvent(RejectedMutation.Design(rejectedCommand), rejected.outcome),
+    )
+
+    val recovered = assertNotNull(FileDesignStore(root).load("design"))
+    assertEquals(0, recovered.ignoredPartialTailBytes)
+    assertEquals(listOf("accepted", "rejected"), recovered.events.map { it.mutation.operationId })
+    val replayed =
+      CollaborationReducer.replayEvents(
+        CollaborationState(recovered.initialDocument),
+        recovered.events,
+        propertyValidator,
+      )
+    assertEquals(rejected.state, replayed.state)
+    assertEquals(rejected.outcome, replayed.outcome)
+  }
+
+  @Test
+  fun `partial tail is reported and last acknowledged record survives`() {
+    val root = Files.createTempDirectory("ui-builder-store-tail")
+    val store = FileDesignStore(root)
+    val initial = document()
+    store.create(initial)
+    val command = command("accepted", 0, literal("saved"))
+    val applied =
+      CollaborationReducer.apply(CollaborationState(initial), command, propertyValidator)
+    store.append("design", CollaborationEvent(RejectedMutation.Design(command), applied.outcome))
+    Files.writeString(
+      root.resolve("design/events.jsonl"),
+      "{\"interrupted\":",
+      StandardOpenOption.APPEND,
+    )
+
+    val recovered = assertNotNull(FileDesignStore(root).load("design"))
+    assertEquals(1, recovered.events.size)
+    assertTrue(recovered.ignoredPartialTailBytes > 0)
+    val replayed =
+      CollaborationReducer.replayEvents(
+        CollaborationState(recovered.initialDocument),
+        recovered.events,
+        propertyValidator,
+      )
+    assertEquals(1, replayed.state.document.revision)
+  }
+
+  @Test
+  fun `checksum corruption in an acknowledged record fails closed`() {
+    val root = Files.createTempDirectory("ui-builder-store-corrupt")
+    val store = FileDesignStore(root)
+    val initial = document()
+    store.create(initial)
+    val command = command("accepted", 0, literal("saved"))
+    val applied =
+      CollaborationReducer.apply(CollaborationState(initial), command, propertyValidator)
+    store.append("design", CollaborationEvent(RejectedMutation.Design(command), applied.outcome))
+    val events = root.resolve("design/events.jsonl")
+    Files.writeString(events, Files.readString(events).replace("saved", "tampered"))
+
+    assertFailsWith<DesignStoreCorruptionException> { FileDesignStore(root).load("design") }
+  }
+
+  @Test
+  fun `identity and create operations are bounded to their design directory`() {
+    val root = Files.createTempDirectory("ui-builder-store-identity")
+    val store = FileDesignStore(root)
+    store.create(document())
+
+    assertEquals(listOf("design"), store.listDesignIds())
+    assertFailsWith<IllegalStateException> { store.create(document()) }
+    assertFailsWith<IllegalArgumentException> { store.load("../escape") }
+    assertFailsWith<IllegalArgumentException> {
+      store.append(
+        "missing",
+        CollaborationEvent(
+          RejectedMutation.Design(command("x", 0, literal("x"))),
+          CommandOutcome.Rejected(RejectionCode.DESIGN_MISMATCH, "missing"),
+        ),
+      )
+    }
+    assertNull(store.load("not-created"))
+  }
+
+  @Test
+  fun `snapshot and event quotas reject before acknowledgment`() {
+    val snapshotRoot = Files.createTempDirectory("ui-builder-store-snapshot-limit")
+    assertFailsWith<DesignStoreLimitException> {
+      FileDesignStore(
+          snapshotRoot,
+          DesignStoreLimits(
+            maxSnapshotBytes = 10,
+            maxEventBytes = 1_000,
+            maxEventLogBytes = 2_000,
+          ),
+        )
+        .create(document())
+    }
+
+    val eventRoot = Files.createTempDirectory("ui-builder-store-event-limit")
+    val initial = document()
+    FileDesignStore(eventRoot).create(initial)
+    val command = command("large", 0, literal("x".repeat(10_000)))
+    val applied =
+      CollaborationReducer.apply(CollaborationState(initial), command, propertyValidator)
+    val limited =
+      FileDesignStore(
+        eventRoot,
+        DesignStoreLimits(
+          maxSnapshotBytes = 100_000,
+          maxEventBytes = 1_000,
+          maxEventLogBytes = 100_000,
+        ),
+      )
+    assertFailsWith<DesignStoreLimitException> {
+      limited.append(
+        "design",
+        CollaborationEvent(RejectedMutation.Design(command), applied.outcome),
+      )
+    }
+    assertTrue(!Files.exists(eventRoot.resolve("design/events.jsonl")))
+  }
+
+  private fun command(operationId: String, revision: Int, value: JsonObject) =
+    DesignCommand(
+      designId = "design",
+      operationId = operationId,
+      actorId = "actor",
+      clientId = "client",
+      baseRevision = revision,
+      operations = listOf(DesignOperation.SetProperty("text", "text", value)),
+    )
+
+  private fun document() =
+    UiBuilderDocument(
+      schema = "compose-ui-builder-document/v1",
+      id = "design",
+      title = "Durable design",
+      revision = 0,
+      catalogPin = JsonObject(emptyMap()),
+      environment = JsonObject(emptyMap()),
+      stateVariables = JsonObject(emptyMap()),
+      roots = listOf("text"),
+      nodes =
+        mapOf(
+          "text" to
+            UiBuilderNode(
+              id = "text",
+              componentId = "m3/text",
+              properties = buildJsonObject { put("text", literal("initial")) },
+            )
+        ),
+    )
+
+  private fun literal(value: String) = buildJsonObject {
+    put("type", "string")
+    put("value", value)
+  }
+}
