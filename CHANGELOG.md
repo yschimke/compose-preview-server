@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.3](https://github.com/yschimke/compose-preview-server/compare/v2.3.2...v2.3.3) (2026-08-31)
+
+
+### Bug Fixes
+
+* **deploy:** bake the desktop live-daemon sidecar into the preview-host image ([#55](https://github.com/yschimke/compose-preview-server/issues/55)) ([9446061](https://github.com/yschimke/compose-preview-server/commit/9446061e8a6f8f91dcf500ef5b59624469bbb239))
+
 ## [2.3.2](https://github.com/yschimke/compose-preview-server/compare/v2.3.1...v2.3.2) (2026-08-31)
 
 
