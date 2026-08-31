@@ -309,9 +309,7 @@ class ServeCatalogAdminTest {
     // the case that, under retire-then-publish, left the system published NOWHERE.
     assertTrue(result is ServeCatalogAdmin.Result.Failed, "$result")
     assertTrue(
-      (result as ServeCatalogAdmin.Result.Failed)
-        .reason
-        .contains("still serving yschimke/old-home"),
+      result.reason.contains("still serving yschimke/old-home"),
       result.reason,
     )
     assertEquals(emptyList(), unloaded)

@@ -145,7 +145,7 @@ class ServeSpecLaneParallelSourceTest {
       // `--public` — i.e. on every local `serve`.
       assertEquals("/wear-m3/render/chip-filled.png?token=$token", src)
       // …and the URL it names really does answer, which is the assertion the string cannot make.
-      assertEquals(200, get(server, src!!).first)
+      assertEquals(200, get(server, src).first)
       assertEquals(404, get(server, src.substringBefore("?")).first, "the gate is real")
     } finally {
       server.stop()

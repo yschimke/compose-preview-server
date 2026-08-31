@@ -88,7 +88,7 @@ class ServeCatalogRegistrySync(
         // registry that reprioritises one must take effect like any other change.
         contribution.homeGroup(entry)?.toString().orEmpty(),
         entry.importedFrom.orEmpty(),
-        entry.loadPriority?.toString().orEmpty(),
+        entry.loadPriority.toString(),
       )
       .joinToString("\u0000")
 
