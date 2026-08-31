@@ -285,11 +285,10 @@ test("capability-generated Compose preserves the compact single-pane structure",
         contentType: "image/png",
     });
 
-    // This exercises the generated helper's compact branch at the exact 412x800 viewport. Pixel
-    // convergence remains an interim spike guard until geometry/semantics inspection and the exact
-    // release gate are available for the standalone generated application.
+    // The compact generated application is held to the same independent-oracle convergence gate as
+    // the expanded generated application and the catalog-driven builder.
     expect(mismatchRatio, "compact generated Compose independent-oracle mismatch").toBeLessThan(
-        0.03,
+        0.01,
     );
 });
 
@@ -388,7 +387,7 @@ test("the same Jetcaster document renders the compact single-pane reference", as
         threshold: 0,
         maxDiffPixelRatio: 0.04,
     });
-    expect(mismatchRatio, "compact independent-oracle mismatch ratio").toBeLessThan(0.02);
+    expect(mismatchRatio, "compact independent-oracle mismatch ratio").toBeLessThan(0.01);
 });
 
 test("editor overlay preserves clean design pixels and the inspection manifest", async ({

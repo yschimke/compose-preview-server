@@ -162,7 +162,7 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
         mainBackgroundChildren: ["main-scrim", "main-scaffold"],
     });
     expect(initialState.documentHash).toBe(
-        "5d58ee43992be772626f2fd6a7e1cae094fa25ca7babdf55418ad80bca702b39",
+        "dbd6d052f9b766db76aa7541927bacc5b6d993367f66ff05d98383be7be04cdc",
     );
     const canvas = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
     expect(canvas.scale).toBeCloseTo(0.625, 3);
