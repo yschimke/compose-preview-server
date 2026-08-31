@@ -7,19 +7,33 @@
 # on an already-deployed box: it keeps the config it already has, and someone has to remember to
 # POST the new entries by hand. This closes that gap as part of publishing.
 #
-# ADDITIVE ONLY. This never deletes and never rewrites an existing entry: an id already present
-# comes back 409 from the admin API, which is treated as success. So a producer or catalog an
-# operator added directly on the box survives untouched.
+# ADDITIVE BY DEFAULT. Without --prune this never deletes and never rewrites an existing entry: an
+# id already present comes back 409 from the admin API, which is treated as success. So a producer
+# or catalog an operator added directly on the box survives untouched.
 #
-# The flip side, and it is a real trade-off rather than an oversight: because the reconcile is
-# blind to history, a catalog RETIRED on the box (DELETE /admin/catalogs/<id>) while still listed
-# in catalogs.json will be re-added by the next publish. That makes the committed seed the
-# declared intent — to retire something permanently, drop it from catalogs.json too. Any
-# alternative needs the box to persist tombstones, which is a bigger change; see the discussion on
-# #2962.
+# The flip side, and it was a real trade-off rather than an oversight: because the reconcile is
+# blind to history, a catalog RETIRED on the box while still listed in catalogs.json is re-added by
+# the next publish, and — the half that bit — one DROPPED from catalogs.json is never retired. The
+# committed file could add but not remove, so it was the declared intent for what should exist and
+# silent about what should not.
+#
+# --prune closes that half WITHOUT the tombstones #2962 said it would need. Tombstones were only
+# necessary while "what exists on the box" was unknowable; it is not, because the box lists it
+# (GET /admin/catalogs). So the file is what should exist, the listing is what does, and the
+# difference is retired. What made that unsafe until now is that the difference is not all stale:
+# a box nominating a registry (--catalog-registry) serves catalogs that are deliberately absent
+# from this file, and a naive prune would delete them on every publish, every time. `/status.json`
+# reports `config.catalogRegistries[].systems` since #63, so they can be told apart — and when that
+# field is missing (an older box) --prune REFUSES rather than guessing, because on such a box a
+# registry catalog and a stale one are indistinguishable and the wrong guess deletes something the
+# box is correctly serving.
+#
+# --prune stays opt-in for the property in the first paragraph: an adopter's box may legitimately
+# carry catalogs this repository has never heard of. preview.coo.ee's own publish passes it, because
+# there the committed file IS meant to be the whole answer.
 #
 # Usage:
-#   BASE_URL=https://preview.coo.ee ADMIN_TOKEN=… publish-config-to-box.sh [--dry-run]
+#   BASE_URL=https://preview.coo.ee ADMIN_TOKEN=… publish-config-to-box.sh [--dry-run] [--prune]
 #
 # --dry-run prints the requests it would make, one per line, and talks to nothing. That is the
 # seam test-publish-config-to-box.sh drives, so the ordering and payload rules below are covered
@@ -53,7 +67,16 @@ else
 fi
 
 DRY_RUN=0
-[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
+PRUNE=0
+for arg in "$@"; do
+  case "${arg}" in
+    --dry-run) DRY_RUN=1 ;;
+    --prune) PRUNE=1 ;;
+    # Refused rather than ignored: a typo'd flag that silently did nothing would read as a
+    # successful prune on a box that pruned nothing.
+    *) echo "::error::unknown argument '${arg}' (expected --dry-run and/or --prune)" >&2; exit 2 ;;
+  esac
+done
 
 : "${BASE_URL:?BASE_URL required}"
 if [[ "${DRY_RUN}" == 0 ]]; then
@@ -363,6 +386,69 @@ while IFS= read -r entry; do
     fi
   fi
 done < <(jq -c '.catalogs // [] | .[]' "${CATALOGS_FILE}")
+
+# PRUNE (--prune only): retire what the box serves and this file no longer declares.
+#
+# Runs AFTER the catalogs loop so a catalog being moved between repositories — retired and
+# re-posted in that loop — is present again by the time we diff, and is never seen as stale.
+#
+# Three sets, and the difference between them is the whole logic:
+#   declared — .catalogs[].system in the committed file: what should exist.
+#   on the box — GET /admin/catalogs: what does exist.
+#   registry — /status.json .config.catalogRegistries[].systems: what exists ON PURPOSE while being
+#              absent from this file, because a nominated registry contributes it.
+#
+# Retire (on the box) minus (declared) minus (registry). Without that last term this would delete
+# every registry catalog on every publish and they would reappear on the next refresh — a delete
+# loop against the box's own correct behaviour.
+if [[ "${PRUNE}" == 1 ]]; then
+  echo "Pruning catalogs the box serves and ${CATALOGS_FILE#"${REPO_ROOT}/"} no longer declares"
+
+  # Injectable so the self-test can drive the diff without a server; nothing else should set these.
+  prune_listing="${PRUNE_BOX_CATALOGS_JSON:-}"
+  prune_status="${PRUNE_STATUS_JSON:-}"
+  if [[ -z "${prune_listing}" && "${DRY_RUN}" != 1 ]]; then
+    prune_listing="${box_catalogs}"
+  fi
+  if [[ -z "${prune_status}" && "${DRY_RUN}" != 1 ]]; then
+    prune_status=$(curl -sS -m 30 "${BASE_URL}/status.json" 2>/dev/null || true)
+  fi
+
+  if [[ -z "${prune_listing}" ]]; then
+    # Not fatal on its own — the additive half already ran and succeeded. But say it loudly: a
+    # prune that silently pruned nothing is indistinguishable from one with nothing to do.
+    echo "::warning::--prune could not read /admin/catalogs; nothing was retired."
+  elif ! printf '%s' "${prune_status}" |
+    jq -e '(.config // {}) | has("catalogRegistries")' >/dev/null 2>&1; then
+    # The refusal that keeps this safe. See the header: without this field a registry-contributed
+    # catalog and an abandoned one look identical, and deleting the wrong one takes down something
+    # the box is serving correctly.
+    echo "::error::--prune needs config.catalogRegistries on ${BASE_URL}/status.json (added in #63) to tell registry-contributed catalogs from stale ones. This box predates it; nothing was retired."
+    rejected=$((rejected + 1))
+  else
+    prune_keep=$(
+      {
+        jq -r '.catalogs // [] | .[].system' "${CATALOGS_FILE}"
+        printf '%s' "${prune_status}" |
+          jq -r '.config.catalogRegistries // [] | .[].systems // [] | .[]'
+      } | sort -u
+    )
+    while IFS= read -r system; do
+      [[ -n "${system}" ]] || continue
+      grep -qxF "${system}" <<<"${prune_keep}" && continue
+      delete "/admin/catalogs/${system}" "catalog ${system}"
+      case "${last_delete}" in
+        ok | absent) ;;
+        # A catalog that is a top-level SITE refuses retirement so a hostname is never stranded.
+        # That is the admin API protecting the box, not a failure of this script — report it and
+        # leave the entry alone rather than counting it as a rejected publish.
+        *)
+          echo "::warning::catalog ${system} is no longer declared but could not be retired (it is published as a top-level site). Remove its \`sites\` entry first."
+          ;;
+      esac
+    done < <(printf '%s' "${prune_listing}" | jq -r '.catalogs // [] | .[].system')
+  fi
+fi
 
 # Sites LAST: a site may only name a catalog the box already serves, so it has to follow the
 # catalogs loop that publishes them — a hostname posted first would be rejected as naming an

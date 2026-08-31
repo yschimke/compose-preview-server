@@ -42,8 +42,14 @@ jobs:
           persist-credentials: false
       - name: Verify deployment scripts
         run: |
-          for test_script in deploy/image/test-*.sh; do
+          # Both directories: the box's own scripts live in deploy/image/, and the reconcile that
+          # publishes config TO a box lives in .github/scripts/. Its self-test was referenced by
+          # name in its header long before it existed, which is how the prune diff went untested.
+          for test_script in deploy/image/test-*.sh .github/scripts/test-*.sh; do
+            [ -f "${test_script}" ] || continue
+            echo "::group::${test_script}"
             bash "${test_script}"
+            echo "::endgroup::"
           done
 
   serve-web:
