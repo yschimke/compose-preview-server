@@ -43,7 +43,8 @@ it. `ui-builder-reference-jetcaster/` is a separately compiled, provenance-pinne
 oracle for the primary Jetcaster visual benchmark and has no dependency on the builder module.
 The server distribution packages the builder's Jetcaster benchmark preview as a separate app at
 `/ui-builder/`; the existing catalog-scoped `/wasm/<system>/` preview application remains a
-distinct feature and route. Interactive editor controls are a subsequent builder milestone.
+distinct feature and route. The builder route opens an interactive Wasm editor around the frozen
+Jetcaster design; clean benchmark modes remain available to the independent visual harness.
 
 ## Spatial and WebXR previews
 
