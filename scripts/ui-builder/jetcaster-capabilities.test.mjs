@@ -49,10 +49,18 @@ test("every capability declares slots, Wasm support, code mapping, and SVG polic
     assert.ok(component.code.symbol.length > 0);
     assert.ok(Array.isArray(component.code.imports));
     assert.ok(
-      ["unverified", "raster-fallback-required", "unsupported"].includes(
+      ["verified", "unverified", "raster-fallback-required", "unsupported"].includes(
         component.svg.status,
       ),
     );
+    if (component.svg.status === "verified") {
+      assert.equal(component.svg.fallback, "none");
+      assert.equal(component.svg.blocksExport, false);
+    }
+    if (component.svg.status === "raster-fallback-required") {
+      assert.equal(component.svg.fallback, "embedded-raster");
+      assert.equal(component.svg.blocksExport, false);
+    }
 
     for (const slot of component.slots) {
       assert.equal(typeof slot.name, "string");
