@@ -14,6 +14,11 @@ import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
 import ee.schimke.composeai.render.session.RenderSessionException
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
+import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
+import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
+import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
+import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderRenderExecutor
+import ee.schimke.composeai.uibuilder.service.RevisionPinnedComposeExportExecutor
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -2248,6 +2253,63 @@ public class ServeRunner(
   }
 
   /**
+   * Open the authoritative design service only alongside the independently packaged builder app.
+   * The service owns no sockets; [ServeHttpServer] is the sole transport boundary. An explicit
+   * unwritable directory is a startup error rather than a silent in-memory downgrade because this
+   * surface promises restart persistence and multiple clients may already hold design ids.
+   */
+  private data class UiBuilderLane(
+    val service: PersistentUiBuilderService,
+    val renderer: AutoCloseable?,
+  ) : AutoCloseable {
+    override fun close() {
+      renderer?.close()
+    }
+  }
+
+  private fun openUiBuilderService(appDirectory: File?): UiBuilderLane? {
+    if (appDirectory == null || uiBuilderStateDirFlag == "none") return null
+    val directory =
+      uiBuilderStateDirFlag?.let(::File)
+        ?: catalogsFilePath?.let(::File)?.absoluteFile?.parentFile?.resolve("ui-builder-state")
+        ?: File(System.getProperty("user.home"), ".compose-preview/ui-builder-state")
+    if (!(directory.isDirectory || directory.mkdirs()) || !directory.canWrite()) {
+      throw IllegalStateException("UI-builder state directory is not writable: $directory")
+    }
+    System.err.println("serve: UI-builder design API persisting to ${directory.absolutePath}")
+    val renderer = runCatching {
+      ProductionUiBuilderRenderExecutor.open(directory.resolve("renderer").toPath())
+    }
+      .onFailure { failure ->
+        System.err.println(
+          "serve: UI-builder PNG/SVG renderer unavailable (${failure.message}); " +
+            "Compose export remains enabled"
+        )
+      }
+      .getOrNull()
+    val exporter = renderer ?: RevisionPinnedComposeExportExecutor()
+    val catalogs =
+      CurrentM3UiBuilderCatalogExecutor(
+        exportCapabilities =
+          renderer?.capabilities
+            ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
+              composeCode = true,
+              svg = false,
+              png = false,
+            )
+      )
+    return UiBuilderLane(
+      service =
+        PersistentUiBuilderService(
+          storage = FileUiBuilderStateStorage(directory.toPath()),
+          catalogs = catalogs,
+          exporter = exporter,
+        ),
+      renderer = renderer,
+    )
+  }
+
+  /**
    * Find conventional executable CMP/Wasm browser projects and associate them with the preview
    * modules they depend on. This covers the usual split (`:shared:ui` plus `:webApp`) while also
    * supporting a preview module that owns its own Wasm executable. Missing distributions are built
@@ -2460,6 +2522,8 @@ public class ServeRunner(
       } else {
         null
       }
+    val uiBuilderAppDir = usableUiBuilderDir()
+    val uiBuilderLane = openUiBuilderService(uiBuilderAppDir)
     val server =
       ServeHttpServer(
         host = host,
@@ -2472,7 +2536,7 @@ public class ServeRunner(
         componentBrowser = componentBrowser,
         wasmCatalogs = wasmCatalogs,
         wasmUiDir = usableWasmUiDir(),
-        uiBuilderDir = usableUiBuilderDir(),
+        uiBuilderDir = uiBuilderAppDir,
         privateWasmCatalogs = privateWasmCatalogs,
         rcPlayerWasmDir = rcPlayerWasmDir,
         // Preserve the CONFIGURED set, not only startup successes. Failed rows then stay visible on
@@ -2530,6 +2594,11 @@ public class ServeRunner(
           },
         agentGrants = agentGrantStore,
         agentGrantLimiter = agentGrantStore?.let { buildAgentGrantRateLimiter() },
+        uiBuilderService = uiBuilderLane?.service,
+        uiBuilderAuthorization =
+          uiBuilderLane?.let {
+            ServeUiBuilderAuthorization.fromServeIdentity(token, githubAuth, agentGrantStore)
+          },
         playgroundRateLimiter = playgroundLane?.let { buildPlaygroundRateLimiter() },
         // Reads a served preview's Kotlin, for two consumers with different requirements:
         // `/playground?from=<system>/<previewId>` (needs a playground to open it in) and the
@@ -2609,6 +2678,7 @@ public class ServeRunner(
           runCatching { catalogFeed?.close() }
           runCatching { catalogRegistrySync?.close() }
           runCatching { registry.close() }
+          runCatching { uiBuilderLane?.close() }
           closeables.forEach { c -> runCatching { c?.close() } }
           done.countDown()
         }

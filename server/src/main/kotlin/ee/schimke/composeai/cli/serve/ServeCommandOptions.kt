@@ -672,6 +672,10 @@ public class ServeCommandOptions(
   override val uiBuilderDir: File? =
     args.flagValue("--ui-builder-dir")?.takeIf { it.isNotBlank() }?.let(::File)
 
+  /** Raw durable-state directory; `none` disables the authoritative design API. */
+  override val uiBuilderStateDirFlag: String? =
+    args.flagValue("--ui-builder-state-dir")?.takeIf { it.isNotBlank() }
+
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   override val rcPlayerWasmDir: File? =
     args
@@ -1071,6 +1075,11 @@ public class ServeCommandOptions(
         --ui-builder-dir <dir>
                           Standalone Compose UI builder distribution served at /ui-builder/.
                           This is additive and does not replace or alter /wasm/<system>/.
+        --ui-builder-state-dir <dir>|none
+                          Durable authoritative design store used by the UI-builder HTTP and
+                          WebSocket API. Defaults to ui-builder-state beside --catalogs-file, or
+                          ~/.compose-preview/ui-builder-state for a local standalone builder.
+                          `none` serves static builder assets without the editable design API.
         --rc-player-wasm-dir <dir>
                           Experimental non-JVM Remote Compose player produced by
                           :rc-player-wasm:wasmPlayerDist. Serves it at /rc-player-wasm/ and enables
