@@ -1951,6 +1951,10 @@ cp-history-menu { display: contents; }
   box-shadow: var(--md-sys-elevation-level1);
   display: flex; align-items: center; justify-content: center; min-height: 220px; }
 .cp-stage img, .cp-stage canvas { max-width: 100%; height: auto; }
+.cp-stage:has(> cp-spatial-view) { padding: 0; overflow: hidden; }
+.cp-stage:has(> cp-spatial-view) > #cp-img,
+.cp-stage:has(> cp-spatial-view) > #cp-backend { display: none; }
+.cp-spatial-mode { color: var(--cp-muted, #686370); font-size: 13px; }
 /* Override/theme renders can take a moment. Preserve the previous pixels as context, fade them
    just enough to signal that they are stale, and layer a compact spinner over the affected
    preview until its replacement image has loaded. */

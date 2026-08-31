@@ -40,6 +40,7 @@ const tracked = [
     "format-compare.js",
     "known-differences.js",
     "viewer.js",
+    "spatial-view.js",
 ].map((name) => relative(repoRoot, resolve(assets, name)));
 
 // The migration is atomic. Keep that property explicit so a future component

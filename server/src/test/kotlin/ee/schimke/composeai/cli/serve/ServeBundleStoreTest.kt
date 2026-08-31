@@ -46,6 +46,34 @@ class ServeBundleStoreTest {
   }
 
   @Test
+  fun `spatial-only bundle registers its scene and contained textures`() {
+    val scene =
+      """{"version":1,"units":"dp","camera":{"kind":"orbit","target":{"x":0,"y":0,"z":0},"distance":1200,"yawDeg":0,"pitchDeg":0},"panels":[]}"""
+        .toByteArray()
+    val texture = byteArrayOf(1, 2, 3)
+    val result =
+      store()
+        .add(
+          "xr",
+          zipOf(
+            "previews/com.example/Xr.spatial/scene.json" to scene,
+            "previews/com.example/Xr.spatial/panel.png" to texture,
+            "previews/com.example/Xr.spatial/ignored.js" to byteArrayOf(9),
+          ),
+          isSecurityChecked = true,
+        )
+
+    assertEquals(ServeBundleStore.Result.Ok("xr", 1), result)
+    val host = registered.getValue("xr")
+    assertEquals(listOf("com.example/Xr"), host.previews.map { it.id })
+    assertTrue(host.previews.single().spatial)
+    assertTrue(scene.contentEquals(host.spatialAsset("com.example/Xr", "scene.json")?.bytes))
+    assertTrue(texture.contentEquals(host.spatialAsset("com.example/Xr", "panel.png")?.bytes))
+    assertEquals(null, host.spatialAsset("com.example/Xr", "ignored.js"))
+    assertEquals(null, host.spatialAsset("com.example/Xr", "../panel.png"))
+  }
+
+  @Test
   fun `error-only bundle registers a diagnostic preview`() {
     val error =
       """{"schema":"compose-preview-error/v1","exception":"java.lang.IllegalStateException","message":"boom","stackTrace":"trace"}"""

@@ -257,6 +257,7 @@ class ServeHttpRoutingTest {
     parityFeed: Boolean = false,
     stagesRcCompare: Boolean = false,
     tagIndex: Boolean = false,
+    spatial: Boolean = false,
     /**
      * False builds the shape `--bundles` and an upload produce: the same host type with no
      * `catalog.json` behind it. Defaults true because every other fixture here stands in for a
@@ -268,6 +269,11 @@ class ServeHttpRoutingTest {
     File(dir, "index.html").writeText("<html></html>")
     File(dir, "previews").apply { mkdirs() }
     File(dir, "previews/$previewId.png").writeBytes(png())
+    if (spatial) {
+      val spatialDir = File(dir, "previews/$previewId.spatial").apply { mkdirs() }
+      File(spatialDir, "scene.json").writeText("""{"version":1,"units":"dp"}""")
+      File(spatialDir, "panel.png").writeBytes(byteArrayOf(4, 5, 6))
+    }
     if (rcDoc != null) {
       File(dir, "ir").apply { mkdirs() }
       File(dir, "ir/$previewId.rc").writeBytes(rcDoc)
@@ -470,6 +476,7 @@ class ServeHttpRoutingTest {
         ),
       pinned = true,
     )
+    registry.register("spatial-view", host = bundle("spatial-view", spatial = true), pinned = true)
     // A baked-only session carrying a degradation reason — reachable at /baked-only/… but kept off
     // catalogSessions so the home-index test is unaffected. Exercises the /api/previews surfacing.
     registry.register(
@@ -2299,6 +2306,7 @@ class ServeHttpRoutingTest {
         "remote-compose.js",
         "known-differences.js",
         "viewer.js",
+        "spatial-view.js",
       )
     scripts.forEach { name ->
       val asset = ServeWebAssets.load(name) ?: error("$name missing")
@@ -2361,11 +2369,36 @@ class ServeHttpRoutingTest {
     assertTrue(api.contains("\"name\":\"shaderColor\""), "declared rc knob name: $api")
     assertTrue(api.contains("\"kind\":\"color\""), "rc knob typed default kind: $api")
     assertTrue(api.contains("\"argb\":\"#FF7DE2FF\""), "rc knob default argb: $api")
+    assertTrue(api.contains("\"spatial\":false"), "flat-preview capability: $api")
     // A fully-served (non-degraded) session carries an empty degradations array.
     assertTrue(
       api.contains("\"degradations\":[]"),
       "empty degradations for a live-capable session: $api",
     )
+  }
+
+  @Test
+  fun `spatial scene assets are served from canonical and query session routes`() {
+    for (path in
+      listOf(
+        "/spatial-view/spatial/$previewId/scene.json",
+        "/spatial/$previewId/scene.json?session=spatial-view",
+      )) {
+      val (code, body) = get(path)
+      assertEquals(200, code, path)
+      assertTrue(body.contains("\"version\":1"), "$path: $body")
+    }
+    assertEquals(404, get("/spatial-view/spatial/$previewId/../scene.json").first)
+    assertEquals(404, get("/spatial-view/spatial/$previewId/script.js").first)
+
+    val (apiCode, api) = get("/spatial-view/api/previews")
+    assertEquals(200, apiCode)
+    assertTrue(api.contains("\"spatial\":true"), "spatial capability: $api")
+
+    val (pageCode, page) = get("/spatial-view/p/$previewId")
+    assertEquals(200, pageCode)
+    assertTrue(page.contains("<cp-spatial-view"), page)
+    assertTrue(page.contains("spatial-view.js"), page)
   }
 
   @Test

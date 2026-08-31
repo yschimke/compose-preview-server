@@ -38,6 +38,22 @@ npm --prefix serve-web run verify
 The independently installable visual harness lives in `preview-harness/`. The experimental
 Compose/Wasm frontend lives in `wasm-ui/`.
 
+## Spatial and WebXR previews
+
+A portable bundle can publish an XR preview as a version-one `SpatialScene` document and its panel
+textures:
+
+```text
+previews/<preview-id>.spatial/scene.json
+previews/<preview-id>.spatial/<panel>.png
+```
+
+The viewer opens these scenes in an orbitable Three.js/WebGL stage and offers **Enter VR** when the
+browser exposes an `immersive-vr` WebXR session. WebXR requires a secure context, so a headset must
+reach the server over HTTPS (localhost remains suitable for desktop WebGL development). Uploaded
+bundles may carry JSON scene documents and PNG/JPEG/WebP textures only; all assets are served from
+the scene's same-origin `/spatial/` route.
+
 Build and run the standalone distribution with:
 
 ```shell

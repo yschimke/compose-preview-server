@@ -1084,6 +1084,19 @@ class ServeWebFixtureTest {
         playgroundHref = "/playground?from=compose-m3/com.example.ProfileScreenPreview",
         parityIssues = parityIssues,
       )
+    val spatialViewer =
+      ServeWeb.viewerPage(
+        ServePreview(
+          id = "com.example.XrMusicPreview",
+          label = "XR music space",
+          spatial = true,
+        ),
+        token,
+        version = version,
+        basePath = "/compose-xr",
+        isPublic = true,
+        spatialSceneUrl = "/compose-xr/spatial/com.example.XrMusicPreview/scene.json",
+      )
     // A second viewer carrying the in-browser Wasm tier, so the harness captures the "Run in
     // browser (Wasm)" toggle + iframe seam a CMP catalog session shows.
     val wasmViewer =
@@ -3829,6 +3842,7 @@ class ServeWebFixtureTest {
         "serve-landing-public.html" to landingPublic,
         "serve-home-index.html" to homeIndex,
         "serve-viewer.html" to viewer,
+        "serve-viewer-spatial.html" to spatialViewer,
         "serve-viewer-history.html" to viewerHistory,
         "serve-viewer-history-local.html" to viewerHistoryLocal,
         "serve-viewer-wasm.html" to wasmViewer,

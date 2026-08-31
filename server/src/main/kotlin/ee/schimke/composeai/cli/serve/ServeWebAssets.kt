@@ -48,6 +48,7 @@ internal object ServeWebAssets {
       // the front door.
       "report-capture.js" to "text/javascript; charset=utf-8",
       "viewer.js" to "text/javascript; charset=utf-8",
+      "spatial-view.js" to "text/javascript; charset=utf-8",
       "format-compare.js" to "text/javascript; charset=utf-8",
       // The acceptance band and the engine behind it: the known-difference contract's whole
       // reference implementation, shared verbatim with `scripts/design-artifacts/` so the browser

@@ -162,7 +162,7 @@ class ServeBundleStore(
    */
   private fun extractPreviews(zipBytes: ByteArray, dir: File): Int {
     val rootPath = dir.canonicalFile.toPath()
-    var count = 0
+    val previewIds = LinkedHashSet<String>()
     var total = 0L
     ZipInputStream(ByteArrayInputStream(zipBytes)).use { zin ->
       var entry = zin.nextEntry
@@ -175,10 +175,21 @@ class ServeBundleStore(
         // knobs. Dropping the RC sidecar here would silently strip `remoteComposeKnobs` from the
         // upload path (POST / URL) while the live-bundle / directory paths kept them.
         val underPreviews = name.startsWith("$PREVIEWS_SUBDIR/") && ".." !in segments
-        val isPng = underPreviews && name.endsWith(PNG_SUFFIX)
+        val insideSpatial = segments.dropLast(1).any { it.endsWith(SPATIAL_SUFFIX) }
+        val isPng = underPreviews && !insideSpatial && name.endsWith(PNG_SUFFIX)
         val isRenderError = underPreviews && name.endsWith(RENDER_ERROR_SUFFIX)
         val isOverrides = underPreviews && name.endsWith(OVERRIDES_SUFFIX)
         val isRemoteCompose = underPreviews && name.endsWith(REMOTECOMPOSE_SUFFIX)
+        // A spatial preview is a scene document plus sibling image textures under
+        // `previews/<id>.spatial/`. Keep the allowlist deliberately closed: the browser never
+        // needs executable content from an uploaded bundle.
+        val spatialLeaf = segments.lastOrNull().orEmpty()
+        val isSpatial =
+          underPreviews &&
+            segments.size >= 3 &&
+            segments[segments.lastIndex - 1].endsWith(SPATIAL_SUFFIX) &&
+            (spatialLeaf == SPATIAL_SCENE_FILE ||
+              SPATIAL_IMAGE_SUFFIXES.any { spatialLeaf.lowercase().endsWith(it) })
         // Also keep the captured Remote Compose documents from the sibling `ir/<id>.rc` tree —
         // the browser player's replayable input, served over `GET /render/<id>.rc`. Dropping
         // these here would strip the client-side render lane from the upload path (POST / URL)
@@ -193,7 +204,13 @@ class ServeBundleStore(
         val isPreviewsJson = name == PREVIEWS_JSON
         if (
           !entry.isDirectory &&
-            (isPng || isRenderError || isOverrides || isRemoteCompose || isRc || isPreviewsJson)
+            (isPng ||
+              isRenderError ||
+              isOverrides ||
+              isRemoteCompose ||
+              isSpatial ||
+              isRc ||
+              isPreviewsJson)
         ) {
           val target = File(dir, name)
           // Zip-slip guard: the resolved path must stay under the bundle dir.
@@ -204,14 +221,22 @@ class ServeBundleStore(
             total += copyCapped(zin, target, remaining = maxBytes - total)
             // A structured render failure is intentionally servable without pixels: its card
             // explains why the corresponding PNG is absent.
-            if (isPng || isRenderError) count++
+            when {
+              isPng -> previewIds += name.removePrefix("$PREVIEWS_SUBDIR/").removeSuffix(PNG_SUFFIX)
+              isRenderError ->
+                previewIds +=
+                  name.removePrefix("$PREVIEWS_SUBDIR/").removeSuffix(RENDER_ERROR_SUFFIX)
+              isSpatial && spatialLeaf == SPATIAL_SCENE_FILE ->
+                previewIds +=
+                  segments.drop(1).dropLast(1).joinToString("/").removeSuffix(SPATIAL_SUFFIX)
+            }
           }
         }
         zin.closeEntry()
         entry = zin.nextEntry
       }
     }
-    return count
+    return previewIds.size
   }
 
   /** Stream [input] into [target], throwing once more than [remaining] bytes have been written. */
@@ -236,6 +261,9 @@ class ServeBundleStore(
     private const val RENDER_ERROR_SUFFIX = ".error.json"
     private const val OVERRIDES_SUFFIX = ".overrides.json"
     private const val REMOTECOMPOSE_SUFFIX = ".remotecompose.json"
+    private const val SPATIAL_SUFFIX = ".spatial"
+    private const val SPATIAL_SCENE_FILE = "scene.json"
+    private val SPATIAL_IMAGE_SUFFIXES = listOf(".png", ".jpg", ".jpeg", ".webp")
     private const val IR_SUBDIR = "ir"
     private const val RC_SUFFIX = ".rc"
     private const val PREVIEWS_JSON = "previews.json"

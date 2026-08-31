@@ -29,6 +29,9 @@ const pages = {
         "known-differences.js",
     ],
     viewer: [runtime, "viewer-components.js", "format-compare.js", "viewer.js"],
+    // Three.js is intentionally isolated: only a preview carrying a scene pays this additional
+    // WebGL/WebXR runtime, while every ordinary viewer remains under the existing budget.
+    "spatial viewer": [runtime, "viewer-components.js", "spatial-view.js"],
 };
 const limits = {
     catalog: 30_000,
@@ -37,6 +40,7 @@ const limits = {
     "design page": 44_000,
     parity: 52_000,
     viewer: 68_000,
+    "spatial viewer": 180_000,
 };
 
 const gzipBytes = new Map();

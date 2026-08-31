@@ -107,6 +107,7 @@ const BUNDLES = [
     { entry: "src/formatCompare.ts", out: "format-compare.js" },
     { entry: "src/knownDifferences.ts", out: "known-differences.js" },
     { entry: "src/viewer.ts", out: "viewer.js" },
+    { entry: "src/spatial.ts", out: "spatial-view.js" },
 ];
 
 const optionsFor = ({ entry, out }) => ({

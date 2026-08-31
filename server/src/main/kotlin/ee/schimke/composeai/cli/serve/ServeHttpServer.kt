@@ -1401,6 +1401,11 @@ class ServeHttpServer(
         get("/tags/{name}") { handleTagIndex(sessionInPath = false) }
         get("/{system}/tags/{name}") { handleTagIndex(sessionInPath = true) }
 
+        // Portable spatial scenes. Textures deliberately share the scene's same-origin route;
+        // uploaded bundles never get to inject scripts or point the WebXR viewer at local files.
+        get("/spatial/{name}/{path...}") { handleSpatialAsset(sessionInPath = false) }
+        get("/{system}/spatial/{name}/{path...}") { handleSpatialAsset(sessionInPath = true) }
+
         // Design pages (see [ServeDesignPages]). One route per level rather than a
         // separate asset path: `{name}` ending in `.png` is the backdrop image, anything else is
         // the screen's own view — the same suffix convention `/reference/{name}` already uses.
@@ -7340,6 +7345,29 @@ class ServeHttpServer(
     }
   }
 
+  /** One scene document or texture for the WebGL/WebXR preview surface. */
+  private suspend fun RoutingContext.handleSpatialAsset(sessionInPath: Boolean) {
+    if (rejectBadToken() || rejectMalformedGeneration()) return
+    val previewId = call.parameters["name"].orEmpty()
+    val requested = call.parameters.getAll("path").orEmpty().joinToString("/")
+    withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
+      if (staleGeneration(renderHost) != null) {
+        call.respondText(
+          "this catalog has moved on; reload the spatial preview",
+          status = HttpStatusCode.Conflict,
+        )
+        return@withLeasedSession
+      }
+      val asset = renderHost.spatialAsset(previewId, requested)
+      if (asset == null) {
+        call.respondText("not found", status = HttpStatusCode.NotFound)
+      } else {
+        call.response.headers.append(HttpHeaders.CacheControl, DYNAMIC_RESOURCE_CACHE_CONTROL)
+        call.respondBytes(asset.bytes, ContentType.parse(asset.contentType))
+      }
+    }
+  }
+
   /**
    * `GET /api/previews` (query) and `GET /{system}/api/previews` (path): the session's preview
    * JSON.
@@ -7367,6 +7395,7 @@ class ServeHttpServer(
                 modes = p.modes.map { it.wire },
                 overrides = p.overrides,
                 remoteComposeKnobs = p.remoteComposeKnobs,
+                spatial = p.spatial,
                 liveOnly = p.id in renderHost.liveOnlyPreviewIds,
                 views = previewEngagement.getValue(p.id).views,
               )
@@ -8180,6 +8209,10 @@ class ServeHttpServer(
           wasmSrc = wasmSrc,
           wasmSameOrigin = wasmSameOrigin,
           basePath = basePath,
+          spatialSceneUrl =
+            if (preview.spatial)
+              "$basePath/spatial/${WebEscaping.urlEncodeSegment(preview.id)}/scene.json${requestQuerySuffix()}"
+            else null,
           changelogHref = changelogHref(sessionId, basePath, webSessionId),
           isPublic = isPublic,
           componentBrowser = componentBrowserMode(),
@@ -11751,6 +11784,8 @@ private data class PreviewDto(
    * them). Additive since `compose-preview-serve/v2`.
    */
   val remoteComposeKnobs: List<RemoteComposeKnobDeclaration> = emptyList(),
+  /** True when `/spatial/<id>/scene.json` is available for WebGL/WebXR presentation. */
+  val spatial: Boolean = false,
   /**
    * True when this preview is **live-only**: the catalog declares it (`deferred[]`) but publishes
    * no baked PNG for it, so every render is produced on demand by the session's live daemon. A
