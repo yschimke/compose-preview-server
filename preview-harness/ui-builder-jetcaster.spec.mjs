@@ -192,8 +192,63 @@ test("capability-generated Jetcaster Compose compiles and renders the full docum
         threshold: 0,
         maxDiffPixelRatio: 0.04,
     });
+    // Interim spike guard only. Product release remains exact geometry/semantics and pixel parity;
+    // this tolerance is not a substitute for that gate.
     expect(mismatchRatio, "generated Compose independent-oracle mismatch").toBeLessThan(
         0.021,
+    );
+});
+
+test("capability-generated Compose preserves the compact single-pane structure", async ({
+    page,
+}, testInfo) => {
+    await page.setViewportSize({ width: 412, height: 800 });
+    const reference = await capture(
+        page,
+        "/ui-builder-reference-jetcaster/build/wasmDist/index.html",
+        () => globalThis.__uiBuilderReferenceJetcasterReady === true,
+    );
+    const generated = await capture(
+        page,
+        "/ui-builder-generated-jetcaster/build/wasmDist/index.html",
+        () =>
+            document.documentElement.dataset
+                .uiBuilderGeneratedJetcasterReady === "true",
+    );
+    const referencePng = PNG.sync.read(reference);
+    const generatedPng = PNG.sync.read(generated);
+    expect([referencePng.width, referencePng.height]).toEqual([412, 800]);
+    expect([generatedPng.width, generatedPng.height]).toEqual([412, 800]);
+
+    const diff = new PNG({ width: 412, height: 800 });
+    const mismatch = pixelmatch(
+        referencePng.data,
+        generatedPng.data,
+        diff.data,
+        412,
+        800,
+        { threshold: 0.1, includeAA: false },
+    );
+    const mismatchRatio = mismatch / (412 * 800);
+    console.info(
+        `Jetcaster compact generated-Compose mismatch: ${mismatch} pixels (${(
+            mismatchRatio * 100
+        ).toFixed(3)}%)`,
+    );
+    await testInfo.attach("jetcaster-compact-generated-compose.png", {
+        body: generated,
+        contentType: "image/png",
+    });
+    await testInfo.attach("jetcaster-compact-generated-compose-diff.png", {
+        body: PNG.sync.write(diff),
+        contentType: "image/png",
+    });
+
+    // This exercises the generated helper's compact branch at the exact 412x800 viewport. Pixel
+    // convergence remains an interim spike guard until geometry/semantics inspection and the exact
+    // release gate are available for the standalone generated application.
+    expect(mismatchRatio, "compact generated Compose independent-oracle mismatch").toBeLessThan(
+        0.03,
     );
 });
 
