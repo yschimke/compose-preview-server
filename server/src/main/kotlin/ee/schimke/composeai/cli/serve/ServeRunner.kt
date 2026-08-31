@@ -569,6 +569,11 @@ public class ServeRunner(
      */
     val group: ServeWeb.HomeGroup? = null,
     /**
+     * Upstream project this catalog was rendered from; see
+     * [ServeCatalogsConfig.Entry.importedFrom].
+     */
+    val importedFrom: String? = null,
+    /**
      * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]). Only a
      * `--catalogs-file` entry can raise it; a bare flag entry takes the default, which is the order
      * it was named in.
@@ -606,6 +611,7 @@ public class ServeRunner(
           repo = repo,
           listed = entry.listed,
           group = ServeCatalogAdmin.homeGroup(entry, repo, catalogsConfig.groups),
+          importedFrom = entry.importedFrom,
           loadPriority = entry.loadPriority,
         )
       }
@@ -695,6 +701,7 @@ public class ServeRunner(
           repo = contribution.repo,
           listed = entry.listed,
           group = contribution.homeGroup(entry),
+          importedFrom = entry.importedFrom,
           loadPriority = entry.loadPriority,
         )
       }
@@ -2977,6 +2984,7 @@ public class ServeRunner(
             repo = ref.repo,
             branch = "$catalogBranchPrefix${ref.system}",
             group = ref.group,
+            importedFrom = ref.importedFrom,
             loadPriority = ref.loadPriority,
           )
         }
@@ -3154,6 +3162,7 @@ public class ServeRunner(
               repo = contribution.repo,
               branch = "$catalogBranchPrefix${entry.system}",
               group = contribution.homeGroup(entry),
+              importedFrom = entry.importedFrom,
               loadPriority = entry.loadPriority,
             )
           if (!loads.add(config)) {

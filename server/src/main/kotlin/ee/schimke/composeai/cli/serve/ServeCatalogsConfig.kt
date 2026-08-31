@@ -89,6 +89,20 @@ data class ServeCatalogsConfig(
     /** [Group.id] this catalog is published under; null ⇒ grouped by its source repo's owner. */
     val group: String? = null,
     /**
+     * `<owner>/<repo>` this catalog's previews were RENDERED FROM, when that is not [repo].
+     *
+     * An imported catalog is served from a staging repository that renders somebody else's project
+     * — `yschimke/compose-preview-imports` publishing `joreilly/PeopleInSpace`'s previews. Two
+     * things go wrong without this. The card falls back to grouping by the SERVING repo's owner, so
+     * an import of a joreilly project lands under the staging repo's owner rather than beside that
+     * owner's other catalogs; and nothing on the card says the catalog is somebody else's work seen
+     * through this box, which is the one fact a reader most needs about it.
+     *
+     * Attribution only: it never widens what a catalog may claim. [group] still has to satisfy
+     * [attributionRepos], and trust is still decided by the branch this was fetched from.
+     */
+    val importedFrom: String? = null,
+    /**
      * Extra repos allowed to satisfy the [group] claim, for a catalog **fetched** from somewhere
      * other than where it's authored — Android's samples are served from preview branches in a
      * fork, but the section is Android's. Never widen this to a repo you don't trust to publish
