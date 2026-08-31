@@ -133,7 +133,14 @@ class ServeCatalogRegistryTest {
   fun `an unreadable or absent document contributes nothing rather than failing the boot`() {
     val problems = mutableListOf<String>()
     assertNull(ServeCatalogRegistry.fetch(nomination("a/b"), { _, _ -> null }, problems::add))
-    assertEquals(emptyList(), problems)
+    // Best-effort BEHAVIOUR, but never silent: a boot read of a live registry that came back with
+    // nothing left no trace in the logs at all, which is indistinguishable from the flag never
+    // reaching the server — and that is where the debugging went. The reason names every ref tried.
+    val miss = problems.single()
+    assertTrue(miss.contains("a/b"), miss)
+    assertTrue(miss.contains(ServeCatalogRegistry.FILE_PATH), miss)
+    ServeCatalogRegistry.DEFAULT_REF_CANDIDATES.forEach { assertTrue(miss.contains(it), miss) }
+    problems.clear()
 
     assertNull(
       ServeCatalogRegistry.fetch(nomination("a/b"), bytesOf("not json at all"), problems::add)

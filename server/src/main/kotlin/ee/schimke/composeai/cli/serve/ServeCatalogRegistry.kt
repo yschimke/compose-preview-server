@@ -163,10 +163,12 @@ object ServeCatalogRegistry {
     onProblem: (String) -> Unit = {},
   ): Contribution? {
     val repo = nomination.repo
-    // First ref that answers wins — one request for a project on `main`, and no dependence on the
-    // `HEAD` alias being current. See [DEFAULT_REF_CANDIDATES].
+    // First ref that answers wins — one request for a project on `HEAD`, and no dependence on any
+    // one ref name. See [DEFAULT_REF_CANDIDATES].
     var bytes: ByteArray? = null
+    val tried = mutableListOf<String>()
     for (ref in nomination.refs) {
+      tried += ref
       bytes =
         runCatching { fetch(documentUrl(repo, ref), MAX_BYTES) }
           .getOrElse {
@@ -175,7 +177,21 @@ object ServeCatalogRegistry {
           }
       if (bytes != null) break
     }
-    val body = bytes ?: return null
+    val body =
+      bytes
+        ?: run {
+          // **Say so.** This return used to be silent, on the reasoning that a best-effort read
+          // leaves the box serving what it already serves. That is the right BEHAVIOUR and was the
+          // wrong SILENCE: on preview.coo.ee the boot read of a live, reachable registry returned
+          // nothing, and because it said nothing the logs held no trace of a registry at all —
+          // indistinguishable from the flag never arriving, which is where the debugging went.
+          // A best-effort read still owes an operator the reason it gave up.
+          onProblem(
+            "catalog registry $repo: no $FILE_PATH at ${tried.joinToString("/")} — " +
+              "contributing no catalogs this pass"
+          )
+          return null
+        }
     val parsed = runCatching {
       ServeCatalogsConfig.parse(body.toString(Charsets.UTF_8))
     }
