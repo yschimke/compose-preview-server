@@ -43,13 +43,13 @@ class ServeStatusCatalogRegistryTest {
     client
       .newCall(Request.Builder().url("http://127.0.0.1:${s.port}/status.json").build())
       .execute()
-      .use { it.body!!.string() }
+      .use { it.body.string() }
 
   private fun statusPage(s: ServeHttpServer): String =
     client
       .newCall(Request.Builder().url("http://127.0.0.1:${s.port}/status").build())
       .execute()
-      .use { it.body!!.string() }
+      .use { it.body.string() }
 
   @Test
   fun `a nomination that contributed catalogs is reported with its systems`() {

@@ -1040,14 +1040,12 @@ class ThemeCachePersistenceTest {
   }
 
   /** The durable dirty boundary recorded in a generation's manifest. */
-  private fun boundaryOf(root: File, fingerprint: String): Long = Json {
-    ignoreUnknownKeys = true
-  }
-    .decodeFromString(
-      GenerationInputs.serializer(),
-      File(File(File(root, "m3-catalog"), fingerprint), ThemeCacheStore.MANIFEST_NAME).readText(),
-    )
-    .dirtyBeforeEpochMillis
+  private fun boundaryOf(root: File, fingerprint: String): Long =
+    Json.decodeFromString(
+        GenerationInputs.serializer(),
+        File(File(File(root, "m3-catalog"), fingerprint), ThemeCacheStore.MANIFEST_NAME).readText(),
+      )
+      .dirtyBeforeEpochMillis
 
   private fun inputs(fingerprint: String) =
     GenerationInputs(

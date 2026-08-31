@@ -1005,12 +1005,12 @@ class ServeCatalogStoreTest {
     // path copies bytes rather than judging records.
     val staged = host.knownDifferences()
     assertTrue(staged is ServeKnownDifferences.Document.Text, "the document reached the host")
-    assertEquals(document, (staged as ServeKnownDifferences.Document.Text).text)
+    assertEquals(document, staged.text)
 
     // …and so do the artifacts it names, at the paths it names them.
     val mask = host.knownDifferenceArtifact("glyph/mask.png")
     assertTrue(mask is ServeKnownDifferences.Artifact.Bytes, "the mask reached the host: $mask")
-    assertEquals("mask", (mask as ServeKnownDifferences.Artifact.Bytes).bytes.decodeToString())
+    assertEquals("mask", mask.bytes.decodeToString())
     assertTrue(
       host.knownDifferenceArtifact("glyph/accepted-candidate.png")
         is ServeKnownDifferences.Artifact.Bytes
