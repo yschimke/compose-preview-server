@@ -65,8 +65,9 @@ interface DesignStore {
  * returning. Recovery accepts only complete newline-terminated records, reports an interrupted
  * partial tail, and fails closed on corruption in any acknowledged record.
  *
- * This is intentionally not the final multi-replica adapter. Compaction and backup are separate
- * gates; callers must enforce quotas while this append-only implementation is active.
+ * This is intentionally not the final multi-replica adapter. The store enforces per-snapshot,
+ * per-event, and per-design event-log byte limits. Compaction, global or tenant quotas, and backup
+ * are separate gates.
  */
 class FileDesignStore(
   private val root: Path,
@@ -119,13 +120,6 @@ class FileDesignStore(
           )
         }
         val eventPath = directory.resolve(EVENTS_FILE)
-        val currentSize = if (Files.exists(eventPath)) Files.size(eventPath) else 0L
-        if (currentSize + bytes.size > limits.maxEventLogBytes) {
-          throw DesignStoreLimitException(
-            "design $safeId event log would exceed ${limits.maxEventLogBytes} bytes; " +
-              "compaction is required"
-          )
-        }
         FileChannel.open(
             eventPath,
             StandardOpenOption.CREATE,
@@ -134,6 +128,16 @@ class FileDesignStore(
           )
           .use { channel ->
             channel.lock().use {
+              val currentSize = channel.size()
+              if (
+                currentSize > limits.maxEventLogBytes ||
+                  bytes.size.toLong() > limits.maxEventLogBytes - currentSize
+              ) {
+                throw DesignStoreLimitException(
+                  "design $safeId event log would exceed ${limits.maxEventLogBytes} bytes; " +
+                    "compaction is required"
+                )
+              }
               var buffer = ByteBuffer.wrap(bytes)
               while (buffer.hasRemaining()) channel.write(buffer)
               channel.force(true)
@@ -150,6 +154,7 @@ class FileDesignStore(
         val directory = root.resolve(safeId)
         val snapshot = directory.resolve(SNAPSHOT_FILE)
         if (!Files.isRegularFile(snapshot)) return@withLock null
+        requireFileWithinLimit(snapshot, limits.maxSnapshotBytes, "$safeId/$SNAPSHOT_FILE")
         val snapshotPayload = decodeEnvelope(Files.readString(snapshot), "$safeId/$SNAPSHOT_FILE")
         if (snapshotPayload.string("schema") != SNAPSHOT_SCHEMA) {
           throw DesignStoreCorruptionException("unsupported snapshot schema for $safeId")
@@ -164,6 +169,7 @@ class FileDesignStore(
           }
         val eventFile = directory.resolve(EVENTS_FILE)
         if (!Files.exists(eventFile)) return@withLock StoredDesignRecovery(initial, emptyList())
+        requireFileWithinLimit(eventFile, limits.maxEventLogBytes, "$safeId/$EVENTS_FILE")
         val bytes = Files.readAllBytes(eventFile)
         val events = mutableListOf<CollaborationEvent>()
         var lineStart = 0
@@ -185,6 +191,13 @@ class FileDesignStore(
           ignoredPartialTailBytes = bytes.size - lineStart,
         )
       }
+  }
+
+  private fun requireFileWithinLimit(path: Path, limit: Long, description: String) {
+    val size = Files.size(path)
+    if (size > limit) {
+      throw DesignStoreLimitException("$description is $size bytes; limit is $limit")
+    }
   }
 
   override fun listDesignIds(): List<String> =

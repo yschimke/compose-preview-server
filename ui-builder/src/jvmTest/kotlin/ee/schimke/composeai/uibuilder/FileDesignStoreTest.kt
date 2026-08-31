@@ -156,6 +156,76 @@ class FileDesignStoreTest {
     assertTrue(!Files.exists(eventRoot.resolve("design/events.jsonl")))
   }
 
+  @Test
+  fun `cumulative event log quota rejects without changing acknowledged events`() {
+    val root = Files.createTempDirectory("ui-builder-store-log-limit")
+    val initial = document()
+    val store = FileDesignStore(root)
+    store.create(initial)
+    val command = command("accepted", 0, literal("saved"))
+    val applied =
+      CollaborationReducer.apply(CollaborationState(initial), command, propertyValidator)
+    val event = CollaborationEvent(RejectedMutation.Design(command), applied.outcome)
+    store.append("design", event)
+    val eventFile = root.resolve("design/events.jsonl")
+    val acknowledgedBytes = Files.size(eventFile)
+
+    val limited =
+      FileDesignStore(
+        root,
+        DesignStoreLimits(
+          maxSnapshotBytes = 100_000,
+          maxEventBytes = acknowledgedBytes,
+          maxEventLogBytes = acknowledgedBytes * 2 - 1,
+        ),
+      )
+    assertFailsWith<DesignStoreLimitException> { limited.append("design", event) }
+
+    assertEquals(acknowledgedBytes, Files.size(eventFile))
+    assertEquals(listOf(event), assertNotNull(store.load("design")).events)
+  }
+
+  @Test
+  fun `oversized recovery files are rejected before whole file reads`() {
+    val root = Files.createTempDirectory("ui-builder-store-recovery-limit")
+    val initial = document()
+    val store = FileDesignStore(root)
+    store.create(initial)
+    val command = command("accepted", 0, literal("saved"))
+    val applied =
+      CollaborationReducer.apply(CollaborationState(initial), command, propertyValidator)
+    store.append(
+      "design",
+      CollaborationEvent(RejectedMutation.Design(command), applied.outcome),
+    )
+    val directory = root.resolve("design")
+    val snapshotBytes = Files.size(directory.resolve("snapshot.json"))
+    val eventBytes = Files.size(directory.resolve("events.jsonl"))
+
+    assertFailsWith<DesignStoreLimitException> {
+      FileDesignStore(
+          root,
+          DesignStoreLimits(
+            maxSnapshotBytes = snapshotBytes - 1,
+            maxEventBytes = eventBytes,
+            maxEventLogBytes = eventBytes,
+          ),
+        )
+        .load("design")
+    }
+    assertFailsWith<DesignStoreLimitException> {
+      FileDesignStore(
+          root,
+          DesignStoreLimits(
+            maxSnapshotBytes = snapshotBytes,
+            maxEventBytes = eventBytes - 1,
+            maxEventLogBytes = eventBytes - 1,
+          ),
+        )
+        .load("design")
+    }
+  }
+
   private fun command(operationId: String, revision: Int, value: JsonObject) =
     DesignCommand(
       designId = "design",
