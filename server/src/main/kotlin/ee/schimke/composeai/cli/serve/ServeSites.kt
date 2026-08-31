@@ -275,6 +275,10 @@ data class ServeSites(private val byHost: Map<String, String>) {
         // routing, so `/motion/…` was read as a neighbour catalog and refused with the site's own
         // styled page rather than reaching `handleMotion` at all.
         "motion",
+        // `GET /spatial/<previewId>/…` — portable scene documents and their sibling textures.
+        // Without this reservation a site host treats `spatial` as a neighbour catalog and
+        // intercepts the request before the scene-asset handler can serve it.
+        "spatial",
         "history",
         "compare",
         "reference",
