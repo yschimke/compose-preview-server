@@ -32,6 +32,7 @@ class ServePinnedRevisionTest {
   private val referenceId = "button-figma"
   private val oldCommit = "1111111111111111111111111111111111111111"
   private val newCommit = "2222222222222222222222222222222222222222"
+  private val ancientCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
   private val currentRender = png(1)
   private val historicalRender = png(2)
@@ -706,6 +707,69 @@ class ServePinnedRevisionTest {
 
     assertFalse(page.contains(metadataCommit), page)
     assertTrue(runs.contains("\"revisions\":2"), runs)
+  }
+
+  @Test
+  fun `indexed image history survives a branch feed crowded by metadata commits`() {
+    // GitHub's branch Atom feed exposes only a small fixed window. Fill all of it with commits that
+    // did not regenerate the catalog, exactly as repeated parity issue-index refreshes did in
+    // production: none of the commits that changed this PNG remain discoverable branch-wide.
+    val metadataCommits = (3..21).map { value -> value.toString(16).padStart(40, '3') }
+    val crowdedFeed =
+      (listOf(newCommit) + metadataCommits)
+        .mapIndexed { index, commit ->
+          """
+          <entry>
+            <id>tag:github.com,2008:Grit::Commit/$commit</id>
+            <updated>2026-08-31T${(23 - index).toString().padStart(2, '0')}:00:00Z</updated>
+            <content type="html">refresh parity issue index</content>
+          </entry>
+          """
+            .trimIndent()
+        }
+        .joinToString("\n", "<feed>\n", "\n</feed>")
+    val history =
+      """
+      {
+        "formatVersion":"${PreviewHistoryManifest.FORMAT_VERSION}",
+        "generatedFrom":"$oldCommit",
+        "previews":{"$previewId":{
+          "path":"images/button-filled/ideal__default__dark.png",
+          "versions":[
+            {"blob":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","commit":"$oldCommit",
+             "date":"2026-08-01T10:00:00Z","sourceSha":"b34eff53","commits":1},
+            {"blob":"cccccccccccccccccccccccccccccccccccccccc","commit":"$ancientCommit",
+             "date":"2026-07-20T10:00:00Z","sourceSha":"c45f0064","commits":1}
+          ],
+          "observations":2,"unstable":false,"flapCount":0
+        }}
+      }
+      """
+        .trimIndent()
+    val tip = "https://raw.githubusercontent.com/$repo/$newCommit/"
+    val port = startServer { url ->
+      when (url) {
+        ServeCatalogRevision.commitsFeedUrl(repo, branch) -> crowdedFeed.encodeToByteArray()
+        "${tip}${PreviewHistoryManifest.FILE_NAME}" -> history.encodeToByteArray()
+        else -> fetch(url)
+      }
+    }
+      .port
+
+    val page = text("http://127.0.0.1:$port/$system/p/$previewId")
+    val runs = text("http://127.0.0.1:$port/$system/api/render-runs/$previewId")
+
+    // Current plus the two indexed image versions survive; unrelated feed rows do not leak into
+    // the preview's revision menu.
+    assertTrue(page.contains("data-revision=\"$newCommit\""), page)
+    assertTrue(page.contains("data-revision=\"$oldCommit\""), page)
+    assertTrue(page.contains("data-revision=\"$ancientCommit\""), page)
+    assertFalse(page.contains(metadataCommits.first()), page)
+    // The indexed `sinceCommit` fallbacks are enough to recover both distinct visual runs even
+    // though this stub exposes no path-scoped Atom feed at all.
+    assertTrue(runs.contains("\"revisions\":3"), runs)
+    assertTrue(runs.contains("\"head\":\"$newCommit\""), runs)
+    assertTrue(runs.contains("\"head\":\"$ancientCommit\""), runs)
   }
 
   @Test

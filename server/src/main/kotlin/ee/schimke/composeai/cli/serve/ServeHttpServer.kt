@@ -3654,10 +3654,27 @@ class ServeHttpServer(
   private fun availableRevisions(
     host: ServeBundleHost,
     previewId: String,
-  ): List<ServeCatalogRevision.Revision> =
-    host.revisions.filterIndexed { index, revision ->
-      index == 0 || host.revisionContainsPreview(revision.commit, previewId) != false
-    }
+  ): List<ServeCatalogRevision.Revision> {
+    // The feed head is the immutable tree this host loaded. Without it there is no trustworthy
+    // "current" revision to lead the menu, so preserve the pre-index behaviour of drawing none.
+    val current = host.revisions.firstOrNull() ?: return emptyList()
+    val fromFeed =
+      host.revisions.filterIndexed { index, revision ->
+        index == 0 || host.revisionContainsPreview(revision.commit, previewId) != false
+      }
+    // history.json is ordered newest-first but contains only distinct image versions. Merge those
+    // durable rows with the branch feed, whose extra rows preserve unchanged publishes while they
+    // remain visible. Sorting by their ISO publish date restores the chronology across both
+    // sources; the map keeps the feed's richer record when a commit appears in both.
+    val tail =
+      (host.indexedPreviewRevisions(previewId) + fromFeed)
+        .associateBy { it.commit }
+        .values
+        .filterNot { it.commit == current.commit }
+        .sortedByDescending { it.date }
+        .take(ServeCatalogRevision.MAX_REVISIONS - 1)
+    return listOf(current) + tail
+  }
 
   /**
    * Answer one **pinned** image request: the published bytes at a delivery-branch commit, or a 404
@@ -7156,19 +7173,18 @@ class ServeHttpServer(
     withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
       val host = catalogBundleHost(renderHost)
       val revisions = host?.let { availableRevisions(it, previewId) }.orEmpty()
-      // Every publish below the tip has to be one the generation-time index CONFIRMS carried this
-      // preview. [availableRevisions] fails open for a branch that ships no `preview-index.json`,
-      // which is right for the menu — an extra link that 404s beats hiding real history — and wrong
-      // here: the window would then reach back past the preview's creation, where the path feed's
-      // creation commit reads as a boundary and every row below it becomes a trailing run headed by
-      // a publish that has no render at all. That row would be marked, counted as another distinct
-      // render, and asked for a thumbnail that cannot exist.
+      // Every publish below the tip has to be one a generation-time index CONFIRMS carried this
+      // preview. [availableRevisions] fails open when a branch ships neither `preview-index.json`
+      // nor image history, which is right for the menu — an extra link that 404s beats hiding real
+      // history — and wrong here: the window would then reach back past the preview's creation,
+      // where the path feed's creation commit reads as a boundary and every row below it becomes a
+      // trailing run headed by a publish that has no render at all. That row would be marked,
+      // counted as another distinct render, and asked for a thumbnail that cannot exist.
       //
-      // Not a real cost for a current publisher: the index is rolled forward to cover exactly the
-      // window the menu lists ([ServeCatalogRevision.MAX_REVISIONS] minus the tip, whose inventory
-      // is `current` rather than a `revisions` entry). It is the legacy branches — the ones we
-      // cannot bound at all — that get no markers, which is the same answer this lane gives
-      // everywhere else it does not know.
+      // Not a real cost for a current publisher: preview-index is rolled forward over the ordinary
+      // menu window, and history.json independently confirms every distinct image revision it
+      // contributes. It is the legacy branches — the ones we cannot bound at all — that get no
+      // markers, which is the same answer this lane gives everywhere else it does not know.
       val bounded =
         host != null &&
           revisions.drop(1).all { host.revisionContainsPreview(it.commit, previewId) == true }
@@ -7181,7 +7197,10 @@ class ServeHttpServer(
       // the branch client's 10s connect / 30s read timeouts, so leaving it here would let a handful
       // of cold menu opens hold Ktor request threads while GitHub is slow and stall unrelated
       // traffic. Same rule the published-asset lanes already follow.
-      val changed = withContext(Dispatchers.IO) { host?.renderChangeCommits(previewId) }
+      val changed =
+        withContext(Dispatchers.IO) {
+          host?.renderChangeCommits(previewId, revisions.mapTo(mutableSetOf()) { it.commit })
+        }
       if (changed == null || revisions.isEmpty() || !bounded) {
         call.respondText("not found", status = HttpStatusCode.NotFound)
         return@withLeasedSession

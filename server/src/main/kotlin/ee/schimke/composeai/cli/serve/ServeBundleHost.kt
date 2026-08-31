@@ -216,6 +216,15 @@ class ServeBundleHost(
   /** Preview inventories precomputed by the publisher, keyed by historic delivery commit. */
   private val revisionPreviewIds: Map<String, Set<String>>? = null,
   /**
+   * Per-image history precomputed by the publisher.
+   *
+   * Unlike [revisions], this is not capped by unrelated commits on the delivery branch: one
+   * timeline contains only commits that changed that preview's PNG. It therefore supplies the
+   * missing revision rows and run boundaries when GitHub's branch-wide Atom window has been filled
+   * by parity/index refreshes. Null for older publishers and plain bundles.
+   */
+  private val indexedPreviewHistory: PreviewHistoryManifest.Manifest? = null,
+  /**
    * The publishes in which one render's bytes changed, by branch path — supplied by
    * [ServeCatalogStore], null for a host with no delivery branch.
    *
@@ -932,20 +941,60 @@ class ServeBundleHost(
   fun pinnedCatalogIsAuthoritative(commit: String): Boolean =
     pinnedManifest?.forCommit(commit)?.catalogRead == true
 
-  /** Null means this branch predates the generation-time index, so menus fail open. */
-  fun revisionContainsPreview(commit: String, previewId: String): Boolean? =
-    revisionPreviewIds?.let { index ->
-      ServeCatalogRevision.normalize(commit)?.let { index[it]?.contains(previewId) ?: false }
+  /**
+   * Whether one indexed revision carried [previewId].
+   *
+   * Image history is authoritative when it names the commit even if the rolling preview inventory
+   * no longer reaches that far back. Null still means this branch predates both generated indexes,
+   * so menus retain their legacy fail-open behaviour.
+   */
+  fun revisionContainsPreview(commit: String, previewId: String): Boolean? {
+    val normalized =
+      ServeCatalogRevision.normalize(commit) ?: return revisionPreviewIds?.let { false }
+    if (normalized in indexedPreviewRevisions(previewId).asSequence().map { it.commit }) return true
+    return revisionPreviewIds?.let { it[normalized]?.contains(previewId) ?: false }
+  }
+
+  /** Distinct image versions the generated history can recover beyond the branch feed's window. */
+  fun indexedPreviewRevisions(previewId: String): List<ServeCatalogRevision.Revision> =
+    indexedPreviewHistory?.previews?.get(previewId)?.versions.orEmpty().mapNotNull { version ->
+      val commit = ServeCatalogRevision.normalize(version.commit) ?: return@mapNotNull null
+      ServeCatalogRevision.Revision(
+        commit = commit,
+        date = version.date,
+        sourceSha = ServeCatalogRevision.normalize(version.sourceSha),
+      )
     }
 
   /**
-   * The delivery-branch publishes in which [previewId]'s render actually changed, or null when the
-   * branch could not be asked.
+   * Boundaries for indexed image versions, aligned to rows this menu can actually display.
    *
-   * Null and the empty set are different answers and both are real: empty means the branch answered
-   * and named no change — every publish in the window carries identical pixels, which is the
-   * *interesting* case this feature exists to show — while null means the read failed and the
-   * viewer must draw no markers rather than claim everything is identical.
+   * [PreviewHistoryManifest.ManifestVersion.introducedBy] is the exact change boundary. A collapsed
+   * history run can, rarely, have an older introducing commit than its displayed [commit], though;
+   * when that introducing row is outside the recovered window, use the displayed commit so the
+   * indexed version still gets a marker instead of collapsing into its neighbour.
+   */
+  private fun indexedRenderChanges(previewId: String, visibleRevisions: Set<String>): Set<String> =
+    indexedPreviewHistory
+      ?.previews
+      ?.get(previewId)
+      ?.versions
+      .orEmpty()
+      .mapNotNull { version ->
+        val introduced = ServeCatalogRevision.normalize(version.introducedBy)
+        val displayed = ServeCatalogRevision.normalize(version.commit)
+        introduced?.takeIf { it in visibleRevisions } ?: displayed
+      }
+      .toSet()
+
+  /**
+   * The delivery-branch publishes in which [previewId]'s render actually changed, or null when
+   * neither the generated image index nor the branch can answer.
+   *
+   * Null and the empty set are different answers and both are real: empty means the available
+   * sources named no change — every publish in the window carries identical pixels, which is the
+   * *interesting* case this feature exists to show — while null means neither source answered and
+   * the viewer must draw no markers rather than claim everything is identical.
    *
    * Cached per preview and never invalidated within a load, which is exactly as fresh as the rest
    * of the page: a load reads one commit ([ServeCatalogStore.load]), so the branch history behind
@@ -983,14 +1032,18 @@ class ServeBundleHost(
    * turns out to happen in practice, the fix is to resolve the path at the window's oldest revision
    * and union the two feeds; see the PR discussion.
    */
-  fun renderChangeCommits(previewId: String): Set<String>? {
-    val fetch = fetchRenderChanges ?: return null
+  fun renderChangeCommits(
+    previewId: String,
+    visibleRevisions: Set<String> = emptySet(),
+  ): Set<String>? {
+    val indexed = indexedRenderChanges(previewId, visibleRevisions)
+    val fetch = fetchRenderChanges ?: return indexed.takeIf { it.isNotEmpty() }
     // The warm read stays OUTSIDE the lock, exactly as [bakedPngFile]'s does: an answer this host
     // already has must never queue behind someone else's cold fetch.
     renderChangeCache[previewId]?.let {
       return it
     }
-    val path = bakedBranchPaths[previewId] ?: return null
+    val path = bakedBranchPaths[previewId] ?: return indexed.takeIf { it.isNotEmpty() }
     synchronized(fillLocks.computeIfAbsent("$RENDER_CHANGE_LOCK_PREFIX$previewId") { Any() }) {
       // Re-checked under the lock: whoever we queued behind was fetching exactly this answer.
       renderChangeCache[previewId]?.let {
@@ -999,13 +1052,17 @@ class ServeBundleHost(
       if (
         !pinnedPermits.tryAcquire(PINNED_FETCH_WAIT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
       )
-        return null
-      val changes =
+        return indexed.takeIf { it.isNotEmpty() }
+      val fetched =
         try {
           runCatching { fetch(path) }.getOrNull()?.map(String::lowercase)?.toSet()
         } finally {
           pinnedPermits.release()
         }
+      // The path feed is a useful live supplement, while history.json is the durable index. Union
+      // both when the feed answers; if it is unavailable, the generated boundaries are still an
+      // authoritative answer for the versions the manifest exposes.
+      val changes = fetched?.plus(indexed) ?: indexed.takeIf { it.isNotEmpty() }
       // Only a real answer is remembered. A failed read says nothing about the branch, and caching
       // it would strand the markers off for the life of the host over one blip.
       if (changes != null) {
