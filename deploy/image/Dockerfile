@@ -146,6 +146,60 @@ RUN set -eu; \
     fi
 
 # ---------------------------------------------------------------------------
+# Stage 1c: the DESKTOP (Compose Multiplatform / Skiko) live daemon sidecar.
+#
+# The counterpart of stage 1b for `backend: "desktop"` bundles, and the reason
+# preview.coo.ee served every desktop catalog as baked PNGs. `ServeBundleDaemon`'s
+# desktop launch (`desktopBundleDaemonLaunch`) needs two directories the Android path
+# has an explicit ARG for and this one had nothing at all: `lib-daemon-desktop/` (the
+# CMP daemon) and `lib-renderer/` (the Skiko render backend it links against). They are
+# located through `locateBundleSidecarJars`, i.e. `-Dcomposeai.cli.libDaemonDesktopDir` /
+# `-Dcomposeai.cli.libRendererDir`, else `$APP_HOME/<name>`.
+#
+# `$APP_HOME` here is `/opt/compose-preview-server`, and the released SERVER tarball
+# carries only `bin/`, `lib/` and `preview-ui/` — those two sidecars are staged into
+# compose-ai-tools' `:cli` distribution (`cli/build.gradle.kts`, `into("lib-daemon-desktop")`
+# / `into("lib-renderer")`), which this image never installed. So the lookup came back
+# empty, `desktopBundleDaemonLaunch` returned null, and every desktop catalog fell back
+# with `livebundle-unavailable: the live bundle daemon could not be started` — the Android
+# catalogs stayed live because stage 1b baked THEIR sidecar and pointed a sysprop at it.
+# Before the repo split (#3824) the server ran out of the CLI install dir and inherited
+# both for free; nothing replaced that when it moved.
+#
+# Only the two sidecar directories are lifted out of the CLI tarball. The rest of it (the
+# `compose-preview` launcher, its own `lib/`, `lib-bta/`, `lib-usage-psi/`, the Wasm
+# players) is not this image's job — the server is the entrypoint, not the CLI — and the
+# ~310 MB download stays in this stage, so the runtime grows by the two sidecars (~165 MB)
+# rather than by the whole tarball.
+#
+# `lib-renderer/` carries every platform's `skiko-awt-runtime-*` beside `skiko-awt`, so the
+# daemon links its bindings against a matching native and does not fall into the split-Skiko
+# `UnsatisfiedLinkError` `SkikoNativePairing` exists to warn about. A bundle built against a
+# NEWER Skiko than this sidecar still resolves its own pair through `CoordinateResolver`
+# (the repair coordinate), which needs the box's Maven Central egress — unchanged by this.
+FROM base AS desktop-daemon
+ARG TOOLS_VERSION
+COPY release-assets/ /tmp/release-assets/
+# Same local-first / public-fallback shape as the server and Android stages: an automatic
+# release stages the tag's tarball into the build context and can build before the draft
+# GitHub Release is public; a manual build falls back to the published asset.
+RUN set -eu; \
+    local="/tmp/release-assets/compose-preview-${TOOLS_VERSION}.tar.gz"; \
+    if [ -f "$local" ]; then \
+      cp "$local" /tmp/cli.tgz; \
+    else \
+      curl -fsSL --retry 20 --retry-delay 30 --retry-all-errors -o /tmp/cli.tgz \
+        "https://github.com/yschimke/compose-ai-tools/releases/download/v${TOOLS_VERSION}/compose-preview-${TOOLS_VERSION}.tar.gz"; \
+    fi; \
+    tar -xzf /tmp/cli.tgz -C /opt --strip-components=1 --wildcards \
+      "*/lib-daemon-desktop" "*/lib-renderer"; \
+    rm /tmp/cli.tgz; \
+    test -d /opt/lib-daemon-desktop; \
+    test -d /opt/lib-renderer; \
+    ls /opt/lib-daemon-desktop/*.jar >/dev/null; \
+    ls /opt/lib-renderer/*.jar >/dev/null
+
+# ---------------------------------------------------------------------------
 # Stage 1b: prewarm the downloadable-font cache.
 #
 # The Android renderer resolves `Font(DeviceFontFamilyName("roboto-flex"))` — Wear Material3's type
@@ -188,8 +242,13 @@ RUN ln -s "/opt/compose-preview-server-${SERVER_VERSION}" /opt/compose-preview-s
 # catalog with an android liveBundle renders live per-variant.
 COPY --from=android-daemon /opt/lib-daemon-android /opt/lib-daemon-android
 COPY --from=android-daemon /opt/android-sdk /opt/android-sdk
+# Desktop (CMP/Skiko) live-render bits (see the desktop-daemon stage): the daemon +
+# renderer sidecars a `backend: "desktop"` liveBundle launches through. Inert until a
+# served catalog resolves one, exactly like the Android pair above.
+COPY --from=desktop-daemon /opt/lib-daemon-desktop /opt/lib-daemon-desktop
+COPY --from=desktop-daemon /opt/lib-renderer /opt/lib-renderer
 # JAVA_TOOL_OPTIONS (inherited by the spawned daemon JVM too) points the CLI at the
-# unpacked Android daemon sidecar, warms catalog daemons in the background so the
+# unpacked Android AND desktop daemon sidecars, warms catalog daemons in the background so the
 # HTTP listener can come up before every live catalog finishes, and lifts BOTH cold-start budgets so a cold
 # Robolectric daemon doesn't abort before it can serve live:
 #   * sandboxBootTimeoutMs — the Robolectric sandbox boot (the one-time
@@ -227,7 +286,7 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     COMPOSE_PREVIEW_INIT_USE_MAVEN_LOCAL=1 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
-    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
+    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
 
 WORKDIR /project
 # Carry the release Maven tree so live bundles can resolve the plugin/runtime
