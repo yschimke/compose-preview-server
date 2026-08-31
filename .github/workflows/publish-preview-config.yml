@@ -6,6 +6,13 @@ on:
     paths:
       - deploy/preview.coo.ee/catalogs.json
       - deploy/preview.coo.ee/producers.json
+      # The reconcile itself. A change to HOW config is applied is as much a reason to re-apply it
+      # as a change to the config: #75 taught this script to retire catalogs the committed file no
+      # longer declares, and without this line that landed on main and did nothing, because the
+      # only paths that trigger a publish are the two data files it had not touched. The box went
+      # on serving three entries #69 had already deleted from catalogs.json, which is the exact
+      # drift --prune exists to end.
+      - .github/scripts/publish-config-to-box.sh
   workflow_dispatch:
 
 permissions:
