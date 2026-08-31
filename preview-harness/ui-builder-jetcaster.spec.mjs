@@ -77,7 +77,7 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
 
     const builder = await capture(
         page,
-        "/ui-builder/build/wasmDist/index.html",
+        "/ui-builder/build/wasmDist/index.html?mode=jetcaster-builder",
         () => document.documentElement.dataset.uiBuilderReady === "true",
     );
     const capabilityValidation = await page.evaluate(
