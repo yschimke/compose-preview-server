@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { deflateSync } from "node:zlib";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
@@ -26,6 +25,22 @@ const variants = [
         accent: [255, 246, 224],
     },
 ];
+const expectedHashes = new Map([
+    [
+        "jetcaster.cover.android-developers-backstage",
+        {
+            encoded: "c043b2552d5bcec590ded52bdccc820c319d31260307eeb43393d24fb112e4b3",
+            decoded: "f339470758577b581d590e44bd07f421a5aa270048713bfb25e69bbc0717d5c6",
+        },
+    ],
+    [
+        "jetcaster.cover.google-developers-podcast",
+        {
+            encoded: "eb95e6a98ca0b2b67a47ce463b3e11dd1f93e99a1e51932f9fcc00d823d95f42",
+            decoded: "4bf3d4e0c8251f00e18b5eb1b73ca2f4a20d613f9ac275ff894d552a23cd932e",
+        },
+    ],
+]);
 
 function sha256(bytes) {
     return createHash("sha256").update(bytes).digest("hex");
@@ -123,15 +138,116 @@ function encodePng(rgba) {
     const raw = Buffer.alloc((SIZE * 4 + 1) * SIZE);
     for (let y = 0; y < SIZE; y++) {
         const row = y * (SIZE * 4 + 1);
-        raw[row] = 0;
-        rgba.copy(raw, row + 1, y * SIZE * 4, (y + 1) * SIZE * 4);
+        raw[row] = 1; // deterministic PNG Sub filter
+        for (let index = 0; index < SIZE * 4; index++) {
+            const source = y * SIZE * 4 + index;
+            const left = index >= 4 ? rgba[source - 4] : 0;
+            raw[row + 1 + index] = (rgba[source] - left + 256) & 0xff;
+        }
     }
     return Buffer.concat([
         Buffer.from("89504e470d0a1a0a", "hex"),
         chunk("IHDR", ihdr),
-        chunk("IDAT", deflateSync(raw, { level: 9 })),
+        chunk("IDAT", encodeDeterministicZlibFixed(raw)),
         chunk("IEND", Buffer.alloc(0)),
     ]);
+}
+
+// Native zlib output is allowed to vary by zlib/Node version even for the same decoded pixels.
+// Emit a fixed-Huffman DEFLATE stream with a repository-owned greedy matcher so encoded PNG bytes
+// are a cross-platform contract rather than an implementation-dependent side effect.
+function encodeDeterministicZlibFixed(bytes) {
+    const output = [];
+    let bits = 0;
+    let bitCount = 0;
+    const writeBits = (value, count) => {
+        bits |= value << bitCount;
+        bitCount += count;
+        while (bitCount >= 8) {
+            output.push(bits & 0xff);
+            bits >>>= 8;
+            bitCount -= 8;
+        }
+    };
+    const reverse = (value, count) => {
+        let reversed = 0;
+        for (let index = 0; index < count; index++) {
+            reversed = (reversed << 1) | ((value >>> index) & 1);
+        }
+        return reversed;
+    };
+    const writeLiteral = (symbol) => {
+        if (symbol <= 143) writeBits(reverse(0x30 + symbol, 8), 8);
+        else if (symbol <= 255) writeBits(reverse(0x190 + symbol - 144, 9), 9);
+        else if (symbol <= 279) writeBits(reverse(symbol - 256, 7), 7);
+        else writeBits(reverse(0xc0 + symbol - 280, 8), 8);
+    };
+    const lengthBases = [
+        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67,
+        83, 99, 115, 131, 163, 195, 227, 258,
+    ];
+    const lengthExtra = [
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5,
+        5, 5, 5, 0,
+    ];
+    const distanceBases = [
+        1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513,
+        769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+    ];
+    const distanceExtra = [
+        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10,
+        11, 11, 12, 12, 13, 13,
+    ];
+    const writeMatch = (length, distance) => {
+        const lengthIndex = lengthBases.findLastIndex((base) => base <= length);
+        writeLiteral(257 + lengthIndex);
+        writeBits(length - lengthBases[lengthIndex], lengthExtra[lengthIndex]);
+        const distanceIndex = distanceBases.findLastIndex((base) => base <= distance);
+        writeBits(reverse(distanceIndex, 5), 5);
+        writeBits(distance - distanceBases[distanceIndex], distanceExtra[distanceIndex]);
+    };
+
+    writeBits(1, 1); // final block
+    writeBits(1, 2); // fixed Huffman block (01, least-significant bit first)
+    const lastPosition = new Map();
+    const keyAt = (index) =>
+        index + 2 < bytes.length
+            ? (bytes[index] << 16) | (bytes[index + 1] << 8) | bytes[index + 2]
+            : null;
+    for (let position = 0; position < bytes.length; ) {
+        const key = keyAt(position);
+        const previous = key == null ? undefined : lastPosition.get(key);
+        let length = 0;
+        if (previous != null && position - previous <= 0x8000) {
+            const maximum = Math.min(258, bytes.length - position);
+            while (length < maximum && bytes[previous + length] === bytes[position + length]) {
+                length++;
+            }
+        }
+        if (length >= 3) {
+            writeMatch(length, position - previous);
+            for (let skipped = 0; skipped < length; skipped++) {
+                const skippedKey = keyAt(position + skipped);
+                if (skippedKey != null) lastPosition.set(skippedKey, position + skipped);
+            }
+            position += length;
+        } else {
+            writeLiteral(bytes[position]);
+            if (key != null) lastPosition.set(key, position);
+            position++;
+        }
+    }
+    writeLiteral(256);
+    if (bitCount > 0) output.push(bits & 0xff);
+    let first = 1;
+    let second = 0;
+    for (const byte of bytes) {
+        first = (first + byte) % 65521;
+        second = (second + first) % 65521;
+    }
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(((second << 16) | first) >>> 0);
+    return Buffer.concat([Buffer.from([0x78, 0x01]), Buffer.from(output), checksum]);
 }
 
 const generated = variants.map((spec) => {
@@ -139,12 +255,19 @@ const generated = variants.map((spec) => {
     const encoded = encodePng(decoded);
     return { spec, decoded, encoded };
 });
+for (const { spec, decoded, encoded } of generated) {
+    const expected = expectedHashes.get(spec.assetKey);
+    if (sha256(encoded) !== expected?.encoded || sha256(decoded) !== expected?.decoded) {
+        throw new Error(`cross-platform artwork hash contract changed for ${spec.assetKey}`);
+    }
+}
 
 const manifest = {
     schema: "compose-preview-project-owned-artwork/v1",
     source: {
         kind: "project-owned-procedural",
         generator: "scripts/generate-ui-builder-artwork.mjs",
+        pngEncoding: "zlib-fixed-lz77-v1",
         upstreamArtwork: false,
         networkRequired: false,
     },

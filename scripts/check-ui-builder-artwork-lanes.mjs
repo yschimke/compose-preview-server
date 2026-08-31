@@ -18,6 +18,13 @@ const provenance = JSON.parse(
 if (manifest.source.networkRequired !== false || manifest.source.upstreamArtwork !== false) {
     throw new Error("project-owned artwork manifest must stay offline and must not claim upstream pixels");
 }
+if (manifest.source.pngEncoding !== "zlib-fixed-lz77-v1") {
+    throw new Error("project-owned artwork must use the pinned cross-platform PNG encoder");
+}
+const generator = await read("scripts/generate-ui-builder-artwork.mjs");
+if (/node:zlib|deflateSync/.test(generator)) {
+    throw new Error("artwork generator must not depend on platform/version-specific native zlib output");
+}
 const serializedManifest = JSON.stringify(manifest).toLowerCase();
 for (const mutableSource of ["http://", "https://", "rss", "feed.xml"]) {
     if (serializedManifest.includes(mutableSource)) {
