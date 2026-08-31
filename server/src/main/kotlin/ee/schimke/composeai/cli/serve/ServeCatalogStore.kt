@@ -457,6 +457,19 @@ class ServeCatalogStore(
     }
       .getOrNull()
 
+    // The branch-wide Atom feed is capped by GitHub. A burst of metadata-only commits can fill its
+    // entire window and push every catalog generation out even though the generated image history
+    // still names the versions of each PNG exactly. Read that index from the same immutable tree as
+    // the catalog so the host can restore those image revisions without another branch-wide query.
+    // Older publishers carry no history.json and keep the feed-only behaviour.
+    val indexedPreviewHistory = runCatching {
+      fetchCatalogAsset(base + PreviewHistoryManifest.FILE_NAME)
+        ?.toString(Charsets.UTF_8)
+        ?.let(PreviewHistoryManifest::decode)
+        ?.takeIf { it.formatVersion == PreviewHistoryManifest.FORMAT_VERSION }
+    }
+      .getOrNull()
+
     // Stage the fetch so a re-load (ServeCatalogRefresher) can't turn a healthy catalog into 404s:
     // fetch the images into a sibling `.staging` dir and only swap it over the live `dir` once we
     // know we have a usable catalog (count > 0). A partial/failed fetch (e.g. images temporarily
@@ -1012,6 +1025,7 @@ class ServeCatalogStore(
           referenceBranchPaths = referenceBranchPaths,
           revisions = revisions,
           revisionPreviewIds = revisionPreviewIds,
+          indexedPreviewHistory = indexedPreviewHistory,
           // Which publishes changed one render, read lazily off the branch's path-scoped feed. The
           // branch (not the resolved head) is deliberate: this asks "when did these bytes move",
           // which is a question about the branch's history rather than about one tree, and pinning
@@ -3599,10 +3613,9 @@ class ServeCatalogStore(
    * The delivery branch's published revisions, newest first — its commit history, read from the
    * branch's own Atom feed ([ServeCatalogRevision.commitsFeedUrl]).
    *
-   * This is the whole substrate the permalink feature stands on: the branch already carries one
-   * commit per publish, so the versions exist and only need addressing. The head of this list is
-   * the revision this load is reading (what a permalink pins to); the tail is what a visitor can go
-   * back to.
+   * The head of this list is the revision this load is reading (what a permalink pins to); its tail
+   * is the catalog-wide history a visitor can go back to while the feed still carries it. Generated
+   * per-image history supplements that tail when unrelated commits have filled the feed window.
    *
    * Runs through the same injected [fetch] seam as every other network call here, so a test stubs
    * it like any catalog asset. Best-effort by construction: every failure — an unreachable host, a
