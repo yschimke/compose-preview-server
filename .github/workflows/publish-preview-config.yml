@@ -30,5 +30,8 @@ jobs:
           ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
         run: |
           test -n "${ADMIN_TOKEN}" || { echo "::error::SERVE_ADMIN_TOKEN is required"; exit 1; }
+          # --prune: this file is the whole answer for this box, so a catalog dropped from it is
+          # retired rather than left serving. Registry-contributed catalogs are exempt by
+          # construction — see the script header.
           DEPLOY_CONFIG_DIR="$(cd "${DEPLOY_CONFIG_DIR}" && pwd)" \
-            bash .github/scripts/publish-config-to-box.sh
+            bash .github/scripts/publish-config-to-box.sh --prune

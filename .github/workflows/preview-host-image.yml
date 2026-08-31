@@ -153,5 +153,7 @@ jobs:
             echo "SERVE_ADMIN_TOKEN is unset; skipping deployment config publish"
             exit 0
           fi
+          # Same reconcile as publish-preview-config.yml and the same --prune, so an image roll
+          # and a config push cannot leave the box in two different states.
           DEPLOY_CONFIG_DIR="$(cd "${DEPLOY_CONFIG_DIR}" && pwd)" \
-            bash .github/scripts/publish-config-to-box.sh
+            bash .github/scripts/publish-config-to-box.sh --prune
