@@ -630,23 +630,55 @@ public class ServeRunner(
    * Best-effort per registry, like every other catalog read: an unreachable document costs its
    * catalogs and nothing else. The next sync pass picks them up.
    */
-  private val catalogRegistryContributions: List<ServeCatalogRegistry.Contribution> by lazy {
-    catalogRegistryRepos.mapNotNull { nomination ->
-      ServeCatalogRegistry.fetch(nomination, ::fetchRegistryDocument) {
-          System.err.println("serve: $it")
-        }
-        // Say what each registry gave us, not only when it gives us nothing. The boot fold-in
-        // registered its catalogs without a word, so "the registry contributed two catalogs" and
-        // "the flag never reached the server" produced identical logs — and an operator reading
-        // them has no way to tell a working registry from an absent one until a catalog 404s.
-        ?.also { contribution ->
-          System.err.println(
-            "serve: catalog registry ${nomination}: ${contribution.entries.size} catalog(s) — " +
-              contribution.entries.joinToString(", ") { it.system }
-          )
-        }
+  private val catalogRegistryBoot: List<RegistryBoot> by lazy {
+    catalogRegistryRepos.map { nomination ->
+      // The problem message is captured as well as printed. Printing alone put the one fact that
+      // explains a missing catalog somewhere only a shell on the host can reach; `/status` now
+      // carries it too. See [CatalogRegistryStatus].
+      var problem: String? = null
+      val contribution =
+        ServeCatalogRegistry.fetch(nomination, ::fetchRegistryDocument) {
+            problem = it
+            System.err.println("serve: $it")
+          }
+          // Say what each registry gave us, not only when it gives us nothing. The boot fold-in
+          // registered its catalogs without a word, so "the registry contributed two catalogs" and
+          // "the flag never reached the server" produced identical logs — and an operator reading
+          // them has no way to tell a working registry from an absent one until a catalog 404s.
+          ?.also { contribution ->
+            System.err.println(
+              "serve: catalog registry ${nomination}: ${contribution.entries.size} catalog(s) — " +
+                contribution.entries.joinToString(", ") { it.system }
+            )
+          }
+      RegistryBoot(nomination, contribution, problem)
     }
   }
+
+  /** One nomination's boot-time result: what it gave us, or why it gave us nothing. */
+  private data class RegistryBoot(
+    val nomination: ServeCatalogRegistry.Nomination,
+    val contribution: ServeCatalogRegistry.Contribution?,
+    val problem: String?,
+  )
+
+  private val catalogRegistryContributions: List<ServeCatalogRegistry.Contribution>
+    get() = catalogRegistryBoot.mapNotNull { it.contribution }
+
+  /**
+   * The nominations as `/status` reports them. Built from the same boot read, so the status surface
+   * cannot disagree with what the server actually loaded.
+   */
+  private val catalogRegistryStatuses: List<CatalogRegistryStatus>
+    get() = catalogRegistryBoot.map { boot ->
+      CatalogRegistryStatus(
+        repo = boot.nomination.repo,
+        ref = boot.nomination.ref,
+        catalogs = boot.contribution?.entries?.size ?: 0,
+        systems = boot.contribution?.entries?.map { it.system }.orEmpty(),
+        error = boot.problem,
+      )
+    }
 
   /**
    * Read one registry document off the network. A seam so the sync and the boot fold-in share it.
@@ -2432,6 +2464,7 @@ public class ServeRunner(
         allowRenderTrusted = allowRenderTrusted,
         trustStoreConfigured = trustStorePath != null,
         catalogRefreshSeconds = catalogRefreshSeconds,
+        catalogRegistries = catalogRegistryStatuses,
         acceptBundlesEnabled = acceptBundles,
         catalogAdmin = catalogAdmin,
         onboarding = onboarding,

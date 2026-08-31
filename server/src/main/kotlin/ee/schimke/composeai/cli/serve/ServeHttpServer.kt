@@ -219,6 +219,17 @@ class ServeHttpServer(
   private val trustStoreConfigured: Boolean = false,
   /** Catalog auto-refresh interval in seconds (`--catalog-refresh-interval`); `0` ⇒ disabled. */
   private val catalogRefreshSeconds: Long = 0,
+  /**
+   * What `--catalog-registry` nominated, and what each nomination gave us at boot — surfaced in the
+   * status config because nothing else exposes it.
+   *
+   * The nomination decides whether a whole project's catalogs are served at all, and until now it
+   * appeared in no diagnostic the server offers: a box running WITHOUT the flag and a box whose
+   * registry read failed produced byte-identical `/status.json`, both simply missing the catalogs.
+   * The only evidence was a boot line in the container log, which needs shell access on the host to
+   * read. Empty ⇒ the feature is off.
+   */
+  private val catalogRegistries: List<CatalogRegistryStatus> = emptyList(),
   /** Whether `POST /bundles` runtime uploads are accepted (`--accept-bundles`). */
   private val acceptBundlesEnabled: Boolean = false,
   /**
@@ -6533,6 +6544,7 @@ class ServeHttpServer(
             imagesHeld = imageOccupancy?.count ?: 0,
             imageBytesHeld = imageOccupancy?.totalBytes ?: 0,
             catalogRefreshSeconds = catalogRefreshSeconds,
+            catalogRegistries = catalogRegistries,
             maxConcurrentRenders = renderSlots,
             liveSeats = liveSeats.totalPermits,
           ),
@@ -6815,6 +6827,22 @@ class ServeHttpServer(
           ServeWeb.Stat(
             "Catalog refresh",
             if (catalogRefreshSeconds > 0) "${catalogRefreshSeconds}s" else "disabled",
+          ),
+          // "none" is a real answer here, and the one that was previously unobtainable: a box with
+          // no `--catalog-registry` and a box whose registry read failed looked identical from
+          // outside, both simply missing the catalogs they should have been serving.
+          ServeWeb.Stat(
+            "Catalog registry",
+            if (catalogRegistries.isEmpty()) "none"
+            else
+              catalogRegistries.joinToString(" · ") { r ->
+                val where = r.ref?.let { "${r.repo}@$it" } ?: r.repo
+                when {
+                  r.error != null -> "$where — unreadable"
+                  r.catalogs == 0 -> "$where — 0 catalogs"
+                  else -> "$where — ${r.catalogs} catalog(s)"
+                }
+              },
           ),
           ServeWeb.Stat(
             "Live seats",
@@ -11349,6 +11377,30 @@ private data class DaemonSummaryDto(
   val busyLeasedSessions: List<String> = emptyList(),
 )
 
+/**
+ * One `--catalog-registry` nomination, as the status surface reports it.
+ *
+ * Public because it reaches [ServeHttpServer]'s constructor. Deliberately carries the boot-time
+ * OUTCOME and not just the nomination: "nominated `yschimke/compose-preview-imports`" alone cannot
+ * distinguish a registry contributing nothing because the document is unreachable from one
+ * contributing nothing because it is empty, and those need opposite fixes.
+ */
+@Serializable
+public data class CatalogRegistryStatus(
+  /** `owner/repo`, as nominated. */
+  val repo: String,
+  /** The explicitly nominated `@ref`. Null ⇒ the default ref candidates were tried in order. */
+  val ref: String? = null,
+  /** Systems this registry contributed at boot. */
+  val catalogs: Int = 0,
+  /**
+   * The contributed system ids, so a reader can see WHICH catalogs a registry is responsible for.
+   */
+  val systems: List<String> = emptyList(),
+  /** Why the read produced nothing, when it did. Null on a successful read. */
+  val error: String? = null,
+)
+
 @Serializable
 private data class ConfigDto(
   val host: String,
@@ -11374,6 +11426,12 @@ private data class ConfigDto(
   val imageBytesHeld: Long = 0,
   /** Catalog auto-refresh interval; `0` ⇒ disabled. */
   val catalogRefreshSeconds: Long,
+  /**
+   * The `--catalog-registry` nominations and what each contributed at boot. Empty list ⇒ no
+   * nomination; a nomination with `catalogs: 0` and a non-null `error` ⇒ nominated but unreadable.
+   * The two are worth telling apart, which is the whole reason this is here.
+   */
+  val catalogRegistries: List<CatalogRegistryStatus> = emptyList(),
   val maxConcurrentRenders: Int,
   /** Live-seat permit budget; `0` ⇒ unbounded. */
   val liveSeats: Int,
