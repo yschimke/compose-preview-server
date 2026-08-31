@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Guard the preview-host image's built-in Compose/Wasm UI registration. A released image must serve
-# /wasm/preview-ui/ without an operator creating a directory or adding SERVE_WASM_DIR to .env.
-# The optional env mapping stays additive and last-wins, so custom Wasm apps and an explicit
-# preview-ui replacement remain possible.
+# Guard the preview-host image's built-in Compose/Wasm UI registration. A released image supplies
+# the shared `/wasm/<catalog>/` fallback without an operator-created directory or env setting.
+# Explicit per-catalog apps remain additive and override the fallback in the server.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,13 +11,13 @@ trap 'rm -rf "${tmp}"' EXIT
 
 block="$(
   awk '
-    /^# The release tarball carries the matching Compose\/Wasm preview browser\./ { capture = 1 }
+    /^# The release tarball carries the matching Compose\/Wasm catalog browser\./ { capture = 1 }
     capture && /^# Trusted server-side re-render/ { exit }
     capture { print }
   ' "${entrypoint}"
 )"
 [[ -n "${block}" ]] || {
-  echo "FAIL: could not find the built-in preview-ui registration in ${entrypoint}" >&2
+  echo "FAIL: could not find the built-in wasm-ui registration in ${entrypoint}" >&2
   exit 1
 }
 
@@ -44,19 +43,16 @@ expect() {
   echo "  ok: ${description}"
 }
 
-echo "==> Built-in preview UI registration"
-expect "" "an older distribution without preview-ui adds no implicit mapping"
+echo "==> Built-in Wasm UI registration"
+expect "" "an older distribution without wasm-ui adds no implicit mapping"
 expect $'--wasm-dir\nextra=/srv/extra' "an explicit app still works without the built-in" \
   "extra=/srv/extra"
 
-mkdir -p "${install}/preview-ui"
-touch "${install}/preview-ui/index.html"
-built_in="preview-ui=${install}/preview-ui"
-expect $'--wasm-dir\n'"${built_in}" "the packaged UI is enabled by default"
-expect $'--wasm-dir\n'"${built_in},extra=/srv/extra" \
-  "operator apps are appended to the default" "extra=/srv/extra"
-expect $'--wasm-dir\n'"${built_in},preview-ui=/srv/replacement" \
-  "an explicit preview-ui mapping comes last and can replace the default" \
-  "preview-ui=/srv/replacement"
+mkdir -p "${install}/wasm-ui"
+touch "${install}/wasm-ui/index.html"
+built_in="${install}/wasm-ui"
+expect $'--wasm-ui-dir\n'"${built_in}" "the packaged UI is enabled as a fallback"
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--wasm-dir\nextra=/srv/extra' \
+  "operator apps are appended to the fallback" "extra=/srv/extra"
 
-echo "PASS: the packaged preview UI is default-on and SERVE_WASM_DIR remains an override"
+echo "PASS: the packaged Wasm UI is catalog-scoped and SERVE_WASM_DIR remains an override"

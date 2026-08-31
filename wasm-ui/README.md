@@ -3,36 +3,36 @@
 An isolated Compose/Wasm prototype over the preview server's existing public client contracts. It
 does not share source or build output with `cli/serve-web`.
 
-Build the CLI distribution. It carries the static app under `preview-ui/`:
+Build the server distribution. It carries the static app under `wasm-ui/`:
 
 ```shell
-./gradlew :cli:installDist
+./gradlew :server:installDist
 ```
 
 Start a normal local preview server and add this distribution to its existing Wasm asset lane:
 
 ```shell
 cli/build/install/compose-preview/bin/compose-preview browse \
-  --wasm-dir preview-ui=cli/build/install/compose-preview/preview-ui
+  --wasm-ui-dir server/build/install/compose-preview-server/wasm-ui
 ```
 
 The prebuilt preview-host image registers that packaged directory automatically, so deployed hosts
-serve `/wasm/preview-ui/` without a volume mount or `SERVE_WASM_DIR` setting. That environment
-variable remains available for additional applications or an explicit replacement.
+serve it per catalog without a volume mount or `SERVE_WASM_DIR` setting. That environment variable
+remains available for catalog-owned applications, which take precedence over the fallback.
 
 The command prints the server URL and token. Open the normal UI as usual, then open the prototype
 side by side at:
 
 ```text
-http://127.0.0.1:<port>/wasm/preview-ui/?token=<token>
+http://127.0.0.1:<port>/wasm/<catalog-id>/?token=<token>
 ```
 
-For a named catalog, append `&session=<catalog-id>`. The app preserves those parameters in its API,
-snapshot, legacy-viewer, and WebSocket requests. Use `?token=...&session=...&preview=<id>` to deep
-link directly into a preview. Add `&live=1` to connect its live stream immediately (handy for a
-saved development URL or browser smoke test).
+The catalog id is part of the path. The app uses the matching canonical API, snapshot,
+legacy-viewer, and WebSocket paths. Use `?token=...&preview=<id>` to deep link directly into a
+preview. Add `&live=1` to connect its live stream immediately (handy for a saved development URL or
+browser smoke test). Old `/wasm/preview-ui/?session=<catalog-id>` links redirect here.
 
-Open the native UI Composer directly with `?token=...&session=compose-m3&compose=1`.
+Open the native UI Composer directly at `/wasm/compose-m3/?token=...&compose=1`.
 
 Implemented in the prototype:
 

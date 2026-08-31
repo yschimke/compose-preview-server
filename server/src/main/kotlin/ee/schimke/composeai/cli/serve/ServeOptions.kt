@@ -579,6 +579,13 @@ public interface ServeOptions {
    */
   public val wasmDirs: Map<String, File>
 
+  /**
+   * Packaged catalog browser used when a catalog does not publish its own Wasm app. Unlike
+   * [wasmDirs], this is not a catalog registration: the same static app is projected at
+   * `/wasm/<system>/` for every known session and discovers that session from the path.
+   */
+  public val wasmUiDir: File?
+
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   public val rcPlayerWasmDir: File?
 

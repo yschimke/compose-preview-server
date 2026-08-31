@@ -103,11 +103,12 @@ uploads are gated, and that should now be `yschimke/compose-preview-server`.
 
 Once `ps` is right, operate from the new directory and delete the old checkout at leisure.
 
-The image also serves its release-matched Compose/Wasm preview browser at
-`/wasm/preview-ui/`. It is packaged inside the server distribution and enabled automatically: no
-`.env` entry or host directory is required. `SERVE_WASM_DIR` is only for adding another static Wasm
-application (`system=/path`) or deliberately replacing the built-in `preview-ui` mapping; every
-path named there must exist inside the container.
+The image also serves its release-matched Compose/Wasm preview browser per catalog at
+`/wasm/<system>/` (for example `/wasm/compose-m3/`). It is packaged inside the server distribution
+and enabled automatically: no `.env` entry or host directory is required. A catalog-published Wasm
+app or `SERVE_WASM_DIR` mapping (`system=/path`) takes precedence at the same URL; every explicit
+path must exist inside the container. Old `/wasm/preview-ui/?session=<system>` links redirect to the
+catalog-scoped form.
 
 ### Onboarding a GitHub project (paste a URL)
 

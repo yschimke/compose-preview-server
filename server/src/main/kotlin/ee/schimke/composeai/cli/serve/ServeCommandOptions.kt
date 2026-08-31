@@ -664,6 +664,10 @@ public class ServeCommandOptions(
       }
       ?.toMap() ?: emptyMap()
 
+  /** Packaged catalog-scoped Wasm browser (`/wasm/<system>/`). */
+  override val wasmUiDir: File? =
+    args.flagValue("--wasm-ui-dir")?.takeIf { it.isNotBlank() }?.let(::File)
+
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   override val rcPlayerWasmDir: File? =
     args
@@ -1056,6 +1060,10 @@ public class ServeCommandOptions(
                           build/wasmDist). That session's viewer then offers a "Run in browser
                           (Wasm)" toggle that mounts the M3 components client-side (no server
                           round-trip), served read-only at /wasm/<system>/. Missing dirs are skipped.
+        --wasm-ui-dir <dir>
+                          Catalog browser fallback served at /wasm/<system>/ for every known
+                          catalog that does not publish its own Wasm app. The catalog id comes from
+                          the path; /wasm/preview-ui/ redirects to this catalog-scoped form.
         --rc-player-wasm-dir <dir>
                           Experimental non-JVM Remote Compose player produced by
                           :rc-player-wasm:wasmPlayerDist. Serves it at /rc-player-wasm/ and enables

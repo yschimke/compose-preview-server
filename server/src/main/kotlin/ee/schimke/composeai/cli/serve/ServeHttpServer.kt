@@ -129,6 +129,8 @@ class ServeHttpServer(
    * `fetch('./composeApp.wasm')` work without threading the token through every sub-resource.
    */
   private val wasmCatalogs: Map<String, File> = emptyMap(),
+  /** Shared browser fallback projected at `/wasm/<system>/` for known catalog sessions. */
+  private val wasmUiDir: File? = null,
   /** Local auto-discovered apps that must use the credential-carrying `/wasm-private/` route. */
   private val privateWasmCatalogs: Set<String> = emptySet(),
   /**
@@ -9911,6 +9913,31 @@ class ServeHttpServer(
 
   private suspend fun RoutingContext.handleWasmAsset(privateRoute: Boolean) {
     val system = call.parameters["system"]
+
+    // The first packaged frontend was registered as a fake `preview-ui` catalog. Keep saved URLs
+    // useful, but canonicalise them immediately: the catalog belongs in the path just as it does
+    // on every existing HTTP surface (`/<system>/api`, `/<system>/render`, ...).
+    if (!privateRoute && system == LEGACY_WASM_UI_SYSTEM) {
+      val targetSystem =
+        call.request.queryParameters["session"]?.takeIf(sessions::isKnownSession)
+          ?: defaultSessionId
+      val query =
+        call.request.queryParameters
+          .entries()
+          .flatMap { (key, values) ->
+            if (key == "session") emptyList()
+            else
+              values.map { value ->
+                "${WebEscaping.urlEncodeSegment(key)}=${WebEscaping.urlEncodeSegment(value)}"
+              }
+          }
+          .joinToString("&")
+      val target =
+        "/wasm/${WebEscaping.urlEncodeSegment(targetSystem)}/" +
+          query.takeIf { it.isNotEmpty() }?.let { "?$it" }.orEmpty()
+      call.respondRedirect(target)
+      return
+    }
     val privateSystem = system in privateWasmCatalogs
     if (
       (privateRoute && (!privateSystem || !isAuthorizedAccessParam(call.parameters["access"]))) ||
@@ -9922,7 +9949,12 @@ class ServeHttpServer(
     // A site hostname serves ONE catalog's app. These constant-prefix routes bypass canonical-path
     // isolation, so enforce the same one-catalog projection here.
     val site = call.siteSystem()
-    val dir = if (site != null && system != site) null else system?.let { wasmCatalogs[it] }
+    val dir =
+      if (site != null && system != site) null
+      else
+        system?.let { selected ->
+          wasmCatalogs[selected] ?: wasmUiDir?.takeIf { sessions.isKnownSession(selected) }
+        }
     if (dir == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
@@ -10927,6 +10959,9 @@ class ServeHttpServer(
 
     /** Max accepted upload-body size for `POST /bundles` (matches the store's extraction cap). */
     private const val MAX_UPLOAD_BYTES = 100L * 1024 * 1024
+
+    /** Compatibility-only name used by the first packaged Wasm browser deployment. */
+    private const val LEGACY_WASM_UI_SYSTEM = "preview-ui"
 
     /**
      * Caching for the `/hero/` lane. The file name is the content hash, so the bytes behind a URL

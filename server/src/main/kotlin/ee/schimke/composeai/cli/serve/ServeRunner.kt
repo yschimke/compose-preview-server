@@ -2231,6 +2231,14 @@ public class ServeRunner(
     ok
   }
 
+  /** Validate the one packaged browser once rather than turning every missing asset into noise. */
+  private fun usableWasmUiDir(): File? {
+    val dir = wasmUiDir ?: return null
+    if (File(dir, "index.html").isFile) return dir
+    System.err.println("serve: --wasm-ui-dir ${dir.path} has no index.html — skipping")
+    return null
+  }
+
   /**
    * Find conventional executable CMP/Wasm browser projects and associate them with the preview
    * modules they depend on. This covers the usual split (`:shared:ui` plus `:webApp`) while also
@@ -2455,6 +2463,7 @@ public class ServeRunner(
         isPublic = public,
         componentBrowser = componentBrowser,
         wasmCatalogs = wasmCatalogs,
+        wasmUiDir = usableWasmUiDir(),
         privateWasmCatalogs = privateWasmCatalogs,
         rcPlayerWasmDir = rcPlayerWasmDir,
         // Preserve the CONFIGURED set, not only startup successes. Failed rows then stay visible on
