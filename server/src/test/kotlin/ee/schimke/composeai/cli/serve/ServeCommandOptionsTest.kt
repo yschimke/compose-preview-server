@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ServeCommandOptionsTest {
@@ -28,6 +29,8 @@ class ServeCommandOptionsTest {
           "/srv/wasm-ui",
           "--ui-builder-dir",
           "/srv/ui-builder",
+          "--ui-builder-state-dir",
+          "/srv/ui-builder-state",
         )
       )
 
@@ -42,6 +45,7 @@ class ServeCommandOptionsTest {
     assertEquals(2500, options.catalogMaxImages)
     assertEquals("/srv/wasm-ui", options.wasmUiDir?.path)
     assertEquals("/srv/ui-builder", options.uiBuilderDir?.path)
+    assertEquals("/srv/ui-builder-state", options.uiBuilderStateDirFlag)
   }
 
   @Test
@@ -54,6 +58,11 @@ class ServeCommandOptionsTest {
     assertFalse(options.discover)
     assertFalse(options.allowRenderTrusted)
     assertEquals(ServeCatalogStore.DEFAULT_MAX_IMAGES, options.catalogMaxImages)
+    assertNull(options.uiBuilderStateDirFlag)
+    assertEquals(
+      "none",
+      options(listOf("--ui-builder-state-dir=none")).uiBuilderStateDirFlag,
+    )
   }
 
   private fun options(args: List<String>): ServeCommandOptions =

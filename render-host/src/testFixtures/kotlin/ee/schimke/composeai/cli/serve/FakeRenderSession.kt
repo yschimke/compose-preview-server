@@ -108,6 +108,10 @@ public class FakeRenderSession(
    */
   private val unknownExtensionIds: Set<String> = emptySet(),
   /**
+   * Include named override values in fake PNG/SVG bytes so payload-bearing adapters are testable.
+   */
+  private val includeNamedOverridesInArtifacts: Boolean = false,
+  /**
    * Stubs [fetchData] for kinds this fake doesn't model natively (e.g.
    * `compose/remotecompose-doc`). Consulted first; a non-null return short-circuits the built-in
    * figma-svg / semantics handling.
@@ -147,6 +151,10 @@ public class FakeRenderSession(
    */
   @Volatile
   var lastStreamOverrides: PreviewOverrides? = null
+    private set
+
+  @Volatile
+  var lastRenderOverrides: PreviewOverrides? = null
     private set
 
   @Volatile
@@ -250,6 +258,7 @@ public class FakeRenderSession(
     overrides: PreviewOverrides?,
     timeout: kotlin.time.Duration,
   ): RenderNowResult {
+    lastRenderOverrides = overrides
     val call = renderCount.incrementAndGet()
     val id = previewIds.single()
     if (rejectAll) {
@@ -271,7 +280,9 @@ public class FakeRenderSession(
     if (hook != null) {
       hook(call) { bytes -> emitFinished(id, bytes) }
     } else {
-      val content = "png:${overrides?.uiMode}:${overrides?.localeTag}:${overrides?.device}"
+      val content =
+        "png:${overrides?.uiMode}:${overrides?.localeTag}:${overrides?.device}" +
+          namedOverrideSuffix(overrides)
       emitFinished(id, content.toByteArray())
       // Model the daemon writing the figma-svg to a shared per-preview path as a side effect of the
       // same render — overwritten each time, so distinct overrides overwrite one another's SVG.
@@ -291,10 +302,15 @@ public class FakeRenderSession(
       File(previewDir, ComposeFigmaSvgProduct.FILE_SVG)
         .writeText("<svg><image href=\"figma-raster/node0.png\"/></svg>")
     } else {
-      val svg = "svg:${overrides?.uiMode}:${overrides?.localeTag}:${overrides?.device}"
+      val svg =
+        "svg:${overrides?.uiMode}:${overrides?.localeTag}:${overrides?.device}" +
+          namedOverrideSuffix(overrides)
       File(previewDir, ComposeFigmaSvgProduct.FILE_SVG).writeText(svg)
     }
   }
+
+  private fun namedOverrideSuffix(overrides: PreviewOverrides?): String =
+    if (includeNamedOverridesInArtifacts) ":${overrides?.namedOverrides.orEmpty()}" else ""
 
   private fun writeSemantics(id: String) {
     val previewDir = File(renderRoot, id).apply { mkdirs() }

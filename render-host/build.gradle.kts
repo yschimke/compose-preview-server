@@ -130,6 +130,24 @@ dependencies {
   testFixturesApi(libs.composeai.render.session.api)
 }
 
+// The first production UI-builder catalog is the provenance-pinned M3/Jetcaster capability
+// document. Package the reviewed source into the published render-host artifact so startup never
+// reaches back into a checkout or over the network. Keeping this as an explicit single-file input
+// also prevents an accidental second catalog from becoming part of the production surface.
+tasks.processResources {
+  from(
+    rootProject.file("docs/design/fixtures/ui-builder/jetcaster-discover-capabilities-v1.json")
+  ) {
+    into("ee/schimke/composeai/uibuilder/catalogs")
+    rename { "m3-catalog-v1.json" }
+  }
+  dependsOn(project(":ui-builder").tasks.named("composePreviewBundle"))
+  from(project(":ui-builder").layout.buildDirectory.file("compose-previews/bundle.png")) {
+    into("ee/schimke/composeai/uibuilder/renderer")
+    rename { "ui-builder-renderer.bundle.png" }
+  }
+}
+
 // Publish the test fixtures under the capability a consumer's `testFixtures(...)` actually asks
 // for.
 //

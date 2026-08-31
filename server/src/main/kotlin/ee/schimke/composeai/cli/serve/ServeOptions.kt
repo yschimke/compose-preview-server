@@ -590,6 +590,13 @@ public interface ServeOptions {
   public val uiBuilderDir: File?
     get() = null
 
+  /**
+   * Durable authoritative UI-builder state (`--ui-builder-state-dir <dir>|none`). Null derives a
+   * stable location when the builder app is enabled; `none` deliberately keeps the API off.
+   */
+  public val uiBuilderStateDirFlag: String?
+    get() = null
+
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   public val rcPlayerWasmDir: File?
 
