@@ -86,11 +86,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.graphics.vector.VectorPath
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -118,6 +126,9 @@ enum class UiBuilderLayer {
  */
 internal val LocalUiBuilderExportRasterAssets =
   staticCompositionLocalOf<Map<String, ImageBitmap>> { emptyMap() }
+
+/** Export-only path drawing avoids Skia SVG color-filter layers becoming anonymous PNG images. */
+internal val LocalUiBuilderExportStructuredIcons = staticCompositionLocalOf { false }
 
 fun uiBuilderLayers(editorOverlay: Boolean): List<UiBuilderLayer> =
   if (editorOverlay) listOf(UiBuilderLayer.Design, UiBuilderLayer.EditorOverlay)
@@ -446,13 +457,7 @@ private fun RenderNode(
         measured,
         color = node.color("color", MaterialTheme.colorScheme.outlineVariant),
       )
-    "m3/icon" ->
-      Icon(
-        node.icon(),
-        node.string("contentDescription").ifEmpty { null },
-        measured.size(node.float("sizeDp", 24f).dp),
-        tint = node.color("color", MaterialTheme.colorScheme.onSurface),
-      )
+    "m3/icon" -> BuilderIcon(node, measured)
     "m3/text" ->
       Text(
         node.string("text"),
@@ -918,6 +923,77 @@ private fun UiBuilderNode.icon(): ImageVector =
     "videoLibrary" -> Icons.Filled.VideoLibrary
     else -> error("unsupported icon '$key' on $id")
   }
+
+@Composable
+private fun BuilderIcon(node: UiBuilderNode, modifier: Modifier) {
+  val vector = node.icon()
+  val description = node.string("contentDescription")
+  val tint = node.color("color", MaterialTheme.colorScheme.onSurface)
+  val sized = modifier.size(node.float("sizeDp", 24f).dp)
+  if (!LocalUiBuilderExportStructuredIcons.current) {
+    Icon(vector, description.ifEmpty { null }, sized, tint = tint)
+    return
+  }
+  val paths = remember(vector) { vector.requireSimpleStructuredPaths() }
+  val layoutDirection = LocalLayoutDirection.current
+  val accessible =
+    if (description.isEmpty()) Modifier
+    else
+      Modifier.semantics {
+        contentDescription = description
+        role = Role.Image
+      }
+  Canvas(sized.then(accessible)) {
+    val scaleX = size.width / vector.viewportWidth
+    val scaleY = size.height / vector.viewportHeight
+    withTransform({
+      if (vector.autoMirror && layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) {
+        translate(size.width, 0f)
+        scale(-scaleX, scaleY)
+      } else {
+        scale(scaleX, scaleY)
+      }
+    }) {
+      paths.forEach { item -> drawPath(item.path, tint.copy(alpha = tint.alpha * item.fillAlpha)) }
+    }
+  }
+}
+
+private data class StructuredIconPath(val path: Path, val fillAlpha: Float)
+
+private fun ImageVector.requireSimpleStructuredPaths(): List<StructuredIconPath> {
+  require(
+    root.rotation == 0f &&
+      root.pivotX == 0f &&
+      root.pivotY == 0f &&
+      root.scaleX == 1f &&
+      root.scaleY == 1f &&
+      root.translationX == 0f &&
+      root.translationY == 0f &&
+      root.clipPathData.isEmpty()
+  ) {
+    "catalog icon $name has unsupported root transforms for structured SVG export"
+  }
+  return root.map { node ->
+    require(node is VectorPath) {
+      "catalog icon $name has a non-path child that cannot be proven for structured SVG export"
+    }
+    require(
+      node.fill != null &&
+        node.stroke == null &&
+        node.trimPathStart == 0f &&
+        node.trimPathEnd == 1f &&
+        node.trimPathOffset == 0f
+    ) {
+      "catalog icon $name has unsupported paint or trim for structured SVG export"
+    }
+    StructuredIconPath(
+      path =
+        PathParser().addPathNodes(node.pathData).toPath().apply { fillType = node.pathFillType },
+      fillAlpha = node.fillAlpha,
+    )
+  }
+}
 
 private fun JsonObject.paddingValues() =
   PaddingValues(

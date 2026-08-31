@@ -31,7 +31,7 @@ class StructuredSvgExportBridgeTest {
   }
 
   @Test
-  fun `JVM Skia bridge exposes the same-runtime Jetcaster anonymous raster blocker`() {
+  fun `JVM Skia bridge retains Jetcaster catalog icons as paths`() {
     val verified =
       catalog.asVectorVerified().withComponentSvg("asset/image") { svg ->
         svg.copy(
@@ -46,11 +46,93 @@ class StructuredSvgExportBridgeTest {
     assertEquals(firstRaw, secondRaw)
     assertEquals(SAME_RUNTIME_DETERMINISM_SCOPE, firstRaw.determinismScope)
     assertTrue(Regex("<(?:g|path|rect|text)\\b").containsMatchIn(firstRaw.svg))
-    assertTrue(firstRaw.svg.contains("<image"), "Skia rasterizes at least the filtered icon mask")
+    assertFalse(firstRaw.svg.contains("<image"))
     assertTrue(firstRaw.rasterRecords.isEmpty())
     assertFalse(Regex("(?:href|src)=\"https?://").containsMatchIn(firstRaw.svg))
 
     val result = executeSavedDocumentSvgExport(job, verified, JvmSkiaStructuredSvgRecorder)
+    val exported = assertIs<SavedDocumentSvgExportResult.Ok>(result)
+    val declaredAssets =
+      document.nodes.values.filter { it.componentId == "asset/image" }.map { it.id }.sorted()
+    assertEquals(declaredAssets.size, Regex("<image\\b").findAll(exported.svg).count())
+    declaredAssets.forEach { nodeId ->
+      assertTrue(exported.svg.contains("data-compose-node-id=\"$nodeId\""))
+    }
+    assertTrue(exported.svg.contains("<path"))
+  }
+
+  @Test
+  fun `known catalog icon exports as a vector path without raster provenance`() {
+    val icon = document.nodes.getValue("search-leading-icon")
+    val iconDocument =
+      document.copy(
+        id = "known-catalog-icon",
+        revision = 43,
+        environment =
+          JsonObject(
+            document.environment +
+              mapOf(
+                "widthDp" to Json.parseToJsonElement("24"),
+                "heightDp" to Json.parseToJsonElement("24"),
+              )
+          ),
+        roots = listOf(icon.id),
+        nodes = mapOf(icon.id to icon),
+      )
+    val iconCatalog =
+      catalog
+        .copy(components = listOf(catalog.componentsById.getValue("m3/icon")))
+        .asVectorVerified()
+
+    val result =
+      assertIs<SavedDocumentSvgExportResult.Ok>(
+        executeSavedDocumentSvgExport(
+          iconDocument.job(StructuredSvgRecorderKind.JVM_SKIA_SVG_CANVAS),
+          iconCatalog,
+          JvmSkiaStructuredSvgRecorder,
+        )
+      )
+
+    assertTrue(result.svg.contains("<path"))
+    assertFalse(result.svg.contains("<image"))
+    assertTrue(result.svg.contains("rasterFallbackNodeIds=;"))
+    assertSvgRasterCloseToCompose(
+      result.svg,
+      iconDocument,
+      maxDifferingRatio = 0.02,
+      channelTolerance = 26,
+    )
+  }
+
+  @Test
+  fun `unknown filtered image remains fail closed instead of being assigned to an icon`() {
+    val icon = document.nodes.getValue("search-leading-icon")
+    val iconDocument =
+      document.copy(
+        id = "anonymous-filtered-icon-image",
+        revision = 44,
+        roots = listOf(icon.id),
+        nodes = mapOf(icon.id to icon),
+      )
+    val iconCatalog =
+      catalog
+        .copy(components = listOf(catalog.componentsById.getValue("m3/icon")))
+        .asVectorVerified()
+
+    val result =
+      executeSavedDocumentSvgExport(
+        iconDocument.job(StructuredSvgRecorderKind.JVM_SKIA_SVG_CANVAS),
+        iconCatalog,
+        recorder {
+          StructuredSvgRecording(
+            "<svg width=\"1280\" height=\"800\"><path d=\"M0 0h1v1z\"/>" +
+              "<image x=\"2\" y=\"2\" width=\"24\" height=\"24\" " +
+              "href=\"data:image/png;base64,AA==\"/></svg>",
+            "anonymous-filter-fixture",
+          )
+        },
+      )
+
     val rejected = assertIs<SavedDocumentSvgExportResult.Rejected>(result)
     assertTrue(rejected.blockers.any { it.code == "RASTER_RECORD_COUNT_MISMATCH" })
     assertTrue(rejected.blockers.any { it.code == "RASTER_RECORD_PAYLOAD_MISMATCH" })

@@ -30,7 +30,8 @@ import org.jetbrains.skia.svg.SVGCanvas
  * that exact node through the same pinned raster provider and matching the unique embedded payload
  * digest, never by assigning document nodes to SVG image order. `matchParentSize` assets use bounds
  * from a clean Compose inspection pass, and those bounds must remain identical during SVG
- * recording.
+ * recording. Known catalog icons are emitted from their `iconKey` ImageVector path data without a
+ * tint filter; unsupported vector structures and every remaining anonymous image fail closed.
  */
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
 object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
@@ -146,7 +147,10 @@ object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
     return try {
       try {
         scene.setContent {
-          CompositionLocalProvider(LocalUiBuilderExportRasterAssets provides rasterAssets.bitmaps) {
+          CompositionLocalProvider(
+            LocalUiBuilderExportRasterAssets provides rasterAssets.bitmaps,
+            LocalUiBuilderExportStructuredIcons provides true,
+          ) {
             UiBuilderSurface(
               document = document,
               editorOverlay = false,
