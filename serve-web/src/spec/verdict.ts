@@ -86,11 +86,28 @@ export function changedPercentOf(
  * front of the visitor. What it is NOT is a verdict, and the line says so rather than leaving the
  * reader to infer it.
  */
-export function offBaselineReadout(changedPercent: number): string {
+export function offBaselineReadout(
+    changedPercent: number,
+    counterpart = "the imported spec",
+): string {
     return (
-        `${changedPercent.toFixed(2)}% pixels differ · the imported spec is baseline-only, ` +
+        `${changedPercent.toFixed(2)}% pixels differ · ${counterpart} is baseline-only, ` +
         `so this is not a match score — clear the overrides to compare`
     );
+}
+
+/**
+ * Names the thing on the other side of the pair in [offBaselineReadout].
+ *
+ * The argument is the same whichever source is picked and the wording must not pretend otherwise: a
+ * sibling catalog's render is produced at ITS baseline, under its own theme and knobs, so an
+ * overridden render is as incomparable to it as it is to an imported spec. What changes is only
+ * which noun the sentence has to use, and saying "the imported spec" over a panel showing
+ * wear-m3-catalog's render would be the lane describing a pair it is not showing.
+ */
+export function counterpartName(label: string): string {
+    const name = label.trim();
+    return name ? `${name}'s render` : "the imported spec";
 }
 
 /** Said in place of a number when the pair cannot be compared at all. */

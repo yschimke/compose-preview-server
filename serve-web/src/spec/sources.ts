@@ -11,6 +11,16 @@
 // getting right — which source is active, whether a switch changes anything, what the panel should
 // admit about where its pixels came from — are pure and answerable without a browser.
 
+/**
+ * The imported design kit's own reference — the one source that IS a specification.
+ *
+ * Everything else the picker can offer is another catalog's RENDER, and the difference is not
+ * cosmetic: it decides whether the published spec verdict still describes the stage, whether the
+ * kit's annotations describe the panel beside the render, and what the reference panel may call
+ * itself. Mirrors `ServeHttpServer.parallelSpecSource`'s `id = "parallel"` on the other side.
+ */
+export const KIT_SOURCE = "kit";
+
 /** One thing the lane can put on the stage beside the render, as the server described it. */
 export interface SpecSource {
     /** `kit` / `parallel` — the picker's value, and the token URL state would carry. */
@@ -43,6 +53,16 @@ export function activeSource(
             if (source.id === pressedId) return source;
     }
     return sources[0];
+}
+
+/**
+ * Whether [source] is the imported design spec rather than another catalog's render.
+ *
+ * A missing source means the single-source lane, which has only ever shown the kit reference — so
+ * "no source" answers yes, and the catalog that declares no pairing keeps the lane it had.
+ */
+export function isSpecSource(source: SpecSource | null): boolean {
+    return !source || source.id === KIT_SOURCE;
 }
 
 /**

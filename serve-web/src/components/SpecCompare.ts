@@ -40,6 +40,7 @@ import {
     UNAVAILABLE,
     changedPercentOf,
     chipText,
+    counterpartName,
     matchBand,
     offBaselineReadout,
     readout,
@@ -61,12 +62,30 @@ import {
 } from "../annotate/typography.js";
 import { dataUrlFor } from "../inspect/layers.js";
 
+/**
+ * Which of the picker's sources the lane is comparing against, as `viewer.js` reads it out of the
+ * pressed button.
+ *
+ * Carried on `open()` rather than read from the markup once, which is the whole of issue #4895: the
+ * reference URL was latched at install from `data-reference` — the KIT raster — so picking the
+ * sibling catalog re-pointed the hidden `<img>` behind the Diff/Triptych/Slider canvases and left
+ * every canvas painting the pair it had already normalised. The picker moved and the stage did not.
+ */
+interface SpecCompareSource {
+    /** Same-origin raster to compare the render against; empty falls back to `data-reference`. */
+    reference: string;
+    /** What the source calls itself, e.g. `Figma` or `wear-m3-catalog`. */
+    label: string;
+    /** Whether those pixels are an imported specification rather than another catalog's render. */
+    spec: boolean;
+}
+
 /** What `viewer.js` calls on the way into and out of the lane. */
 interface SpecCompareApi {
     view(): SpecView;
     prefer(next: string): void;
     hydrate(next: string | null): void;
-    open(url: string): void;
+    open(url: string, source?: SpecCompareSource | null): void;
     close(): void;
     /** Whether the stage is showing the render the published score was measured against. */
     baseline(atBaseline: boolean): void;
@@ -111,7 +130,41 @@ export class SpecCompare extends ControllerElement {
      * honest, it is only the arithmetic over them that has nothing to say.
      */
     private atBaseline = true;
+    /** The kit raster the server put on `data-reference` — the lane's source when none is picked. */
     private referenceUrl = "";
+    /**
+     * The picked source's raster, when the picker offered a choice and `viewer.js` named one.
+     *
+     * Kept beside [referenceUrl] rather than overwriting it so leaving the lane and coming back on
+     * a catalog with no pairing still finds the served reference exactly as it was rendered.
+     */
+    private sourceUrl = "";
+    /** The picked source's label, for the panel caption and the off-baseline line. */
+    private sourceLabel = "";
+    /**
+     * Whether the panel beside the render is a SPECIFICATION.
+     *
+     * False the moment the picker points at a sibling catalog, and three things turn on it, all for
+     * the same reason — a sibling's render is not a spec, and every surface that says "spec" would
+     * be stating something untrue about the pixels on the stage:
+     *
+     *  - the design-spec chip keeps its published verdict to itself. That number is the kit
+     *    comparison, measured at publish against the imported reference; quoting it over a
+     *    wear-m3-catalog pair puts two unrelated comparisons in one row and invites the reader to
+     *    read one as the other. Same argument as [atBaseline], one axis over;
+     *  - the reference panel's caption and label name the source instead of reading "Spec";
+     *  - the kit's typography annotations are withheld. They describe the imported reference, so
+     *    matching them against the render while a sibling's raster is in the panel would annotate
+     *    a frame nobody is looking at.
+     *
+     * The pictures and the live measurement are untouched: a render against a paired catalog's
+     * render is a real pixel comparison, and it is exactly the number the cross-system parity
+     * surfaces report. Only the claim that it is a SPEC match goes.
+     */
+    private sourceIsSpec = true;
+    /** The reference panel's served caption/label, restored whenever the kit source is back. */
+    private bakedCaption = "";
+    private bakedPanelLabel = "";
     private actualUrl = "";
 
     private choice: ViewChoice = INITIAL;
@@ -173,9 +226,22 @@ export class SpecCompare extends ControllerElement {
             this.choice = hydrate(this.choice, next);
             this.apply();
         },
-        open: (url) => {
+        open: (url, source) => {
             this.open = true;
             this.actualUrl = url || "";
+            // A switch inside the lane re-enters through here, so the source lands with the pair it
+            // belongs to. `compute()` keys its cached frames on `(reference, actual)`, which is what
+            // makes the new reference re-run the ONE normalisation the four views share — a cached
+            // pass would line the new raster up against the old geometry.
+            this.sourceUrl = source?.reference ?? "";
+            this.sourceLabel = source?.label ?? "";
+            this.sourceIsSpec = source ? source.spec : true;
+            this.applySourceLabels();
+            // Drop a live spec number the moment the panel stops being the spec, rather than at the
+            // end of the normalisation it triggers: the switch is instant and the comparison is not,
+            // so leaving it up would show the kit's percentage over the sibling's picture for as
+            // long as the raster takes to arrive.
+            if (!this.sourceIsSpec) this.setChipVerdict(null);
             // Deliberately NOT written to the address bar here. `viewer.js` calls this from inside
             // `enterMode`'s spec branch — before its closing `syncUrl()`, and therefore while the
             // current history entry is still the lane being LEFT. Writing now would stamp a
@@ -187,6 +253,12 @@ export class SpecCompare extends ControllerElement {
         },
         close: () => {
             this.open = false;
+            // Off the lane the panel is the served one again, so the caption the server wrote comes
+            // back with it rather than a sibling's name outliving the pair it described.
+            this.sourceUrl = "";
+            this.sourceLabel = "";
+            this.sourceIsSpec = true;
+            this.applySourceLabels();
             // `close()` puts the published verdict back, and a normalisation or score resolving
             // afterwards would otherwise still pass its generation check and paint a live —
             // possibly override-specific — number onto the chip while the published render is back.
@@ -224,6 +296,10 @@ export class SpecCompare extends ControllerElement {
         this.chip = document.getElementById("cp-spec-chip");
         this.bakedBand = this.chip?.getAttribute("data-spec-match") ?? "";
         this.referenceUrl = this.compare.getAttribute("data-reference") ?? "";
+        const referencePanel = this.referencePanel();
+        this.bakedCaption = referencePanel?.caption.textContent ?? "";
+        this.bakedPanelLabel =
+            referencePanel?.canvas.getAttribute("aria-label") ?? "";
 
         // ServeWeb's inline theme bootstrap publishes this before the component bundle loads, so
         // the first install does not briefly show the baked verdict for a themed deep link.
@@ -272,6 +348,56 @@ export class SpecCompare extends ControllerElement {
         return document.getElementById(
             "cp-spec-wipe-range",
         ) as HTMLInputElement | null;
+    }
+
+    /** The reference panel's caption and canvas, or null on a page without the compare surface. */
+    private referencePanel(): {
+        caption: HTMLElement;
+        canvas: HTMLElement;
+    } | null {
+        const figure = this.compare?.querySelector<HTMLElement>(
+            '[data-cp-spec-panel="reference"]',
+        );
+        const caption = figure?.querySelector<HTMLElement>("figcaption");
+        const canvas = this.canvas("cp-spec-reference");
+        if (!caption || !canvas) return null;
+        return { caption, canvas };
+    }
+
+    /** The raster the comparison is taken against: the picked source, else the served reference. */
+    private reference(): string {
+        return this.sourceUrl || this.referenceUrl;
+    }
+
+    /**
+     * Whether the published verdict still describes what is on the stage.
+     *
+     * Two independent ways for it to stop doing so, and they compose: the RENDER can move off the
+     * baseline the score was taken at, and the PANEL can stop being the spec the score was taken
+     * against. Either one alone is enough to make the baked number a confident answer to a question
+     * nobody asked.
+     */
+    private publishedApplies(): boolean {
+        return this.atBaseline && this.sourceIsSpec;
+    }
+
+    /**
+     * Put the picked source's name on the reference panel, or the served caption back.
+     *
+     * Cheap and idempotent, so it can run on every entry: the panel is server-rendered and never
+     * replaced, and the caption is the one place a reader is told what the left-hand picture IS.
+     */
+    private applySourceLabels(): void {
+        const panel = this.referencePanel();
+        if (!panel) return;
+        const named = !this.sourceIsSpec && this.sourceLabel.trim();
+        panel.caption.textContent = named
+            ? this.sourceLabel
+            : this.bakedCaption;
+        const label = named
+            ? `${this.sourceLabel}'s own render of this component`
+            : this.bakedPanelLabel;
+        if (label) panel.canvas.setAttribute("aria-label", label);
     }
 
     private setView(next: string): void {
@@ -338,7 +464,7 @@ export class SpecCompare extends ControllerElement {
             // so the chip says only which tool the spec came from and the tooltip says why. The
             // band goes with it: a colour is a verdict too, and a green chip over a render the
             // verdict was never taken against is the same lie in less text.
-            const baked = this.atBaseline;
+            const baked = this.publishedApplies();
             chip.textContent = baked
                 ? chip.getAttribute("data-spec-chip-label") || name
                 : name;
@@ -364,7 +490,7 @@ export class SpecCompare extends ControllerElement {
     /** Paint every comparison surface from one normalisation of the current pair. */
     private async compute(): Promise<void> {
         const api = compareApi();
-        const reference = sameOrigin(this.referenceUrl, location.origin);
+        const reference = sameOrigin(this.reference(), location.origin);
         const actual = sameOrigin(this.actualUrl, location.origin);
         const annotationFrameUrl =
             document.getElementById("cp-img")?.getAttribute("data-cp-src") ||
@@ -383,7 +509,7 @@ export class SpecCompare extends ControllerElement {
             // The readout still holds this pair's live numbers, so the chip has to come back to the
             // same ones. Without this an override-bearing page re-entering the lane showed the
             // PUBLISHED score beside the live readout — two numbers for one comparison.
-            if (this.framesMatch !== null)
+            if (this.framesMatch !== null && this.sourceIsSpec)
                 this.setChipVerdict(this.framesMatch);
             void this.refreshTypography();
             return;
@@ -419,7 +545,12 @@ export class SpecCompare extends ControllerElement {
             // declining to show it — an unscored pair cannot leak one through the cached-frames
             // path, the chip, or the tooltip.
             if (!this.atBaseline) {
-                const stale = offBaselineReadout(changedPercent);
+                const stale = offBaselineReadout(
+                    changedPercent,
+                    this.sourceIsSpec
+                        ? undefined
+                        : counterpartName(this.sourceLabel),
+                );
                 this.setScore(stale);
                 this.scoreTip = null;
                 this.framesMatch = null;
@@ -444,7 +575,11 @@ export class SpecCompare extends ControllerElement {
             this.setScore(text);
             this.scoreTip = text;
             this.framesMatch = result.percent;
-            this.setChipVerdict(result.percent);
+            // The readout carries the live number for either source — it sits under the views, next
+            // to the pair it describes. The CHIP does not: it is the design-spec chip, named for the
+            // kit's provider, and a sibling comparison's percentage wearing that label is a
+            // different comparison in the same clothes.
+            this.setChipVerdict(this.sourceIsSpec ? result.percent : null);
             void this.refreshTypography();
         } catch {
             if (generation !== this.generation) return;
@@ -467,6 +602,10 @@ export class SpecCompare extends ControllerElement {
     }
 
     private referenceAnnotations(): unknown {
+        // Published for the imported reference and for nothing else. With a sibling's raster in the
+        // panel there is no annotation set for those pixels, and matching the kit's against the
+        // render would draw markers over a picture they were never measured on.
+        if (!this.sourceIsSpec) return null;
         const node = document.getElementById("cp-spec-annotations");
         if (!node) return null;
         try {

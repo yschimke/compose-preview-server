@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
     activeSource,
     changesSource,
+    isSpecSource,
     offersChoice,
     sourceNote,
     type SpecSource,
@@ -40,6 +41,18 @@ describe("spec lane sources", () => {
 
     it("has no active source when the lane has none", () => {
         assert.equal(activeSource([], "kit"), null);
+    });
+
+    it("knows a specification from another catalog's render", () => {
+        // Which one it is decides whether the published spec verdict, the kit's annotations and the
+        // word "Spec" on the panel still describe what is on the stage.
+        assert.equal(isSpecSource(kit), true);
+        assert.equal(isSpecSource(parallel), false);
+        assert.equal(
+            isSpecSource(null),
+            true,
+            "a lane with no picker has only ever shown the kit reference",
+        );
     });
 
     it("offers no choice for the single-source lane every unpaired catalog has", () => {

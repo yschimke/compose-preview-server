@@ -8,6 +8,7 @@ import {
     changedPercentOf,
     chipText,
     matchBand,
+    counterpartName,
     offBaselineReadout,
     readout,
 } from "../src/spec/verdict.js";
@@ -69,6 +70,22 @@ describe("readout", () => {
                 "so this is not a match score — clear the overrides to compare",
         );
         assert.ok(!line.includes("match ·"), "no verdict to misread");
+    });
+
+    it("names the side that is baseline-only", () => {
+        // A sibling catalog's render is produced at ITS baseline too, so the suppression is the
+        // same argument — but the sentence has to name the panel the reader is looking at rather
+        // than an imported spec that is nowhere on the stage.
+        assert.equal(
+            counterpartName("wear-m3-catalog"),
+            "wear-m3-catalog's render",
+        );
+        assert.equal(counterpartName("  "), "the imported spec");
+        assert.equal(
+            offBaselineReadout(89.34, counterpartName("wear-m3-catalog")),
+            "89.34% pixels differ · wear-m3-catalog's render is baseline-only, " +
+                "so this is not a match score — clear the overrides to compare",
+        );
     });
 
     it("stays quiet about drift below the threshold", () => {
