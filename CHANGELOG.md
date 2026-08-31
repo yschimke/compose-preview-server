@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.8.0](https://github.com/yschimke/compose-preview-server/compare/v2.7.0...v2.8.0) (2026-08-31)
+
+
+### Features
+
+* **ui-builder:** add authenticated design transport ([#103](https://github.com/yschimke/compose-preview-server/issues/103)) ([cdb93f0](https://github.com/yschimke/compose-preview-server/commit/cdb93f0c6ce662c34f08c8ec033b36a4bf002c32))
+* **ui-builder:** add editor operation controls ([#100](https://github.com/yschimke/compose-preview-server/issues/100)) ([c043e65](https://github.com/yschimke/compose-preview-server/commit/c043e65720d15fd0b2383aa925c45bebb43ee6c1))
+* **ui-builder:** add persistent collaboration service ([#106](https://github.com/yschimke/compose-preview-server/issues/106)) ([c4b844a](https://github.com/yschimke/compose-preview-server/commit/c4b844aaa2dfa8d483e86b4c7c039e43ed81e14d))
+* **ui-builder:** add protocol client adapter ([#107](https://github.com/yschimke/compose-preview-server/issues/107)) ([f4092fd](https://github.com/yschimke/compose-preview-server/commit/f4092fdb2bcbebfd1286a097c904a37814ebc41f))
+* **ui-builder:** add protocol service foundation ([#101](https://github.com/yschimke/compose-preview-server/issues/101)) ([cacf436](https://github.com/yschimke/compose-preview-server/commit/cacf436d5b82921b380a81dfb8fbd67bd9fc4b64))
+* **ui-builder:** connect live browser sessions ([#109](https://github.com/yschimke/compose-preview-server/issues/109)) ([9075b2e](https://github.com/yschimke/compose-preview-server/commit/9075b2eaf281e524334f10c676a8025b57795763))
+* **ui-builder:** share project-owned offline artwork ([#98](https://github.com/yschimke/compose-preview-server/issues/98)) ([d754472](https://github.com/yschimke/compose-preview-server/commit/d75447287c8a9522f36fb5d1c094a142b21ec13c))
+* **ui-builder:** wire production persistence and exports ([#111](https://github.com/yschimke/compose-preview-server/issues/111)) ([bfe2099](https://github.com/yschimke/compose-preview-server/commit/bfe2099ad4afce708cec7d857fbf539085c1ec21))
+
+
+### Bug Fixes
+
+* **serve:** recover indexed image revision history ([#110](https://github.com/yschimke/compose-preview-server/issues/110)) ([0dfa8f4](https://github.com/yschimke/compose-preview-server/commit/0dfa8f41b35ba2f13a16a2bc4938bcf6587245f0))
+* **ui-builder:** improve Jetcaster render fidelity ([#112](https://github.com/yschimke/compose-preview-server/issues/112)) ([174ed63](https://github.com/yschimke/compose-preview-server/commit/174ed63219765742102805a16552be3ba9336ab5))
+* **ui-builder:** make restart exports deterministic ([#99](https://github.com/yschimke/compose-preview-server/issues/99)) ([d8757bb](https://github.com/yschimke/compose-preview-server/commit/d8757bb534258131e5e37f8accd45ac9b3093f37))
+* **ui-builder:** preserve SVG typography provenance ([#105](https://github.com/yschimke/compose-preview-server/issues/105)) ([ae4da3c](https://github.com/yschimke/compose-preview-server/commit/ae4da3c4efa0c61b2c1fe519b38dcb7aa8545888))
+
 ## [2.7.0](https://github.com/yschimke/compose-preview-server/compare/v2.6.0...v2.7.0) (2026-08-31)
 
 
