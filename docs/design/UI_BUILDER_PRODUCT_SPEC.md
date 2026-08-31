@@ -741,6 +741,13 @@ of these are true:
 Until then, co-location is useful because the render and catalog seams are still being discovered.
 Directory isolation and contract tests prevent that convenience from becoming an implicit API.
 
+Two concrete co-location seams remain before extraction is honest. The server distribution build
+currently packages the `:ui-builder` Wasm task output directly, even though the server runtime
+classpath is clean; that must become an immutable released frontend artifact or an independent
+deployment input. The first durable `DesignService` also incubates in `:ui-builder`; production
+server routes must consume a separately published pure service port/implementation rather than add
+a `:server -> :ui-builder` project dependency.
+
 Do not add a reverse `:render-host -> :server` edge, a web server to `:render-host`, `mavenLocal()`, a
 composite include, or implementation code to the contracts repository. `checkServeModuleBoundary`
 and `checkRenderHostIsServerFree` remain positive resolved-classpath gates.
