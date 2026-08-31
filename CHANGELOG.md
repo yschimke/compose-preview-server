@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.6.0](https://github.com/yschimke/compose-preview-server/compare/v2.5.0...v2.6.0) (2026-08-31)
+
+
+### Features
+
+* **serve:** add WebXR spatial preview viewer ([#81](https://github.com/yschimke/compose-preview-server/issues/81)) ([e4b7fdd](https://github.com/yschimke/compose-preview-server/commit/e4b7fdd9849ed2bd268d12b33f578b39025ce8f6))
+* **ui-builder:** add native Confetti render slice ([#80](https://github.com/yschimke/compose-preview-server/issues/80)) ([9d0bae8](https://github.com/yschimke/compose-preview-server/commit/9d0bae8c128a506d10b1c280791aaee903a3b6da))
+* **ui-builder:** add wave one foundations ([#86](https://github.com/yschimke/compose-preview-server/issues/86)) ([aa3c50d](https://github.com/yschimke/compose-preview-server/commit/aa3c50d5aa8773b79fcc407e6d48c6655320c1b7))
+* **ui-builder:** adopt Jetcaster benchmark ([#82](https://github.com/yschimke/compose-preview-server/issues/82)) ([cf6468f](https://github.com/yschimke/compose-preview-server/commit/cf6468fbcd531a28574b964ef49f2e08e3202a47))
+* **ui-builder:** render Jetcaster benchmark ([#84](https://github.com/yschimke/compose-preview-server/issues/84)) ([f79652f](https://github.com/yschimke/compose-preview-server/commit/f79652f00bc4375ebbc364820689f3a4ebb43d72))
+
+
+### Bug Fixes
+
+* **serve:** clear Kotlin compiler warnings ([#87](https://github.com/yschimke/compose-preview-server/issues/87)) ([fe2e59b](https://github.com/yschimke/compose-preview-server/commit/fe2e59bd3955804ea5ee62843778bcba9e9d03fe))
+* **serve:** re-publish a registry catalog whose entry changed ([#78](https://github.com/yschimke/compose-preview-server/issues/78)) ([099661e](https://github.com/yschimke/compose-preview-server/commit/099661e522d1ff875acfd4438ec8cdb8fa00f9d5))
+* **serve:** reserve spatial route ([#85](https://github.com/yschimke/compose-preview-server/issues/85)) ([0377b28](https://github.com/yschimke/compose-preview-server/commit/0377b28890a7faa4acd201a5613ad3a9ea174415))
+
 ## [2.5.0](https://github.com/yschimke/compose-preview-server/compare/v2.4.0...v2.5.0) (2026-08-31)
 
 
