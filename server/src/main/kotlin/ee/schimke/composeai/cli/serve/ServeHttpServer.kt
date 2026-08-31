@@ -12,6 +12,7 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
 import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
+import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.web.WebEscaping
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -362,6 +363,10 @@ class ServeHttpServer(
    * ⇒ unlimited, which is right for a single-user local host.
    */
   private val agentGrantLimiter: ServeRateLimiter? = null,
+  /** Authoritative editable-design service. Null keeps the design API unregistered. */
+  private val uiBuilderService: UiBuilderServicePort? = null,
+  /** Independent human/operator/agent authorization for [uiBuilderService]. */
+  private val uiBuilderAuthorization: ServeUiBuilderAuthorization? = null,
   /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
@@ -758,6 +763,9 @@ class ServeHttpServer(
         }
       }
       routing {
+        if (uiBuilderService != null && uiBuilderAuthorization != null) {
+          installUiBuilderRoutes(uiBuilderService, uiBuilderAuthorization)
+        }
         // `/healthz` — ungated liveness: "ok" the moment the listener is up. Leaks nothing, and
         // proves nothing beyond "the process is answering HTTP". The rolling-update gate is
         // `/readyz` below, not this.
