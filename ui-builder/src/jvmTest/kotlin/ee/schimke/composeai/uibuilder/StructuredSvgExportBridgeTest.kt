@@ -75,7 +75,44 @@ class StructuredSvgExportBridgeTest {
     )
     assertFalse("detail-episode-139-meta" in emittedTextNodeIds)
     assertEquals(textElements.size, textElements.map { it.attributes.getValue("id") }.toSet().size)
-    assertEquals(34, elements.count { it.name == "path" })
+    val authoredIconNodeIds =
+      setOf(
+        "chip-crime-check",
+        "detail-episode-139-more-icon",
+        "detail-episode-139-play-icon",
+        "detail-episode-139-queue-icon",
+        "detail-episode-140-more-icon",
+        "detail-episode-140-play-icon",
+        "detail-episode-140-queue-icon",
+        "detail-follow-icon",
+        "detail-more-icon",
+        "main-episode-more-icon",
+        "main-episode-play-icon",
+        "main-episode-queue-icon",
+        "podcast-card-android-follow-icon",
+        "podcast-card-google-follow-icon",
+        "search-account-icon",
+        "search-leading-icon",
+        "toolbar-discover-icon",
+        "toolbar-library-icon",
+      )
+    assertEquals(
+      authoredIconNodeIds,
+      document.nodes.values.filter { it.componentId == "m3/icon" }.map { it.id }.toSet(),
+    )
+    authoredIconNodeIds.forEach { nodeId ->
+      val icon = document.nodes.getValue(nodeId)
+      val isolated =
+        document.copy(
+          id = "${document.id}-vector-proof-$nodeId",
+          roots = listOf(nodeId),
+          nodes = mapOf(nodeId to icon),
+        )
+      val iconRecording = JvmSkiaStructuredSvgRecorder.record(isolated)
+      assertTrue(Regex("<path\\b").containsMatchIn(iconRecording.svg), nodeId)
+      assertFalse(Regex("<image\\b").containsMatchIn(iconRecording.svg), nodeId)
+      assertTrue(iconRecording.rasterRecords.isEmpty(), nodeId)
+    }
 
     val result = executeSavedDocumentSvgExport(job, catalog, JvmSkiaStructuredSvgRecorder)
     val exported = assertIs<SavedDocumentSvgExportResult.Ok>(result, result.toString())
