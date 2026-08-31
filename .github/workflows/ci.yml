@@ -122,6 +122,7 @@ jobs:
         working-directory: preview-harness
       - run: npm run harness:ui-builder-renderer
       - run: npm run harness:ui-builder-visual-replay
+      - run: npm run harness:ui-builder-performance
         working-directory: preview-harness
       - run: npm run harness:pages
         working-directory: preview-harness
