@@ -1,16 +1,23 @@
 package ee.schimke.composeai.uibuilder
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.graphics.asComposeCanvas
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.scene.CanvasLayersComposeScene
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.math.roundToInt
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.jetbrains.skia.DynamicMemoryWStream
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
+import org.jetbrains.skia.Surface
 import org.jetbrains.skia.svg.SVGCanvas
 
 /**
@@ -18,14 +25,82 @@ import org.jetbrains.skia.svg.SVGCanvas
  * `convertTextToPaths=false` asks Skia to retain text where its backend can represent it.
  *
  * This remains a feasibility spike, not the production render-host bridge. Its deterministic output
- * claim is scoped to the same Compose/Skiko/font/OS/architecture runtime, and it supplies no raster
- * node correlations because generic Skia image elements cannot be attributed to document nodes.
+ * claim is scoped to the same Compose/Skiko/font/OS/architecture runtime. Generic Skia-created
+ * images remain anonymous and fail closed. Declared asset images are correlated by re-rendering
+ * that exact node through the same pinned raster provider and matching the unique embedded payload
+ * digest, never by assigning document nodes to SVG image order.
  */
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
 object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
   override val kind = StructuredSvgRecorderKind.JVM_SKIA_SVG_CANVAS
 
-  override fun record(document: UiBuilderDocument): StructuredSvgRecording {
+  fun record(document: UiBuilderDocument): StructuredSvgRecording =
+    record(StructuredSvgRecordingRequest(document, emptyList()))
+
+  override fun record(request: StructuredSvgRecordingRequest): StructuredSvgRecording {
+    val document = request.document
+    val rasterAssets =
+      JvmStructuredSvgRasterAssets.create(document, request.declaredRasterFallbackNodeIds)
+    return try {
+      val expectedPayloads =
+        request.declaredRasterFallbackNodeIds.associateWith { nodeId ->
+          val node = document.nodes.getValue(nodeId)
+          require(node.componentId == "asset/image") {
+            "JVM recorder can correlate declared raster assets only; $nodeId is ${node.componentId}"
+          }
+          val isolated =
+            document.copy(
+              id = "${document.id}-raster-probe-$nodeId",
+              roots = listOf(nodeId),
+              nodes = mapOf(nodeId to node),
+            )
+          val probe = parseStrictSvg(recordRaw(isolated, rasterAssets))
+          val images = requireNotNull(probe.document) { "raster probe $nodeId was invalid" }.images
+          require(images.size == 1) {
+            "raster probe $nodeId emitted ${images.size} images; correlation is ambiguous"
+          }
+          requireNotNull(images.single().embeddedImagePayloadDigest()) {
+            "raster probe $nodeId did not emit an embedded raster payload"
+          }
+        }
+      require(expectedPayloads.values.toSet().size == expectedPayloads.size) {
+        "declared raster asset payloads are not unique enough for node correlation"
+      }
+      val svg = recordRaw(document, rasterAssets)
+      val emittedDigests =
+        parseStrictSvg(svg).document?.images.orEmpty().mapNotNull {
+          it.embeddedImagePayloadDigest()
+        }
+      val records = expectedPayloads.map { (nodeId, digest) ->
+        require(emittedDigests.count { it == digest } == 1) {
+          "saved scene did not emit exactly one payload correlated to $nodeId"
+        }
+        val asset = rasterAssets.identities.getValue(nodeId)
+        StructuredSvgRasterRecord(
+          nodeId = nodeId,
+          sourceIdentity = asset.sourceIdentity,
+          sourceIdentitySha256 = asset.sourceIdentitySha256,
+          renderedWidthPx = asset.widthPx,
+          renderedHeightPx = asset.heightPx,
+          embeddedPayloadSha256 = digest,
+          reason = "pinned asset image rendered by node $nodeId",
+        )
+      }
+      StructuredSvgRecording(
+        svg = svg,
+        producer = "skia-svg-canvas/0.144.6",
+        rasterRecords = records,
+        determinismScope = SAME_RUNTIME_DETERMINISM_SCOPE,
+      )
+    } finally {
+      rasterAssets.close()
+    }
+  }
+
+  private fun recordRaw(
+    document: UiBuilderDocument,
+    rasterAssets: JvmStructuredSvgRasterAssets,
+  ): String {
     val widthDp = document.environmentNumber("widthDp")
     val heightDp = document.environmentNumber("heightDp")
     val density = document.environmentNumber("density")
@@ -53,7 +128,11 @@ object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
       )
     return try {
       try {
-        scene.setContent { UiBuilderSurface(document = document, editorOverlay = false) }
+        scene.setContent {
+          CompositionLocalProvider(LocalUiBuilderExportRasterAssets provides rasterAssets.bitmaps) {
+            UiBuilderSurface(document = document, editorOverlay = false)
+          }
+        }
         scene.render(skiaCanvas.asComposeCanvas(), document.fixedFrameNanos())
       } finally {
         try {
@@ -64,17 +143,117 @@ object JvmSkiaStructuredSvgRecorder : StructuredSvgSceneRecorder {
       }
       val bytes = ByteArray(output.bytesWritten())
       check(output.read(bytes, 0, bytes.size)) { "Skia SVG stream could not be read" }
-      StructuredSvgRecording(
-        svg = bytes.decodeToString().canonicalizeSkiaResourceIds(),
-        producer = "skia-svg-canvas/0.144.6",
-        rasterRecords = emptyList(),
-        determinismScope = SAME_RUNTIME_DETERMINISM_SCOPE,
-      )
+      bytes.decodeToString().canonicalizeSkiaResourceIds()
     } finally {
       output.close()
     }
   }
 }
+
+internal class JvmStructuredSvgRasterAssets
+private constructor(
+  val bitmaps: Map<String, androidx.compose.ui.graphics.ImageBitmap>,
+  val identities: Map<String, JvmStructuredSvgRasterIdentity>,
+  private val nativeImages: List<Image>,
+) : AutoCloseable {
+  override fun close() {
+    nativeImages.forEach(Image::close)
+  }
+
+  companion object {
+    fun create(document: UiBuilderDocument, nodeIds: List<String>): JvmStructuredSvgRasterAssets {
+      val images = mutableListOf<Image>()
+      return try {
+        val identities = nodeIds.associateWith { nodeId ->
+          val node = document.nodes.getValue(nodeId)
+          require(node.componentId == "asset/image") {
+            "raster export node $nodeId is not an asset/image"
+          }
+          val assetKey = node.stringProperty("assetKey")
+          val (widthPx, heightPx) = node.explicitRasterPixelSize(document)
+          val sourceIdentity = "generated-placeholder/v1/$assetKey/${widthPx}x$heightPx"
+          val sourceRecipe =
+            "$sourceIdentity|argb=${pinnedAssetColors(assetKey).joinToString(",") { it.toUInt().toString(16) }}"
+          JvmStructuredSvgRasterIdentity(
+              image = createPinnedAssetImage(assetKey, widthPx, heightPx),
+              sourceIdentity = sourceIdentity,
+              sourceIdentitySha256 = sha256Hex(sourceRecipe),
+              widthPx = widthPx,
+              heightPx = heightPx,
+            )
+            .also { images += it.image }
+        }
+        JvmStructuredSvgRasterAssets(
+          bitmaps = identities.mapValues { it.value.image.toComposeImageBitmap() },
+          identities = identities,
+          nativeImages = images,
+        )
+      } catch (failure: Throwable) {
+        images.forEach(Image::close)
+        throw failure
+      }
+    }
+  }
+}
+
+internal data class JvmStructuredSvgRasterIdentity(
+  val image: Image,
+  val sourceIdentity: String,
+  val sourceIdentitySha256: String,
+  val widthPx: Int,
+  val heightPx: Int,
+)
+
+private fun createPinnedAssetImage(assetKey: String, widthPx: Int, heightPx: Int): Image {
+  val colors = pinnedAssetColors(assetKey)
+  val surface = Surface.makeRasterN32Premul(widthPx, heightPx)
+  return try {
+    surface.canvas.clear(colors[0])
+    Paint().use { paint ->
+      paint.color = colors[1]
+      surface.canvas.drawRect(Rect.makeXYWH(0f, 0f, widthPx / 2f, heightPx.toFloat()), paint)
+      paint.color = colors[2]
+      val shortest = minOf(widthPx, heightPx).toFloat()
+      surface.canvas.drawCircle(widthPx * 0.72f, heightPx * 0.31f, shortest * 0.22f, paint)
+    }
+    surface.makeImageSnapshot()
+  } finally {
+    surface.close()
+  }
+}
+
+private fun pinnedAssetColors(assetKey: String): IntArray =
+  when (assetKey) {
+    "jetcaster.cover.android-developers-backstage" ->
+      intArrayOf(0xFF0B57D0.toInt(), 0xFF00A896.toInt(), 0xFF101828.toInt())
+    "jetcaster.cover.google-developers-podcast" ->
+      intArrayOf(0xFFEA4335.toInt(), 0xFFFBBC04.toInt(), 0xFF174EA6.toInt())
+    "ui-builder.gate0.cover" ->
+      intArrayOf(0xFF6750A4.toInt(), 0xFFB69DF8.toInt(), 0xFF21005D.toInt())
+    else -> error("no pinned JVM raster asset for '$assetKey'")
+  }
+
+private fun UiBuilderNode.explicitRasterPixelSize(document: UiBuilderDocument): Pair<Int, Int> {
+  val size =
+    modifiers
+      .mapNotNull { it as? JsonObject }
+      .singleOrNull { modifier -> (modifier["type"] as? JsonPrimitive)?.content == "size" }
+      ?: error("raster node $id needs one explicit size modifier for deterministic export")
+  val widthDp = (size["widthDp"] as? JsonPrimitive)?.content?.toFloatOrNull()
+  val heightDp = (size["heightDp"] as? JsonPrimitive)?.content?.toFloatOrNull()
+  val density = document.environmentNumber("density")
+  val widthPx = ((widthDp ?: error("raster node $id has no widthDp")) * density).roundToInt()
+  val heightPx = ((heightDp ?: error("raster node $id has no heightDp")) * density).roundToInt()
+  require(widthPx > 0 && heightPx > 0) { "raster node $id has a non-positive pixel size" }
+  return widthPx to heightPx
+}
+
+private fun UiBuilderNode.stringProperty(name: String): String =
+  (properties[name] as? kotlinx.serialization.json.JsonObject)
+    ?.get("value")
+    ?.let { it as? kotlinx.serialization.json.JsonPrimitive }
+    ?.content
+    .orEmpty()
 
 private fun UiBuilderDocument.environmentNumber(name: String): Float =
   requireNotNull(

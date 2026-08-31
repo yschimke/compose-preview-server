@@ -3,6 +3,7 @@
 package ee.schimke.composeai.uibuilder
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -73,6 +74,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,9 +83,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -108,6 +112,12 @@ enum class UiBuilderLayer {
   Design,
   EditorOverlay,
 }
+
+/**
+ * Export-only pinned raster assets; normal Wasm rendering retains its deterministic placeholder.
+ */
+internal val LocalUiBuilderExportRasterAssets =
+  staticCompositionLocalOf<Map<String, ImageBitmap>> { emptyMap() }
 
 fun uiBuilderLayers(editorOverlay: Boolean): List<UiBuilderLayer> =
   if (editorOverlay) listOf(UiBuilderLayer.Design, UiBuilderLayer.EditorOverlay)
@@ -392,6 +402,7 @@ private fun RenderNode(
       Card(
         measured,
         shape = node.shape(),
+        elevation = CardDefaults.cardElevation(defaultElevation = node.float("elevationDp").dp),
         colors =
           CardDefaults.cardColors(
             node.color("containerColor", MaterialTheme.colorScheme.surfaceContainer)
@@ -642,6 +653,22 @@ private fun LegacyListItem(
 
 @Composable
 private fun AssetPlaceholder(node: UiBuilderNode, modifier: Modifier) {
+  val exportRaster = LocalUiBuilderExportRasterAssets.current[node.id]
+  if (exportRaster != null) {
+    Image(
+      bitmap = exportRaster,
+      contentDescription = node.string("contentDescription").ifEmpty { null },
+      modifier = modifier,
+      contentScale =
+        when (node.string("contentScale")) {
+          "fit" -> ContentScale.Fit
+          "fillBounds" -> ContentScale.FillBounds
+          "inside" -> ContentScale.Inside
+          else -> ContentScale.Crop
+        },
+    )
+    return
+  }
   val key = node.string("assetKey")
   val palette =
     when (key) {
@@ -649,6 +676,7 @@ private fun AssetPlaceholder(node: UiBuilderNode, modifier: Modifier) {
         listOf(Color(0xFF0B57D0), Color(0xFF00A896), Color(0xFF101828))
       "jetcaster.cover.google-developers-podcast" ->
         listOf(Color(0xFFEA4335), Color(0xFFFBBC04), Color(0xFF174EA6))
+      "ui-builder.gate0.cover" -> listOf(Color(0xFF6750A4), Color(0xFFB69DF8), Color(0xFF21005D))
       else -> error("unsupported asset '$key' on ${node.id}")
     }
   Canvas(modifier) {
