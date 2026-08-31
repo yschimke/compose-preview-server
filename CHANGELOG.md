@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.4.0](https://github.com/yschimke/compose-preview-server/compare/v2.3.4...v2.4.0) (2026-08-31)
+
+
+### Features
+
+* **serve:** attribute an imported catalog to the project it came from ([#67](https://github.com/yschimke/compose-preview-server/issues/67)) ([c57bccf](https://github.com/yschimke/compose-preview-server/commit/c57bccf9cfee4b8f28945aa29a8fda2d4afa50ff))
+* **serve:** report the catalog-registry nomination on /status ([#63](https://github.com/yschimke/compose-preview-server/issues/63)) ([194a151](https://github.com/yschimke/compose-preview-server/commit/194a1511a122854095817fff45226ba4d2697163))
+
+
+### Bug Fixes
+
+* **deploy:** restore the daemon sidecar flags a replaced JAVA_TOOL_OPTIONS drops ([#62](https://github.com/yschimke/compose-preview-server/issues/62)) ([64461fc](https://github.com/yschimke/compose-preview-server/commit/64461fc98ed276462a949de28f0cda7ac5c75868))
+* **deploy:** serve the imported catalogs preview.coo.ee is missing ([#64](https://github.com/yschimke/compose-preview-server/issues/64)) ([904344d](https://github.com/yschimke/compose-preview-server/commit/904344d6af62b631bcdca7749f01f95db74d54c0))
+* **viewer:** move the spec lane's pair when the compare source changes ([#66](https://github.com/yschimke/compose-preview-server/issues/66)) ([39efe43](https://github.com/yschimke/compose-preview-server/commit/39efe4377528dff5d795df8938de4ef135ba776a))
+
 ## [2.3.4](https://github.com/yschimke/compose-preview-server/compare/v2.3.3...v2.3.4) (2026-08-31)
 
 
