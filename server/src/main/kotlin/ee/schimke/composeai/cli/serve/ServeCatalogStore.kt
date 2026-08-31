@@ -121,6 +121,14 @@ class ServeCatalogStore(
   private val onPostPublishIncomplete: (system: String) -> Unit = {},
   private val serverSideRenderEnabled: Boolean = false,
   /**
+   * Why [system]'s live-lane launch failed, when something recorded a reason ([LiveLaneLaunchLog]).
+   * Appended to the daemon-startup degradations below so `/status.json` and the viewer banner name
+   * the actual cause — a missing sidecar directory, an unreadable bundle, a backend with no daemon
+   * — instead of the one fixed sentence every cause used to collapse into. Null (the default, and
+   * the case when the builder failed without logging) leaves the sentence exactly as it was.
+   */
+  private val liveLaneFailure: (system: String) -> String? = { null },
+  /**
    * Trusted server-side re-render from a carried **executable bundle** (opt-in,
    * `--allow-render-trusted`). When a catalog is `Trusted` AND declares a `liveBundle` (`{path,
    * file}`), the bundle is fetched and this is invoked to stand up a daemon-backed, re-renderable
@@ -236,6 +244,17 @@ class ServeCatalogStore(
    * PNG at all, so the alias isn't an enhancement for them — it is the ONLY way they can be served,
    * and the store registers them only where this mapping exists.
    */
+  /**
+   * [cause] with the launch's own explanation appended when one was recorded.
+   *
+   * The generic half stays first and unchanged — it is what every existing consumer (and this
+   * repo's own tests) matches on, and it reads correctly on its own when nothing was recorded. The
+   * recorded half is the daemon's log line, which already names the catalog and, for a module
+   * bundle, the module.
+   */
+  private fun withLaunchReason(cause: String, system: String): String =
+    liveLaneFailure(system)?.trim()?.takeIf { it.isNotEmpty() }?.let { "$cause: $it" } ?: cause
+
   private fun previewAliasFor(catalog: Catalog): Map<String, String> {
     val alias = LinkedHashMap<String, String>()
     for (component in catalog.components) {
@@ -1135,7 +1154,9 @@ class ServeCatalogStore(
         }
         if (liveBundleFallback == null) {
           liveBundleFallback =
-            ServeDegradation.liveBundleUnavailable("the module bundle daemons could not be started")
+            ServeDegradation.liveBundleUnavailable(
+              withLaunchReason("the module bundle daemons could not be started", safe)
+            )
         }
       }
     }
@@ -1224,7 +1245,8 @@ class ServeCatalogStore(
             // reason.
             liveBundleFallback =
               ServeDegradation.liveBundleUnavailable(
-                if (serverSideRenderEnabled) "the live bundle daemon could not be started"
+                if (serverSideRenderEnabled)
+                  withLaunchReason("the live bundle daemon could not be started", safe)
                 else "server-side re-render is not enabled on this server"
               )
           }

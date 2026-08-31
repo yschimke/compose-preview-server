@@ -165,6 +165,14 @@ public class ServeRunner(
   private val liveSeatLimiter: LiveSeatLimiter = LiveSeatLimiter(liveSeats)
 
   /**
+   * Why each catalog's live-lane launch failed, so `/status.json` and the viewer banner can name
+   * the cause instead of the one fixed "could not be started" sentence every cause collapsed into.
+   * Written by the bundle builders below (the daemon's own log lines), read by [ServeCatalogStore]
+   * when it composes the degradation. See [LiveLaneLaunchLog].
+   */
+  private val liveLaneLaunchLog: LiveLaneLaunchLog = LiveLaneLaunchLog()
+
+  /**
    * Where each `--catalogs` system's fetched, trust-verified `liveBundle` landed on disk, filled in
    * by [registerCatalogs] as catalogs load (and refreshed in place when a branch head moves). Read
    * by the playground's `--playground-bundle <system>` form so a compile classpath can come from a
@@ -2952,6 +2960,7 @@ public class ServeRunner(
         maxImages = catalogMaxImages,
         blobs = catalogBlobPool,
         serverSideRenderEnabled = allowRenderTrusted,
+        liveLaneFailure = liveLaneLaunchLog::lastReason,
         // The vector fills and the rc-compare pull run after the catalog is published, so a
         // throttle there lands after the head was recorded. Un-settle the revision so the next
         // poll re-reads it, exactly as a trust revocation and a retirement do.
@@ -3313,6 +3322,9 @@ public class ServeRunner(
         system,
         extraMavenRepos = extraMavenRepos,
         extraClasspathDirs = listOfNotNull(externalResourcesDir),
+        // Still prints as before; also keeps the last line, which on the failure path IS the
+        // reason materialize returned null. ServeCatalogStore appends it to the degradation.
+        onLog = liveLaneLaunchLog.sink(system),
       )
         ?: run {
           perPreviewPool.close()
@@ -3341,12 +3353,22 @@ public class ServeRunner(
     val host =
       openHost(state)
         ?: run {
+          // Nothing logged this: the bundle materialized and the render host still refused to open
+          // it, which no `materialize` message covers.
+          liveLaneLaunchLog.record(
+            system,
+            "the daemon materialized but its render host would not open",
+          )
           perPreviewPool.close()
           return false
         }
     if (!publishCatalogRuntime(system, state, host, perPreviewPool, registry)) {
+      liveLaneLaunchLog.record(system, "the live host could not be published for this catalog")
       return false
     }
+    // Up: drop anything the attempt recorded so a later failure can never report a stale line, and
+    // an informational one (the Skiko pairing repair) is never mistaken for a failure at all.
+    liveLaneLaunchLog.clear(system)
     System.err.println("serve: catalog $system → LIVE from bundle (no build) (?session=$system)")
     return true
   }
@@ -3480,6 +3502,9 @@ public class ServeRunner(
             "$system:${published.module}",
             extraMavenRepos = extraMavenRepos,
             extraClasspathDirs = listOfNotNull(published.externalResourcesDir),
+            // Keyed by catalog, not by module: the store looks the reason up by catalog id, and
+            // the message materialize logs already names `<system>:<module>`.
+            onLog = liveLaneLaunchLog.sink(system),
           )
             ?: run {
               pool.close()
@@ -3541,14 +3566,26 @@ public class ServeRunner(
           serverIdleMillis = backgroundWork.idleClock(registry::idleMillis),
           backgroundWork = backgroundWork,
         )
-      val host = openHost(state) ?: return false
+      val host =
+        openHost(state)
+          ?: run {
+            liveLaneLaunchLog.record(
+              system,
+              "the module daemons materialized but their render host would not open",
+            )
+            return false
+          }
       val resources = AutoCloseable {
         opened.forEach { runtime ->
           runCatching { runtime.pool.close() }
           runCatching { runtime.monolithic?.close() }
         }
       }
-      if (!publishCatalogRuntime(system, state, host, resources, registry)) return false
+      if (!publishCatalogRuntime(system, state, host, resources, registry)) {
+        liveLaneLaunchLog.record(system, "the live host could not be published for this catalog")
+        return false
+      }
+      liveLaneLaunchLog.clear(system)
       System.err.println(
         "serve: catalog $system → LIVE from ${opened.size} module bundles (no build) (?session=$system)"
       )
