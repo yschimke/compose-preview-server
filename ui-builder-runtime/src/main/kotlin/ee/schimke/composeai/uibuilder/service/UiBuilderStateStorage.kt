@@ -3,7 +3,6 @@ package ee.schimke.composeai.uibuilder.service
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -153,16 +152,12 @@ class FileUiBuilderStateStorage(
   }
 
   private fun replaceAtomically(source: Path, target: Path) {
-    try {
-      Files.move(
-        source,
-        target,
-        StandardCopyOption.ATOMIC_MOVE,
-        StandardCopyOption.REPLACE_EXISTING,
-      )
-    } catch (_: AtomicMoveNotSupportedException) {
-      Files.move(source, target, StandardCopyOption.REPLACE_EXISTING)
-    }
+    Files.move(
+      source,
+      target,
+      StandardCopyOption.ATOMIC_MOVE,
+      StandardCopyOption.REPLACE_EXISTING,
+    )
   }
 
   private fun <T> locked(block: () -> T): T {
