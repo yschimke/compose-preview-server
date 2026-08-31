@@ -78,19 +78,26 @@ private val AppColors =
   )
 
 @Composable
-fun PreviewServerApp(client: BrowserPreviewClient, config: ClientConfig) {
+fun PreviewServerApp(client: BrowserPreviewClient) {
   MaterialTheme(colorScheme = AppColors) {
     Surface(Modifier.fillMaxSize()) {
       var catalog by remember { mutableStateOf<Catalog?>(null) }
       var loadError by remember { mutableStateOf<String?>(null) }
-      var selectedId by remember { mutableStateOf(config.initialPreview) }
-      var composing by remember { mutableStateOf(config.initialComposer) }
+      var location by remember { mutableStateOf(client.initialLocation()) }
       var filter by remember { mutableStateOf("") }
+      DisposableEffect(client) {
+        val stop = client.observeHistory { location = it }
+        onDispose(stop)
+      }
       LaunchedEffect(Unit) {
         try {
           catalog = client.catalog()
-          if (selectedId != null && catalog?.previews?.none { it.id == selectedId } == true) {
-            selectedId = null
+          if (
+            location.previewId != null &&
+              catalog?.previews?.none { it.id == location.previewId } == true
+          ) {
+            location = AppLocation()
+            client.replaceLocation(location)
           }
         } catch (error: Throwable) {
           loadError = error.message ?: "Could not load the preview catalog"
@@ -102,37 +109,39 @@ fun PreviewServerApp(client: BrowserPreviewClient, config: ClientConfig) {
         loadError != null -> ErrorScreen(loadError!!)
         loaded == null -> LoadingScreen()
         else -> {
-          val selected = loaded.previews.firstOrNull { it.id == selectedId }
+          val selected = loaded.previews.firstOrNull { it.id == location.previewId }
           BoxWithConstraints(Modifier.fillMaxSize()) {
             val compact = maxWidth < 760.dp
             Column(Modifier.fillMaxSize()) {
               AppHeader(
                 catalog = loaded,
                 selected = selected,
-                composing = composing,
+                composing = location.composing,
                 compact = compact,
                 onCatalog = {
-                  composing = false
-                  selectedId = null
-                  client.replaceLocation(null)
+                  location = AppLocation()
+                  client.pushLocation(location)
                 },
                 onCompose = {
-                  composing = true
-                  selectedId = null
-                  client.replaceComposerLocation()
+                  location = AppLocation(composing = true)
+                  client.pushLocation(location)
                 },
               )
-              if (composing) {
+              if (location.composing) {
                 UiComposer(compact)
               } else if (selected != null) {
                 PreviewDetail(
                   preview = selected,
                   client = client,
                   compact = compact,
-                  initiallyLive = config.initialLive,
+                  initiallyLive = location.live,
+                  onLivePermalink = { enabled ->
+                    location = location.copy(live = enabled)
+                    client.replaceLocation(location)
+                  },
                   onBack = {
-                    selectedId = null
-                    client.replaceLocation(null)
+                    location = AppLocation()
+                    client.pushLocation(location)
                   },
                 )
               } else {
@@ -143,8 +152,8 @@ fun PreviewServerApp(client: BrowserPreviewClient, config: ClientConfig) {
                   client = client,
                   onFilter = { filter = it },
                   onSelect = {
-                    selectedId = it.id
-                    client.replaceLocation(it.id)
+                    location = AppLocation(previewId = it.id)
+                    client.pushLocation(location)
                   },
                 )
               }
@@ -386,11 +395,13 @@ private fun PreviewDetail(
   preview: PreviewSummary,
   client: BrowserPreviewClient,
   compact: Boolean,
-  initiallyLive: Boolean,
+  initiallyLive: Boolean?,
+  onLivePermalink: (Boolean) -> Unit,
   onBack: () -> Unit,
 ) {
   val nativeTarget = preview.nativeTarget
-  var live by remember(preview.id) { mutableStateOf(nativeTarget != null || initiallyLive) }
+  var live by
+    remember(preview.id, initiallyLive) { mutableStateOf(initiallyLive ?: (nativeTarget != null)) }
   var dark by remember(preview.id) { mutableStateOf(nativeTarget?.dark ?: false) }
   var transparent by remember(preview.id) { mutableStateOf(false) }
   var fontScale by remember(preview.id) { mutableStateOf(nativeTarget?.fontScale ?: 1f) }
@@ -479,7 +490,10 @@ private fun PreviewDetail(
       fontScale = fontScale,
       locale = locale,
       client = client,
-      onLive = { live = it },
+      onLive = {
+        live = it
+        onLivePermalink(it)
+      },
       onDark = { dark = it },
       onTransparent = { transparent = it },
       onFontScale = { fontScale = it },
