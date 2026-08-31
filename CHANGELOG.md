@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.7.0](https://github.com/yschimke/compose-preview-server/compare/v2.6.0...v2.7.0) (2026-08-31)
+
+
+### Features
+
+* **ui-builder:** add interactive Wasm editor ([#96](https://github.com/yschimke/compose-preview-server/issues/96)) ([8ddc7e2](https://github.com/yschimke/compose-preview-server/commit/8ddc7e2a13f25883658aa3f8dd150c56cd13f863))
+* **ui-builder:** advance gate zero ([#88](https://github.com/yschimke/compose-preview-server/issues/88)) ([52c3e60](https://github.com/yschimke/compose-preview-server/commit/52c3e6078c1a33ba71a0aad3d233edff41964e43))
+* **ui-builder:** harden SVG raster provenance ([#92](https://github.com/yschimke/compose-preview-server/issues/92)) ([28e7aee](https://github.com/yschimke/compose-preview-server/commit/28e7aee456de20f0e52324fbf024a91afaf250f2))
+* **ui-builder:** host standalone preview ([#89](https://github.com/yschimke/compose-preview-server/issues/89)) ([ad59438](https://github.com/yschimke/compose-preview-server/commit/ad594385bbb973d510184b91b982a78a705a77d6))
+* **ui-builder:** persist collaborative designs ([#91](https://github.com/yschimke/compose-preview-server/issues/91)) ([9e3f232](https://github.com/yschimke/compose-preview-server/commit/9e3f2327fea7d8798540caf901a2f23bfa1e8824))
+* **ui-builder:** verify generated Compose export ([#93](https://github.com/yschimke/compose-preview-server/issues/93)) ([d563182](https://github.com/yschimke/compose-preview-server/commit/d563182c3d2d50457caace7d262c7298302aceb0))
+
+
+### Bug Fixes
+
+* **ui-builder:** preserve generated Compose fields ([#95](https://github.com/yschimke/compose-preview-server/issues/95)) ([7edb80b](https://github.com/yschimke/compose-preview-server/commit/7edb80be9adccf059af8f5f8bcb79c2b3e6b0f2c))
+* **ui-builder:** serialize subscriber delivery ([#97](https://github.com/yschimke/compose-preview-server/issues/97)) ([c9a6a38](https://github.com/yschimke/compose-preview-server/commit/c9a6a385882e1838932a8e43ca6d1de2d89dbe84))
+
 ## [2.6.0](https://github.com/yschimke/compose-preview-server/compare/v2.5.0...v2.6.0) (2026-08-31)
 
 
