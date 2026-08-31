@@ -16,6 +16,7 @@ import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.startCoroutine
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -556,6 +557,55 @@ class PersistentUiBuilderServiceTest {
     assertFailsWith<UiBuilderPersistenceException> {
       service(storage = FileUiBuilderStateStorage(temporaryDirectory))
     }
+  }
+
+  @Test
+  fun `explicit backup restore recovers the previous acknowledged snapshot`() {
+    val storage = FileUiBuilderStateStorage(temporaryDirectory)
+    var service = service(storage = storage)
+    create(service)
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("insert", 0, InsertNodeMutationV1(textNode("node"), NodeLocationV1()))
+        ),
+      )
+    )
+    assertTrue(Files.exists(temporaryDirectory.resolve(FileUiBuilderStateStorage.BACKUP_FILE)))
+
+    val stateFile = temporaryDirectory.resolve(FileUiBuilderStateStorage.STATE_FILE)
+    Files.writeString(stateFile, "truncated")
+    assertFailsWith<UiBuilderPersistenceException> {
+      service(storage = FileUiBuilderStateStorage(temporaryDirectory))
+    }
+
+    assertTrue(FileUiBuilderStateStorage(temporaryDirectory).restoreBackup())
+    service = service(storage = FileUiBuilderStateStorage(temporaryDirectory))
+    val restored = snapshot(execute(service, owner, UiBuilderServiceRequest.OpenDesign("design")))
+    assertEquals(0, restored.state.document.revision)
+    assertTrue(restored.state.document.nodes.isEmpty())
+    assertFalse(FileUiBuilderStateStorage(temporaryDirectory.resolve("empty")).restoreBackup())
+  }
+
+  @Test
+  fun `unsupported persistence schema fails with a migration diagnostic`() {
+    val storage = FileUiBuilderStateStorage(temporaryDirectory)
+    create(service(storage = storage))
+    val stateFile = temporaryDirectory.resolve(FileUiBuilderStateStorage.STATE_FILE)
+    Files.writeString(
+      stateFile,
+      Files.readString(stateFile)
+        .replace("compose-preview-ui-builder-service/v1", "compose-preview-ui-builder-service/v2"),
+    )
+
+    val failure =
+      assertFailsWith<UiBuilderPersistenceException> {
+        service(storage = FileUiBuilderStateStorage(temporaryDirectory))
+      }
+    assertContains(failure.message.orEmpty(), "unsupported UI-builder persistence format")
+    assertContains(failure.message.orEmpty(), "compose-preview-ui-builder-service/v2")
   }
 
   @Test

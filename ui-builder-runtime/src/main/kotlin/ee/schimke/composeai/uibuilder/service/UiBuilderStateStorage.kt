@@ -26,8 +26,11 @@ interface UiBuilderStateStorage {
  *
  * The service payload carries its own version and checksum. This class bounds bytes before reading
  * or writing, forces the new file before rename, and ignores orphaned temporary files from a crash.
- * It does not provide multi-replica compare-and-set semantics; deployments requiring concurrent
- * writers must supply a transactional [UiBuilderStateStorage].
+ * Before replacing an existing state it atomically preserves that state as [BACKUP_FILE]. Operators
+ * may explicitly restore that one-generation backup after diagnosing a failed startup; corrupt
+ * primary state is never silently hidden. It does not provide multi-replica compare-and-set
+ * semantics; deployments requiring concurrent writers must supply a transactional
+ * [UiBuilderStateStorage].
  */
 class FileUiBuilderStateStorage(
   root: Path,
@@ -35,6 +38,7 @@ class FileUiBuilderStateStorage(
 ) : UiBuilderStateStorage {
   private val directory = root.toAbsolutePath().normalize()
   private val stateFile = directory.resolve(STATE_FILE)
+  private val backupFile = directory.resolve(BACKUP_FILE)
   private val lockFile = directory.resolve(LOCK_FILE)
 
   init {
@@ -70,23 +74,19 @@ class FileUiBuilderStateStorage(
       )
     }
     locked {
-      val temporary = Files.createTempFile(directory, ".$STATE_FILE.", ".tmp")
+      var temporary: Path? = null
+      var backupTemporary: Path? = null
       try {
-        FileChannel.open(temporary, StandardOpenOption.WRITE).use { channel ->
-          val buffer = ByteBuffer.wrap(value)
-          while (buffer.hasRemaining()) channel.write(buffer)
-          channel.force(true)
+        temporary = writeTemporary(STATE_FILE, value)
+        if (Files.exists(stateFile)) {
+          val previous = readBounded(stateFile, "state")
+          backupTemporary = writeTemporary(BACKUP_FILE, previous)
+          replaceAtomically(backupTemporary, backupFile)
+          backupTemporary = null
+          forceDirectory()
         }
-        try {
-          Files.move(
-            temporary,
-            stateFile,
-            StandardCopyOption.ATOMIC_MOVE,
-            StandardCopyOption.REPLACE_EXISTING,
-          )
-        } catch (_: AtomicMoveNotSupportedException) {
-          Files.move(temporary, stateFile, StandardCopyOption.REPLACE_EXISTING)
-        }
+        replaceAtomically(temporary, stateFile)
+        temporary = null
         forceDirectory()
       } catch (failure: IOException) {
         throw UiBuilderPersistenceException(
@@ -94,8 +94,74 @@ class FileUiBuilderStateStorage(
           failure,
         )
       } finally {
-        Files.deleteIfExists(temporary)
+        backupTemporary?.let { Files.deleteIfExists(it) }
+        temporary?.let { Files.deleteIfExists(it) }
       }
+    }
+  }
+
+  /**
+   * Replaces the primary state with its one-generation backup, leaving the backup intact.
+   *
+   * This is deliberately explicit: callers should first retain and diagnose a corrupt primary. The
+   * restored envelope is still validated by [PersistentUiBuilderService] on its next startup.
+   * Returns false when no prior generation has been recorded.
+   */
+  fun restoreBackup(): Boolean = locked {
+    if (!Files.exists(backupFile)) return@locked false
+    var temporary: Path? = null
+    try {
+      val backup = readBounded(backupFile, "backup")
+      temporary = writeTemporary(STATE_FILE, backup)
+      replaceAtomically(temporary, stateFile)
+      temporary = null
+      forceDirectory()
+    } catch (failure: IOException) {
+      throw UiBuilderPersistenceException(
+        "cannot restore UI-builder state backup at $backupFile",
+        failure,
+      )
+    } finally {
+      temporary?.let { Files.deleteIfExists(it) }
+    }
+    true
+  }
+
+  private fun readBounded(path: Path, description: String): ByteArray {
+    val size = Files.size(path)
+    if (size > maximumBytes) {
+      throw UiBuilderPersistenceException(
+        "UI-builder $description at $path is $size bytes; limit is $maximumBytes"
+      )
+    }
+    return Files.readAllBytes(path)
+  }
+
+  private fun writeTemporary(name: String, value: ByteArray): Path {
+    val temporary = Files.createTempFile(directory, ".$name.", ".tmp")
+    try {
+      FileChannel.open(temporary, StandardOpenOption.WRITE).use { channel ->
+        val buffer = ByteBuffer.wrap(value)
+        while (buffer.hasRemaining()) channel.write(buffer)
+        channel.force(true)
+      }
+      return temporary
+    } catch (failure: Throwable) {
+      Files.deleteIfExists(temporary)
+      throw failure
+    }
+  }
+
+  private fun replaceAtomically(source: Path, target: Path) {
+    try {
+      Files.move(
+        source,
+        target,
+        StandardCopyOption.ATOMIC_MOVE,
+        StandardCopyOption.REPLACE_EXISTING,
+      )
+    } catch (_: AtomicMoveNotSupportedException) {
+      Files.move(source, target, StandardCopyOption.REPLACE_EXISTING)
     }
   }
 
@@ -126,6 +192,7 @@ class FileUiBuilderStateStorage(
 
   companion object {
     const val STATE_FILE: String = "ui-builder-service-v1.json"
+    const val BACKUP_FILE: String = "ui-builder-service-v1.json.backup"
     private const val LOCK_FILE = ".ui-builder-service.lock"
   }
 }
