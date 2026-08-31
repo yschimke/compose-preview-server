@@ -24,6 +24,9 @@ async function capture(page, url, ready) {
             requestAnimationFrame(() => requestAnimationFrame(resolve)),
         );
     });
+    // Font activation can trigger a second Compose layout after the first ready signal. Require the
+    // caller's full readiness contract again before taking authoritative pixels or inspection data.
+    await page.waitForFunction(ready, null, { timeout: 20_000 });
     expect(errors).toEqual([]);
     return page.screenshot();
 }
@@ -121,4 +124,110 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
     // This is an honest convergence guard against a separately compiled reference. Tighten it as
     // the catalog adapters replace the remaining approximations; the release gate remains exact.
     expect(mismatchRatio, "independent-oracle mismatch ratio").toBeLessThan(0.08);
+});
+
+test("editor overlay preserves clean design pixels and the inspection manifest", async ({
+    page,
+}, testInfo) => {
+    const builderUrl =
+        "/ui-builder/build/wasmDist/index.html?mode=jetcaster-builder";
+    const editorUrl =
+        "/ui-builder/build/wasmDist/index.html?mode=jetcaster-editor";
+    const ready = () =>
+        document.documentElement.dataset.uiBuilderReady === "true" &&
+        globalThis.__uiBuilderInspection?.documentRevision === 99 &&
+        globalThis.__uiBuilderInspection?.generation?.key ===
+            "fixture-jetcaster-discover-expanded@99" &&
+        globalThis.__uiBuilderInspection?.generation?.completed === true &&
+        globalThis.__uiBuilderInspection?.generation?.expectedAuthoredNodeIds
+            ?.length === 99;
+
+    const cleanBefore = await capture(page, builderUrl, ready);
+    const cleanManifest = await page.evaluate(
+        () => globalThis.__uiBuilderInspection,
+    );
+    const editor = await capture(page, editorUrl, ready);
+    const editorManifest = await page.evaluate(
+        () => globalThis.__uiBuilderInspection,
+    );
+    const cleanAfter = await capture(page, builderUrl, ready);
+
+    expect(cleanManifest).toEqual(editorManifest);
+    expect(cleanManifest).toMatchObject({
+        schema: "compose-ui-builder-inspection/v1",
+        documentRevision: 99,
+        coordinateSpace: "root-render-pixels",
+        coordinatePrecision: "1/64px",
+        generation: {
+            key: "fixture-jetcaster-discover-expanded@99",
+            completed: true,
+            stabilityFrames: 2,
+        },
+    });
+    expect(cleanManifest.generation.expectedAuthoredNodeIds).toHaveLength(99);
+    expect(
+        cleanManifest.generation.expectedAuthoredTextNodeIds.length,
+        "authored text inventory",
+    ).toBeGreaterThan(10);
+    expect(cleanManifest.generation.measuredNodeIds).toEqual(
+        cleanManifest.nodes
+            .filter((node) => node.bounds)
+            .map((node) => node.nodeId),
+    );
+    expect(cleanManifest.generation.measuredTextNodeIds).toEqual(
+        cleanManifest.nodes
+            .filter((node) => node.text)
+            .map((node) => node.nodeId),
+    );
+    expect(cleanManifest.nodes).toHaveLength(99);
+    expect(
+        cleanManifest.nodes.filter((node) => node.bounds).length,
+        "measured nodes",
+    ).toBeGreaterThan(50);
+    expect(
+        cleanManifest.nodes.filter((node) => node.text?.firstBaselineY).length,
+        "text nodes with absolute baselines",
+    ).toBeGreaterThan(10);
+    expect(cleanManifest.slots.length, "declared slots").toBeGreaterThan(20);
+    // This title has authored 16dp start, 12dp end and 16dp bottom padding. Its node bounds must
+    // cover that outer footprint, while its baselines remain absolute root-pixel coordinates for
+    // the inner two-line Text layout.
+    const paddedTitle = cleanManifest.nodes.find(
+        (node) => node.nodeId === "podcast-card-android-title",
+    );
+    expect(paddedTitle.bounds).toEqual({ x: 8, y: 217, width: 128, height: 56 });
+    expect(paddedTitle.text).toMatchObject({
+        text: "Android Developers Backstage",
+        lineCount: 2,
+    });
+    expect(paddedTitle.text.firstBaselineY).toBeCloseTo(231.578125, 4);
+    expect(paddedTitle.text.lastBaselineY).toBeCloseTo(251.578125, 4);
+    expect(paddedTitle.text.firstBaselineY).toBeGreaterThan(
+        paddedTitle.bounds.y,
+    );
+    expect(paddedTitle.text.lastBaselineY).toBeLessThan(
+        paddedTitle.bounds.y + paddedTitle.bounds.height,
+    );
+
+    const beforePng = PNG.sync.read(cleanBefore);
+    const afterPng = PNG.sync.read(cleanAfter);
+    const cleanMismatch = pixelmatch(
+        beforePng.data,
+        afterPng.data,
+        null,
+        beforePng.width,
+        beforePng.height,
+        { threshold: 0, includeAA: true },
+    );
+    expect(cleanMismatch, "clean pixels after displaying the editor").toBe(0);
+    expect(editor.equals(cleanBefore), "overlay must be visible").toBe(false);
+
+    await testInfo.attach("jetcaster-editor-inspection.json", {
+        body: Buffer.from(JSON.stringify(editorManifest, null, 2)),
+        contentType: "application/json",
+    });
+    await testInfo.attach("jetcaster-editor-overlay.png", {
+        body: editor,
+        contentType: "image/png",
+    });
 });
