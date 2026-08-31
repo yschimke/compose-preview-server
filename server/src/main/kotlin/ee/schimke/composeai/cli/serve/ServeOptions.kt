@@ -591,6 +591,13 @@ public interface ServeOptions {
     get() = null
 
   /**
+   * Retained native renderer bundles (`runtimeId` to directory). Each directory contains a verified
+   * `runtime-manifest.json`; ids are exact pins and never aliases for a latest runtime.
+   */
+  public val uiBuilderRuntimeDirs: Map<String, File>
+    get() = emptyMap()
+
+  /**
    * Durable authoritative UI-builder state (`--ui-builder-state-dir <dir>|none`). Null derives a
    * stable location when the builder app is enabled; `none` deliberately keeps the API off.
    */
