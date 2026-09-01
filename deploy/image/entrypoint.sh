@@ -229,6 +229,9 @@ fi
 # `preview-ui` catalog or as the `/wasm/<system>/` fallback above.
 if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   args+=(--ui-builder-dir /opt/compose-preview-server/ui-builder)
+  # Keep collaborative designs on the deployment's persistent config volume by default. `none`
+  # remains an explicit escape hatch for a static-only builder shell.
+  args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")
 fi
 # Explicit per-catalog apps remain additive and take precedence over the packaged fallback.
 [[ -n "${SERVE_WASM_DIR:-}" ]] && args+=(--wasm-dir "${SERVE_WASM_DIR}")
@@ -526,7 +529,8 @@ if [[ "${SERVE_AGENT_GRANTS:-}" == "1" || "${SERVE_AGENT_GRANTS:-}" == "true" ]]
   args+=(--agent-grants)
   [[ -n "${SERVE_AGENT_GRANT_SCOPES:-}" ]] &&
     args+=(--agent-grant-scopes "${SERVE_AGENT_GRANT_SCOPES}")
-  # Independent of the scope ceiling above, and refused by `serve` unless the image lane is on.
+  # Independent of the scope ceiling above. Each named capability is admitted only when its
+  # backing lane is enabled; the prebuilt image always carries the UI-builder lane.
   [[ -n "${SERVE_AGENT_GRANT_CAPABILITIES:-}" ]] &&
     args+=(--agent-grant-capabilities "${SERVE_AGENT_GRANT_CAPABILITIES}")
   [[ -n "${SERVE_AGENT_GRANT_MAX_TTL:-}" ]] &&

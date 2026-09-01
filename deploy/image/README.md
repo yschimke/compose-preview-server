@@ -112,9 +112,18 @@ catalog-scoped form.
 
 The Compose UI builder's Jetcaster benchmark preview is packaged alongside that browser and served
 at `/ui-builder/`. It is not a `compose=1` mode, a fake catalog, or a replacement for
-`/wasm/<system>/`; both apps are installed and routed independently. The static preview shell is
-public like other Wasm assets. Interactive editing and independently authenticated design
-read/write/export APIs are subsequent builder milestones.
+`/wasm/<system>/`; both apps are installed and routed independently. The static Wasm shell is
+public like other client assets, but every design read, write, subscription, render and export is
+authenticated. GitHub collaborators use the existing OAuth session; agents use short-lived grants
+with independent `ui-builder-read`, `ui-builder-write` and `ui-builder-export` capabilities. The
+authoritative state defaults to `/config/ui-builder-state` on the persistent `preview_config`
+volume, and `SERVE_UI_BUILDER_STATE_DIR=none` is the explicit static-only opt-out.
+
+The compose deployment offers those three agent capabilities by default because the image always
+packages the builder lane. To narrow them, set `SERVE_AGENT_GRANT_CAPABILITIES` explicitly in
+`.env`. The grant token belongs in `COMPOSE_PREVIEW_UI_BUILDER_TOKEN` for the remote MCP process,
+never in its argv; see [the live-session guide](../../docs/design/UI_BUILDER_LIVE_SESSION.md) and
+the [remote MCP reference](https://github.com/yschimke/compose-ai-tools/blob/main/docs/daemon/MCP.md#remote-ui-builder-tools).
 
 ### Onboarding a GitHub project (paste a URL)
 
