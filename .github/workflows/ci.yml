@@ -28,6 +28,8 @@ jobs:
         with:
           cache-provider: basic
       - run: ./gradlew check ktfmtCheckAll :server:distTar
+      - name: Verify UI-builder extraction consumer
+        run: ./scripts/check-ui-builder-external-consumer.sh
       - name: Smoke-test standalone distribution
         run: |
           mkdir -p "${RUNNER_TEMP}/compose-preview-server"
