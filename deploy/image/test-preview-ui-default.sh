@@ -26,15 +26,17 @@ install="${tmp}/compose-preview-server"
 block="${block//\/opt\/compose-preview-server/${install}}"
 
 run_case() {
-  local env_value="${1:-}" state_dir="${2:-}"
+  local env_value="${1:-}" state_dir="${2:-}" builder_catalogs="${3:-}"
   env -i PATH="${PATH}" SERVE_WASM_DIR="${env_value}" \
-    SERVE_UI_BUILDER_STATE_DIR="${state_dir}" bash -c \
+    SERVE_UI_BUILDER_STATE_DIR="${state_dir}" SERVE_UI_BUILDER_CATALOGS="${builder_catalogs}" \
+    bash -c \
     "set -euo pipefail; args=(); ${block}; printf '%s\n' \"\${args[@]}\""
 }
 
 expect() {
-  local wanted="$1" description="$2" env_value="${3:-}" state_dir="${4:-}" actual
-  actual="$(run_case "${env_value}" "${state_dir}")"
+  local wanted="$1" description="$2" env_value="${3:-}" state_dir="${4:-}" \
+    builder_catalogs="${5:-}" actual
+  actual="$(run_case "${env_value}" "${state_dir}" "${builder_catalogs}")"
   if [[ "${actual}" != "${wanted}" ]]; then
     echo "FAIL: ${description}" >&2
     echo "  wanted: ${wanted@Q}" >&2
@@ -59,13 +61,15 @@ expect $'--wasm-ui-dir\n'"${built_in}"$'\n--wasm-dir\nextra=/srv/extra' \
 mkdir -p "${install}/ui-builder"
 touch "${install}/ui-builder/index.html"
 built_in_builder="${install}/ui-builder"
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-state-dir\n/config/ui-builder-state' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nm3-catalog,remote-m3\n--ui-builder-state-dir\n/config/ui-builder-state' \
   "the packaged builder is enabled at its distinct route"
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-state-dir\n/config/ui-builder-state\n--wasm-dir\nextra=/srv/extra' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nm3-catalog,remote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--wasm-dir\nextra=/srv/extra' \
   "the builder, catalog fallback, and operator app remain additive" "extra=/srv/extra"
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-state-dir\n/config/custom-builder-state' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nm3-catalog,remote-m3\n--ui-builder-state-dir\n/config/custom-builder-state' \
   "the builder accepts an explicit persistent state directory" "" "/config/custom-builder-state"
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-state-dir\nnone' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nm3-catalog,remote-m3\n--ui-builder-state-dir\nnone' \
   "the builder preserves the explicit static-only opt-out" "" "none"
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nremote-m3\n--ui-builder-state-dir\n/config/ui-builder-state' \
+  "the builder catalog allowlist is operator-selectable" "" "" "remote-m3"
 
 echo "PASS: the packaged Wasm UI and standalone builder remain distinct and additive"

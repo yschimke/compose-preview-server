@@ -377,8 +377,9 @@ class PlaygroundRoutingTest {
         cookie,
       )
       .use { resp ->
-        assertEquals(413, resp.code)
-        assertTrue(resp.body.string().contains("exceeds 256KB"))
+        val responseBody = resp.body.string()
+        assertEquals(413, resp.code, "unexpected oversized-body response: $responseBody")
+        assertTrue(responseBody.contains("exceeds 256KB"))
       }
   }
 

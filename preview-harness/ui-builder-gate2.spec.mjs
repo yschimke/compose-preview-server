@@ -71,6 +71,8 @@ async function startProductServer(port, stateDirectory, logPath) {
             operatorToken,
             "--ui-builder-dir",
             app,
+            "--ui-builder-catalogs",
+            "m3-catalog,remote-m3",
             "--ui-builder-state-dir",
             stateDirectory,
             "--accept-docs",
@@ -286,6 +288,7 @@ async function openBrowserSession(
     token,
     create,
     sessionDesignId = designId,
+    catalogSystemId = "m3-catalog",
 ) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const designResponses = [];
@@ -302,7 +305,9 @@ async function openBrowserSession(
         token,
     });
     if (create) query.set("create", "true");
-    await page.goto(`${origin}/ui-builder/?${query}`);
+    const builderPath =
+        catalogSystemId === "m3-catalog" ? "/ui-builder/" : `/ui-builder/${catalogSystemId}/`;
+    await page.goto(`${origin}${builderPath}?${query}`);
     await page.waitForFunction(
         () =>
             document.documentElement.dataset.uiBuilderReady === "true" &&
@@ -312,6 +317,90 @@ async function openBrowserSession(
     );
     return { page, designResponses };
 }
+
+test("only explicitly enabled catalog-scoped UI builders are available", async ({
+    browser,
+}, testInfo) => {
+    const port = await freePort();
+    const stateDirectory = await mkdtemp(resolve(tmpdir(), "compose-ui-builder-catalogs-"));
+    const serverLog = testInfo.outputPath("catalog-instances-server.log");
+    const server = await startProductServer(port, stateDirectory, serverLog);
+    let defaultBuilder;
+    let remoteBuilder;
+    try {
+        const listed = responseOf(await apiCall(server.origin, { type: "listCatalogs" }), "catalogs");
+        expect(listed.catalogs.map((catalog) => catalog.benchmark.catalogSystemId)).toEqual([
+            "m3-catalog",
+            "remote-m3",
+        ]);
+        const remoteCatalog = listed.catalogs.find(
+            (catalog) => catalog.benchmark.catalogSystemId === "remote-m3",
+        );
+        expect(remoteCatalog.components.map((component) => component.componentId)).toEqual([
+            "remote-m3/widget-container-small",
+            "remote-m3/widget-container-large",
+            "layout/box",
+            "layout/column",
+            "layout/row",
+            "m3/surface",
+            "m3/text",
+            "remote-compose/document",
+        ]);
+        expect((await fetch(`${server.origin}/ui-builder/wear-m3-catalog/`)).status).toBe(404);
+
+        defaultBuilder = await openBrowserSession(
+            browser,
+            server.origin,
+            "operator",
+            "catalog-default",
+            operatorToken,
+            true,
+            "catalog-default-design",
+        );
+        remoteBuilder = await openBrowserSession(
+            browser,
+            server.origin,
+            "operator",
+            "catalog-remote",
+            operatorToken,
+            true,
+            "catalog-remote-design",
+            "remote-m3",
+        );
+        await expect(remoteBuilder.page.getByText(/remote-m3 · Live/)).toBeVisible();
+        await expect(
+            remoteBuilder.page.getByText("Wear widget · Small (216×76dp)").first(),
+        ).toBeVisible();
+        await expect(
+            remoteBuilder.page.getByText("Wear widget · Large (216×124dp)").first(),
+        ).toBeVisible();
+
+        const defaultEvidence = testInfo.outputPath("ui-builder-m3-catalog.png");
+        const remoteEvidence = testInfo.outputPath("ui-builder-remote-m3.png");
+        await defaultBuilder.page.screenshot({ path: defaultEvidence, fullPage: true });
+        await remoteBuilder.page.screenshot({ path: remoteEvidence, fullPage: true });
+        await testInfo.attach("ui-builder-m3-catalog.png", {
+            path: defaultEvidence,
+            contentType: "image/png",
+        });
+        await testInfo.attach("ui-builder-remote-m3.png", {
+            path: remoteEvidence,
+            contentType: "image/png",
+        });
+    } finally {
+        if (defaultBuilder && !defaultBuilder.page.isClosed()) await defaultBuilder.page.close();
+        if (remoteBuilder && !remoteBuilder.page.isClosed()) await remoteBuilder.page.close();
+        await server.stop();
+        try {
+            await testInfo.attach("catalog-instances-server.log", {
+                body: await readFile(serverLog),
+                contentType: "text/plain",
+            });
+        } catch {
+            // A pre-start failure can leave no server log.
+        }
+    }
+});
 
 async function editorState(page, revision) {
     await page.waitForFunction(
