@@ -597,8 +597,12 @@ class ServeCatalogStore(
     // visitors never open. Fetching them at registration would make every catalog refresh pay for
     // pixels nobody asked to see.
     val motionPathById = LinkedHashMap<String, String>()
+    var imageLimitExceeded = false
     for (planned in plannedImages) {
-      if (count >= maxImages) break
+      if (count >= maxImages) {
+        imageLimitExceeded = true
+        break
+      }
       // Counted as the catalog CLAIMS to publish it, which is how the completeness check below
       // tells "this catalog bakes nothing" (legal, all-deferred) apart from "this catalog bakes
       // things and the branch can't serve them" (an outage — must not swap).
@@ -700,12 +704,15 @@ class ServeCatalogStore(
     // the baked pixels win.
     val deferredIds = LinkedHashSet<String>()
     for (record in catalog.deferred) {
-      if (deferredIds.size >= maxImages) break
       val id = deferredPreviewIdOf(record) ?: continue
       // Checked against the DECLARED baked set, not the previews dir: with images fetched lazily
       // nothing is on disk yet at this point, and a flat catalog's baked previews carry no variant
       // metadata either — so an on-disk test would let a deferred record shadow a baked preview.
       if (variants.containsKey(id) || bakedPathById.containsKey(id)) continue
+      if (count + deferredIds.size >= maxImages) {
+        imageLimitExceeded = true
+        break
+      }
       if (!deferredIds.add(id)) continue
       val section = record.section?.takeIf { it.isNotBlank() }
       val group = record.group?.takeIf { it.isNotBlank() }
@@ -735,7 +742,10 @@ class ServeCatalogStore(
     // describes the published render, and a static catalog must never turn it into a silent 404.
     val failedIds = LinkedHashSet<String>()
     for ((index, failure) in catalog.failures.withIndex()) {
-      if (count + deferredIds.size + failedIds.size >= maxImages) break
+      if (count + deferredIds.size + failedIds.size >= maxImages) {
+        imageLimitExceeded = true
+        break
+      }
       // Catalog JSON is fetched input. Never reuse its id as a filesystem path: generate a
       // single-segment route id from descriptive fields, then suffix collisions deterministically.
       fun failureSlug(value: String): String =
@@ -762,6 +772,15 @@ class ServeCatalogStore(
           caption = captionByComponentId[failure.componentId?.takeIf { it.isNotBlank() }],
           renderFailure = failure,
         )
+    }
+
+    // A catalog is an inventory, not a best-effort feed. Silently keeping its first N records
+    // makes every component after the cutoff disappear from navigation while the server still
+    // reports a healthy catalog. Reject the staged generation instead: a refresh keeps serving its
+    // previous complete generation, and an initial load reports the configured ceiling explicitly.
+    if (imageLimitExceeded) {
+      staging.deleteRecursively()
+      return Result.Failed(system, "catalog exceeds the $maxImages image limit")
     }
 
     // Nothing to serve? Distinguish the two ways that happens, because only one is a failure:
@@ -3354,13 +3373,13 @@ class ServeCatalogStore(
     fun previewIdFor(imagePath: String): String = CatalogImagePaths.previewIdFor(imagePath)
 
     /**
-     * Maximum baked previews loaded from one published catalog unless the server overrides it.
-     * Images are fetched lazily, so this bounds registered metadata/routes rather than eager
-     * network or bitmap memory. Keep it above the largest first-party catalog (m3-catalog is
-     * currently ~1,150 previews) so the ceiling remains a guard instead of silently truncating a
-     * healthy catalog.
+     * Maximum previews loaded from one published catalog unless the server overrides it. Images are
+     * fetched lazily, so this bounds registered metadata/routes rather than eager network or bitmap
+     * memory. Keep it above the largest first-party catalog (m3-catalog currently publishes 4,120
+     * light/dark image records). Exceeding the ceiling rejects the generation; it never truncates
+     * the catalog.
      */
-    const val DEFAULT_MAX_IMAGES = 2000
+    const val DEFAULT_MAX_IMAGES = 10_000
 
     /**
      * How many design pages one catalog may stage. A page is a whole specimen sheet as SVG — most
