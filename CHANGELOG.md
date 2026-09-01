@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.14.0](https://github.com/yschimke/compose-preview-server/compare/v2.13.0...v2.14.0) (2026-09-01)
+
+
+### Features
+
+* **serve:** inspect component slots and properties ([#166](https://github.com/yschimke/compose-preview-server/issues/166)) ([e01e641](https://github.com/yschimke/compose-preview-server/commit/e01e64112567369153887e47252113172626b170))
+* **ui-builder:** add catalog-scoped instances and Wear scaffolds ([#164](https://github.com/yschimke/compose-preview-server/issues/164)) ([83bc80e](https://github.com/yschimke/compose-preview-server/commit/83bc80e4c7be65b86473687a8c059aea121c0061))
+* **ui-builder:** compose Remote Compose documents ([#163](https://github.com/yschimke/compose-preview-server/issues/163)) ([ddcc46e](https://github.com/yschimke/compose-preview-server/commit/ddcc46e97969f2203fe8679ec76a000f62c4d976))
+
+
+### Bug Fixes
+
+* **ui-builder:** hide theme metadata from properties ([#162](https://github.com/yschimke/compose-preview-server/issues/162)) ([3b1ceef](https://github.com/yschimke/compose-preview-server/commit/3b1ceef634871411368d0510d15f50f203ba36b7))
+* **wasm:** gate native catalog by published version ([#165](https://github.com/yschimke/compose-preview-server/issues/165)) ([7562698](https://github.com/yschimke/compose-preview-server/commit/7562698754b6e4b186572f297f2d743b205c3807))
+
 ## [2.13.0](https://github.com/yschimke/compose-preview-server/compare/v2.12.0...v2.13.0) (2026-09-01)
 
 
