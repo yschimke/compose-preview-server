@@ -2,6 +2,9 @@ import java.io.File
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedArtifactResult
+import org.gradle.api.attributes.Category
+import org.gradle.api.attributes.LibraryElements
+import org.gradle.api.attributes.Usage
 import org.gradle.api.tasks.ClasspathNormalizer
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.Sync
@@ -79,7 +82,49 @@ application {
 
 evaluationDependsOn(":wasm-ui")
 
-evaluationDependsOn(":ui-builder")
+val uiBuilderWeb =
+  configurations.create("uiBuilderWeb") {
+    description = "Immutable Compose/Wasm UI-builder frontend archive."
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+    attributes {
+      attribute(Category.CATEGORY_ATTRIBUTE, objects.named("distribution"))
+      attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named("ui-builder-web"))
+      attribute(Usage.USAGE_ATTRIBUTE, objects.named("ui-builder-web"))
+    }
+  }
+
+abstract class UnpackUiBuilderWeb : DefaultTask() {
+  @get:InputFile
+  @get:PathSensitive(PathSensitivity.NONE)
+  abstract val archiveFile: RegularFileProperty
+
+  @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+  @get:Inject abstract val archiveOperations: ArchiveOperations
+
+  @get:Inject abstract val fileSystemOperations: FileSystemOperations
+
+  @TaskAction
+  fun unpack() {
+    fileSystemOperations.sync {
+      from(archiveOperations.zipTree(archiveFile))
+      into(outputDirectory)
+    }
+  }
+}
+
+val unpackUiBuilderWeb =
+  tasks.register<UnpackUiBuilderWeb>("unpackUiBuilderWeb") {
+    description =
+      "Unpack the immutable UI-builder frontend into the server distribution staging area."
+    group = "distribution"
+    archiveFile.set(
+      layout.file(uiBuilderWeb.elements.map { artifacts -> artifacts.single().asFile })
+    )
+    outputDirectory.set(layout.buildDirectory.dir("ui-builder-web"))
+  }
 
 // Subprocess-only Compose renderer/daemon runtimes. These intentionally do not extend any server
 // classpath: the generated launcher discovers them below APP_HOME, and the render host passes them
@@ -144,9 +189,9 @@ val stageDaemonDesktopLibs =
 
 distributions {
   main {
+    contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
+    contents { from(unpackUiBuilderWeb) { into("ui-builder") } }
     contents {
-      from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") }
-      from(project(":ui-builder").tasks.named("wasmFrontendDist")) { into("ui-builder") }
       into("lib-renderer") { from(stageRendererLibs) }
       into("lib-daemon-desktop") { from(stageDaemonDesktopLibs) }
     }
@@ -221,6 +266,11 @@ tasks.named<Tar>("distTar") {
 // turning the gate on, is its own change.
 
 dependencies {
+  add(
+    "uiBuilderWeb",
+    project(":ui-builder-web"),
+  )
+
   // The render host, the bundle daemon and the git-backed preview history, split out so the CLI's
   // OFFLINE `bundle render` / `history manifest` can reach them without a web server on the
   // classpath (yschimke/compose-ai-tools#4832). `api`, because those types are all over this

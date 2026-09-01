@@ -90,13 +90,15 @@ jobs:
           cache-provider: basic
           cache-read-only: true
       - name: Build distribution and publish Maven artifacts
-        # Both library modules publish too, and must: `:server`'s POM names render-host and the
-        # UI-builder runtime at the same version. A partial release ships an unresolvable graph
-        # rather than a reduced feature set. All three, or none.
+        # Both library modules and the immutable builder frontend publish too: `:server`'s POM names
+        # render-host and the UI-builder runtime at the same version, while its standalone
+        # distribution is assembled from the matching frontend archive. Build/verify the complete
+        # graph before this release job so a missing frontend artifact is caught before publication.
         run: >-
           ./gradlew :server:distTar
           :render-host:publishAndReleaseToMavenCentral
           :ui-builder-runtime:publishAndReleaseToMavenCentral
+          :ui-builder-web:publishAndReleaseToMavenCentral
           :server:publishAndReleaseToMavenCentral
       - name: Upload standalone server distribution
         run: >-
