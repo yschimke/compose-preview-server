@@ -6710,6 +6710,7 @@ class ServeHttpServer(
                 rejectedAssetBytes = it.rejectedAssetBytes,
                 timedOutExports = it.timedOutExports,
                 activeMutationBuckets = it.activeMutationBuckets,
+                persistenceMigrations = it.persistenceMigrations,
               )
             },
         playground =
@@ -11395,6 +11396,7 @@ private data class UiBuilderDto(
   val rejectedAssetBytes: Long,
   val timedOutExports: Long,
   val activeMutationBuckets: Int,
+  val persistenceMigrations: Long,
 )
 
 @Serializable

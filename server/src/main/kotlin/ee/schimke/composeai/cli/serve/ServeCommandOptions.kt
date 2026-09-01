@@ -700,6 +700,8 @@ public class ServeCommandOptions(
   override val uiBuilderStateDirFlag: String? =
     args.flagValue("--ui-builder-state-dir")?.takeIf { it.isNotBlank() }
 
+  override val uiBuilderMigrateState: Boolean = "--ui-builder-migrate-state" in args
+
   /** Experimental AndroidX-conformant Remote Compose CMP/Wasm player distribution. */
   override val rcPlayerWasmDir: File? =
     args
@@ -1108,6 +1110,9 @@ public class ServeCommandOptions(
                           WebSocket API. Defaults to ui-builder-state beside --catalogs-file, or
                           ~/.compose-preview/ui-builder-state for a local standalone builder.
                           `none` serves static builder assets without the editable design API.
+        --ui-builder-migrate-state
+                          Explicitly migrate a validated v1 design store to v2 before serving.
+                          Retains the exact v1 generation for rollback; never runs implicitly.
         --rc-player-wasm-dir <dir>
                           Experimental non-JVM Remote Compose player produced by
                           :rc-player-wasm:wasmPlayerDist. Serves it at /rc-player-wasm/ and enables
