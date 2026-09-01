@@ -953,6 +953,38 @@ const FIXTURE_STATES = [
     },
   },
   {
+    // The aggregate counterpart lane: the same Remote M3 rows against their paired Wear M3
+    // renders, with the raster diff and score calculated in-browser. This is deliberately a
+    // separate shot from Figma: both are raster comparisons, but they answer different questions
+    // and must retain distinct labels and URL state.
+    fixture: "serve-format-compare",
+    suffix: "parallel-lane",
+    parkPointer: true,
+    apply: async (page) => {
+      await page.evaluate(() =>
+        document.querySelector(".cp-fab-menu")?.removeAttribute("open"),
+      );
+      await page.waitForSelector(".cp-fab-menu[open]", { state: "detached" });
+      await page.click('[data-compare-format="parallel"]');
+      await expect(page.locator(".cp-compare-target-head")).toHaveText(
+        "Wear M3",
+      );
+      await expect(page.locator(".cp-compare-diff-head")).toBeVisible();
+      await page.waitForFunction(() =>
+        Array.from(
+          document.querySelectorAll(".cp-compare-row:not([hidden])"),
+        ).every((row) => {
+          const score = row.querySelector(".cp-compare-score")?.textContent;
+          if (score === "waiting…" || score === "comparing…") return false;
+          return (
+            (row.querySelector(".cp-compare-diff")?.width ?? 0) > 0 ||
+            /unavailable/.test(score ?? "")
+          );
+        }),
+      );
+    },
+  },
+  {
     // The wall's DESIGN-SPEC lane, which the wall never opens on: `serve-format-compare` is served
     // with `svg` as its default format, so every other shot of this page shows the render-vs-export
     // question and none of them show the design one — the lane the catalog's own "compare to Figma"
@@ -3499,6 +3531,15 @@ for (const fixture of listPageFixtures()) {
             });
           }
           const url = new URL(route.request().url());
+          if (
+            fixture === "serve-format-compare" &&
+            url.pathname.startsWith("/wear-m3/render/")
+          ) {
+            return route.fulfill({
+              body: REFERENCE_PLACEHOLDER,
+              contentType: "image/svg+xml",
+            });
+          }
           const svg = url.pathname.endsWith(".svg");
           const exploded = svg && url.searchParams.get("exploded") === "1";
           if (!svg && fixture === "serve-design-page") {

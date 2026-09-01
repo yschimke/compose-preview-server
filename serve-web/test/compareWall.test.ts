@@ -22,8 +22,13 @@ import {
     scoreOf,
 } from "../src/compare/wallRows.js";
 
-const ALL: Available = { svg: true, rc: true, reference: true };
-const SVG_ONLY: Available = { svg: true, rc: false, reference: false };
+const ALL: Available = { svg: true, rc: true, reference: true, parallel: true };
+const SVG_ONLY: Available = {
+    svg: true,
+    rc: false,
+    reference: false,
+    parallel: false,
+};
 
 /** A row that carries exactly the listed `<kind>-<variant>` artifacts. */
 const row = (have: string[]) => (kind: string, variant: string) =>
@@ -56,6 +61,7 @@ describe("supportsFormat", () => {
         assert.equal(supportsFormat("svg", ALL), true);
         assert.equal(supportsFormat("rc", SVG_ONLY), false);
         assert.equal(supportsFormat("reference", SVG_ONLY), false);
+        assert.equal(supportsFormat("parallel", ALL), true);
     });
 
     it("refuses anything that is not a format at all", () => {
@@ -370,7 +376,12 @@ describe("initialState with an unusable default", () => {
             defaults: { format: "svg", theme: "light" },
             remembered: null,
             params: new URLSearchParams(),
-            available: { svg: false, rc: true, reference: false },
+            available: {
+                svg: false,
+                rc: true,
+                reference: false,
+                parallel: false,
+            },
         });
         assert.equal(state.format, "rc");
     });
@@ -380,9 +391,29 @@ describe("initialState with an unusable default", () => {
             defaults: { format: "nonsense", theme: "light" },
             remembered: null,
             params: new URLSearchParams(),
-            available: { svg: false, rc: true, reference: true },
+            available: {
+                svg: false,
+                rc: true,
+                reference: true,
+                parallel: false,
+            },
         });
         assert.equal(state.format, "rc");
+    });
+
+    it("opens a parallel-only catalog on its one real comparison", () => {
+        const state = initialState({
+            defaults: { format: "svg", theme: "light" },
+            remembered: null,
+            params: new URLSearchParams("format=parallel"),
+            available: {
+                svg: false,
+                rc: false,
+                reference: false,
+                parallel: true,
+            },
+        });
+        assert.equal(state.format, "parallel");
     });
 });
 

@@ -2756,26 +2756,26 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
    one string, and the invisible one silently winning. */
 #cp-compare[data-format="reference"] .cp-compare-vector { cursor: pointer; }
 
-/* The middle column, the delta map between the pair — whichever way round the pair is sitting, since
-   the reference lane leads with the spec and the others lead with the render (`compare/columns.ts`).
-   Shown only in the reference lane: the vector lanes score a render against an export of the SAME
-   render, so a map of what moved between them would be describing the exporter, not the design.
+/* The middle column, the delta map between the pair — whichever way round the pair is sitting.
+   Shown for independently-authored raster pairs: either a design reference or the paired catalog's
+   implementation. The vector lanes score a render against an export of the SAME render, so a map
+   of what moved between those would describe the exporter, not the design or implementation.
    `<cp-compare-wall>` keeps the cell seated between the two as they swap. Hidden by DEFAULT — the
-   selector is `:not([data-format="reference"])` rather than a `display: none` the reference lane
-   overrides — because `<cp-compare-wall>` writes `data-format` when it runs, and a column that
+   selector excludes both raster lanes rather than relying on either to override `display: none` —
+   because `<cp-compare-wall>` writes `data-format` when it runs, and a column that
    started visible would flash a row of empty boxes on every load that lands on the SVG lane. */
-#cp-compare:not([data-format="reference"]) .cp-compare-diff-head,
-#cp-compare:not([data-format="reference"]) .cp-compare-diff-cell { display: none; }
+#cp-compare:not([data-format="reference"]):not([data-format="parallel"]) .cp-compare-diff-head,
+#cp-compare:not([data-format="reference"]):not([data-format="parallel"]) .cp-compare-diff-cell { display: none; }
 #cp-compare[data-format="reference"] .cp-compare-diff { cursor: pointer; }
 /* Three panels have to fit where two did, and the column that must NOT fall off the end is the
    score: it is what the wall is sorted by and read for. So the reference lane trades panel width
    for the row fitting — at 1024px the untouched 260px panels push `Match` past the scroll edge, and
    a triage wall whose verdict is off-screen is the one regression this column could cause. */
-#cp-compare[data-format="reference"] .cp-compare-shot { width: min(200px, 22vw); min-width: 120px; }
+#cp-compare:is([data-format="reference"], [data-format="parallel"]) .cp-compare-shot { width: min(200px, 22vw); min-width: 120px; }
 /* …and the Bugs column is a fourth thing competing for the same row, so it pays for itself out of
    the same budget rather than out of `Match`. Only where the column exists: a catalog with no
    published issue index has nothing to make room for. */
-#cp-compare[data-format="reference"][data-has-bugs="1"] .cp-compare-shot {
+#cp-compare:is([data-format="reference"], [data-format="parallel"])[data-has-bugs="1"] .cp-compare-shot {
   width: min(184px, 20vw); }
 
 /* The Remote Compose player wall: one column per player, every render published by the offline

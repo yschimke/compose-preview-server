@@ -9434,6 +9434,12 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     rcCompare: RcCompareManifest? = null,
     referencesFor: (String) -> List<DesignReference> = { emptyList() },
+    /** A paired catalog's design reference, used only when this preview has no local mapping. */
+    pairedDesignSourceFor: (ServePreview) -> SpecSource? = { null },
+    /**
+     * The paired catalog implementation whose rendered pixels form the parallel comparison lane.
+     */
+    parallelSourceFor: (ServePreview) -> SpecSource? = { null },
     unfurl: UnfurlMetadata? = null,
     /**
      * The **page-scoped** report this wall files against the catalog's own repo — the launcher's
@@ -9515,26 +9521,37 @@ ${captureControlsHtml().prependIndent("          ")}
     // that row is the whole point of the page.
     val comparableDarkFirst = isDarkFirstSystem(basePath, sessionId, declaredSurface)
     val comparablePrimarySizes = primarySizeByComponent(previews, comparableDarkFirst)
+    val pairedDesignSources = previews.associateWith(pairedDesignSourceFor)
+    val parallelSources = previews.associateWith(parallelSourceFor)
+    fun hasEffectiveReference(preview: ServePreview): Boolean =
+      referencesFor(preview.id).isNotEmpty() || pairedDesignSources[preview] != null
     val comparablePreviews = previews.filterNot { preview ->
       (isNonDefaultState(preview) ||
         hasNonDefaultProps(preview) ||
         isNonPrimarySize(preview, comparablePrimarySizes, comparableDarkFirst)) &&
-        referencesFor(preview.id).isEmpty()
+        !hasEffectiveReference(preview) &&
+        parallelSources[preview] == null
     }
     val cards = groupPreviews(comparablePreviews)
     val hasSvg = comparablePreviews.any { hasSvgFor(it.id) }
     // The published comparison is a Remote Compose lane in its own right: it may cover previews
     // whose `.rc` sidecar never reached this box, so it turns the format on by itself.
     val hasRc = comparablePreviews.any { hasRemoteComposeFor(it.id) } || rcCompare != null
-    val hasReference = comparablePreviews.any { referencesFor(it.id).isNotEmpty() }
+    val hasReference = comparablePreviews.any(::hasEffectiveReference)
+    val hasParallel = comparablePreviews.any { parallelSources[it] != null }
     // Name the design lane after the tool the references actually came from ("PNG ↔ Figma"), the
     // same wording the catalog's own action uses, so the two read as one route rather than two
     // features. A catalog whose references are plain PNGs/mocks keeps the neutral label.
     val referenceToolLabel =
       comparablePreviews.firstNotNullOfOrNull { preview ->
         referencesFor(preview.id).firstNotNullOfOrNull { designToolLabel(it.source.provider) }
+          ?: pairedDesignSources[preview]?.label
       } ?: "Design reference"
-    val defaultFormat = if (hasSvg) "svg" else if (hasRc) "rc" else "reference"
+    val parallelLabel =
+      comparablePreviews.firstNotNullOfOrNull { parallelSources[it]?.label }
+        ?: "Parallel implementation"
+    val defaultFormat =
+      if (hasSvg) "svg" else if (hasRc) "rc" else if (hasReference) "reference" else "parallel"
     // An imported design spec is always drawn to the LEFT of the render it is compared against —
     // the same order the viewer's spec lane states three ways (the Spec / Diff / Render triptych,
     // the wipe's seam, and the focused Reference / Diff / Actual page). This wall's `reference`
@@ -9542,7 +9559,7 @@ ${captureControlsHtml().prependIndent("          ")}
     // render against an export OF that render, which is a different question and keeps the render
     // first. `compare/columns.ts` owns the rule, and `<cp-compare-wall>` re-asserts it whenever the
     // visitor switches lane — this only has to be right for the format the page is SERVED on.
-    val specLeadsColumns = defaultFormat == "reference"
+    val specLeadsColumns = defaultFormat == "reference" || defaultFormat == "parallel"
     val renderCell =
       "<td class=\"cp-compare-render-cell\"><div class=\"cp-compare-shot\">" +
         "<img class=\"cp-compare-png\" alt=\"\"></div></td>"
@@ -9631,7 +9648,12 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
     fun referenceAttrs(theme: String, preview: ServePreview?): String {
-      val reference = preview?.let { referencesFor(it.id).firstOrNull() } ?: return ""
+      preview ?: return ""
+      val reference = referencesFor(preview.id).firstOrNull()
+      if (reference == null) {
+        val paired = pairedDesignSources[preview] ?: return ""
+        return " data-reference-$theme=\"${WebEscaping.htmlEscape(paired.rasterUrl)}\""
+      }
       val raster = "$basePath/reference/${WebEscaping.urlEncodeSegment(reference.id)}.png$assetQ"
       val detail = detailHref(preview, reference)
       // The published score rides along with the pair it describes, per variant, because the pair
@@ -9647,9 +9669,17 @@ ${captureControlsHtml().prependIndent("          ")}
         match
     }
 
+    fun parallelAttrs(theme: String, preview: ServePreview?): String {
+      val source = preview?.let { parallelSources[it] } ?: return ""
+      return " data-parallel-$theme=\"${WebEscaping.htmlEscape(source.rasterUrl)}\""
+    }
+
     val shownCards = cards.filter { card ->
       listOfNotNull(card.light, card.dark, card.neutral).any { p ->
-        hasSvgFor(p.id) || hasRemoteComposeFor(p.id) || referencesFor(p.id).isNotEmpty()
+        hasSvgFor(p.id) ||
+          hasRemoteComposeFor(p.id) ||
+          hasEffectiveReference(p) ||
+          parallelSources[p] != null
       }
     }
     // Every id that has a row of its own. A design reference names one exact state/props mapping,
@@ -9767,6 +9797,10 @@ ${captureControlsHtml().prependIndent("          ")}
           referenceAttrs("light", card.light) +
             referenceAttrs("dark", card.dark) +
             referenceAttrs("neutral", card.neutral)
+        val parallelDataAttrs =
+          parallelAttrs("light", card.light) +
+            parallelAttrs("dark", card.dark) +
+            parallelAttrs("neutral", card.neutral)
         // The ground each variant declares for ITSELF, where it declares one. Only the preview's
         // own rungs — the catalog default is the wall's `data-default-theme` and applying it here
         // too would make every row claim to have declared something. Without this the wall could
@@ -9783,7 +9817,7 @@ ${captureControlsHtml().prependIndent("          ")}
             .joinToString("")
         """
           <tr class="cp-compare-row" data-label="${WebEscaping.htmlEscape(label)}"
-            data-hay="${WebEscaping.htmlEscape(hay)}" data-preview-ids="${WebEscaping.htmlEscape(ids)}"$componentIdAttr$pngAttrs$svgAttrs$rcAttrs$referenceAttrs$declaredBgAttrs>
+            data-hay="${WebEscaping.htmlEscape(hay)}" data-preview-ids="${WebEscaping.htmlEscape(ids)}"$componentIdAttr$pngAttrs$svgAttrs$rcAttrs$referenceAttrs$parallelDataAttrs$declaredBgAttrs>
             <th scope="row">$pickCell<a href="$viewer">${WebEscaping.htmlEscape(component)}${
             if (variant.isEmpty()) ""
             else "<span class=\"cp-compare-variant\">${WebEscaping.htmlEscape(variant)}</span>"
@@ -9816,6 +9850,12 @@ ${captureControlsHtml().prependIndent("          ")}
             "aria-pressed=\"${defaultFormat == "reference"}\">" +
             "${WebEscaping.htmlEscape(referenceToolLabel)} ↔ PNG</button>"
         )
+      if (hasParallel)
+        append(
+          "<button type=\"button\" class=\"cp-theme-btn\" data-compare-format=\"parallel\" " +
+            "aria-pressed=\"${defaultFormat == "parallel"}\">" +
+            "${WebEscaping.htmlEscape(parallelLabel)} ↔ PNG</button>"
+        )
     }
     val themeControls =
       if (cards.any { it.swappable })
@@ -9839,6 +9879,7 @@ ${captureControlsHtml().prependIndent("          ")}
     val targetHead =
       when (defaultFormat) {
         "reference" -> referenceToolLabel
+        "parallel" -> parallelLabel
         "rc" -> "Remote Compose"
         else -> "SVG"
       }
@@ -9895,7 +9936,9 @@ ${captureControlsHtml().prependIndent("          ")}
         "data-theme-key=\"${WebEscaping.htmlEscape(themeStorageKey(sessionId, basePath))}\" " +
         "data-has-svg=\"${if (hasSvg) "1" else "0"}\" data-has-rc=\"${if (hasRc) "1" else "0"}\" " +
         "data-has-reference=\"${if (hasReference) "1" else "0"}\" " +
-        "data-reference-label=\"${WebEscaping.htmlEscape(referenceToolLabel)}\"" +
+        "data-has-parallel=\"${if (hasParallel) "1" else "0"}\" " +
+        "data-reference-label=\"${WebEscaping.htmlEscape(referenceToolLabel)}\" " +
+        "data-parallel-label=\"${WebEscaping.htmlEscape(parallelLabel)}\"" +
         // The Bugs column is a fourth thing competing for the reference lane's row width, so
         // `serve.css` has to know it is there to pay for it out of the panels rather than out of
         // `Match`.

@@ -11,6 +11,7 @@ describe("compare wall columns", () => {
     it("puts the design spec first, and only on the lane that has one", () => {
         // The house rule everywhere the two are shown together: spec left, render right.
         assert.equal(specLeadsColumns("reference"), true);
+        assert.equal(specLeadsColumns("parallel"), true);
         // `svg` and `rc` pit a render against an export OF that render — the render is the source
         // of truth there, not the thing being measured — so it keeps the left column.
         assert.equal(specLeadsColumns("svg"), false);
@@ -19,6 +20,10 @@ describe("compare wall columns", () => {
 
     it("names the column after the lane it is actually showing", () => {
         assert.equal(targetHeadLabel("reference", "Figma"), "Figma");
+        assert.equal(
+            targetHeadLabel("parallel", "Figma", "Wear M3"),
+            "Wear M3",
+        );
         assert.equal(targetHeadLabel("rc", "Figma"), "Remote Compose");
         assert.equal(targetHeadLabel("svg", "Figma"), "SVG");
     });

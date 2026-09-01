@@ -11,7 +11,8 @@
 //
 // The `svg` and `rc` lanes are NOT that comparison: they pit a render against an export **of that
 // same render**, where the render is the source of truth and the export is the thing on trial. So
-// they keep the render first, and only the design-spec lane leads with the spec.
+// they keep the render first. A paired implementation is independently authored like the design
+// reference, so it follows the same target / diff / current-render order.
 //
 // DOM-free on purpose: `CompareWall` reads these two answers and moves the cells.
 
@@ -20,11 +21,11 @@ import type { Format } from "./pairing.js";
 /**
  * Whether the design spec leads the pair.
  *
- * True only for `reference` — see the module note: the other two lanes compare a render against
- * its own export, which is a different question and keeps the render on the left.
+ * True for independently-authored raster targets (`reference` and `parallel`) — see the module
+ * note. The other lanes compare a render against its own export and keep the render on the left.
  */
 export function specLeadsColumns(format: Format): boolean {
-    return format === "reference";
+    return format === "reference" || format === "parallel";
 }
 
 /**
@@ -39,7 +40,9 @@ export function specLeadsColumns(format: Format): boolean {
 export function targetHeadLabel(
     format: Format,
     referenceLabel: string,
+    parallelLabel = "Parallel implementation",
 ): string {
     if (format === "reference") return referenceLabel || "Design reference";
+    if (format === "parallel") return parallelLabel;
     return format === "rc" ? "Remote Compose" : "SVG";
 }
