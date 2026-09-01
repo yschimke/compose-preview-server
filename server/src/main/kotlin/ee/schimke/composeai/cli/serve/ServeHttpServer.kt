@@ -4937,6 +4937,37 @@ class ServeHttpServer(
   }
 
   /**
+   * The design reference attached to this preview's paired sibling. Parallel catalogs implement the
+   * same design-kit component, so the sibling's mapping is also the authoritative design target for
+   * a Remote Compose preview that has not duplicated that reference into its own manifest.
+   */
+  private fun RoutingContext.pairedDesignSpecSource(
+    host: ServeHost,
+    preview: ServePreview,
+  ): ServeWeb.SpecSource? {
+    // As with [parallelSpecSource], a top-level site cannot fetch a neighbouring system's route.
+    if (siteSystem() != null) return null
+    val parallel = resolveParallel(host, preview) ?: return null
+    val reference =
+      parallel.host.designReferencesFor(parallel.preview.id).firstOrNull() ?: return null
+    val label = ServeWeb.designToolLabel(reference.source.provider) ?: "Design spec"
+    return ServeWeb.SpecSource(
+      id = "kit",
+      label = label,
+      rasterUrl =
+        "/" +
+          WebEscaping.urlEncodeSegment(parallel.system) +
+          "/reference/" +
+          WebEscaping.urlEncodeSegment(reference.id) +
+          ".png" +
+          if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken()),
+      provenance =
+        "$label reference mapped by ${parallel.label}'s paired " +
+          "${parallel.preview.componentId ?: parallel.componentId}${parallel.pairedOn}.",
+    )
+  }
+
+  /**
    * `GET /{system}/parallel/{preview}` — the **cross-catalog layer diff** for one render, as a page
    * or (with `?format=json`) as data.
    *
@@ -8323,6 +8354,10 @@ class ServeHttpServer(
           // one canonical spec, and the manifest's order is the producer's own. Absent for every
           // catalog that publishes no references, which omits the lane entirely.
           designReference = renderHost.designReferencesFor(preview.id).firstOrNull(),
+          // A parallel catalog maps the same design-kit component. When this preview has no local
+          // reference, reuse the paired sibling's imported spec so Remote Compose can still be
+          // compared directly with Figma instead of losing the design lane entirely.
+          pairedDesignSource = pairedDesignSpecSource(renderHost, preview),
           // …and the counterpart in the `compareWith` sibling, when this catalog declares a pairing
           // and we host the other side of it. A second SOURCE for that same lane rather than a mode
           // of its own, so the four views are unchanged (issue #4621).

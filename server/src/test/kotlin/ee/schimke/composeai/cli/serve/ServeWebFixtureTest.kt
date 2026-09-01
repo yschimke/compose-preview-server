@@ -1376,6 +1376,40 @@ class ServeWebFixtureTest {
         enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
       )
+    // A Remote Compose preview whose design target and ordinary implementation both come through
+    // its paired Wear M3 catalog. This is the public remote-m3/Card shape: no duplicated local
+    // Figma reference, but a Figma source inherited from the paired Wear preview and the Wear
+    // render itself as the second comparison source.
+    val viewerRcParallel =
+      ServeWeb.viewerPage(
+        ServePreview(
+          "card__ideal__default__compact",
+          "Card",
+          section = "Cards",
+          componentId = "Card",
+        ),
+        token,
+        sessionId = "remote-m3",
+        basePath = "/remote-m3",
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        pairedDesignSource =
+          ServeWeb.SpecSource(
+            id = "kit",
+            label = "Figma",
+            rasterUrl = "/wear-m3-catalog/reference/card-figma.png",
+            provenance = "Figma reference mapped by the paired Wear M3 card.",
+          ),
+        parallelSource =
+          ServeWeb.SpecSource(
+            id = "parallel",
+            label = "Wear M3",
+            rasterUrl = "/wear-m3-catalog/render/card__ideal__default.png",
+            provenance = "Wear M3's own render under that catalog's theme and knobs.",
+          ),
+        parallelLayers = true,
+        trust = "branch:yschimke/wear-m3-catalog@design-artifacts/remote-m3",
+      )
     // The same rich viewer, PINNED. Captured as the twin of [viewerRcPlayers] because that is the
     // page where the rule is visible: every lane above renders the catalog's current code, so a pin
     // must leave none of them on the page — no Live toggle, no renderer combo, no SVG toggle or
@@ -3863,6 +3897,7 @@ class ServeWebFixtureTest {
         "serve-viewer-path.html" to viewerPath,
         "serve-viewer-spec-default-theme.html" to viewerSpecDefaultTheme,
         "serve-viewer-rc-players.html" to viewerRcPlayers,
+        "serve-viewer-rc-parallel.html" to viewerRcParallel,
         "serve-viewer-wear-screen.html" to viewerWearScreen,
         "serve-landing-themed.html" to landingThemed,
         "serve-landing-catalog-palette.html" to landingCatalogPalette,

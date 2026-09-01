@@ -12303,6 +12303,12 @@ ${scriptTag("known-differences.js")}
      */
     parallelSource: SpecSource? = null,
     /**
+     * The paired sibling preview's imported design reference, used as this preview's design source
+     * when it publishes no reference of its own. This is how a Remote Compose implementation can
+     * still be compared directly with the Figma node shared with its Wear M3 counterpart.
+     */
+    pairedDesignSource: SpecSource? = null,
+    /**
      * `/parallel/<preview>` — the **cross-catalog layer diff** for this render, offered beside the
      * lane's own spec-diff link whenever [parallelSource] resolved (issue #4838).
      *
@@ -12701,30 +12707,10 @@ ${scriptTag("known-differences.js")}
       else
         "$basePath/parallel/$idSeg" +
           querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
-    // The four ways to look at the render/spec pair, offered on the stage itself the moment the
-    // spec lane is up. The lane used to be a flip — spec on the stage instead of the render — which
-    // answers "are these different?" only by asking the eye to hold one frame while looking at the
-    // other. That finds a wholesale colour change and misses the 4dp of padding that is the actual
-    // bug. The focused `/compare/<id>` page has always had the real instruments, but reaching it
-    // means leaving the viewer, and with it the overrides, knobs and theme that produced the render
-    // worth comparing. So the instruments come to the lane. `triptych` is the default (#4376): the
-    // lane is entered to ask how the two compare, and side-by-side answers that on arrival, while
-    // `spec` — the reference alone, the way the lane used to open — is one click away.
-    val specViews =
-      listOf(
-        "spec" to ("Spec" to "The imported design reference on its own"),
-        "diff" to ("Diff" to "Highlight every pixel where the render and the spec disagree"),
-        "triptych" to ("Triptych" to "Spec, diff and render side by side"),
-        "slider" to ("Slider" to "One frame, wiped between the spec and the render"),
-      )
-    // The spec lane's *carrier*, not a control: `data-spec-src` is the raster viewer.js paints onto
-    // the stage when the lane is entered, the comparison group beside it chooses how that pair is
-    // drawn, and the trailing link is the step out to the focused comparison page. Entering the
-    // lane is [specChipHtml]'s job — a chip of its own on the bar, not an `<option>` inside the
-    // renderer combo.
-    // Every source the lane can compare this render against, in the order the picker offers them.
-    // The kit reference leads: it is the specification, it is what the lane has always shown, and a
-    // catalog with no pairing has only this one — so the default pair never moves.
+    // Every source the comparison lane can put opposite this render. A catalog may publish a
+    // design reference, declare a parallel implementation, or do both. In particular, Remote
+    // Compose catalogs commonly have a Wear M3 counterpart before every preview has a Figma
+    // reference; the parallel raster is still a complete and useful pair on its own.
     val specSources =
       listOfNotNull(
         if (specRasterUrl == null || specProviderLabel == null) null
@@ -12737,12 +12723,53 @@ ${scriptTag("known-differences.js")}
             // this publish's render against this publish's spec is the comparison the lane is for.
             provenance = "",
           ),
+        pairedDesignSource.takeIf { designReference == null },
         parallelSource,
       )
+    val primarySpecSource = specSources.firstOrNull()
+    val specSurfaceUrl = primarySpecSource?.rasterUrl
+    val parallelOnly = designReference == null && primarySpecSource?.id == "parallel"
+    // The four ways to look at the render/reference pair, offered on the stage itself the moment
+    // the lane is up. The lane used to be a flip — reference on the stage instead of the render —
+    // which
+    // answers "are these different?" only by asking the eye to hold one frame while looking at the
+    // other. That finds a wholesale colour change and misses the 4dp of padding that is the actual
+    // bug. The focused `/compare/<id>` page has always had the real instruments, but reaching it
+    // means leaving the viewer, and with it the overrides, knobs and theme that produced the render
+    // worth comparing. So the instruments come to the lane. `triptych` is the default (#4376): the
+    // lane is entered to ask how the two compare, and side-by-side answers that on arrival, while
+    // `spec` — the reference alone, the way the lane used to open — is one click away.
+    val referenceNoun = if (parallelOnly) primarySpecSource.label else "Spec"
+    val comparisonAriaLabel = if (parallelOnly) "Render comparison" else "Design comparison"
+    val specViews =
+      if (parallelOnly)
+        listOf(
+          "spec" to (referenceNoun to "$referenceNoun on its own"),
+          "diff" to
+            ("Diff" to "Highlight every pixel where the render and $referenceNoun disagree"),
+          "triptych" to ("Triptych" to "$referenceNoun, diff and render side by side"),
+          "slider" to ("Slider" to "One frame, wiped between $referenceNoun and the render"),
+        )
+      else
+        listOf(
+          "spec" to ("Spec" to "The imported design reference on its own"),
+          "diff" to ("Diff" to "Highlight every pixel where the render and the spec disagree"),
+          "triptych" to ("Triptych" to "Spec, diff and render side by side"),
+          "slider" to ("Slider" to "One frame, wiped between the spec and the render"),
+        )
+    // The spec lane's *carrier*, not a control: `data-spec-src` is the raster viewer.js paints onto
+    // the stage when the lane is entered, the comparison group beside it chooses how that pair is
+    // drawn, and the trailing link is the step out to the focused comparison page. Entering the
+    // lane is [specChipHtml]'s job — a chip of its own on the bar, not an `<option>` inside the
+    // renderer combo.
     val specSelector =
-      if (specRasterUrl == null || specProviderLabel == null || specLabel == null) ""
+      if (primarySpecSource == null) ""
       else {
-        val tip = "Compare this render against the imported design spec — $specLabel"
+        val tip =
+          if (parallelOnly) "Compare this render against ${primarySpecSource.label}"
+          else
+            "Compare this render against the imported design spec — " +
+              (specLabel ?: primarySpecSource.label)
         // Hidden until the lane is entered: while a render is on the stage there is no pair to
         // compare, and a control that acts on nothing is worse than no control. `<cp-spec-compare>`
         // reveals it from openSpec() and hides it again on the way out.
@@ -12755,7 +12782,7 @@ ${scriptTag("known-differences.js")}
         // and handing it to an image (CodeQL's `js/xss-through-dom`, and the reason `data-spec-src`
         // is set here rather than assembled in the browser).
         val sourceButtons =
-          if (specSources.size < 2) ""
+          if (specSources.size < 2 && !parallelOnly) ""
           else
             "<span class=\"cp-spec-sources\" id=\"cp-spec-sources\" role=\"group\" " +
               "aria-label=\"Compare against\" hidden>" +
@@ -12777,20 +12804,30 @@ ${scriptTag("known-differences.js")}
               "aria-pressed=\"${value == SPEC_DEFAULT_VIEW}\" " +
               "title=\"${WebEscaping.htmlEscape(viewTip)}\">${WebEscaping.htmlEscape(viewLabel)}</button>"
           }
+        val detailLink =
+          when {
+            specCompareHref != null ->
+              "<a class=\"cp-format-link cp-spec-diff\" " +
+                "href=\"${WebEscaping.htmlEscape(specCompareHref)}\" " +
+                "title=\"${WebEscaping.htmlEscape(tip)}\">spec diff →</a>"
+            parallelLayersHref.isNotEmpty() ->
+              "<a class=\"cp-format-link cp-spec-diff\" " +
+                "href=\"${WebEscaping.htmlEscape(parallelLayersHref)}\" " +
+                "title=\"Compare resolved layers across the paired catalogs\">layer diff →</a>"
+            else -> ""
+          }
         "<span class=\"cp-spec-lane\" id=\"cp-spec-lane\" " +
           // The FIRST source's raster and label stay on these two attributes, unchanged. They are
           // what a single-source lane has always carried and what the backend badge still reads, so
           // a catalog with no pairing produces byte-identical markup to before.
-          "data-spec-src=\"${WebEscaping.htmlEscape(specRasterUrl)}\" " +
-          "data-spec-label=\"${WebEscaping.htmlEscape(specProviderLabel)}\">" +
+          "data-spec-src=\"${WebEscaping.htmlEscape(primarySpecSource.rasterUrl)}\" " +
+          "data-spec-label=\"${WebEscaping.htmlEscape(primarySpecSource.label)}\">" +
           sourceButtons +
           "<span class=\"cp-spec-views\" id=\"cp-spec-views\" role=\"group\" " +
-          "aria-label=\"Design comparison\" hidden>$viewButtons</span>" +
+          "aria-label=\"$comparisonAriaLabel\" hidden>$viewButtons</span>" +
           "<span class=\"cp-spec-score\" id=\"cp-spec-score\" role=\"status\" " +
           "aria-live=\"polite\" hidden></span>" +
-          "<a class=\"cp-format-link cp-spec-diff\" " +
-          "href=\"${WebEscaping.htmlEscape(specCompareHref.orEmpty())}\" " +
-          "title=\"${WebEscaping.htmlEscape(tip)}\">spec diff →</a></span>"
+          "$detailLink</span>"
       }
     // ---- The renderer picker -------------------------------------------------------------------
     //
@@ -12852,9 +12889,11 @@ ${scriptTag("known-differences.js")}
     // `aria-pressed` reports whether the spec is currently on the stage. viewer.js drives both from
     // the same lane state, so the chip and the combo cannot disagree.
     val specChipHtml =
-      if (specRasterUrl == null || specProviderLabel == null) ""
+      if (primarySpecSource == null) ""
       else {
-        val name = if (specProviderLabel == "Figma") "Figma" else "Design spec"
+        val name =
+          if (parallelOnly) primarySpecSource.label
+          else if (primarySpecSource.label == "Figma") "Figma" else "Design spec"
         // The **verdict**, on the chip, at rest. The catalog exists to answer "does this render
         // match its design?", and the chip that led to that answer used to say only which tool the
         // design came from — the question was one click and two raster decodes away, on every page,
@@ -12865,12 +12904,14 @@ ${scriptTag("known-differences.js")}
         // number that is usually high is still the thing a reader came for, and suppressing it
         // would make its absence ambiguous with "not scored". The BAND only picks the colour, so a
         // quiet 99.7% and a loud 85.8% read differently without either being hidden.
-        val match = designReference.match
+        val match = designReference?.match
         val band = match?.let { specMatchBand(it.percent) }
         val label = if (match == null) name else "$name ${WebEscaping.formatPercent(match.percent)}"
         val tip =
-          if (match == null)
-            "Put the imported $specProviderLabel spec on the stage instead of the render"
+          if (parallelOnly)
+            "Compare this render against the paired ${primarySpecSource.label} implementation"
+          else if (match == null)
+            "Put the imported ${primarySpecSource.label} spec on the stage instead of the render"
           else
             buildString {
               append("${WebEscaping.formatPercent(match.percent)} match against the imported ")
@@ -13203,7 +13244,7 @@ ${scriptTag("known-differences.js")}
         "<div class=\"cp-source-panel\" id=\"cp-source-panel\" role=\"region\" " +
           "aria-label=\"Usage source\" hidden></div>"
     val specImg =
-      if (specRasterUrl == null) ""
+      if (specSurfaceUrl == null) ""
       else
         "<img id=\"cp-spec-img\" class=\"cp-spec-img\" hidden alt=\"" +
           "${WebEscaping.htmlEscape("$displayName — design spec")}\">"
@@ -13214,7 +13255,7 @@ ${scriptTag("known-differences.js")}
     // case), and only canvases can carry that redrawn result. Nothing is fetched until a
     // comparison view is actually chosen.
     val specCompare =
-      if (specRasterUrl == null) ""
+      if (specSurfaceUrl == null) ""
       else {
         fun panel(kind: String, id: String, caption: String, description: String) =
           "<figure class=\"cp-spec-panel\" data-cp-spec-panel=\"$kind\">" +
@@ -13222,7 +13263,7 @@ ${scriptTag("known-differences.js")}
             "<figcaption>${WebEscaping.htmlEscape(caption)}</figcaption></figure>"
         "<div class=\"cp-spec-compare\" id=\"cp-spec-compare\" hidden " +
           "data-view=\"$SPEC_DEFAULT_VIEW\" " +
-          "data-reference=\"${WebEscaping.htmlEscape(specRasterUrl)}\">" +
+          "data-reference=\"${WebEscaping.htmlEscape(specSurfaceUrl)}\">" +
           panel("reference", "cp-spec-reference", "Spec", "Imported design spec") +
           panel("diff", "cp-spec-diff", "Diff", "Pixels where the render and the spec disagree") +
           panel("actual", "cp-spec-actual", "Render", "This preview's Compose render") +
@@ -13255,7 +13296,7 @@ ${scriptTag("known-differences.js")}
         "<input type=\"radio\" name=\"cp-mode\" value=\"source\" id=\"cp-source-toggle\" " +
           "tabindex=\"-1\">"
     val specModeInput =
-      if (specRasterUrl == null) ""
+      if (specSurfaceUrl == null) ""
       else
         "<input type=\"radio\" name=\"cp-mode\" value=\"spec\" id=\"cp-spec-toggle\" tabindex=\"-1\">"
     val isAppScreen = isScreenPreview(preview)
@@ -14035,7 +14076,7 @@ ${scriptTag("known-differences.js")}
       listOfNotNull(
           scriptTag("format-compare.js").takeIf {
             spatialSceneUrl == null &&
-              ((hasSvgExport && !componentBrowser) || specRasterUrl != null)
+              ((hasSvgExport && !componentBrowser) || specSurfaceUrl != null)
           }
         )
         .joinToString("") { "$it\n      " }

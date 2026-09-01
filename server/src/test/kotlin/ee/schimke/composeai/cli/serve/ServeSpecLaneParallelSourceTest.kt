@@ -83,6 +83,8 @@ class ServeSpecLaneParallelSourceTest {
   private fun newServer(
     isPublic: Boolean,
     sites: ServeSiteRegistry = ServeSiteRegistry.empty(),
+    reference: Boolean = true,
+    siblingReference: Boolean = false,
   ): ServeHttpServer {
     registry.register(
       "compose-m3",
@@ -93,13 +95,19 @@ class ServeSpecLaneParallelSourceTest {
           componentId = "Button/Filled",
           compareWith = "wear-m3",
           parallel = "Button/Filled",
-          reference = true,
+          reference = reference,
         ),
       pinned = true,
     )
     registry.register(
       "wear-m3",
-      host = catalog("wear-m3", previewId = "chip-filled", componentId = "Button/Filled"),
+      host =
+        catalog(
+          "wear-m3",
+          previewId = "chip-filled",
+          componentId = "Button/Filled",
+          reference = siblingReference,
+        ),
       pinned = true,
     )
     return ServeHttpServer(
@@ -158,6 +166,62 @@ class ServeSpecLaneParallelSourceTest {
     try {
       val (_, html) = get(server, "/compose-m3/p/button-filled")
       assertEquals("/wear-m3/render/chip-filled.png", parallelSrc(html))
+    } finally {
+      server.stop()
+    }
+  }
+
+  @Test
+  fun `a parallel implementation is comparable without a design reference`() {
+    val server = newServer(isPublic = true, reference = false)
+    try {
+      val (code, html) = get(server, "/compose-m3/p/button-filled")
+      assertEquals(200, code)
+      assertTrue(html.contains("id=\"cp-spec-lane\""), "the parallel raster creates the lane")
+      assertTrue(
+        html.contains("id=\"cp-spec-img\"") && html.contains("id=\"cp-spec-compare\""),
+        "the parallel raster creates the stage and comparison surfaces",
+      )
+      assertTrue(
+        html.contains("id=\"cp-spec-chip\"") && html.contains(">wear-m3</button>"),
+        "the paired implementation is a first-class comparison: $html",
+      )
+      assertTrue(
+        html.contains("data-spec-src=\"/wear-m3/render/chip-filled.png\""),
+        "the sibling render is the lane's primary source: $html",
+      )
+      assertFalse(
+        html.contains("href=\"\""),
+        "a parallel-only lane must not emit the absent Figma detail link",
+      )
+    } finally {
+      server.stop()
+    }
+  }
+
+  @Test
+  fun `a parallel catalog shares its mapped design reference`() {
+    val server = newServer(isPublic = true, reference = false, siblingReference = true)
+    try {
+      val (code, html) = get(server, "/compose-m3/p/button-filled")
+      assertEquals(200, code)
+      assertTrue(
+        html.contains(
+          "data-spec-src=\"/wear-m3/reference/chip-filled-figma.png\" " +
+            "data-spec-label=\"Figma\""
+        ),
+        "the paired Figma reference leads the comparison lane: $html",
+      )
+      assertEquals("/wear-m3/render/chip-filled.png", parallelSrc(html))
+      assertTrue(
+        html.contains("id=\"cp-spec-chip\"") && html.contains(">Figma</button>"),
+        "the inherited reference keeps the design-source label: $html",
+      )
+      assertEquals(
+        200,
+        get(server, "/wear-m3/reference/chip-filled-figma.png").first,
+        "the inherited reference URL is reachable",
+      )
     } finally {
       server.stop()
     }
