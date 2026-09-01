@@ -12528,6 +12528,14 @@ ${scriptTag("known-differences.js")}
     @Suppress("NAME_SHADOWING") val hasSvgExport = hasSvgExport && pinned == null
     @Suppress("NAME_SHADOWING")
     val hasScrollExport = hasScrollExport && pinned == null && !componentBrowser
+    // A component page offers only the one inspection product that explains its public API:
+    // measured content slots. The metadata says which parameters are slots; the daemon's existing
+    // `.slots` product says where the preview actually placed their `PreviewSlot` markers.
+    val hasSlotInspection =
+      componentBrowser &&
+        pinned == null &&
+        hasDesignAnnotations &&
+        preview.componentParameters.any { it.composableSlot }
     // Catalog mode keeps the Remote Compose facet whole — the `.rc` canvas and every player the
     // host offers, embedded included — rather than stripping it with the rest of the dev surface.
     //
@@ -13271,6 +13279,24 @@ ${scriptTag("known-differences.js")}
           "title=\"See every Remote Compose player's render of this screen side by side\">" +
           "compare players →</a>"
       }
+    val componentParametersHtml =
+      if (!componentBrowser || preview.componentParameters.isEmpty()) ""
+      else {
+        val parameters =
+          preview.componentParameters.joinToString("") { parameter ->
+            val slot =
+              if (parameter.composableSlot) "<span class=\"cp-source-property-kind\">slot</span>"
+              else ""
+            val default =
+              if (parameter.hasDefault) "<span class=\"cp-source-property-default\">optional</span>"
+              else ""
+            "<li class=\"cp-source-property${if (parameter.composableSlot) " cp-source-property--slot" else ""}\">" +
+              "<code><span class=\"cp-source-property-name\">${WebEscaping.htmlEscape(parameter.name)}</span>: " +
+              "${WebEscaping.htmlEscape(parameter.type)}</code>$slot$default</li>"
+          }
+        "<template id=\"cp-source-properties\"><section class=\"cp-source-properties\" " +
+          "aria-label=\"Component properties\"><h2>Properties</h2><ul>$parameters</ul></section></template>"
+      }
     // The stage image the Spec lane paints into: a sibling of the snapshot `<img>`, left `hidden`
     // (and src-less) until the lane is entered, so a viewer that never opens it costs no request.
     // The Source panel: a sibling of the snapshot `<img>` on the stage, left empty and `hidden`
@@ -13285,7 +13311,7 @@ ${scriptTag("known-differences.js")}
       if (!usageAvailable) ""
       else
         "<div class=\"cp-source-panel\" id=\"cp-source-panel\" role=\"region\" " +
-          "aria-label=\"Usage source\" hidden></div>"
+          "aria-label=\"Usage source\" hidden>$componentParametersHtml</div>"
     val specImg =
       if (specSurfaceUrl == null) ""
       else
@@ -13702,6 +13728,11 @@ ${scriptTag("known-differences.js")}
         hasPublishedTypography ||
         referenceAnnotations.any { it.kind == AnnotationKind.TYPOGRAPHY }
     val inspectRows = buildString {
+      if (hasSlotInspection)
+        append(
+          "<label class=\"cp-live-row\"><input class=\"cp-inspect\" id=\"cp-inspect-slots\" " +
+            "data-cp-inspect=\"slots\" type=\"checkbox\"> Slots</label>\n"
+        )
       if (hasA11yOverlay)
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-inspect\" id=\"cp-inspect-a11y\" " +
@@ -14196,24 +14227,6 @@ ${scriptTag("known-differences.js")}
         ?.takeIf { it.isNotBlank() }
         ?.let { "<p class=\"cp-preview-caption\">${WebEscaping.htmlEscape(it)}</p>" }
         .orEmpty()
-    val componentParametersHtml =
-      if (!componentBrowser || preview.componentParameters.isEmpty()) ""
-      else {
-        val parameters =
-          preview.componentParameters.joinToString("") { parameter ->
-            val slot =
-              if (parameter.composableSlot) "<span class=\"cp-component-param-kind\">slot</span>"
-              else ""
-            val default =
-              if (parameter.hasDefault) "<span class=\"cp-component-param-default\">optional</span>"
-              else ""
-            "<li class=\"cp-component-param${if (parameter.composableSlot) " cp-component-param--slot" else ""}\">" +
-              "<code><span class=\"cp-component-param-name\">${WebEscaping.htmlEscape(parameter.name)}</span>: " +
-              "${WebEscaping.htmlEscape(parameter.type)}</code>$slot$default</li>"
-          }
-        "<section class=\"cp-component-api\" aria-label=\"Component parameters\">" +
-          "<span class=\"cp-component-api-label\">Parameters</span><ul>$parameters</ul></section>"
-      }
     // Title, trust badge, id and the view tally on ONE baseline-aligned row. They are all
     // *identity* — three separate blocks said so three times, at the cost of ~90px above the fold.
     val body =
@@ -14222,7 +14235,7 @@ ${scriptTag("known-differences.js")}
         <h1 class="cp-head cp-preview-title">$label${compactTrustBadge(trust)}</h1>
         ${if (componentBrowser) "" else "<code class=\"cp-preview-id\" title=\"$idText\">$idText</code>"}
         ${if (componentBrowser) "" else viewerViewCountHtml(engagement.views)}$headTogglesHtml
-      </div>${if (captionHtml.isBlank()) "" else "\n      $captionHtml"}${if (componentParametersHtml.isBlank()) "" else "\n      $componentParametersHtml"}${if (browserVariant.isBlank()) "" else "\n      $browserVariant"}
+      </div>${if (captionHtml.isBlank()) "" else "\n      $captionHtml"}${if (browserVariant.isBlank()) "" else "\n      $browserVariant"}
       $revisionBanner${degradeBanner(degradations)}$issueRows
       <div class="cp-preview-primary" aria-label="Preview renderer">
       $primaryControls${if (pinnedControlsNote.isBlank()) "" else "\n        $pinnedControlsNote"}

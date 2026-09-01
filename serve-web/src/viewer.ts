@@ -2531,6 +2531,9 @@ function closeMotion() {
 const sourceChip = may<HTMLButtonElement>("cp-source-chip");
 const sourcePanel = may<HTMLElement>("cp-source-panel");
 const sourceToggle = may<HTMLInputElement>("cp-source-toggle");
+// Component API metadata comes from catalog discovery, not from the lazily fetched snippet. Keep
+// its template after the panel is cleared so loading, failure and success all show the same facts.
+const sourceProperties = may<HTMLTemplateElement>("cp-source-properties");
 var sourceLoaded = false;
 var pendingSourceData: UsageSnippet | null | undefined;
 function sourceAvailable() {
@@ -2614,6 +2617,11 @@ function renderSourceMessage(text: string) {
     p.className = "cp-source-note";
     p.textContent = text;
     sourcePanel.appendChild(p);
+    appendSourceProperties();
+}
+function appendSourceProperties() {
+    if (!sourcePanel || !sourceProperties) return;
+    sourcePanel.appendChild(sourceProperties.content.cloneNode(true));
 }
 function codeMirrorStylesReady() {
     var link = document.querySelector<HTMLLinkElement>(
@@ -2651,6 +2659,7 @@ function renderSource(data: UsageSnippet | null) {
         note.textContent = "The plain Compose that produces this render.";
     }
     sourcePanel.appendChild(note);
+    appendSourceProperties();
     var pre = document.createElement("pre");
     var code = document.createElement("code");
     var sourceText = (data && data.text) || "";

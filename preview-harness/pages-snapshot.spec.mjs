@@ -314,6 +314,15 @@ const ANNOTATIONS_PAYLOAD = {
     },
   ],
 };
+const SLOTS_PAYLOAD = {
+  previewId: "button-filled-pressed",
+  slots: [
+    {
+      name: "content",
+      bounds: { left: 38, top: 120, right: 162, bottom: 188 },
+    },
+  ],
+};
 
 // The published element tag index (`GET /tags/<previewId>`), which the focused comparison's element
 // selector fetches. Shaped exactly as `ServeAnnotationsPayload.encodeTags` writes it — `space` on
@@ -1669,7 +1678,8 @@ const FIXTURE_STATES = [
           heightDelta: Math.abs(shortRect.height - tallRect.height),
           bottomDelta: Math.abs(shortRect.bottom - tallRect.bottom),
           centerDelta: Math.abs(
-            imageRect.top + imageRect.height / 2 -
+            imageRect.top +
+              imageRect.height / 2 -
               (wellRect.top + wellRect.height / 2),
           ),
         };
@@ -3375,6 +3385,52 @@ const FIXTURE_STATES = [
     apply: async () => {},
   },
   {
+    // Component metadata belongs beside the usage call site, not above the render. Opening Source
+    // proves the discovered value parameters survive the lazy panel's clear-and-repaint cycle.
+    fixture: "serve-component-browser-component",
+    suffix: "source-properties",
+    apply: async (page) => {
+      await page.route("**/usage/**", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            text: [
+              "Button(",
+              "  onClick = {},",
+              "  modifier = Modifier,",
+              '  content = { Text("Continue") },',
+              ")",
+            ].join("\n"),
+            entryFunction: "Button",
+            scaffoldsDeclared: true,
+            residue: [],
+          }),
+        }),
+      );
+      await page.click("#cp-source-chip");
+      await page.waitForSelector(".cp-source-properties");
+      await page.waitForSelector(".cp-source-code, .cp-source-panel pre");
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // Slot names are useful on the pixels they describe. The checkbox fetches production-shaped
+    // measured bounds and the shared inspection element draws the box plus readable legend.
+    fixture: "serve-component-browser-component",
+    suffix: "slot-overlay",
+    apply: async (page) => {
+      // States share a page; return from Source if the preceding state left it selected.
+      await page.click("#cp-browser-preview-tab");
+      await page.click("#cp-controls-toggle");
+      await page.click('details[data-cp-group="overlays"] > summary');
+      await page.check("#cp-inspect-slots");
+      await page.waitForSelector('.cp-inspect-box[data-cp-kind="slots"]');
+      await page.waitForSelector(".cp-inspect-section-head");
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
     // Catalog mode with a render server UP — the case the Dev landing's `daemon-connected` shot
     // cannot cover. Catalog mode's header carries no nav, so there is no Status link and no badge
     // slot; the poller used to manufacture a span and append it to `<header>`, where that
@@ -3596,6 +3652,12 @@ for (const fixture of listPageFixtures()) {
         route.fulfill({
           contentType: "application/json",
           body: JSON.stringify(ANNOTATIONS_PAYLOAD),
+        }),
+      );
+      await page.route("**/render/*.slots*", (route) =>
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify(SLOTS_PAYLOAD),
         }),
       );
       // The published tag index. Not a render product — this lane reads a file the catalog

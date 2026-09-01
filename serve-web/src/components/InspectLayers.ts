@@ -1,8 +1,8 @@
 // `<cp-inspect-layers>` — the viewer's inspection overlays. Replaces `assets/inspect.js`.
 //
 // Draws what the render is MADE OF over the frame it produced: numbered boxes on the image plus a
-// legend beside it. Three layers, each a checkbox in the Overrides panel's "Inspect" group —
-// accessibility (what a screen reader sees), typography, and theme attributes.
+// legend beside it. Each layer is a checkbox in the Overrides panel's "Inspect" group — slots,
+// accessibility (what a screen reader sees), typography, theme attributes, and layout.
 //
 // The box + numbered-badge + legend idiom is deliberately the compare page's, because a spec label
 // is far wider than the box it describes: the box carries an index, the readable text lives in the
@@ -30,6 +30,7 @@ import { whenParsed } from "../dom/whenParsed.js";
 import {
     a11yEntries,
     annotationEntries,
+    slotEntries,
     type Entry,
 } from "../inspect/entries.js";
 import {
@@ -304,9 +305,9 @@ export class InspectLayers extends ControllerElement {
         const byName = new Map(names.map((name, i) => [name, results[i]]));
         this.entries = activeLayers(kinds).flatMap((spec) => {
             const payload = byName.get(spec.source) ?? null;
-            return spec.kind === "a11y"
-                ? a11yEntries(payload as never)
-                : annotationEntries(payload as never, spec.kind);
+            if (spec.kind === "slots") return slotEntries(payload as never);
+            if (spec.kind === "a11y") return a11yEntries(payload as never);
+            return annotationEntries(payload as never, spec.kind);
         });
         this.draw();
     }

@@ -3135,6 +3135,7 @@ class ServeWebFixtureTest {
         canRenderOverrides = true,
         usageHref = "/compose-m3/usage/button-filled-pressed",
         hasSvgExport = true,
+        hasDesignAnnotations = true,
         // Carries the presence heartbeat — and with it the render-server poller — because Catalog
         // mode is where the badge has no header slot to land in. The Dev landing already captures
         // the badge's connected/idle states (`serve-landing-declared-themes`); this is the page
