@@ -121,7 +121,9 @@ jobs:
       - run: npm run harness:ui-builder-jetcaster
         working-directory: preview-harness
       - run: npm run harness:ui-builder-renderer
+        working-directory: preview-harness
       - run: npm run harness:ui-builder-visual-replay
+        working-directory: preview-harness
       - run: npm run harness:ui-builder-performance
         working-directory: preview-harness
       - run: npm run harness:pages

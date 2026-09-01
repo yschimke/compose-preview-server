@@ -1811,6 +1811,12 @@ class ServeHttpServer(
       )
       return
     }
+    // Authorize before reserving the per-catalog refresh lane. A response can reach the client
+    // before this coroutine resumes after respondText(), so admitting first briefly exposed the
+    // rejected request as "in flight" and a following request could receive 202 instead of the
+    // same 404. Rejected work never needs admission or cleanup.
+    val force = call.request.queryParameters["force"] == "1"
+    if (force && rejectBadAdminToken()) return
     if (!catalogRefreshesInFlight.add(system)) {
       call.response.headers.append(HttpHeaders.CacheControl, "no-store")
       call.response.headers.append(HttpHeaders.RetryAfter, "2")
@@ -1832,11 +1838,6 @@ class ServeHttpServer(
     // removes that short-circuit, so an anonymous caller could drive a full re-stage (and, with a
     // cold pool, a bundle re-download) in a loop. Refused the way the admin surface refuses
     // everything, which also means a box with no configured admin token cannot be forced at all.
-    val force = call.request.queryParameters["force"] == "1"
-    if (force && rejectBadAdminToken()) {
-      catalogRefreshesInFlight.remove(system)
-      return
-    }
     val result =
       try {
         withContext(Dispatchers.IO) { refresh(system, force) }
