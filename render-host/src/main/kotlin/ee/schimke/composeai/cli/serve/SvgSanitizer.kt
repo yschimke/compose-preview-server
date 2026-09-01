@@ -59,12 +59,12 @@ object SvgSanitizer {
   /**
    * A ceiling on the export this will parse into a DOM.
    *
-   * A specimen sheet is large — the Material 3 kit's `Shape` page is ~840 KB with its text outlined
-   * — so the limit is generous, but it is not absent: parsing is O(bytes) in both time and heap, it
-   * happens at catalog load, and a delivery branch is not trusted to be sane about what it
-   * publishes.
+   * A specimen sheet is large — the Material 3 kit's `Buttons` page is ~14 MB with its text
+   * outlined — so the limit must cover a real maximum-node export, but it is not absent: parsing is
+   * O(bytes) in both time and heap, it happens at catalog load, and a delivery branch is not
+   * trusted to be sane about what it publishes.
    */
-  const val MAX_BYTES: Int = 12 * 1024 * 1024
+  const val MAX_BYTES: Int = 16 * 1024 * 1024
 
   /**
    * What a specimen sheet is made of: shapes, paint, and text.

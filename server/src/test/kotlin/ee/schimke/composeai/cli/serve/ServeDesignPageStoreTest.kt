@@ -161,19 +161,25 @@ class ServeDesignPageStoreTest {
   }
 
   @Test
-  fun `nodes are capped per page, not just pages per catalog`() {
-    // A page cap bounds how many exports a catalog can stage, but nothing about one page's manifest
-    // entry — and every node becomes an outline, a render image and a list row.
-    val many =
-      (1..ServeDesignPageStore.MAX_NODES_PER_PAGE + 25).joinToString(",") { i ->
-        """{"nodeId":"1:$i","name":"Item $i","link":"unlinked"}"""
-      }
-    val crowded =
-      shape.replace(Regex("\"nodes\":\\[.*\\]", RegexOption.DOT_MATCHES_ALL), "\"nodes\":[$many]")
-    assertEquals(
-      ServeDesignPageStore.MAX_NODES_PER_PAGE,
-      store(manifest(crowded)).pages.single().nodes.size,
-    )
+  fun `the per-page node cap is inclusive at 500`() {
+    // The importer walks at most 500 nodes. Pin both sides of that boundary: 499 and 500 survive
+    // whole, while a malformed producer carrying 501 is bounded to the same supported maximum.
+    for (input in listOf(499, 500, 501)) {
+      val many =
+        (1..input).joinToString(",") { i ->
+          """{"nodeId":"1:$i","name":"Item $i","link":"unlinked"}"""
+        }
+      val crowded =
+        shape.replace(
+          Regex("\"nodes\":\\[.*\\]", RegexOption.DOT_MATCHES_ALL),
+          "\"nodes\":[$many]",
+        )
+      assertEquals(
+        minOf(input, ServeDesignPageStore.MAX_NODES_PER_PAGE),
+        store(manifest(crowded)).pages.single().nodes.size,
+        "input node count $input",
+      )
+    }
   }
 
   @Test
