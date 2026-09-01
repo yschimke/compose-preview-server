@@ -372,6 +372,7 @@ const STYLED_FIXTURES = new Set([
   // one are the same screenshot.
   "serve-reference-compare-round-device",
   "serve-viewer",
+  "serve-viewer-rc-parallel",
   // The WebGL/WebXR stage is a separate, selectively-loaded renderer. This fixture keeps its
   // desktop orbit presentation and headset affordance in the normal visual-diff workflow.
   "serve-viewer-spatial",
@@ -2336,6 +2337,37 @@ const FIXTURE_STATES = [
           "*, *::before, *::after { transition-duration: 0ms !important; }",
       });
       await page.hover(".cp-grid .cp-card");
+    },
+  },
+  {
+    // A Remote Compose component can share both useful counterparts through its catalog pairing:
+    // the Wear preview's imported Figma target and the Wear implementation itself. This fixture
+    // deliberately publishes no local design reference; the lit Figma chip and two-source picker
+    // prove that the inherited target creates a comparison lane on its own.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "paired-figma",
+    apply: async (page) => {
+      await page.click("#cp-spec-chip");
+      await page.waitForFunction(
+        () => document.getElementById("cp-spec-img")?.hidden === false,
+      );
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // The same pair switched from its inherited Figma target to the sibling implementation. The
+    // views stay put; only the reference source and its provenance change.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "paired-wear",
+    apply: async (page) => {
+      await page.click('[data-cp-spec-source="parallel"]');
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-cp-spec-source="parallel"]')
+            ?.getAttribute("aria-pressed") === "true",
+      );
+      await page.mouse.move(0, 0);
     },
   },
   {
