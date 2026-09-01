@@ -350,6 +350,14 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
         const receiptToInspectionInvalidated = summary(
             editMeasurements.map((item) => item.receiptToInspectionInvalidatedMs),
         );
+        const propertyDeltaPaths = {
+            accepted: editMeasurements.filter(
+                (item) => item.localReductionPath === "verifiedPropertyDeltaAccepted",
+            ).length,
+            fallback: editMeasurements.filter(
+                (item) => item.localReductionPath === "verifiedPropertyDeltaFallback",
+            ).length,
+        };
         const reopen = summary(reopenMeasurements.map((item) => item.completedAtMs));
         const results = {
             schema: "compose-ui-builder-performance-results/v1",
@@ -371,6 +379,7 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
                     inspectionEncode,
                     receiptToInspectionInvalidated,
                     authoritativeToCanvas,
+                    propertyDeltaPaths,
                 },
             },
             samples: { edits: editMeasurements, cachedReopens: reopenMeasurements },
@@ -444,6 +453,7 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
                 (item) => item.localReductionPath === "verifiedPropertyDeltaAccepted",
             ),
         ).toBe(true);
+        expect(propertyDeltaPaths).toEqual({ accepted: propagationSamples, fallback: 0 });
         expect(reopenMeasurements.every((item) => item.completedAtMs > 0)).toBe(true);
         if (perfMode) {
             expect(propagation.p95).toBeLessThan(250);

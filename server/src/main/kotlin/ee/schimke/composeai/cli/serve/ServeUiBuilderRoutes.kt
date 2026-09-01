@@ -12,6 +12,7 @@ import ee.schimke.composeai.uibuilder.protocol.HttpResponseEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.PreviewCatalogUpgradeRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorV1
 import ee.schimke.composeai.uibuilder.protocol.UI_BUILDER_SCHEMA_VERSION_V1
@@ -228,6 +229,7 @@ private fun ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1.requiredC
     is ExportDesignRequestV1 -> UiBuilderRouteCapability.EXPORT
     is ApplyOperationRequestV1,
     is CreateDesignRequestV1,
+    is PreviewCatalogUpgradeRequestV1,
     is UpdateDesignAccessRequestV1,
     is UpdatePresenceRequestV1 -> UiBuilderRouteCapability.WRITE
   }
