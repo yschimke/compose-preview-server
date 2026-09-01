@@ -1,8 +1,38 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 
-async function capture(page, url, ready) {
+const jetcasterFixture = JSON.parse(
+    readFileSync(
+        new URL(
+            "../docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json",
+            import.meta.url,
+        ),
+        "utf8",
+    ),
+);
+const jetcasterExpectation = {
+    revision: jetcasterFixture.operations.length - 1,
+    generationKey: `${jetcasterFixture.designId}@${jetcasterFixture.operations.length - 1}`,
+    nodeCount: jetcasterFixture.operations.filter(
+        (operation) => operation.type === "insertNode",
+    ).length,
+    documentHash: jetcasterFixture.expectedDocumentHash,
+};
+
+function jetcasterBuilderReady(expected) {
+    const inspection = globalThis.__uiBuilderInspection;
+    return (
+        document.documentElement.dataset.uiBuilderReady === "true" &&
+        inspection?.documentRevision === expected.revision &&
+        inspection?.generation?.key === expected.generationKey &&
+        inspection?.generation?.completed === true &&
+        inspection?.generation?.expectedAuthoredNodeIds?.length === expected.nodeCount
+    );
+}
+
+async function capture(page, url, ready, readyArgument = null) {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
@@ -14,7 +44,7 @@ async function capture(page, url, ready) {
     });
     await page.goto(url);
     try {
-        await page.waitForFunction(ready, null, { timeout: 20_000 });
+        await page.waitForFunction(ready, readyArgument, { timeout: 20_000 });
     } catch {
         throw new Error(`Wasm capture did not become ready: ${errors.join(" | ")}`);
     }
@@ -26,7 +56,7 @@ async function capture(page, url, ready) {
     });
     // Font activation can trigger a second Compose layout after the first ready signal. Require the
     // caller's full readiness contract again before taking authoritative pixels or inspection data.
-    await page.waitForFunction(ready, null, { timeout: 20_000 });
+    await page.waitForFunction(ready, readyArgument, { timeout: 20_000 });
     expect(errors).toEqual([]);
     return page.screenshot();
 }
@@ -63,9 +93,8 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
         ],
         comparisonFixture: {
             resource: "jetcaster-discover-operations-v1.json",
-            revision: 99,
-            documentHash:
-                "09b7af04ab546421f72b81b1c49564f044790b8f2db4d2304dc66ff73c148643",
+            revision: jetcasterExpectation.revision,
+            documentHash: jetcasterExpectation.documentHash,
         },
         source: {
             repository: "android/compose-samples",
@@ -78,14 +107,8 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
     const builder = await capture(
         page,
         "/ui-builder/build/wasmDist/index.html?mode=jetcaster-builder",
-        () =>
-            document.documentElement.dataset.uiBuilderReady === "true" &&
-            globalThis.__uiBuilderInspection?.documentRevision === 99 &&
-            globalThis.__uiBuilderInspection?.generation?.key ===
-                "fixture-jetcaster-discover-expanded@99" &&
-            globalThis.__uiBuilderInspection?.generation?.completed === true &&
-            globalThis.__uiBuilderInspection?.generation?.expectedAuthoredNodeIds
-                ?.length === 99,
+        jetcasterBuilderReady,
+        jetcasterExpectation,
     );
     const capabilityValidation = await page.evaluate(
         () => globalThis.__uiBuilderCapabilityValidation,
@@ -271,11 +294,8 @@ test("the same Jetcaster document renders the compact single-pane reference", as
     const builder = await capture(
         page,
         "/ui-builder/build/wasmDist/index.html?mode=jetcaster-builder",
-        () =>
-            globalThis.__uiBuilderInspection?.documentRevision === 99 &&
-            globalThis.__uiBuilderInspection?.generation?.key ===
-                "fixture-jetcaster-discover-expanded@99" &&
-            globalThis.__uiBuilderInspection?.generation?.completed === true,
+        jetcasterBuilderReady,
+        jetcasterExpectation,
     );
     const manifest = await page.evaluate(
         () => globalThis.__uiBuilderInspection,
@@ -301,7 +321,9 @@ test("the same Jetcaster document renders the compact single-pane reference", as
         ).toFixed(3)}%)`,
     );
 
-    expect(manifest.generation.expectedAuthoredNodeIds).toHaveLength(99);
+    expect(manifest.generation.expectedAuthoredNodeIds).toHaveLength(
+        jetcasterExpectation.nodeCount,
+    );
     expect(manifest.nodes.find((node) => node.nodeId === "root-surface").bounds).toEqual(
         { x: 0, y: 0, width: 412, height: 800 },
     );
@@ -365,38 +387,46 @@ test("editor overlay preserves clean design pixels and the inspection manifest",
         "/ui-builder/build/wasmDist/index.html?mode=jetcaster-builder";
     const editorUrl =
         "/ui-builder/build/wasmDist/index.html?mode=jetcaster-editor";
-    const ready = () =>
-        document.documentElement.dataset.uiBuilderReady === "true" &&
-        globalThis.__uiBuilderInspection?.documentRevision === 99 &&
-        globalThis.__uiBuilderInspection?.generation?.key ===
-            "fixture-jetcaster-discover-expanded@99" &&
-        globalThis.__uiBuilderInspection?.generation?.completed === true &&
-        globalThis.__uiBuilderInspection?.generation?.expectedAuthoredNodeIds
-            ?.length === 99;
-
-    const cleanBefore = await capture(page, builderUrl, ready);
+    const cleanBefore = await capture(
+        page,
+        builderUrl,
+        jetcasterBuilderReady,
+        jetcasterExpectation,
+    );
     const cleanManifest = await page.evaluate(
         () => globalThis.__uiBuilderInspection,
     );
-    const editor = await capture(page, editorUrl, ready);
+    const editor = await capture(
+        page,
+        editorUrl,
+        jetcasterBuilderReady,
+        jetcasterExpectation,
+    );
     const editorManifest = await page.evaluate(
         () => globalThis.__uiBuilderInspection,
     );
-    const cleanAfter = await capture(page, builderUrl, ready);
+    const cleanAfter = await capture(
+        page,
+        builderUrl,
+        jetcasterBuilderReady,
+        jetcasterExpectation,
+    );
 
     expect(cleanManifest).toEqual(editorManifest);
     expect(cleanManifest).toMatchObject({
         schema: "compose-ui-builder-inspection/v1",
-        documentRevision: 99,
+        documentRevision: jetcasterExpectation.revision,
         coordinateSpace: "root-render-pixels",
         coordinatePrecision: "1/64px",
         generation: {
-            key: "fixture-jetcaster-discover-expanded@99",
+            key: jetcasterExpectation.generationKey,
             completed: true,
             stabilityFrames: 2,
         },
     });
-    expect(cleanManifest.generation.expectedAuthoredNodeIds).toHaveLength(99);
+    expect(cleanManifest.generation.expectedAuthoredNodeIds).toHaveLength(
+        jetcasterExpectation.nodeCount,
+    );
     expect(
         cleanManifest.generation.expectedAuthoredTextNodeIds.length,
         "authored text inventory",
@@ -411,7 +441,7 @@ test("editor overlay preserves clean design pixels and the inspection manifest",
             .filter((node) => node.text)
             .map((node) => node.nodeId),
     );
-    expect(cleanManifest.nodes).toHaveLength(99);
+    expect(cleanManifest.nodes).toHaveLength(jetcasterExpectation.nodeCount);
     expect(
         cleanManifest.nodes.filter((node) => node.bounds).length,
         "measured nodes",
