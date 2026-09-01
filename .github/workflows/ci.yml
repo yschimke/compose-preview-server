@@ -116,6 +116,7 @@ jobs:
           :ui-builder-generated-jetcaster:wasmFrontendDist
           :server:installDist
           --no-daemon
+          --no-parallel
       - run: npm run harness:ui-builder
         working-directory: preview-harness
       - run: npm run harness:ui-builder-jetcaster
