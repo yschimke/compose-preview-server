@@ -114,12 +114,14 @@ jobs:
           :ui-builder-renderer:wasmRendererDist
           :ui-builder-reference-jetcaster:wasmFrontendDist
           :ui-builder-generated-jetcaster:wasmFrontendDist
+          :server:installDist
           --no-daemon
       - run: npm run harness:ui-builder
         working-directory: preview-harness
       - run: npm run harness:ui-builder-jetcaster
         working-directory: preview-harness
       - run: npm run harness:ui-builder-renderer
+      - run: npm run harness:ui-builder-visual-replay
         working-directory: preview-harness
       - run: npm run harness:pages
         working-directory: preview-harness
