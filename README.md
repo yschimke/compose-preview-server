@@ -58,6 +58,9 @@ The server distribution packages the builder's Jetcaster benchmark preview as a 
 `/ui-builder/`; the existing catalog-scoped `/wasm/<system>/` preview application remains a
 distinct feature and route. The builder route opens an interactive Wasm editor around the frozen
 Jetcaster design; clean benchmark modes remain available to the independent visual harness.
+`:ui-builder-renderer` builds a separate renderer-only CMP/Wasm runtime directory and ZIP. The
+editor can mount an exact retained runtime under `/ui-builder/runtime/<runtimeId>/` in a sandboxed
+iframe and receive measured node/slot geometry without placing editor overlays in the Compose tree.
 The distribution consumes the frontend through the immutable `:ui-builder-web` archive variant;
 it no longer reaches into the frontend project's tasks or output directory.
 

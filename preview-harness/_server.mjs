@@ -56,6 +56,50 @@ export function startServer(root, port = 0) {
                     /^\/+/,
                     "",
                 );
+                // Development-only projection of the renderer-only bundle onto the same exact,
+                // version-addressed route used by the production server. Keeping this mapping in
+                // the static harness means the browser test exercises opaque-origin iframe
+                // messaging rather than importing the renderer into the editor page.
+                const rendererMatch =
+                    /^ui-builder\/runtime\/m3-2026\.09-protocol1\/(.*)$/.exec(
+                        rel,
+                    );
+                if (rendererMatch) {
+                    const rendererRoot = resolve(
+                        harnessRoot,
+                        "ui-builder-renderer/build/wasmRendererDist",
+                    );
+                    const requested = rendererMatch[1] || "index.html";
+                    const rendererPath = normalize(
+                        resolve(rendererRoot, requested),
+                    );
+                    if (
+                        relative(rendererRoot, rendererPath).startsWith("..") ||
+                        isAbsolute(relative(rendererRoot, rendererPath))
+                    ) {
+                        res.writeHead(403);
+                        res.end("forbidden");
+                        return;
+                    }
+                    try {
+                        const body = await readFile(rendererPath);
+                        const ext = rendererPath.slice(
+                            rendererPath.lastIndexOf("."),
+                        );
+                        res.writeHead(200, {
+                            "content-type":
+                                mimeByExt[ext] ?? "application/octet-stream",
+                            "cache-control": "no-store",
+                            "access-control-allow-origin": "*",
+                        });
+                        res.end(body);
+                        return;
+                    } catch {
+                        res.writeHead(404);
+                        res.end("not found: " + rel);
+                        return;
+                    }
+                }
                 // Serve-page fixtures embed the CLI viewer's hashed asset URLs
                 // (`/assets/serve/<hash>/serve.css`). Those live in the CLI's resources, not under
                 // the extension root, so without this they 404 — which is why every `serve-*` page

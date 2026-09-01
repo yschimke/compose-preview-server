@@ -111,12 +111,15 @@ jobs:
       - run: >-
           ./gradlew
           :ui-builder:wasmFrontendDist
+          :ui-builder-renderer:wasmRendererDist
           :ui-builder-reference-jetcaster:wasmFrontendDist
           :ui-builder-generated-jetcaster:wasmFrontendDist
           --no-daemon
       - run: npm run harness:ui-builder
         working-directory: preview-harness
       - run: npm run harness:ui-builder-jetcaster
+        working-directory: preview-harness
+      - run: npm run harness:ui-builder-renderer
         working-directory: preview-harness
       - run: npm run harness:pages
         working-directory: preview-harness
