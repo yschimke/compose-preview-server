@@ -50,15 +50,26 @@ async function capture(page, url, ready, readyArgument = null) {
     }
     await page.evaluate(async () => {
         if (document.fonts) await document.fonts.ready;
-        await new Promise((resolve) =>
-            requestAnimationFrame(() => requestAnimationFrame(resolve)),
-        );
     });
-    // Font activation can trigger a second Compose layout after the first ready signal. Require the
-    // caller's full readiness contract again before taking authoritative pixels or inspection data.
-    await page.waitForFunction(ready, readyArgument, { timeout: 20_000 });
-    expect(errors).toEqual([]);
-    return page.screenshot();
+    // Font activation and the Wasm canvas present can both trail the first ready signal. A fixed
+    // frame count can therefore capture a valid but transient surface. Require two consecutive
+    // pixel-identical frames while the caller's complete readiness contract remains true.
+    let previousPixels = null;
+    for (let attempt = 0; attempt < 8; attempt++) {
+        await page.evaluate(
+            () =>
+                new Promise((resolve) =>
+                    requestAnimationFrame(() => requestAnimationFrame(resolve)),
+                ),
+        );
+        await page.waitForFunction(ready, readyArgument, { timeout: 20_000 });
+        expect(errors).toEqual([]);
+        const screenshot = await page.screenshot();
+        const pixels = PNG.sync.read(screenshot).data;
+        if (previousPixels?.equals(pixels)) return screenshot;
+        previousPixels = pixels;
+    }
+    throw new Error("Wasm capture did not reach two consecutive pixel-identical frames");
 }
 
 test("Jetcaster operations render against the independent Compose Wasm oracle", async ({
@@ -174,7 +185,7 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
 
     // This is an honest convergence guard against a separately compiled reference. Tighten it as
     // the catalog adapters replace the remaining approximations; the release gate remains exact.
-    expect(mismatchRatio, "independent-oracle mismatch ratio").toBeLessThan(0.02);
+    expect(mismatchRatio, "independent-oracle mismatch ratio").toBeLessThan(0.01);
 });
 
 test("capability-generated Jetcaster Compose compiles and renders the full document", async ({
@@ -225,7 +236,7 @@ test("capability-generated Jetcaster Compose compiles and renders the full docum
     // Interim spike guard only. Product release remains exact geometry/semantics and pixel parity;
     // this tolerance is not a substitute for that gate.
     expect(mismatchRatio, "generated Compose independent-oracle mismatch").toBeLessThan(
-        0.021,
+        0.01,
     );
 });
 
