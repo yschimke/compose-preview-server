@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 
@@ -501,7 +502,7 @@ test("capability inspector validates and commits typed scaffold and Text propert
     const mainPaneVisible = page.getByRole("button", { name: "Main Pane Visible property" });
     await clickCompose(page, mainPaneVisible);
     await waitForEditor(page, 109);
-    await clickCompose(page, mainPaneVisible);
+    await clickCompose(page, page.getByRole("button", { name: /Undo \(Ctrl\/⌘\+Z\)/ }));
     await waitForEditor(page, 110);
 
     const titleBounds = await page.evaluate(() =>
@@ -570,5 +571,84 @@ test("capability inspector validates and commits typed scaffold and Text propert
     expect(evidence).toMatchSnapshot("ui-builder-typed-inspector.png", {
         threshold: 0,
         maxDiffPixelRatio: 0.04,
+    });
+});
+
+test("screen settings update the render environment without writing component nodes", async ({
+    page,
+}, testInfo) => {
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+    const beforeState = await page.evaluate(() => globalThis.__uiBuilderEditor);
+    const before = await page.screenshot();
+    if (process.env.UPDATE_UI_BUILDER_EVIDENCE === "true") {
+        await writeFile("snapshots/ui-builder-screen-settings-before.png", before);
+    }
+
+    await clickCompose(page, page.getByRole("button", { name: "Screen", exact: true }));
+    await expect(page.getByText("Screen environment", { exact: true })).toBeVisible();
+    await fillCompose(page, page.getByRole("textbox", { name: "Width (dp)" }), "1000");
+    await fillCompose(page, page.getByRole("textbox", { name: "Font scale" }), "1.15");
+    await clickCompose(page, page.getByRole("button", { name: "Light theme" }));
+    await clickCompose(
+        page,
+        page.getByRole("button", { name: "Right to left layout direction" }),
+    );
+    await clickCompose(page, page.getByRole("button", { name: "Apply screen settings" }));
+    await page.waitForFunction(
+        () =>
+            globalThis.__uiBuilderEditor?.revision === 109 &&
+            globalThis.__uiBuilderEditor?.environment?.widthDp === 1000 &&
+            globalThis.__uiBuilderEditor?.environment?.fontScale === 1.15,
+    );
+    await settle(page);
+
+    const changed = await page.evaluate(() => globalThis.__uiBuilderEditor);
+    expect(changed).toMatchObject({
+        revision: 109,
+        nodeCount: 108,
+        operationSequence: 1,
+        environment: {
+            widthDp: 1000,
+            heightDp: 800,
+            density: 1,
+            fontScale: 1.15,
+            locale: "en-US",
+            theme: "light",
+            layoutDirection: "rtl",
+        },
+    });
+    expect(changed.nodeCount).toBe(beforeState.nodeCount);
+    expect(changed.documentHash).not.toBe(beforeState.documentHash);
+    const after = await page.screenshot();
+    if (process.env.UPDATE_UI_BUILDER_EVIDENCE === "true") {
+        await writeFile("snapshots/ui-builder-screen-settings-after.png", after);
+    }
+
+    await clickCompose(page, page.getByRole("button", { name: /Undo \(Ctrl\/⌘\+Z\)/ }));
+    await page.waitForFunction(
+        () =>
+            globalThis.__uiBuilderEditor?.revision === 110 &&
+            globalThis.__uiBuilderEditor?.environment?.widthDp === 1280 &&
+            globalThis.__uiBuilderEditor?.environment?.fontScale === 1,
+    );
+    await clickCompose(
+        page,
+        page.getByRole("button", { name: /Redo \(Ctrl\/⌘\+Shift\+Z\)/ }),
+    );
+    await page.waitForFunction(
+        () =>
+            globalThis.__uiBuilderEditor?.revision === 111 &&
+            globalThis.__uiBuilderEditor?.environment?.widthDp === 1000,
+    );
+
+    await testInfo.attach("ui-builder-screen-settings-before.png", {
+        body: before,
+        contentType: "image/png",
+    });
+    await testInfo.attach("ui-builder-screen-settings-after.png", {
+        body: after,
+        contentType: "image/png",
     });
 });
