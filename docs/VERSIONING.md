@@ -38,8 +38,10 @@ branch; do not hand-edit the version in it.
 
 `deploy/image/Dockerfile`'s `ARG SERVER_VERSION` is a release-please `extra-files` entry, so it
 tracks each release without anyone remembering to bump it. `ARG TOOLS_VERSION` in the same file is
-**not** the server's version — it pins the compose-ai-tools release supplying the Android daemon,
-and moves on its own schedule.
+**not** the server's version — it names the compose-ai-tools release supplying the daemon sidecars.
+It has no Dockerfile default: automatic releases read the value from `composeai-tools` in
+`gradle/libs.versions.toml`, keeping the separately packaged daemons aligned with the server's
+runtime dependencies, while manual image builds must name the tools release explicitly.
 
 ## Not to be confused with compose-preview-contracts 2.x
 

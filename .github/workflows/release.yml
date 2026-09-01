@@ -108,8 +108,30 @@ jobs:
       - name: Publish the draft GitHub release
         run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false --latest
 
+  resolve-preview-host-tools:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tools.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+      - name: Read the compose-ai-tools version used by the server
+        id: tools
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^composeai-tools = "\([^"]*\)"$/\1/p' gradle/libs.versions.toml)"
+          test -n "${version}" || {
+            echo "::error::composeai-tools is missing from gradle/libs.versions.toml"
+            exit 1
+          }
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
   preview-host-image:
-    needs: [release-please, publish]
+    needs: [release-please, publish, resolve-preview-host-tools]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
       contents: read
@@ -118,7 +140,10 @@ jobs:
     uses: ./.github/workflows/preview-host-image.yml
     with:
       server_version: ${{ needs.release-please.outputs.tag_name }}
-      tools_version: ${{ vars.COMPOSE_AI_TOOLS_VERSION || '1.53.0' }}
+      # The image's daemon sidecars must be the same compose-ai-tools release as the server's
+      # runtime dependencies. A separate repository variable silently stayed at 1.53.0 while the
+      # Gradle pin moved on, so new server images kept shipping an old Android daemon (#4822).
+      tools_version: ${{ needs.resolve-preview-host-tools.outputs.version }}
     secrets:
       DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
       SERVE_ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
