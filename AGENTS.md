@@ -22,12 +22,14 @@ repository boundary.
 - Wire shapes belong in `compose-preview-contracts`; server behavior and browser/offline scoring
   implementation belong here. Moving implementation into the contracts repository does not reduce
   traffic coupling.
-- Two Kotlin modules, and the direction is `:server` -> `:render-host`, never back. `:render-host`
+- Three published Kotlin modules. `:server` depends on `:render-host` and `:ui-builder-runtime`,
+  never back; the latter two do not depend on each other. `:render-host`
   holds what renders and reads history — the render host, the bundle daemon, the git-backed preview
   history — and must stay free of a web server; `:server` holds the HTTP layer, the runner, the
-  catalog store and the web surfaces. Both publish, and a release must publish both: `:server`'s POM
-  names `compose-preview-render-host` at the same version. `checkRenderHostIsServerFree` and
-  `checkServeModuleBoundary` enforce the two halves.
+  catalog store and the web surfaces. `:ui-builder-runtime` holds persistent design state, catalog
+  validation and renderer-neutral export orchestration. All three publish in lockstep: `:server`'s
+  POM names both libraries at the same version. `checkRenderHostIsServerFree`,
+  `checkUiBuilderRuntimeBoundary` and `checkServeModuleBoundary` enforce the graph.
 - Keep `checkServeModuleBoundary` a resolved-classpath positive allowlist, including transitives.
 - The source package stays `ee.schimke.composeai.cli.serve` until a separately reviewed rename.
 - UI-affecting PRs include viewable before/after evidence and update the visual harness when needed.

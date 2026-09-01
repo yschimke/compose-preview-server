@@ -78,7 +78,14 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
     const builder = await capture(
         page,
         "/ui-builder/build/wasmDist/index.html?mode=jetcaster-builder",
-        () => document.documentElement.dataset.uiBuilderReady === "true",
+        () =>
+            document.documentElement.dataset.uiBuilderReady === "true" &&
+            globalThis.__uiBuilderInspection?.documentRevision === 99 &&
+            globalThis.__uiBuilderInspection?.generation?.key ===
+                "fixture-jetcaster-discover-expanded@99" &&
+            globalThis.__uiBuilderInspection?.generation?.completed === true &&
+            globalThis.__uiBuilderInspection?.generation?.expectedAuthoredNodeIds
+                ?.length === 99,
     );
     const capabilityValidation = await page.evaluate(
         () => globalThis.__uiBuilderCapabilityValidation,

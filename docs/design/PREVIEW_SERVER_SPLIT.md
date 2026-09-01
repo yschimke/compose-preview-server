@@ -5,6 +5,24 @@
 > `compose-preview-contracts` coordinates. The red traffic gate remains useful for measuring the
 > cross-repository release cost; it is no longer a condition that keeps the source co-located.
 
+## UI-builder runtime boundary (2026-08-31)
+
+The production UI builder introduced a third published, lockstep JVM module:
+`compose-preview-ui-builder-runtime`. It owns the transport-neutral service port, persistent design
+state, exact catalog validation and revision-pinned export orchestration. It intentionally does not
+own Ktor routes, authentication, MCP tooling, Compose UI, daemon launch or render-host execution.
+
+The dependency graph is `:server -> :ui-builder-runtime` and `:server -> :render-host`; there is no
+edge between the libraries. The runtime emits a contracts-shaped `UiBuilderRenderRequest`, and the
+server adapts it to `ServeRenderHost`. This removes `ui-builder-protocol` and UI-builder service
+types from the offline render/history artifact. The generic packaged preview bundle is a build-time
+resource of the runtime that owns its revision lifecycle; the frontend is only its build-time
+producer and is absent from the runtime classpath and POM.
+
+This is a module boundary before it is a repository boundary. Publishing it now makes a future
+repository move mechanical without adding another release train while service, ACL and export
+semantics are still evolving.
+
 Issue [#3824](https://github.com/yschimke/compose-ai-tools/issues/3824) asks whether the preview
 server should live in its own repository, measures the coupling, and answers: **not yet, and here is
 what to do meanwhile.** This document is the "meanwhile" — what the preparation is, what has landed,

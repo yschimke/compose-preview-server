@@ -117,6 +117,9 @@ dependencies {
   // The sources kept their `ee.schimke.composeai.cli.serve` package, so nothing in this module
   // changed at the call sites; only the module that compiles them did.
   api(project(":render-host"))
+  // Authoritative persistence, validation, collaboration and export orchestration. The server
+  // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
+  api(project(":ui-builder-runtime"))
 
   api(libs.composeai.common.web.escaping)
   // Published wire-format DTOs and the bundle format. `api` because they appear in this module's
@@ -391,10 +394,9 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     }
   )
 
-  // The render host, split out of this module so the CLI's offline commands can reach it without a
-  // web server (#4832). The only project dependency this module may have; everything else in this
-  // build reaching its classpath is still a failure.
-  allowedProjects.set(listOf(":render-host"))
+  // The render host and UI-builder runtime are the two deliberately published libraries beneath
+  // the server. Everything else in this build reaching its classpath is still a failure.
+  allowedProjects.set(listOf(":render-host", ":ui-builder-runtime"))
 
   // The same implementations named twice, because they can arrive by two different routes and the
   // identity differs between them.

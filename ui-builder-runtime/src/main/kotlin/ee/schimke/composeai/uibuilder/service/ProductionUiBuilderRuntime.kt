@@ -2,12 +2,6 @@
 
 package ee.schimke.composeai.uibuilder.service
 
-import ee.schimke.composeai.cli.serve.RenderOutcome
-import ee.schimke.composeai.cli.serve.ServeBundleDaemon
-import ee.schimke.composeai.cli.serve.ServeRenderHost
-import ee.schimke.composeai.cli.serve.SvgOutcome
-import ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
-import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
@@ -261,90 +255,74 @@ class RevisionPinnedComposeExportExecutor : UiBuilderExportExecutor {
   }
 }
 
-/**
- * Opaque bundled Compose preview backed by the existing daemon render host.
- *
- * The bundle is produced at build time by `:ui-builder:composePreviewBundle` and packaged as bytes
- * in this module; there is no runtime or published project dependency from render-host to
- * ui-builder. Every request supplies the exact saved document as a named string override, so the
- * PNG and Figma SVG are products of the same revision-bearing Compose frame. [open] fails closed
- * when the release lacks a daemon sidecar or cannot materialize the bundle.
- */
-class ProductionUiBuilderRenderExecutor
-private constructor(
-  private val host: ServeRenderHost,
+/** Immutable, renderer-neutral request for one exact saved document revision. */
+data class UiBuilderRenderRequest(
+  val designId: String,
+  val revision: Long,
+  val documentHash: String,
+  val widthPx: Int,
+  val heightPx: Int,
+  val density: Float,
+  val localeTag: String,
+  val fontScale: Float,
+  val encodedDocument: String,
+)
+
+/** Narrow pixel/vector port implemented by the server beside its render-host dependency. */
+interface UiBuilderRenderPort : Closeable {
+  val supportsSvg: Boolean
+
+  fun renderPng(request: UiBuilderRenderRequest): ByteArray
+
+  fun renderSvg(request: UiBuilderRenderRequest): ByteArray
+}
+
+/** Combines the runtime-owned Compose projection with an injected renderer-neutral port. */
+class ProductionUiBuilderExportExecutor(
+  private val renderer: UiBuilderRenderPort,
   private val compose: UiBuilderExportExecutor = RevisionPinnedComposeExportExecutor(),
 ) : UiBuilderExportExecutor, Closeable {
   val capabilities: ExportCapabilitiesV1 =
-    ExportCapabilitiesV1(composeCode = true, svg = host.hasSvgExport, png = true)
+    ExportCapabilitiesV1(composeCode = true, svg = renderer.supportsSvg, png = true)
 
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 =
     when (request.format) {
       ExportFormatV1.COMPOSE -> compose.export(request)
-      ExportFormatV1.PNG -> request.renderPng()
-      ExportFormatV1.SVG -> request.renderSvg()
+      ExportFormatV1.PNG -> request.binaryArtifact(renderer.renderPng(request.toRenderRequest()))
+      ExportFormatV1.SVG -> request.svgArtifact(renderer.renderSvg(request.toRenderRequest()))
     }
 
-  override fun close() {
-    host.close()
-  }
+  override fun close() = renderer.close()
 
-  private fun RevisionPinnedUiBuilderExport.overrides(): PreviewOverrides {
-    val width = (document.environment.widthDp * document.environment.density).toInt()
-    val height = (document.environment.heightDp * document.environment.density).toInt()
-    return PreviewOverrides(
-      widthPx = width,
-      heightPx = height,
+  private fun RevisionPinnedUiBuilderExport.toRenderRequest(): UiBuilderRenderRequest =
+    UiBuilderRenderRequest(
+      designId = designId,
+      revision = revision,
+      documentHash = documentHash,
+      widthPx = (document.environment.widthDp * document.environment.density).toInt(),
+      heightPx = (document.environment.heightDp * document.environment.density).toInt(),
       density = document.environment.density.toFloat(),
       localeTag = document.environment.locale,
       fontScale = document.environment.fontScale.toFloat(),
-      namedOverrides =
-        mapOf(
-          DOCUMENT_OVERRIDE_KEY to
-            PreviewOverrideValue.StringValue(projectRendererDocument(document))
-        ),
+      encodedDocument = projectRendererDocument(document),
     )
-  }
 
-  private fun RevisionPinnedUiBuilderExport.renderPng(): ExportArtifactV1 {
-    val bytes =
-      when (val outcome = host.render(PREVIEW_ID, overrides())) {
-        is RenderOutcome.Ok -> outcome.png
-        RenderOutcome.NotFound -> error("packaged UI-builder preview is missing")
-        RenderOutcome.Busy -> error("UI-builder renderer is busy")
-        is RenderOutcome.Failed -> error(outcome.reason)
-      }
-    return binaryArtifact(ExportFormatV1.PNG, "image/png", bytes)
-  }
-
-  private fun RevisionPinnedUiBuilderExport.renderSvg(): ExportArtifactV1 {
-    val bytes =
-      when (val outcome = host.renderSvg(PREVIEW_ID, overrides())) {
-        is SvgOutcome.Ok -> outcome.svg
-        SvgOutcome.NotFound -> error("packaged UI-builder SVG producer is unavailable")
-        is SvgOutcome.Failed -> error(outcome.reason)
-      }
-    val content = bytes.toString(Charsets.UTF_8)
-    return ExportArtifactV1(
-      format = ExportFormatV1.SVG,
-      mediaType = "image/svg+xml; charset=utf-8",
-      encoding = ExportEncodingV1.UTF8,
-      content = content,
+  private fun RevisionPinnedUiBuilderExport.binaryArtifact(bytes: ByteArray): ExportArtifactV1 =
+    ExportArtifactV1(
+      format = ExportFormatV1.PNG,
+      mediaType = "image/png",
+      encoding = ExportEncodingV1.BASE64,
+      content = Base64.getEncoder().encodeToString(bytes),
       contentDigest = bytes.sha256(),
       diagnostics = provenanceDiagnostics(),
     )
-  }
 
-  private fun RevisionPinnedUiBuilderExport.binaryArtifact(
-    format: ExportFormatV1,
-    mediaType: String,
-    bytes: ByteArray,
-  ): ExportArtifactV1 =
+  private fun RevisionPinnedUiBuilderExport.svgArtifact(bytes: ByteArray): ExportArtifactV1 =
     ExportArtifactV1(
-      format = format,
-      mediaType = mediaType,
-      encoding = ExportEncodingV1.BASE64,
-      content = Base64.getEncoder().encodeToString(bytes),
+      format = ExportFormatV1.SVG,
+      mediaType = "image/svg+xml; charset=utf-8",
+      encoding = ExportEncodingV1.UTF8,
+      content = bytes.toString(Charsets.UTF_8),
       contentDigest = bytes.sha256(),
       diagnostics = provenanceDiagnostics(),
     )
@@ -358,66 +336,40 @@ private constructor(
           "Rendered design $designId revision $revision ($documentHash) through the packaged Compose UI-builder preview.",
       )
     )
+}
 
-  companion object {
-    const val BUNDLE_RESOURCE: String =
-      "/ee/schimke/composeai/uibuilder/renderer/ui-builder-renderer.bundle.png"
-    const val PREVIEW_ID: String =
-      "ee.schimke.composeai.uibuilder.ProductionUiBuilderPreviewKt.ProductionUiBuilderPreview"
-    const val DOCUMENT_OVERRIDE_KEY: String = "uiBuilder.document.v1"
+/** Runtime-owned opaque preview bundle; materialization and rendering stay outside this module. */
+object PackagedUiBuilderRenderBundle {
+  const val RESOURCE: String =
+    "/ee/schimke/composeai/uibuilder/renderer/ui-builder-renderer.bundle.png"
+  const val PREVIEW_ID: String =
+    "ee.schimke.composeai.uibuilder.ProductionUiBuilderPreviewKt.ProductionUiBuilderPreview"
+  const val DOCUMENT_OVERRIDE_KEY: String = "uiBuilder.document.v1"
 
-    internal fun forHost(host: ServeRenderHost): ProductionUiBuilderRenderExecutor =
-      ProductionUiBuilderRenderExecutor(host)
-
-    fun open(
-      root: Path,
-      onLog: (String) -> Unit = { System.err.println("[ui-builder renderer] $it") },
-    ): ProductionUiBuilderRenderExecutor {
-      val bundleBytes =
-        checkNotNull(
-            ProductionUiBuilderRenderExecutor::class.java.getResourceAsStream(BUNDLE_RESOURCE)
-          ) {
-            "packaged UI-builder renderer bundle is missing"
-          }
-          .use { it.readBytes() }
-      val generation = root.toAbsolutePath().normalize().resolve(bundleBytes.sha256())
-      Files.createDirectories(generation)
-      val bundle = generation.resolve("ui-builder-renderer.bundle.png")
-      if (!Files.exists(bundle) || !Files.readAllBytes(bundle).contentEquals(bundleBytes)) {
-        val partial = Files.createTempFile(generation, ".ui-builder-renderer.", ".tmp")
-        try {
-          Files.write(partial, bundleBytes)
-          Files.move(
-            partial,
-            bundle,
-            StandardCopyOption.ATOMIC_MOVE,
-            StandardCopyOption.REPLACE_EXISTING,
-          )
-        } finally {
-          Files.deleteIfExists(partial)
+  fun copyTo(root: Path): Path {
+    val bytes =
+      checkNotNull(javaClass.getResourceAsStream(RESOURCE)) {
+          "packaged UI-builder renderer bundle is missing"
         }
-      }
-      val state =
-        ServeBundleDaemon.materialize(
-          bundleFile = bundle.toFile(),
-          destDir = generation.resolve("runtime").toFile(),
-          system = "ui-builder-renderer",
-          onLog = onLog,
-        ) ?: error("could not materialize packaged UI-builder renderer bundle")
-      require(state.previews.any { it.id == PREVIEW_ID }) {
-        "packaged UI-builder preview id is missing"
-      }
-      val host =
-        ServeRenderHost.open(
-          descriptorPath = state.descriptor,
-          workspaceRoot = state.workspaceRoot,
-          workspaceName = state.workspaceName,
-          previews = state.previews,
-          label = "UI builder renderer",
-          onLog = onLog,
+        .use { it.readBytes() }
+    val generation = root.toAbsolutePath().normalize().resolve(bytes.sha256())
+    Files.createDirectories(generation)
+    val bundle = generation.resolve("ui-builder-renderer.bundle.png")
+    if (!Files.exists(bundle) || !Files.readAllBytes(bundle).contentEquals(bytes)) {
+      val partial = Files.createTempFile(generation, ".ui-builder-renderer.", ".tmp")
+      try {
+        Files.write(partial, bytes)
+        Files.move(
+          partial,
+          bundle,
+          StandardCopyOption.ATOMIC_MOVE,
+          StandardCopyOption.REPLACE_EXISTING,
         )
-      return ProductionUiBuilderRenderExecutor(host)
+      } finally {
+        Files.deleteIfExists(partial)
+      }
     }
+    return bundle
   }
 }
 
