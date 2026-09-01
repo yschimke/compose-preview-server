@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.12.0](https://github.com/yschimke/compose-preview-server/compare/v2.11.0...v2.12.0) (2026-09-01)
+
+
+### Features
+
+* **ui-builder:** add screen environment controls ([#152](https://github.com/yschimke/compose-preview-server/issues/152)) ([b6d200b](https://github.com/yschimke/compose-preview-server/commit/b6d200bb9ae756306d8c57efcc2981a5aa0ed11b))
+* **ui-builder:** add typed authoring inspector ([#150](https://github.com/yschimke/compose-preview-server/issues/150)) ([2362ba3](https://github.com/yschimke/compose-preview-server/commit/2362ba3c34cc23f1a470fe684becf30405a50161))
+
+
+### Bug Fixes
+
+* publish maximum-node design pages ([#149](https://github.com/yschimke/compose-preview-server/issues/149)) ([cd2d420](https://github.com/yschimke/compose-preview-server/commit/cd2d4208887c4317882fdf9e7fbec6d9af18ab47))
+* **ui-builder:** replace renderer input shortcuts ([#151](https://github.com/yschimke/compose-preview-server/issues/151)) ([fdf7f02](https://github.com/yschimke/compose-preview-server/commit/fdf7f024af656375708556d0c797bb2fee7b78b5))
+
 ## [2.11.0](https://github.com/yschimke/compose-preview-server/compare/v2.10.0...v2.11.0) (2026-09-01)
 
 
