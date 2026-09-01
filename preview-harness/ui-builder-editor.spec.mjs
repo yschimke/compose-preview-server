@@ -159,6 +159,63 @@ test("the pinned editor canvas preserves clean 1280x800 geometry and pixels", as
     ).toBeLessThan(0.002);
 });
 
+test("mobile editor defaults to the design and exposes collapsible dock panels", async ({
+    page,
+}, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+
+    await expect(page.getByText("M3 component catalog", { exact: true })).toBeHidden();
+    await expect(page.getByText("m3/surface", { exact: true })).toBeHidden();
+    const canvas = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
+    expect(canvas.scale).toBeGreaterThan(0.25);
+    expect(canvas.scale).toBeLessThan(0.31);
+    expect(canvas.bounds.width).toBeLessThanOrEqual(374);
+
+    const design = await page.screenshot();
+    await testInfo.attach("ui-builder-mobile-design.png", {
+        body: design,
+        contentType: "image/png",
+    });
+
+    await clickCompose(page, page.getByRole("button", { name: "Open components panel" }));
+    await expect(page.getByText("M3 component catalog", { exact: true })).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Close components panel" }),
+    ).toBeVisible();
+    const components = await page.screenshot();
+    await testInfo.attach("ui-builder-mobile-components.png", {
+        body: components,
+        contentType: "image/png",
+    });
+
+    await clickCompose(page, page.getByRole("button", { name: "Open properties panel" }));
+    await expect(page.getByText("M3 component catalog", { exact: true })).toBeHidden();
+    await expect(page.getByText("m3/surface", { exact: true })).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Close properties panel" }),
+    ).toBeVisible();
+    const properties = await page.screenshot();
+    await testInfo.attach("ui-builder-mobile-properties.png", {
+        body: properties,
+        contentType: "image/png",
+    });
+
+    expect(design).toMatchSnapshot("ui-builder-mobile-design.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+    expect(components).toMatchSnapshot("ui-builder-mobile-components.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+    expect(properties).toMatchSnapshot("ui-builder-mobile-properties.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+});
+
 test("the property inspector selects Google icons from a searchable catalog", async ({
     page,
 }, testInfo) => {
