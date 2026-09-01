@@ -672,6 +672,30 @@ public class ServeCommandOptions(
   override val uiBuilderDir: File? =
     args.flagValue("--ui-builder-dir")?.takeIf { it.isNotBlank() }?.let(::File)
 
+  /** Exact, retained renderer bundles; unlike the builder shell these paths are immutable pins. */
+  override val uiBuilderRuntimeDirs: Map<String, File> =
+    args
+      .flagValue("--ui-builder-runtime-dir")
+      ?.split(",")
+      ?.map { entry ->
+        val eq = entry.indexOf('=')
+        require(eq > 0 && eq < entry.lastIndex) {
+          "--ui-builder-runtime-dir entries must be <runtimeId>=<dir>"
+        }
+        val runtimeId = entry.substring(0, eq).trim()
+        val path = entry.substring(eq + 1).trim()
+        require(runtimeId.isNotEmpty() && path.isNotEmpty()) {
+          "--ui-builder-runtime-dir entries must be <runtimeId>=<dir>"
+        }
+        runtimeId to File(path)
+      }
+      ?.also { entries ->
+        require(entries.map { it.first }.distinct().size == entries.size) {
+          "--ui-builder-runtime-dir contains a duplicate runtime id"
+        }
+      }
+      ?.toMap() ?: emptyMap()
+
   /** Raw durable-state directory; `none` disables the authoritative design API. */
   override val uiBuilderStateDirFlag: String? =
     args.flagValue("--ui-builder-state-dir")?.takeIf { it.isNotBlank() }
@@ -1075,6 +1099,10 @@ public class ServeCommandOptions(
         --ui-builder-dir <dir>
                           Standalone Compose UI builder distribution served at /ui-builder/.
                           This is additive and does not replace or alter /wasm/<system>/.
+        --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]
+                          Retained immutable native renderer bundles. Each directory must contain
+                          runtime-manifest.json. Runtime ids are exact pins; there is no latest
+                          fallback.
         --ui-builder-state-dir <dir>|none
                           Durable authoritative design store used by the UI-builder HTTP and
                           WebSocket API. Defaults to ui-builder-state beside --catalogs-file, or

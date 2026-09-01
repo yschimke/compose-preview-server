@@ -2538,6 +2538,7 @@ public class ServeRunner(
         wasmCatalogs = wasmCatalogs,
         wasmUiDir = usableWasmUiDir(),
         uiBuilderDir = uiBuilderAppDir,
+        uiBuilderRuntimeDirs = uiBuilderRuntimeDirs,
         privateWasmCatalogs = privateWasmCatalogs,
         rcPlayerWasmDir = rcPlayerWasmDir,
         // Preserve the CONFIGURED set, not only startup successes. Failed rows then stay visible on

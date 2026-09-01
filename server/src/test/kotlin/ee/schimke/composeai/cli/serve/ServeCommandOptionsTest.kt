@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -29,6 +30,8 @@ class ServeCommandOptionsTest {
           "/srv/wasm-ui",
           "--ui-builder-dir",
           "/srv/ui-builder",
+          "--ui-builder-runtime-dir",
+          "m3-2026.09=/srv/runtime-one,m3-2026.10=/srv/runtime-two",
           "--ui-builder-state-dir",
           "/srv/ui-builder-state",
         )
@@ -45,6 +48,13 @@ class ServeCommandOptionsTest {
     assertEquals(2500, options.catalogMaxImages)
     assertEquals("/srv/wasm-ui", options.wasmUiDir?.path)
     assertEquals("/srv/ui-builder", options.uiBuilderDir?.path)
+    assertEquals(
+      mapOf(
+        "m3-2026.09" to java.io.File("/srv/runtime-one"),
+        "m3-2026.10" to java.io.File("/srv/runtime-two"),
+      ),
+      options.uiBuilderRuntimeDirs,
+    )
     assertEquals("/srv/ui-builder-state", options.uiBuilderStateDirFlag)
   }
 
@@ -63,6 +73,16 @@ class ServeCommandOptionsTest {
       "none",
       options(listOf("--ui-builder-state-dir=none")).uiBuilderStateDirFlag,
     )
+  }
+
+  @Test
+  fun `runtime bundle arguments reject duplicates and malformed entries`() {
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-runtime-dir", "runtime="))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-runtime-dir", "runtime=/one,runtime=/two"))
+    }
   }
 
   private fun options(args: List<String>): ServeCommandOptions =

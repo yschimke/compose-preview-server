@@ -134,6 +134,8 @@ class ServeHttpServer(
   private val wasmUiDir: File? = null,
   /** Independent Compose UI builder app. It is never projected as a catalog Wasm viewer. */
   private val uiBuilderDir: File? = null,
+  /** Retained native renderer directories, snapshotted before this server accepts requests. */
+  uiBuilderRuntimeDirs: Map<String, File> = emptyMap(),
   /** Local auto-discovered apps that must use the credential-carrying `/wasm-private/` route. */
   private val privateWasmCatalogs: Set<String> = emptySet(),
   /**
@@ -436,6 +438,7 @@ class ServeHttpServer(
   /** Trusted module roots for local browse sessions, keyed by their session ids. */
   private val localSourceRoots: Map<String, File> = emptyMap(),
 ) {
+  private val uiBuilderRuntimeAssets = ServeUiBuilderRuntimeAssets.load(uiBuilderRuntimeDirs)
 
   /**
    * Resolves `/playground?from=<system>/<previewId>` to that preview's source. Built here rather
@@ -884,6 +887,9 @@ class ServeHttpServer(
           if (uiBuilderDir == null) call.respondText("not found", status = HttpStatusCode.NotFound)
           else call.respondRedirect("/ui-builder/")
         }
+        // A runtime id is an exact immutable pin. There is deliberately no unversioned or
+        // `latest` route: an unavailable pin has to surface as an explicit migration decision.
+        get("/ui-builder/runtime/{runtimeId}/{path...}") { handleUiBuilderRuntimeAsset() }
         get("/ui-builder/{path...}") { handleUiBuilderAsset() }
 
         // The CMP/Wasm Remote Compose player is a single shared app rather than a per-catalog app.
@@ -10075,6 +10081,28 @@ class ServeHttpServer(
     }
     val bytes = withContext(Dispatchers.IO) { file.readBytes() }
     call.respondBytes(bytes, wasmContentType(file.name))
+  }
+
+  private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {
+    val runtimeId = call.parameters["runtimeId"].orEmpty()
+    val segments = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
+    val asset = uiBuilderRuntimeAssets.asset(runtimeId, segments)
+    if (asset == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
+    call.response.headers.append(
+      HttpHeaders.CacheControl,
+      "public, max-age=31536000, immutable",
+    )
+    call.response.headers.append(HttpHeaders.ETag, asset.etag)
+    if (call.request.headers[HttpHeaders.IfNoneMatch] == asset.etag) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    val name = segments.lastOrNull() ?: ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME
+    call.respondBytes(asset.bytes, wasmContentType(name))
   }
 
   // ------------------------------------------------------------ agent grants
