@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.10.0](https://github.com/yschimke/compose-preview-server/compare/v2.9.0...v2.10.0) (2026-09-01)
+
+
+### Features
+
+* **serve:** compare paired catalog references ([#137](https://github.com/yschimke/compose-preview-server/issues/137)) ([5d70daa](https://github.com/yschimke/compose-preview-server/commit/5d70daa07504cc13fedaf7302ca17f3102f97684))
+
+
+### Bug Fixes
+
+* **ui-builder:** consolidate mutable test clock ([2b7da62](https://github.com/yschimke/compose-preview-server/commit/2b7da6278a487759d088e97ef76581baaa149e82))
+
 ## [2.9.0](https://github.com/yschimke/compose-preview-server/compare/v2.8.0...v2.9.0) (2026-09-01)
 
 
