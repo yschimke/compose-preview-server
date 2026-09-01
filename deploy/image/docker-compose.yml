@@ -263,14 +263,16 @@ services:
       # default of 1 would break every box without an OAuth app). `0` opts out explicitly.
       SERVE_AGENT_GRANTS: "${SERVE_AGENT_GRANTS:-}"
       SERVE_AGENT_GRANT_SCOPES: "${SERVE_AGENT_GRANT_SCOPES:-}"
-      # Non-cumulative permissions a grant may carry beside its scope — currently `images`, which
-      # lets an approved agent use the image lane above without a GitHub credential of its own.
-      # Needs SERVE_ACCEPT_IMAGES; `serve` refuses to start otherwise rather than offering a
-      # checkbox whose grant would 404.
-      SERVE_AGENT_GRANT_CAPABILITIES: "${SERVE_AGENT_GRANT_CAPABILITIES:-}"
+      # Non-cumulative permissions a grant may carry beside its scope. UI-builder capabilities are
+      # enabled by default because this image always packages the authenticated design API; image
+      # upload remains opt-in through SERVE_ACCEPT_IMAGES/SERVE_IMAGE_UPLOAD_REPO.
+      SERVE_AGENT_GRANT_CAPABILITIES: "${SERVE_AGENT_GRANT_CAPABILITIES:-ui-builder-read,ui-builder-write,ui-builder-export}"
       SERVE_AGENT_GRANT_MAX_TTL: "${SERVE_AGENT_GRANT_MAX_TTL:-}"
       SERVE_AGENT_GRANT_MAX_ACTIVE: "${SERVE_AGENT_GRANT_MAX_ACTIVE:-}"
       SERVE_AGENT_GRANT_RATE_LIMIT: "${SERVE_AGENT_GRANT_RATE_LIMIT:-}"
+      # Durable browser/MCP design state. The preview_config volume is shared across rolling image
+      # replacements, so a design does not disappear when preview.coo.ee updates.
+      SERVE_UI_BUILDER_STATE_DIR: "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}"
       # Naming this turns the image lane on (see SERVE_ACCEPT_IMAGES above): the repository an
       # uploader's GitHub token must have access to. Write access on a public repo, any grant on a
       # private one.
