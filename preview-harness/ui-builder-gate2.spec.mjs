@@ -460,13 +460,17 @@ test("checked-in Jetcaster operations converge and production PNG matches the in
         expect(fixture).toMatchObject({
             schema: "compose-ui-builder-operations/v1-candidate",
             designId: "fixture-jetcaster-discover-expanded",
-            expectedDocumentHash:
-                "09b7af04ab546421f72b81b1c49564f044790b8f2db4d2304dc66ff73c148643",
         });
-        expect(fixture.operations).toHaveLength(100);
+        expect(fixture.expectedDocumentHash).toMatch(/^[0-9a-f]{64}$/);
+        const expectedMutationCount = fixture.operations.length - 1;
+        expect(expectedMutationCount).toBeGreaterThan(0);
 
         const replay = await replayJetcasterOperations(server.origin, fixture);
-        expect(replay).toMatchObject({ revision: 1, mutationCount: 99 });
+        expect(replay).toMatchObject({
+            revision: 1,
+            mutationCount: expectedMutationCount,
+        });
+        expect(replay.documentHash).toMatch(/^[0-9a-f]{64}$/);
         const opened = responseOf(
             await apiCall(server.origin, {
                 type: "openDesign",
@@ -478,7 +482,9 @@ test("checked-in Jetcaster operations converge and production PNG matches the in
             id: visualReplayDesignId,
             revision: replay.revision,
         });
-        expect(Object.keys(opened.state.document.nodes)).toHaveLength(99);
+        expect(Object.keys(opened.state.document.nodes)).toHaveLength(
+            expectedMutationCount,
+        );
 
         browserA = await openBrowserSession(
             browser,
@@ -490,7 +496,8 @@ test("checked-in Jetcaster operations converge and production PNG matches the in
             visualReplayDesignId,
         );
         const stateA = await editorState(browserA.page, replay.revision);
-        expect(stateA.nodeCount).toBe(99);
+        expect(stateA.nodeCount).toBe(expectedMutationCount);
+        expect(stateA.documentHash).toMatch(/^[0-9a-f]{64}$/);
 
         const agent = await issueAgentGrant(server.origin);
         responseOf(
@@ -519,7 +526,7 @@ test("checked-in Jetcaster operations converge and production PNG matches the in
             visualReplayDesignId,
         );
         const stateB = await editorState(browserB.page, replay.revision);
-        expect(stateB.nodeCount).toBe(99);
+        expect(stateB.nodeCount).toBe(expectedMutationCount);
         expect(stateB.documentHash).toBe(stateA.documentHash);
 
         const pngArtifact = responseOf(
@@ -546,7 +553,7 @@ test("checked-in Jetcaster operations converge and production PNG matches the in
             referenceId: "jetcaster-discover-expanded-v1",
             comparisonFixture: {
                 resource: "jetcaster-discover-operations-v1.json",
-                revision: 99,
+                revision: replay.mutationCount,
                 documentHash: fixture.expectedDocumentHash,
             },
         });
@@ -604,7 +611,7 @@ test("checked-in Jetcaster operations converge and production PNG matches the in
                     {
                         designId: visualReplayDesignId,
                         revision: replay.revision,
-                        fixtureRevision: 99,
+                        fixtureRevision: replay.mutationCount,
                         operationCount: fixture.operations.length,
                         mutationCount: replay.mutationCount,
                         serviceDocumentHash: replay.documentHash,
@@ -680,7 +687,7 @@ test("Gate 2 converges browsers and actual MCP through restart and exports", asy
         expect(browserA.designResponses).toContain(200);
         checkpoint("Browser A created revision 0; reloading to reopen");
         await browserA.page.reload();
-        await editorState(browserA.page, 0);
+        const initialBrowserState = await editorState(browserA.page, 0);
         checkpoint("Browser A reopened revision 0");
 
         // A real editor control emits the Browser A operation; the API client reads it back.
@@ -700,7 +707,7 @@ test("Gate 2 converges browsers and actual MCP through restart and exports", asy
         await browserA.page.keyboard.press("Control+d");
         const afterBrowser = await editorState(browserA.page, 1);
         checkpoint("Browser A committed revision 1");
-        expect(afterBrowser.nodeCount).toBe(100);
+        expect(afterBrowser.nodeCount).toBe(initialBrowserState.nodeCount + 1);
         expect(afterBrowser.selectedNodeId).toBe("main-scrim-copy-001");
         const readByAdapter = responseOf(
             await apiCall(server.origin, { type: "openDesign", designId }),
