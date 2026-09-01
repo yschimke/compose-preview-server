@@ -1812,6 +1812,26 @@ html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"] .cp-stage { backg
   color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-body-medium-size);
   line-height: var(--md-sys-typescale-body-medium-line); }
+/* A catalog component's production Compose API. The producer owns the Kotlin signature; this page
+   only presents it. Values and content slots share one ordered list so `spacing: Dp` sits beside
+   `content: RowScope.() -> Unit`, while the slot badge makes the nesting seam scannable. */
+.cp-component-api { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px;
+  margin: -4px 0 12px; color: var(--md-sys-color-on-surface-variant); }
+.cp-component-api-label { font-size: var(--md-sys-typescale-label-medium-size); font-weight: 650; }
+.cp-component-api ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0;
+  list-style: none; }
+.cp-component-param { display: inline-flex; align-items: center; gap: 5px; min-width: 0;
+  padding: 4px 8px; border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-small);
+  background: var(--md-sys-color-surface-container-low); }
+.cp-component-param code { overflow-wrap: anywhere; color: var(--md-sys-color-on-surface); }
+.cp-component-param-name { color: var(--md-sys-color-primary); font-weight: 650; }
+.cp-component-param-kind, .cp-component-param-default {
+  font-size: var(--md-sys-typescale-label-small-size); line-height: 1; }
+.cp-component-param-kind { padding: 3px 5px; border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container);
+  font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
+.cp-component-param-default { color: var(--md-sys-color-outline); }
 .cp-preview-id { font-family: var(--md-sys-typescale-mono-font); padding: 2px 6px;
   border-radius: var(--md-sys-shape-corner-extra-small);
   background: var(--md-sys-color-surface-container-high); color: var(--cp-fg-muted);

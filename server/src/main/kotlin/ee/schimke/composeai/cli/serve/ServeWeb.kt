@@ -14196,6 +14196,24 @@ ${scriptTag("known-differences.js")}
         ?.takeIf { it.isNotBlank() }
         ?.let { "<p class=\"cp-preview-caption\">${WebEscaping.htmlEscape(it)}</p>" }
         .orEmpty()
+    val componentParametersHtml =
+      if (!componentBrowser || preview.componentParameters.isEmpty()) ""
+      else {
+        val parameters =
+          preview.componentParameters.joinToString("") { parameter ->
+            val slot =
+              if (parameter.composableSlot) "<span class=\"cp-component-param-kind\">slot</span>"
+              else ""
+            val default =
+              if (parameter.hasDefault) "<span class=\"cp-component-param-default\">optional</span>"
+              else ""
+            "<li class=\"cp-component-param${if (parameter.composableSlot) " cp-component-param--slot" else ""}\">" +
+              "<code><span class=\"cp-component-param-name\">${WebEscaping.htmlEscape(parameter.name)}</span>: " +
+              "${WebEscaping.htmlEscape(parameter.type)}</code>$slot$default</li>"
+          }
+        "<section class=\"cp-component-api\" aria-label=\"Component parameters\">" +
+          "<span class=\"cp-component-api-label\">Parameters</span><ul>$parameters</ul></section>"
+      }
     // Title, trust badge, id and the view tally on ONE baseline-aligned row. They are all
     // *identity* — three separate blocks said so three times, at the cost of ~90px above the fold.
     val body =
@@ -14204,7 +14222,7 @@ ${scriptTag("known-differences.js")}
         <h1 class="cp-head cp-preview-title">$label${compactTrustBadge(trust)}</h1>
         ${if (componentBrowser) "" else "<code class=\"cp-preview-id\" title=\"$idText\">$idText</code>"}
         ${if (componentBrowser) "" else viewerViewCountHtml(engagement.views)}$headTogglesHtml
-      </div>${if (captionHtml.isBlank()) "" else "\n      $captionHtml"}${if (browserVariant.isBlank()) "" else "\n      $browserVariant"}
+      </div>${if (captionHtml.isBlank()) "" else "\n      $captionHtml"}${if (componentParametersHtml.isBlank()) "" else "\n      $componentParametersHtml"}${if (browserVariant.isBlank()) "" else "\n      $browserVariant"}
       $revisionBanner${degradeBanner(degradations)}$issueRows
       <div class="cp-preview-primary" aria-label="Preview renderer">
       $primaryControls${if (pinnedControlsNote.isBlank()) "" else "\n        $pinnedControlsNote"}

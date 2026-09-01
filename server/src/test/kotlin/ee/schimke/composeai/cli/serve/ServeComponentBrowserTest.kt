@@ -133,6 +133,15 @@ class ServeComponentBrowserTest {
         section = "Components",
         group = "Buttons",
         props = JsonObject(mapOf("size" to JsonPrimitive("large"))),
+        componentParameters =
+          listOf(
+            ServeComponentParameter("spacing", "Dp", hasDefault = true),
+            ServeComponentParameter(
+              "content",
+              "RowScope.() -> Unit",
+              composableSlot = true,
+            ),
+          ),
         motion = listOf(ServeMotion("button-press", "interaction", "Press")),
       )
     val siblings =
@@ -166,6 +175,11 @@ class ServeComponentBrowserTest {
     assertTrue(html.contains("Components"))
     assertTrue(html.contains("Buttons"))
     assertTrue(html.contains("Pressed · size large"))
+    assertTrue(html.contains("aria-label=\"Component parameters\""))
+    assertTrue(html.contains("cp-component-param-name\">spacing</span>: Dp"))
+    assertTrue(html.contains("cp-component-param-default\">optional</span>"))
+    assertTrue(html.contains("cp-component-param-name\">content</span>: RowScope.() -&gt; Unit"))
+    assertTrue(html.contains("cp-component-param-kind\">slot</span>"))
     assertTrue(html.contains("id=\"cp-browser-preview-tab\""))
     assertTrue(html.contains("id=\"cp-source-chip\""))
     assertTrue(html.contains("id=\"cp-motion-chip\""))

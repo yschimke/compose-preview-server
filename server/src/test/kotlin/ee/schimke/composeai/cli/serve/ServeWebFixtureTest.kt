@@ -3047,6 +3047,17 @@ class ServeWebFixtureTest {
           section = "Components",
           group = "Buttons",
           props = jsonProps("label" to "Continue"),
+          componentParameters =
+            listOf(
+              ServeComponentParameter("onClick", "() -> Unit"),
+              ServeComponentParameter("modifier", "Modifier", hasDefault = true),
+              ServeComponentParameter("spacing", "Dp", hasDefault = true),
+              ServeComponentParameter(
+                "content",
+                "RowScope.() -> Unit",
+                composableSlot = true,
+              ),
+            ),
         ),
         ServePreview(
           "button-outlined-default",

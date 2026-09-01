@@ -97,6 +97,20 @@ data class ServeMotion(
   val extension: String = ".apng",
 )
 
+/**
+ * One production-composable value parameter published with a catalog component. [type] is the
+ * producer's short Kotlin rendering (`Dp`, `RowScope.() -> Unit`, …), intended for display rather
+ * than source generation. [composableSlot] distinguishes content slots from ordinary callbacks and
+ * values; [hasDefault] tells the reader which API surface is optional.
+ */
+@Serializable
+data class ServeComponentParameter(
+  val name: String,
+  val type: String,
+  val hasDefault: Boolean = false,
+  val composableSlot: Boolean = false,
+)
+
 data class ServePreview(
   val id: String,
   val label: String,
@@ -294,6 +308,12 @@ data class ServePreview(
    * spatial/WebXR viewer. Last for positional-call compatibility; see [motion].
    */
   val spatial: Boolean = false,
+  /**
+   * The production composable's ordered value parameters, recovered by compose-ai-tools discovery
+   * and published on the catalog component. Empty for plain bundles and older catalogs. Last for
+   * positional-call compatibility; see [motion].
+   */
+  val componentParameters: List<ServeComponentParameter> = emptyList(),
 )
 
 /**
