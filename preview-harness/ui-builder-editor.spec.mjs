@@ -780,3 +780,49 @@ test("screen settings update the render environment without writing component no
         contentType: "image/png",
     });
 });
+
+test("top-level theme builder updates colours typography and shapes atomically", async ({
+    page,
+}, testInfo) => {
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+    const before = await page.screenshot();
+
+    await clickCompose(page, page.getByRole("button", { name: "Theme inspector" }));
+    await expect(page.getByText("Theme builder", { exact: true })).toBeVisible();
+    await fillCompose(page, page.getByRole("textbox", { name: "Primary colour" }), "#FFFF6B8A");
+    await fillCompose(page, page.getByRole("textbox", { name: "Background colour" }), "#FF101525");
+    await fillCompose(page, page.getByRole("textbox", { name: "Surface colour" }), "#FF202A44");
+    await fillCompose(page, page.getByRole("textbox", { name: "Content colour" }), "#FFF4F6FF");
+    await fillCompose(page, page.getByRole("textbox", { name: "Type scale (0.75–1.5)" }), "1.15");
+    await fillCompose(page, page.getByRole("textbox", { name: "Corner radius (0–48dp)" }), "24");
+    await clickCompose(page, page.getByRole("button", { name: "Apply theme" }));
+    await waitForEditor(page, 109);
+
+    const themed = await page.screenshot();
+    const state = await page.evaluate(() => globalThis.__uiBuilderEditor);
+    expect(state).toMatchObject({
+        revision: 109,
+        nodeCount: 108,
+        operationSequence: 1,
+        outcome: "accepted",
+        outcomeMessage: "",
+    });
+    expect(themed.equals(before), "theme controls must change the rendered design").toBe(false);
+    await testInfo.attach("ui-builder-theme-builder.png", {
+        body: themed,
+        contentType: "image/png",
+    });
+    expect(themed).toMatchSnapshot("ui-builder-theme-builder.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+
+    await page.keyboard.press("Control+z");
+    await waitForEditor(page, 110);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        revision: 110,
+        operationSequence: 2,
+        outcome: "accepted",
+    });
+});
