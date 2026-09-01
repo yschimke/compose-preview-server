@@ -159,6 +159,77 @@ test("the pinned editor canvas preserves clean 1280x800 geometry and pixels", as
     ).toBeLessThan(0.002);
 });
 
+test("the property inspector selects Google icons from a searchable catalog", async ({
+    page,
+}, testInfo) => {
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+
+    const iconLayer = await page
+        .getByRole("button", { name: /Reorder search-leading-icon/ })
+        .boundingBox();
+    expect(iconLayer).not.toBeNull();
+    await page.mouse.click(
+        iconLayer.x + iconLayer.width / 2,
+        iconLayer.y + iconLayer.height / 2,
+    );
+    await page.waitForFunction(
+        () => globalThis.__uiBuilderEditor?.selectedNodeId === "search-leading-icon",
+    );
+    const before = await page.screenshot();
+    await testInfo.attach("ui-builder-google-icon-before.png", {
+        body: before,
+        contentType: "image/png",
+    });
+    const chooseIcon = await page
+        .getByRole("button", { name: "Choose Google icon" })
+        .boundingBox();
+    expect(chooseIcon).not.toBeNull();
+    await page.mouse.click(
+        chooseIcon.x + chooseIcon.width / 2,
+        chooseIcon.y + chooseIcon.height / 2,
+    );
+    await page.getByRole("textbox", { name: "Google icon search" }).fill("home");
+    await expect(page.getByRole("button", { name: "Home" })).toBeVisible();
+
+    const catalog = await page.screenshot();
+    await testInfo.attach("ui-builder-google-icon-picker.png", {
+        body: catalog,
+        contentType: "image/png",
+    });
+    const homeIcon = await page.getByRole("button", { name: "Home" }).boundingBox();
+    expect(homeIcon).not.toBeNull();
+    await page.mouse.click(
+        homeIcon.x + homeIcon.width / 2,
+        homeIcon.y + homeIcon.height / 2,
+    );
+    await waitForEditor(page, 109);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        selectedNodeId: "search-leading-icon",
+        selectedIconKey: "home",
+        operationSequence: 1,
+        outcome: "accepted",
+    });
+
+    const selected = await page.screenshot();
+    await testInfo.attach("ui-builder-google-icon-selected.png", {
+        body: selected,
+        contentType: "image/png",
+    });
+    expect(catalog).toMatchSnapshot("ui-builder-google-icon-picker.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+    expect(before).toMatchSnapshot("ui-builder-google-icon-before.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+    expect(selected).toMatchSnapshot("ui-builder-google-icon-selected.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+});
+
 test("pointer operations use visible canvas and sibling targets", async ({ page }, testInfo) => {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
