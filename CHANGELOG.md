@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.13.0](https://github.com/yschimke/compose-preview-server/compare/v2.12.0...v2.13.0) (2026-09-01)
+
+
+### Features
+
+* **ui-builder:** add Google icon property editing ([#153](https://github.com/yschimke/compose-preview-server/issues/153)) ([c05a79c](https://github.com/yschimke/compose-preview-server/commit/c05a79cb5b1152d0e051aadf3fe8302fedfe1457))
+* **ui-builder:** add top-level theme builder ([#160](https://github.com/yschimke/compose-preview-server/issues/160)) ([369ea03](https://github.com/yschimke/compose-preview-server/commit/369ea03cd0cf4f9faee8a88f92f16622404af949))
+
+
+### Bug Fixes
+
+* **ui-builder:** make editor usable on mobile ([#158](https://github.com/yschimke/compose-preview-server/issues/158)) ([6153a90](https://github.com/yschimke/compose-preview-server/commit/6153a90f4219523792ea1134f7ca6076fe2689b2))
+
 ## [2.12.0](https://github.com/yschimke/compose-preview-server/compare/v2.11.0...v2.12.0) (2026-09-01)
 
 
