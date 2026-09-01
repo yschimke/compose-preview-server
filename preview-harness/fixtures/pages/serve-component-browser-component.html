@@ -79,8 +79,8 @@
         </ul>
         <p class="cp-nav-empty" id="cp-nav-empty" hidden>No components match.</p>
       </aside>
-        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="Button Filled"><canvas id="cp-canvas" hidden></canvas><div class="cp-source-panel" id="cp-source-panel" role="region" aria-label="Usage source" hidden></div><div class="cp-error" id="cp-error" role="alert" hidden></div></div>
-
+        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="Button Filled"><canvas id="cp-canvas" hidden></canvas><div class="cp-source-panel" id="cp-source-panel" role="region" aria-label="Usage source" hidden><template id="cp-source-properties"><section class="cp-source-properties" aria-label="Component properties"><h2>Properties</h2><ul><li class="cp-source-property"><code><span class="cp-source-property-name">onClick</span>: () -&gt; Unit</code></li><li class="cp-source-property"><code><span class="cp-source-property-name">modifier</span>: Modifier</code><span class="cp-source-property-default">optional</span></li><li class="cp-source-property"><code><span class="cp-source-property-name">spacing</span>: Dp</code><span class="cp-source-property-default">optional</span></li><li class="cp-source-property cp-source-property--slot"><code><span class="cp-source-property-name">content</span>: RowScope.() -&gt; Unit</code><span class="cp-source-property-kind">slot</span></li></ul></section></template></div><div class="cp-inspect-layer" id="cp-inspect-layer"></div><div class="cp-error" id="cp-error" role="alert" hidden></div></div>
+        <div class="cp-inspect-legend" id="cp-inspect-legend" role="region" aria-label="Inspection legend" hidden></div><cp-inspect-layers></cp-inspect-layers>
         <div class="cp-controls" id="cp-controls">
           <!-- No "Appearance" group. Its only ever-visible control was a Background select
                offering "(default) / Clear (crisp outline)" — which read as a duplicate of the
@@ -142,7 +142,16 @@
               </label>
             </div>
           </details>
+                  <details class="cp-group" data-cp-group="overlays">
+          <summary>Overlays</summary>
+          <div class="cp-group-body">
+            <div class="cp-overlays">
+  <div class="cp-overlays-head">Inspect</div>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-slots" data-cp-inspect="slots" type="checkbox"> Slots</label>
+</div>
 
+          </div>
+        </details>
 
 
 

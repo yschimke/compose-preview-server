@@ -335,6 +335,8 @@ class ServeCatalogStore(
     val componentBodyLine: Int?,
     /** The owning component's authored one-line description, tagged onto each of its renders. */
     val componentCaption: String?,
+    /** The production composable API published with the owning component. */
+    val componentParameters: List<ComponentParameter>,
     /**
      * The owning component's published captures, paired to this image by theme in the load loop.
      */
@@ -542,6 +544,12 @@ class ServeCatalogStore(
         put(id, caption)
       }
     }
+    val parametersByComponentId: Map<String, List<ComponentParameter>> = buildMap {
+      catalog.components.forEach { component ->
+        val id = component.componentId?.takeIf { it.isNotBlank() } ?: return@forEach
+        component.parameters.takeIf { it.isNotEmpty() }?.let { put(id, it) }
+      }
+    }
     val plannedImages =
       catalog.components.flatMap { component ->
         // The component's section/group tag every one of its previews (a component maps to one
@@ -553,6 +561,7 @@ class ServeCatalogStore(
         val componentSourceModule = component.sourceModule?.takeIf { it.isNotBlank() }
         val componentBodyLine = component.bodyLine?.takeIf { it > 0 }
         val componentCaption = component.caption?.takeIf { it.isNotBlank() }
+        val componentParameters = component.parameters
         component.images.mapNotNull { image ->
           val path = image.path
           // Only image-directory PNGs; reject traversal. The path is from a trusted branch, but a
@@ -577,6 +586,7 @@ class ServeCatalogStore(
             componentSourceModule,
             componentBodyLine,
             componentCaption,
+            componentParameters,
             component.motion,
           )
         }
@@ -662,7 +672,8 @@ class ServeCatalogStore(
             image.supportsFocus ||
             image.supportsGestures ||
             image.fixedTheme ||
-            image.secondary
+            image.secondary ||
+            planned.componentParameters.isNotEmpty()
         ) {
           variants[id] =
             VariantMeta(
@@ -685,6 +696,7 @@ class ServeCatalogStore(
               sourceModule = planned.componentSourceModule,
               bodyLine = planned.componentBodyLine,
               caption = planned.componentCaption,
+              componentParameters = planned.componentParameters.map(ComponentParameter::toServe),
               // The ground and the frame this render was captured with. Straight through from the
               // catalog's own image record — the export lifted them off the bundle's
               // `previews.json`, which is the only place they exist and which a published catalog
@@ -734,6 +746,10 @@ class ServeCatalogStore(
           caption =
             record.caption?.takeIf { it.isNotBlank() }
               ?: captionByComponentId[record.componentId?.takeIf { it.isNotBlank() }],
+          componentParameters =
+            parametersByComponentId[record.componentId?.takeIf { it.isNotBlank() }]
+              .orEmpty()
+              .map(ComponentParameter::toServe),
         )
     }
 
@@ -770,6 +786,10 @@ class ServeCatalogStore(
           order = count + deferredIds.size + failedIds.size - 1,
           sourceFile = failure.sourceFile,
           caption = captionByComponentId[failure.componentId?.takeIf { it.isNotBlank() }],
+          componentParameters =
+            parametersByComponentId[failure.componentId?.takeIf { it.isNotBlank() }]
+              .orEmpty()
+              .map(ComponentParameter::toServe),
           renderFailure = failure,
         )
     }
@@ -2970,6 +2990,12 @@ class ServeCatalogStore(
      */
     val caption: String? = null,
     /**
+     * The production composable's ordered Kotlin value parameters, stamped by compose-ai-tools
+     * discovery. This includes ordinary values such as `spacing: Dp` and content slots such as
+     * `content: RowScope.() -> Unit`. Empty for catalogs published before this additive field.
+     */
+    val parameters: List<ComponentParameter> = emptyList(),
+    /**
      * Top-level **section** (the tab a preview host buckets this component under — `"Themes"`,
      * `"Components"`, `"Screens"`, `"Animations"`, …). Sits one level above [group]. Null ⇒ the
      * component is untabbed (a flat catalog).
@@ -3009,6 +3035,22 @@ class ServeCatalogStore(
      */
     val motion: List<Motion> = emptyList(),
   )
+
+  @Serializable
+  private data class ComponentParameter(
+    val name: String = "",
+    val type: String = "",
+    val hasDefault: Boolean = false,
+    val composableSlot: Boolean = false,
+  ) {
+    fun toServe(): ServeComponentParameter =
+      ServeComponentParameter(
+        name = name,
+        type = type,
+        hasDefault = hasDefault,
+        composableSlot = composableSlot,
+      )
+  }
 
   /**
    * One published animated capture: what moved, why a reader should care, and which themed card it
@@ -3211,6 +3253,8 @@ class ServeCatalogStore(
      * naming it. Null for a catalog that authors none.
      */
     val caption: String? = null,
+    /** Production composable API shared by every render of this component. */
+    val componentParameters: List<ServeComponentParameter> = emptyList(),
     /**
      * The i18n / content / a11y variant axis this render varies (`{"locale":"ar-XB"}`,
      * `{"direction":"rtl"}`, `{"fontScale":"2.0"}`, `{"content":"icon+label"}`), or absent/empty

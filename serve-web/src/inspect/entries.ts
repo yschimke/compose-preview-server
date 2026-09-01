@@ -1,7 +1,7 @@
 // What the inspection layers draw, decided before any DOM exists.
 //
-// Two sources feed one list of boxes: the accessibility hierarchy (what a screen reader sees), and
-// three kinds of design annotation (typography, theme, layout). Turning them into entries is where
+// Three sources feed one list of boxes: measured slots, the accessibility hierarchy (what a screen
+// reader sees), and three kinds of design annotation (typography, theme, layout). Turning them into entries is where
 // all the judgement is, and almost none of it is visible in a screenshot — a rectangle drawn over a
 // component looks equally right whether it is the correct node, a duplicate of its parent, or a
 // finding that was silently dropped.
@@ -32,6 +32,40 @@ export interface Entry {
     color: string | null;
     /** Optional expanded wording kept off the compact legend row and exposed as a tooltip. */
     tooltip?: string;
+}
+
+export interface SlotPayload {
+    slots?: Array<{
+        name?: string;
+        bounds?: { left: number; top: number; right: number; bottom: number };
+    }>;
+}
+
+/** Declared Compose content slots, measured in the rendered frame's own pixel space. */
+export function slotEntries(payload: SlotPayload | null): Entry[] {
+    return (payload?.slots ?? []).flatMap((slot) => {
+        const bounds = slot.bounds;
+        if (!bounds) return [];
+        const width = bounds.right - bounds.left;
+        const height = bounds.bottom - bounds.top;
+        if (!(width > 0 && height > 0)) return [];
+        const name = (slot.name ?? "").trim() || "(unnamed slot)";
+        return [
+            {
+                kind: "slots",
+                bounds: {
+                    x: bounds.left,
+                    y: bounds.top,
+                    width,
+                    height,
+                },
+                title: name,
+                detail: `${width}×${height} px`,
+                level: "info" as const,
+                color: null,
+            },
+        ];
+    });
 }
 
 /**

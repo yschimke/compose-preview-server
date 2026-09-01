@@ -1,14 +1,15 @@
-// The four inspection layers, what each is fetched from, and how they are addressed.
+// The inspection layers, what each is fetched from, and how they are addressed.
 
 /** A layer: its checkbox value, its legend heading, and the endpoint suffix it reads. */
 export interface LayerSpec {
     kind: string;
     label: string;
-    /** `a11y` and `annotations` — the TWO endpoints behind four layers. */
+    /** Endpoint suffix; typography/theme/layout intentionally share `annotations`. */
     source: string;
 }
 
 export const LAYERS: LayerSpec[] = [
+    { kind: "slots", label: "Slots", source: "slots" },
     { kind: "a11y", label: "Accessibility", source: "a11y" },
     { kind: "typography", label: "Typography", source: "annotations" },
     { kind: "theme", label: "Theme", source: "annotations" },

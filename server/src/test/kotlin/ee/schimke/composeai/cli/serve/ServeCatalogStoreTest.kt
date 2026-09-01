@@ -63,6 +63,41 @@ class ServeCatalogStoreTest {
       .trimIndent()
 
   @Test
+  fun `component parameters survive catalog loading`() {
+    val catalog =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3","components":[
+        {"componentId":"Layout/Row","parameters":[
+          {"name":"spacing","type":"Dp","hasDefault":true},
+          {"name":"content","type":"RowScope.() -> Unit","composableSlot":true}],
+         "images":[{"path":"images/layout-row/ideal__default.png"}]}]}
+      """
+        .trimIndent()
+
+    assertTrue(
+      store(
+          TrustStore.EMPTY,
+          fetch = { url ->
+            when {
+              url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.toByteArray()
+              url.endsWith(".png") -> png()
+              else -> null
+            }
+          },
+        )
+        .load("compose-m3") is ServeCatalogStore.Result.Ok
+    )
+
+    assertEquals(
+      listOf(
+        ServeComponentParameter("spacing", "Dp", hasDefault = true),
+        ServeComponentParameter("content", "RowScope.() -> Unit", composableSlot = true),
+      ),
+      registered.getValue("compose-m3").previews.single().componentParameters,
+    )
+  }
+
+  @Test
   fun `failure-only catalog registers visible diagnostic cards`() {
     val broken =
       """

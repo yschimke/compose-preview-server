@@ -48,7 +48,7 @@ describe("activeLayers", () => {
     it("names each layer for its legend heading", () => {
         assert.deepEqual(
             LAYERS.map((l) => l.label),
-            ["Accessibility", "Typography", "Theme", "Layout"],
+            ["Slots", "Accessibility", "Typography", "Theme", "Layout"],
         );
     });
 

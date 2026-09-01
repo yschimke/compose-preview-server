@@ -9,6 +9,7 @@ import {
     PALETTE,
     a11yEntries,
     annotationEntries,
+    slotEntries,
     isFocusStop,
     levelOf,
     parseBounds,
@@ -47,6 +48,47 @@ describe("parseBounds", () => {
         ]) {
             assert.equal(parseBounds(bad), null, String(bad));
         }
+    });
+});
+
+describe("slotEntries", () => {
+    it("maps declared slot bounds into the render coordinate space", () => {
+        assert.deepEqual(
+            slotEntries({
+                slots: [
+                    {
+                        name: "content",
+                        bounds: { left: 12, top: 20, right: 212, bottom: 68 },
+                    },
+                ],
+            }),
+            [
+                {
+                    kind: "slots",
+                    bounds: { x: 12, y: 20, width: 200, height: 48 },
+                    title: "content",
+                    detail: "200×48 px",
+                    level: "info",
+                    color: null,
+                },
+            ],
+        );
+    });
+
+    it("drops absent and empty slot bounds", () => {
+        assert.deepEqual(
+            slotEntries({
+                slots: [
+                    { name: "missing" },
+                    {
+                        name: "empty",
+                        bounds: { left: 4, top: 4, right: 4, bottom: 10 },
+                    },
+                ],
+            }),
+            [],
+        );
+        assert.deepEqual(slotEntries(null), []);
     });
 });
 

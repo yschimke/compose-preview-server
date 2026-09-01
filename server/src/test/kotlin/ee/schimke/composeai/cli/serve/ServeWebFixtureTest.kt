@@ -3047,6 +3047,17 @@ class ServeWebFixtureTest {
           section = "Components",
           group = "Buttons",
           props = jsonProps("label" to "Continue"),
+          componentParameters =
+            listOf(
+              ServeComponentParameter("onClick", "() -> Unit"),
+              ServeComponentParameter("modifier", "Modifier", hasDefault = true),
+              ServeComponentParameter("spacing", "Dp", hasDefault = true),
+              ServeComponentParameter(
+                "content",
+                "RowScope.() -> Unit",
+                composableSlot = true,
+              ),
+            ),
         ),
         ServePreview(
           "button-outlined-default",
@@ -3124,6 +3135,7 @@ class ServeWebFixtureTest {
         canRenderOverrides = true,
         usageHref = "/compose-m3/usage/button-filled-pressed",
         hasSvgExport = true,
+        hasDesignAnnotations = true,
         // Carries the presence heartbeat — and with it the render-server poller — because Catalog
         // mode is where the badge has no header slot to land in. The Dev landing already captures
         // the badge's connected/idle states (`serve-landing-declared-themes`); this is the page
