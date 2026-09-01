@@ -117,6 +117,8 @@ jobs:
           :server:installDist
           --no-daemon
           --no-parallel
+          --max-workers=1
+          -Pkotlin.daemon.jvmargs=-Xmx6g
       - run: npm run harness:ui-builder
         working-directory: preview-harness
       - run: npm run harness:ui-builder-jetcaster
