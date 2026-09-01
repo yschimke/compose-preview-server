@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.9.0](https://github.com/yschimke/compose-preview-server/compare/v2.8.0...v2.9.0) (2026-09-01)
+
+
+### Features
+
+* **ui-builder:** add recoverable persistence migration ([4bacc28](https://github.com/yschimke/compose-preview-server/commit/4bacc28b104e4fb45324b002d60f01b9d2d4db88))
+* **ui-builder:** add sandboxed renderer runtime ([d0da863](https://github.com/yschimke/compose-preview-server/commit/d0da863958a8603996fe57ec2f29aa40a4f423c8))
+* **ui-builder:** bound runtime pressure ([fd68850](https://github.com/yschimke/compose-preview-server/commit/fd688501132e6afd32e12c6a8d5119ff4d563d65))
+* **ui-builder:** compile generated previews ([fd7ebfb](https://github.com/yschimke/compose-preview-server/commit/fd7ebfbef617dec4a06b398d80a5ea7b4c923042))
+* **ui-builder:** enforce runtime quotas ([a99b124](https://github.com/yschimke/compose-preview-server/commit/a99b124de04480081c917e6373405b8e4b2e322f))
+* **ui-builder:** host pinned renderer runtimes ([04f9492](https://github.com/yschimke/compose-preview-server/commit/04f9492b631b05df8e41e03c6f64642615f62677))
+* **ui-builder:** show live collaborator presence ([a37cf07](https://github.com/yschimke/compose-preview-server/commit/a37cf07e37c176daba8320e4afb853f7d2a80d64))
+
+
+### Bug Fixes
+
+* reject truncated catalog inventories ([#134](https://github.com/yschimke/compose-preview-server/issues/134)) ([b34d2f9](https://github.com/yschimke/compose-preview-server/commit/b34d2f9a1be9e0cb16866ad92db9b1614c90c459))
+* **server:** package desktop render sidecars ([92acd7e](https://github.com/yschimke/compose-preview-server/commit/92acd7e194157146cc8a8d5a059d255be4664f69))
+* **ui-builder:** align compact Jetcaster fidelity ([80af87d](https://github.com/yschimke/compose-preview-server/commit/80af87d6cd8e7ed988d82bbab3a511c1c950c571))
+* **ui-builder:** authenticate live browser sessions ([c2b1b60](https://github.com/yschimke/compose-preview-server/commit/c2b1b608fdd6076e33b3f909edb50061a55bab51))
+* **ui-builder:** improve Jetcaster detail fidelity ([c16c96c](https://github.com/yschimke/compose-preview-server/commit/c16c96cc4b05c7c09e3bb6134f51f63f06f13a1e))
+
 ## [2.8.0](https://github.com/yschimke/compose-preview-server/compare/v2.7.0...v2.8.0) (2026-08-31)
 
 
