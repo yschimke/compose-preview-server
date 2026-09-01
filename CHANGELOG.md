@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.11.0](https://github.com/yschimke/compose-preview-server/compare/v2.10.0...v2.11.0) (2026-09-01)
+
+
+### Features
+
+* **serve:** compare paired catalogs in bulk ([#138](https://github.com/yschimke/compose-preview-server/issues/138)) ([ba58c1c](https://github.com/yschimke/compose-preview-server/commit/ba58c1cc0a4a1c6e792ad8e4fb3096fdc4e0e4ba))
+* **ui-builder:** forward sandbox renderer input ([#140](https://github.com/yschimke/compose-preview-server/issues/140)) ([dbdbee5](https://github.com/yschimke/compose-preview-server/commit/dbdbee5e05b039bb35b39fb8800bc954d744e0d9))
+
+
+### Bug Fixes
+
+* **deploy:** align preview host daemon sidecars ([#139](https://github.com/yschimke/compose-preview-server/issues/139)) ([93b08b2](https://github.com/yschimke/compose-preview-server/commit/93b08b224089467902c105f0cd82c52e825f90cc))
+* **deps:** update compose-ai-tools ([#144](https://github.com/yschimke/compose-preview-server/issues/144)) ([e6f102b](https://github.com/yschimke/compose-preview-server/commit/e6f102b8c4730b303c75b4ff40209f430fd09e8c))
+* **deps:** update compose-preview-contracts to v2.3.0 ([#145](https://github.com/yschimke/compose-preview-server/issues/145)) ([4620b72](https://github.com/yschimke/compose-preview-server/commit/4620b72d6bed9d6f04b529e67142dacdfe259315))
+* **deps:** update design-parity packages to v1.0.4 ([#142](https://github.com/yschimke/compose-preview-server/issues/142)) ([c25920f](https://github.com/yschimke/compose-preview-server/commit/c25920fdc815b148db9236ec1549e68f74471a2b))
+
 ## [2.10.0](https://github.com/yschimke/compose-preview-server/compare/v2.9.0...v2.10.0) (2026-09-01)
 
 
