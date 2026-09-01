@@ -31,7 +31,7 @@ async function openRenderer(page) {
     );
 }
 
-test("sandbox input operates Jetcaster state and an independent scroll pane", async ({
+test("sandbox semantic actions operate Jetcaster state and an independent scroll pane", async ({
     page,
 }, testInfo) => {
     const errors = [];
@@ -75,12 +75,6 @@ test("sandbox input operates Jetcaster state and an independent scroll pane", as
     expect(security.overlayCount).toBeGreaterThan(20);
     expect(security.measuredNodes).toBeGreaterThan(20);
     expect(security.measuredSlots).toBeGreaterThan(5);
-    const roundTrip = await page.evaluate(() =>
-        globalThis.__uiBuilderSandboxCoordinateRoundTrip(137.25, 419.75),
-    );
-    expect(roundTrip.x).toBeCloseTo(137.25, 8);
-    expect(roundTrip.y).toBeCloseTo(419.75, 8);
-
     const shell = page.locator("#composeApp");
     const withOverlay = await shell.screenshot();
     const geometry = await page.evaluate(() => {
@@ -111,18 +105,13 @@ test("sandbox input operates Jetcaster state and an independent scroll pane", as
     );
 
     const beforeInteraction = await shell.screenshot();
-    const pointerDown = await page.evaluate(() =>
-        globalThis.__uiBuilderSandboxPointerAtNode("chip-news", "down"),
+    const activate = await page.evaluate(() =>
+        globalThis.__uiBuilderSandboxActivateNode("chip-news"),
     );
-    expect((await waitForResponse(page, pointerDown)).type).toBe(
-        "inputDispatched",
-    );
-    const pointerUp = await page.evaluate(() =>
-        globalThis.__uiBuilderSandboxPointerAtNode("chip-news", "up"),
-    );
-    expect((await waitForResponse(page, pointerUp)).type).toBe(
-        "inputDispatched",
-    );
+    const activateResponse = await waitForResponse(page, activate);
+    expect(activateResponse, JSON.stringify(activateResponse)).toMatchObject({
+        type: "actionDispatched",
+    });
     await expect
         .poll(() =>
             page.evaluate(() => {
@@ -148,11 +137,11 @@ test("sandbox input operates Jetcaster state and an independent scroll pane", as
             categoryRow: bounds("category-row"),
         };
     });
-    const wheelRequest = await page.evaluate(() =>
-        globalThis.__uiBuilderSandboxWheelAtNode("detail-list", 360),
+    const scrollRequest = await page.evaluate(() =>
+        globalThis.__uiBuilderSandboxScrollNodeBy("detail-list", 360),
     );
-    expect((await waitForResponse(page, wheelRequest)).type).toBe(
-        "inputDispatched",
+    expect((await waitForResponse(page, scrollRequest)).type).toBe(
+        "actionDispatched",
     );
     await expect
         .poll(() =>
@@ -179,12 +168,11 @@ test("sandbox input operates Jetcaster state and an independent scroll pane", as
     expect(afterScroll.detailHero.y).toBeLessThan(beforeScroll.detailHero.y);
 
     const staleId = await page.evaluate(() =>
-        globalThis.__uiBuilderSandboxDispatchInput({
+        globalThis.__uiBuilderSandboxDispatchAction({
+            documentId: "fixture-jetcaster-discover-expanded",
             documentRevision: 0,
-            kind: "wheel",
-            x: 900,
-            y: 400,
-            deltaMode: 0,
+            nodeId: "detail-list",
+            kind: "scrollBy",
             deltaX: 0,
             deltaY: 1,
         }),
@@ -200,7 +188,7 @@ test("sandbox input operates Jetcaster state and an independent scroll pane", as
             protocolVersion: 1,
             runtimeId: "m3-2026.09-protocol1",
             requestId,
-            type: "inputDispatched",
+            type: "actionDispatched",
             payload: { inspection: { documentRevision: 0 } },
         });
         dispatchEvent(
@@ -224,41 +212,42 @@ test("sandbox input operates Jetcaster state and an independent scroll pane", as
         payload: { code: "STALE_DOCUMENT" },
     });
     const unsupportedId = await page.evaluate(() =>
-        globalThis.__uiBuilderSandboxDispatchInput({
+        globalThis.__uiBuilderSandboxDispatchAction({
+            documentId:
+                globalThis.__uiBuilderSandboxInspection.documentId,
             documentRevision:
                 globalThis.__uiBuilderSandboxInspection.documentRevision,
-            kind: "keyboard",
-            x: 1,
-            y: 1,
+            nodeId: "chip-news",
+            kind: "focus",
         }),
     );
     expect(await waitForResponse(page, unsupportedId)).toMatchObject({
         type: "error",
-        payload: { code: "UNSUPPORTED_INPUT" },
+        payload: { code: "UNSUPPORTED_ACTION" },
     });
-    const outsideId = await page.evaluate(() =>
-        globalThis.__uiBuilderSandboxDispatchInput({
+    const horizontalId = await page.evaluate(() =>
+        globalThis.__uiBuilderSandboxDispatchAction({
+            documentId:
+                globalThis.__uiBuilderSandboxInspection.documentId,
             documentRevision:
                 globalThis.__uiBuilderSandboxInspection.documentRevision,
-            kind: "wheel",
-            x: 99999,
-            y: 99999,
-            deltaMode: 0,
-            deltaX: 0,
+            nodeId: "detail-list",
+            kind: "scrollBy",
+            deltaX: 1,
             deltaY: 1,
         }),
     );
-    expect(await waitForResponse(page, outsideId)).toMatchObject({
+    expect(await waitForResponse(page, horizontalId)).toMatchObject({
         type: "error",
-        payload: { code: "INPUT_OUT_OF_BOUNDS" },
+        payload: { code: "INVALID_ACTION" },
     });
     expect(errors).toEqual([]);
 
-    await testInfo.attach("jetcaster-renderer-before-input.png", {
+    await testInfo.attach("jetcaster-renderer-before-semantic-actions.png", {
         body: beforeInteraction,
         contentType: "image/png",
     });
-    await testInfo.attach("jetcaster-renderer-after-input.png", {
+    await testInfo.attach("jetcaster-renderer-after-semantic-actions.png", {
         body: await page.screenshot(),
         contentType: "image/png",
     });
