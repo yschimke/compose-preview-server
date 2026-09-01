@@ -27,6 +27,24 @@ async function waitForEditor(page, revision) {
     await settle(page);
 }
 
+async function clickCompose(page, locator) {
+    const bounds = await locator.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+}
+
+async function fillCompose(page, locator, value) {
+    const current = (await locator.textContent()) ?? "";
+    const bounds = await locator.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.click(bounds.x + bounds.width - 2, bounds.y + bounds.height / 2);
+    await page.keyboard.press("End");
+    for (let index = 0; index < current.length; index++) await page.keyboard.press("Backspace");
+    await page.keyboard.type(value);
+    await settle(page);
+    await expect(locator).toHaveText(value);
+}
+
 function crop(buffer, bounds) {
     const image = PNG.sync.read(buffer);
     const result = new PNG({ width: Math.round(bounds.width), height: Math.round(bounds.height) });
@@ -418,6 +436,138 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
         maxDiffPixelRatio: 0.04,
     });
     expect(before).toMatchSnapshot("ui-builder-interactive-editor-before.png", {
+        threshold: 0,
+        maxDiffPixelRatio: 0.04,
+    });
+});
+
+test("capability inspector validates and commits typed scaffold and Text properties", async ({
+    page,
+}, testInfo) => {
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+        if (message.type() === "error") errors.push(message.text());
+    });
+
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+    const canvasBefore = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
+
+    await clickCompose(page, page.getByRole("button", { name: /Reorder pane-scaffold/ }));
+    await page.waitForFunction(
+        () => globalThis.__uiBuilderEditor?.selectedNodeId === "pane-scaffold",
+    );
+
+    const paneWidth = page.getByRole("textbox", {
+        name: "Main pane preferred width dp property",
+    });
+    await fillCompose(page, paneWidth, "5000");
+    await clickCompose(
+        page,
+        page.getByRole("button", { name: "Apply main pane preferred width dp" }),
+    );
+    await page.waitForFunction(
+        () =>
+            globalThis.__uiBuilderEditor?.outcome === "rejected:INVALID_PROPERTY" &&
+            globalThis.__uiBuilderEditor?.outcomeNodeId === "pane-scaffold" &&
+            globalThis.__uiBuilderEditor?.outcomeField === "mainPanePreferredWidthDp",
+    );
+    await expect(
+        page.getByText("Main Pane Preferred Width Dp must be 0..4096", { exact: true }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor.revision)).toBe(108);
+
+    await fillCompose(page, paneWidth, "800");
+    await clickCompose(
+        page,
+        page.getByRole("button", { name: "Apply main pane preferred width dp" }),
+    );
+    await waitForEditor(page, 109);
+
+    await clickCompose(page, page.getByRole("button", { name: "Layout mode property" }));
+    await clickCompose(page, page.getByText("twoPane", { exact: true }));
+    await waitForEditor(page, 110);
+
+    // A fresh fixture restores the expanded reference after proving the enum operation. The rest
+    // of the test can then exercise the supporting-pane Text node without a test-only reset path.
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+    await clickCompose(page, page.getByRole("button", { name: /Reorder pane-scaffold/ }));
+    await page.waitForFunction(
+        () => globalThis.__uiBuilderEditor?.selectedNodeId === "pane-scaffold",
+    );
+
+    const mainPaneVisible = page.getByRole("button", { name: "Main Pane Visible property" });
+    await clickCompose(page, mainPaneVisible);
+    await waitForEditor(page, 109);
+    await clickCompose(page, mainPaneVisible);
+    await waitForEditor(page, 110);
+
+    const titleBounds = await page.evaluate(() =>
+        globalThis.__uiBuilderInspection.nodes.find(
+            (node) => node.nodeId === "detail-podcast-title",
+        )?.bounds,
+    );
+    expect(titleBounds).toBeTruthy();
+    await page.mouse.click(
+        titleBounds.x + titleBounds.width / 2,
+        titleBounds.y + titleBounds.height / 2,
+    );
+    await page.waitForFunction(
+        () => globalThis.__uiBuilderEditor?.selectedNodeId === "detail-podcast-title",
+    );
+    await fillCompose(
+        page,
+        page.getByRole("textbox", { name: "Text property" }),
+        "Typed inspector title",
+    );
+    await clickCompose(page, page.getByRole("button", { name: "Apply text" }));
+    await waitForEditor(page, 111);
+
+    const color = page.getByRole("textbox", { name: "Color property" });
+    await color.scrollIntoViewIfNeeded();
+    await fillCompose(page, color, "onSurfaceVariant");
+    await clickCompose(page, page.getByRole("button", { name: "Apply color" }));
+    await waitForEditor(page, 112);
+
+    await page.mouse.move(1300, 700);
+    await page.mouse.wheel(0, 900);
+    await settle(page);
+    const maxLines = page.getByRole("textbox", { name: "Max lines property" });
+    await maxLines.scrollIntoViewIfNeeded();
+    await fillCompose(page, maxLines, "4");
+    await clickCompose(page, page.getByRole("button", { name: "Apply max lines" }));
+    await waitForEditor(page, 113);
+
+    const finalState = await page.evaluate(() => globalThis.__uiBuilderEditor);
+    expect(finalState).toMatchObject({
+        revision: 113,
+        operationSequence: 5,
+        selectedNodeId: "detail-podcast-title",
+        selectedText: "Typed inspector title",
+        outcome: "accepted",
+    });
+    const canvasAfter = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
+    expect(canvasAfter).toMatchObject({
+        sourceWidthDp: canvasBefore.sourceWidthDp,
+        sourceHeightDp: canvasBefore.sourceHeightDp,
+        scale: canvasBefore.scale,
+        bounds: { width: canvasBefore.bounds.width, height: canvasBefore.bounds.height },
+    });
+    expect(errors).toEqual([]);
+
+    await settle(page);
+    const evidence = await page.screenshot();
+    await testInfo.attach("ui-builder-typed-inspector.png", {
+        body: evidence,
+        contentType: "image/png",
+    });
+    await testInfo.attach("ui-builder-typed-inspector-state.json", {
+        body: Buffer.from(JSON.stringify(finalState, null, 2)),
+        contentType: "application/json",
+    });
+    expect(evidence).toMatchSnapshot("ui-builder-typed-inspector.png", {
         threshold: 0,
         maxDiffPixelRatio: 0.04,
     });
