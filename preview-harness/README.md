@@ -50,6 +50,22 @@ WebSocket gap recovery, restart persistence, deterministic revision-pinned PNG/S
 and scripted operations-to-pixels acceptance. Artifacts and process logs are retained under
 `test-results/ui-builder-gate2/`.
 
+The performance acceptance harness uses the same installed server and live Wasm client but does not
+need MCP. Its default CI lane runs a bounded marker-correctness sample. Opt into the statistically
+useful acceptance run locally with:
+
+```
+./gradlew :server:installDist
+UI_BUILDER_PERF=1 npm --prefix preview-harness run harness:ui-builder-performance
+```
+
+That mode records 50 warm committed edits and 20 cached reopens, reports p50/p95, and enforces the
+product targets for cross-client propagation (p95 <250ms), protocol-receipt-to-canvas application
+(p95 below one 60Hz frame), and cached reopen-to-stable-render (p95 <2s). Protocol receipt, authoritative
+document receipt, the first post-layout animation frame, and stable render completion are explicit
+Wasm markers based on `performance.now()`; revision state is not used as a paint proxy. Results and
+reference-machine details are retained in `test-results/ui-builder-performance/`.
+
 `HARNESS_CHROMIUM=/path/to/chrome` points Playwright at an existing browser when the matching
 download isn't present. `HARNESS_THEME=dark` narrows the captures.
 
