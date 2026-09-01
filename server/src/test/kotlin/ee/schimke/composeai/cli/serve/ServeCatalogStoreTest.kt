@@ -147,13 +147,12 @@ class ServeCatalogStoreTest {
     )
 
   @Test
-  fun `the image cap bounds the previews a catalog declares`() {
+  fun `the image cap rejects a catalog instead of silently truncating it`() {
     // Fetching lazily makes the ceiling count DECLARED previews rather than successfully fetched
     // ones: whether an image can be had isn't known at load time any more, and finding out would
-    // mean fetching everything — the thing lazy loading exists to avoid. So a cap of two publishes
-    // the first two declarations, and a card whose image turns out to be missing reports NotFound
-    // on request instead of being silently replaced by a later one. The default stays above the
-    // largest published catalog so it remains a guard rather than truncating valid previews.
+    // mean fetching everything — the thing lazy loading exists to avoid. A partial catalog is not
+    // a safe fallback, though: its later components disappear from navigation with no visible
+    // failure. Reject the generation before registration instead.
     val trust =
       TrustStore(
         branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
@@ -175,24 +174,11 @@ class ServeCatalogStoreTest {
         )
         .load("compose-m3")
 
-    assertEquals(2, (result as ServeCatalogStore.Result.Ok).previewCount)
-    val host = registered.getValue("compose-m3")
     assertEquals(
-      listOf("button-filled__ideal__default__dark", "button-filled__ideal__default__light"),
-      host.previews.map { it.id },
+      ServeCatalogStore.Result.Failed("compose-m3", "catalog exceeds the 2 image limit"),
+      result,
     )
-    assertTrue(
-      host.previews.all { it.componentId == "Button/Filled" },
-      "the original component id survives route slug generation",
-    )
-    // The declared-but-unfetchable card reports NotFound; its sibling still serves.
-    assertEquals(
-      RenderOutcome.NotFound,
-      host.render("button-filled__ideal__default__dark", PreviewOverrides()),
-    )
-    assertTrue(
-      host.render("button-filled__ideal__default__light", PreviewOverrides()) is RenderOutcome.Ok
-    )
+    assertFalse(registered.containsKey("compose-m3"))
   }
 
   /** Eight baked images, comfortably more than the handful sampled before publishing. */
