@@ -333,6 +333,19 @@ test("only explicitly enabled catalog-scoped UI builders are available", async (
             "m3-catalog",
             "remote-m3",
         ]);
+        const remoteCatalog = listed.catalogs.find(
+            (catalog) => catalog.benchmark.catalogSystemId === "remote-m3",
+        );
+        expect(remoteCatalog.components.map((component) => component.componentId)).toEqual([
+            "remote-m3/widget-container-small",
+            "remote-m3/widget-container-large",
+            "layout/box",
+            "layout/column",
+            "layout/row",
+            "m3/surface",
+            "m3/text",
+            "remote-compose/document",
+        ]);
         expect((await fetch(`${server.origin}/ui-builder/wear-m3-catalog/`)).status).toBe(404);
 
         defaultBuilder = await openBrowserSession(
@@ -355,6 +368,12 @@ test("only explicitly enabled catalog-scoped UI builders are available", async (
             "remote-m3",
         );
         await expect(remoteBuilder.page.getByText(/remote-m3 · Live/)).toBeVisible();
+        await expect(
+            remoteBuilder.page.getByText("Wear widget · Small (216×76dp)").first(),
+        ).toBeVisible();
+        await expect(
+            remoteBuilder.page.getByText("Wear widget · Large (216×124dp)").first(),
+        ).toBeVisible();
 
         const defaultEvidence = testInfo.outputPath("ui-builder-m3-catalog.png");
         const remoteEvidence = testInfo.outputPath("ui-builder-remote-m3.png");

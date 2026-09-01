@@ -427,7 +427,16 @@ private fun LiveSessionApp() {
               kotlinx.serialization.json.JsonPrimitive(selectedCatalog.benchmark.nativeRuntimeId)
           }
         val initialDocument =
-          if (config.template == "blank") {
+          if (config.catalogSystemId == "remote-m3") {
+            wearWidgetUiBuilderDocument(
+              designId = config.designId,
+              catalogPin = JsonObject(catalogPin),
+              environment = fixtureDocument.environment,
+              size =
+                if (config.template == "wear-widget-large") WearWidgetScaffoldSize.Large
+                else WearWidgetScaffoldSize.Small,
+            )
+          } else if (config.template == "blank") {
             blankUiBuilderDocument(
               designId = config.designId,
               catalogPin = JsonObject(catalogPin),
@@ -996,8 +1005,10 @@ private fun liveSessionConfig(): LiveSessionConfig {
       require(it.actorId.isNotBlank()) { "live actor must not be blank" }
       require(it.clientId.isNotBlank()) { "live clientId must not be blank" }
       require(Regex("#[0-9A-Fa-f]{8}").matches(it.colorArgbHex)) { "live color must be #AARRGGBB" }
-      require(it.template in setOf("jetcaster", "blank")) {
-        "live template must be jetcaster or blank"
+      require(
+        it.template in setOf("jetcaster", "blank", "wear-widget-small", "wear-widget-large")
+      ) {
+        "live template must be jetcaster, blank, wear-widget-small, or wear-widget-large"
       }
     }
 }

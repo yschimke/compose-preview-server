@@ -113,7 +113,9 @@ catalog-scoped form.
 The Compose UI builder's Jetcaster benchmark preview is packaged alongside that browser and served
 at `/ui-builder/`, with explicitly enabled catalog instances at `/ui-builder/<catalog>/`. The
 packaged preview deployment enables `m3-catalog` and `remote-m3`; override the selective allowlist
-with `SERVE_UI_BUILDER_CATALOGS`. It is not a `compose=1` mode, a fake catalog, or a replacement for
+with `SERVE_UI_BUILDER_CATALOGS`. `remote-m3` is the reviewed Wear-widget subset (Small and Large
+host scaffolds plus the few components needed to fill them), not a clone of all M3 capabilities. It
+is not a `compose=1` mode, a fake catalog, or a replacement for
 `/wasm/<system>/`; both apps are installed and routed independently. The static Wasm shell is
 public like other client assets, but every design read, write, subscription, render and export is
 authenticated. GitHub collaborators use the existing OAuth session; agents use short-lived grants

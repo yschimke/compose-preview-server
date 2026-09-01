@@ -17,12 +17,15 @@ Start the server with UI-builder persistence and open:
 For the Remote Compose M3 instance, use a distinct design id under:
 
 ```text
-/ui-builder/remote-m3/?session=live&create=1&template=blank&designId=my-remote-screen
+/ui-builder/remote-m3/?session=live&create=1&template=wear-widget-small&designId=my-remote-screen
 ```
 
 `create=1` only creates a missing design. It never overwrites an existing `designId`. The `blank`
 template is a real, valid document: a `layout/scaffold` root with an empty `layout/box` in its
-required content slot. The default live template remains the Jetcaster reference. Authentication
+required content slot. In `remote-m3`, creation starts with the Small Wear widget scaffold instead:
+a 216×76dp host frame with an empty content slot. Use `template=wear-widget-large` for the
+216×124dp form. These copy the stable 240dp-screen preview contract—200×60dp or 200×108dp content,
+8dp host padding, and 26dp corners—without depending on preview-only Glance code. Authentication
 credentials are intentionally absent from this example: supply them through the server and client
 credential facilities, never in a shared URL, shell history, or process arguments.
 
@@ -44,6 +47,9 @@ unsupported. Inspect capability notes before treating a design as portable to an
 Operators select the reviewed adapters with
 `--ui-builder-catalogs m3-catalog,remote-m3`. The packaged deployment uses exactly that allowlist;
 other served catalogs remain preview-only until added explicitly.
+`remote-m3` is a deliberately small adapter: Small and Large Wear widget scaffolds plus Box, Row,
+Column, Surface, Text, and nested Remote Compose document. It is not an alias for every M3
+capability.
 
 ## Property coverage
 

@@ -59,12 +59,62 @@ class ProductionUiBuilderRuntimeTest {
       catalogs.listCatalogs().map { it.benchmark.catalogSystemId },
     )
     val remoteDocument =
-      document().copy(catalogPin = document().catalogPin.copy(systemId = "remote-m3"))
+      document()
+        .copy(
+          catalogPin =
+            document()
+              .catalogPin
+              .copy(
+                systemId = "remote-m3",
+                catalogRevision = "wear-widget-scaffolds-v1",
+              ),
+          roots = listOf("widget"),
+          nodes =
+            mapOf(
+              "widget" to
+                DesignNodeV1(
+                  id = "widget",
+                  componentId = "remote-m3/widget-container-small",
+                  slots = mapOf("content" to emptyList()),
+                )
+            ),
+        )
     val remoteCatalog = assertNotNull(catalogs.resolve(remoteDocument.catalogPin))
     assertNull(catalogs.validate(remoteDocument, remoteCatalog))
+    assertEquals(
+      listOf(
+        "remote-m3/widget-container-small",
+        "remote-m3/widget-container-large",
+        "layout/box",
+        "layout/column",
+        "layout/row",
+        "m3/surface",
+        "m3/text",
+        "remote-compose/document",
+      ),
+      remoteCatalog.components.map { it.componentId },
+    )
+    assertEquals(
+      "UNKNOWN_COMPONENT",
+      catalogs
+        .validate(
+          document()
+            .copy(
+              catalogPin = remoteDocument.catalogPin,
+              nodes =
+                document().nodes +
+                  ("text" to document().nodes.getValue("text").copy(componentId = "m3/button")),
+            ),
+          remoteCatalog,
+        )
+        ?.code,
+    )
     assertNull(catalogs.resolve(document().catalogPin.copy(systemId = "wear-m3-catalog")))
     assertFailsWith<IllegalArgumentException> {
       CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("remote/m3"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("wear-m3-catalog"))
     }
   }
 
