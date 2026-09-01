@@ -9,6 +9,30 @@ plugins {
 
 ktfmt { googleStyle() }
 
+// Version of the compose-ai-tools sources compiled into :native-catalog-m3. The public catalog
+// publishes the renderer version that produced its snapshots; the frontend substitutes native
+// composables only when these values agree exactly (#4821).
+val generateNativeCatalogVersion =
+  tasks.register("generateNativeCatalogVersion") {
+    val outputDir = layout.buildDirectory.dir("generated/nativeCatalogVersion/kotlin")
+    val nativeVersion = libs.versions.composeai.tools.get()
+    inputs.property("nativeCatalogVersion", nativeVersion)
+    outputs.dir(outputDir)
+    doLast {
+      val source =
+        outputDir.get().file("ee/schimke/composeai/servewasm/NativeCatalogVersion.kt").asFile
+      source.parentFile.mkdirs()
+      source.writeText(
+        """
+      package ee.schimke.composeai.servewasm
+
+      internal const val NATIVE_CATALOG_VERSION = "$nativeVersion"
+      """
+          .trimIndent() + "\n"
+      )
+    }
+  }
+
 kotlin {
   @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
   wasmJs {
@@ -18,6 +42,7 @@ kotlin {
   }
 
   sourceSets {
+    commonMain { kotlin.srcDir(generateNativeCatalogVersion) }
     commonMain.dependencies {
       implementation(project(":native-catalog-m3"))
       @Suppress("DEPRECATION") implementation(compose.runtime)

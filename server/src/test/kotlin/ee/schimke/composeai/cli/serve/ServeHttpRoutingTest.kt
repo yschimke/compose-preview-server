@@ -264,6 +264,7 @@ class ServeHttpRoutingTest {
      * published catalog.
      */
     isCatalog: Boolean = true,
+    catalogVersion: String? = null,
   ): ServeBundleHost {
     val dir = Files.createTempDirectory("routing-$label").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText("<html></html>")
@@ -416,6 +417,14 @@ class ServeHttpRoutingTest {
       label = label,
       isCatalog = isCatalog,
       title = title,
+      provenance =
+        catalogVersion?.let {
+          ServeWeb.CatalogProvenance(
+            repo = "yschimke/compose-ai-tools",
+            branch = "design-artifacts/$label",
+            toolVersion = it,
+          )
+        },
       degradations = degradations,
       stagesRcCompare = stagesRcCompare,
     )
@@ -473,6 +482,7 @@ class ServeHttpRoutingTest {
           designReference = true,
           parityFeed = true,
           tagIndex = true,
+          catalogVersion = "1.2.3",
         ),
       pinned = true,
     )
@@ -2440,11 +2450,12 @@ class ServeHttpRoutingTest {
   }
 
   @Test
-  fun `api previews advertises v2 and carries author override declarations`() {
+  fun `api previews advertises v3 and carries catalog provenance plus author overrides`() {
     val (code, api) = get("/compose-m3/api/previews")
     assertEquals(200, code)
-    // v2 = the payload now carries per-preview override declarations.
-    assertTrue(api.contains("\"schema\":\"compose-preview-serve/v2\""), "schema v2: $api")
+    // v3 = the payload carries the snapshot producer version native clients must agree with.
+    assertTrue(api.contains("\"schema\":\"compose-preview-serve/v3\""), "schema v3: $api")
+    assertTrue(api.contains("\"catalogVersion\":\"1.2.3\""), "catalog provenance: $api")
     // The declared `label` knob (from the sidecar) surfaces to a programmatic client.
     assertTrue(api.contains("\"overrides\":["), "overrides array present: $api")
     assertTrue(api.contains("\"key\":\"label\""), "declared knob key: $api")

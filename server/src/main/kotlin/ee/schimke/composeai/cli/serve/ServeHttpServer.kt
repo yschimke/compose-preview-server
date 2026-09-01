@@ -7496,6 +7496,10 @@ class ServeHttpServer(
       val dto =
         PreviewsResponse(
           module = renderHost.label,
+          // The compose-ai-tools version that produced this catalog's snapshots. Native clients
+          // must agree with it before substituting their compiled composables for those pixels;
+          // absent provenance fails closed to the snapshots (#4821).
+          catalogVersion = catalogBundleHost(renderHost)?.provenance?.toolVersion,
           // Producer-trust verdict for a bundle/catalog session (signature / branch / provenance /
           // unverified); null for a live daemon-backed module session.
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
@@ -11319,10 +11323,10 @@ private data class VersionResponse(
   /** The host CLI's released version ([SERVE_VERSION]). */
   val version: String,
   /**
-   * The schema id the `/api/previews` + page surface speaks, so a client can feature-detect. `v2`
-   * adds per-preview `overrides` plus best-effort engagement counts to `/api/previews`.
+   * The schema id the `/api/previews` + page surface speaks, so a client can feature-detect. `v3`
+   * adds the catalog snapshot provenance used to gate native substitutions.
    */
-  val serveSchema: String = "compose-preview-serve/v2",
+  val serveSchema: String = "compose-preview-serve/v3",
   /** True when the box serves token-free (public preview server); false for a token-gated serve. */
   val public: Boolean,
 )
@@ -11795,8 +11799,15 @@ private data class UsesResponse(
 
 @Serializable
 private data class PreviewsResponse(
-  val schema: String = "compose-preview-serve/v2",
+  val schema: String = "compose-preview-serve/v3",
   val module: String,
+  /**
+   * The compose-ai-tools version that produced this catalog's published snapshots, from
+   * `catalog.json`'s `renderer`. A client with a compiled native catalog may substitute it only
+   * when its own version agrees exactly; null means the server cannot vouch for parity and the
+   * snapshot remains authoritative. Added in `compose-preview-serve/v3`.
+   */
+  val catalogVersion: String? = null,
   /**
    * Producer-trust verdict for this session ([BundleVerifier.summary]) — `signature:<keyId>`,
    * `branch:<repo>@<branch>`, `provenance:<id>`, or `unverified`. Null for a live daemon-backed

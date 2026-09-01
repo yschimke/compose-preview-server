@@ -167,6 +167,7 @@ class BrowserPreviewClient(private val config: ClientConfig) {
         .parseToJsonElement(fetchText("${config.serverPath("/api/previews")}${config.suffix()}"))
         .jsonObject
     val module = root.string("module") ?: config.session ?: "Preview server"
+    val catalogVersion = root.string("catalogVersion")
     val previews =
       root["previews"]?.jsonArray.orEmpty().mapNotNull { value ->
         val item = value as? JsonObject ?: return@mapNotNull null
@@ -181,6 +182,7 @@ class BrowserPreviewClient(private val config: ClientConfig) {
             nativeCatalogTarget(
               system = config.session,
               previewId = id,
+              catalogVersion = catalogVersion,
               knobSeeds = item.overrideSeeds(),
             ),
         )
