@@ -1715,6 +1715,7 @@ class ServeHttpRoutingTest {
           isPublic = false,
           wasmCatalogs = mapOf("compose-m3" to catalogDir),
           uiBuilderDir = builderDir,
+          uiBuilderCatalogs = setOf("m3-catalog", "remote-m3"),
         )
         .also { it.start() }
     val noRedirects = OkHttpClient.Builder().followRedirects(false).build()
@@ -1756,6 +1757,25 @@ class ServeHttpRoutingTest {
           assertEquals("font/ttf", response.header("Content-Type"))
         }
       }
+      fetch("/ui-builder/remote-m3", noRedirects).let { (code, response) ->
+        response.use {
+          assertEquals(302, code)
+          assertEquals("/ui-builder/remote-m3/", response.header("Location"))
+        }
+      }
+      fetch("/ui-builder/remote-m3/").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertTrue(response.body.string().contains("Compose UI builder"))
+        }
+      }
+      fetch("/ui-builder/remote-m3/builder.mjs").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertEquals("window.composeUiBuilder = true", response.body.string())
+        }
+      }
+      assertEquals(404, fetch("/ui-builder/wear-m3-catalog/").second.use { it.code })
       assertEquals(404, fetch("/ui-builder/../secret").second.use { it.code })
       assertEquals(404, fetch("/ui-builder/linked-secret.txt").second.use { it.code })
 

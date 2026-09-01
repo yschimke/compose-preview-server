@@ -17,6 +17,16 @@ The checked-in JVM Compose render evidence captures the same fixture immediately
 [after](evidence/ui-builder-remote-compose/after.png) registering its `hero.card` slot. The render
 test regenerates both images while also asserting the nested slot's centre pixel.
 
+The preview deployment exposes this adapter as a second catalog-scoped builder at
+`/ui-builder/remote-m3/`. Catalog registration is intentionally insufficient: the server's
+`--ui-builder-catalogs` allowlist admits only reviewed authoring adapters, currently `m3-catalog`
+and `remote-m3`. Each instance creates an exact catalog pin while sharing the transport-neutral M3
+and Remote Compose renderer capabilities.
+
+| Default catalog instance | Explicit Remote Compose catalog instance |
+| --- | --- |
+| ![M3 catalog UI-builder instance](evidence/ui-builder-remote-compose/m3-catalog-builder.png) | ![Remote M3 UI-builder instance](evidence/ui-builder-remote-compose/remote-m3-builder.png) |
+
 ## Named slots
 
 Every key in the node's `slots` map registers a Remote Compose custom-component config of the same

@@ -2296,13 +2296,14 @@ public class ServeRunner(
       renderer?.let(::ProductionUiBuilderExportExecutor) ?: RevisionPinnedComposeExportExecutor()
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
+        catalogSystemIds = uiBuilderCatalogs,
         exportCapabilities =
           (exporter as? ProductionUiBuilderExportExecutor)?.capabilities
             ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
               composeCode = true,
               svg = false,
               png = false,
-            )
+            ),
       )
     val service =
       PersistentUiBuilderService(
@@ -2557,6 +2558,7 @@ public class ServeRunner(
         wasmCatalogs = wasmCatalogs,
         wasmUiDir = usableWasmUiDir(),
         uiBuilderDir = uiBuilderAppDir,
+        uiBuilderCatalogs = uiBuilderCatalogs,
         uiBuilderRuntimeDirs = uiBuilderRuntimeDirs,
         privateWasmCatalogs = privateWasmCatalogs,
         rcPlayerWasmDir = rcPlayerWasmDir,

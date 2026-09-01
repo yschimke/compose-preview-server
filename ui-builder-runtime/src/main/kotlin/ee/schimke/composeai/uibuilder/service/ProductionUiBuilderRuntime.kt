@@ -33,7 +33,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * The single production catalog admitted by the v1 service.
+ * The explicitly enabled production catalogs admitted by the v1 service.
  *
  * Resolution is exact across all four pin fields. The packaged catalog is parsed strictly and its
  * invariants are checked before it is exposed; there is no "closest" revision or permissive
@@ -43,15 +43,23 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 class CurrentM3UiBuilderCatalogExecutor(
   source: String = packagedM3CatalogSource(),
+  catalogSystemIds: Set<String> = setOf(DEFAULT_CATALOG_SYSTEM_ID),
   exportCapabilities: ExportCapabilitiesV1 =
     ExportCapabilitiesV1(composeCode = true, svg = false, png = false),
 ) : UiBuilderCatalogExecutor {
-  private val catalog =
+  private val baseCatalog =
     json
       .decodeFromString<CatalogCapabilityV1>(source)
       .let(::validateCatalog)
       .copy(exportCapabilities = exportCapabilities)
-  private val reference =
+  private val catalogs =
+    catalogSystemIds
+      .also { require(it.isNotEmpty()) { "at least one UI-builder catalog must be enabled" } }
+      .associateWith { systemId ->
+        require(SAFE_SYSTEM_ID.matches(systemId)) { "invalid UI-builder catalog id: $systemId" }
+        baseCatalog.copy(benchmark = baseCatalog.benchmark.copy(catalogSystemId = systemId))
+      }
+  private val references = catalogs.mapValues { (_, catalog) ->
     CatalogReferenceV1(
       systemId = catalog.benchmark.catalogSystemId,
       catalogRevision = catalog.benchmark.catalogRevision,
@@ -61,21 +69,22 @@ class CurrentM3UiBuilderCatalogExecutor(
       capabilityDigest = CURRENT_CAPABILITY_DIGEST,
       nativeRuntimeId = catalog.benchmark.nativeRuntimeId,
     )
-  private val components = catalog.components.associateBy { it.componentId }
-
-  override fun listCatalogs(): List<CatalogCapabilityV1> = listOf(catalog)
-
-  override fun resolve(reference: CatalogReferenceV1): CatalogCapabilityV1? = catalog.takeIf {
-    reference == this.reference
   }
+  private val components = baseCatalog.components.associateBy { it.componentId }
+
+  override fun listCatalogs(): List<CatalogCapabilityV1> = catalogs.values.toList()
+
+  override fun resolve(reference: CatalogReferenceV1): CatalogCapabilityV1? =
+    catalogs[reference.systemId]?.takeIf { reference == references[reference.systemId] }
 
   override fun validate(
     document: DesignDocumentV1,
     catalog: CatalogCapabilityV1,
   ): UiBuilderCatalogIssue? {
-    if (catalog != this.catalog)
-      return issue("CATALOG_MISMATCH", "catalog is not the current M3 catalog")
-    if (document.catalogPin != reference) {
+    val systemId = catalog.benchmark.catalogSystemId
+    if (catalog != catalogs[systemId])
+      return issue("CATALOG_MISMATCH", "catalog is not an enabled UI-builder catalog")
+    if (document.catalogPin != references[systemId]) {
       return issue("CATALOG_PIN_MISMATCH", "document catalog pin does not resolve exactly")
     }
     val encodedDocument = json.encodeToJsonElement(document).jsonObject
@@ -226,6 +235,8 @@ class CurrentM3UiBuilderCatalogExecutor(
   companion object {
     const val RESOURCE: String = "/ee/schimke/composeai/uibuilder/catalogs/m3-catalog-v1.json"
     const val CURRENT_CAPABILITY_DIGEST: String = "candidate"
+    const val DEFAULT_CATALOG_SYSTEM_ID: String = "m3-catalog"
+    private val SAFE_SYSTEM_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
 
     private fun packagedM3CatalogSource(): String =
       checkNotNull(CurrentM3UiBuilderCatalogExecutor::class.java.getResourceAsStream(RESOURCE)) {

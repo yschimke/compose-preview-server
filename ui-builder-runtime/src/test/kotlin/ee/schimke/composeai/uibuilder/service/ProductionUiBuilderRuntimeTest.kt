@@ -13,6 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.jsonArray
@@ -46,6 +47,25 @@ class ProductionUiBuilderRuntimeTest {
               ("text" to document().nodes.getValue("text").copy(componentId = "m3/not-real"))
         )
     assertEquals("UNKNOWN_COMPONENT", catalogs.validate(invalid, catalog)?.code)
+  }
+
+  @Test
+  fun `only explicitly enabled catalogs get independent exact pins`() {
+    val catalogs =
+      CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = linkedSetOf("m3-catalog", "remote-m3"))
+
+    assertEquals(
+      listOf("m3-catalog", "remote-m3"),
+      catalogs.listCatalogs().map { it.benchmark.catalogSystemId },
+    )
+    val remoteDocument =
+      document().copy(catalogPin = document().catalogPin.copy(systemId = "remote-m3"))
+    val remoteCatalog = assertNotNull(catalogs.resolve(remoteDocument.catalogPin))
+    assertNull(catalogs.validate(remoteDocument, remoteCatalog))
+    assertNull(catalogs.resolve(document().catalogPin.copy(systemId = "wear-m3-catalog")))
+    assertFailsWith<IllegalArgumentException> {
+      CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("remote/m3"))
+    }
   }
 
   @Test

@@ -672,6 +672,23 @@ public class ServeCommandOptions(
   override val uiBuilderDir: File? =
     args.flagValue("--ui-builder-dir")?.takeIf { it.isNotBlank() }?.let(::File)
 
+  override val uiBuilderCatalogs: Set<String> =
+    args
+      .flagValue("--ui-builder-catalogs")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.also { entries ->
+        require(entries.isNotEmpty()) { "--ui-builder-catalogs must name at least one catalog" }
+        require(entries.all(UI_BUILDER_CATALOG_ID::matches)) {
+          "--ui-builder-catalogs contains an invalid catalog id"
+        }
+        require(entries.distinct().size == entries.size) {
+          "--ui-builder-catalogs contains a duplicate catalog id"
+        }
+      }
+      ?.toSet() ?: setOf("m3-catalog")
+
   /** Exact, retained renderer bundles; unlike the builder shell these paths are immutable pins. */
   override val uiBuilderRuntimeDirs: Map<String, File> =
     args
@@ -1101,6 +1118,10 @@ public class ServeCommandOptions(
         --ui-builder-dir <dir>
                           Standalone Compose UI builder distribution served at /ui-builder/.
                           This is additive and does not replace or alter /wasm/<system>/.
+        --ui-builder-catalogs <system>[,<system>…]
+                          Explicit catalog allowlist for catalog-scoped builder instances at
+                          /ui-builder/<system>/. Defaults to m3-catalog. Serving a catalog does not
+                          enable its builder automatically.
         --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]
                           Retained immutable native renderer bundles. Each directory must contain
                           runtime-manifest.json. Runtime ids are exact pins; there is no latest
@@ -1122,6 +1143,10 @@ public class ServeCommandOptions(
       """
         .trimIndent()
     )
+  }
+
+  private companion object {
+    val UI_BUILDER_CATALOG_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
   }
 
   override fun previewIdMatchesRequest(

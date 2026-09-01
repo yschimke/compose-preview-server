@@ -1,8 +1,10 @@
 # Compose UI Builder: getting started
 
-The UI builder is a separate Compose/Wasm authoring surface at `/ui-builder/`; it does not replace
-the existing `/wasm/<catalog>/` preview application. It edits one persistent, revisioned design
-through the same Design API used by agents.
+The UI builder is a separate Compose/Wasm authoring surface. `/ui-builder/` remains the default
+`m3-catalog` instance, and explicitly enabled catalogs are also available at
+`/ui-builder/<catalog>/`. It does not replace the existing `/wasm/<catalog>/` preview application.
+Each design remains pinned to one catalog while the service can host a small operator-selected set.
+Publishing a preview catalog never enables authoring for it automatically.
 
 ## Start from a blank screen
 
@@ -10,6 +12,12 @@ Start the server with UI-builder persistence and open:
 
 ```text
 /ui-builder/?session=live&create=1&template=blank&designId=my-screen
+```
+
+For the Remote Compose M3 instance, use a distinct design id under:
+
+```text
+/ui-builder/remote-m3/?session=live&create=1&template=blank&designId=my-remote-screen
 ```
 
 `create=1` only creates a missing design. It never overwrites an existing `designId`. The `blank`
@@ -32,6 +40,10 @@ compatibility adapter is explicit capability metadata, not a claim that an unava
 API was silently substituted. The Jetcaster supporting-pane scaffold, for example, retains its
 semantic component identity while its general adaptive Material adapter remains marked
 unsupported. Inspect capability notes before treating a design as portable to another runtime.
+
+Operators select the reviewed adapters with
+`--ui-builder-catalogs m3-catalog,remote-m3`. The packaged deployment uses exactly that allowlist;
+other served catalogs remain preview-only until added explicitly.
 
 ## Property coverage
 

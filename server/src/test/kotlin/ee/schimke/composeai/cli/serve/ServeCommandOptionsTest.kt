@@ -30,6 +30,8 @@ class ServeCommandOptionsTest {
           "/srv/wasm-ui",
           "--ui-builder-dir",
           "/srv/ui-builder",
+          "--ui-builder-catalogs",
+          "m3-catalog,remote-m3",
           "--ui-builder-runtime-dir",
           "m3-2026.09=/srv/runtime-one,m3-2026.10=/srv/runtime-two",
           "--ui-builder-state-dir",
@@ -49,6 +51,7 @@ class ServeCommandOptionsTest {
     assertEquals(2500, options.catalogMaxImages)
     assertEquals("/srv/wasm-ui", options.wasmUiDir?.path)
     assertEquals("/srv/ui-builder", options.uiBuilderDir?.path)
+    assertEquals(setOf("m3-catalog", "remote-m3"), options.uiBuilderCatalogs)
     assertEquals(
       mapOf(
         "m3-2026.09" to java.io.File("/srv/runtime-one"),
@@ -72,6 +75,7 @@ class ServeCommandOptionsTest {
     assertEquals(ServeCatalogStore.DEFAULT_MAX_IMAGES, options.catalogMaxImages)
     assertNull(options.uiBuilderStateDirFlag)
     assertFalse(options.uiBuilderMigrateState)
+    assertEquals(setOf("m3-catalog"), options.uiBuilderCatalogs)
     assertEquals(
       "none",
       options(listOf("--ui-builder-state-dir=none")).uiBuilderStateDirFlag,
@@ -85,6 +89,16 @@ class ServeCommandOptionsTest {
     }
     assertFailsWith<IllegalArgumentException> {
       options(listOf("--ui-builder-runtime-dir", "runtime=/one,runtime=/two"))
+    }
+  }
+
+  @Test
+  fun `UI builder catalog allowlist rejects duplicates and unsafe ids`() {
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-catalogs", "remote-m3,remote-m3"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-catalogs", "remote-m3,not/a/catalog"))
     }
   }
 

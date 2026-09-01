@@ -590,6 +590,10 @@ public interface ServeOptions {
   public val uiBuilderDir: File?
     get() = null
 
+  /** Catalog ids explicitly exposed as UI-builder instances. Registration alone never opts in. */
+  public val uiBuilderCatalogs: Set<String>
+    get() = setOf("m3-catalog")
+
   /**
    * Retained native renderer bundles (`runtimeId` to directory). Each directory contains a verified
    * `runtime-manifest.json`; ids are exact pins and never aliases for a latest runtime.

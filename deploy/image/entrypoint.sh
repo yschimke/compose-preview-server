@@ -229,6 +229,9 @@ fi
 # `preview-ui` catalog or as the `/wasm/<system>/` fallback above.
 if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   args+=(--ui-builder-dir /opt/compose-preview-server/ui-builder)
+  # Catalog publication does not imply authoring support. Enable only the explicitly reviewed
+  # catalog adapters; this deployment carries M3 plus the Remote Compose M3 catalog.
+  args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}")
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")

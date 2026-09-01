@@ -24,10 +24,24 @@ grep -Fq \
 }
 
 grep -Fq \
+  'SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}"' \
+  "${compose}" || {
+  echo "FAIL: compose does not selectively enable the reviewed UI-builder catalogs" >&2
+  exit 1
+}
+
+grep -Fq \
+  'args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}")' \
+  "${entrypoint}" || {
+  echo "FAIL: entrypoint does not pass the selective UI-builder catalog allowlist" >&2
+  exit 1
+}
+
+grep -Fq \
   'args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")' \
   "${entrypoint}" || {
   echo "FAIL: entrypoint does not pass the persistent UI-builder state directory" >&2
   exit 1
 }
 
-echo "PASS: preview image defaults to durable UI-builder state and scoped agent capabilities"
+echo "PASS: preview image defaults to selective catalogs, durable state, and scoped capabilities"
