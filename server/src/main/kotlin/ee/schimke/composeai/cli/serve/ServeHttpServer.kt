@@ -12,6 +12,7 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
 import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.web.WebEscaping
 import io.ktor.http.ContentType
@@ -6689,6 +6690,23 @@ class ServeHttpServer(
                   },
               )
             },
+        uiBuilder =
+          (uiBuilderService as? UiBuilderServiceDiagnosticsSource)
+            ?.takeIf { onlySystem == null }
+            ?.diagnostics()
+            ?.let {
+              UiBuilderDto(
+                activeSubscribers = it.activeSubscribers,
+                peakSubscribers = it.peakSubscribers,
+                rejectedBatchLimit = it.rejectedBatchLimit,
+                rejectedSubscriberLimit = it.rejectedSubscriberLimit,
+                slowSubscribersClosed = it.slowSubscribersClosed,
+                rejectedPresenceLimit = it.rejectedPresenceLimit,
+                activeExports = it.activeExports,
+                peakExports = it.peakExports,
+                rejectedExportLimit = it.rejectedExportLimit,
+              )
+            },
         playground =
           playgroundHealth?.invoke()?.let { h ->
             PlaygroundDto(
@@ -11352,6 +11370,21 @@ private data class StatusResponse(
    * the production box" without the alerting pipeline becoming somewhere a credential is stored.
    */
   val agentAccess: AgentAccessDto? = null,
+  /** Aggregate UI-builder pressure counters. Owner and document identifiers are never included. */
+  val uiBuilder: UiBuilderDto? = null,
+)
+
+@Serializable
+private data class UiBuilderDto(
+  val activeSubscribers: Int,
+  val peakSubscribers: Long,
+  val rejectedBatchLimit: Long,
+  val rejectedSubscriberLimit: Long,
+  val slowSubscribersClosed: Long,
+  val rejectedPresenceLimit: Long,
+  val activeExports: Int,
+  val peakExports: Long,
+  val rejectedExportLimit: Long,
 )
 
 @Serializable

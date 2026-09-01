@@ -4,8 +4,16 @@ import ee.schimke.composeai.bundle.BundleVerifier
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnostics
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
+import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
+import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
+import java.io.Closeable
 import java.io.File
 import java.nio.file.Files
 import java.time.Instant
@@ -77,6 +85,7 @@ class ServeStatusTest {
     failedCatalogPreviews: List<String> = emptyList(),
     deferredCatalogPreviews: List<String> = emptyList(),
     recordDaemonFailure: Boolean = true,
+    uiBuilderService: UiBuilderServicePort? = null,
     playgroundHealth: (() -> PlaygroundHealth)? = null,
   ): ServeHttpServer {
     registry.register(
@@ -127,6 +136,7 @@ class ServeStatusTest {
         catalogRefreshSeconds = 600,
         acceptBundlesEnabled = false,
         playgroundHealth = playgroundHealth,
+        uiBuilderService = uiBuilderService,
       )
       .also { it.start() }
   }
@@ -235,6 +245,51 @@ class ServeStatusTest {
     assertTrue(body.contains("\"incrementalCompiles\":10"), body)
     assertTrue(body.contains("\"fullFallbacks\":2"), body)
     assertFalse(body.contains("editLease"), "status must not expose the lease capability: $body")
+  }
+
+  @Test
+  fun `status_json exposes only aggregate ui builder pressure`() {
+    val diagnostics =
+      UiBuilderServiceDiagnostics(
+        activeSubscribers = 3,
+        peakSubscribers = 7,
+        rejectedBatchLimit = 11,
+        rejectedSubscriberLimit = 13,
+        slowSubscribersClosed = 17,
+        rejectedPresenceLimit = 19,
+        activeExports = 2,
+        peakExports = 5,
+        rejectedExportLimit = 23,
+      )
+    val uiBuilder =
+      object : UiBuilderServicePort, UiBuilderServiceDiagnosticsSource {
+        override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
+          error("not used")
+
+        override fun subscribe(
+          call: UiBuilderSubscriptionCall,
+          listener: (UiBuilderServiceUpdate) -> Unit,
+        ): Closeable = Closeable {}
+
+        override fun diagnostics(): UiBuilderServiceDiagnostics = diagnostics
+      }
+    server =
+      newServer(
+        public = true,
+        token = "unused",
+        uiBuilderService = uiBuilder,
+      )
+
+    val (code, body) = get("/status.json")
+
+    assertEquals(200, code)
+    val status = Json.parseToJsonElement(body).jsonObject
+    val pressure = assertNotNull(status["uiBuilder"]).jsonObject
+    assertEquals(3, pressure.getValue("activeSubscribers").jsonPrimitive.int)
+    assertEquals(17, pressure.getValue("slowSubscribersClosed").jsonPrimitive.long)
+    assertEquals(23, pressure.getValue("rejectedExportLimit").jsonPrimitive.long)
+    assertFalse(body.contains("actorId"), body)
+    assertFalse(body.contains("designId"), body)
   }
 
   @Test
