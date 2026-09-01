@@ -1720,6 +1720,16 @@ class ServeWebFixtureTest {
             )
           else emptyList()
         },
+        parallelSourceFor = { preview ->
+          if (preview.id.startsWith("button-filled"))
+            ServeWeb.SpecSource(
+              id = "parallel",
+              label = "Wear M3",
+              rasterUrl = "/wear-m3/render/${preview.id}.png",
+              provenance = "Wear M3 fixture render",
+            )
+          else null
+        },
         reportIssue = fixtureWallReportIssue(),
         parityIssues = parityIssues,
       )
@@ -4190,6 +4200,7 @@ class ServeWebFixtureTest {
       formatComparison.contains("data-compare-format=\"svg\"") &&
         formatComparison.contains("data-compare-format=\"rc\"") &&
         formatComparison.contains("data-compare-format=\"reference\"") &&
+        formatComparison.contains("data-compare-format=\"parallel\"") &&
         formatComparison.contains("data-compare-theme=\"light\"") &&
         formatComparison.contains("data-compare-theme=\"dark\""),
       "the comparison page exposes only its available formats and its baked theme pair",

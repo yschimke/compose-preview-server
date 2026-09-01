@@ -228,6 +228,51 @@ class ServeSpecLaneParallelSourceTest {
   }
 
   @Test
+  fun `the comparison wall inherits Figma and adds the paired implementation lane`() {
+    val server = newServer(isPublic = false, reference = false, siblingReference = true)
+    try {
+      val (code, html) = get(server, "/compose-m3/compare?token=$token")
+      assertEquals(200, code)
+      assertTrue(
+        html.contains("data-compare-format=\"reference\"") &&
+          html.contains(
+            "data-reference-neutral=\"/wear-m3/reference/chip-filled-figma.png?token=$token\""
+          ),
+        "the bulk Figma lane inherits the paired catalog's mapping: $html",
+      )
+      assertTrue(
+        html.contains("data-compare-format=\"parallel\"") &&
+          html.contains("data-parallel-neutral=\"/wear-m3/render/chip-filled.png?token=$token\"") &&
+          html.contains(">wear-m3 ↔ PNG</button>"),
+        "the bulk parallel lane compares every mapped sibling render: $html",
+      )
+      assertEquals(200, get(server, "/wear-m3/reference/chip-filled-figma.png?token=$token").first)
+      assertEquals(200, get(server, "/wear-m3/render/chip-filled.png?token=$token").first)
+    } finally {
+      server.stop()
+    }
+  }
+
+  @Test
+  fun `the comparison wall omits sibling lanes on a site host`() {
+    val server =
+      newServer(
+        isPublic = true,
+        sites = ServeSiteRegistry.of(listOf(siteHost to "compose-m3")),
+        reference = false,
+        siblingReference = true,
+      )
+    try {
+      val (code, html) = get(server, "/compare", host = siteHost)
+      assertEquals(404, code)
+      assertFalse(html.contains("data-compare-format=\"parallel\""))
+      assertFalse(html.contains("/wear-m3/reference/"))
+    } finally {
+      server.stop()
+    }
+  }
+
+  @Test
   fun `a top-level site offers no sibling it would 404`() {
     val server =
       newServer(isPublic = true, sites = ServeSiteRegistry.of(listOf(siteHost to "compose-m3")))

@@ -1,7 +1,7 @@
 // Which two artifacts a row compares, and whether the page can compare them at all.
 
 /** The formats the wall can put beside a baked PNG, in the order it prefers them. */
-export const FORMATS = ["svg", "rc", "reference"] as const;
+export const FORMATS = ["svg", "rc", "reference", "parallel"] as const;
 
 export type Format = (typeof FORMATS)[number];
 
@@ -13,6 +13,7 @@ export interface Available {
     svg: boolean;
     rc: boolean;
     reference: boolean;
+    parallel: boolean;
 }
 
 export function supportsFormat(
@@ -21,7 +22,8 @@ export function supportsFormat(
 ): candidate is Format {
     return candidate === "svg" ||
         candidate === "rc" ||
-        candidate === "reference"
+        candidate === "reference" ||
+        candidate === "parallel"
         ? available[candidate]
         : false;
 }

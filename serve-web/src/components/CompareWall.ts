@@ -87,7 +87,12 @@ export class CompareWall extends ControllerElement {
     private pickedBar: HTMLElement | null = null;
     private pickedText: HTMLElement | null = null;
 
-    private available: Available = { svg: false, rc: false, reference: false };
+    private available: Available = {
+        svg: false,
+        rc: false,
+        reference: false,
+        parallel: false,
+    };
     private state!: WallState;
     /** What Back falls back to on an entry naming no format or theme: what THIS load resolved to. */
     private initial!: WallState;
@@ -141,6 +146,7 @@ export class CompareWall extends ControllerElement {
             svg: root.getAttribute("data-has-svg") === "1",
             rc: root.getAttribute("data-has-rc") === "1",
             reference: root.getAttribute("data-has-reference") === "1",
+            parallel: root.getAttribute("data-has-parallel") === "1",
         };
 
         this.state = initialState({
@@ -189,7 +195,8 @@ export class CompareWall extends ControllerElement {
                 if (
                     picked !== "svg" &&
                     picked !== "rc" &&
-                    picked !== "reference"
+                    picked !== "reference" &&
+                    picked !== "parallel"
                 )
                     return;
                 this.state.format = picked;
@@ -499,6 +506,7 @@ export class CompareWall extends ControllerElement {
             this.targetHead.textContent = targetHeadLabel(
                 this.state.format,
                 this.root.getAttribute("data-reference-label") ?? "",
+                this.root.getAttribute("data-parallel-label") ?? "",
             );
             lead(this.targetHead, this.renderHead, specFirst, this.diffHead);
         }
@@ -692,11 +700,21 @@ export class CompareWall extends ControllerElement {
                     : "";
             report.href = focused || report.dataset.bugFallback || report.href;
         }
-        if (format === "svg" || format === "reference") {
+        if (
+            format === "svg" ||
+            format === "reference" ||
+            format === "parallel"
+        ) {
             vector.hidden = false;
             canvas.hidden = true;
             vector.src = candidateUrl;
-            vector.alt = `${row.getAttribute("data-label")}${format === "svg" ? " SVG" : " design reference"}`;
+            vector.alt = `${row.getAttribute("data-label")}${
+                format === "svg"
+                    ? " SVG"
+                    : format === "parallel"
+                      ? " parallel implementation"
+                      : " design reference"
+            }`;
             vector.title =
                 format === "reference" ? "Open Reference / Diff / Actual" : "";
             vector.onclick = format === "reference" ? detail : null;
@@ -832,7 +850,7 @@ export class CompareWall extends ControllerElement {
                 percent: await compare.scoreSvgUrls(pngUrl, candidateUrl),
             };
         }
-        if (format === "reference") {
+        if (format === "reference" || format === "parallel") {
             if (!withMap) return compare.scoreImageUrls(candidateUrl, pngUrl);
             // The same composition the detail page measures with, for the same reason: normalise
             // the pair ONCE, then diff and score those frames, so the map in the middle column and

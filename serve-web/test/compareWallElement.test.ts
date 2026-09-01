@@ -135,6 +135,7 @@ async function mount(
         <button data-compare-format="svg">SVG</button>
         <button data-compare-format="rc">RC</button>
         <button data-compare-format="reference">Reference</button>
+        <button data-compare-format="parallel">Parallel</button>
         <button data-compare-theme="light">Light</button>
         <button data-compare-theme="dark">Dark</button>
         <input id="cp-compare-search" value="${options.search ?? ""}">
@@ -461,6 +462,30 @@ describe("<cp-compare-wall>", () => {
         );
         assert.equal(diff.width, 8);
         assert.equal(scoreTextOf("Button"), "80.0%");
+    });
+
+    it("scores a parallel implementation as a raster pair and paints its diff", async () => {
+        const scorer = stubScorer({ "/a/Button-parallel-light": 72.5 });
+        await mount({
+            available: 'data-has-svg="1" data-has-parallel="1"',
+            rows: [
+                {
+                    name: "Button",
+                    have: ["png-light", "parallel-light", "svg-light"],
+                },
+            ],
+        });
+        document
+            .querySelector<HTMLElement>('[data-compare-format="parallel"]')!
+            .click();
+        await settle();
+
+        const diff = document.querySelector<HTMLCanvasElement>(
+            '[data-label="Button"] .cp-compare-diff',
+        )!;
+        assert.equal(scoreTextOf("Button"), "72.5%");
+        assert.equal(diff.width, 8);
+        assert.equal(scorer.calls.at(-1), "/a/Button-parallel-light");
     });
 
     it("clears the map rather than leaving the last lane's magenta standing", async () => {

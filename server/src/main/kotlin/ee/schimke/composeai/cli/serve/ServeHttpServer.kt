@@ -3323,6 +3323,18 @@ class ServeHttpServer(
       sessionId,
       onMissing = { respondNotFoundHtml("That design system was not found on this server.") },
     ) { renderHost ->
+      // Resolve each cross-catalog source once. The wall asks the same question while filtering,
+      // grouping and writing rows; repeating the pairing walk at every stage is needless metadata
+      // churn and makes it easier for a sibling session disappearing mid-response to produce a
+      // button whose rows carry no source.
+      val pairedDesignSources =
+        renderHost.previews.associateWith { preview ->
+          if (renderHost.designReferencesFor(preview.id).isEmpty())
+            pairedDesignSpecSource(renderHost, preview)
+          else null
+        }
+      val parallelSources =
+        renderHost.previews.associateWith { preview -> parallelSpecSource(renderHost, preview) }
       // The published player comparison is itself a comparable format: a catalog can carry it even
       // where the per-preview `.rc` sidecars didn't make it into the served staging dir.
       val rcCompare = renderHost.rcCompare()
@@ -3331,7 +3343,9 @@ class ServeHttpServer(
           renderHost.previews.any { preview ->
             renderHost.hasSvgExportFor(preview.id) ||
               renderHost.hasRemoteComposeDoc(preview.id) ||
-              renderHost.designReferencesFor(preview.id).isNotEmpty()
+              renderHost.designReferencesFor(preview.id).isNotEmpty() ||
+              pairedDesignSources[preview] != null ||
+              parallelSources[preview] != null
           }
       if (!comparable) {
         respondNotFoundHtml("This session has no native formats or design references to compare.")
@@ -3370,6 +3384,8 @@ class ServeHttpServer(
           hasRemoteComposeFor = renderHost::hasRemoteComposeDoc,
           rcCompare = rcCompare,
           referencesFor = renderHost::designReferencesFor,
+          pairedDesignSourceFor = { pairedDesignSources[it] },
+          parallelSourceFor = { parallelSources[it] },
           unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
           reportIssue = reportIssue,
           generation = catalogGeneration(renderHost),
