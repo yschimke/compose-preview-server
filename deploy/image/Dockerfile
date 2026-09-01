@@ -14,7 +14,9 @@
 # x-release-please-start-version
 ARG SERVER_VERSION=2.10.0
 # x-release-please-end
-ARG TOOLS_VERSION=1.53.0
+# Required build input. The release workflow reads it from gradle/libs.versions.toml so the
+# server's runtime dependencies and its separately packaged daemon sidecars cannot drift.
+ARG TOOLS_VERSION
 
 # ---------------------------------------------------------------------------
 # Stage 0: base — JDK + Skiko's native deps (same rationale as the cloudrun image:

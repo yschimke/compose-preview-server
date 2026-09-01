@@ -9,7 +9,6 @@ on:
       tools_version:
         description: Released compose-ai-tools version supplying the Android daemon
         required: true
-        default: 1.53.0
   workflow_call:
     inputs:
       server_version:
@@ -40,8 +39,12 @@ jobs:
           RAW_SERVER: ${{ inputs.server_version }}
           RAW_TOOLS: ${{ inputs.tools_version }}
         run: |
-          echo "server=${RAW_SERVER#v}" >> "$GITHUB_OUTPUT"
-          echo "tools=${RAW_TOOLS#v}" >> "$GITHUB_OUTPUT"
+          server="${RAW_SERVER#v}"
+          tools="${RAW_TOOLS#v}"
+          test -n "${server}" || { echo "::error::server_version is empty"; exit 1; }
+          test -n "${tools}" || { echo "::error::tools_version is empty"; exit 1; }
+          echo "server=${server}" >> "$GITHUB_OUTPUT"
+          echo "tools=${tools}" >> "$GITHUB_OUTPUT"
       - name: Prepare image context
         run: |
           mkdir -p deploy/image/m2 deploy/image/release-assets deploy/image/scripts
