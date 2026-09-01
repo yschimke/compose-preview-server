@@ -1,10 +1,14 @@
 import { expect, test } from "@playwright/test";
+import pixelmatch from "pixelmatch";
+import { PNG } from "pngjs";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { harnessRoot, startServer as startStaticServer } from "./_server.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -16,6 +20,11 @@ const app = resolve(root, "server/build/install/compose-preview-server/ui-builde
 const mcpLauncher = process.env.GATE2_MCP_LAUNCHER;
 const operatorToken = "gate2-operator-token";
 const designId = "gate2-jetcaster";
+const visualReplayDesignId = "gate2-jetcaster-visual-replay";
+// Unlike ui-builder-jetcaster.spec.mjs's 2% same-Chromium semantic comparison, this compares the
+// production JVM/Skia daemon PNG with the Compose/Wasm Chromium oracle. Use that harness's existing
+// 4% committed/cross-platform raster bound; the measured ratio remains attached on every run.
+const crossRuntimeJetcasterMismatchLimit = 0.04;
 
 async function freePort() {
     const server = createServer();
@@ -268,7 +277,15 @@ class McpProcess {
     }
 }
 
-async function openBrowserSession(browser, origin, actorId, clientId, token, create) {
+async function openBrowserSession(
+    browser,
+    origin,
+    actorId,
+    clientId,
+    token,
+    create,
+    sessionDesignId = designId,
+) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const designResponses = [];
     page.on("response", (response) => {
@@ -278,7 +295,7 @@ async function openBrowserSession(browser, origin, actorId, clientId, token, cre
     });
     const query = new URLSearchParams({
         session: "live",
-        designId,
+        designId: sessionDesignId,
         actor: actorId,
         clientId,
         token,
@@ -303,6 +320,328 @@ async function editorState(page, revision) {
     );
     return page.evaluate(() => globalThis.__uiBuilderEditor);
 }
+
+async function captureJetcasterReference(browser, origin) {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+        if (message.type() === "error") errors.push(message.text());
+    });
+    try {
+        await page.goto(
+            `${origin}/ui-builder-reference-jetcaster/build/wasmDist/index.html`,
+        );
+        await page.waitForFunction(
+            () => globalThis.__uiBuilderReferenceJetcasterReady === true,
+            null,
+            { timeout: 30_000 },
+        );
+        await page.evaluate(async () => {
+            if (document.fonts) await document.fonts.ready;
+            await new Promise((accept) =>
+                requestAnimationFrame(() => requestAnimationFrame(accept)),
+            );
+        });
+        await page.waitForFunction(
+            () => globalThis.__uiBuilderReferenceJetcasterReady === true,
+            null,
+            { timeout: 30_000 },
+        );
+        const provenance = await page.evaluate(async () => {
+            const response = await fetch("./provenance.json", { cache: "no-store" });
+            if (!response.ok)
+                throw new Error(`provenance fetch failed: ${response.status}`);
+            return response.json();
+        });
+        expect(errors).toEqual([]);
+        return { png: await page.screenshot(), provenance };
+    } finally {
+        await page.close();
+    }
+}
+
+function initialDocumentFromFixture(fixture) {
+    const create = fixture.operations[0];
+    expect(create.type).toBe("createDesign");
+    return {
+        schema: fixture.documentSchema,
+        id: visualReplayDesignId,
+        title: create.title,
+        revision: 0,
+        catalogPin: create.catalogPin,
+        environment: create.environment,
+        stateVariables: create.stateVariables,
+        roots: [],
+        nodes: {},
+        assets: {},
+        tokenBindings: {},
+    };
+}
+
+async function replayJetcasterOperations(origin, fixture) {
+    responseOf(
+        await apiCall(origin, {
+            type: "createDesign",
+            document: initialDocumentFromFixture(fixture),
+        }),
+        "snapshot",
+    );
+
+    const mutations = fixture.operations.slice(1).map((operation) => {
+        expect(operation.type).toBe("insertNode");
+        return {
+            type: "insertNode",
+            node: operation.node,
+            location: {
+                parent: operation.parent ?? null,
+                afterNodeId: operation.afterNodeId ?? null,
+            },
+        };
+    });
+    // The protocol batch is the transaction boundary. Several scaffold/container capabilities
+    // require children, so publishing each parent before its next fixture operation would expose
+    // a deliberately invalid intermediate document. The ordered 99 mutations are still reduced
+    // one by one inside this single atomic public-protocol command.
+    const result = responseOf(
+        await apiCall(origin, {
+            type: "applyOperation",
+            submission: {
+                type: "batch",
+                designId: visualReplayDesignId,
+                operationId: "replay-jetcaster-discover-operations-v1",
+                actorId: "operator",
+                clientId: "visual-replay-script",
+                baseRevision: 0,
+                operations: mutations,
+            },
+        }),
+        "operationOutcome",
+    );
+    expect(result.outcome, JSON.stringify(result.outcome)).toMatchObject({
+        type: "accepted",
+        committedRevision: 1,
+    });
+    return {
+        revision: result.outcome.committedRevision,
+        mutationCount: mutations.length,
+        documentHash: result.outcome.documentHash,
+    };
+}
+
+function artifactBytes(artifact) {
+    return artifact.encoding === "base64"
+        ? Buffer.from(artifact.content, "base64")
+        : Buffer.from(artifact.content);
+}
+
+function sha256(bytes) {
+    return createHash("sha256").update(bytes).digest("hex");
+}
+
+test("checked-in Jetcaster operations converge and production PNG matches the independent oracle", async ({
+    browser,
+}, testInfo) => {
+    const port = await freePort();
+    const stateDirectory = await mkdtemp(
+        resolve(tmpdir(), "compose-ui-builder-visual-replay-state-"),
+    );
+    const serverLog = testInfo.outputPath("visual-replay-server.log");
+    const staticServer = await startStaticServer(harnessRoot);
+    const server = await startProductServer(port, stateDirectory, serverLog);
+    let browserA;
+    let browserB;
+    try {
+        const fixtureResponse = await fetch(
+            `${server.origin}/ui-builder/jetcaster-discover-operations-v1.json`,
+        );
+        expect(fixtureResponse.status).toBe(200);
+        const fixture = await fixtureResponse.json();
+        expect(fixture).toMatchObject({
+            schema: "compose-ui-builder-operations/v1-candidate",
+            designId: "fixture-jetcaster-discover-expanded",
+            expectedDocumentHash:
+                "09b7af04ab546421f72b81b1c49564f044790b8f2db4d2304dc66ff73c148643",
+        });
+        expect(fixture.operations).toHaveLength(100);
+
+        const replay = await replayJetcasterOperations(server.origin, fixture);
+        expect(replay).toMatchObject({ revision: 1, mutationCount: 99 });
+        const opened = responseOf(
+            await apiCall(server.origin, {
+                type: "openDesign",
+                designId: visualReplayDesignId,
+            }),
+            "snapshot",
+        ).snapshot;
+        expect(opened.state.document).toMatchObject({
+            id: visualReplayDesignId,
+            revision: replay.revision,
+        });
+        expect(Object.keys(opened.state.document.nodes)).toHaveLength(99);
+
+        browserA = await openBrowserSession(
+            browser,
+            server.origin,
+            "operator",
+            "visual-replay-browser-a",
+            operatorToken,
+            false,
+            visualReplayDesignId,
+        );
+        const stateA = await editorState(browserA.page, replay.revision);
+        expect(stateA.nodeCount).toBe(99);
+
+        const agent = await issueAgentGrant(server.origin);
+        responseOf(
+            await apiCall(server.origin, {
+                type: "updateDesignAccess",
+                designId: visualReplayDesignId,
+                baseAccessRevision: 0,
+                mutations: [
+                    {
+                        type: "grantActor",
+                        actorId: agent.actorId,
+                        role: "viewer",
+                        allowedActions: ["read", "export"],
+                    },
+                ],
+            }),
+            "designAccess",
+        );
+        browserB = await openBrowserSession(
+            browser,
+            server.origin,
+            agent.actorId,
+            "visual-replay-browser-b",
+            agent.token,
+            false,
+            visualReplayDesignId,
+        );
+        const stateB = await editorState(browserB.page, replay.revision);
+        expect(stateB.nodeCount).toBe(99);
+        expect(stateB.documentHash).toBe(stateA.documentHash);
+
+        const pngArtifact = responseOf(
+            await apiCall(server.origin, {
+                type: "exportDesign",
+                designId: visualReplayDesignId,
+                revision: replay.revision,
+                format: "png",
+            }),
+            "export",
+        ).artifact;
+        const svgArtifact = responseOf(
+            await apiCall(server.origin, {
+                type: "exportDesign",
+                designId: visualReplayDesignId,
+                revision: replay.revision,
+                format: "svg",
+            }),
+            "export",
+        ).artifact;
+        const productionPng = artifactBytes(pngArtifact);
+        const reference = await captureJetcasterReference(browser, staticServer.origin);
+        expect(reference.provenance).toMatchObject({
+            referenceId: "jetcaster-discover-expanded-v1",
+            comparisonFixture: {
+                resource: "jetcaster-discover-operations-v1.json",
+                revision: 99,
+                documentHash: fixture.expectedDocumentHash,
+            },
+        });
+        expect(pngArtifact.diagnostics.map((item) => item.code)).toContain(
+            "REVISION_PINNED_DAEMON_RENDER",
+        );
+        expect(svgArtifact.diagnostics.map((item) => item.code)).toContain(
+            "REVISION_PINNED_DAEMON_RENDER",
+        );
+        expect(svgArtifact.content.startsWith("<svg")).toBe(true);
+        expect(svgArtifact.content).toContain('data-material-icon="search"');
+        expect(svgArtifact.contentDigest).toBe(sha256(artifactBytes(svgArtifact)));
+        expect(
+            svgArtifact.diagnostics.find(
+                (item) => item.code === "REVISION_PINNED_DAEMON_RENDER",
+            ).message,
+        ).toContain(
+            `Rendered design ${visualReplayDesignId} revision ${replay.revision} (${replay.documentHash})`,
+        );
+
+        const production = PNG.sync.read(productionPng);
+        const oracle = PNG.sync.read(reference.png);
+        expect([production.width, production.height]).toEqual([1280, 800]);
+        expect([oracle.width, oracle.height]).toEqual([1280, 800]);
+        const diff = new PNG({ width: 1280, height: 800 });
+        const mismatch = pixelmatch(
+            oracle.data,
+            production.data,
+            diff.data,
+            1280,
+            800,
+            { threshold: 0.1, includeAA: false },
+        );
+        const mismatchRatio = mismatch / (1280 * 800);
+        console.info(
+            `Jetcaster protocol-replay production mismatch: ${mismatch} pixels (${(
+                mismatchRatio * 100
+            ).toFixed(3)}%)`,
+        );
+        await testInfo.attach("jetcaster-protocol-reference.png", {
+            body: reference.png,
+            contentType: "image/png",
+        });
+        await testInfo.attach("jetcaster-protocol-production.png", {
+            body: productionPng,
+            contentType: "image/png",
+        });
+        await testInfo.attach("jetcaster-protocol-diff.png", {
+            body: PNG.sync.write(diff),
+            contentType: "image/png",
+        });
+        await testInfo.attach("jetcaster-protocol-diff.json", {
+            body: Buffer.from(
+                JSON.stringify(
+                    {
+                        designId: visualReplayDesignId,
+                        revision: replay.revision,
+                        fixtureRevision: 99,
+                        operationCount: fixture.operations.length,
+                        mutationCount: replay.mutationCount,
+                        serviceDocumentHash: replay.documentHash,
+                        nodeCount: Object.keys(opened.state.document.nodes).length,
+                        browserAHash: stateA.documentHash,
+                        browserBHash: stateB.documentHash,
+                        pngDigest: pngArtifact.contentDigest,
+                        svgDigest: svgArtifact.contentDigest,
+                        mismatch,
+                        mismatchRatio,
+                        limit: crossRuntimeJetcasterMismatchLimit,
+                    },
+                    null,
+                    2,
+                ),
+            ),
+            contentType: "application/json",
+        });
+        expect(
+            mismatchRatio,
+            "protocol-replay production PNG independent-oracle mismatch",
+        ).toBeLessThan(crossRuntimeJetcasterMismatchLimit);
+    } finally {
+        if (browserA && !browserA.page.isClosed()) await browserA.page.close();
+        if (browserB && !browserB.page.isClosed()) await browserB.page.close();
+        await server.stop();
+        await staticServer.close();
+        try {
+            await testInfo.attach("visual-replay-server.log", {
+                body: await readFile(serverLog),
+                contentType: "text/plain",
+            });
+        } catch {
+            // A pre-start failure can leave no server log.
+        }
+    }
+});
 
 test("Gate 2 converges browsers and actual MCP through restart and exports", async ({
     browser,

@@ -23,19 +23,31 @@ npm run harness:playground
 npm run harness:bundle-upload
 ```
 
+CI also runs `npm run harness:ui-builder-visual-replay` after assembling the standalone server and
+the independent Jetcaster reference. That command deliberately excludes the cross-repository MCP
+case below, so operations-to-production-pixels remains a required check without needing an external
+compose-ai-tools checkout.
+
 The UI-builder convergence gate additionally needs the standalone server distribution, packaged
 UI-builder Wasm, and the real compose-ai-tools MCP executable:
 
 ```
-./gradlew :server:installDist
+./gradlew :server:installDist :ui-builder-reference-jetcaster:wasmFrontendDist
 GATE2_MCP_LAUNCHER=/absolute/path/to/compose-preview-mcp npm --prefix preview-harness run harness:ui-builder-gate2
 ```
 
-It starts the installed server twice with a fresh persistent state directory and no external render
-app-home, then drives two real Chromium pages and the MCP process concurrently. Passing the gate
-proves authenticated create/open, private-design denial, browser/MCP convergence, WebSocket gap
-recovery, restart persistence, and deterministic revision-pinned PNG, SVG, and Compose exports.
-Artifacts, process logs, and `gate2-evidence.json` are retained under
+The visual-replay case submits the checked-in 100-step Jetcaster fixture through the public HTTP
+protocol as one create plus an atomic ordered batch of 99 insert mutations. It opens the committed
+revision in operator and independently granted agent browsers, exports through the production
+daemon render lane, and pixel-diffs that PNG against the separately compiled Compose/Wasm oracle.
+The 4% limit is the visual harness's existing cross-runtime/platform raster bound; the exact ratio,
+PNG/SVG digests, converged browser hashes and diff images are retained as test attachments.
+
+The MCP case starts the installed server twice with a fresh persistent state directory and no
+external render app-home, then drives two real Chromium pages and the MCP process concurrently.
+Together the cases prove authenticated create/open, private-design denial, browser/MCP convergence,
+WebSocket gap recovery, restart persistence, deterministic revision-pinned PNG/SVG/Compose exports,
+and scripted operations-to-pixels acceptance. Artifacts and process logs are retained under
 `test-results/ui-builder-gate2/`.
 
 `HARNESS_CHROMIUM=/path/to/chrome` points Playwright at an existing browser when the matching
