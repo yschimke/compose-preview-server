@@ -2393,17 +2393,7 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handlePlaygroundRunAdmitted(
     service: PlaygroundCompileService
   ) {
-    val body =
-      withContext(Dispatchers.IO) {
-        call.receiveStream().use { readCapped(it, MAX_PLAYGROUND_BYTES) }
-      }
-        ?: run {
-          call.respondText(
-            "playground request exceeds ${MAX_PLAYGROUND_BYTES / 1024}KB",
-            status = HttpStatusCode.PayloadTooLarge,
-          )
-          return
-        }
+    val body = receivePlaygroundBody() ?: return
     val request =
       try {
         JSON.decodeFromString(PlaygroundRunRequest.serializer(), body.decodeToString())
@@ -2458,17 +2448,7 @@ class ServeHttpServer(
       )
       return
     }
-    val body =
-      withContext(Dispatchers.IO) {
-        call.receiveStream().use { readCapped(it, MAX_PLAYGROUND_BYTES) }
-      }
-        ?: run {
-          call.respondText(
-            "playground request exceeds ${MAX_PLAYGROUND_BYTES / 1024}KB",
-            status = HttpStatusCode.PayloadTooLarge,
-          )
-          return
-        }
+    val body = receivePlaygroundBody() ?: return
     val request =
       if (body.isEmpty()) PlaygroundEditLeaseAcquireRequest()
       else
@@ -2505,19 +2485,14 @@ class ServeHttpServer(
       )
       return
     }
-    val body =
-      withContext(Dispatchers.IO) {
-        call.receiveStream().use { readCapped(it, MAX_PLAYGROUND_BYTES) }
-      }
-    val request = body?.let {
-      runCatching {
-        JSON.decodeFromString(
-          PlaygroundEditLeaseReleaseRequest.serializer(),
-          it.decodeToString(),
-        )
-      }
-        .getOrNull()
+    val body = receivePlaygroundBody() ?: return
+    val request = runCatching {
+      JSON.decodeFromString(
+        PlaygroundEditLeaseReleaseRequest.serializer(),
+        body.decodeToString(),
+      )
     }
+      .getOrNull()
     if (
       request == null || !service.releaseEditLease(owner, request.lease, client = request.client)
     ) {
@@ -2525,6 +2500,24 @@ class ServeHttpServer(
       return
     }
     call.respondText("{\"released\":true}", ContentType.Application.Json)
+  }
+
+  /** Reject declared oversized bodies before the handler reads their content. */
+  private suspend fun RoutingContext.receivePlaygroundBody(): ByteArray? {
+    val declaredBytes = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+    val body =
+      if (declaredBytes != null && declaredBytes > MAX_PLAYGROUND_BYTES) null
+      else
+        withContext(Dispatchers.IO) {
+          call.receiveStream().use { readCapped(it, MAX_PLAYGROUND_BYTES) }
+        }
+    if (body == null) {
+      call.respondText(
+        "playground request exceeds ${MAX_PLAYGROUND_BYTES / 1024}KB",
+        status = HttpStatusCode.PayloadTooLarge,
+      )
+    }
+    return body
   }
 
   /** `GET /d/{id}`: the permalink page. An expired (or unknown) id is a styled 404, not a hint. */
