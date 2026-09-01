@@ -6705,6 +6705,11 @@ class ServeHttpServer(
                 activeExports = it.activeExports,
                 peakExports = it.peakExports,
                 rejectedExportLimit = it.rejectedExportLimit,
+                rejectedMutationRate = it.rejectedMutationRate,
+                rejectedDocumentBytes = it.rejectedDocumentBytes,
+                rejectedAssetBytes = it.rejectedAssetBytes,
+                timedOutExports = it.timedOutExports,
+                activeMutationBuckets = it.activeMutationBuckets,
               )
             },
         playground =
@@ -11385,6 +11390,11 @@ private data class UiBuilderDto(
   val activeExports: Int,
   val peakExports: Long,
   val rejectedExportLimit: Long,
+  val rejectedMutationRate: Long,
+  val rejectedDocumentBytes: Long,
+  val rejectedAssetBytes: Long,
+  val timedOutExports: Long,
+  val activeMutationBuckets: Int,
 )
 
 @Serializable
