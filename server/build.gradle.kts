@@ -1,8 +1,10 @@
 import java.io.File
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedArtifactResult
 import org.gradle.api.tasks.ClasspathNormalizer
 import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.bundling.Compression
 import org.gradle.api.tasks.bundling.Tar
 import org.gradle.process.CommandLineArgumentProvider
@@ -79,12 +81,123 @@ evaluationDependsOn(":wasm-ui")
 
 evaluationDependsOn(":ui-builder")
 
+// Subprocess-only Compose renderer/daemon runtimes. These intentionally do not extend any server
+// classpath: the generated launcher discovers them below APP_HOME, and the render host passes them
+// only to the isolated daemon JVM. This gives the standalone server distribution the same honest
+// PNG/SVG capability as the compose-ai-tools CLI distribution without making :server load a
+// renderer implementation.
+val composePreviewRenderer =
+  configurations.create("composePreviewRenderer") {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+  }
+val composePreviewDaemonDesktop =
+  configurations.create("composePreviewDaemonDesktop") {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+  }
+
+fun registerIsolatedDesktopSidecar(
+  taskName: String,
+  configuration: Configuration,
+  destination: String,
+) =
+  tasks.register<Sync>(taskName) {
+    destinationDir = layout.buildDirectory.dir(destination).get().asFile
+    val artifactsProvider = configuration.incoming.artifacts.resolvedArtifacts
+    from(
+      artifactsProvider.map { resolved ->
+        resolved
+          .filterNot { it.file.name.startsWith("skiko-awt-runtime-") }
+          .map(ResolvedArtifactResult::getFile)
+      }
+    )
+    val nameByPath = artifactsProvider.map { resolved ->
+      val staged = resolved.filterNot { it.file.name.startsWith("skiko-awt-runtime-") }
+      val counts = staged.groupingBy { it.file.name }.eachCount()
+      staged.associate { artifact ->
+        val original = artifact.file.name
+        val mapped =
+          if (counts.getValue(original) > 1) {
+            val id = artifact.id.componentIdentifier
+            if (id is ModuleComponentIdentifier) "${id.module}-${id.version}.jar" else original
+          } else original
+        artifact.file.absolutePath to mapped
+      }
+    }
+    inputs.property("nameByPath", nameByPath)
+    eachFile { nameByPath.get()[file.absolutePath]?.let { name = it } }
+  }
+
+val stageRendererLibs =
+  registerIsolatedDesktopSidecar(
+    "stageRendererLibs",
+    composePreviewRenderer,
+    "staged-renderer-libs",
+  )
+val stageDaemonDesktopLibs =
+  registerIsolatedDesktopSidecar(
+    "stageDaemonDesktopLibs",
+    composePreviewDaemonDesktop,
+    "staged-daemon-desktop-libs",
+  )
+
 distributions {
   main {
-    contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
-    contents { from(project(":ui-builder").tasks.named("wasmFrontendDist")) { into("ui-builder") } }
+    contents {
+      from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") }
+      from(project(":ui-builder").tasks.named("wasmFrontendDist")) { into("ui-builder") }
+      into("lib-renderer") { from(stageRendererLibs) }
+      into("lib-daemon-desktop") { from(stageDaemonDesktopLibs) }
+    }
   }
 }
+
+abstract class CheckServerDesktopSidecarPackaging : DefaultTask() {
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.RELATIVE)
+  abstract val rendererJars: ConfigurableFileCollection
+
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.RELATIVE)
+  abstract val daemonJars: ConfigurableFileCollection
+
+  @TaskAction
+  fun checkPackaging() {
+    val renderer = rendererJars.files.flatMap { it.listFiles()?.toList().orEmpty() }
+    val daemon = daemonJars.files.flatMap { it.listFiles()?.toList().orEmpty() }
+    check(renderer.any { it.name.startsWith("renderer-desktop-") }) {
+      "Standalone server distribution lost renderer-desktop"
+    }
+    check(renderer.any { it.name.matches(Regex("skiko-awt-[^-].*\\.jar")) }) {
+      "Standalone server distribution lost the Skiko API used for host-native provisioning"
+    }
+    check(daemon.any { it.name.startsWith("daemon-desktop-") }) {
+      "Standalone server distribution lost daemon-desktop"
+    }
+    check(daemon.any { it.name.startsWith("components-resources-desktop-") }) {
+      "Standalone server distribution lost Compose resource support"
+    }
+    check((renderer + daemon).none { it.name.startsWith("skiko-awt-runtime-") }) {
+      "Portable server distribution contains a host-specific Skiko native"
+    }
+    listOf("lib-renderer" to renderer, "lib-daemon-desktop" to daemon).forEach { (name, jars) ->
+      val duplicates = jars.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
+      check(duplicates.isEmpty()) { "$name contains colliding filenames: $duplicates" }
+    }
+  }
+}
+
+val checkServerDesktopSidecarPackaging =
+  tasks.register<CheckServerDesktopSidecarPackaging>("checkServerDesktopSidecarPackaging") {
+    description = "Checks the standalone server's isolated desktop renderer sidecars."
+    group = "verification"
+    dependsOn(stageRendererLibs, stageDaemonDesktopLibs)
+    rendererJars.from(stageRendererLibs)
+    daemonJars.from(stageDaemonDesktopLibs)
+  }
+
+tasks.named("check") { dependsOn(checkServerDesktopSidecarPackaging) }
 
 tasks.named<Tar>("distTar") {
   compression = Compression.GZIP
@@ -153,6 +266,16 @@ dependencies {
   implementation(libs.ktor.server.auto.head.response)
   implementation(libs.classgraph)
   implementation(libs.jmdns)
+
+  val composeAiToolsVersion = libs.versions.composeai.tools.get()
+  add(
+    "composePreviewRenderer",
+    "ee.schimke.composeai:renderer-desktop:$composeAiToolsVersion",
+  )
+  add(
+    "composePreviewDaemonDesktop",
+    "ee.schimke.composeai:daemon-desktop:$composeAiToolsVersion",
+  )
 
   // BTA *interfaces only* — the playground compiler references `BtaCompileSession`'s
   // build-tools-api parameter types (`CompilerPlugin`, `KotlinLogger`, `SourcesChanges`) to drive
