@@ -170,6 +170,14 @@ class SvgSanitizerTest {
   }
 
   @Test
+  fun `a fourteen megabyte maximum-node design page is accepted`() {
+    // m3-catalog's 500-node Buttons export is 14,576,730 bytes. The old 12 MiB ceiling silently
+    // dropped that page even though the node boundary itself is inclusive.
+    val body = " ".repeat(14 * 1024 * 1024)
+    assertNotNull(clean(wrap(body)))
+  }
+
+  @Test
   fun `the output has no XML prologue — it is spliced into an HTML document`() {
     val out =
       assertNotNull(clean("""<?xml version="1.0"?>${wrap("<rect width=\"1\" height=\"1\"/>")}"""))
