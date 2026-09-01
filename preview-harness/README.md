@@ -23,6 +23,21 @@ npm run harness:playground
 npm run harness:bundle-upload
 ```
 
+The UI-builder convergence gate additionally needs the standalone server distribution, packaged
+UI-builder Wasm, and the real compose-ai-tools MCP executable:
+
+```
+./gradlew :server:installDist
+GATE2_MCP_LAUNCHER=/absolute/path/to/compose-preview-mcp npm --prefix preview-harness run harness:ui-builder-gate2
+```
+
+It starts the installed server twice with a fresh persistent state directory and no external render
+app-home, then drives two real Chromium pages and the MCP process concurrently. Passing the gate
+proves authenticated create/open, private-design denial, browser/MCP convergence, WebSocket gap
+recovery, restart persistence, and deterministic revision-pinned PNG, SVG, and Compose exports.
+Artifacts, process logs, and `gate2-evidence.json` are retained under
+`test-results/ui-builder-gate2/`.
+
 `HARNESS_CHROMIUM=/path/to/chrome` points Playwright at an existing browser when the matching
 download isn't present. `HARNESS_THEME=dark` narrows the captures.
 
