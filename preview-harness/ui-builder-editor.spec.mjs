@@ -166,7 +166,7 @@ test("mobile editor defaults to the design and exposes collapsible dock panels",
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
 
-    await expect(page.getByText("M3 component catalog", { exact: true })).toBeHidden();
+    await expect(page.getByText("m3-catalog component catalog", { exact: true })).toBeHidden();
     await expect(page.getByText("m3/surface", { exact: true })).toBeHidden();
     const canvas = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
     expect(canvas.scale).toBeGreaterThan(0.25);
@@ -180,7 +180,7 @@ test("mobile editor defaults to the design and exposes collapsible dock panels",
     });
 
     await clickCompose(page, page.getByRole("button", { name: "Open components panel" }));
-    await expect(page.getByText("M3 component catalog", { exact: true })).toBeVisible();
+    await expect(page.getByText("m3-catalog component catalog", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Close components panel" }),
     ).toBeVisible();
@@ -191,7 +191,7 @@ test("mobile editor defaults to the design and exposes collapsible dock panels",
     });
 
     await clickCompose(page, page.getByRole("button", { name: "Open properties panel" }));
-    await expect(page.getByText("M3 component catalog", { exact: true })).toBeHidden();
+    await expect(page.getByText("m3-catalog component catalog", { exact: true })).toBeHidden();
     await expect(page.getByText("m3/surface", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Close properties panel" }),
@@ -223,7 +223,7 @@ test("the property inspector selects Google icons from a searchable catalog", as
     await waitForEditor(page, 108);
 
     const iconLayer = await page
-        .getByRole("button", { name: /Reorder search-leading-icon/ })
+        .getByRole("button", { name: /Select search-leading-icon/ })
         .boundingBox();
     expect(iconLayer).not.toBeNull();
     await page.mouse.click(
@@ -355,7 +355,7 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
 
     // Select a concrete slot owner, then release the catalog drag over the visible canvas target.
     const discoverLayer = await page
-        .getByRole("button", { name: /Reorder discover-grid/ })
+        .getByRole("button", { name: /Select discover-grid/ })
         .boundingBox();
     expect(discoverLayer).not.toBeNull();
     await page.mouse.click(
@@ -436,9 +436,7 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
     const beforeCanvas = crop(beforeReorder, canvas.bounds);
 
     // This gesture resolves the concrete next sibling before emitting MoveNode.
-    const scrimLayer = await page
-        .getByRole("button", { name: /Reorder main-scrim/ })
-        .boundingBox();
+    const scrimLayer = await page.getByRole("img", { name: "Reorder main-scrim" }).boundingBox();
     expect(scrimLayer).not.toBeNull();
     await page.mouse.move(
         scrimLayer.x + scrimLayer.width / 2,
@@ -583,7 +581,7 @@ test("capability inspector validates and commits typed scaffold and Text propert
     await waitForEditor(page, 108);
     const canvasBefore = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
 
-    await clickCompose(page, page.getByRole("button", { name: /Reorder pane-scaffold/ }));
+    await clickCompose(page, page.getByRole("button", { name: /Select pane-scaffold/ }));
     await page.waitForFunction(
         () => globalThis.__uiBuilderEditor?.selectedNodeId === "pane-scaffold",
     );
@@ -622,7 +620,7 @@ test("capability inspector validates and commits typed scaffold and Text propert
     // of the test can then exercise the supporting-pane Text node without a test-only reset path.
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
-    await clickCompose(page, page.getByRole("button", { name: /Reorder pane-scaffold/ }));
+    await clickCompose(page, page.getByRole("button", { name: /Select pane-scaffold/ }));
     await page.waitForFunction(
         () => globalThis.__uiBuilderEditor?.selectedNodeId === "pane-scaffold",
     );
