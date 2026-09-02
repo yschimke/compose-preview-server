@@ -9004,7 +9004,14 @@ class ServeHttpServer(
             call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
           }
         if (staged != null) {
-          markGeneration(RenderOutcome.Generation.RC_PUBLISHED.wire, DYNAMIC_RESOURCE_CACHE_CONTROL)
+          // Cached exactly like the daemon-backed player lanes below, and for the same reason:
+          // these ARE the published bytes. This path returns before that decision is reached, so
+          // it has to make the same one — otherwise the one player whose staged raster costs a
+          // ~4.3s subprocess to redraw is the one the wall refetches on every view.
+          markGeneration(
+            RenderOutcome.Generation.RC_PUBLISHED.wire,
+            if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else DYNAMIC_RESOURCE_CACHE_CONTROL,
+          )
           call.respondBytes(staged, ContentType.Image.PNG)
           return@withLeasedSession
         }
@@ -9250,7 +9257,12 @@ class ServeHttpServer(
                 // The staleness this accepts is the one the baked lane already accepts: a redeploy
                 // can change the player, and for up to `max-age` a cache answers with the previous
                 // one. `stale-while-revalidate` bounds it the same way there.
-                val bareRcPlayer = overrideParams.keys.singleOrNull() == "rcPlayer"
+                // `!scroll` for the same reason [bareRcPlayerRequest] excludes it: `scroll=` is not
+                // an override param, so it would otherwise ride through here — but a full-page
+                // capture skips the published/baked chain entirely (`cached = if (scroll) null`)
+                // and is made to order by the daemon. Nothing about it is a replay of published
+                // bytes, so nothing about it earns the published bytes' lifetime.
+                val bareRcPlayer = overrideParams.keys.singleOrNull() == "rcPlayer" && !scroll
                 val bakedBrowse =
                   outcome.generation == RenderOutcome.Generation.BAKED && overrideParams.isEmpty()
                 markGeneration(
@@ -9500,10 +9512,14 @@ class ServeHttpServer(
    *
    * The same condition the parsed-override path applies: anything beyond the player selection wants
    * pixels the offline parity run never drew, so it must reach the renderer.
+   *
+   * `scroll=` is excluded for the reason `.svg` is: a full-page capture is a **different product**,
+   * which a staged viewport raster cannot answer however bare the rest of the query is. The
+   * parsed-override path already spells that rule out as `cached = if (scroll) null`.
    */
   private fun RoutingContext.bareRcPlayerRequest(): Boolean =
     call.request.queryParameters.entries().none { (key, _) ->
-      ServeOverrides.isOverrideParam(key) && key != "rcPlayer"
+      (ServeOverrides.isOverrideParam(key) && key != "rcPlayer") || key == "scroll"
     }
 
   /** Whether the caller passed `?fallback=baked` — an explicit "serve the snapshot anyway". */
