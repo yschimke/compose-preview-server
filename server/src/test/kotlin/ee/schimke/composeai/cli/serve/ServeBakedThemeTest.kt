@@ -18,6 +18,8 @@ class ServeBakedThemeTest {
 
   private val untagged = "button-filled__ideal__l-square"
   private val darkTwin = "button-filled__ideal__l-square__dark"
+  private val sizedLight = "bottomappbar-standard__ideal__four-actions__compact"
+  private val sizedDark = "bottomappbar-standard__ideal__four-actions__dark__compact"
 
   @Test
   fun `an explicit token names the theme`() {
@@ -39,6 +41,55 @@ class ServeBakedThemeTest {
   @Test
   fun `an untagged render is the light half of a published pair`() {
     assertEquals(UiMode.LIGHT, ServeBakedTheme.resolve(untagged) { it == darkTwin })
+  }
+
+  /**
+   * The theme segment sits BEFORE the size and props, so a sticker drawn at a breakpoint pairs
+   * across the middle of its id, not its end. Appending was the first cut of this and it missed
+   * every such render — 99 of `m3-catalog`'s 1973 pairs.
+   */
+  @Test
+  fun `a sized render pairs across the middle of its id`() {
+    assertEquals(sizedDark, ServeBakedTheme.twinIn(sizedLight, UiMode.DARK) { it == sizedDark })
+    assertEquals(sizedLight, ServeBakedTheme.twinIn(sizedDark, UiMode.LIGHT) { it == sizedLight })
+    assertEquals(UiMode.LIGHT, ServeBakedTheme.resolve(sizedLight) { it == sizedDark })
+    assertNull(
+      ServeBakedTheme.twinIn(sizedLight, UiMode.DARK) { it == sizedLight + "__dark" },
+      "the twin is not the id with __dark appended",
+    )
+  }
+
+  /** A props fan-out pairs the same way — the theme still precedes every `<key>-<value>`. */
+  @Test
+  fun `a props render pairs across the middle of its id`() {
+    val props = "slider-continuous__ideal__default__medium__value-50"
+    val propsDark = "slider-continuous__ideal__default__dark__medium__value-50"
+    assertEquals(propsDark, ServeBakedTheme.twinIn(props, UiMode.DARK) { it == propsDark })
+    assertEquals(props, ServeBakedTheme.twinIn(propsDark, UiMode.LIGHT) { it == props })
+  }
+
+  /**
+   * The light half may be spelled either way — untagged (what the default mode produces) or with an
+   * explicit `__light`, which 44 of `m3-catalog`'s records carry. Untagged is tried first.
+   */
+  @Test
+  fun `the light twin is found under either spelling`() {
+    val dark = "badge-number__ideal__default__dark__size-small"
+    val tagged = "badge-number__ideal__default__light__size-small"
+    val bare = "badge-number__ideal__default__size-small"
+
+    assertEquals(tagged, ServeBakedTheme.twinIn(dark, UiMode.LIGHT) { it == tagged })
+    assertEquals(bare, ServeBakedTheme.twinIn(dark, UiMode.LIGHT) { it == bare })
+    assertEquals(bare, ServeBakedTheme.twinIn(dark, UiMode.LIGHT) { it == bare || it == tagged })
+  }
+
+  @Test
+  fun `an unpublished twin is not invented`() {
+    assertNull(ServeBakedTheme.twinIn(untagged, UiMode.DARK) { false })
+    // A contrast specimen names its CONTRAST in the state and has no theme pair at all.
+    val specimen = "color-role-grid__ideal__dark-high-contrast__medium"
+    assertNull(ServeBakedTheme.token(specimen))
+    assertNull(ServeBakedTheme.twinIn(specimen, UiMode.DARK) { false })
   }
 
   /**
@@ -109,7 +160,7 @@ class ServeBakedThemeTest {
       java.nio.file.Files.createTempDirectory("baked-theme").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText("<html></html>")
     val previews = File(dir, "previews").apply { mkdirs() }
-    for (id in listOf(untagged, darkTwin, "badge-number__ideal__solo")) {
+    for (id in listOf(untagged, darkTwin, sizedLight, sizedDark, "badge-number__ideal__solo")) {
       File(previews, "$id.png").writeBytes(byteArrayOf(4, 2))
     }
 
@@ -117,6 +168,11 @@ class ServeBakedThemeTest {
 
     assertEquals(UiMode.LIGHT, host.bakedTheme(untagged), "published beside its dark twin")
     assertEquals(UiMode.DARK, host.bakedTheme(darkTwin))
+    assertEquals(
+      UiMode.LIGHT,
+      host.bakedTheme(sizedLight),
+      "a sized render pairs across the middle of its id",
+    )
     assertNull(host.bakedTheme("badge-number__ideal__solo"), "no twin, no claim")
     assertNull(host.bakedTheme("not-published__ideal__default"))
   }
