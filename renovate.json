@@ -6,6 +6,16 @@
   "automerge": true,
   "packageRules": [
     {
+      "description": "compose-multiplatform: pin to the 1.11.x line. Compose 1.12 changes the CanvasLayersComposeScene API used by the UI builder's structured-SVG recorder, while the standalone distribution's renderer-desktop and daemon-desktop sidecars remain governed by the deliberately held compose-ai-tools host floor. Moving to 1.12 therefore requires a coordinated source migration, full visual verification, and any intended host-floor release rather than an automated dependency bump.",
+      "matchManagers": ["gradle"],
+      "matchPackageNames": [
+        "org.jetbrains.compose",
+        "org.jetbrains.compose{/,}**"
+      ],
+      "matchCurrentValue": "/^1\\.11\\./",
+      "allowedVersions": "/^1\\.11\\./"
+    },
+    {
       "description": "The design-parity packages are published in lockstep from one monorepo, so update them together in a single PR.",
       "matchManagers": ["npm"],
       "matchPackageNames": ["@design-parity/**"],
