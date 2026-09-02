@@ -199,7 +199,8 @@ internal object BundleClasspathGaps {
   /** The gap that best explains the type in [dottedReason], or null when none says anything. */
   private fun List<Gap>.bestExplanationOf(dottedReason: String): Gap? = maxByOrNull {
     attributionScore(dottedReason, it)
-  }?.takeIf { attributionScore(dottedReason, it) > 0 }
+  }
+    ?.takeIf { attributionScore(dottedReason, it) > 0 }
 
   private fun BundleReader.ClasspathEntry.Maven.toGap() =
     Gap(coordinate = "$group:$artifact:$version", group = group, artifact = artifact)
