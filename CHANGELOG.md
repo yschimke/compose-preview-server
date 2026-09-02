@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.16.1](https://github.com/yschimke/compose-preview-server/compare/v2.16.0...v2.16.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#190](https://github.com/yschimke/compose-preview-server/issues/190)) ([38da259](https://github.com/yschimke/compose-preview-server/commit/38da2593038500a5b4ce2e9017c8124451a344bb))
+* **reporting:** file server bugs against compose-preview-server ([#183](https://github.com/yschimke/compose-preview-server/issues/183)) ([efa41c7](https://github.com/yschimke/compose-preview-server/commit/efa41c7f1b3a0132ea4098d6c00788b673f9dee6))
+* **serve:** keep the design page's lane controls on screen ([#186](https://github.com/yschimke/compose-preview-server/issues/186)) ([80daf82](https://github.com/yschimke/compose-preview-server/commit/80daf821a8d171f98768bb9fe2c0e663cb796524))
+* **serve:** name the Remote Compose players a run left out ([#188](https://github.com/yschimke/compose-preview-server/issues/188)) ([f8a88a0](https://github.com/yschimke/compose-preview-server/commit/f8a88a0a71c53950cc11b1cc7e6618ab56cf40cc))
+* **serve:** replay the baked sticker for an untagged variant's own theme ([#185](https://github.com/yschimke/compose-preview-server/issues/185)) ([ca3539f](https://github.com/yschimke/compose-preview-server/commit/ca3539f83590bde6afff305369653505534c35d1))
+
 ## [2.16.0](https://github.com/yschimke/compose-preview-server/compare/v2.15.0...v2.16.0) (2026-09-02)
 
 
