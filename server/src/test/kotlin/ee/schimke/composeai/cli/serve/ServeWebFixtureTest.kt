@@ -1786,8 +1786,10 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
         isPublic = true,
         rcCompare = rcCompareFixture(themedPreviews, lanes = setOf("baked", "js", "cmp-wasm")),
-        // `badge` stands in for a preview the host carries no document for, so the wall has to
-        // show a column its rows do not all fill.
+        // The host offers BOTH server-side players, and the wall must take only cmp-jvm: on an
+        // Android daemon `?rcPlayer=cmp-android` returns the baked capture itself, so that column
+        // would duplicate the one beside it. `badge` stands in for a preview the host carries no
+        // document for, so the wall also has to show a column its rows do not all fill.
         liveRcPlayersFor = { previewId ->
           if (previewId.startsWith("badge")) emptyList()
           else listOf(RcPlayerBackend.CMP_ANDROID, RcPlayerBackend.CMP_JVM)
@@ -4356,7 +4358,6 @@ class ServeWebFixtureTest {
       listOf(
         "AndroidX Embedded · baked",
         "RC · JS player",
-        "AndroidX Embedded · vendored Android",
         "RC · cmp-jvm player",
         "RC · cmp-wasm player",
       ),
@@ -4365,10 +4366,15 @@ class ServeWebFixtureTest {
         .map { it.groupValues[1] }
         .toList()
         .drop(1),
-      "a host that can draw a player gets its column, ordered with the published ones",
+      "a live column appears for a renderer that cannot duplicate the baked capture, and only that",
+    )
+    // The one that must NOT appear, and the reason this filter exists at all.
+    assertFalse(
+      rcLanesLiveComparison.contains("rcPlayer=cmp-android"),
+      "cmp-android is never filled live: an Android daemon answers it with the baked bytes",
     )
     assertEquals(
-      listOf("AndroidX Embedded · androidx.dev"),
+      listOf("AndroidX Embedded · vendored Android", "AndroidX Embedded · androidx.dev"),
       Regex("<span class=\"cp-rc-absent-lane\">([^<]+)</span>")
         .findAll(rcLanesLiveComparison)
         .map { it.groupValues[1] }
@@ -4376,7 +4382,7 @@ class ServeWebFixtureTest {
       "only a player neither published nor drawable on demand is still reported absent",
     )
     assertEquals(
-      listOf("none", "baked", "js", "embedded", "cmp-jvm", "cmp-wasm"),
+      listOf("none", "baked", "js", "cmp-jvm", "cmp-wasm"),
       Regex("data-rc-ref=\"([^\"]+)\"")
         .findAll(rcLanesLiveComparison)
         .map { it.groupValues[1] }
@@ -4388,17 +4394,14 @@ class ServeWebFixtureTest {
     // whether or not the lane was ever staged.
     assertTrue(
       rcLanesLiveComparison.contains(
-        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=cmp-android"
-      ) &&
-        rcLanesLiveComparison.contains(
-          "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=cmp-jvm"
-        ),
+        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=cmp-jvm"
+      ),
       "a live cell points at this host's render endpoint for that player and preview",
     )
     assertEquals(
-      8,
+      4,
       Regex("data-live=\"1\"").findAll(rcLanesLiveComparison).count(),
-      "every live cell is marked as drawn on request — two players over the four rows that carry a document",
+      "every live cell is marked as drawn on request — one player over the four rows that carry a document",
     )
     assertTrue(
       rcLanesLiveComparison.contains(
