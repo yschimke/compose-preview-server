@@ -1294,6 +1294,7 @@ ${captureControlsHtml().prependIndent("          ")}
       "<label class=\"cp-report-summary\">Summary" +
       "<input class=\"cp-report-summary-input\" type=\"text\" name=\"title\" required" +
       " autocomplete=\"off\" placeholder=\"Briefly describe what is wrong\"></label>" +
+      reportScopeHtml(r.bodyTemplate) +
       reportClassificationHtml() +
       "<input type=\"hidden\" name=\"body\" id=\"cp-report-body\"" +
       " value=\"${WebEscaping.htmlEscape(r.body)}\"" +
@@ -1347,6 +1348,25 @@ ${captureControlsHtml().prependIndent("          ")}
       "catalog&rsquo;s issue index can tell a difference that is ours from one that is not. " +
       "Leave it on <em>needs investigating</em> if you are not sure — that is what it is for." +
       "</span></cp-report-classification>"
+
+  /** Controls whether the locator joins back to every variant or only the one being reported. */
+  private fun reportScopeHtml(bodyTemplate: String): String {
+    if (
+      ServeIssueReport.LOCATOR_FENCE !in bodyTemplate &&
+        ServeIssueReport.LOCATORS_PLACEHOLDER !in bodyTemplate
+    ) {
+      return ""
+    }
+    return "<cp-report-scope class=\"cp-report-class\">" +
+      "<label class=\"cp-report-class-label\">Show this issue on" +
+      "<select class=\"cp-report-class-input\">" +
+      "<option value=\"component\" selected>This component</option>" +
+      "<option value=\"variant\">This component + variant</option>" +
+      "</select></label>" +
+      "<span class=\"cp-report-class-note\">Component issues appear on every preview variant; " +
+      "variant issues appear only on the preview you are reporting.</span>" +
+      "</cp-report-scope>"
+  }
 
   /**
    * The three answers, as `label value` → visible text → the sentence the issue body states.
@@ -1609,7 +1629,7 @@ ${captureControlsHtml().prependIndent("          ")}
     preview: ServePreview,
   ): List<ParityIssue> = issues.filter { issue ->
     preview.id in issue.previewIds ||
-      (preview.componentId != null && issue.component == preview.componentId)
+      (issue.scope == "component" && issue.component == ServeIssueReport.componentIdFor(preview))
   }
 
   /**
@@ -1635,7 +1655,7 @@ ${captureControlsHtml().prependIndent("          ")}
     return issues
       .filter { issue ->
         issue.previewIds.any { it in wanted } ||
-          (componentId != null && issue.component == componentId)
+          (issue.scope == "component" && componentId != null && issue.component == componentId)
       }
       .sortedWith(compareBy({ it.state != "open" }, { -it.number }))
   }
@@ -9742,7 +9762,12 @@ ${captureControlsHtml().prependIndent("          ")}
         // component itself. Matched on the row's WHOLE id set rather than on `current` alone: an
         // issue is filed from one theme's page and the row shows both, so joining on the served
         // variant would hide a dark-lane report from the reader looking at the light lane.
-        val bugs = issuesForRow(parityIssues, variants.map { it.id } + folded, current.componentId)
+        val bugs =
+          issuesForRow(
+            parityIssues,
+            variants.map { it.id } + folded,
+            ServeIssueReport.componentIdFor(current),
+          )
         // Where "+ file" lands at rest: the focused Reference / Diff / Actual page for the pair
         // this row is SERVED showing, which files a report naming that exact preview and reference.
         // `<cp-compare-wall>` re-points it at the pair it resolves whenever the lane or theme

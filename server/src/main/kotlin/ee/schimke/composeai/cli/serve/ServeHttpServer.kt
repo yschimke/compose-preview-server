@@ -4307,7 +4307,7 @@ class ServeHttpServer(
             allParityIssues.filter { issue ->
               preview.id in issue.previewIds ||
                 reference.id in issue.referenceIds ||
-                (preview.componentId != null && issue.component == preview.componentId)
+                (issue.scope == "component" && issue.component == reportContext.componentId)
             },
           acceptanceIssues = allParityIssues,
           revisions = revisions,

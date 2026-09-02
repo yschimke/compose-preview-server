@@ -84,6 +84,20 @@ class ServeParityIssuesStoreTest {
   }
 
   @Test
+  fun `scope is preserved and unknown values are refused rather than broadened`() {
+    write(
+      ParityIssues(
+        issues =
+          listOf(
+            issue(40).copy(scope = "variant"),
+            issue(41).copy(scope = "unknown"),
+          )
+      )
+    )
+    assertEquals(listOf("variant"), assertNotNull(load()).issues.map { it.scope })
+  }
+
+  @Test
   fun `loads the JavaScript producer fixture without schema drift`() {
     write(File(repoRoot(), "scripts/design-artifacts/fixtures/parity-issues.json").readText())
     assertEquals(listOf("open", "closed"), assertNotNull(load()).issues.map { it.state })

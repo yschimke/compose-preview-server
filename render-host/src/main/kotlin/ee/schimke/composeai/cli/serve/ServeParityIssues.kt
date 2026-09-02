@@ -35,6 +35,8 @@ data class ParityIssue(
   val parity: String? = null,
   val system: String? = null,
   val component: String? = null,
+  /** Component-wide by default for indexes produced before report scope was explicit. */
+  val scope: String = "component",
   val previewIds: List<String> = emptyList(),
   val referenceIds: List<String> = emptyList(),
   val acceptanceId: String? = null,
@@ -94,6 +96,8 @@ object ServeParityIssuesStore {
       raw.state.trim().lowercase().takeIf { it == "open" || it == "closed" } ?: return null
     val title =
       raw.title.trim().takeIf { it.isNotEmpty() }?.let { clamp(it, MAX_TEXT) } ?: return null
+    val scope =
+      raw.scope.trim().lowercase().takeIf { it == "component" || it == "variant" } ?: return null
     return ParityIssue(
       repository = repository,
       number = raw.number,
@@ -104,6 +108,7 @@ object ServeParityIssuesStore {
       parity = raw.parity?.removePrefix("parity:")?.lowercase()?.takeIf(PARITY::contains),
       system = raw.system.cleanId(),
       component = raw.component.cleanId(),
+      scope = scope,
       previewIds = raw.previewIds.mapNotNull { it.cleanId() }.distinct().take(100),
       referenceIds = raw.referenceIds.mapNotNull { it.cleanId() }.distinct().take(100),
       acceptanceId = raw.acceptanceId.cleanId(),

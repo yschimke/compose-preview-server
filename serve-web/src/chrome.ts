@@ -20,6 +20,7 @@ import {
 } from "./chrome/bugReport.js";
 import { installReportLauncher } from "./chrome/reportLauncher.js";
 import "./components/ReportClassification.js";
+import "./components/ReportScope.js";
 
 installUrlState();
 installPageTheme();

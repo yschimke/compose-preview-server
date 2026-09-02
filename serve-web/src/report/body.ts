@@ -18,6 +18,7 @@
 import { fillReport, needsRender } from "../annotate/report.js";
 import { withClassification } from "./classification.js";
 import { fillLocators, fillSelection, type Selection } from "./locator.js";
+import { type ReportScope, withScope } from "./scope.js";
 
 /** What the page knows so far. Every field is independently optional. */
 export interface ReportInputs {
@@ -35,6 +36,8 @@ export interface ReportInputs {
      * keeps the rule that exactly one thing writes the field.
      */
     classification?: string;
+    /** Whether the issue follows the whole component or only the preview variant on screen. */
+    scope?: ReportScope;
     /**
      * One `compose-parity-locator/v1` block per comparison the reader ticked on the wall.
      *
@@ -93,16 +96,19 @@ export class ReportBody {
         // never reach the body.
         if (needsRender(template) && !this.state.render) return;
         input.value = withClassification(
-            fillLocators(
-                fillSelection(
-                    fillReport(
-                        template,
-                        this.state.render ?? "",
-                        this.state.scores ?? null,
+            withScope(
+                fillLocators(
+                    fillSelection(
+                        fillReport(
+                            template,
+                            this.state.render ?? "",
+                            this.state.scores ?? null,
+                        ),
+                        this.state.selection ?? {},
                     ),
-                    this.state.selection ?? {},
+                    this.state.locators ?? [],
                 ),
-                this.state.locators ?? [],
+                this.state.scope ?? "component",
             ),
             this.state.classification ?? "",
         );

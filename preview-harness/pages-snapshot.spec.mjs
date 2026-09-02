@@ -548,7 +548,7 @@ const SERVE_ASSETS = [
 
 // Fail before Chromium starts if a generated page contains a custom-element tag without the
 // surface entry that defines it, or if a page pays for Vue more than once. Shared elements name
-// each valid home; the report classifier is shell-owned and deliberately does not require Vue.
+// each valid home; the report controls are shell-owned and deliberately do not require Vue.
 const COMPONENT_ASSETS = {
   "cp-bg-toggle": ["catalog-components.js", "viewer-components.js"],
   "cp-catalog-live": ["catalog-components.js"],
@@ -576,6 +576,7 @@ const COMPONENT_ASSETS = {
   "cp-acceptance": ["known-differences.js"],
   "cp-acceptance-audit": ["known-differences.js"],
   "cp-report-classification": ["serve-chrome.js"],
+  "cp-report-scope": ["serve-chrome.js"],
 };
 for (const file of readdirSync(pagesDir).filter((name) =>
   name.endsWith(".html"),
@@ -850,6 +851,22 @@ async function settleScroll(page) {
 }
 
 const FIXTURE_STATES = [
+  {
+    // The locator scope is inside the catalog report disclosure, so every resting page capture
+    // hides it. Keep one focused-comparison state open: this is where component-wide versus exact
+    // variant matters, and the shot makes the new choice reviewable instead of merely present in
+    // committed HTML nobody sees.
+    fixture: "serve-reference-compare",
+    suffix: "report-scope",
+    parkPointer: true,
+    apply: async (page) => {
+      await page.click("#cp-report > summary");
+      await expect(page.locator("#cp-report .cp-report-panel")).toBeVisible();
+      await expect(page.locator("cp-report-scope select")).toHaveValue(
+        "component",
+      );
+    },
+  },
   {
     // A capture on the report page with its markup editor open. The editor is built entirely by
     // `report-capture.js` from sessionStorage — neither the committed HTML fixture nor the page's
