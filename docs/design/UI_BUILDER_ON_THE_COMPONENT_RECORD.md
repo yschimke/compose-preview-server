@@ -26,7 +26,7 @@ The builder describes one catalog and renders another.
   a resource named `m3-catalog-v1.json`. It has no relationship to
   `yschimke/m3-catalog` — the 59-component Material 3 reference catalog served on
   the same host under the same name.
-* **Restated three times, by hand — one more than the first draft of this document
+* **Restated four times, by hand — two more than the first draft of this document
   found.** `UiBuilderRenderer.kt` (1,554 lines) re-implements each component as a
   `when (componentId)` branch; `CapabilityComposeCodeExporter.kt` (1,232 lines) prints
   Kotlin from a second `when (componentId)`; and the **production** export path uses
@@ -38,6 +38,17 @@ The builder describes one catalog and renders another.
   export and the in-browser exporter are separately hand-maintained renditions of the
   same catalog, and generating only the common one would leave the path users actually
   hit exactly as it is today.
+
+  And there is a fourth rendition: `ComposeCodeExporter.export(document)` — the one-argument
+  overload in `:ui-builder` commonMain — is a 145-line hard-coded "Confetti spike" that
+  `require`s a single `layout/scaffold` root and emits a fixed `ConfettiScheduleHeader()`
+  with its own chip/tab/list-item projection. Its sibling two-argument overload delegates to
+  `CapabilityComposeCodeExporter`; this one delegates to nothing. Repo-wide callers are
+  tests today, but it is retained main-source API and will drift the moment a component's
+  call shape changes.
+
+  Counting the catalog JSON itself, **five** surfaces describe one component set and
+  nothing compares any of them.
 * **The three already disagree**, and nothing detects it:
 
   | | ids |
@@ -46,8 +57,8 @@ The builder describes one catalog and renders another.
   | exporter prints, catalog does not declare | the same five |
   | catalog declares, exporter cannot print | `remote-compose/document` |
 
-  …and that diff covers only two of the three tables. The production projector is a
-  fourth surface nothing compares against anything.
+  …and that diff covers two of the five surfaces. The production projector and the legacy
+  spike exporter are compared against nothing at all.
 
 * **Slots are declared in one place and implemented in another.**
   `SlotCapability` (`name`, `cardinality`, `ordered`, `acceptedRoles`,
@@ -81,17 +92,25 @@ gate for `Button` itself. The record therefore assigns each parameter a role:
 | `slot` | `@Composable`-annotated function type | `slots` |
 | `modifier` | type is `androidx.compose.ui.Modifier` | `modifierCapabilities` |
 | `event` | non-composable function type taking **no** value | `eventBindings` |
-| `stateCallback` | non-composable function type taking a value — `(String) -> Unit` | a state variable, updated from the callback's argument |
+| `stateCallback` | a value-taking callback the **catalog has declared** as state-updating | a state variable, updated from the callback's argument |
 | `property` | everything else that is constructible | `properties` |
 | `unsupported` | anything left (`Painter`, `Shape`, `InteractionSource`) | nothing; blocks Tier 3 unless defaulted |
 
-**A callback that carries a value is not an event, and collapsing the two loses data.**
-`m3/search-input-field` declares `(String) -> Unit`: the renderer updates state straight
-from the callback's argument, and the Jetcaster fixture's `valueChange` action carries no
-literal precisely because the value comes from the call. The generic event dispatcher
-accepts no payload, so generating that parameter as an ordinary event would clear
-`searchQuery` or fail to update it. The `stateCallback` role carries the argument mapping
-that keeps it working.
+**A callback that carries a value is not always an event, and collapsing the two loses
+data.** `m3/search-input-field` declares `(String) -> Unit`: the renderer updates state
+straight from the callback's argument, and the Jetcaster fixture's `valueChange` action
+carries no literal precisely because the value comes from the call. The generic event
+dispatcher accepts no payload, so generating that parameter as an ordinary event would
+clear `searchQuery` or fail to update it.
+
+**But the signature cannot decide which it is, and an earlier draft of this table was wrong
+to imply it can.** `onValueChange: (String) -> Unit` updates state; `onItemClick: (String)
+-> Unit` has exactly the same type and dispatches an event carrying a payload. Splitting on
+"does the function take a value" would make the generated adapter store the argument for
+both, silently swallowing the click. So `stateCallback` is an **authored** classification —
+the catalog declares which callbacks are state-updating and what the payload maps to — and
+a value-taking callback with no such declaration stays an `event` whose payload is carried,
+not consumed. Arity is the trigger for asking the question, never the answer.
 
 | capability field | derived from |
 |---|---|
@@ -228,11 +247,15 @@ first; nothing here can be built on a record that does not exist. Then, here:
 2. Generate the capability catalog from a published `components.json`; keep the
    hand-written file as a golden until the generated one matches it.
 3. Generate the Wasm renderer/exporter dispatch; CI-diff the checked-in output.
-   **Including the production projector.** `ComposeSourceProjection` is the one a served
-   export actually runs, so generating only `CapabilityComposeCodeExporter` would satisfy
-   the letter of this phase and leave the real export path hand-maintained — the exact
-   drift this plan exists to end. Either the production executor is switched onto the
-   generated path, or its projection is generated and CI-diffed too.
+   **Including the production projector, and settling the legacy spike.**
+   `ComposeSourceProjection` is the one a served export actually runs, so generating only
+   `CapabilityComposeCodeExporter` would satisfy the letter of this phase and leave the real
+   export path hand-maintained — the exact drift this plan exists to end. Either the
+   production executor is switched onto the generated path, or its projection is generated
+   and CI-diffed too. `ComposeCodeExporter.export(document)`, the hard-coded Confetti spike,
+   is retained main-source API with only test callers: delegate it, generate it, or retire
+   it before claiming the exporter surfaces agree. Leaving it is the cheapest way for this
+   whole effort to be quietly wrong again.
 4. Reflective invocation on the daemon tier, behind a flag, proven against the
    Wasm tier's pixels.
 5. Export through the oracle; drop `ALMOST_COMPILING_PROJECTION`.
@@ -245,10 +268,11 @@ first; nothing here can be built on a record that does not exist. Then, here:
 
 ## Success criteria
 
-* The renderer, **both** exporters and the catalog cannot disagree, because every
-  surface but the catalog is generated and CI diffs them. Counting only the common
-  exporter leaves `ComposeSourceProjection` — the one a served export runs — outside
-  the guarantee.
+* The renderer, **every** exporter and the catalog cannot disagree, because every
+  surface but the catalog is generated and CI diffs them. There are five, not two:
+  counting only the common exporter leaves `ComposeSourceProjection` — the one a served
+  export runs — and the legacy `ComposeCodeExporter.export(document)` spike outside the
+  guarantee.
 * Every Compose export the server hands a user has been compiled and rendered.
 * A component's slots are its `@Composable` lambda parameters, so "does this
   component have a slot, and must a lambda be passed for it" is answered by the
