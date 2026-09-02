@@ -10165,6 +10165,21 @@ ${captureControlsHtml().prependIndent("          ")}
     }
     val liveLaneIds = liveBackends.mapTo(mutableSetOf()) { it.rcCompareLane!! }
     val liveWireByLane = liveBackends.associate { it.rcCompareLane!! to it.wire }
+    // Every player this host reports for any row — including the ones [LIVE_FILLABLE] withholds.
+    // The note below has to tell "this host cannot draw it" apart from "it would draw a copy of a
+    // column already here", and only this set can.
+    val hostWires =
+      manifest.rows.flatMapTo(mutableSetOf()) { row ->
+        liveRcPlayersFor(row.previewId).map { it.wire }
+      }
+    val withheldLaneIds =
+      RcPlayerBackend.UNIVERSE.filter {
+          it !in LIVE_FILLABLE &&
+            it.rcCompareLane != null &&
+            it.rcCompareLane !in publishedLaneIds &&
+            it.wire in hostWires
+        }
+        .mapTo(mutableSetOf()) { it.rcCompareLane!! }
     // The live render endpoint, per preview and player. `?rcPlayer=` is answered from published
     // bytes where the run drew them and from the renderer otherwise, so this one URL is right
     // whether or not the lane was ever staged.
@@ -10283,6 +10298,9 @@ ${captureControlsHtml().prependIndent("          ")}
     // job skipped it would be exactly the false claim the note exists to prevent.
     val shown = lanes.mapTo(mutableSetOf()) { it.id }
     val absent = ServeRcCompare.LANES.filterNot { it.id in shown }
+    // Two different reasons to have no column, and stating only the first would be a false claim
+    // about the host: a withheld player is one this server CAN draw (#200 review).
+    val withheld = absent.filter { it.id in withheldLaneIds }
     val absentNote =
       if (absent.isEmpty()) ""
       else
@@ -10290,8 +10308,15 @@ ${captureControlsHtml().prependIndent("          ")}
           absent.joinToString(", ") {
             "<span class=\"cp-rc-absent-lane\">${WebEscaping.htmlEscape(it.label)}</span>"
           } +
-          ". A player is here when the catalog's parity run published it or this server can draw " +
-          "it on request; neither is true of these, so they are absent rather than empty.</p>"
+          ". A player is here when the catalog's parity run published it, or when this server can " +
+          "draw it and that would show something the baked column does not." +
+          (if (withheld.isEmpty()) ""
+          else
+            " This host does draw " +
+              withheld.joinToString(", ") { WebEscaping.htmlEscape(it.label) } +
+              " — but through the same embedded player the baked column already went through, so " +
+              "its column would be a copy rather than a comparison.") +
+          "</p>"
 
     val picker =
       "<button type=\"button\" class=\"cp-theme-btn\" data-rc-ref=\"none\" aria-pressed=\"true\">nothing</button>" +

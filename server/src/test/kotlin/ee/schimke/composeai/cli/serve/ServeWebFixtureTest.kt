@@ -4381,6 +4381,20 @@ class ServeWebFixtureTest {
         .toList(),
       "only a player neither published nor drawable on demand is still reported absent",
     )
+    // …and the note says WHICH of the two reasons applies. `embedded` is one this host draws; it
+    // has no column because it would duplicate baked, and claiming the host cannot draw it would
+    // be a false capability statement (#200 review).
+    assertTrue(
+      rcLanesLiveComparison.contains(
+        "This host does draw AndroidX Embedded · vendored Android — but through the same embedded " +
+          "player the baked column already went through"
+      ),
+      "a player withheld to avoid duplicating baked is distinguished from one the host cannot draw",
+    )
+    assertFalse(
+      rcLanesPartialComparison.contains("This host does draw"),
+      "a host with no live players has nothing withheld, and says nothing about drawing",
+    )
     assertEquals(
       listOf("none", "baked", "js", "cmp-jvm", "cmp-wasm"),
       Regex("data-rc-ref=\"([^\"]+)\"")
