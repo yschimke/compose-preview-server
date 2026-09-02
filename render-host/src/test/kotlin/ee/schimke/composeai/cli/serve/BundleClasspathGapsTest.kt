@@ -122,4 +122,94 @@ class BundleClasspathGapsTest {
     assertContains(logs.single(), "3 of 84 classpath coordinate(s) did not resolve")
     assertContains(logs.single(), "androidx.wear.compose.remote:remote-material3:1.0.0-SNAPSHOT")
   }
+
+  /**
+   * meshcore-mobile's shape (#187): nothing unresolved, but part of the Remote Compose family
+   * resolved to another androidx.dev build's bytes under the same `1.0.0-SNAPSHOT` version string.
+   */
+  private fun recordRemoteComposeMismatch() =
+    BundleClasspathGaps.record(
+      destDir = destDir,
+      unresolved = emptyList(),
+      total = 119,
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+      mismatched =
+        listOf(
+          maven("androidx.compose.remote", "remote-player-core"),
+          maven("androidx.compose.remote", "remote-player-view"),
+        ),
+    )
+
+  @Test
+  fun `a mismatched coordinate that owns the missing member is named as the cause`() {
+    recordRemoteComposeMismatch()
+
+    val text =
+      requireNotNull(
+        BundleClasspathGaps.linkageDiagnosis(
+          "render failed: NoSuchFieldError: Class androidx.compose.remote.core.RemoteClock does " +
+            "not have member field 'androidx.compose.remote.core.RemoteClock SYSTEM'",
+          descriptor,
+        )
+      ) {
+        "a hash mismatch is the whole cause here — nothing was unresolved to fall back on"
+      }
+
+    assertContains(text, "resolved to different bytes")
+    assertContains(text, "androidx.compose.remote:remote-player-core:1.0.0-SNAPSHOT")
+    assertContains(text, "two builds of one library")
+    assertContains(text, "-SNAPSHOT")
+  }
+
+  @Test
+  fun `a mismatch nothing in the failure points at is not claimed as the cause`() {
+    recordRemoteComposeMismatch()
+
+    // The wrong bytes are real, but they are not what this `NoSuchMethodError` is about — blaming
+    // them would send the reader to the wrong artifact. Better to say nothing.
+    assertNull(
+      BundleClasspathGaps.linkageDiagnosis(
+        "render failed: NoSuchMethodError: 'void com.example.other.Thing.go()'",
+        descriptor,
+      )
+    )
+  }
+
+  @Test
+  fun `an attributable mismatch outranks the unresolved list`() {
+    // Both shapes at once. The mismatch names the artifact AND what is wrong with it, so it wins.
+    BundleClasspathGaps.record(
+      destDir = destDir,
+      unresolved = listOf(maven("com.example.other", "widgets")),
+      total = 119,
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+      mismatched = listOf(maven("androidx.compose.remote", "remote-player-core")),
+    )
+
+    val text =
+      requireNotNull(
+        BundleClasspathGaps.linkageDiagnosis(
+          "render failed: NoSuchFieldError: Class androidx.compose.remote.core.RemoteClock does " +
+            "not have member field 'androidx.compose.remote.core.RemoteClock SYSTEM'",
+          descriptor,
+        )
+      )
+
+    assertContains(text, "resolved to different bytes")
+    assertTrue(
+      "could not resolve" !in text,
+      "the unresolved sentence must not be appended to the mismatch one: $text",
+    )
+  }
+
+  @Test
+  fun `mismatches are logged separately from unresolved coordinates`() {
+    recordRemoteComposeMismatch()
+
+    assertEquals(1, logs.size, "nothing was unresolved, so only the mismatch line: $logs")
+    assertContains(logs.single(), "2 of 119 classpath coordinate(s) resolved to bytes")
+    assertContains(logs.single(), "androidx.compose.remote:remote-player-view:1.0.0-SNAPSHOT")
+  }
 }

@@ -222,12 +222,20 @@ public object ServeBundleDaemon {
     // unrelated warnings, and the consequence only surfaced later as an unattributable
     // `NoClassDefFoundError` that tripped the breaker terminally (issues #4259 / #4265). Record the
     // gap beside the launch descriptor so a linkage trip can name it — see [BundleClasspathGaps].
+    //
+    // A coordinate that resolved to the WRONG bytes is recorded the same way and for the same
+    // reason. The resolver warns and hands the artifact over regardless, so a hash mismatch reads
+    // as one more startup warning while the daemon links two builds of one library — which is how
+    // meshcore-mobile's lane died on `NoSuchFieldError: … RemoteClock … SYSTEM` with a breaker
+    // reason that named no cause at all (#187). Nothing was unresolved there, so only the mismatch
+    // list could have said so.
     BundleClasspathGaps.record(
       destDir = destDir,
       unresolved = resolutions.filter { it.file == null }.map { it.coordinate },
       total = mavenCoords.size,
       system = system,
       onLog = onLog,
+      mismatched = resolutions.filter { it.mismatch }.map { it.coordinate },
       fileSystem = fileSystem,
     )
     // The resolver warns and returns null rather than throwing, so an unresolvable repair would
