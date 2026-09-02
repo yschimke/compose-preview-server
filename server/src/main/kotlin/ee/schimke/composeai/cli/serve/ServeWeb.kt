@@ -10136,6 +10136,19 @@ ${captureControlsHtml().prependIndent("          ")}
    * columns, and a catalog's published `rc-compare.html` will never carry a `java` one — so putting
    * it there would make the absent-players note start reporting a player no run could ever publish,
    * on every wall, forever.
+   *
+   * ONE EXCEPTION IS KNOWN AND ACCEPTED, and it is the same shape as the `cmp-android` one above. A
+   * preview that pins the view-backed lane with `RemoteViewPreviewWrapper` bakes THROUGH this
+   * player, so on such a row the java column would be the baked bytes again. Nothing records which
+   * player baked a row — [ServeRcCompare.LANES] says so where it says the same about `cmp-android`
+   * — so it cannot be detected here, and the column cannot be suppressed for those rows alone.
+   *
+   * Shipped anyway, unlike `cmp-android`, because the two differ in how often they are wrong:
+   * `cmp-android` duplicates the capture for EVERY ordinary catalog, the embedded player being the
+   * default, while this duplicates it only for a catalog that opts a preview into the view-backed
+   * wrapper. Measured on `remote-m3`, which does not: java answers `822c80a4…` against a baked
+   * `e69d5136…`. Carry per-row provenance and the exception closes; until then a view-pinned
+   * catalog reads a 0.00% against baked that means "the same player", not "two players agree".
    */
   private val LIVE_ONLY_LANES =
     mapOf(RcPlayerBackend.JAVA to RcCompareLane("java", "AOSP · view-backed player", "java"))
