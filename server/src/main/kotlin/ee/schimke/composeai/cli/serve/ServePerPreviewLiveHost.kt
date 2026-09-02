@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import ee.schimke.composeai.daemon.protocol.UiMode
 
 /**
  * A [ServeHost] that fronts a trusted design-system catalog's baked PNGs with an opt-in live daemon
@@ -138,6 +139,11 @@ class ServePerPreviewLiveHost(
    */
   override val liveOnlyPreviewIds: Set<String> = baked.liveOnlyPreviewIds
 
+  // The sticker is the baked host's, so the mode it was drawn in is the baked host's answer — the
+  // routing below asks it rather than the id, so an untagged half of a folded light/dark pair
+  // replays instead of waking a daemon. See [ServeBakedTheme].
+  override fun bakedTheme(previewId: String): UiMode? = baked.bakedTheme(previewId)
+
   /**
    * Snapshots stay static (baked PNGs) so browsing is instant — the live lane is opt-in per edit.
    */
@@ -227,7 +233,7 @@ class ServePerPreviewLiveHost(
         resolveLive(daemonId)?.renderAnnotations(daemonId, overrides)
       }
     if (live != null && live !is AnnotationsOutcome.NotFound) return live
-    if (CatalogLiveRouting.overridesAffectRender(previewId, overrides))
+    if (CatalogLiveRouting.overridesAffectRender(previewId, overrides, bakedTheme(previewId)))
       return AnnotationsOutcome.NotFound
     return baked.renderAnnotations(previewId, overrides)
   }
@@ -239,8 +245,13 @@ class ServePerPreviewLiveHost(
    */
   override fun render(previewId: String, overrides: PreviewOverrides): RenderOutcome {
     val daemonId =
-      CatalogLiveRouting.daemonIdForRender(previewId, overrides, alias, liveOnlyPreviewIds)
-        ?: return baked.render(previewId, overrides)
+      CatalogLiveRouting.daemonIdForRender(
+        previewId,
+        overrides,
+        alias,
+        liveOnlyPreviewIds,
+        bakedTheme(previewId),
+      ) ?: return baked.render(previewId, overrides)
     val live =
       resolveLive(daemonId)
         // A live-only (deferred) preview has no baked PNG to fall back to, so an unresolvable
@@ -271,12 +282,18 @@ class ServePerPreviewLiveHost(
    * a mapped id fall back to its daemon.
    */
   override fun renderSvg(previewId: String, overrides: PreviewOverrides): SvgOutcome {
-    CatalogLiveRouting.daemonIdForRender(previewId, overrides, alias, liveOnlyPreviewIds)?.let {
-      daemonId ->
-      resolveLive(daemonId)?.let {
-        return it.renderSvg(daemonId, overrides)
+    CatalogLiveRouting.daemonIdForRender(
+        previewId,
+        overrides,
+        alias,
+        liveOnlyPreviewIds,
+        bakedTheme(previewId),
+      )
+      ?.let { daemonId ->
+        resolveLive(daemonId)?.let {
+          return it.renderSvg(daemonId, overrides)
+        }
       }
-    }
     // No override — but the baked `figma/<slug>.svg` is slug-keyed + light-preferred, so a
     // `…__dark`
     // id would serve the LIGHT vector even though its PNG and live render are dark. Prefer the

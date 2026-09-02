@@ -4,6 +4,7 @@ import ee.schimke.composeai.bundle.BundleVerifier
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import ee.schimke.composeai.daemon.protocol.UiMode
 import ee.schimke.composeai.data.overrides.PreviewOverridesPayload
 import ee.schimke.composeai.data.pseudolocale.LocaleDirection
 import ee.schimke.composeai.data.pseudolocale.Pseudolocale
@@ -635,6 +636,17 @@ class ServeBundleHost(
         )
       }
       .toList()
+
+  /** Every id this session lists, for the containment checks below. */
+  private val publishedIds: Set<String> = previews.mapTo(HashSet()) { it.id }
+
+  /**
+   * This host is the **baked** surface of a published catalog, so it is the one that can answer
+   * what mode a sticker was drawn in — from the record's own `theme`, its id, or the folded pair it
+   * belongs to. See [ServeBakedTheme]; the live composites in front of it delegate here.
+   */
+  override fun bakedTheme(previewId: String): UiMode? =
+    ServeBakedTheme.resolve(previewId, variantMeta[previewId]?.theme) { it in publishedIds }
 
   /**
    * The catalog's declared hero ([declaredHero]) resolved to one of this host's actual preview ids,

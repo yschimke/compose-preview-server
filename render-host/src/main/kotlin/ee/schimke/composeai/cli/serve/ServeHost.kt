@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import ee.schimke.composeai.daemon.protocol.UiMode
 
 /**
  * A servable preview session behind the multi-tenant registry + HTTP layer. Two implementations:
@@ -146,6 +147,19 @@ interface ServeHost : AutoCloseable {
    */
   val liveOnlyPreviewIds: Set<String>
     get() = emptySet()
+
+  /**
+   * The light/dark mode [previewId]'s **baked** pixels are drawn in, or null when this session
+   * cannot name one — see [ServeBakedTheme].
+   *
+   * The routing predicates ask the host rather than the id alone, because only the session knows
+   * what its catalog publishes: an untagged sticker is the light half of a folded pair exactly when
+   * the `__dark` twin is published beside it, and that is a fact about the manifest, not about the
+   * string. A host that carries no such manifest keeps the id-only answer, which is the
+   * conservative one — an unnamed theme routes a `uiMode` request to a real render rather than
+   * replaying a sticker whose mode nothing established.
+   */
+  fun bakedTheme(previewId: String): UiMode? = ServeBakedTheme.token(previewId)
 
   /** Human label for the tenant (module Gradle path, `module@rev`, or a bundle name). */
   val label: String

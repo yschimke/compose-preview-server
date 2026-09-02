@@ -5967,7 +5967,12 @@ class ServeHttpServer(
       ServeOverrides.parse(params, ServeOverrides.declaredKnobKinds(preview)) as? OverrideParse.Ok
         ?: return seeds(params)
     val dropped =
-      CatalogLiveRouting.irReplayDroppedOverrideNames(preview.id, parsed.overrides).toSet()
+      CatalogLiveRouting.irReplayDroppedOverrideNames(
+          preview.id,
+          parsed.overrides,
+          renderHost.bakedTheme(preview.id),
+        )
+        .toSet()
     return seeds(if (dropped.isEmpty()) params else params.filterKeys { it !in dropped })
   }
 
@@ -9170,7 +9175,14 @@ class ServeHttpServer(
         remoteCompose =
           rc.copy(player = null).takeIf { it.profile != null || it.namedValues.isNotEmpty() }
       )
-    if (CatalogLiveRouting.overridesAffectRender(previewId, withoutPlayer)) return null
+    if (
+      CatalogLiveRouting.overridesAffectRender(
+        previewId,
+        withoutPlayer,
+        renderHost.bakedTheme(previewId),
+      )
+    )
+      return null
     val bytes = renderHost.publishedRcPlayerRender(previewId, backend) ?: return null
     return RenderOutcome.Ok(bytes, RenderOutcome.Generation.RC_PUBLISHED)
   }
@@ -9182,13 +9194,21 @@ class ServeHttpServer(
     overrides: PreviewOverrides,
   ): List<String> =
     if (generation == RenderOutcome.Generation.BAKED) {
-      CatalogLiveRouting.droppedOverrideNames(previewId, overrides)
+      CatalogLiveRouting.droppedOverrideNames(
+        previewId,
+        overrides,
+        renderHost.bakedTheme(previewId),
+      )
     } else if (renderHost.hasRemoteComposeDoc(previewId)) {
       // A real render happened — and still could not apply everything, because this preview is
       // replayed from its captured document rather than recomposed. See
       // [CatalogLiveRouting.irReplayDroppedOverrideNames] for which axes that costs and why the
       // list is narrow.
-      CatalogLiveRouting.irReplayDroppedOverrideNames(previewId, overrides)
+      CatalogLiveRouting.irReplayDroppedOverrideNames(
+        previewId,
+        overrides,
+        renderHost.bakedTheme(previewId),
+      )
     } else {
       emptyList()
     }
@@ -9216,7 +9236,11 @@ class ServeHttpServer(
     overrides: PreviewOverrides,
   ): List<String> =
     if (isReplayedPreview(renderHost, previewId)) {
-      CatalogLiveRouting.irReplayDroppedOverrideNames(previewId, overrides)
+      CatalogLiveRouting.irReplayDroppedOverrideNames(
+        previewId,
+        overrides,
+        renderHost.bakedTheme(previewId),
+      )
     } else {
       emptyList()
     }
