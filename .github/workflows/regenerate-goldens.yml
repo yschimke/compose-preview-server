@@ -1,0 +1,217 @@
+name: Regenerate goldens
+
+# Rewrite the committed goldens from the code that renders them and push the result onto a pull
+# request's branch.
+#
+# The goldens — `preview-harness/fixtures/pages/` and `renders/exploded-view/` — are a *derived*
+# artifact with a deterministic generator. When `ServeWebFixtureTest` fails there is nothing to
+# decide: the fix is to run `scripts/regenerate-goldens.sh` and commit what it writes. The only
+# reason a red pull request ever waited on a person was that nobody had wired the generator to the
+# failure.
+#
+# Three ways in:
+#   * automatically, when CI fails on a dependency-bump branch. Renovate merges on green, so a
+#     stale golden parks an otherwise-fine bump indefinitely, and the drift there is never
+#     intentional — nothing in the diff meant to change a page.
+#   * `/regenerate-goldens` as a pull request comment, from anyone who can write to the repository.
+#   * `workflow_dispatch` with a pull request number.
+#
+# Deliberately NOT on every pull request. Where a change touches the serve UI on purpose the
+# regenerated goldens *are* the change under review: the author regenerates them and looks at the
+# harness screenshots that move with them, which is what the fixtures exist for.
+
+on:
+  # After CI, not before: a green run costs nothing here, and a red one already knows which branch
+  # it was red on. `workflow_run` also gets a writable token on a pull-request branch, which the
+  # `pull_request` event does not guarantee.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request number whose branch should get refreshed goldens
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    regenerate-goldens-${{ github.event.inputs.pull_request
+    || github.event.issue.number
+    || github.event.workflow_run.head_branch }}
+  # Never cancel. A cancelled run can leave a pushed commit without the CI re-dispatch that follows
+  # it, which is the one state this workflow must not produce.
+  cancel-in-progress: false
+
+jobs:
+  # Decide whether to run, and on which branch. Split from the work so the permissions that push
+  # only exist in a job that starts after the trigger has been vetted.
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      ref: ${{ steps.decide.outputs.ref }}
+      pr: ${{ steps.decide.outputs.pr }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          # A comment body is text anyone with an account can write. Read it from the environment
+          # and compare it whole, never interpolate it into the script.
+          COMMENT: ${{ github.event.comment.body }}
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+          IS_PR_COMMENT: ${{ github.event.issue.pull_request != null }}
+          COMMENT_PR: ${{ github.event.issue.number }}
+          DISPATCH_PR: ${{ github.event.inputs.pull_request }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+        run: |
+          set -euo pipefail
+          pr=""
+          case "${EVENT}" in
+            workflow_run)
+              # Dependency bumps only, and only a real failure. `renovate/` is Renovate's branch
+              # prefix; a human branch that goes red is a human's to read, because the drift there
+              # may well be the point of the change.
+              if [ "${RUN_CONCLUSION}" = "failure" ] &&
+                 [ "${RUN_EVENT}" = "pull_request" ] &&
+                 [ "${RUN_REPO}" = "${GH_REPO}" ] &&
+                 [ "${RUN_BRANCH#renovate/}" != "${RUN_BRANCH}" ]; then
+                pr="$(gh pr list --head "${RUN_BRANCH}" --state open --json number \
+                  --jq '.[0].number // empty')"
+              fi
+              ;;
+            issue_comment)
+              first_line="$(printf '%s' "${COMMENT}" | head -n1 | tr -d '\r')"
+              case "${ASSOCIATION}" in
+                OWNER | MEMBER | COLLABORATOR) may_ask=true ;;
+                *) may_ask=false ;;
+              esac
+              if [ "${IS_PR_COMMENT}" = "true" ] &&
+                 [ "${first_line}" = "/regenerate-goldens" ] &&
+                 [ "${may_ask}" = true ]; then
+                pr="${COMMENT_PR}"
+              fi
+              ;;
+            workflow_dispatch)
+              pr="${DISPATCH_PR}"
+              ;;
+          esac
+
+          if [ -z "${pr}" ]; then
+            echo "nothing to regenerate for this event"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Resolve the head branch from the API rather than from the event payload, so neither the
+          # dispatch nor the comment path can be pointed at a branch this workflow must not push to.
+          head_repo="$(gh pr view "${pr}" --json headRepository,headRepositoryOwner \
+            --jq '"\(.headRepositoryOwner.login)/\(.headRepository.name)"')"
+          head_ref="$(gh pr view "${pr}" --json headRefName --jq .headRefName)"
+          state="$(gh pr view "${pr}" --json state --jq .state)"
+          if [ "${head_repo}" != "${GH_REPO}" ]; then
+            echo "::notice::#${pr} comes from ${head_repo}; this workflow only pushes inside ${GH_REPO}"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${state}" != "OPEN" ]; then
+            echo "::notice::#${pr} is ${state}"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "run=true"
+            echo "ref=${head_ref}"
+            echo "pr=${pr}"
+          } >> "$GITHUB_OUTPUT"
+
+  regenerate:
+    needs: resolve
+    if: ${{ needs.resolve.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # `gh workflow run` below. A push made with GITHUB_TOKEN does not start a workflow, so without
+      # the re-dispatch the refreshed head would carry no checks at all.
+      actions: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+          # Kept, unlike every other checkout in this repository: this job's product is a commit on
+          # that branch.
+          persist-credentials: true
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Regenerate
+        run: ./scripts/regenerate-goldens.sh
+      - name: Commit and push
+        id: push
+        env:
+          BRANCH: ${{ needs.resolve.outputs.ref }}
+        run: |
+          set -euo pipefail
+          git add -- preview-harness/fixtures/pages 'renders/exploded-view/*.svg'
+          if git diff --cached --quiet; then
+            echo "the goldens already match what the code renders"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files="$(git diff --cached --name-only | wc -l | tr -d ' ')"
+          # Committed as the Actions bot, whose identity is a bot account and not an agent name —
+          # see the attribution rule in AGENTS.md.
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "test(fixtures): regenerate the goldens" \
+            -m "Written by scripts/regenerate-goldens.sh from the current ServeWeb and ExplodedSvg: ${files} file(s)."
+          # The branch can have moved since checkout — Renovate rebases, a reviewer pushes.
+          # --force-with-lease refuses instead of clobbering, and the next failure regenerates.
+          git push --force-with-lease origin "HEAD:${BRANCH}"
+          {
+            echo "pushed=true"
+            echo "files=${files}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Run CI on the refreshed head
+        # A push authenticated with GITHUB_TOKEN deliberately does not trigger `on: push` or
+        # `on: pull_request`, so CI has to be asked for by name or the commit this job just made
+        # carries no checks and the pull request waits forever.
+        if: ${{ steps.push.outputs.pushed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.resolve.outputs.ref }}
+        run: gh workflow run ci.yml --ref "${BRANCH}"
+      - name: Say so on the pull request
+        if: ${{ steps.push.outputs.pushed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.resolve.outputs.pr }}
+          FILES: ${{ steps.push.outputs.files }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Regenerated ${FILES} golden file(s) from the current \`ServeWeb\`/\`ExplodedSvg\`"
+            echo "and pushed them to this branch; CI is re-dispatched for the new head."
+            echo
+            echo "The visual harness diffs the refreshed pages, so **look at the screenshots** —"
+            echo "a golden that moved is a page that moved."
+          } > comment.md
+          gh pr comment "${PR}" --body-file comment.md
+          rm -f comment.md

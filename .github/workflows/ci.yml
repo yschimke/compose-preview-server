@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # For `Regenerate goldens`, which pushes a fixture refresh onto a pull request branch with
+  # GITHUB_TOKEN. Such a push deliberately raises neither `push` nor `pull_request`, so without a
+  # way to ask for CI by name the commit it makes would carry no checks at all.
+  workflow_dispatch:
 
 permissions:
   contents: read
