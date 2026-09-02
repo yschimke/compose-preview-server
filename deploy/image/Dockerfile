@@ -194,12 +194,14 @@ RUN set -eu; \
         "https://github.com/yschimke/compose-ai-tools/releases/download/v${TOOLS_VERSION}/compose-preview-${TOOLS_VERSION}.tar.gz"; \
     fi; \
     tar -xzf /tmp/cli.tgz -C /opt --strip-components=1 --wildcards \
-      "*/lib-daemon-desktop" "*/lib-renderer"; \
+      "*/lib-daemon-desktop" "*/lib-renderer" "*/lib-rcjvm"; \
     rm /tmp/cli.tgz; \
     test -d /opt/lib-daemon-desktop; \
     test -d /opt/lib-renderer; \
+    test -d /opt/lib-rcjvm; \
     ls /opt/lib-daemon-desktop/*.jar >/dev/null; \
-    ls /opt/lib-renderer/*.jar >/dev/null
+    ls /opt/lib-renderer/*.jar >/dev/null; \
+    ls /opt/lib-rcjvm/*.jar >/dev/null
 
 # ---------------------------------------------------------------------------
 # Stage 1b: prewarm the downloadable-font cache.
@@ -249,6 +251,12 @@ COPY --from=android-daemon /opt/android-sdk /opt/android-sdk
 # served catalog resolves one, exactly like the Android pair above.
 COPY --from=desktop-daemon /opt/lib-daemon-desktop /opt/lib-daemon-desktop
 COPY --from=desktop-daemon /opt/lib-renderer /opt/lib-renderer
+# …and the embedded JVM Remote Compose player the `cmp-jvm` render lane spawns
+# (`RcJvmServerRenderer`), whose subprocess classpath is `lib-rcjvm/*` + `lib-daemon-desktop/*`.
+# Only half of that pair was here, so every `?rcPlayer=cmp-jvm` on the deployed site answered 503
+# with "needs lib-rcjvm and lib-daemon-desktop on the CLI install" — measured against
+# preview.coo.ee/remote-m3 — and the compare wall could never show that player.
+COPY --from=desktop-daemon /opt/lib-rcjvm /opt/lib-rcjvm
 # JAVA_TOOL_OPTIONS (inherited by the spawned daemon JVM too) points the CLI at the
 # unpacked Android AND desktop daemon sidecars, warms catalog daemons in the background so the
 # HTTP listener can come up before every live catalog finishes, and lifts BOTH cold-start budgets so a cold
@@ -288,7 +296,7 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     COMPOSE_PREVIEW_INIT_USE_MAVEN_LOCAL=1 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
-    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
+    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
 
 WORKDIR /project
 # Carry the release Maven tree so live bundles can resolve the plugin/runtime
