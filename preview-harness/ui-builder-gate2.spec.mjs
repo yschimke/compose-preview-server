@@ -318,6 +318,20 @@ async function openBrowserSession(
     return { page, designResponses };
 }
 
+async function clickCompose(page, locator) {
+    const bounds = await locator.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+}
+
+async function fillCompose(page, locator, value) {
+    const bounds = await locator.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await page.keyboard.type(value, { delay: 20 });
+}
+
 test("only explicitly enabled catalog-scoped UI builders are available", async ({
     browser,
 }, testInfo) => {
@@ -374,6 +388,129 @@ test("only explicitly enabled catalog-scoped UI builders are available", async (
         await expect(
             remoteBuilder.page.getByText("Wear widget · Large (216×124dp)").first(),
         ).toBeVisible();
+
+        await clickCompose(
+            remoteBuilder.page,
+            remoteBuilder.page.getByRole("button", { name: /New design/ }),
+        );
+        await expect(remoteBuilder.page.getByText("Create a new design")).toBeVisible();
+        await clickCompose(
+            remoteBuilder.page,
+            remoteBuilder.page.getByRole("button", { name: "Cancel" }),
+        );
+        await remoteBuilder.page.goto(
+            `${server.origin}/ui-builder/remote-m3/?token=${encodeURIComponent(operatorToken)}&actor=operator&clientId=catalog-remote`,
+        );
+        await remoteBuilder.page.waitForFunction(
+            () => document.documentElement.dataset.uiBuilderReady === "true",
+            null,
+            { timeout: 30_000 },
+        );
+        await expect(remoteBuilder.page.getByText("Create a new design")).toBeVisible();
+        await expect(
+            remoteBuilder.page.getByRole("button", { name: "Remote Material 3" }),
+        ).toBeVisible();
+        await clickCompose(
+            remoteBuilder.page,
+            remoteBuilder.page.getByRole("button", { name: "Large widget" }),
+        );
+        const createdDesignId = "catalog-created-large-widget";
+        await remoteBuilder.page
+            .getByRole("textbox", { name: "Design ID" })
+            .fill(createdDesignId);
+        const creationEvidence = testInfo.outputPath("ui-builder-new-widget-dialog.png");
+        await remoteBuilder.page.screenshot({ path: creationEvidence, fullPage: true });
+        await testInfo.attach("ui-builder-new-widget-dialog.png", {
+            path: creationEvidence,
+            contentType: "image/png",
+        });
+        await clickCompose(
+            remoteBuilder.page,
+            remoteBuilder.page.getByRole("button", { name: "Create" }),
+        );
+        await remoteBuilder.page.waitForURL(
+            (url) =>
+                url.pathname === "/ui-builder/remote-m3/" &&
+                url.searchParams.get("designId") === createdDesignId &&
+                url.searchParams.get("template") === "wear-widget-large" &&
+                url.searchParams.get("token") === operatorToken,
+        );
+        await remoteBuilder.page.waitForFunction(
+            () =>
+                document.documentElement.dataset.uiBuilderReady === "true" &&
+                globalThis.__uiBuilderEditor?.revision === 0 &&
+                globalThis.__uiBuilderEditor?.nodeCount === 1,
+            null,
+            { timeout: 30_000 },
+        );
+        await expect(
+            remoteBuilder.page.getByText("Wear widget · Large (216×124dp)", { exact: true }).first(),
+        ).toBeVisible();
+
+        await remoteBuilder.page
+            .getByRole("textbox", { name: "Component catalog search" })
+            .fill("Column");
+        await remoteBuilder.page.waitForFunction(
+            () => globalThis.__uiBuilderEditor?.catalogQuery === "Column",
+        );
+        const addColumn = remoteBuilder.page.getByRole("button", { name: /Add Column/ });
+        await expect(addColumn).toBeEnabled();
+        await expect.poll(async () => (await addColumn.boundingBox())?.y).toBeLessThan(300);
+        await clickCompose(remoteBuilder.page, addColumn);
+        await editorState(remoteBuilder.page, 1);
+        await expect(remoteBuilder.page.getByText(/seq 1/).last()).toBeVisible();
+        await remoteBuilder.page.waitForFunction(
+            () => globalThis.__uiBuilderEditor?.selectedNodeId === "editor-layout-column-001",
+            null,
+            { timeout: 30_000 },
+        );
+        await fillCompose(
+            remoteBuilder.page,
+            remoteBuilder.page.getByRole("textbox", { name: "Component catalog search" }),
+            "Text",
+        );
+        await remoteBuilder.page.waitForFunction(
+            () => globalThis.__uiBuilderEditor?.catalogQuery === "Text",
+        );
+        await clickCompose(
+            remoteBuilder.page,
+            remoteBuilder.page.getByRole("button", { name: /Add Text/ }),
+        );
+        await editorState(remoteBuilder.page, 2);
+        await expect(remoteBuilder.page.getByText(/seq 2/).last()).toBeVisible();
+        await remoteBuilder.page.waitForFunction(
+            () => globalThis.__uiBuilderEditor?.selectedNodeId === "editor-m3-text-002",
+            null,
+            { timeout: 30_000 },
+        );
+        await fillCompose(
+            remoteBuilder.page,
+            remoteBuilder.page.getByRole("textbox", { name: "Text property" }),
+            "Next meeting in 10 minutes",
+        );
+        await clickCompose(
+            remoteBuilder.page,
+            remoteBuilder.page.getByRole("button", { name: "Apply text" }),
+        );
+        await editorState(remoteBuilder.page, 3);
+        await expect(remoteBuilder.page.getByText(/seq 3/).last()).toBeVisible();
+        await remoteBuilder.page.waitForFunction(
+            () => globalThis.__uiBuilderEditor?.selectedNodeId === "editor-m3-text-002",
+            null,
+            { timeout: 30_000 },
+        );
+        const completed = await remoteBuilder.page.evaluate(() => globalThis.__uiBuilderEditor);
+        expect(completed).toMatchObject({
+            revision: 3,
+            nodeCount: 3,
+            selectedText: "Next meeting in 10 minutes",
+        });
+        const completedEvidence = testInfo.outputPath("ui-builder-new-widget-complete.png");
+        await remoteBuilder.page.screenshot({ path: completedEvidence, fullPage: true });
+        await testInfo.attach("ui-builder-new-widget-complete.png", {
+            path: completedEvidence,
+            contentType: "image/png",
+        });
 
         const defaultEvidence = testInfo.outputPath("ui-builder-m3-catalog.png");
         const remoteEvidence = testInfo.outputPath("ui-builder-remote-m3.png");
@@ -782,7 +919,7 @@ test("Gate 2 converges browsers and actual MCP through restart and exports", asy
 
         // A real editor control emits the Browser A operation; the API client reads it back.
         const scrimLayer = await browserA.page
-            .getByRole("button", { name: /Reorder main-scrim/ })
+            .getByRole("button", { name: /Select main-scrim/ })
             .boundingBox();
         checkpoint("found main-scrim layer");
         expect(scrimLayer).not.toBeNull();
@@ -881,7 +1018,7 @@ test("Gate 2 converges browsers and actual MCP through restart and exports", asy
         ]);
         expect(stateA.documentHash).toBe(stateB.documentHash);
         const placeholderLayer = await browserB.page
-            .getByRole("button", { name: /Reorder search-placeholder/ })
+            .getByRole("button", { name: /Select search-placeholder/ })
             .boundingBox();
         expect(placeholderLayer).not.toBeNull();
         await browserB.page.mouse.click(
