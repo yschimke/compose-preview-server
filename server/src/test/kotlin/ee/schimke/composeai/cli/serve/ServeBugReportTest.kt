@@ -34,8 +34,12 @@ class ServeBugReportTest {
   @Test
   fun `a server bug is always filed against the repo that ships the server`() {
     // The whole point of the split from ServeIssueReport: a catalog's repo cannot fix the server.
-    assertEquals("yschimke/compose-ai-tools", ServeBugReport.REPO)
-    assertEquals("https://github.com/yschimke/compose-ai-tools/issues/new", ServeBugReport.action())
+    // And the server's repo is this one, not the compose-ai-tools the code was extracted from.
+    assertEquals("yschimke/compose-preview-server", ServeBugReport.REPO)
+    assertEquals(
+      "https://github.com/yschimke/compose-preview-server/issues/new",
+      ServeBugReport.action(),
+    )
     assertEquals("ui-report,bug,daemon", ServeBugReport.LABELS)
   }
 

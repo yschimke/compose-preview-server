@@ -484,7 +484,7 @@ class ServeTopLevelSiteTest {
     )
     // The form itself is unchanged: a SERVER bug still goes to the repo that ships the server.
     assertTrue(
-      body.contains("action=\"https://github.com/yschimke/compose-ai-tools/issues/new\""),
+      body.contains("action=\"https://github.com/yschimke/compose-preview-server/issues/new\""),
       body,
     )
 

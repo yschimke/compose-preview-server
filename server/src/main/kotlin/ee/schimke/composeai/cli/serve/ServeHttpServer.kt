@@ -5787,8 +5787,11 @@ class ServeHttpServer(
     // Which catalog's tracker a *pixel* bug belongs in, so the page can name and link it instead of
     // telling the reporter to go and find the link on a preview. Always answerable on a top-level
     // site — the hostname is the catalog — and answerable for any `/{system}/…` page too. Skipped
-    // when the only repo on offer is [ServeIssueReport.FALLBACK_REPO], which is this server's own:
-    // a paragraph pointing at the tracker the form already files against says nothing.
+    // when the catalog's own tracker turns out to be [ServeBugReport.REPO]: a paragraph pointing at
+    // the tracker the form already files against says nothing. The test is against that repo rather
+    // than [ServeIssueReport.FALLBACK_REPO] — since the server moved to its own repository those
+    // two are different trackers, and a catalog that falls back to the CLI's is still a second,
+    // real destination worth naming.
     val catalogTarget = system?.let { id ->
       val provenance = bundle?.provenance ?: seen?.provenance
       val repo = ServeIssueReport.repoFor(bundle?.catalogSource, provenance)
