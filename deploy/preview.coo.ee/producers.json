@@ -30,10 +30,6 @@
       "branch": "design-artifacts/*"
     },
     {
-      "repo": "yschimke/horologist",
-      "branch": "design-artifacts/*"
-    },
-    {
       "repo": "yschimke/thunderbird-android",
       "branch": "design-artifacts/*"
     },

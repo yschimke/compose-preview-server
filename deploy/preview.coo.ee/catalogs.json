@@ -13,11 +13,6 @@
       "noun": "sample(s)"
     },
     {
-      "id": "horologist",
-      "heading": "google/horologist",
-      "noun": "catalog(s)"
-    },
-    {
       "id": "thunderbird",
       "heading": "thunderbird/thunderbird-android",
       "noun": "app(s)"
@@ -65,15 +60,6 @@
       "system": "homeassistant-remotecompose",
       "repo": "yschimke/homeassistant-remotecompose",
       "listed": true
-    },
-    {
-      "system": "horologist",
-      "repo": "yschimke/horologist",
-      "listed": true,
-      "group": "horologist",
-      "attributionRepos": [
-        "google/horologist"
-      ]
     },
     {
       "system": "thunderbird",
