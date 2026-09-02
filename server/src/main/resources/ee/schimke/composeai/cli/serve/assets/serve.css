@@ -2807,6 +2807,14 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
 .cp-sub-rc { display: none; }
 #cp-compare[data-rc-lanes="1"][data-format="rc"] .cp-sub-rc { display: inline; }
 #cp-compare[data-rc-lanes="1"][data-format="rc"] .cp-sub-formats { display: none; }
+/* Which players this catalog's run did NOT publish. Muted and set below the wall's own summary:
+   it is a caveat on the columns above it, not a warning — a catalog that ran every lane simply
+   omits the paragraph. */
+.cp-rc-absent { margin: 6px 0 0; color: var(--cp-fg-muted);
+  font-size: var(--md-sys-typescale-body-small-size);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
+  padding-left: 10px; border-left: 2px solid var(--cp-border); }
+.cp-rc-absent-lane { color: var(--cp-fg); font-weight: 600; white-space: nowrap; }
 .cp-rc-table td { vertical-align: top; }
 .cp-rc-table tbody th { vertical-align: top; min-width: 180px; }
 .cp-rc-status { color: var(--cp-fg-muted); font-size: 0.75rem; }

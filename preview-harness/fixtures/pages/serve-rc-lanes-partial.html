@@ -79,14 +79,15 @@
         <p class="cp-sub">Pick a column and every other column grows a pixel diff and a mismatch chip.
           The baked lane replays the build-time <code>pixelmatch</code> diffs; another player diffs in your browser,
           which is how you compare two players directly.</p>
+        <p class="cp-rc-absent">Not in this catalog's parity run: <span class="cp-rc-absent-lane">AndroidX Embedded · vendored Android</span>, <span class="cp-rc-absent-lane">AndroidX Embedded · androidx.dev</span>, <span class="cp-rc-absent-lane">RC · cmp-jvm player</span>. A player earns a column here only when the published run recorded a verdict for it, so these are absent rather than empty — the catalog's publishing workflow opts each lane in.</p>
         <div class="cp-compare-controls">
           <span class="cp-compare-control-label">Diff against</span>
-          <span class="cp-theme" role="group" aria-label="Diff reference"><button type="button" class="cp-theme-btn" data-rc-ref="none" aria-pressed="true">nothing</button><button type="button" class="cp-theme-btn" data-rc-ref="baked" aria-pressed="false">baked</button><button type="button" class="cp-theme-btn" data-rc-ref="js" aria-pressed="false">js</button><button type="button" class="cp-theme-btn" data-rc-ref="embedded" aria-pressed="false">vendored</button><button type="button" class="cp-theme-btn" data-rc-ref="androidx-embedded" aria-pressed="false">androidx.dev</button><button type="button" class="cp-theme-btn" data-rc-ref="cmp-jvm" aria-pressed="false">cmp-jvm</button><button type="button" class="cp-theme-btn" data-rc-ref="cmp-wasm" aria-pressed="false">cmp-wasm</button></span>
+          <span class="cp-theme" role="group" aria-label="Diff reference"><button type="button" class="cp-theme-btn" data-rc-ref="none" aria-pressed="true">nothing</button><button type="button" class="cp-theme-btn" data-rc-ref="baked" aria-pressed="false">baked</button><button type="button" class="cp-theme-btn" data-rc-ref="js" aria-pressed="false">js</button><button type="button" class="cp-theme-btn" data-rc-ref="cmp-wasm" aria-pressed="false">cmp-wasm</button></span>
           <span id="cp-rc-status" class="cp-rc-status" role="status"></span>
         </div>
         <div class="cp-compare-table-wrap">
           <table class="cp-compare-table cp-rc-table">
-            <thead><tr><th>Preview</th><th>AndroidX Embedded · baked</th><th>RC · JS player</th><th>AndroidX Embedded · vendored Android</th><th>AndroidX Embedded · androidx.dev</th><th>RC · cmp-jvm player</th><th>RC · cmp-wasm player</th></tr></thead>
+            <thead><tr><th>Preview</th><th>AndroidX Embedded · baked</th><th>RC · JS player</th><th>RC · cmp-wasm player</th></tr></thead>
             <tbody>
         <tr class="cp-rc-row" data-row="0" data-hay="button-filled button-filled__ideal__default__light button-filled__ideal__default__dark"
           data-preview-ids="button-filled__ideal__default__light button-filled__ideal__default__dark">
@@ -102,18 +103,6 @@
 </figure></td><td><figure class="cp-rc-cell" data-lane="js">
   <figcaption>RC · JS player<span class="cp-rc-refbadge">reference</span></figcaption>
   <img loading="lazy" src="/rc-compare/js/0.png?session=remote-m3" alt="button-filled — RC · JS player">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="embedded">
-  <figcaption>AndroidX Embedded · vendored Android<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/embedded/0.png?session=remote-m3" alt="button-filled — AndroidX Embedded · vendored Android">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="androidx-embedded">
-  <figcaption>AndroidX Embedded · androidx.dev<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/androidx-embedded/0.png?session=remote-m3" alt="button-filled — AndroidX Embedded · androidx.dev">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="cmp-jvm">
-  <figcaption>RC · cmp-jvm player<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/cmp-jvm/0.png?session=remote-m3" alt="button-filled — RC · cmp-jvm player">
   <div class="cp-rc-diffslot" hidden></div>
 </figure></td><td><figure class="cp-rc-cell" data-lane="cmp-wasm">
   <figcaption>RC · cmp-wasm player<span class="cp-rc-refbadge">reference</span></figcaption>
@@ -136,18 +125,6 @@
   <figcaption>RC · JS player<span class="cp-rc-refbadge">reference</span></figcaption>
   <img loading="lazy" src="/rc-compare/js/2.png?session=remote-m3" alt="switch-on — RC · JS player">
   <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="embedded">
-  <figcaption>AndroidX Embedded · vendored Android<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/embedded/2.png?session=remote-m3" alt="switch-on — AndroidX Embedded · vendored Android">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="androidx-embedded">
-  <figcaption>AndroidX Embedded · androidx.dev<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/androidx-embedded/2.png?session=remote-m3" alt="switch-on — AndroidX Embedded · androidx.dev">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="cmp-jvm">
-  <figcaption>RC · cmp-jvm player<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/cmp-jvm/2.png?session=remote-m3" alt="switch-on — RC · cmp-jvm player">
-  <div class="cp-rc-diffslot" hidden></div>
 </figure></td><td><figure class="cp-rc-cell" data-lane="cmp-wasm">
   <figcaption>RC · cmp-wasm player<span class="cp-rc-refbadge">reference</span></figcaption>
   <img loading="lazy" src="/rc-compare/cmp-wasm/2.png?session=remote-m3" alt="switch-on — RC · cmp-wasm player">
@@ -168,18 +145,6 @@
 </figure></td><td><figure class="cp-rc-cell" data-lane="js">
   <figcaption>RC · JS player<span class="cp-rc-refbadge">reference</span></figcaption>
   <img loading="lazy" src="/rc-compare/js/1.png?session=remote-m3" alt="button-filled — RC · JS player">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="embedded">
-  <figcaption>AndroidX Embedded · vendored Android<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/embedded/1.png?session=remote-m3" alt="button-filled — AndroidX Embedded · vendored Android">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="androidx-embedded">
-  <figcaption>AndroidX Embedded · androidx.dev<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/androidx-embedded/1.png?session=remote-m3" alt="button-filled — AndroidX Embedded · androidx.dev">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="cmp-jvm">
-  <figcaption>RC · cmp-jvm player<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/cmp-jvm/1.png?session=remote-m3" alt="button-filled — RC · cmp-jvm player">
   <div class="cp-rc-diffslot" hidden></div>
 </figure></td><td><figure class="cp-rc-cell" data-lane="cmp-wasm">
   <figcaption>RC · cmp-wasm player<span class="cp-rc-refbadge">reference</span></figcaption>
@@ -202,18 +167,6 @@
   <figcaption>RC · JS player<span class="cp-rc-refbadge">reference</span></figcaption>
   <img loading="lazy" src="/rc-compare/js/3.png?session=remote-m3" alt="switch-on — RC · JS player">
   <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="embedded">
-  <figcaption>AndroidX Embedded · vendored Android<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/embedded/3.png?session=remote-m3" alt="switch-on — AndroidX Embedded · vendored Android">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="androidx-embedded">
-  <figcaption>AndroidX Embedded · androidx.dev<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/androidx-embedded/3.png?session=remote-m3" alt="switch-on — AndroidX Embedded · androidx.dev">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="cmp-jvm">
-  <figcaption>RC · cmp-jvm player<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/cmp-jvm/3.png?session=remote-m3" alt="switch-on — RC · cmp-jvm player">
-  <div class="cp-rc-diffslot" hidden></div>
 </figure></td><td><figure class="cp-rc-cell" data-lane="cmp-wasm">
   <figcaption>RC · cmp-wasm player<span class="cp-rc-refbadge">reference</span></figcaption>
   <img loading="lazy" src="/rc-compare/cmp-wasm/3.png?session=remote-m3" alt="switch-on — RC · cmp-wasm player">
@@ -235,18 +188,6 @@
   <figcaption>RC · JS player<span class="cp-rc-refbadge">reference</span></figcaption>
   <img loading="lazy" src="/rc-compare/js/4.png?session=remote-m3" alt="badge — RC · JS player">
   <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="embedded">
-  <figcaption>AndroidX Embedded · vendored Android<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/embedded/4.png?session=remote-m3" alt="badge — AndroidX Embedded · vendored Android">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="androidx-embedded">
-  <figcaption>AndroidX Embedded · androidx.dev<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/androidx-embedded/4.png?session=remote-m3" alt="badge — AndroidX Embedded · androidx.dev">
-  <div class="cp-rc-diffslot" hidden></div>
-</figure></td><td><figure class="cp-rc-cell" data-lane="cmp-jvm">
-  <figcaption>RC · cmp-jvm player<span class="cp-rc-refbadge">reference</span></figcaption>
-  <img loading="lazy" src="/rc-compare/cmp-jvm/4.png?session=remote-m3" alt="badge — RC · cmp-jvm player">
-  <div class="cp-rc-diffslot" hidden></div>
 </figure></td><td><figure class="cp-rc-cell" data-lane="cmp-wasm">
   <figcaption>RC · cmp-wasm player<span class="cp-rc-refbadge">reference</span></figcaption>
   <img loading="lazy" src="/rc-compare/cmp-wasm/4.png?session=remote-m3" alt="badge — RC · cmp-wasm player">
@@ -257,7 +198,7 @@
           </table>
         </div>
         <p id="cp-rc-empty" class="cp-empty" hidden>No comparisons match this filter.</p>
-        <script type="application/json" id="cp-rc-model">{"threshold":0.1,"lanes":[{"id":"baked","label":"AndroidX Embedded · baked","short":"baked"},{"id":"js","label":"RC · JS player","short":"js"},{"id":"embedded","label":"AndroidX Embedded · vendored Android","short":"vendored"},{"id":"androidx-embedded","label":"AndroidX Embedded · androidx.dev","short":"androidx.dev"},{"id":"cmp-jvm","label":"RC · cmp-jvm player","short":"cmp-jvm"},{"id":"cmp-wasm","label":"RC · cmp-wasm player","short":"cmp-wasm"}],"rows":[{"label":"button-filled","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/0.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/0.png?session=remote-m3","diff":"/rc-compare/js-diff/0.png?session=remote-m3","mismatchPct":2.97,"mismatchPx":9116,"note":""},"embedded":{"rendered":true,"render":"/rc-compare/embedded/0.png?session=remote-m3","diff":"/rc-compare/embedded-diff/0.png?session=remote-m3","mismatchPct":0.03,"mismatchPx":24,"note":""},"androidx-embedded":{"rendered":true,"render":"/rc-compare/androidx-embedded/0.png?session=remote-m3","diff":"/rc-compare/androidx-embedded-diff/0.png?session=remote-m3","mismatchPct":0.4,"mismatchPx":640,"note":""},"cmp-jvm":{"rendered":true,"render":"/rc-compare/cmp-jvm/0.png?session=remote-m3","diff":"/rc-compare/cmp-jvm-diff/0.png?session=remote-m3","mismatchPct":1.09,"mismatchPx":5151,"note":""},"cmp-wasm":{"rendered":true,"render":"/rc-compare/cmp-wasm/0.png?session=remote-m3","diff":"/rc-compare/cmp-wasm-diff/0.png?session=remote-m3","mismatchPct":3.4,"mismatchPx":12040,"note":""}}},{"label":"switch-on","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/2.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/2.png?session=remote-m3","diff":"/rc-compare/js-diff/2.png?session=remote-m3","mismatchPct":2.17,"mismatchPx":7316,"note":""},"embedded":{"rendered":true,"render":"/rc-compare/embedded/2.png?session=remote-m3","diff":"/rc-compare/embedded-diff/2.png?session=remote-m3","mismatchPct":0.05,"mismatchPx":26,"note":""},"androidx-embedded":{"rendered":true,"render":"/rc-compare/androidx-embedded/2.png?session=remote-m3","diff":"/rc-compare/androidx-embedded-diff/2.png?session=remote-m3","mismatchPct":0.6000000000000001,"mismatchPx":660,"note":""},"cmp-jvm":{"rendered":true,"render":"/rc-compare/cmp-jvm/2.png?session=remote-m3","diff":"/rc-compare/cmp-jvm-diff/2.png?session=remote-m3","mismatchPct":1.4900000000000002,"mismatchPx":5231,"note":""},"cmp-wasm":{"rendered":true,"render":"/rc-compare/cmp-wasm/2.png?session=remote-m3","diff":"/rc-compare/cmp-wasm-diff/2.png?session=remote-m3","mismatchPct":2.8,"mismatchPx":10240,"note":""}}},{"label":"button-filled","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/1.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/1.png?session=remote-m3","diff":"/rc-compare/js-diff/1.png?session=remote-m3","mismatchPct":2.5700000000000003,"mismatchPx":8216,"note":""},"embedded":{"rendered":true,"render":"/rc-compare/embedded/1.png?session=remote-m3","diff":"/rc-compare/embedded-diff/1.png?session=remote-m3","mismatchPct":0.04,"mismatchPx":25,"note":""},"androidx-embedded":{"rendered":true,"render":"/rc-compare/androidx-embedded/1.png?session=remote-m3","diff":"/rc-compare/androidx-embedded-diff/1.png?session=remote-m3","mismatchPct":0.5,"mismatchPx":650,"note":""},"cmp-jvm":{"rendered":true,"render":"/rc-compare/cmp-jvm/1.png?session=remote-m3","diff":"/rc-compare/cmp-jvm-diff/1.png?session=remote-m3","mismatchPct":1.29,"mismatchPx":5191,"note":""},"cmp-wasm":{"rendered":false,"render":"","diff":"","mismatchPct":null,"mismatchPx":null,"note":"Document is not renderable by the CMP player: CoreText requires DataFont"}}},{"label":"switch-on","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/3.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/3.png?session=remote-m3","diff":"/rc-compare/js-diff/3.png?session=remote-m3","mismatchPct":1.77,"mismatchPx":6416,"note":""},"embedded":{"rendered":true,"render":"/rc-compare/embedded/3.png?session=remote-m3","diff":"/rc-compare/embedded-diff/3.png?session=remote-m3","mismatchPct":0.06,"mismatchPx":27,"note":""},"androidx-embedded":{"rendered":true,"render":"/rc-compare/androidx-embedded/3.png?session=remote-m3","diff":"/rc-compare/androidx-embedded-diff/3.png?session=remote-m3","mismatchPct":0.7000000000000001,"mismatchPx":670,"note":""},"cmp-jvm":{"rendered":true,"render":"/rc-compare/cmp-jvm/3.png?session=remote-m3","diff":"/rc-compare/cmp-jvm-diff/3.png?session=remote-m3","mismatchPct":1.6900000000000002,"mismatchPx":5271,"note":""},"cmp-wasm":{"rendered":true,"render":"/rc-compare/cmp-wasm/3.png?session=remote-m3","diff":"/rc-compare/cmp-wasm-diff/3.png?session=remote-m3","mismatchPct":2.5,"mismatchPx":9340,"note":""}}},{"label":"badge","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/4.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/4.png?session=remote-m3","diff":"/rc-compare/js-diff/4.png?session=remote-m3","mismatchPct":1.37,"mismatchPx":5516,"note":""},"embedded":{"rendered":true,"render":"/rc-compare/embedded/4.png?session=remote-m3","diff":"/rc-compare/embedded-diff/4.png?session=remote-m3","mismatchPct":0.07,"mismatchPx":28,"note":""},"androidx-embedded":{"rendered":true,"render":"/rc-compare/androidx-embedded/4.png?session=remote-m3","diff":"/rc-compare/androidx-embedded-diff/4.png?session=remote-m3","mismatchPct":0.8,"mismatchPx":680,"note":""},"cmp-jvm":{"rendered":true,"render":"/rc-compare/cmp-jvm/4.png?session=remote-m3","diff":"/rc-compare/cmp-jvm-diff/4.png?session=remote-m3","mismatchPct":1.8900000000000001,"mismatchPx":5311,"note":""},"cmp-wasm":{"rendered":true,"render":"/rc-compare/cmp-wasm/4.png?session=remote-m3","diff":"/rc-compare/cmp-wasm-diff/4.png?session=remote-m3","mismatchPct":2.2,"mismatchPx":8440,"note":""}}}]}</script>
+        <script type="application/json" id="cp-rc-model">{"threshold":0.1,"lanes":[{"id":"baked","label":"AndroidX Embedded · baked","short":"baked"},{"id":"js","label":"RC · JS player","short":"js"},{"id":"cmp-wasm","label":"RC · cmp-wasm player","short":"cmp-wasm"}],"rows":[{"label":"button-filled","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/0.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/0.png?session=remote-m3","diff":"/rc-compare/js-diff/0.png?session=remote-m3","mismatchPct":2.97,"mismatchPx":9116,"note":""},"cmp-wasm":{"rendered":true,"render":"/rc-compare/cmp-wasm/0.png?session=remote-m3","diff":"/rc-compare/cmp-wasm-diff/0.png?session=remote-m3","mismatchPct":3.4,"mismatchPx":12040,"note":""}}},{"label":"switch-on","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/2.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/2.png?session=remote-m3","diff":"/rc-compare/js-diff/2.png?session=remote-m3","mismatchPct":2.17,"mismatchPx":7316,"note":""},"cmp-wasm":{"rendered":true,"render":"/rc-compare/cmp-wasm/2.png?session=remote-m3","diff":"/rc-compare/cmp-wasm-diff/2.png?session=remote-m3","mismatchPct":2.8,"mismatchPx":10240,"note":""}}},{"label":"button-filled","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/1.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/1.png?session=remote-m3","diff":"/rc-compare/js-diff/1.png?session=remote-m3","mismatchPct":2.5700000000000003,"mismatchPx":8216,"note":""},"cmp-wasm":{"rendered":false,"render":"","diff":"","mismatchPct":null,"mismatchPx":null,"note":"Document is not renderable by the CMP player: CoreText requires DataFont"}}},{"label":"switch-on","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/3.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/3.png?session=remote-m3","diff":"/rc-compare/js-diff/3.png?session=remote-m3","mismatchPct":1.77,"mismatchPx":6416,"note":""},"cmp-wasm":{"rendered":true,"render":"/rc-compare/cmp-wasm/3.png?session=remote-m3","diff":"/rc-compare/cmp-wasm-diff/3.png?session=remote-m3","mismatchPct":2.5,"mismatchPx":9340,"note":""}}},{"label":"badge","referenceBlank":false,"lanes":{"baked":{"rendered":true,"render":"/rc-compare/baked/4.png?session=remote-m3","diff":"","mismatchPct":null,"mismatchPx":null,"note":""},"js":{"rendered":true,"render":"/rc-compare/js/4.png?session=remote-m3","diff":"/rc-compare/js-diff/4.png?session=remote-m3","mismatchPct":1.37,"mismatchPx":5516,"note":""},"cmp-wasm":{"rendered":true,"render":"/rc-compare/cmp-wasm/4.png?session=remote-m3","diff":"/rc-compare/cmp-wasm-diff/4.png?session=remote-m3","mismatchPct":2.2,"mismatchPx":8440,"note":""}}}]}</script>
         <!-- Picks the reference, measures the rows and fills in the chips. Emitted LAST in this
              section, immediately after the model it reads: `format-compare.js` calls
              `window.cpRcLanes.filter()` on its very first pass, so the element has to be able to
@@ -296,7 +237,7 @@
                 <span class="cp-fab-what">Something is wrong with this <strong>preview</strong></span>
                 <span class="cp-fab-who">wrong colours, wrong spec, a state that is missing</span>
               </a>
-              <form class="cp-report-bug" method="get" action="/report-bug"><input type="hidden" name="from" value=""><input type="hidden" name="token" value=""><input type="hidden" name="scheme" value=""><button type="submit" class="cp-fab-choice"><span class="cp-fab-what">Something is wrong with the <strong>preview server</strong></span><span class="cp-fab-who">the page, a control, a render that failed &mdash; goes to <code>yschimke/compose-preview-server</code></span></button></form>
+              <form class="cp-report-bug" method="get" action="/report-bug"><input type="hidden" name="from" value=""><input type="hidden" name="token" value=""><input type="hidden" name="scheme" value=""><button type="submit" class="cp-fab-choice"><span class="cp-fab-what">Something is wrong with the <strong>preview server</strong></span><span class="cp-fab-who">the page, a control, a render that failed &mdash; goes to <code>yschimke/compose-ai-tools</code></span></button></form>
               <div class="cp-shot" hidden>
                 <p class="cp-shot-head">Capture what you can see</p>
                 <p class="cp-fab-who">The report embeds the plain render. Anything the browser composes

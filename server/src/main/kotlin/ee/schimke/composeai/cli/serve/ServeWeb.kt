@@ -10010,7 +10010,7 @@ ${captureControlsHtml().prependIndent("          ")}
           <h1 class="cp-head">Format comparison${compactTrustBadge(trust)}</h1>
           <p class="cp-sub"><span class="cp-sub-formats">PNG, SVG and Remote Compose fidelity · scores measure the drawn content on a fixed backdrop</span>${
           if (rcLanes != null)
-            "<span class=\"cp-sub-rc\">Every Remote Compose player side by side · pixel diffs from the published parity run</span>"
+            "<span class=\"cp-sub-rc\">Every Remote Compose player this catalog's parity run published, side by side · pixel diffs from that run</span>"
           else ""
         }</p>
           <div class="cp-compare-controls">
@@ -10146,6 +10146,27 @@ ${captureControlsHtml().prependIndent("          ")}
           .trimIndent()
       }
 
+    // The players this view knows about that the run did NOT publish, named out loud instead of
+    // left to be inferred from a column that isn't there. A reader who knows the vocabulary counts
+    // the columns and asks where the rest went (#4998); "that lane wasn't part of this catalog's
+    // run" is an answer no arrangement of the columns that ARE here can give, and the alternative —
+    // a column of empty cells per absent player — spends the wall's width saying nothing.
+    //
+    // [ServeRcCompare.LANES] is the vocabulary, and it is the same list [ServeRcCompare.plan]
+    // filters down to build `manifest.lanes`, so the two can't drift apart.
+    val published = manifest.lanes.mapTo(mutableSetOf()) { it.id }
+    val absent = ServeRcCompare.LANES.filterNot { it.id in published }
+    val absentNote =
+      if (absent.isEmpty()) ""
+      else
+        "\n        <p class=\"cp-rc-absent\">Not in this catalog's parity run: " +
+          absent.joinToString(", ") {
+            "<span class=\"cp-rc-absent-lane\">${WebEscaping.htmlEscape(it.label)}</span>"
+          } +
+          ". A player earns a column here only when the published run recorded a verdict for it, " +
+          "so these are absent rather than empty — the catalog's publishing workflow opts each " +
+          "lane in.</p>"
+
     val picker =
       "<button type=\"button\" class=\"cp-theme-btn\" data-rc-ref=\"none\" aria-pressed=\"true\">nothing</button>" +
         manifest.lanes.joinToString("") { lane ->
@@ -10174,7 +10195,7 @@ ${captureControlsHtml().prependIndent("          ")}
       <section id="cp-rc-lanes" hidden>
         <p class="cp-sub">Pick a column and every other column grows a pixel diff and a mismatch chip.
           The baked lane replays the build-time <code>pixelmatch</code> diffs; another player diffs in your browser,
-          which is how you compare two players directly.</p>
+          which is how you compare two players directly.</p>$absentNote
         <div class="cp-compare-controls">
           <span class="cp-compare-control-label">Diff against</span>
           <span class="cp-theme" role="group" aria-label="Diff reference">$picker</span>
