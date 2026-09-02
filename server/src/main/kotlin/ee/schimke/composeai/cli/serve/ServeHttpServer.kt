@@ -9231,13 +9231,38 @@ class ServeHttpServer(
                   outcome.generation,
                 )
               } else {
+                // A BARE `?rcPlayer=` is a fixed answer to a fixed URL, the same way an
+                // override-free browse is: it replays a PUBLISHED `ir/<id>.rc` through a named
+                // player at the preview's own spec, and every axis that would make the pixels
+                // depend on the request — a knob, a theme, a device, a font scale — is another
+                // override param and excluded here by `singleOrNull`.
+                //
+                // It was `no-store`, on the reasoning that an override means "pixels that reflect
+                // no published bytes at all". That is untrue of this one twice over. Once by
+                // construction: [RenderOutcome.Generation.RC_PUBLISHED] IS published bytes, read
+                // off the catalog's rc-compare staging, and its own KDoc says it is answerable
+                // exactly as the baked PNG is — measured on the deployed host, `?rcPlayer=cmp-
+                // android` returns bytes md5-identical to the bare render and was still `no-store`.
+                // And once by cost: the compare wall now points a cell at this lane for every
+                // player a run did not publish, so `no-store` re-renders each of them on every page
+                // view and every lazy scroll back into view, against a serial daemon.
+                //
+                // The staleness this accepts is the one the baked lane already accepts: a redeploy
+                // can change the player, and for up to `max-age` a cache answers with the previous
+                // one. `stale-while-revalidate` bounds it the same way there.
+                val bareRcPlayer = overrideParams.keys.singleOrNull() == "rcPlayer"
+                val bakedBrowse =
+                  outcome.generation == RenderOutcome.Generation.BAKED && overrideParams.isEmpty()
                 markGeneration(
                   outcome.generation.wire,
-                  if (
-                    outcome.generation == RenderOutcome.Generation.BAKED &&
-                      overrideParams.isEmpty() &&
-                      isPublic
-                  ) {
+                  if (!isPublic) DYNAMIC_RESOURCE_CACHE_CONTROL
+                  // A player selection stops at the short public lifetime and never takes the
+                  // `immutable` one, even on a generation-scoped URL: what these bytes depend on is
+                  // the *deployed player*, and a redeploy that swaps it need not move the catalog's
+                  // generation. `max-age` is the bound on how stale that can get; `immutable` would
+                  // have no bound at all.
+                  else if (bareRcPlayer) STATIC_RESOURCE_CACHE_CONTROL
+                  else if (bakedBrowse) {
                     // A frame URL that names its generation is content-addressed: these exact
                     // bytes are what it answers with for as long as it resolves at all, because a
                     // republish moves the page's generation and therefore the URL. That is what
@@ -9249,9 +9274,7 @@ class ServeHttpServer(
                     // generation, not to cache the ambiguity for longer.
                     if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
                     else STATIC_RESOURCE_CACHE_CONTROL
-                  } else {
-                    DYNAMIC_RESOURCE_CACHE_CONTROL
-                  },
+                  } else DYNAMIC_RESOURCE_CACHE_CONTROL,
                 )
                 call.respondBytes(outcome.png, ContentType.Image.PNG)
               }
