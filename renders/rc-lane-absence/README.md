@@ -19,7 +19,7 @@ the lane vocabulary it subtracts the published lanes from is
 | `rc-lanes-partial.before.light.png` | the three-column wall as it shipped: nothing says the other three players exist |
 | `rc-lanes-partial.after.light.png` | the same wall naming the players the run did not include |
 | `rc-lanes-partial.after.dark.png` | the same page in the dark scheme |
-| `rc-lanes-live.light.png` | the same partial run on a host that can draw two of the missing players itself: five columns, the live ones badged, and only the player nothing can produce still reported absent |
+| `rc-lanes-live.light.png` | the same partial run on a host that can draw a missing player itself: the cmp-jvm column filled live and badged, the two Android lanes still reported absent |
 | `rc-lanes-live.dark.png` | the live wall in the dark scheme |
 
 All are headless-Chromium captures of committed harness fixtures —
@@ -33,3 +33,10 @@ the offline run, but the recorded `ir/<id>.rc` document plus a host that can pla
 fill the column anyway. `ServeWeb.rcLanesSection` adds a column for every backend
 [`ServeHost.enabledRcPlayersFor`](../../render-host/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeHost.kt)
 reports that the run has none for, pointing it at `/render/<id>.png?rcPlayer=<wire>`.
+
+Not every drawable player, though, and the capture shows which: `cmp-android` is deliberately left
+absent. It is the same embedded player a catalog's capture bakes through, so an Android daemon
+answers `?rcPlayer=cmp-android` with the baked bytes themselves — measured against the deployed
+`remote-m3` host, `appcard__ideal__default__compact` returns md5 `e69d5136…` for both. Filling that
+column would put a pixel-for-pixel copy of `baked` under another player's name, which asserts an
+agreement nothing measured. `ServeWeb.LIVE_FILLABLE` carries the rule and the numbers.

@@ -10070,6 +10070,30 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
+   * The backends a missing column may be filled from by rendering it live — NOT simply every
+   * backend the host can draw, which is the whole point of the distinction.
+   *
+   * `cmp-android` is the embedded AndroidX player, and a catalog's baked capture goes through that
+   * same player (it is what `RemoteOverridablePreview` defaults to), so on an Android daemon
+   * `?rcPlayer=cmp-android` hands back the baked bytes themselves. Measured against the deployed
+   * `remote-m3` host: `appcard__ideal__default__compact` answers md5 `e69d5136…` to both the bare
+   * render and `?rcPlayer=cmp-android`, and `button-imagebackground__ideal__default__compact`
+   * answers `48794c07…` to both. A column filled from that would be a pixel-for-pixel copy of the
+   * baked column under another player's name — worse than an absent column, because it asserts that
+   * two players agree where nothing was compared.
+   *
+   * The offline `embedded` lane is a third thing again: the vendored/local-patch player under this
+   * repo's own Robolectric harness, a harness-vs-harness check on that same player. Nothing records
+   * which player baked a given row (see [ServeRcCompare.LANES]'s note on provenance), so the
+   * duplication cannot be detected per row either — carry that provenance before widening this set.
+   *
+   * `cmp-jvm` is safe: Compose Desktop / Skiko is a different rasteriser from anything an Android
+   * capture can be. `java` is genuinely distinct too, but maps to no published column, so filling
+   * one would invent a lane the offline vocabulary does not have.
+   */
+  private val LIVE_FILLABLE = setOf(RcPlayerBackend.CMP_JVM)
+
+  /**
    * The **Remote Compose players** view: every player's published render of every `ir/<id>.rc`
    * document, one column per player, with the baked capture (the offline Robolectric/Skiko render,
    * and the reference the offline run scored everything against) first.
@@ -10118,16 +10142,13 @@ ${captureControlsHtml().prependIndent("          ")}
 
     // ---- The live columns -------------------------------------------------------------------
     //
-    // A player this host can draw but the published run has no column for. Only the server-side
-    // raster backends qualify: the client-side ones (`js`, `cmp-wasm`) paint in the visitor's
-    // browser rather than answering an `<img>`, and `java` maps to no published column at all, so
-    // adding one here would invent a lane the vocabulary does not have.
+    // A player this host can draw, that the published run has no column for, and that cannot come
+    // back as a copy of a column already on the wall. [LIVE_FILLABLE] carries the last condition
+    // and the measurements behind it.
     val publishedLaneIds = manifest.lanes.mapTo(mutableSetOf()) { it.id }
     val liveCandidates =
       RcPlayerBackend.UNIVERSE.filter { backend ->
-        !backend.clientSide &&
-          backend.rcCompareLane != null &&
-          backend.rcCompareLane !in publishedLaneIds
+        backend in LIVE_FILLABLE && backend.rcCompareLane !in publishedLaneIds
       }
     // Availability is per preview — a host can carry the document for one and not another — so a
     // column appears when ANY row can draw it, and the rows that cannot say so in their own cell.
