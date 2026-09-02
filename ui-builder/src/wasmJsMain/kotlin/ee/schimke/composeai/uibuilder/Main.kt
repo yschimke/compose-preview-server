@@ -123,31 +123,8 @@ fun main() {
     }
     return
   }
-  ComposeViewport(viewportContainerId = "composeApp") { UiBuilderBrowserApp() }
-}
-
-@Composable
-private fun UiBuilderBrowserApp() {
-  val explicitLiveSession = remember { liveSessionRequested() }
-  val explicitFixture = remember { captureModePresent() }
-  var liveServiceAvailable by remember {
-    mutableStateOf<Boolean?>(
-      when {
-        explicitLiveSession -> true
-        explicitFixture -> false
-        else -> null
-      }
-    )
-  }
-  LaunchedEffect(explicitLiveSession, explicitFixture) {
-    if (liveServiceAvailable == null) {
-      liveServiceAvailable = probeLiveSessionService()
-    }
-  }
-  when (liveServiceAvailable) {
-    true -> LiveSessionApp()
-    false -> VisualFixtureApp(captureMode())
-    null -> Unit
+  ComposeViewport(viewportContainerId = "composeApp") {
+    if (liveSessionEnabled()) LiveSessionApp() else VisualFixtureApp(captureMode())
   }
 }
 
@@ -1017,31 +994,13 @@ private external fun fetchTextPromise(url: String): Promise<JsString>
 @JsFun("() => new URLSearchParams(globalThis.location.search).get('mode') || 'interactive-editor'")
 private external fun captureMode(): String
 
-@JsFun("() => new URLSearchParams(globalThis.location.search).has('mode')")
-private external fun captureModePresent(): Boolean
-
-@JsFun("() => new URLSearchParams(globalThis.location.search).get('session') === 'live'")
-private external fun liveSessionRequested(): Boolean
-
-private suspend fun probeLiveSessionService(): Boolean {
-  val config = liveSessionConfig()
-  val http =
-    UiBuilderProtocolHttpClient(
-      actorId = config.actorId,
-      endpoint = config.httpEndpoint,
-      transport = BrowserUiBuilderHttpTransport(),
-      requestIds = MonotonicUiBuilderRequestIds(config.clientId),
-    )
-  return try {
-    // Any valid protocol response, including an authorization error, proves that the live service
-    // exists. A static-assets-only server instead returns a non-protocol 404 and keeps the fixture
-    // editor as the default.
-    http.execute(ListCatalogsRequestV1)
-    true
-  } catch (_: Exception) {
-    false
-  }
-}
+@JsFun(
+  """() => {
+    const params = new URLSearchParams(globalThis.location.search);
+    return params.get('session') === 'live' || !params.has('mode');
+  }"""
+)
+private external fun liveSessionEnabled(): Boolean
 
 private fun liveSessionConfig(): LiveSessionConfig {
   val catalogSystemId = liveConfigValue("catalog", uiBuilderCatalogFromPath())

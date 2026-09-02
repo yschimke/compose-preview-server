@@ -10,9 +10,7 @@ Publishing a preview catalog never enables authoring for it automatically.
 
 Start the server with UI-builder persistence and open `/ui-builder/`. The website opens its New
 design chooser when no design is named. The same chooser is available from **New design** in every
-live editor. If persistence is disabled with `--ui-builder-state-dir none`, the same default URL
-detects that no design service is installed and opens the deterministic fixture editor instead;
-explicit `?mode=…` fixture URLs remain unchanged.
+live editor.
 
 1. Choose **Material 3** for a blank Compose screen, or **Remote Material 3** for a Wear widget.
 2. For a widget, choose **Small widget** (216×76dp) or **Large widget** (216×124dp).

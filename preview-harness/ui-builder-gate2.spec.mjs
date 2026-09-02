@@ -337,7 +337,7 @@ async function fillCompose(page, locator, value) {
     await page.keyboard.type(value, { delay: 20 });
 }
 
-test("the default website selects an enabled catalog and retains the offline fixture fallback", async ({
+test("the default website selects an enabled catalog", async ({
     browser,
 }, testInfo) => {
     const remotePort = await freePort();
@@ -369,28 +369,6 @@ test("the default website selects an enabled catalog and retains the offline fix
     } finally {
         await remotePage.close();
         await remoteServer.stop();
-    }
-
-    const offlinePort = await freePort();
-    const offlineLog = testInfo.outputPath("offline-ui-builder-server.log");
-    const offlineServer = await startProductServer(offlinePort, "none", offlineLog);
-    const offlinePage = await browser.newPage();
-    try {
-        await offlinePage.goto(`${offlineServer.origin}/ui-builder/`);
-        await offlinePage.waitForFunction(
-            () =>
-                document.documentElement.dataset.uiBuilderReady === "true" &&
-                globalThis.__uiBuilderEditor?.revision === 108,
-            null,
-            { timeout: 30_000 },
-        );
-        await expect(offlinePage.getByText("Create a new design")).toHaveCount(0);
-        await expect(
-            offlinePage.getByText("m3-catalog component catalog", { exact: true }),
-        ).toBeVisible();
-    } finally {
-        await offlinePage.close();
-        await offlineServer.stop();
     }
 });
 
