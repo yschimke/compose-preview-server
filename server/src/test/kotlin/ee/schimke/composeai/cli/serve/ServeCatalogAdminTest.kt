@@ -97,6 +97,72 @@ class ServeCatalogAdminTest {
   }
 
   @Test
+  fun `an import's origin reaches the runtime, not just the config file`() {
+    // The entry was persisted with its origin and registered without it, so the box served an
+    // import that `catalogs.json` attributed correctly and the front page filed under the staging
+    // repository's owner until the next restart (compose-ai-tools#5012).
+    val tracker = tracker()
+    admin(tracker)
+      .register(
+        ServeCatalogsConfig.Entry(
+          system = "joreilly-peopleinspace",
+          repo = "yschimke/compose-preview-imports",
+          importedFrom = "joreilly/PeopleInSpace",
+        )
+      )
+
+    assertEquals(
+      "joreilly/PeopleInSpace",
+      tracker.configFor("joreilly-peopleinspace")?.importedFrom,
+    )
+    assertEquals("joreilly/PeopleInSpace", file.load().catalogs.single().importedFrom)
+  }
+
+  @Test
+  fun `re-posting an entry that gained an origin converges it instead of conflicting`() {
+    // How a box already serving an unattributed import is repaired without a restart: the
+    // deployment reconcile re-posts the entry, and a 409 "already published" would leave the card
+    // where it was.
+    seedConfig(
+      ServeCatalogsConfig(
+        catalogs =
+          listOf(
+            ServeCatalogsConfig.Entry(
+              system = "joreilly-bikeshare",
+              repo = "yschimke/compose-preview-imports",
+            )
+          )
+      )
+    )
+    val tracker =
+      tracker(
+        CatalogLoadTracker.Config(
+          "joreilly-bikeshare",
+          true,
+          "yschimke/compose-preview-imports",
+          "b",
+        )
+      )
+    tracker.recordSuccess("joreilly-bikeshare")
+
+    val result =
+      admin(tracker)
+        .register(
+          ServeCatalogsConfig.Entry(
+            system = "joreilly-bikeshare",
+            repo = "yschimke/compose-preview-imports",
+            importedFrom = "joreilly/BikeShare",
+          )
+        )
+
+    assertTrue(result is ServeCatalogAdmin.Result.Ok, "$result")
+    assertEquals(emptyList(), loaded, "the running catalog is never re-fetched behind its back")
+    assertTrue(tracker.snapshot().single().available, "and keeps its load state")
+    assertEquals("joreilly/BikeShare", tracker.configFor("joreilly-bikeshare")?.importedFrom)
+    assertEquals("joreilly/BikeShare", file.load().catalogs.single().importedFrom)
+  }
+
+  @Test
   fun `an unknown group, a bad id, and a bad repo are all rejected before any fetch`() {
     val tracker = tracker()
     val a = admin(tracker)

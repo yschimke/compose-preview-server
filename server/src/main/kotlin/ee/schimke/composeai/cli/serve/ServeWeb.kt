@@ -5395,6 +5395,25 @@ ${captureControlsHtml().prependIndent("          ")}
      * at.
      */
     val importedFrom: String? = null,
+    /**
+     * The upstream project the catalog's own `catalog.json` names as the source of its Kotlin
+     * ([ServeBundleHost.catalogSource]), which for an import is the project itself rather than the
+     * staging repository its delivery branch lives in.
+     *
+     * It backs [importedFrom] up for the owner section, and exists because the two facts have
+     * different failure modes: [importedFrom] is operator (or registry) configuration and is
+     * therefore *absent* whenever a registration path drops it — an admin publish that never
+     * carried the field, an entry written into `catalogs.json` before the field existed — while
+     * this travels inside the catalog. When the configuration went missing, three `joreilly`
+     * imports sat under `yschimke repositories` purely because [sourceRepo] records the delivery
+     * branch, which is a delivery detail (compose-ai-tools#5012).
+     *
+     * It never outranks [importedFrom]: the operator's statement about somebody else's catalog wins
+     * over that catalog's statement about itself. Both come from the same delivery repository's
+     * trust boundary — whoever may push the branch may write both this and the registry document —
+     * so preferring it to [sourceRepo] grants no attribution authority that wasn't already there.
+     */
+    val catalogSourceRepo: String? = null,
     val heroPreviewId: String?,
     /** Content-crop for the hero thumbnail (frames a Wear sticker to its component); null ⇒ raw. */
     val heroCrop: ContentCrop? = null,
@@ -5924,9 +5943,14 @@ ${captureControlsHtml().prependIndent("          ")}
    *   Android's work — which is what [ServeCatalogsConfig.Entry.attributionRepos] exists to
    *   express.
    *
-   * A catalog whose claim doesn't hold — or that declares no group at all — falls back to its
-   * source repo's **owner** section, and one with no provenance at all to "Other": unattributed,
-   * never promoted.
+   * A catalog whose claim doesn't hold — or that declares no group at all — falls back to an
+   * **owner** section, and one with no provenance at all to "Other": unattributed, never promoted.
+   * The owner is read from the first of [HomeSystem.importedFrom] (the operator's statement about
+   * where an import came from), [HomeSystem.catalogSourceRepo] (the catalog's own) and
+   * [HomeSystem.sourceRepo] (the delivery branch) that is present — so an import is filed beside
+   * the upstream project's other catalogs even when its registration carried no `importedFrom`,
+   * which is how three `joreilly` imports came to sit under `yschimke repositories`
+   * (compose-ai-tools#5012).
    *
    * Sections come out by their group's [HomeGroup.priority] (highest first), then in
    * first-appearance (i.e. configured) order — so an operator orders the front page either by where
@@ -5944,7 +5968,11 @@ ${captureControlsHtml().prependIndent("          ")}
       val claimed = s.group?.takeIf { g -> s.sourceRepo != null && s.sourceRepo in g.repos }
       // An import is grouped by the project it came FROM, not the staging repo serving it —
       // otherwise every import, whatever it wraps, piles into the staging repo owner's section.
-      val heading = claimed?.heading ?: ownerHeading(s.importedFrom ?: s.sourceRepo)
+      // The catalog's own declared source stands in when the operator named no origin, so a
+      // registration that lost `importedFrom` still files the card under the upstream owner
+      // rather than under whoever hosts the delivery branch (#5012).
+      val heading =
+        claimed?.heading ?: ownerHeading(s.importedFrom ?: s.catalogSourceRepo ?: s.sourceRepo)
       grouped.getOrPut(heading) { mutableListOf() } += s
       nouns.putIfAbsent(heading, claimed?.noun ?: ServeCatalogsConfig.DEFAULT_NOUN)
       // Sections merge on the HEADING, which is operator text and neither unique nor validated as

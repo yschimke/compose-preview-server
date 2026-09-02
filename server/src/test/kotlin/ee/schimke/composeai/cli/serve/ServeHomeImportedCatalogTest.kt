@@ -16,7 +16,12 @@ import kotlin.test.assertTrue
  */
 class ServeHomeImportedCatalogTest {
 
-  private fun system(id: String, importedFrom: String? = null, sourceRepo: String? = null) =
+  private fun system(
+    id: String,
+    importedFrom: String? = null,
+    sourceRepo: String? = null,
+    catalogSourceRepo: String? = null,
+  ) =
     ServeWeb.HomeSystem(
       system = id,
       title = id,
@@ -25,6 +30,7 @@ class ServeHomeImportedCatalogTest {
       trust = "trusted",
       sourceRepo = sourceRepo,
       importedFrom = importedFrom,
+      catalogSourceRepo = catalogSourceRepo,
       heroPreviewId = null,
     )
 
@@ -86,6 +92,59 @@ class ServeHomeImportedCatalogTest {
 
     assertTrue(html.contains("<h1 class=\"cp-head\">joreilly repositories</h1>"))
     assertTrue(!html.contains("cp-sys-imported"), "a non-imported catalog must carry no badge")
+  }
+
+  @Test
+  fun `an import declares its own origin when the registration lost importedFrom`() {
+    // What actually reached preview.coo.ee (compose-ai-tools#5012): the catalogs were imports of
+    // joreilly projects, served from the staging repo, and their registration carried no
+    // `importedFrom` — so they sectioned by the delivery branch and sat under `yschimke
+    // repositories`, split from the joreilly catalogs they belong beside. The catalog's own
+    // `source.repo` says whose Kotlin it is and travels with the bytes, so it answers when the
+    // configuration doesn't.
+    val html =
+      page(
+        system("confetti-wear", sourceRepo = "joreilly/Confetti"),
+        system(
+          "joreilly-bikeshare",
+          sourceRepo = "yschimke/compose-preview-imports",
+          catalogSourceRepo = "joreilly/BikeShare",
+        ),
+      )
+
+    assertTrue(
+      !html.contains("<h1 class=\"cp-head\">yschimke repositories</h1>"),
+      "the staging repo's owner must not collect an import that names its upstream",
+    )
+    assertTrue(
+      html.indexOf("<h1 class=\"cp-head\">joreilly repositories</h1>") <
+        html.indexOf("href=\"/joreilly-bikeshare/\""),
+      "the import belongs under the upstream owner's heading",
+    )
+    // Attribution only; the badge stays the operator's statement about the catalog.
+    assertTrue(!html.contains("cp-sys-imported"), "a declared source is not an imported badge")
+  }
+
+  @Test
+  fun `the operator's origin outranks the catalog's own`() {
+    // The catalog's `source.repo` is written by whoever may push the delivery branch, so it is a
+    // fallback and never a veto: where the operator (or the registry document they nominated) has
+    // said where an import came from, that is the answer.
+    val html =
+      page(
+        system(
+          "joreilly-peopleinspace",
+          sourceRepo = "yschimke/compose-preview-imports",
+          importedFrom = "joreilly/PeopleInSpace",
+          catalogSourceRepo = "someone-else/fork",
+        )
+      )
+
+    assertTrue(html.contains("<h1 class=\"cp-head\">joreilly repositories</h1>"))
+    assertTrue(
+      !html.contains("<h1 class=\"cp-head\">someone-else repositories</h1>"),
+      "the catalog's own claim must not override the operator's",
+    )
   }
 
   @Test
