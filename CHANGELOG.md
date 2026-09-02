@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.16.0](https://github.com/yschimke/compose-preview-server/compare/v2.15.0...v2.16.0) (2026-09-02)
+
+
+### Features
+
+* **serve:** add authenticated catalog MCP ([#179](https://github.com/yschimke/compose-preview-server/issues/179)) ([363f8d2](https://github.com/yschimke/compose-preview-server/commit/363f8d221f6d4498ff41d16156f9baff71054e3c))
+
+
+### Bug Fixes
+
+* **reporting:** scope preview issue metadata ([#174](https://github.com/yschimke/compose-preview-server/issues/174)) ([9f5f295](https://github.com/yschimke/compose-preview-server/commit/9f5f2954fc7500a7c0ae140da5311dec553e7ad5))
+
 ## [2.15.0](https://github.com/yschimke/compose-preview-server/compare/v2.14.0...v2.15.0) (2026-09-02)
 
 
