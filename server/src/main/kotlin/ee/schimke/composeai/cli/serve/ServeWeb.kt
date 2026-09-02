@@ -9476,6 +9476,24 @@ ${captureControlsHtml().prependIndent("          ")}
      * [rcLanesSection]) instead of rendering one player's output in the visitor's browser.
      */
     rcCompare: RcCompareManifest? = null,
+    /**
+     * The Remote Compose players this host can raster for a preview **on demand** — normally
+     * [ServeHost.enabledRcPlayersFor]. The wall adds a column for every one of them the published
+     * run has none for, pointing it at `/render/<id>.png?rcPlayer=<wire>`.
+     *
+     * The document is the artifact; a baked column is an optimisation over it. A live daemon can
+     * already replay `ir/<id>.rc` through the embedded Android player and the desktop one — the
+     * viewer has offered exactly that as a chip for a long time — so a wall that shows only what
+     * some offline run happened to draw is narrower than the host it is served from, and a reader
+     * counting columns cannot tell which of the two is missing (#4998).
+     *
+     * Cheap by construction: `?rcPlayer=` is answered from the published bytes when the parity run
+     * drew them and only reaches the renderer otherwise, so a lane that IS staged costs nothing
+     * extra and one that is not costs a render for the rows a reader actually scrolls to.
+     *
+     * Empty (the default, and every static host) leaves the wall exactly as the run published it.
+     */
+    liveRcPlayersFor: (String) -> List<RcPlayerBackend> = { emptyList() },
     referencesFor: (String) -> List<DesignReference> = { emptyList() },
     /** A paired catalog's design reference, used only when this preview has no local mapping. */
     pairedDesignSourceFor: (ServePreview) -> SpecSource? = { null },
@@ -9969,6 +9987,7 @@ ${captureControlsHtml().prependIndent("          ")}
         basePath,
         isPublic,
         generation,
+        liveRcPlayersFor,
       )
     }
     // The wall's page-scoped catalog report, in a provenance row of its own — see
@@ -10077,6 +10096,8 @@ ${captureControlsHtml().prependIndent("          ")}
     isPublic: Boolean,
     /** The wall's cache generation, scoping the staged rasters. See [ServeCacheGeneration]. */
     generation: String?,
+    /** Players this host can draw on demand. See [comparisonPage]'s parameter of the same name. */
+    liveRcPlayersFor: (String) -> List<RcPlayerBackend>,
   ): String? {
     if (manifest.lanes.isEmpty() || manifest.rows.isEmpty()) return null
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
@@ -10086,8 +10107,69 @@ ${captureControlsHtml().prependIndent("          ")}
     // review) — the same claim the primary render/reference pair makes, about a different pair.
     val assetQ = ServeCacheGeneration.scope(q, generation)
     val previewsById = previews.associateBy { it.id }
+    // Staged names are `<lane>/<slot>.png` and need the catalog's rc-compare prefix; a live lane's
+    // cell already carries a resolved render URL, which starts with `/` and is passed through.
     fun asset(name: String): String =
-      if (name.isEmpty()) "" else "$basePath/${ServeRcCompare.DIRECTORY}/$name$assetQ"
+      when {
+        name.isEmpty() -> ""
+        name.startsWith("/") -> name
+        else -> "$basePath/${ServeRcCompare.DIRECTORY}/$name$assetQ"
+      }
+
+    // ---- The live columns -------------------------------------------------------------------
+    //
+    // A player this host can draw but the published run has no column for. Only the server-side
+    // raster backends qualify: the client-side ones (`js`, `cmp-wasm`) paint in the visitor's
+    // browser rather than answering an `<img>`, and `java` maps to no published column at all, so
+    // adding one here would invent a lane the vocabulary does not have.
+    val publishedLaneIds = manifest.lanes.mapTo(mutableSetOf()) { it.id }
+    val liveCandidates =
+      RcPlayerBackend.UNIVERSE.filter { backend ->
+        !backend.clientSide &&
+          backend.rcCompareLane != null &&
+          backend.rcCompareLane !in publishedLaneIds
+      }
+    // Availability is per preview — a host can carry the document for one and not another — so a
+    // column appears when ANY row can draw it, and the rows that cannot say so in their own cell.
+    val liveFor: Map<String, Set<String>> =
+      if (liveCandidates.isEmpty()) emptyMap()
+      else
+        manifest.rows.associate { row ->
+          val wires = liveRcPlayersFor(row.previewId).mapTo(mutableSetOf()) { it.wire }
+          row.previewId to
+            liveCandidates.filter { it.wire in wires }.mapTo(mutableSetOf()) { it.wire }
+        }
+    val liveBackends = liveCandidates.filter { backend ->
+      liveFor.values.any { backend.wire in it }
+    }
+    val liveLaneIds = liveBackends.mapTo(mutableSetOf()) { it.rcCompareLane!! }
+    val liveWireByLane = liveBackends.associate { it.rcCompareLane!! to it.wire }
+    // The live render endpoint, per preview and player. `?rcPlayer=` is answered from published
+    // bytes where the run drew them and from the renderer otherwise, so this one URL is right
+    // whether or not the lane was ever staged.
+    val liveQuery = linkQuery(token, linkSessionId, basePath, isPublic)
+    fun liveRenderUrl(previewId: String, wire: String): String =
+      "$basePath/render/${WebEscaping.urlEncodeSegment(previewId)}.png" +
+        querySuffix(
+          listOf(liveQuery, "rcPlayer=$wire").filter { it.isNotEmpty() }.joinToString("&")
+        )
+
+    // One cell, built once: the table below and the client model inlined under it must agree about
+    // what a lane holds, and they read this rather than each deciding.
+    fun liveCell(previewId: String, laneId: String): RcCompareCell? {
+      val wire = liveWireByLane[laneId] ?: return null
+      return if (wire in liveFor[previewId].orEmpty())
+        RcCompareCell(rendered = true, render = liveRenderUrl(previewId, wire))
+      else RcCompareCell(note = "this host cannot draw this player for this preview")
+    }
+
+    // One vocabulary: a live column borrows the label the offline pipeline gives the same player,
+    // so a wall mixing the two does not name one player two ways.
+    val lanes =
+      (manifest.lanes +
+          ServeRcCompare.LANES.filter { it.id in liveLaneIds }
+            .map { RcCompareLane(it.id, it.label, it.short) })
+        .sortedBy { lane -> ServeRcCompare.LANES.indexOfFirst { it.id == lane.id } }
 
     // Worst-match first on the worst-scoring player, so a preview only one player gets wrong still
     // sorts to the top; rows nothing scored sink, then alphabetical. Mirrors the published page.
@@ -10111,7 +10193,7 @@ ${captureControlsHtml().prependIndent("          ")}
 
     val head =
       "<tr><th>Preview</th>" +
-        manifest.lanes.joinToString("") { "<th>${WebEscaping.htmlEscape(it.label)}</th>" } +
+        lanes.joinToString("") { "<th>${WebEscaping.htmlEscape(it.label)}</th>" } +
         "</tr>"
 
     val rows =
@@ -10127,8 +10209,12 @@ ${captureControlsHtml().prependIndent("          ")}
         val viewer = "$basePath/p/${WebEscaping.urlEncodeSegment(row.previewId)}$q"
         val dims = if (row.width > 0 && row.height > 0) "${row.width}×${row.height}" else ""
         val cells =
-          manifest.lanes.joinToString("") { lane ->
-            val cell = row.lanes[lane.id] ?: RcCompareCell()
+          lanes.joinToString("") { lane ->
+            // Rendered on demand where this is a live column: no build-time diff and no
+            // build-time score, so the client measures it against whatever column the reader
+            // picks, exactly as it already does for any player pair the offline run never compared.
+            val cell = liveCell(row.previewId, lane.id) ?: row.lanes[lane.id] ?: RcCompareCell()
+            val live = cell.rendered && lane.id in liveLaneIds
             val body =
               if (cell.render.isNotEmpty())
                 "<img loading=\"lazy\" src=\"${WebEscaping.htmlEscape(asset(cell.render))}\" " +
@@ -10136,8 +10222,12 @@ ${captureControlsHtml().prependIndent("          ")}
               else
                 "<div class=\"cp-rc-missing\">${WebEscaping.htmlEscape(cell.note.ifBlank { "—" })}</div>"
             """
-            <td><figure class="cp-rc-cell" data-lane="${WebEscaping.htmlEscape(lane.id)}">
-              <figcaption>${WebEscaping.htmlEscape(lane.label)}<span class="cp-rc-refbadge">reference</span></figcaption>
+            <td><figure class="cp-rc-cell" data-lane="${WebEscaping.htmlEscape(lane.id)}"${if (live) " data-live=\"1\"" else ""}>
+              <figcaption>${WebEscaping.htmlEscape(lane.label)}${
+              if (live)
+                "<span class=\"cp-rc-livebadge\" title=\"rendered by this server on request from the catalog's ir/*.rc document, not replayed from the parity run\">live</span>"
+              else ""
+            }<span class="cp-rc-refbadge">reference</span></figcaption>
               $body
               <div class="cp-rc-diffslot" hidden></div>
             </figure></td>
@@ -10166,22 +10256,25 @@ ${captureControlsHtml().prependIndent("          ")}
     //
     // [ServeRcCompare.LANES] is the vocabulary, and it is the same list [ServeRcCompare.plan]
     // filters down to build `manifest.lanes`, so the two can't drift apart.
-    val published = manifest.lanes.mapTo(mutableSetOf()) { it.id }
-    val absent = ServeRcCompare.LANES.filterNot { it.id in published }
+    //
+    // Measured against the columns actually on the wall, not against what the run published: a
+    // player this host draws on demand is present, and reporting it missing because some offline
+    // job skipped it would be exactly the false claim the note exists to prevent.
+    val shown = lanes.mapTo(mutableSetOf()) { it.id }
+    val absent = ServeRcCompare.LANES.filterNot { it.id in shown }
     val absentNote =
       if (absent.isEmpty()) ""
       else
-        "\n        <p class=\"cp-rc-absent\">Not in this catalog's parity run: " +
+        "\n        <p class=\"cp-rc-absent\">No column for: " +
           absent.joinToString(", ") {
             "<span class=\"cp-rc-absent-lane\">${WebEscaping.htmlEscape(it.label)}</span>"
           } +
-          ". A player earns a column here only when the published run recorded a verdict for it, " +
-          "so these are absent rather than empty — the catalog's publishing workflow opts each " +
-          "lane in.</p>"
+          ". A player is here when the catalog's parity run published it or this server can draw " +
+          "it on request; neither is true of these, so they are absent rather than empty.</p>"
 
     val picker =
       "<button type=\"button\" class=\"cp-theme-btn\" data-rc-ref=\"none\" aria-pressed=\"true\">nothing</button>" +
-        manifest.lanes.joinToString("") { lane ->
+        lanes.joinToString("") { lane ->
           "<button type=\"button\" class=\"cp-theme-btn\" data-rc-ref=\"${WebEscaping.htmlEscape(lane.id)}\" " +
             "aria-pressed=\"false\">${WebEscaping.htmlEscape(lane.short)}</button>"
         }
@@ -10198,7 +10291,7 @@ ${captureControlsHtml().prependIndent("          ")}
               lanes =
                 row.lanes.mapValues { (_, cell) ->
                   cell.copy(render = asset(cell.render), diff = asset(cell.diff))
-                },
+                } + liveLaneIds.mapNotNull { id -> liveCell(row.previewId, id)?.let { id to it } },
             )
           },
       )

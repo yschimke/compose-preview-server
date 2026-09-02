@@ -1772,6 +1772,27 @@ class ServeWebFixtureTest {
         isPublic = true,
         rcCompare = rcCompareFixture(themedPreviews, lanes = setOf("baked", "js", "cmp-wasm")),
       )
+
+    // The same partial run, served by a host that can draw the two server-side players itself —
+    // which is what a live daemon carrying the catalog's ir/*.rc actually is. The wall fills the
+    // columns that run never published rather than reporting them absent (#4998): the reader gets
+    // five players, two of them rendered on request and badged as such.
+    val rcLanesLiveComparison =
+      ServeWeb.comparisonPage(
+        "remote-m3",
+        themedPreviews,
+        token,
+        sessionId = "remote-m3",
+        trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
+        isPublic = true,
+        rcCompare = rcCompareFixture(themedPreviews, lanes = setOf("baked", "js", "cmp-wasm")),
+        // `badge` stands in for a preview the host carries no document for, so the wall has to
+        // show a column its rows do not all fill.
+        liveRcPlayersFor = { previewId ->
+          if (previewId.startsWith("badge")) emptyList()
+          else listOf(RcPlayerBackend.CMP_ANDROID, RcPlayerBackend.CMP_JVM)
+        },
+      )
     val comparisonReferences =
       listOf(
         DesignReference(
@@ -3953,6 +3974,7 @@ class ServeWebFixtureTest {
         "serve-format-compare.html" to formatComparison,
         "serve-rc-lanes.html" to rcLanesComparison,
         "serve-rc-lanes-partial.html" to rcLanesPartialComparison,
+        "serve-rc-lanes-live.html" to rcLanesLiveComparison,
         "serve-reference-compare.html" to referenceComparison,
         "serve-reference-compare-pinned.html" to referenceComparisonPinned,
         "serve-reference-compare-dark-first.html" to referenceComparisonDarkFirst,
@@ -4317,7 +4339,7 @@ class ServeWebFixtureTest {
         .findAll(rcLanesPartialComparison)
         .map { it.groupValues[1] }
         .toList(),
-      "a partial run names every player it did not publish, in the vocabulary's own order",
+      "a wall with no live players names every one the run did not publish",
     )
     assertEquals(
       listOf("AndroidX Embedded · baked", "RC · JS player", "RC · cmp-wasm player"),
@@ -4327,6 +4349,68 @@ class ServeWebFixtureTest {
         .toList()
         .drop(1),
       "a partial run still gets a column per player it did publish, and no empty ones",
+    )
+    // The live wall: the two server-side players fill in, in the vocabulary's order, and only the
+    // player nothing can draw on demand is still reported absent.
+    assertEquals(
+      listOf(
+        "AndroidX Embedded · baked",
+        "RC · JS player",
+        "AndroidX Embedded · vendored Android",
+        "RC · cmp-jvm player",
+        "RC · cmp-wasm player",
+      ),
+      Regex("<th>([^<]+)</th>")
+        .findAll(rcLanesLiveComparison.substringAfter("cp-rc-table").substringBefore("</thead>"))
+        .map { it.groupValues[1] }
+        .toList()
+        .drop(1),
+      "a host that can draw a player gets its column, ordered with the published ones",
+    )
+    assertEquals(
+      listOf("AndroidX Embedded · androidx.dev"),
+      Regex("<span class=\"cp-rc-absent-lane\">([^<]+)</span>")
+        .findAll(rcLanesLiveComparison)
+        .map { it.groupValues[1] }
+        .toList(),
+      "only a player neither published nor drawable on demand is still reported absent",
+    )
+    assertEquals(
+      listOf("none", "baked", "js", "embedded", "cmp-jvm", "cmp-wasm"),
+      Regex("data-rc-ref=\"([^\"]+)\"")
+        .findAll(rcLanesLiveComparison)
+        .map { it.groupValues[1] }
+        .toList(),
+      "a live column can be picked as the diff reference like any other",
+    )
+    // The point of the lane: the cell asks the server for that player's raster of THIS preview.
+    // `?rcPlayer=` is answered from published bytes where the run drew them, so the URL is right
+    // whether or not the lane was ever staged.
+    assertTrue(
+      rcLanesLiveComparison.contains(
+        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=cmp-android"
+      ) &&
+        rcLanesLiveComparison.contains(
+          "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=cmp-jvm"
+        ),
+      "a live cell points at this host's render endpoint for that player and preview",
+    )
+    assertEquals(
+      8,
+      Regex("data-live=\"1\"").findAll(rcLanesLiveComparison).count(),
+      "every live cell is marked as drawn on request — two players over the four rows that carry a document",
+    )
+    assertTrue(
+      rcLanesLiveComparison.contains(
+        "cp-rc-missing\">this host cannot draw this player for this preview"
+      ),
+      "a row the host has no document for says so rather than showing an empty frame",
+    )
+    // A staged column is untouched by any of this: same published raster, same build-time score.
+    assertTrue(
+      rcLanesLiveComparison.contains("/rc-compare/js/0.png?session=remote-m3") &&
+        !rcLanesPartialComparison.contains("data-live"),
+      "a published column still replays its staged raster, and a host with no live players changes nothing",
     )
     val escapedComparison =
       ServeWeb.comparisonPage(

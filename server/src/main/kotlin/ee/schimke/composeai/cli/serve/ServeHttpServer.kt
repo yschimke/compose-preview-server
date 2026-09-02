@@ -3419,6 +3419,8 @@ class ServeHttpServer(
           hasSvgFor = renderHost::hasSvgExportFor,
           hasRemoteComposeFor = renderHost::hasRemoteComposeDoc,
           rcCompare = rcCompare,
+          // …and the players this host can draw itself, for the columns that run did not publish.
+          liveRcPlayersFor = renderHost::enabledRcPlayersFor,
           referencesFor = renderHost::designReferencesFor,
           pairedDesignSourceFor = { pairedDesignSources[it] },
           parallelSourceFor = { parallelSources[it] },

@@ -2826,6 +2826,14 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
 .cp-rc-cell img { display: block; width: auto; height: auto; max-width: 100%; max-height: 220px;
   object-fit: contain; border: 1px solid var(--cp-border); border-radius: 8px;
   background: repeating-conic-gradient(var(--cp-surface-2) 0% 25%, var(--cp-surface) 0% 50%) 50% / 14px 14px; }
+/* A column this server drew on request rather than replaying from the parity run. Always visible,
+   unlike the reference badge: which pixels came from where is the reader's first question about a
+   mixed wall, and the scores differ in kind — a staged column carries the run's own number, a live
+   one is only ever measured in the browser. */
+.cp-rc-livebadge { margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.04em;
+  background: var(--md-sys-color-secondary-container, #e6e0ec);
+  color: var(--md-sys-color-on-secondary-container, #1d192b); }
 .cp-rc-refbadge { display: none; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
   background: var(--cp-accent, #0969da); color: #fff; font-size: 0.62rem; text-transform: uppercase; }
 .cp-rc-cell.is-reference .cp-rc-refbadge { display: inline-block; }
