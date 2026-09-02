@@ -8360,10 +8360,18 @@ class ServeHttpServer(
       // is concrete on this page — which preview, which component, which variant, the overrides in
       // force, the catalog build it came from, and the PNG at those exact settings — and the viewer
       // is where someone actually notices a button rendering wrongly. Only the two reference-scoped
-      // facts are unavailable, and both are optional by construction: with `referenceId` left null
-      // the body drops its "Raw comparison" row and [ServeIssueReport.locator] returns null, so no
-      // parity-locator fence is emitted. Those stay exclusive to the comparison, which is the only
-      // page that can honestly name a design reference or a parity score.
+      // facts are unavailable, and both stay off this page: `referenceId` is left null, so the body
+      // drops its "Raw comparison" row and the locator omits its `reference:` line. Naming a
+      // reference remains exclusive to the comparison, which is the page that has one on screen.
+      //
+      // What no longer follows is dropping the locator with it. `referenceId` used to gate the
+      // whole fence, so a report filed from here carried the prose table and nothing the index
+      // could read — it looked complete and never appeared in `parity/issues.json`, which is what
+      // the classification control on this very form promises it will feed
+      // (yschimke/compose-ai-tools#5000). The four facts a row is keyed on — repository, system,
+      // component, preview — are all known here, so the block is written and the reference line is
+      // simply absent. That also covers a preview the catalog publishes with no kit node at all,
+      // which the comparison cannot report either.
       val reportContext =
         ServeIssueReport.Context(
           repo = ServeIssueReport.repoFor(bundleHost?.catalogSource, bundleHost?.provenance),
@@ -8390,6 +8398,10 @@ class ServeHttpServer(
           bodyTemplate = ServeIssueReport.body(reportContext, renderPlaceholder = true),
           repo = reportContext.repo,
           login = githubAuth?.currentLogin(call),
+          // The frame the locator's `overrides:` line describes. The knobs move without a reload
+          // and only the render URL is re-substituted, so the script needs this to tell a report
+          // filed at the served frame from one filed after the controls moved on.
+          servedRender = reportContext.renderUrl,
         )
       val liveAuthPrompt =
         githubAuth

@@ -208,7 +208,18 @@ internal object ServeIssueReport {
     val system: String,
     val componentId: String,
     val previewId: String,
-    val referenceId: String,
+    /**
+     * The design reference this preview is compared against, when there is one on screen to name.
+     *
+     * Null on the viewer, and null for a preview the catalog publishes with no kit node of its own
+     * — an `@OverrideVariant` cell, say, which `designReferencesFor` answers for with an empty
+     * list. Requiring it made those two cases unreportable *into the index*: `locator` returned
+     * null, no fence was written, and an issue filed from the viewer looked complete while being
+     * invisible to `parity/issues.json` (yschimke/compose-ai-tools#5000). The index has always
+     * carried `referenceIds` as a list that may be empty and matches rows by component and preview
+     * id as well, so a locator without one still reaches the component it names.
+     */
+    val referenceId: String? = null,
     val variant: String,
     val overrides: Map<String, String>,
     /**
@@ -435,7 +446,9 @@ internal object ServeIssueReport {
     val preview = ctx.previewId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val system = ctx.system?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val component = ctx.componentId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    val reference = ctx.referenceId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    // Optional, unlike the four above: a page that names no design reference still names a
+    // preview, and that is enough to index. See [Locator.referenceId].
+    val reference = ctx.referenceId?.trim()?.takeIf { it.isNotEmpty() }
     return Locator(
       repository = ctx.repo,
       system = system,
@@ -484,7 +497,11 @@ internal object ServeIssueReport {
     append("system: ${locator.system}\n")
     append("component: ${locator.componentId}\n")
     append("preview: ${locator.previewId}\n")
-    append("reference: ${locator.referenceId}\n")
+    // `isNotBlank`, not just non-null: a writer must never emit a line its own producer refuses,
+    // which is the argument [Bounds] makes at the point a rectangle is constructed. A hand-built
+    // Locator is the only way to get here with a blank, and it would take the whole issue out of
+    // the index with no symptom until someone wondered why the report never appeared.
+    locator.referenceId?.takeIf { it.isNotBlank() }?.let { append("reference: $it\n") }
     append("variant: ${locator.variant}\n")
     append("overrides: ${canonicalOverrides(locator.overrides)}\n")
     if (selectionPlaceholder) append("$SELECTION_PLACEHOLDER\n")
@@ -539,7 +556,12 @@ internal object ServeIssueReport {
       system = fields["system"]?.takeIf { it.isNotBlank() } ?: return null,
       componentId = fields["component"]?.takeIf { it.isNotBlank() } ?: return null,
       previewId = fields["preview"]?.takeIf { it.isNotBlank() } ?: return null,
-      referenceId = fields["reference"]?.takeIf { it.isNotBlank() } ?: return null,
+      // Absent is legal; present-and-blank is not. `takeIf` alone would collapse the two, which
+      // would read a mangled body as a reference-less one here while the producer refuses it —
+      // the cross-engine disagreement the shared fixture exists to catch.
+      referenceId =
+        if (fields.containsKey("reference"))
+          fields["reference"]?.takeIf { it.isNotBlank() } ?: return null else null,
       variant = fields["variant"] ?: return null,
       overrides = overrides,
       element =

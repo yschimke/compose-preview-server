@@ -235,15 +235,53 @@ class ServeViewerIssueReportRouteTest {
 
   @Test
   fun `reference-scoped facts stay on the comparison, which is the page that can name them`() {
-    // A viewer names no design reference and has run no parity scorer, so the locator fence and
+    // A viewer names no design reference and has run no parity scorer, so the `reference:` line and
     // the raw-comparison row must be absent rather than emitted empty or with a placeholder the
     // viewer's own script never fills.
     server = newServer()
-    val (_, body) = get("/compose-m3/p/button-filled")
-    assertTrue(body.contains("cp-report-body"), body)
-    assertFalse(body.contains(ServeIssueReport.LOCATOR_FENCE), body)
-    assertFalse(body.contains(ServeIssueReport.RAW_SCORES_PLACEHOLDER), body)
+    val (_, page) = get("/compose-m3/p/button-filled")
+    assertTrue(page.contains("cp-report-body"), page)
+    // Scoped to the report body: the surrounding page mentions design references in its own
+    // chrome, and asserting over the whole HTML would pass or fail on that instead.
+    val body = reportBody(page)
+    assertFalse(body.contains("reference:"), body)
+    assertFalse(page.contains(ServeIssueReport.RAW_SCORES_PLACEHOLDER), page)
     assertFalse(body.contains("Raw comparison"), body)
+  }
+
+  @Test
+  fun `the viewer's report carries a locator, so a report filed from it can be indexed`() {
+    // The four facts a `parity/issues.json` row is keyed on — repository, system, component,
+    // preview — are all concrete on this page, and the reference is not one of them. The fence
+    // used to be gated on the reference, so every report filed from the viewer carried the prose
+    // table and nothing the index could read: it looked complete and never appeared, while the
+    // form's own classification control promised the reporter it fed that index
+    // (yschimke/compose-ai-tools#5000).
+    server = newServer()
+    val (_, page) = get("/compose-m3/p/button-filled")
+    val body = reportBody(page)
+    assertTrue(body.contains("```${ServeIssueReport.LOCATOR_FENCE}"), body)
+    assertTrue(body.contains("component: Button/Filled"), body)
+    assertTrue(body.contains("preview: button-filled"), body)
+    // Absent, not empty: a blank identity field is what the producer refuses outright.
+    assertFalse(body.contains("reference:"), body)
+  }
+
+  @Test
+  fun `the viewer tells its script which frame the locator describes`() {
+    // The knobs move without a reload and `refreshReportLink` only re-substitutes the render URL,
+    // so the locator's `overrides:` line goes on naming the frame the page was SERVED at. The
+    // script drops the block once the two have parted, and this attribute is how it can tell.
+    server = newServer()
+    val (_, page) = get("/compose-m3/p/button-filled")
+    val served =
+      page
+        .substringAfter("id=\"cp-report-body\"")
+        .substringAfter("data-served-render=\"")
+        .substringBefore("\"")
+        .replace("&amp;", "&")
+    assertTrue(served.contains("/compose-m3/render/button-filled.png"), page)
+    assertFalse(served.contains("token="), "the capability never reaches an issue body")
   }
 
   @Test

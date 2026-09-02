@@ -391,7 +391,7 @@ class ServeIssueReportTest {
     val written =
       fixture["cases"]!!.jsonArray.map { it.jsonObject }.filter { it.containsKey("writer") }
     // A fixture that silently stopped carrying writer cases would pass every assertion below.
-    assertEquals(7, written.size, "the fixture must keep exercising the writer")
+    assertEquals(8, written.size, "the fixture must keep exercising the writer")
     for (case in written) {
       val name = case["name"]!!.jsonPrimitive.content
       val writer = case["writer"]!!.jsonObject
@@ -401,7 +401,7 @@ class ServeIssueReportTest {
           system = writer["system"]!!.jsonPrimitive.content,
           componentId = writer["componentId"]!!.jsonPrimitive.content,
           previewId = writer["previewId"]!!.jsonPrimitive.content,
-          referenceId = writer["referenceId"]!!.jsonPrimitive.content,
+          referenceId = writer["referenceId"]?.jsonPrimitive?.contentOrNull,
           variant = writer["variant"]!!.jsonPrimitive.content,
           overrides =
             writer["overrides"]!!.jsonObject.entries.associate {
@@ -418,6 +418,31 @@ class ServeIssueReportTest {
   }
 
   @Test
+  fun `an omitted reference reads back as absent, and a blank one is refused`() {
+    // Optional means the writer leaves the line out — the viewer names no design reference, and a
+    // preview with no kit node of its own has none to name anywhere. It does NOT mean the line may
+    // be present and empty: a blank identity field is a mangled body, and reading it as "no
+    // reference" here while `parity-issues.mjs` refuses it is exactly the cross-engine
+    // disagreement the shared fixture exists to catch.
+    val fixture =
+      Json.parseToJsonElement(
+          File(repoRoot(), "scripts/design-artifacts/fixtures/parity-locators.json").readText()
+        )
+        .jsonObject["cases"]!!
+        .jsonArray
+        .single { it.jsonObject["name"]!!.jsonPrimitive.content == "no-reference" }
+    val block = fixture.jsonObject["block"]!!.jsonPrimitive.content
+    assertFalse(block.contains("reference:"), "the line is omitted, not emitted empty")
+    assertNull(ServeIssueReport.locatorFromBody(block)?.referenceId)
+    assertNull(
+      ServeIssueReport.locatorFromBody(
+        block.replace("preview: ", "reference:\npreview: ")
+      ),
+      "a blank reference is a mangled body, not a reference-less one",
+    )
+  }
+
+  @Test
   fun `the writer emits one block per component of an umbrella report`() {
     // The other half of the multi-component contract: `parity-issues.test.mjs` asserts the producer
     // reads these bodies back as one row per block. An issue like m3-catalog#42 names three
@@ -429,7 +454,7 @@ class ServeIssueReportTest {
         .jsonObject
     val bodies =
       fixture["bodies"]!!.jsonArray.map { it.jsonObject }.filter { it.containsKey("writers") }
-    assertEquals(1, bodies.size, "the fixture must keep exercising the writer")
+    assertEquals(2, bodies.size, "the fixture must keep exercising the writer")
     for (case in bodies) {
       val name = case["name"]!!.jsonPrimitive.content
       val locators =
@@ -442,7 +467,7 @@ class ServeIssueReportTest {
               system = writer["system"]!!.jsonPrimitive.content,
               componentId = writer["componentId"]!!.jsonPrimitive.content,
               previewId = writer["previewId"]!!.jsonPrimitive.content,
-              referenceId = writer["referenceId"]!!.jsonPrimitive.content,
+              referenceId = writer["referenceId"]?.jsonPrimitive?.contentOrNull,
               variant = writer["variant"]!!.jsonPrimitive.content,
               overrides =
                 writer["overrides"]!!.jsonObject.entries.associate {

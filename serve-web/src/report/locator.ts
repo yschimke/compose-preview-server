@@ -143,7 +143,15 @@ export interface Locator {
     system: string;
     componentId: string;
     previewId: string;
-    referenceId: string;
+    /**
+     * The design reference on screen beside the render, when the page has one.
+     *
+     * Optional: the viewer names no reference, and a preview the catalog publishes with no kit
+     * node of its own has none to name anywhere. The line is omitted rather than written empty,
+     * and the row is still keyed by repository, system, component and preview
+     * (yschimke/compose-ai-tools#5000).
+     */
+    referenceId?: string | null;
     variant: string;
     overrides?: Record<string, string>;
     revision?: string | null;
@@ -198,7 +206,7 @@ export function locatorBlock(locator: Locator): string {
     out += `system: ${locator.system}\n`;
     out += `component: ${locator.componentId}\n`;
     out += `preview: ${locator.previewId}\n`;
-    out += `reference: ${locator.referenceId}\n`;
+    if (locator.referenceId) out += `reference: ${locator.referenceId}\n`;
     out += `variant: ${locator.variant}\n`;
     out += `overrides: ${canonicalOverrides(locator.overrides)}\n`;
     out += selectionLines({
@@ -246,4 +254,43 @@ export function fillLocators(template: string, blocks: string[]): string {
     const filled = blocks.length ? "\n" + blocks.join("") : "";
     lines.splice(at, 1, ...(filled ? filled.split("\n").slice(0, -1) : []));
     return lines.join("\n");
+}
+
+/**
+ * The body with every `compose-parity-locator/v1` block removed.
+ *
+ * For the one case where a locator the SERVER wrote has stopped describing what is on screen: the
+ * viewer's knobs move without a reload, and only the render URL is re-substituted into the body, so
+ * once a control has moved the embedded screenshot is one frame and the locator's `overrides:` line
+ * is another. Indexing that would key the issue to a frame nobody reported — the identity-vs-pixels
+ * mismatch batch 01 exists to prevent — so the block comes out and the report goes on carrying its
+ * prose table and its screenshot, exactly as it did before it carried a locator at all.
+ *
+ * Deliberately the crude half of the batch's own choice ("disable the affordance rather than get it
+ * subtly wrong"): rewriting the `overrides:` line from live control state instead would mean a
+ * second implementation of the server's normalisation, and the two disagreeing is the failure this
+ * is avoiding, arriving by another route.
+ */
+export function withoutLocatorBlocks(body: string): string {
+    const open = "```" + LOCATOR_FENCE + "\n";
+    let out = body;
+    for (;;) {
+        const at = out.indexOf(open);
+        if (at < 0) return out;
+        const close = out.indexOf("\n```\n", at + open.length);
+        // An unterminated fence is a body this function did not write and must not half-eat: the
+        // producer already tells a broken block apart from an absent one, and truncating here
+        // would turn the first into the second.
+        if (close < 0) return out;
+        const end = close + "\n```\n".length;
+        // Take the BLANK line the server writes before the fence with it, so removing the only
+        // block does not leave a trailing gap the body did not have before. Two newlines, not one:
+        // a single one is the previous line's own terminator, and eating that would join the
+        // prose above onto whatever follows.
+        const from =
+            at >= 2 && out[at - 1] === "\n" && out[at - 2] === "\n"
+                ? at - 1
+                : at;
+        out = out.slice(0, from) + out.slice(end);
+    }
 }

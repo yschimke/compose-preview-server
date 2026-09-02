@@ -1107,6 +1107,21 @@ ${captureControlsHtml().prependIndent("          ")}
     val locatorSystem: String? = null,
     /** Delivery provenance as `owner/repo@branch`, the locator's `revision:` line. */
     val locatorRevision: String? = null,
+    /**
+     * The token-stripped `/render/<id>.png` URL for the frame this page was **served** at, when
+     * the body carries a locator whose `overrides:` line describes that same frame.
+     *
+     * The viewer's controls move without a reload, and `refreshReportLink` only ever swaps the
+     * render URL — so after a knob moves, the embedded screenshot is the new frame while the
+     * locator still names the served one. That is the identity-vs-pixels mismatch batch 01 spent
+     * its D2/D4 constraints on, and it would silently key a filed issue to a frame nobody
+     * reported. With this the script can see the two have parted and drop the locator, which is
+     * the crude half of the batch's own choice — "disable the affordance rather than get it
+     * subtly wrong" — and leaves the report exactly as good as it was before it carried one.
+     *
+     * Null on a page whose body has no server-written locator, or whose frame cannot move.
+     */
+    val servedRender: String? = null,
   )
 
   /**
@@ -1298,6 +1313,7 @@ ${captureControlsHtml().prependIndent("          ")}
       reportClassificationHtml() +
       "<input type=\"hidden\" name=\"body\" id=\"cp-report-body\"" +
       " value=\"${WebEscaping.htmlEscape(r.body)}\"" +
+      (r.servedRender?.let { " data-served-render=\"${WebEscaping.htmlEscape(it)}\"" } ?: "") +
       " data-report-template=\"${WebEscaping.htmlEscape(r.bodyTemplate)}\">" +
       "<button type=\"submit\" class=\"cp-report-submit\">" +
       "$GITHUB_ICON Open a prefilled issue</button>" +

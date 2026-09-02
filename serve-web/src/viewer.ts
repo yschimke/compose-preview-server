@@ -21,6 +21,7 @@ import {
     type ServeFrame,
 } from "./live/framePainter.js";
 import { visibilityMessage } from "./live/session.js";
+import { withoutLocatorBlocks } from "./report/locator.js";
 import * as rules from "./viewer/rules.js";
 import { viewParam } from "./spec/views.js";
 import {
@@ -1031,7 +1032,17 @@ function refreshReportLink() {
     var tpl = body.getAttribute("data-report-template");
     var field = may<HTMLInputElement>("cp-url-png");
     if (!tpl || !field || !field.value) return;
-    body.value = tpl.replace("{{render}}", stripToken(field.value));
+    var live = stripToken(field.value);
+    var filled = tpl.replace("{{render}}", live);
+    // The locator the server wrote describes the frame the page was SERVED at — its `overrides:`
+    // line is that frame's, and nothing here rewrites it. Once a control has moved, `live` is a
+    // different frame, so the block would name one frame beside a screenshot of another and the
+    // index would key the issue to the one nobody reported. Drop it rather than guess: the report
+    // keeps its table and its picture, which is exactly what it carried before locators reached
+    // this page.
+    var served = body.getAttribute("data-served-render");
+    if (served && served !== live) filled = withoutLocatorBlocks(filled);
+    body.value = filled;
 }
 function stripToken(url: string) {
     var cut = url.indexOf("?");

@@ -7717,8 +7717,14 @@ class ServeWebFixtureTest {
       viewerSource()
         .substringAfter("function refreshReportLink()")
         .substringBefore("function stripToken(")
+    // Two `contains` rather than one `body.value = tpl.replace(`: the substitution is no longer a
+    // single expression, because a locator the server wrote has to be dropped from the body first
+    // when the on-screen frame has moved off the served one. Both halves of the invariant are
+    // still pinned — the substituted template reaches an input's `value`, and nothing in this
+    // function assigns an href.
     assertTrue(
-      refreshReportLinkSource.contains("body.value = tpl.replace(") &&
+      refreshReportLinkSource.contains("tpl.replace(") &&
+        refreshReportLinkSource.contains("body.value = ") &&
         !refreshReportLinkSource.contains(".href = "),
       "the report prefill goes into a form input, not a navigation sink",
     )

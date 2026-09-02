@@ -21,6 +21,8 @@ import {
     selectionLines,
     usableBounds,
     variantOf,
+    withoutLocatorBlocks,
+    LOCATOR_FENCE,
     LOCATORS_PLACEHOLDER,
     type Bounds,
 } from "../src/report/locator.js";
@@ -33,7 +35,7 @@ interface FixtureCase {
               system: string;
               componentId: string;
               previewId: string;
-              referenceId: string;
+              referenceId: string | null;
               variant: string;
               overrides?: Record<string, string>;
               revision?: string;
@@ -350,5 +352,49 @@ describe("filling a pickable report's locators", () => {
             fillLocators("### Which page\n", ["x"]),
             "### Which page\n",
         );
+    });
+});
+
+// The viewer's knobs move without a reload and only the render URL is re-substituted, so a
+// server-written locator stops describing what is on screen the moment a control moves. The block
+// comes out rather than being rewritten from live state — a second implementation of the server's
+// override normalisation is the failure this avoids, arriving by another route.
+describe("withoutLocatorBlocks", () => {
+    const block = locatorBlock({
+        repository: "yschimke/m3-catalog",
+        system: "m3-catalog",
+        componentId: "DatePicker/Modal",
+        previewId: "datepicker-modal__ideal__input__compact",
+        variant: "ideal/input/compact",
+        overrides: {},
+    });
+
+    it("leaves a body that carries none untouched", () => {
+        const prose = "### What's wrong\n\nA table and a screenshot.\n";
+        assert.equal(withoutLocatorBlocks(prose), prose);
+    });
+
+    it("removes the block and the blank line the server writes before it", () => {
+        const prose = "### What's wrong\n\nA table and a screenshot.\n";
+        assert.equal(withoutLocatorBlocks(prose + "\n" + block), prose);
+    });
+
+    it("removes every block, not just the first", () => {
+        const prose = "Two components.\n";
+        assert.equal(
+            withoutLocatorBlocks(prose + "\n" + block + "\n" + block),
+            prose,
+        );
+    });
+
+    it("leaves an unterminated fence alone rather than eating the rest of the body", () => {
+        // The producer tells a block that fails to close apart from one that was never there, and
+        // truncating here would turn the first into the second — a damaged report going down the
+        // silent-skip path instead of being reported.
+        const broken =
+            "Prose.\n\n```" +
+            LOCATOR_FENCE +
+            "\nrepository: yschimke/m3-catalog\n";
+        assert.equal(withoutLocatorBlocks(broken), broken);
     });
 });

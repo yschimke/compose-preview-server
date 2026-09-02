@@ -80,15 +80,20 @@ export function locatorBlocks(locators: Array<Locator | null>): string[] {
     const blocks: string[] = [];
     for (const locator of locators) {
         if (!locator) continue;
+        // The reference is only a duplicate key when the block names one. A wall row always does,
+        // but the type does not promise it (the viewer's locator has none), and an absent value is
+        // not a repeated one — treating two reference-less blocks as duplicates would silently
+        // drop the second component from the body. Mirrors the producer's own check.
+        const reference = locator.referenceId ?? null;
         if (
             components.has(locator.componentId) ||
             previews.has(locator.previewId) ||
-            references.has(locator.referenceId)
+            (reference !== null && references.has(reference))
         )
             continue;
         components.add(locator.componentId);
         previews.add(locator.previewId);
-        references.add(locator.referenceId);
+        if (reference !== null) references.add(reference);
         blocks.push(locatorBlock(locator));
     }
     return blocks;
