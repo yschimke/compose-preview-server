@@ -3,44 +3,15 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.io.SystemFileSystem
 import java.io.File
 import java.time.Instant
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 import okio.Path.Companion.toPath
 
-/** A catalog-published snapshot of the GitHub issues joined to its previews. */
-@Serializable
-data class ParityIssues(
-  val schema: String = SCHEMA,
-  val generatedAt: String? = null,
-  val issues: List<ParityIssue> = emptyList(),
-) {
-  companion object {
-    const val SCHEMA = "compose-preview-issues/v1"
-    const val DIRECTORY = "parity"
-    const val FILE = "issues.json"
-  }
-}
+/** Source-compatible names for the wire types now owned by compose-preview-contracts. */
+typealias ParityIssues = ee.schimke.composeai.parityissues.protocol.ParityIssues
 
-@Serializable
-data class ParityIssue(
-  val repository: String,
-  val number: Int,
-  val title: String,
-  /** Read from the wire only to validate the claimed identity; rebuilt before use. */
-  val url: String,
-  val state: String,
-  val area: String? = null,
-  val parity: String? = null,
-  val system: String? = null,
-  val component: String? = null,
-  /** Component-wide by default for indexes produced before report scope was explicit. */
-  val scope: String = "component",
-  val previewIds: List<String> = emptyList(),
-  val referenceIds: List<String> = emptyList(),
-  val acceptanceId: String? = null,
-)
+typealias ParityIssue = ee.schimke.composeai.parityissues.protocol.ParityIssue
 
 /** Fail-soft trust boundary for `parity/issues.json`. */
 object ServeParityIssuesStore {
