@@ -37,6 +37,7 @@ class ServeCommandOptionsTest {
           "--ui-builder-state-dir",
           "/srv/ui-builder-state",
           "--ui-builder-migrate-state",
+          "--catalog-mcp",
         )
       )
 
@@ -61,6 +62,7 @@ class ServeCommandOptionsTest {
     )
     assertEquals("/srv/ui-builder-state", options.uiBuilderStateDirFlag)
     assertTrue(options.uiBuilderMigrateState)
+    assertTrue(options.catalogMcp)
   }
 
   @Test
@@ -75,6 +77,7 @@ class ServeCommandOptionsTest {
     assertEquals(ServeCatalogStore.DEFAULT_MAX_IMAGES, options.catalogMaxImages)
     assertNull(options.uiBuilderStateDirFlag)
     assertFalse(options.uiBuilderMigrateState)
+    assertFalse(options.catalogMcp)
     assertEquals(setOf("m3-catalog"), options.uiBuilderCatalogs)
     assertEquals(
       "none",

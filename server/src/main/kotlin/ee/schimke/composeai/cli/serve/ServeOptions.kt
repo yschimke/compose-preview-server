@@ -473,6 +473,9 @@ public interface ServeOptions {
    */
   public val agentGrants: Boolean
 
+  /** Expose each served catalog through stateless Streamable HTTP MCP at `/{catalog}/mcp`. */
+  public val catalogMcp: Boolean
+
   /**
    * Raw `--agent-grant-scopes`, unparsed.
    *
