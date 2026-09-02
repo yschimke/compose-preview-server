@@ -24,6 +24,16 @@ export class ReportScopeControl extends ControllerElement {
         if (!select || !field) return false;
         this.select = select;
         this.field = field;
+        // The server keeps the script-dependent choice unavailable. Without this successful
+        // attachment the hidden body cannot be rewritten, so exposing the option would let a
+        // reporter select variant scope while silently submitting component scope.
+        const variant = select.querySelector<HTMLOptionElement>(
+            'option[value="variant"]',
+        );
+        if (variant) {
+            variant.disabled = false;
+            variant.hidden = false;
+        }
         this.listen(select, "change", () => this.apply());
         this.apply();
         return true;

@@ -1361,7 +1361,7 @@ ${captureControlsHtml().prependIndent("          ")}
       "<label class=\"cp-report-class-label\">Show this issue on" +
       "<select class=\"cp-report-class-input\">" +
       "<option value=\"component\" selected>This component</option>" +
-      "<option value=\"variant\">This component + variant</option>" +
+      "<option value=\"variant\" disabled hidden>This component + variant</option>" +
       "</select></label>" +
       "<span class=\"cp-report-class-note\">Component issues appear on every preview variant; " +
       "variant issues appear only on the preview you are reporting.</span>" +

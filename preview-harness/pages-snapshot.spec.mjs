@@ -865,6 +865,9 @@ const FIXTURE_STATES = [
       await expect(page.locator("cp-report-scope select")).toHaveValue(
         "component",
       );
+      await expect(
+        page.locator('cp-report-scope option[value="variant"]'),
+      ).toBeEnabled();
     },
   },
   {

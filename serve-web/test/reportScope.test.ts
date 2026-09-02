@@ -22,7 +22,7 @@ function form(template = locator): HTMLInputElement {
       <form>
         <cp-report-scope><select>
           <option value="component" selected>This component</option>
-          <option value="variant">This component + variant</option>
+          <option value="variant" disabled hidden>This component + variant</option>
         </select></cp-report-scope>
         <input type="hidden" name="body" value="${locator}" data-report-template="${template}">
       </form>`;
@@ -37,6 +37,16 @@ describe("report locator scope", () => {
             withScope(locator, "component"),
             /component: Button\/Filled\nscope: component\npreview:/,
         );
+    });
+
+    it("enables the variant choice only after the body writer attaches", async () => {
+        form();
+        const variant = document.querySelector<HTMLOptionElement>(
+            'option[value="variant"]',
+        )!;
+        await flush();
+        assert.equal(variant.disabled, false);
+        assert.equal(variant.hidden, false);
     });
 
     it("changes the metadata to the exact variant", async () => {

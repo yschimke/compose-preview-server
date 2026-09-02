@@ -1270,7 +1270,10 @@ class ServeWebTest {
       )
     assertTrue(html.contains("<cp-report-scope"), html)
     assertTrue(html.contains("value=\"component\" selected>This component"), html)
-    assertTrue(html.contains("value=\"variant\">This component + variant"), html)
+    assertTrue(
+      html.contains("value=\"variant\" disabled hidden>This component + variant"),
+      "the script-dependent choice stays unavailable until its body writer attaches: $html",
+    )
   }
 
   @Test
