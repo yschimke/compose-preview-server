@@ -10386,7 +10386,11 @@ ${captureControlsHtml().prependIndent("          ")}
     val model =
       ServeRcCompare.ClientModel(
         threshold = manifest.threshold,
-        lanes = manifest.lanes,
+        // The COLUMNS, not the published lanes. `RcLanes` derives its lane ids from this and
+        // validates `?ref=` against it, so a live column missing here is a column the client never
+        // diffs and a `?ref=` nobody can share — the entire point of adding it, silently absent
+        // (#206 review). It was `manifest.lanes` from #199, so cmp-jvm was in that state too.
+        lanes = lanes,
         rows =
           ordered.map { (row, label) ->
             ServeRcCompare.ClientRow(

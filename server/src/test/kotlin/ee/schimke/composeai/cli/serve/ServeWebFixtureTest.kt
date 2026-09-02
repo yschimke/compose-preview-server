@@ -4433,6 +4433,23 @@ class ServeWebFixtureTest {
       ),
       "the wall-named java column renders through this host, not from staged bytes",
     )
+    // The inlined client model must carry the COLUMNS, not the published lanes: `RcLanes` reads its
+    // lane ids from here, so a live column absent from this list is one the client never diffs and
+    // a `?ref=` that cannot be shared. It was `manifest.lanes` from #199, which left cmp-jvm in
+    // exactly that state — a column you could see and not compare.
+    assertEquals(
+      listOf("baked", "js", "cmp-jvm", "cmp-wasm", "java"),
+      Regex("\"id\":\"([^\"]+)\"")
+        .findAll(
+          rcLanesLiveComparison
+            .substringAfter("id=\"cp-rc-model\">")
+            .substringBefore("</script>")
+            .substringBefore("\"rows\"")
+        )
+        .map { it.groupValues[1] }
+        .toList(),
+      "the client model lists every column on the wall, live ones included",
+    )
     // …and it is never reported absent, because no parity run could ever have published it.
     assertFalse(
       rcLanesLiveComparison.contains("cp-rc-absent-lane\">AOSP"),
