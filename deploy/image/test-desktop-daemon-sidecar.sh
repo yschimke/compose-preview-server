@@ -32,9 +32,16 @@ dockerfile="${DOCKERFILE:-${here}/Dockerfile}"
 # daemon links against the Skiko renderer, and either one missing returns null from
 # `desktopBundleDaemonLaunch`.
 sidecars=(
-  "android|lib-daemon-android|composeai.cli.libDaemonAndroidDir"
-  "desktop|lib-daemon-desktop|composeai.cli.libDaemonDesktopDir"
-  "desktop|lib-renderer|composeai.cli.libRendererDir"
+  "android|lib-daemon-android|composeai.cli.libDaemonAndroidDir|its catalogs publish as baked PNGs with livebundle-unavailable"
+  "desktop|lib-daemon-desktop|composeai.cli.libDaemonDesktopDir|its catalogs publish as baked PNGs with livebundle-unavailable"
+  "desktop|lib-renderer|composeai.cli.libRendererDir|its catalogs publish as baked PNGs with livebundle-unavailable"
+  # The cmp-jvm RENDER lane, not a liveBundle daemon, and it failed the same way for the same
+  # reason: `RcJvmServerRenderer` spawns a subprocess whose classpath is `lib-rcjvm/*` +
+  # `lib-daemon-desktop/*`, only the second half was baked, and the miss surfaced as a 503 on
+  # `?rcPlayer=cmp-jvm` rather than as anything a build or a log would show. Same pairing rule —
+  # baked, carried into the runtime stage, named by the sysprop that locates it — different
+  # consequence, which is why the message is per row rather than one line for all four.
+  "cmp-jvm|lib-rcjvm|composeai.cli.libRcjvmDir|?rcPlayer=cmp-jvm answers 503 and the compare wall can never show that player"
 )
 
 # The line that puts the directory into the RUNTIME stage. Anchored to `COPY --from=`, so a stage
@@ -51,10 +58,10 @@ sysprop_points_at() {
 }
 
 for entry in "${sidecars[@]}"; do
-  IFS='|' read -r backend dir sysprop <<<"${entry}"
+  IFS='|' read -r backend dir sysprop consequence <<<"${entry}"
   runtime_copies "${dir}" || {
     echo "FAIL: backend=${backend} needs /opt/${dir} in the runtime stage, but no COPY --from carries it." >&2
-    echo "      Its catalogs will publish as baked PNGs with livebundle-unavailable." >&2
+    echo "      Then ${consequence}." >&2
     exit 1
   }
   sysprop_points_at "${dir}" "${sysprop}" || {

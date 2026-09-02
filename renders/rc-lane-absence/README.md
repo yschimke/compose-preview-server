@@ -19,7 +19,7 @@ the lane vocabulary it subtracts the published lanes from is
 | `rc-lanes-partial.before.light.png` | the three-column wall as it shipped: nothing says the other three players exist |
 | `rc-lanes-partial.after.light.png` | the same wall naming the players the run did not include |
 | `rc-lanes-partial.after.dark.png` | the same page in the dark scheme |
-| `rc-lanes-live.light.png` | the same partial run on a host that can draw a missing player itself: the cmp-jvm column filled live and badged, the two Android lanes still reported absent |
+| `rc-lanes-live.light.png` | the same partial run on a host that draws the missing players itself: the cmp-jvm column filled live and badged, a `java` column the offline pipeline has no lane for at all, and the two Android lanes still reported absent |
 | `rc-lanes-live.dark.png` | the live wall in the dark scheme |
 
 All are headless-Chromium captures of committed harness fixtures —
@@ -35,8 +35,16 @@ fill the column anyway. `ServeWeb.rcLanesSection` adds a column for every backen
 reports that the run has none for, pointing it at `/render/<id>.png?rcPlayer=<wire>`.
 
 Not every drawable player, though, and the capture shows which: `cmp-android` is deliberately left
-absent. It is the same embedded player a catalog's capture bakes through, so an Android daemon
+absent, and `java` is present even though no run ever published it. It is the same embedded player a catalog's capture bakes through, so an Android daemon
 answers `?rcPlayer=cmp-android` with the baked bytes themselves — measured against the deployed
 `remote-m3` host, `appcard__ideal__default__compact` returns md5 `e69d5136…` for both. Filling that
 column would put a pixel-for-pixel copy of `baked` under another player's name, which asserts an
 agreement nothing measured. `ServeWeb.LIVE_FILLABLE` carries the rule and the numbers.
+
+`java` is the opposite case and the reason the two are worth telling apart. The AOSP view-backed
+`RemoteComposePlayer` draws into a framework `Canvas` rather than into Compose nodes, and on the
+same host it answers `822c80a4…` where the baked capture is `e69d5136…` — a real second opinion.
+The offline pipeline has no `java` column and never will, so `ServeWeb.LIVE_ONLY_LANES` names that
+lane rather than `ServeRcCompare.LANES`: putting it in the published vocabulary would make every
+wall start reporting a player absent that no run could ever publish. It sorts last for the same
+reason — it has no position in an order it is not part of.

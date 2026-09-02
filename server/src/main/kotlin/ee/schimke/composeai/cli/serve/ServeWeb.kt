@@ -10119,7 +10119,26 @@ ${captureControlsHtml().prependIndent("          ")}
    * capture can be. `java` is genuinely distinct too, but maps to no published column, so filling
    * one would invent a lane the offline vocabulary does not have.
    */
-  private val LIVE_FILLABLE = setOf(RcPlayerBackend.CMP_JVM)
+  private val LIVE_FILLABLE = setOf(RcPlayerBackend.CMP_JVM, RcPlayerBackend.JAVA)
+
+  /**
+   * A column for a player the offline pipeline has no lane id for, so the wall has to name it
+   * itself. Only [RcPlayerBackend.JAVA] is in this position: the AOSP view-backed
+   * `RemoteComposePlayer`, which draws into a framework `Canvas` rather than into Compose nodes.
+   *
+   * It is a genuinely different renderer from everything else on the wall, and measurably so — on
+   * the deployed `remote-m3` host `?rcPlayer=java` answers `822c80a4…` where the baked capture is
+   * `e69d5136…`, so unlike `cmp-android` it is never the baked bytes wearing another name. That is
+   * exactly why [RcPlayerBackend.JAVA.rcCompareLane] is null: the lane mapping exists to answer a
+   * bare `?rcPlayer=` from staged bytes, and there are no staged bytes that are this player's.
+   *
+   * Kept out of [ServeRcCompare.LANES] deliberately. That list mirrors the offline pipeline's
+   * columns, and a catalog's published `rc-compare.html` will never carry a `java` one — so putting
+   * it there would make the absent-players note start reporting a player no run could ever publish,
+   * on every wall, forever.
+   */
+  private val LIVE_ONLY_LANES =
+    mapOf(RcPlayerBackend.JAVA to RcCompareLane("java", "AOSP · view-backed player", "java"))
 
   /**
    * The **Remote Compose players** view: every player's published render of every `ir/<id>.rc`
@@ -10174,9 +10193,13 @@ ${captureControlsHtml().prependIndent("          ")}
     // back as a copy of a column already on the wall. [LIVE_FILLABLE] carries the last condition
     // and the measurements behind it.
     val publishedLaneIds = manifest.lanes.mapTo(mutableSetOf()) { it.id }
+    // A backend's column id: the offline lane it corresponds to, or the one this wall names for a
+    // player the offline pipeline has none for.
+    fun laneIdOf(backend: RcPlayerBackend): String? =
+      backend.rcCompareLane ?: LIVE_ONLY_LANES[backend]?.id
     val liveCandidates =
       RcPlayerBackend.UNIVERSE.filter { backend ->
-        backend in LIVE_FILLABLE && backend.rcCompareLane !in publishedLaneIds
+        backend in LIVE_FILLABLE && laneIdOf(backend) !in publishedLaneIds
       }
     // Availability is per preview — a host can carry the document for one and not another — so a
     // column appears when ANY row can draw it, and the rows that cannot say so in their own cell.
@@ -10191,8 +10214,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val liveBackends = liveCandidates.filter { backend ->
       liveFor.values.any { backend.wire in it }
     }
-    val liveLaneIds = liveBackends.mapTo(mutableSetOf()) { it.rcCompareLane!! }
-    val liveWireByLane = liveBackends.associate { it.rcCompareLane!! to it.wire }
+    val liveLaneIds = liveBackends.mapNotNullTo(mutableSetOf()) { laneIdOf(it) }
+    val liveWireByLane = liveBackends.associate { laneIdOf(it)!! to it.wire }
     // Every player this host reports for any row — including the ones [LIVE_FILLABLE] withholds.
     // The note below has to tell "this host cannot draw it" apart from "it would draw a copy of a
     // column already here", and only this set can.
@@ -10232,8 +10255,15 @@ ${captureControlsHtml().prependIndent("          ")}
     val lanes =
       (manifest.lanes +
           ServeRcCompare.LANES.filter { it.id in liveLaneIds }
-            .map { RcCompareLane(it.id, it.label, it.short) })
-        .sortedBy { lane -> ServeRcCompare.LANES.indexOfFirst { it.id == lane.id } }
+            .map { RcCompareLane(it.id, it.label, it.short) } +
+          LIVE_ONLY_LANES.values.filter { it.id in liveLaneIds })
+        // Published order first, this wall's own lanes after it. A live-only lane has no position
+        // in a vocabulary it is not part of, and `indexOfFirst` would hand it -1 — the first
+        // column, ahead of `baked`, which is the one place it must never sit.
+        .sortedBy { lane ->
+          val i = ServeRcCompare.LANES.indexOfFirst { it.id == lane.id }
+          if (i >= 0) i else ServeRcCompare.LANES.size
+        }
 
     // Worst-match first on the worst-scoring player, so a preview only one player gets wrong still
     // sorts to the top; rows nothing scored sink, then alphabetical. Mirrors the published page.
