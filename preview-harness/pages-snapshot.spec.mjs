@@ -655,12 +655,26 @@ async function sheetPoint(page, ux, uy) {
       const svg = document.querySelector(".cp-page-stage svg");
       const rect = svg.getBoundingClientRect();
       const box = svg.viewBox.baseVal;
-      return {
+      const at = {
         x: rect.left + (x / box.width) * rect.width,
         y: rect.top + (y / box.height) * rect.height,
+      };
+      // What a real pointer at that spot would actually hit. `elementFromPoint` answers with
+      // the TOPMOST element, which is the one a `page.mouse` gesture is dispatched to — so this
+      // is the question "would a reader's double-click here reach the sheet at all?".
+      const hit = document.elementFromPoint(at.x, at.y);
+      return {
+        ...at,
         width: window.innerWidth,
         height: window.innerHeight,
+        covered: hit && !hit.closest(".cp-page-stage") ? describe(hit) : null,
       };
+      function describe(el) {
+        const named = el.closest("[class]") ?? el;
+        const name =
+          typeof named.className === "string" ? named.className : named.tagName;
+        return `<${el.tagName.toLowerCase()}> in ${name}`;
+      }
     },
     [ux, uy],
   );
@@ -675,7 +689,40 @@ async function sheetPoint(page, ux, uy) {
         `in a ${at.width}x${at.height} viewport — aim at a spot the current view still shows`,
     );
   }
+  // On screen but under something else. The control row is STICKY (issue #4996), so once the page
+  // is scrolled it stands over the top strip of the sheet, and a gesture aimed into that strip is
+  // dispatched to the bar instead — the sheet never sees it. Indistinguishable from "the gesture
+  // did nothing" at the assertion, and it cost an hour of a 60s timeout to find the first time, so
+  // name the thing in the way here.
+  if (at.covered) {
+    throw new Error(
+      `sheet point ${ux},${uy} is covered at (${Math.round(at.x)}, ${Math.round(at.y)}) by ` +
+        `${at.covered} — aim clear of the sticky control row, or scroll it out of the way first`,
+    );
+  }
   return at;
+}
+
+/**
+ * Scroll the design page so the sheet starts below the sticky control row.
+ *
+ * The row stands over the top of the sheet once the page is scrolled (issue #4996) — the same
+ * trade every canvas toolbar makes — so a gesture aimed into that strip is dispatched to the bar
+ * and the sheet never sees it. A reader scrolls the part they want out from under it; the zoom
+ * states do the same thing here, once, before they aim. Deliberately NOT inside `sheetPoint`:
+ * scrolling to rescue a bad aim would hide exactly the regression its `covered` guard exists to
+ * report.
+ */
+async function revealStage(page) {
+  await page.evaluate(() => {
+    const stage = document.querySelector(".cp-page-stage");
+    const bar = document.querySelector(".cp-page-controls");
+    // Where the stage's top edge would have to be for the bar to clear it, plus a margin so a
+    // point aimed AT that edge is still the sheet's.
+    const clearance = bar.getBoundingClientRect().height + 24;
+    const top = stage.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: Math.max(0, top - clearance), behavior: "instant" });
+  });
 }
 
 // How far in the sheet is, read off the control the reader reads it off.
@@ -1322,6 +1369,7 @@ const FIXTURE_STATES = [
     // the double-click put it, a later state's assertions would inherit a hover on the sheet.
     parkPointer: true,
     apply: async (page) => {
+      await revealStage(page);
       const at = await sheetPoint(page, 65, 430);
       await page.mouse.dblclick(at.x, at.y);
       // The readout is the reader's own evidence, so assert on it rather than on the transform
@@ -1367,6 +1415,7 @@ const FIXTURE_STATES = [
     suffix: "zoom-nested",
     parkPointer: true,
     apply: async (page) => {
+      await revealStage(page);
       const was = await zoomPercent(page);
       // The top slot's own padding: inside the slot panel, outside the component's hit area,
       // and — with the card now filling the stage — still somewhere the view actually shows. A
@@ -1395,6 +1444,7 @@ const FIXTURE_STATES = [
     parkPointer: true,
     apply: async (page) => {
       await page.click("[data-cp-page-zoom-reset]");
+      await revealStage(page);
       const at = await sheetPoint(page, 320, 215);
       await page.mouse.move(at.x, at.y);
       await page.keyboard.down("Control");
