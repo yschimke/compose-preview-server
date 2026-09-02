@@ -6522,6 +6522,18 @@ class ServeHttpServer(
       if (onlySystem == null) themeOptimizerStats?.invoke() else null
 
     /**
+     * The catalog blob pool, scoped like [optimizerAdmission] — server-wide counters, so a
+     * single-system site has no business reading them.
+     *
+     * On the page as well as in `/status.json` because the cap is the part that needs watching and
+     * the JSON is not what anyone opens when the box feels slow. A pool pinned at its cap serves
+     * every request from a miss and evicts on every write, which costs render time everywhere while
+     * each individual catalog still looks healthy.
+     */
+    val catalogCache: CatalogBlobPoolSnapshot? =
+      if (onlySystem == null) catalogCacheStats?.invoke() else null
+
+    /**
      * Sessions holding an open lease — what keeps a session resident. Scoped like `knownSessions`:
      * a top-level site names only its own.
      */
@@ -6578,6 +6590,65 @@ class ServeHttpServer(
      * separate them are server-wide, not per-catalog. The threshold is printed beside the reading
      * so "closed" always comes with the number it was compared against.
      */
+    /**
+     * The effective stop/resume thresholds, rendered as the pairs they actually are.
+     *
+     * Stop and resume are printed together per limb because the *gap* is the tuning: a stop of
+     * 0.98 against a resume of 0.92 is a band the optimizer's own load crosses, so it flaps, and
+     * neither number alone shows that. `quiet` closes it — a wide band with a 5s quiet still flaps.
+     */
+    private fun optimizerThresholdText(t: OptimizerPressureThresholds): String =
+      listOf(
+          "load ${trimZeros(t.stopLoadPerCpu)}→${trimZeros(t.resumeLoadPerCpu)}/cpu",
+          "cpu ${formatPercent(t.stopCpuUtilization)}→${formatPercent(t.resumeCpuUtilization)}",
+          "mem ${formatPercent(t.stopMemoryAvailableFraction)}→" +
+            formatPercent(t.resumeMemoryAvailableFraction),
+          "quiet ${t.resumeQuietMillis / 1000}s",
+        )
+        .joinToString(" · ")
+
+    /**
+     * Host and cgroup headroom, shown apart, with the governing one named.
+     *
+     * Only rendered when both are known and they disagree enough to matter; on a bare-metal host
+     * (no cgroup limit) there is one ceiling and the existing reading already says it.
+     */
+    private fun memoryCeilingText(pressure: OptimizerPressureSnapshot): String? {
+      val host = pressure.memoryHostAvailableFraction ?: return null
+      val cgroup = pressure.memoryCgroupAvailableFraction ?: return null
+      val governing = if (cgroup <= host) "container limit" else "host"
+      return "host ${formatPercent(host)} · container ${formatPercent(cgroup)} · " +
+        "$governing governs"
+    }
+
+    /**
+     * `8.0 / 8.0 GB · 100% · 171 evicted` — the cap is the point, so it is never omitted.
+     *
+     * Hit rate is appended only once there have been reads, because `0 hits` on a cold pool is not
+     * the same signal as `0 hits` on a warm one, and the second is the one worth seeing.
+     */
+    private fun catalogCacheText(c: CatalogBlobPoolSnapshot): String {
+      val fill = if (c.maxBytes > 0) " · ${formatPercent(c.bytes.toDouble() / c.maxBytes)}" else ""
+      val reads = c.hits + c.misses
+      val hitRate =
+        if (reads > 0) " · ${formatPercent(c.hits.toDouble() / reads)} hits" else ""
+      val evicted = if (c.evicted > 0) " · ${c.evicted} evicted" else ""
+      return "${gigabytes(c.bytes)} / ${gigabytes(c.maxBytes)}$fill$hitRate$evicted"
+    }
+
+    /** GB rather than [humanBytes]' MB ceiling: this pool is sized in gigabytes. */
+    private fun gigabytes(bytes: Long): String =
+      String.format(java.util.Locale.ROOT, "%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+
+    /** Matches the phrasing the gate's own `reason` strings use, so the two rows agree. */
+    private fun formatPercent(value: Double): String =
+      "%.0f%%".format(java.util.Locale.ROOT, value * 100.0)
+
+    /** `2.0` reads better than `2.0000001`, and `0.85` must not become `1`. */
+    private fun trimZeros(value: Double): String =
+      if (value == value.toLong().toDouble()) value.toLong().toString()
+      else value.toString().trimEnd('0').trimEnd('.')
+
     private fun optimizerGateText(admission: ThemeOptimizerAdmissionSnapshot): String {
       val needs = "needs ${admission.idleThresholdMillis / 1000}s quiet"
       // A host whose steady state sits on a stop threshold runs on the starvation cap's bounded
@@ -6933,6 +7004,49 @@ class ServeHttpServer(
         // choosing to be polite or a gate that will never open, and those need different fixes.
         optimizerAdmission?.let {
           add(ServeWeb.Stat("Theme optimiser gate", optimizerGateText(it)))
+          // The thresholds that gate was judged against. Without them the row above is a reading
+          // with no scale: "paused · load 2.06 per CPU" is either a gate working or a gate tuned
+          // past usefulness, and the two are indistinguishable on the page. They are set by system
+          // property outside the image, so reading the source does not answer it either.
+          it.pressure?.thresholds?.let { t ->
+            add(ServeWeb.Stat("Theme optimiser limits", optimizerThresholdText(t)))
+          }
+          // Which ceiling the memory limb is actually reading. A container at its own cap on a box
+          // with plenty free reports the same "memory available 0%" as a genuinely full machine,
+          // and the fix differs: raise the cap, or get a bigger host.
+          it.pressure?.let { p ->
+            memoryCeilingText(p)?.let { text ->
+              add(ServeWeb.Stat("Optimiser memory headroom", text))
+            }
+          }
+        }
+        // Fill against the cap, with a meter, because "8.0 GB cached" is only alarming next to an
+        // 8.0 GB ceiling. Evictions are shown beside it: a pool at its cap is not a problem while
+        // it fits, and is a permanent one the moment it does not.
+        catalogCache?.let {
+          add(
+            ServeWeb.Stat(
+              "Catalog blob cache",
+              catalogCacheText(it),
+              if (it.maxBytes <= 0) null
+              else
+                ServeWeb.Meter(
+                  it.maxBytes,
+                  listOf(
+                    ServeWeb.MeterSegment(
+                      "used",
+                      it.bytes.coerceIn(0, it.maxBytes),
+                      if (it.bytes * 10 >= it.maxBytes * 9) "warning" else "secondary",
+                    ),
+                    ServeWeb.MeterSegment(
+                      "free",
+                      (it.maxBytes - it.bytes).coerceAtLeast(0),
+                      "primary",
+                    ),
+                  ),
+                ),
+            )
+          )
         }
         add(
           ServeWeb.Stat(
