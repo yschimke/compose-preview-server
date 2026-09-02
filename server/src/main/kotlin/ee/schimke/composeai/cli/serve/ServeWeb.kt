@@ -1633,14 +1633,13 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The issues one **comparison row** carries — any naming one of its preview [ids], or its
-   * component.
+   * The issues one **comparison row** carries — component-scoped issues naming any of its preview
+   * [ids] or its component, plus variant-scoped issues naming the [activePreviewId] exactly.
    *
-   * Matched over the row's whole id set rather than over the one variant it is serving, because a
-   * row IS the variants: an issue filed from the dark page is about the same two pictures the light
-   * lane is showing, and joining on the served variant alone would hide it from the reader who
-   * switched theme. The folded-out siblings ride along for the same reason they ride along in the
-   * filter — they have no row of their own to carry their reports.
+   * Component-wide reports match the row's whole id set because a row IS the variants. Exact
+   * reports deliberately do not: a dark-preview report must not appear while this row is serving
+   * light, and a folded-out sibling's report must not be promoted onto the row that merely carries
+   * its filtering alias.
    *
    * Open before closed, then newest first: the column is read for "does someone already know?", and
    * a closed report answers that more weakly than an open one.
@@ -1649,13 +1648,16 @@ ${captureControlsHtml().prependIndent("          ")}
     issues: List<ParityIssue>,
     ids: List<String>,
     componentId: String?,
+    activePreviewId: String,
   ): List<ParityIssue> {
     if (issues.isEmpty()) return emptyList()
     val wanted = ids.toSet()
     return issues
       .filter { issue ->
-        issue.previewIds.any { it in wanted } ||
-          (issue.scope == "component" && componentId != null && issue.component == componentId)
+        if (issue.scope == "variant") activePreviewId in issue.previewIds
+        else
+          issue.previewIds.any { it in wanted } ||
+            (componentId != null && issue.component == componentId)
       }
       .sortedWith(compareBy({ it.state != "open" }, { -it.number }))
   }
@@ -9758,15 +9760,13 @@ ${captureControlsHtml().prependIndent("          ")}
             previewIdsByCard[cardKey].orEmpty().filterNot { it in rowPreviewIds }
           else emptyList()
         val ids = (variants.map { it.id } + folded).distinct().joinToString(" ")
-        // Every issue the catalog's index names against any of this row's previews, or against the
-        // component itself. Matched on the row's WHOLE id set rather than on `current` alone: an
-        // issue is filed from one theme's page and the row shows both, so joining on the served
-        // variant would hide a dark-lane report from the reader looking at the light lane.
+        // Component issues join against the whole row; exact issues join only against `current`.
         val bugs =
           issuesForRow(
             parityIssues,
             variants.map { it.id } + folded,
             ServeIssueReport.componentIdFor(current),
+            current.id,
           )
         // Where "+ file" lands at rest: the focused Reference / Diff / Actual page for the pair
         // this row is SERVED showing, which files a report naming that exact preview and reference.

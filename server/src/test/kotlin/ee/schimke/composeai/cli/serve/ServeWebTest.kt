@@ -2289,6 +2289,44 @@ class ServeWebTest {
   }
 
   @Test
+  fun `the Bugs column does not promote an exact issue from the inactive theme`() {
+    val light =
+      ServePreview(
+        id = "button__ideal__default__light",
+        label = "Button",
+        componentId = "Button/Filled",
+        state = "default",
+        theme = "light",
+      )
+    val dark = light.copy(id = "button__ideal__default__dark", theme = "dark")
+    fun issue(number: Int, scope: String) =
+      ParityIssue(
+        repository = "yschimke/m3-catalog",
+        number = number,
+        title = "Dark preview issue",
+        url = "https://github.com/yschimke/m3-catalog/issues/$number",
+        state = "open",
+        component = "Button/Filled",
+        scope = scope,
+        previewIds = listOf(dark.id),
+      )
+    val html =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(light, dark),
+        token = "t",
+        referencesFor = { listOf(referenceFor(it)) },
+        parityIssues = listOf(issue(42, "component"), issue(43, "variant")),
+      )
+    val cell = html.substringAfter("class=\"cp-compare-bugs\"").substringBefore("</td>")
+    assertTrue(cell.contains("/issues/42"), "component scope crosses the theme pair: $cell")
+    assertFalse(
+      cell.contains("/issues/43"),
+      "variant scope stays on the reported dark preview: $cell",
+    )
+  }
+
+  @Test
   fun `the wall offers a picker per row, and the facts a browser needs to write its locator`() {
     val preview =
       ServePreview(
