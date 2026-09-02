@@ -21,6 +21,20 @@
 {$DOMAIN} {$SITE_DOMAINS:} {
 	encode zstd gzip
 
+	# Access log. There was none, and its absence is not neutral: with only warnings
+	# reaching stdout, `docker logs caddy` returns nothing for a window in which the
+	# box served real traffic, which reads as "no requests" rather than "no logging".
+	# That misreading turned a user-facing incident — interactive renders aborting
+	# after 2-8s while background optimization held the CPU — into an apparently idle
+	# host, because the aborted requests were invisible and only the load was not.
+	#
+	# stdout (not a file) so it lands in the json-file driver the compose `x-logging`
+	# anchor now caps; without that cap this would grow unbounded.
+	log {
+		output stdout
+		format json
+	}
+
 	# Deploy webhook: the image-publish CI POSTs here to roll `preview` immediately
 	# when a new image is published (instead of waiting for the rollout poll). Routed
 	# to the `hook` sidecar, which enforces the bearer-token check and runs a

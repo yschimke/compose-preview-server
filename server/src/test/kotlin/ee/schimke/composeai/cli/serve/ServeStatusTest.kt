@@ -1086,4 +1086,95 @@ class ServeStatusTest {
     assertTrue(html.contains("Theme optimiser gate"), "the page names the gate: $html")
     assertTrue(html.contains("closed"), "and says it is shut: $html")
   }
+
+  /**
+   * The thresholds a pressure reading was judged against reach both projections.
+   *
+   * Every field beside them is a reading, and a reading alone cannot say whether the gate is
+   * behaving: `loadPerCpu 2.06` under `paused: load 2.06 per CPU` is either a gate doing its job or
+   * one tuned past the point of doing it. The values are set by `composeai.serve.optimizer*` system
+   * properties outside the image, so neither the source nor the deployed config answers it — only
+   * the running server can, which makes publishing them the only way to know.
+   */
+  @Test
+  fun `status publishes the optimizer thresholds a reading was judged against`() {
+    val thresholds =
+      OptimizerPressureThresholds(
+        stopLoadPerCpu = 2.0,
+        resumeLoadPerCpu = 1.2,
+        stopCpuUtilization = 0.95,
+        resumeCpuUtilization = 0.75,
+        resumeQuietMillis = 30_000L,
+      )
+    // A host over the CPU stop side, with the two memory ceilings deliberately far apart: the
+    // container is nearly full while the machine is not, which is the pair the collapsed
+    // `memoryAvailableFraction` cannot express.
+    val gate =
+      OptimizerPressureGate(
+        sample = {
+          HostResourceSample(
+            loadPerCpu = 2.5,
+            cpuUtilization = 0.99,
+            memoryAvailableFraction = 0.02,
+            memoryHost = 0.60,
+            memoryCgroup = 0.02,
+          )
+        },
+        thresholds = thresholds,
+        clock = { 5_000L },
+      )
+    val bg = ServeBackgroundWork(clock = { 5_000L }, pressureGate = gate)
+
+    server =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "unused",
+          sessions = registry,
+          defaultSessionId = "default-mod",
+          isPublic = true,
+          themeOptimizerStats = { bg.optimizerAdmissionSnapshot() },
+        )
+        .also { it.start() }
+
+    val (code, body) = get("/status.json")
+    assertEquals(200, code)
+    val pressure =
+      Json.parseToJsonElement(body)
+        .jsonObject["themeOptimizer"]
+        ?.jsonObject
+        ?.get("pressure")
+        ?.jsonObject ?: error("status.json carries no themeOptimizer.pressure: $body")
+
+    val published =
+      pressure["thresholds"]?.jsonObject
+        ?: error("the thresholds are not published beside the reading: $body")
+    assertEquals(2.0, published["stopLoadPerCpu"]?.jsonPrimitive?.content?.toDouble())
+    assertEquals(1.2, published["resumeLoadPerCpu"]?.jsonPrimitive?.content?.toDouble())
+    assertEquals(0.95, published["stopCpuUtilization"]?.jsonPrimitive?.content?.toDouble())
+    assertEquals(30_000L, published["resumeQuietMillis"]?.jsonPrimitive?.long)
+
+    // The two ceilings stay apart, so "memory available 2%" can be read as the container's cap
+    // rather than the machine's — a one-line limit change, not a bigger box.
+    assertEquals(
+      0.60,
+      pressure["memoryHostAvailableFraction"]?.jsonPrimitive?.content?.toDouble(),
+    )
+    assertEquals(
+      0.02,
+      pressure["memoryCgroupAvailableFraction"]?.jsonPrimitive?.content?.toDouble(),
+    )
+
+    val (htmlCode, html) = get("/status")
+    assertEquals(200, htmlCode)
+    assertTrue(html.contains("Theme optimiser limits"), "the page names the limits row: $html")
+    assertTrue(
+      html.contains("load 2\u21921.2/cpu") || html.contains("load 2\u2192" + "1.2/cpu"),
+      "and prints the stop/resume pair the tuning actually is: $html",
+    )
+    assertTrue(
+      html.contains("host 60% · container 2% · container limit governs"),
+      "and keeps the two ceilings apart, naming the one constraining: $html",
+    )
+  }
 }

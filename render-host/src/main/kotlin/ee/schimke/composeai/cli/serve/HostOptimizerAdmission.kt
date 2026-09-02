@@ -13,10 +13,28 @@ import kotlinx.serialization.Serializable
 data class HostResourceSample(
   val loadPerCpu: Double?,
   val cpuUtilization: Double?,
+  /** The governing headroom: the smaller of [memoryHost] and [memoryCgroup]. */
   val memoryAvailableFraction: Double?,
+  /**
+   * The two ceilings [memoryAvailableFraction] is the minimum of, retained so `/status.json` can
+   * say which one governs. Null when that ceiling does not exist or could not be read — an
+   * unlimited cgroup leaves [memoryCgroup] null, which is what a bare-metal host reports.
+   */
+  val memoryHost: Double? = null,
+  val memoryCgroup: Double? = null,
 )
 
-/** Thresholds deliberately have separate stop/resume sides so a busy host cannot flap. */
+/**
+ * Thresholds deliberately have separate stop/resume sides so a busy host cannot flap.
+ *
+ * Serializable because these are published on `/status.json` under
+ * `themeOptimizer.pressure.thresholds`. A reading without its threshold is not diagnosable: the
+ * page showed `loadPerCpu 2.06` and `paused: load 2.06 per CPU` while an operator had no way to
+ * tell whether the limit was the 0.85 default or a deployment override several times larger, and
+ * therefore no way to tell a gate doing its job from one tuned past the point of doing it. The
+ * override is a system property set outside the image, so the source cannot answer it either.
+ */
+@Serializable
 data class OptimizerPressureThresholds(
   val stopLoadPerCpu: Double = 0.85,
   val resumeLoadPerCpu: Double = 0.60,
@@ -181,6 +199,25 @@ data class OptimizerPressureSnapshot(
   val dutyCycleUntilEpochMillis: Long? = null,
   /** How many times the starvation cap has had to open this gate since the server started. */
   val dutyCycles: Int = 0,
+  /**
+   * The thresholds [constrained] was judged against — the effective values after any
+   * `composeai.serve.optimizer*` override, not the compiled defaults.
+   *
+   * Published because every other field here is a reading, and a reading alone cannot say whether
+   * the gate is behaving. Null only when a snapshot is built without a gate to ask.
+   */
+  val thresholds: OptimizerPressureThresholds? = null,
+  /**
+   * The two memory ceilings behind [memoryAvailableFraction], which is the SMALLER of them.
+   *
+   * Kept apart because collapsing them loses the fact that decides what to do. A box reporting
+   * `memory available 0%` reads as an emergency; if that 0% is [memoryCgroupAvailableFraction]
+   * while [memoryHostAvailableFraction] sits at 60%, the machine is fine and the container's own
+   * limit is the whole problem — a one-line cap change, not a bigger box. The collapsed number
+   * cannot tell those apart, and the wrong reading points at the wrong fix.
+   */
+  val memoryHostAvailableFraction: Double? = null,
+  val memoryCgroupAvailableFraction: Double? = null,
 )
 
 /**
@@ -323,6 +360,9 @@ class OptimizerPressureGate(
           heldMillis = heldMillis(now, holding),
           dutyCycleUntilEpochMillis = dutyCycleUntil.takeIf { it > now },
           dutyCycles = dutyCycles,
+          thresholds = thresholds,
+          memoryHostAvailableFraction = current.memoryHost,
+          memoryCgroupAvailableFraction = current.memoryCgroup,
         )
       cached
     }
@@ -510,9 +550,10 @@ class LinuxHostResourceSampler(
       .getOrNull()
     // Whichever ceiling is nearer governs. An unlimited or unreadable cgroup contributes nothing,
     // which is what keeps a bare-metal host reading exactly as it did before.
-    val constrained = listOfNotNull(memory, cgroupMemoryAvailableFraction()).minOrNull()
+    val cgroup = cgroupMemoryAvailableFraction()
+    val constrained = listOfNotNull(memory, cgroup).minOrNull()
     if (load == null && cpu == null && constrained == null) return null
-    return HostResourceSample(load, cpu, constrained)
+    return HostResourceSample(load, cpu, constrained, memoryHost = memory, memoryCgroup = cgroup)
   }
 
   /**
