@@ -22,10 +22,6 @@
       "branch": "design-artifacts/*"
     },
     {
-      "repo": "yschimke/home-assistant-android",
-      "branch": "design-artifacts/*"
-    },
-    {
       "repo": "yschimke/cadence",
       "branch": "design-artifacts/*"
     },
@@ -39,10 +35,6 @@
     },
     {
       "repo": "yschimke/thunderbird-android",
-      "branch": "design-artifacts/*"
-    },
-    {
-      "repo": "yschimke/pocket-casts-android",
       "branch": "design-artifacts/*"
     },
     {
