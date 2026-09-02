@@ -12,6 +12,9 @@ repository boundary.
 - Commit subjects and PR titles use Conventional Commits.
 - Run `./gradlew ktfmtFormat` before committing Kotlin changes and
   `npm --prefix serve-web run format` before committing serve-web changes.
+- Regenerate the committed goldens with `scripts/regenerate-goldens.sh`, and read the diff. On a
+  Renovate branch the `Regenerate goldens` workflow does it for you when CI goes red; on any pull
+  request `/regenerate-goldens` asks for the same thing.
 - Immediately before every push, fetch `origin main` and confirm the branch or PR has not merged.
 - Open or update a PR automatically after a completed coding change. Never auto-merge.
 

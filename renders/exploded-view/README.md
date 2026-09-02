@@ -35,7 +35,7 @@ None of it is hand-drawn, and none of it has to be remembered:
 Regenerate the SVGs (and the harness's placeholder) with:
 
 ```bash
-UPDATE_SERVE_WEB_FIXTURES=true ./gradlew :cli:test --tests '*ExplodedSvgFixtureTest*' --rerun-tasks
+scripts/regenerate-goldens.sh
 ```
 
 Re-shoot the viewer PNGs with the harness, then copy them out of `preview-server/preview-harness/out/`:

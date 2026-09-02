@@ -118,7 +118,7 @@ Keep the Kotlin/custom-element boundary reviewable and preserve the fixture net:
    page-sized controller to the shared component bundle.
 4. `npm run verify`, then regenerate the page fixtures:
    ```
-   UPDATE_SERVE_WEB_FIXTURES=true ./gradlew :server:test --tests '*ServeWebFixtureTest*'
+   scripts/regenerate-goldens.sh
    ```
 5. Confirm the pixels didn't move:
    ```
