@@ -6612,9 +6612,9 @@ class ServeHttpServer(
     /**
      * The effective stop/resume thresholds, rendered as the pairs they actually are.
      *
-     * Stop and resume are printed together per limb because the *gap* is the tuning: a stop of
-     * 0.98 against a resume of 0.92 is a band the optimizer's own load crosses, so it flaps, and
-     * neither number alone shows that. `quiet` closes it — a wide band with a 5s quiet still flaps.
+     * Stop and resume are printed together per limb because the *gap* is the tuning: a stop of 0.98
+     * against a resume of 0.92 is a band the optimizer's own load crosses, so it flaps, and neither
+     * number alone shows that. `quiet` closes it — a wide band with a 5s quiet still flaps.
      */
     private fun optimizerThresholdText(t: OptimizerPressureThresholds): String =
       listOf(
@@ -6649,8 +6649,7 @@ class ServeHttpServer(
     private fun catalogCacheText(c: CatalogBlobPoolSnapshot): String {
       val fill = if (c.maxBytes > 0) " · ${formatPercent(c.bytes.toDouble() / c.maxBytes)}" else ""
       val reads = c.hits + c.misses
-      val hitRate =
-        if (reads > 0) " · ${formatPercent(c.hits.toDouble() / reads)} hits" else ""
+      val hitRate = if (reads > 0) " · ${formatPercent(c.hits.toDouble() / reads)} hits" else ""
       val evicted = if (c.evicted > 0) " · ${c.evicted} evicted" else ""
       return "${gigabytes(c.bytes)} / ${gigabytes(c.maxBytes)}$fill$hitRate$evicted"
     }
