@@ -330,8 +330,16 @@ class ServeWebFixtureTest {
    * refuses one document outright, so the fixture captures a rendered column, a scored column and a
    * "player could not decode this" column side by side.
    */
-  private fun rcCompareFixture(previews: List<ServePreview>): RcCompareManifest {
-    val lanes =
+  private fun rcCompareFixture(
+    previews: List<ServePreview>,
+    /**
+     * Which lanes this catalog's run published. Defaults to all of them; narrowing it is how the
+     * partial-run wall is built, since [ServeRcCompare.plan] drops a lane the run never scored and
+     * the page has to say so rather than quietly showing fewer columns.
+     */
+    lanes: Set<String>? = null,
+  ): RcCompareManifest {
+    val allLanes =
       listOf(
         RcCompareLane("baked", "AndroidX Embedded · baked", "baked"),
         RcCompareLane("js", "RC · JS player", "js"),
@@ -340,6 +348,7 @@ class ServeWebFixtureTest {
         RcCompareLane("cmp-jvm", "RC · cmp-jvm player", "cmp-jvm"),
         RcCompareLane("cmp-wasm", "RC · cmp-wasm player", "cmp-wasm"),
       )
+    val kept = allLanes.filter { lanes == null || it.id in lanes }
     fun cell(lane: String, slot: Int, pct: Double?, px: Long?, note: String = "") =
       if (pct == null && note.isNotEmpty()) RcCompareCell(rendered = false, note = note)
       else
@@ -351,7 +360,7 @@ class ServeWebFixtureTest {
           mismatchPx = px,
         )
     return RcCompareManifest(
-      lanes = lanes,
+      lanes = kept,
       rows =
         previews.mapIndexed { slot, preview ->
           val wasmRefuses = slot == 1
@@ -359,25 +368,28 @@ class ServeWebFixtureTest {
             previewId = preview.id,
             width = 400,
             height = 400,
+            // Keyed by the kept lanes only, exactly as a real run's manifest is: a lane the run
+            // never touched carries no cell, not an empty one.
             lanes =
               mapOf(
-                "baked" to cell("baked", slot, null, null),
-                "js" to cell("js", slot, 2.97 - slot * 0.4, 9116L - slot * 900),
-                "embedded" to cell("embedded", slot, 0.03 + slot * 0.01, 24L + slot),
-                "androidx-embedded" to
-                  cell("androidx-embedded", slot, 0.4 + slot * 0.1, 640L + slot * 10),
-                "cmp-jvm" to cell("cmp-jvm", slot, 1.09 + slot * 0.2, 5151L + slot * 40),
-                "cmp-wasm" to
-                  if (wasmRefuses)
-                    cell(
-                      "cmp-wasm",
-                      slot,
-                      null,
-                      null,
-                      "Document is not renderable by the CMP player: CoreText requires DataFont",
-                    )
-                  else cell("cmp-wasm", slot, 3.4 - slot * 0.3, 12040L - slot * 900),
-              ),
+                  "baked" to cell("baked", slot, null, null),
+                  "js" to cell("js", slot, 2.97 - slot * 0.4, 9116L - slot * 900),
+                  "embedded" to cell("embedded", slot, 0.03 + slot * 0.01, 24L + slot),
+                  "androidx-embedded" to
+                    cell("androidx-embedded", slot, 0.4 + slot * 0.1, 640L + slot * 10),
+                  "cmp-jvm" to cell("cmp-jvm", slot, 1.09 + slot * 0.2, 5151L + slot * 40),
+                  "cmp-wasm" to
+                    if (wasmRefuses)
+                      cell(
+                        "cmp-wasm",
+                        slot,
+                        null,
+                        null,
+                        "Document is not renderable by the CMP player: CoreText requires DataFont",
+                      )
+                    else cell("cmp-wasm", slot, 3.4 - slot * 0.3, 12040L - slot * 900),
+                )
+                .filterKeys { id -> kept.any { it.id == id } },
           )
         },
     )
@@ -1745,6 +1757,20 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
         isPublic = true,
         rcCompare = rcCompareFixture(themedPreviews),
+      )
+    // The same wall for a catalog whose run opted into only SOME of the players — the shape
+    // wear-m3-catalog publishes (baked + the JS player + CMP/Wasm), and the one that made a reader
+    // ask where the desktop and Android players went (#4998). The three absent lanes are named
+    // under the summary rather than left as a gap in the header row.
+    val rcLanesPartialComparison =
+      ServeWeb.comparisonPage(
+        "remote-m3",
+        themedPreviews,
+        token,
+        sessionId = "remote-m3",
+        trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
+        isPublic = true,
+        rcCompare = rcCompareFixture(themedPreviews, lanes = setOf("baked", "js", "cmp-wasm")),
       )
     val comparisonReferences =
       listOf(
@@ -3926,6 +3952,7 @@ class ServeWebFixtureTest {
         "serve-viewer-catalog-palette.html" to viewerCatalogPalette,
         "serve-format-compare.html" to formatComparison,
         "serve-rc-lanes.html" to rcLanesComparison,
+        "serve-rc-lanes-partial.html" to rcLanesPartialComparison,
         "serve-reference-compare.html" to referenceComparison,
         "serve-reference-compare-pinned.html" to referenceComparisonPinned,
         "serve-reference-compare-dark-first.html" to referenceComparisonDarkFirst,
@@ -4271,6 +4298,35 @@ class ServeWebFixtureTest {
       rcLanesComparison.contains("/rc-compare/js/0.png?session=remote-m3") &&
         rcLanesComparison.contains("cp-rc-missing\">Document is not renderable by the CMP player"),
       "a rendered lane shows its published PNG; a lane that refused the document shows its reason",
+    )
+    // #4998: a catalog whose run covered every lane says nothing about absent players, because
+    // there are none — the note is a caveat, not furniture.
+    assertFalse(
+      rcLanesComparison.contains("cp-rc-absent"),
+      "a wall showing every known player carries no absent-players note",
+    )
+    // ...and one whose run covered only three names the other three, so the missing columns read
+    // as "this run didn't include them" rather than as a page that lost its players.
+    assertEquals(
+      listOf(
+        "AndroidX Embedded · vendored Android",
+        "AndroidX Embedded · androidx.dev",
+        "RC · cmp-jvm player",
+      ),
+      Regex("<span class=\"cp-rc-absent-lane\">([^<]+)</span>")
+        .findAll(rcLanesPartialComparison)
+        .map { it.groupValues[1] }
+        .toList(),
+      "a partial run names every player it did not publish, in the vocabulary's own order",
+    )
+    assertEquals(
+      listOf("AndroidX Embedded · baked", "RC · JS player", "RC · cmp-wasm player"),
+      Regex("<th>([^<]+)</th>")
+        .findAll(rcLanesPartialComparison.substringAfter("cp-rc-table").substringBefore("</thead>"))
+        .map { it.groupValues[1] }
+        .toList()
+        .drop(1),
+      "a partial run still gets a column per player it did publish, and no empty ones",
     )
     val escapedComparison =
       ServeWeb.comparisonPage(
