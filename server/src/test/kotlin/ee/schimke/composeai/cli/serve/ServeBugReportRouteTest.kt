@@ -116,7 +116,7 @@ class ServeBugReportRouteTest {
     val (code, body) = get("/report-bug")
     assertEquals(200, code)
     assertTrue(
-      body.contains("action=\"https://github.com/yschimke/compose-ai-tools/issues/new\""),
+      body.contains("action=\"https://github.com/yschimke/compose-preview-server/issues/new\""),
       body,
     )
     assertTrue(body.contains("Report a bug in the preview server"), body)
@@ -309,7 +309,10 @@ class ServeBugReportRouteTest {
       // The whole point of the panel: the two destinations, told apart before the choice.
       assertTrue(body.contains("cp-fab-catalog"), "$path: no catalog half")
       assertTrue(body.contains("preview server</strong>"), "$path: no server half")
-      assertTrue(body.contains("<code>yschimke/compose-ai-tools</code>"), "$path: unnamed repo")
+      assertTrue(
+        body.contains("<code>yschimke/compose-preview-server</code>"),
+        "$path: unnamed repo",
+      )
       // The capture controls ship hidden; `report-capture.js` unhides them only where the browser
       // can actually grab a frame.
       assertTrue(body.contains("<div class=\"cp-shot\" hidden>"), "$path: capture not hidden")

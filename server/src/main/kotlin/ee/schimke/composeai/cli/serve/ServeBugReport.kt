@@ -35,8 +35,13 @@ internal object ServeBugReport {
    * The repo that ships the preview server. Fixed, not derived: unlike a preview — which belongs to
    * whichever project declared it — the server has exactly one home, and a bug in it filed anywhere
    * else reaches people who cannot fix it.
+   *
+   * That home is `compose-preview-server`, not the `compose-ai-tools` this code was extracted from:
+   * the CLI stayed there and consumes the published library, so the running server, its render
+   * lanes and every web surface this report describes are maintained here. A server bug filed
+   * against the CLI's tracker lands on people who no longer hold the code.
    */
-  const val REPO: String = "yschimke/compose-ai-tools"
+  const val REPO: String = "yschimke/compose-preview-server"
 
   /** Labels pre-applied to reports opened by the server UI. */
   const val LABELS: String = "ui-report,bug,daemon"
