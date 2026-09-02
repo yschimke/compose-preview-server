@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import ee.schimke.composeai.daemon.protocol.UiMode
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -248,6 +249,11 @@ class ServeCatalogLiveHost(
    * the daemon on every request (there is nothing to replay) and `/api/previews` can badge them.
    */
   override val liveOnlyPreviewIds: Set<String> = baked.liveOnlyPreviewIds
+
+  // The sticker is the baked host's, so the mode it was drawn in is the baked host's answer — the
+  // routing below asks it rather than the id, so an untagged half of a folded light/dark pair
+  // replays instead of waking a daemon. See [ServeBakedTheme].
+  override fun bakedTheme(previewId: String): UiMode? = baked.bakedTheme(previewId)
 
   // ── Non-blocking cold start ────────────────────────────────────────────────────────────────────
   // The no-override SVG lane prefers the daemon's per-variant vector over the baked per-slug one
@@ -1794,7 +1800,8 @@ class ServeCatalogLiveHost(
     previewId: String,
     overrides: PreviewOverrides,
   ): AnnotationsOutcome =
-    if (CatalogLiveRouting.overridesAffectRender(previewId, overrides)) AnnotationsOutcome.NotFound
+    if (CatalogLiveRouting.overridesAffectRender(previewId, overrides, bakedTheme(previewId)))
+      AnnotationsOutcome.NotFound
     else baked.renderAnnotations(previewId, overrides)
 
   /**
@@ -1803,7 +1810,13 @@ class ServeCatalogLiveHost(
    * re-render" decision is identical across the two trusted-catalog live hosts.
    */
   private fun daemonIdForOverrideRender(previewId: String, overrides: PreviewOverrides): String? =
-    CatalogLiveRouting.daemonIdForRender(previewId, overrides, alias, liveOnlyPreviewIds)
+    CatalogLiveRouting.daemonIdForRender(
+      previewId,
+      overrides,
+      alias,
+      liveOnlyPreviewIds,
+      bakedTheme(previewId),
+    )
 
   /** Live streaming is available only for aliased ids; others have no stream (snapshot only). */
   override fun subscribeStream(

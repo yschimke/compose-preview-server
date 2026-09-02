@@ -13683,14 +13683,28 @@ ${scriptTag("known-differences.js")}
       // nothing picked. It rides as its own attribute because the `selected` option stops
       // answering for it the moment the sticky script writes `el.value`, and every consumer that
       // asks "has the visitor actually pinned a theme?" (`pinsTheme`) reads it after that point.
-      // Empty when the catalog names no theme for the preview, which is deliberately NOT the same
-      // as "light": the select falls back to displaying Light, but a `uiMode=light` there is a
-      // real request the baked pixels may not answer, so it stays an override.
+      // Empty when NOTHING names a theme for this preview, which is deliberately not the same as
+      // "light": the select falls back to displaying Light, but a `uiMode=light` there is a real
+      // request the baked pixels may not answer, so it stays an override.
+      //
+      // "Nothing names it" is the narrow case it was always meant to be, and used not to be. An
+      // untagged sticker published beside its `__dark` twin is named by that pairing — it is the
+      // light half — which is what [ServeBakedTheme] resolves and what the render lane now routes
+      // on. While this attribute stayed empty for those, the toggle wrote `uiMode=light` into
+      // every URL as though it were a pin, and the same disagreement that costs a daemon render
+      // server-side (compose-ai-tools#4997) also pinned a parameter nobody chose.
       // `tabindex="-1"` keeps the hidden select out of the tab order, which is what makes the
       // `aria-hidden` wrapper legitimate.
+      val bakedThemeName =
+        viewerTheme
+          ?: ServeBakedTheme.resolve(preview.id, preview.theme) { id ->
+              siblings.any { it.id == id }
+            }
+            ?.name
+            ?.lowercase()
       """
         <span class="cp-modes-inputs" aria-hidden="true">
-          <select id="cp-theme" class="cp-knob-theme" data-theme-active="0" data-default-theme="${viewerTheme.orEmpty()}" data-has-declared-themes="${declaredThemes.isNotEmpty()}" data-fixed-theme="$themeFixed" tabindex="-1"$themeDis>
+          <select id="cp-theme" class="cp-knob-theme" data-theme-active="0" data-default-theme="${bakedThemeName.orEmpty()}" data-has-declared-themes="${declaredThemes.isNotEmpty()}" data-fixed-theme="$themeFixed" tabindex="-1"$themeDis>
             $defaults$providerOptions
           </select>
         </span>
