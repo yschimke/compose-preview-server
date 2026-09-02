@@ -55,7 +55,12 @@ async function waitUntilReady(origin, process) {
     throw new Error("server did not become ready");
 }
 
-async function startProductServer(port, stateDirectory, logPath) {
+async function startProductServer(
+    port,
+    stateDirectory,
+    logPath,
+    catalogs = "m3-catalog,remote-m3",
+) {
     const output = [];
     const environment = { ...process.env };
     delete environment.JAVA_OPTS;
@@ -72,7 +77,7 @@ async function startProductServer(port, stateDirectory, logPath) {
             "--ui-builder-dir",
             app,
             "--ui-builder-catalogs",
-            "m3-catalog,remote-m3",
+            catalogs,
             "--ui-builder-state-dir",
             stateDirectory,
             "--accept-docs",
@@ -331,6 +336,63 @@ async function fillCompose(page, locator, value) {
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
     await page.keyboard.type(value, { delay: 20 });
 }
+
+test("the default website selects an enabled catalog and retains the offline fixture fallback", async ({
+    browser,
+}, testInfo) => {
+    const remotePort = await freePort();
+    const remoteState = await mkdtemp(resolve(tmpdir(), "compose-ui-builder-remote-only-"));
+    const remoteLog = testInfo.outputPath("remote-only-server.log");
+    const remoteServer = await startProductServer(
+        remotePort,
+        remoteState,
+        remoteLog,
+        "remote-m3",
+    );
+    const remotePage = await browser.newPage();
+    try {
+        await remotePage.goto(
+            `${remoteServer.origin}/ui-builder/?token=${encodeURIComponent(operatorToken)}&actor=operator&clientId=remote-only`,
+        );
+        await remotePage.waitForFunction(
+            () => document.documentElement.dataset.uiBuilderReady === "true",
+            null,
+            { timeout: 30_000 },
+        );
+        await expect(remotePage.getByText("Create a new design")).toBeVisible();
+        await expect(
+            remotePage.getByRole("button", { name: "Remote Material 3" }),
+        ).toBeVisible();
+        await expect(
+            remotePage.getByRole("button", { name: "Material 3", exact: true }),
+        ).toHaveCount(0);
+    } finally {
+        await remotePage.close();
+        await remoteServer.stop();
+    }
+
+    const offlinePort = await freePort();
+    const offlineLog = testInfo.outputPath("offline-ui-builder-server.log");
+    const offlineServer = await startProductServer(offlinePort, "none", offlineLog);
+    const offlinePage = await browser.newPage();
+    try {
+        await offlinePage.goto(`${offlineServer.origin}/ui-builder/`);
+        await offlinePage.waitForFunction(
+            () =>
+                document.documentElement.dataset.uiBuilderReady === "true" &&
+                globalThis.__uiBuilderEditor?.revision === 108,
+            null,
+            { timeout: 30_000 },
+        );
+        await expect(offlinePage.getByText("Create a new design")).toHaveCount(0);
+        await expect(
+            offlinePage.getByText("m3-catalog component catalog", { exact: true }),
+        ).toBeVisible();
+    } finally {
+        await offlinePage.close();
+        await offlineServer.stop();
+    }
+});
 
 test("only explicitly enabled catalog-scoped UI builders are available", async ({
     browser,

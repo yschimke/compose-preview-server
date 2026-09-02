@@ -1,7 +1,9 @@
 # UI builder live browser session
 
-The `/ui-builder/` Wasm application keeps its fixture-backed editor as the default. A shared,
-persistent session is explicit:
+The `/ui-builder/` Wasm application probes the same-origin design service when neither `mode` nor
+`session` is specified. A configured service opens the live New design chooser; a
+`--ui-builder-state-dir none` static-assets-only deployment falls back to the fixture-backed editor.
+A shared, persistent design can also be opened explicitly:
 
 ```text
 /ui-builder/?session=live&designId=jetcaster-discover&actor=operator&clientId=browser-a&token=…
