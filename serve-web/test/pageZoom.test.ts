@@ -18,13 +18,7 @@ import "../src/components/PageZoom.js";
 const STAGE = { left: 0, top: 0, width: 1200, height: 800 };
 const SHEET = { width: 1200, height: 800 };
 
-/**
- * A design page: two portrait cards, each holding slots, each slot a component —
- * the shape a real Figma export has, and the committed page fixture with it.
- */
-const PAGE = `
-  <div id="cp-design-page">
-  <div class="cp-page-stage">
+const SHEET_MARKUP = `
     <div class="cp-page-canvas" data-cp-page-canvas>
       <svg data-box="0,0,1200,800">
         <g data-node-id="card-a" data-box="40,90,560,690">
@@ -35,7 +29,31 @@ const PAGE = `
         <g data-node-id="card-b" data-box="620,90,560,690"></g>
       </svg>
       <a class="cp-page-node" data-cp-node="shape-a1" href="/p/shape"></a>
-    </div>
+    </div>`;
+
+/**
+ * A design page: two portrait cards, each holding slots, each slot a component —
+ * the shape a real Figma export has, and the committed page fixture with it.
+ *
+ * The bar sits in the sticky control row above the stage, which is where the
+ * server writes it: the stage is as tall as the sheet's aspect makes it, so a
+ * control in its bottom corner is off screen for most of the reading (#4996).
+ * It therefore drives a stage it is NOT inside — the arrangement every test
+ * below runs against.
+ */
+const PAGE = `
+  <div id="cp-design-page">
+  <div class="cp-page-controls">
+    <cp-page-zoom hidden></cp-page-zoom>
+  </div>
+  <div class="cp-page-stage">${SHEET_MARKUP}
+  </div>
+  </div>`;
+
+/** The arrangement the bar used to ship in: nested inside the stage it drives. */
+const NESTED_PAGE = `
+  <div id="cp-design-page">
+  <div class="cp-page-stage">${SHEET_MARKUP}
     <cp-page-zoom hidden></cp-page-zoom>
   </div>
   </div>`;
@@ -235,6 +253,25 @@ describe("<cp-page-zoom>", () => {
         await mount();
         assert.equal(el<HTMLElement>("cp-page-zoom").hidden, true);
         assert.equal(percent(), 100);
+    });
+
+    it("drives the stage from the control row it is written into", async () => {
+        await mount();
+        assert.equal(
+            el<HTMLElement>("cp-page-zoom").closest(".cp-page-stage"),
+            null,
+            "the fixture must place the bar OUTSIDE the stage",
+        );
+        dblclick(at(65, 430));
+        await flush();
+        assert.ok(percent() > 150, `expected a real zoom, got ${percent()}%`);
+    });
+
+    it("still drives a stage it is nested inside", async () => {
+        await mount(NESTED_PAGE);
+        dblclick(at(65, 430));
+        await flush();
+        assert.ok(percent() > 150, `expected a real zoom, got ${percent()}%`);
     });
 
     it("frames the section a double-click lands in", async () => {

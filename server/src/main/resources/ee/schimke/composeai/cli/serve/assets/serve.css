@@ -3729,9 +3729,10 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
 
    Filling the stage exactly (`inset: 0`) is load-bearing twice over: it is what makes the overlays'
    percentage placement mean "percent of the stage", and `transform` on it makes it their containing
-   block, so that stays true once a zoom is applied. The tip and the zoom bar are deliberately NOT
-   in here — a tooltip that scaled 12x would be unreadable, and a control that panned away with the
-   sheet could not be reached to undo the pan. */
+   block, so that stays true once a zoom is applied. The tip is deliberately NOT in here — a tooltip
+   that scaled 12x would be unreadable — and the zoom bar is not even in the stage: a control that
+   panned away with the sheet could not be reached to undo the pan, and one parked in the stage's
+   corner could not be reached from a sheet taller than the window either. See `cp-page-zoom`. */
 .cp-page-canvas {
   position: absolute;
   inset: 0;
@@ -3962,37 +3963,30 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   transform-origin: 100% 100%;
 }
 /* The way back out, and the readout that says how far in you are — `<cp-page-zoom>`, which renders
-   its own buttons into this pill (light DOM, so these rules reach them). Subtle on purpose: it is
-   parked in the stage's bottom-right corner, it is only there while the sheet IS zoomed (at 1:1 there
-   is nothing to reset, and a permanent control would be chrome over the drawing), and it sits at
-   two-thirds opacity until pointed at.
+   its own buttons into this pill (light DOM, so these rules reach them). It used to be parked in
+   the stage's bottom-right corner at two-thirds opacity, which only worked while the whole sheet
+   was on screen: the stage is sized to the design's own aspect, so on a wide display it is two
+   screenfuls tall and its bottom corner sits below the fold for most of the reading — the reader
+   who had drilled in was the one who could no longer reach Reset (issue #4996). It rides the
+   sticky control row instead, so it is beside the lane flip and on screen at every scroll offset,
+   and it is drawn as a sibling of the lane switch rather than as chrome over the drawing.
 
-   `display: flex` beats the `hidden` attribute on its own — the same trap the legend fell into — so
-   the tag has to be told to respect it, or an unzoomed sheet would carry a bar offering to reset a
-   zoom nobody applied. The server ships it `hidden` for that reason too: the element only unhides
-   itself once there is a zoom. */
+   Still only there while the sheet IS zoomed: at 1:1 there is nothing to reset. `display: flex`
+   beats the `hidden` attribute on its own — the same trap the legend fell into — so the tag has to
+   be told to respect it, or an unzoomed sheet would carry a bar offering to reset a zoom nobody
+   applied. The server ships it `hidden` for that reason too: the element only unhides itself once
+   there is a zoom. */
 cp-page-zoom {
-  position: absolute;
-  right: 0.5rem;
-  bottom: 0.5rem;
-  z-index: 3;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.15rem;
   padding: 0.15rem;
   border: 1px solid var(--cp-border);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--cp-surface, #fff) 88%, transparent);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
   color: var(--cp-fg-muted);
   font-size: 0.72rem;
-  opacity: 0.62;
-  transition: opacity 120ms ease;
 }
 cp-page-zoom[hidden] { display: none; }
-cp-page-zoom:hover,
-cp-page-zoom:focus-within { opacity: 1; }
 cp-page-zoom button {
   border: 0;
   border-radius: 999px;
@@ -4021,20 +4015,46 @@ cp-page-zoom button:focus-visible {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-/* How the sheet is driven, said once next to the controls rather than discovered by accident.
+/* How the sheet is driven, said once under the controls rather than discovered by accident.
    Double-click is not a gesture anyone tries on a picture unprompted, and the modifier on the wheel
-   is the half nobody guesses. */
+   is the half nobody guesses.
+
+   BELOW the control row, not in it. It is help text, not an action, and the row it used to sit in
+   is now sticky: at 1024px this sentence wrapped that row to two lines and doubled the strip of
+   sheet the bar stands over — 84px of a surface whose whole interaction is pointing at it. Read
+   once and then in the way, which is exactly what should scroll off. */
 .cp-page-hint {
+  margin: 0 0 0.8rem;
   color: var(--cp-fg-muted);
   font-size: 0.72rem;
 }
+/* The floating action bar. The stage below it is sized to the sheet's own aspect and takes the
+   full width of a wide display, so it is routinely taller than the window — m3-catalog's Buttons
+   page is over two screenfuls at 2560x1330. Left in the flow, this row scrolled off with the top
+   of the sheet, and with it went the only way to change what the sheet SHOWS: a reader looking at
+   the bottom of a page had to scroll back up to flip a lane (issue #4996). So it sticks under the
+   header, on the same shape `.cp-catalog-tools` uses — the header's own height as the offset, the
+   page's background behind it so the sheet passes underneath rather than through.
+
+   Above the stage's own layers (the overlays and the tip) but below the header's 80: the sheet
+   scrolls under this bar, and this bar scrolls under the site's. */
 .cp-page-controls {
+  position: sticky;
+  top: var(--site-header-height);
+  z-index: 19;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.9rem;
-  margin: 0.8rem 0;
+  margin: 0 0 0.8rem;
+  padding: 0.55rem 0;
+  background: var(--cp-bg);
   font-size: var(--md-sys-typescale-body-small-size, 0.82rem);
+}
+/* None of what the hint describes — a double-click, a modified wheel, a keyboard — is a gesture a
+   phone reader has, so on a phone it is a paragraph that costs a fold and offers nothing. */
+@media (max-width: 720px) {
+  .cp-page-hint { display: none; }
 }
 .cp-page-controls label { display: inline-flex; align-items: center; gap: 0.35rem; }
 /* The flip, as a segmented pair rather than two loose radios: the two lanes are one question with

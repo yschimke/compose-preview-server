@@ -16,8 +16,11 @@
 // `.cp-page-canvas` — the layer holding the export, the component overlays over
 // it and the renders inside those. One transform moves the sheet and its whole
 // instrumentation together, so a slot cannot come unstuck from the shape it
-// stands in. This element sits OUTSIDE that layer (as does the tooltip): a
-// control that panned away with the sheet could not be reached to undo the pan.
+// stands in. This element sits OUTSIDE that layer, and outside the stage
+// altogether: a control that panned away with the sheet could not be reached to
+// undo the pan, and one parked in the stage's corner could not be reached from a
+// sheet two screenfuls tall either. It renders into the page's sticky control
+// row, and reaches the stage by lookup rather than by ancestry.
 //
 // COMPONENT BOUNDARY
 //
@@ -31,6 +34,7 @@
 
 import { Fragment, h, type VNode } from "../vue.js";
 import { customElement } from "../controllerElement.js";
+import { whenParsed } from "../dom/whenParsed.js";
 import { VueElement } from "../vueElement.js";
 import {
     STEP,
@@ -55,6 +59,7 @@ export class PageZoom extends VueElement {
     /** The readout, and the only reactive state — the view itself is not rendered. */
     private percent = 100;
 
+    private installed = false;
     private stage: HTMLElement | null = null;
     private canvas: HTMLElement | null = null;
     private svg: SVGSVGElement | null = null;
@@ -149,7 +154,37 @@ export class PageZoom extends VueElement {
 
     connectedCallback(): void {
         super.connectedCallback();
-        this.stage = this.closest<HTMLElement>(".cp-page-stage");
+        // The stage is no longer an ANCESTOR, so the wiring can lose the race the
+        // parser sets up: the bar is written into the control row ABOVE the sheet, and
+        // an element is upgraded the moment the parser reaches its tag. Same answer
+        // `<cp-design-page>` gives — try now, and once more when the document is
+        // whole. `install` is idempotent, so the second attempt costs nothing when the
+        // first one already succeeded.
+        if (!this.install()) void whenParsed().then(() => this.install());
+    }
+
+    /**
+     * Bind to the sheet this bar drives, if it is in the document yet.
+     *
+     * Returns whether there is nothing left to wait for — true once bound, and true
+     * as well for a bar that has been disconnected in the meantime, which is not a
+     * retry either.
+     */
+    private install(): boolean {
+        if (!this.isConnected || this.installed) return true;
+        // The bar rides the page's sticky control row now, not the stage's bottom-right corner: the
+        // stage is sized to the sheet's own aspect and is routinely taller than the window, so a
+        // control parked in its corner was below the fold for most of the reading and the reader
+        // who had drilled in could not reach Reset (issue #4996). It is therefore no longer a
+        // DESCENDANT of what it drives — find the stage through the page root, keeping `closest`
+        // first so a bar nested in a stage (the unit fixture, and any caller that still writes it
+        // that way) resolves without a document-wide lookup.
+        this.stage =
+            this.closest<HTMLElement>(".cp-page-stage") ??
+            this.closest<HTMLElement>(
+                "#cp-design-page",
+            )?.querySelector<HTMLElement>(".cp-page-stage") ??
+            null;
         this.canvas =
             this.stage?.querySelector<HTMLElement>("[data-cp-page-canvas]") ??
             null;
@@ -157,7 +192,8 @@ export class PageZoom extends VueElement {
         // Nothing to transform means the gestures are inert rather than
         // half-working: a readout climbing to 400% over a sheet that never moved
         // would be worse than no zoom at all.
-        if (!this.stage || !this.canvas) return;
+        if (!this.stage || !this.canvas) return false;
+        this.installed = true;
 
         this.stage.addEventListener("dblclick", this.onDblClick);
         this.stage.addEventListener("wheel", this.onWheel, { passive: false });
@@ -203,6 +239,7 @@ export class PageZoom extends VueElement {
         }
         window.addEventListener("resize", this.onResize);
         this.apply(this.view);
+        return true;
     }
 
     disconnectedCallback(): void {
@@ -221,6 +258,7 @@ export class PageZoom extends VueElement {
         this.removeEventListener("focusout", this.onFocusOut);
         this.observer?.disconnect();
         this.observer = null;
+        this.installed = false;
         super.disconnectedCallback();
     }
 
