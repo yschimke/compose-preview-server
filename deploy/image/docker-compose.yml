@@ -20,8 +20,25 @@
 # `-p image`) THEN `up -d` — a plain `down` would target this new name and leave
 # the old stack colliding on 80/443. See README → Auto-updates.
 name: compose-preview
+
+# Log rotation. Docker's json-file driver defaults to UNBOUNDED, and nothing here
+# or in /etc/docker/daemon.json capped it, so every container's log grew until the
+# disk did. `preview` alone writes ~16k lines per 30 min of render tracing, and
+# turning on Caddy's access log (which was off entirely — see Caddyfile) adds a
+# line per request on top. 50 MB x 5 files caps each container at 250 MB and still
+# leaves roughly a day of history to diagnose from.
+#
+# Anchored rather than repeated so a service added later inherits the cap by
+# writing one line, instead of silently reverting to unbounded.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   preview:
+    logging: *default-logging
     image: "ghcr.io/yschimke/compose-preview-host:${IMAGE_TAG:-latest}"
     restart: always
     pull_policy: always
@@ -371,6 +388,7 @@ services:
   # for the pull (docker login ghcr.io on the host) — no in-container config.
   # Set ROLLOUT_INTERVAL in .env to change the poll cadence (default 1200s).
   rollout:
+    logging: *default-logging
     image: docker:29-cli
     restart: always
     depends_on:
@@ -404,6 +422,7 @@ services:
   # Comment this service out (and the Caddyfile /__hooks/rollout route) to disable the
   # webhook and rely on the poll loop alone.
   hook:
+    logging: *default-logging
     image: docker:29-cli
     restart: always
     depends_on:
@@ -431,6 +450,7 @@ services:
   # superseded image. Comment this out to manage caddy manually. For a private GHCR
   # package, mount a registry config: `- ~/.docker/config.json:/config.json:ro`.
   watchtower:
+    logging: *default-logging
     # Maintained fork of the (now-stale) containrrr/watchtower: the upstream image's
     # baked Docker SDK negotiates API 1.25, which modern engines reject ("client
     # version 1.25 is too old. Minimum supported API version is 1.40"), so it silently
@@ -443,6 +463,7 @@ services:
     command: --label-enable --cleanup --interval 1200
 
   caddy:
+    logging: *default-logging
     # The Caddyfile is BAKED into this image (preview-caddy-image.yml) instead of
     # bind-mounted, so a config change auto-deploys via Watchtower like the server
     # (Watchtower watches image digests, not files). DOMAIN is still substituted
