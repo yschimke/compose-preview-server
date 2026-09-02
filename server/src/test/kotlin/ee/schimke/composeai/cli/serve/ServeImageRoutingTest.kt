@@ -234,6 +234,17 @@ class ServeImageRoutingTest {
   }
 
   @Test
+  fun `only a repository-matched browser session discovers capture hosting`() {
+    get("/images/capability", port = browserServer.port).use { response ->
+      assertEquals(204, response.code)
+    }
+    get("/images/capability").use { response -> assertEquals(403, response.code) }
+    get("/images/capability", port = plainServer.port).use { response ->
+      assertEquals(404, response.code)
+    }
+  }
+
+  @Test
   fun `a real github account without access to the gating repo is refused`() {
     upload(bearer = FakeAuth.OUTSIDER_TOKEN).use { response ->
       assertEquals(403, response.code)
