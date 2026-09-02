@@ -64,6 +64,15 @@ iframe and receive measured node/slot geometry without placing editor overlays i
 The distribution consumes the frontend through the immutable `:ui-builder-web` archive variant;
 it no longer reaches into the frontend project's tasks or output directory.
 
+## Remote catalog MCP
+
+The server can expose every hosted catalog through one aggregate Streamable HTTP MCP endpoint at
+`/mcp`. Enable it with `--agent-grants --catalog-mcp`; published resources require a
+short-lived `preview` grant, while made-to-order renders and structured data products require a
+`live` grant. The endpoint is separate from the stateful UI-builder authoring MCP surface, but both
+use the same authenticated user approval and revocation flow. See
+[the catalog MCP design and setup guide](docs/design/CATALOG_MCP.md).
+
 ## Spatial and WebXR previews
 
 A portable bundle can publish an XR preview as a version-one `SpatialScene` document and its panel

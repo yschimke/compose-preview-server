@@ -544,6 +544,13 @@ if [[ "${SERVE_AGENT_GRANTS:-}" == "1" || "${SERVE_AGENT_GRANTS:-}" == "true" ]]
     args+=(--agent-grant-rate-limit "${SERVE_AGENT_GRANT_RATE_LIMIT}")
 fi
 
+# Remote, per-catalog MCP. This deliberately has its own switch: UI-builder MCP is an authoring
+# surface with capability grants, while catalog MCP is a preview/live surface. The server refuses
+# this flag unless the authenticated agent-grant flow above is also enabled.
+if [[ "${SERVE_CATALOG_MCP:-}" == "1" || "${SERVE_CATALOG_MCP:-}" == "true" ]]; then
+  args+=(--catalog-mcp)
+fi
+
 # Extra Maven repositories the live-daemon classpath resolver may fetch from, beyond Maven Central +
 # Google Maven. A served catalog whose module pulls deps from a non-default repo (e.g.
 # meshcore-mobile's jitpack.io deps like usb-serial-for-android) otherwise has those coordinates

@@ -556,6 +556,9 @@ public class ServeCommandOptions(
    */
   override val agentGrants: Boolean = "--agent-grants" in args
 
+  /** Serve every catalog over aggregate Streamable HTTP MCP (`/mcp`). */
+  override val catalogMcp: Boolean = "--catalog-mcp" in args
+
   /** Raw `--agent-grant-scopes`; the server parses it (an unknown scope throws there). */
   override val agentGrantScopesFlag: String? = args.flagValue("--agent-grant-scopes")
   /** Raw `--agent-grant-max-ttl` (e.g. `2h`/`90m`/`3600`); the server parses and clamps it. */
@@ -843,6 +846,9 @@ public class ServeCommandOptions(
                           signed-in GitHub user (with --github-auth-*) or the --token holder; a
                           --public server with neither is refused. Revoke any time from /status.
                           Off by default.
+        --catalog-mcp     Expose all catalogs at /mcp using stateless Streamable HTTP.
+                          Requires --agent-grants. Published reads need preview scope; made-to-order
+                          renders and data products need live scope. Separate from UI-builder MCP.
         --agent-grant-scopes <list>
                           Ceiling on what a grant may carry: preview, live, playground (cumulative;
                           default preview,live). 'playground' lets an approved agent compile and run

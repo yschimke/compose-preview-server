@@ -57,6 +57,7 @@ import java.io.File
 import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -70,6 +71,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 
 /**
  * The embedded Ktor (CIO) HTTP server fronting a [ServeSessionRegistry]. Thin IO shell: a token
@@ -368,6 +370,10 @@ class ServeHttpServer(
    * ⇒ unlimited, which is right for a single-user local host.
    */
   private val agentGrantLimiter: ServeRateLimiter? = null,
+  /** Register stateless Streamable HTTP MCP endpoints for served catalogs. */
+  private val catalogMcpEnabled: Boolean = false,
+  /** Shared bearer/session resolver used by catalog MCP and UI-builder authorization. */
+  private val machineAuthorization: ServeMachineAuthorization? = null,
   /** Authoritative editable-design service. Null keeps the design API unregistered. */
   private val uiBuilderService: UiBuilderServicePort? = null,
   /** Independent human/operator/agent authorization for [uiBuilderService]. */
@@ -549,6 +555,10 @@ class ServeHttpServer(
   private val liveFrameStats = LiveFramePerfStats()
 
   private val renderSemaphore = Semaphore(renderSlots)
+  private val catalogMcp =
+    if (catalogMcpEnabled && machineAuthorization != null)
+      ServeCatalogMcp(sessions, renderSemaphore)
+    else null
   private val unleasedThemeSemaphore = Semaphore(1)
   private val themeRenderLeases = ThemeRenderLeaseManager(renderSlots)
 
@@ -831,6 +841,16 @@ class ServeHttpServer(
           post("${ServeAgentGrants.BASE_PATH}/{grantId}/revoke") {
             handleAgentGrantRevokeFromStatus(store)
           }
+        }
+
+        // Stateless aggregate Streamable HTTP MCP. One stable endpoint discovers every registered
+        // catalog; resource URIs and catalog-bearing tool arguments select the target. GET is
+        // intentionally 405: this version has no server-initiated notifications, so an SSE listen
+        // stream would make a promise the stateless implementation cannot use.
+        if (catalogMcp != null) {
+          post("/mcp") { handleCatalogMcp() }
+          get("/mcp") { rejectCatalogMcpListen() }
+          delete("/mcp") { rejectCatalogMcpListen() }
         }
 
         // `/status` — the operator/observer view of this running host: published catalogs + their
@@ -7543,6 +7563,129 @@ class ServeHttpServer(
     }
   }
 
+  /** One stateless MCP request for the selected catalog (Streamable HTTP, JSON response mode). */
+  private suspend fun RoutingContext.handleCatalogMcp() {
+    val mcp = catalogMcp ?: return call.respond(HttpStatusCode.NotFound)
+    val authorization = machineAuthorization ?: return call.respond(HttpStatusCode.NotFound)
+    if (rejectCatalogMcpOrigin()) return
+
+    when (val decision = authorization.authorizeScope(call, AgentGrantScope.PREVIEW)) {
+      is ServeMachineAuthorization.Decision.Authorized -> Unit
+      ServeMachineAuthorization.Decision.Missing -> {
+        respondCatalogMcpAuthorization(
+          HttpStatusCode.Unauthorized,
+          "A short-lived preview grant is required.",
+        )
+        return
+      }
+      is ServeMachineAuthorization.Decision.Forbidden -> {
+        respondCatalogMcpAuthorization(HttpStatusCode.Forbidden, decision.message)
+        return
+      }
+    }
+
+    val requestContentType =
+      call.request.headers[HttpHeaders.ContentType]?.substringBefore(';')?.trim()
+    if (!requestContentType.equals(ContentType.Application.Json.toString(), ignoreCase = true)) {
+      call.respondText(
+        "MCP POST requests require Content-Type: application/json",
+        status = HttpStatusCode.UnsupportedMediaType,
+      )
+      return
+    }
+
+    val protocolVersion = call.request.headers[MCP_PROTOCOL_VERSION_HEADER]
+    if (
+      protocolVersion != null && protocolVersion !in ServeCatalogMcp.SUPPORTED_PROTOCOL_VERSIONS
+    ) {
+      call.respondText(
+        "unsupported MCP protocol version '$protocolVersion'",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+
+    val bytes =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, MAX_CATALOG_MCP_BYTES) }
+      }
+    if (bytes == null) {
+      call.respondText("MCP request exceeds 1 MiB", status = HttpStatusCode.PayloadTooLarge)
+      return
+    }
+    val request =
+      try {
+        JSON.parseToJsonElement(bytes.decodeToString()).jsonObject
+      } catch (e: Exception) {
+        call.respondText("invalid JSON-RPC request", status = HttpStatusCode.BadRequest)
+        return
+      }
+
+    val reply = mcp.handle(request) { authorization.authorizeScope(call, AgentGrantScope.LIVE) }
+    if (reply.accepted) {
+      call.respond(HttpStatusCode.Accepted)
+    } else {
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      call.respondText(
+        reply.body.toString(),
+        ContentType.Application.Json,
+        HttpStatusCode.OK,
+      )
+    }
+  }
+
+  /** Streamable HTTP permits a stateless server to decline the optional GET/SSE channel. */
+  private suspend fun RoutingContext.rejectCatalogMcpListen() {
+    call.response.headers.append(HttpHeaders.Allow, HttpMethod.Post.value)
+    call.respondText(
+      "This catalog MCP endpoint is stateless; send JSON-RPC messages with POST.",
+      status = HttpStatusCode.MethodNotAllowed,
+    )
+  }
+
+  /** MCP's DNS-rebinding guard: browser-originated calls may only come from this request's host. */
+  private suspend fun RoutingContext.rejectCatalogMcpOrigin(): Boolean {
+    val raw = call.request.headers[HttpHeaders.Origin] ?: return false
+    val originHost = runCatching { URI(raw).host }.getOrNull()
+    val requestHost =
+      call.request.headers[HttpHeaders.Host]?.let { authority ->
+        runCatching { URI("http://$authority").host }.getOrNull()
+      }
+    if (originHost != null && requestHost != null && originHost.equals(requestHost, true)) {
+      return false
+    }
+    call.respondText("untrusted Origin", status = HttpStatusCode.Forbidden)
+    return true
+  }
+
+  private suspend fun RoutingContext.respondCatalogMcpAuthorization(
+    status: HttpStatusCode,
+    message: String,
+  ) {
+    call.response.headers.append(
+      HttpHeaders.WWWAuthenticate,
+      "Bearer realm=\"compose-preview-catalog-mcp\"",
+    )
+    call.response.headers.append(
+      CATALOG_MCP_AGENT_ACCESS_HEADER,
+      externalOrigin() + ServeAgentGrants.REQUEST_PATH,
+    )
+    call.respondText(
+      JSON.encodeToString(
+        CatalogMcpAuthorizationResponse.serializer(),
+        CatalogMcpAuthorizationResponse(
+          error =
+            if (status == HttpStatusCode.Unauthorized) "authorization_required" else "forbidden",
+          message = message,
+          agentAccessRequestUrl = externalOrigin() + ServeAgentGrants.REQUEST_PATH,
+          requiredScope = AgentGrantScope.PREVIEW.wire,
+        ),
+      ),
+      ContentType.Application.Json,
+      status,
+    )
+  }
+
   /**
    * `GET /api/uses?q=<token>` (query) and `GET /{system}/api/uses?q=<token>` (path): the previews
    * whose declaration **calls** something matching the token — what the landing filter box answers
@@ -10882,6 +11025,9 @@ class ServeHttpServer(
   }
 
   companion object {
+    private const val MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
+    private const val CATALOG_MCP_AGENT_ACCESS_HEADER = "X-Compose-Preview-Agent-Access"
+    private const val MAX_CATALOG_MCP_BYTES = 1024L * 1024
     private const val UI_MODE_NIGHT_MASK = 0x30
     private const val UI_MODE_NIGHT_NO = 0x10
     private const val UI_MODE_NIGHT_YES = 0x20
@@ -11350,6 +11496,15 @@ private data class VersionResponse(
   val serveSchema: String = "compose-preview-serve/v3",
   /** True when the box serves token-free (public preview server); false for a token-gated serve. */
   val public: Boolean,
+)
+
+@Serializable
+private data class CatalogMcpAuthorizationResponse(
+  val schema: String = "compose-preview/catalog-mcp-auth/v1",
+  val error: String,
+  val message: String,
+  val agentAccessRequestUrl: String,
+  val requiredScope: String,
 )
 
 /**

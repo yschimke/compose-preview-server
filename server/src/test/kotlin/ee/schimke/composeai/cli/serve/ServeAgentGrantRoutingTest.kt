@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import java.io.File
 import java.nio.file.Files
+import java.util.Base64
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -10,6 +11,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
@@ -40,7 +42,21 @@ class ServeAgentGrantRoutingTest {
     val dir = Files.createTempDirectory("grants").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText("<html></html>")
     File(dir, "previews").mkdirs()
+    val pixel =
+      Base64.getDecoder()
+        .decode(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB" +
+            "AScY42YAAAAASUVORK5CYII="
+        )
+    File(dir, "previews/example.png").writeBytes(pixel)
     registry.register("demo", host = ServeBundleHost(dir, label = "demo"), pinned = true)
+    val other = Files.createTempDirectory("grants-other").toFile().also { it.deleteOnExit() }
+    File(other, "index.html").writeText("<html></html>")
+    File(other, "previews").mkdirs()
+    File(other, "previews/example.png").writeBytes(pixel)
+    registry.register("other", host = ServeBundleHost(other, label = "other"), pinned = true)
+    val machineAuthorization =
+      ServeMachineAuthorization(operatorToken, githubAuth = null, agentGrants = grants)
     ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -49,6 +65,8 @@ class ServeAgentGrantRoutingTest {
         defaultSessionId = "demo",
         isPublic = false,
         agentGrants = grants,
+        catalogMcpEnabled = true,
+        machineAuthorization = machineAuthorization,
       )
       .also { it.start() }
   }
@@ -135,6 +153,148 @@ class ServeAgentGrantRoutingTest {
         .content
         .contains(payload["deviceSecret"]!!.jsonPrimitive.content)
     )
+  }
+
+  @Test
+  fun `catalog MCP is streamable HTTP and advertises the grant flow`() {
+    val unauthenticated = post("/mcp", initializeRequest(1))
+    assertEquals(401, unauthenticated.first)
+    assertEquals("authorization_required", str(unauthenticated.second, "error"))
+    assertTrue(
+      str(unauthenticated.second, "agentAccessRequestUrl").endsWith("/agent-access/request")
+    )
+
+    val request = Request.Builder().url(url("/mcp")).get().build()
+    client.newCall(request).execute().use { response ->
+      assertEquals(405, response.code)
+      assertEquals("POST", response.header("Allow"))
+    }
+  }
+
+  @Test
+  fun `preview grant initializes and reads a catalog resource`() {
+    val token = grantedToken(scope = "preview")
+    val initialized = mcp(token, initializeRequest(1))
+    assertEquals(200, initialized.first)
+    val result = json(initialized.second)["result"]!!.jsonObject
+    assertEquals(
+      ServeCatalogMcp.MCP_PROTOCOL_VERSION,
+      result["protocolVersion"]!!.jsonPrimitive.content,
+    )
+
+    val listed =
+      mcp(
+        token,
+        """{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}""",
+      )
+    val resources = json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray
+    assertEquals(2, resources.size)
+    val uri =
+      resources
+        .single { it.jsonObject["uri"]!!.jsonPrimitive.content.contains("/demo/") }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+
+    val projects =
+      mcp(
+        token,
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}""",
+      )
+    val projectText =
+      json(projects.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single()
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(projectText.contains("\"workspaceId\":\"demo\""))
+    assertTrue(projectText.contains("\"workspaceId\":\"other\""))
+
+    val read =
+      mcp(
+        token,
+        """{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"$uri"}}""",
+      )
+    val contents = json(read.second)["result"]!!.jsonObject["contents"]!!.jsonArray
+    assertTrue(contents.single().jsonObject["blob"]!!.jsonPrimitive.content.isNotBlank())
+
+    val storyDoc =
+      mcp(
+        token,
+        """{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get-documentation-for-story","arguments":{"storyId":"demo::example"}}}""",
+      )
+    assertTrue(storyDoc.second.contains("compose-preview-mcp-storybook/v1"))
+    assertTrue(storyDoc.second.contains("demo::example"))
+  }
+
+  @Test
+  fun `catalog MCP accepts notifications and rejects hostile browser origins`() {
+    val token = grantedToken(scope = "preview")
+    val notification = mcp(token, """{"jsonrpc":"2.0","method":"notifications/initialized"}""")
+    assertEquals(202, notification.first)
+
+    val hostileOrigin = mcp(token, initializeRequest(6), origin = "https://attacker.example")
+    assertEquals(403, hostileOrigin.first)
+    assertEquals("untrusted Origin", hostileOrigin.second)
+
+    val unsupportedProtocol = mcp(token, initializeRequest(7), protocolVersion = "2099-01-01")
+    assertEquals(400, unsupportedProtocol.first)
+    assertTrue(unsupportedProtocol.second.contains("unsupported MCP protocol version"))
+  }
+
+  @Test
+  fun `made to order MCP render requires live scope`() {
+    val previewToken = grantedToken(scope = "preview")
+    val refused =
+      mcp(
+        previewToken,
+        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
+      )
+    assertTrue(refused.second.contains("'live' was not approved"))
+
+    val liveToken = grantedToken(scope = "live")
+    val rendered =
+      mcp(
+        liveToken,
+        """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}""",
+      )
+    val content = json(rendered.second)["result"]!!.jsonObject["content"]!!.jsonArray
+    assertEquals("image", content.single().jsonObject["type"]!!.jsonPrimitive.content)
+
+    val observed =
+      mcp(
+        liveToken,
+        """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
+      )
+    val observation =
+      json(observed.second)["result"]!!.jsonObject["content"]!!.jsonArray.single().jsonObject
+    assertEquals("text", observation["type"]!!.jsonPrimitive.content)
+    assertTrue(observation["text"]!!.jsonPrimitive.content.contains("\"sha256\""))
+  }
+
+  private fun initializeRequest(id: Int): String =
+    """{"jsonrpc":"2.0","id":$id,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"""
+
+  private fun mcp(
+    token: String,
+    body: String,
+    origin: String? = null,
+    protocolVersion: String = ServeCatalogMcp.MCP_PROTOCOL_VERSION,
+  ): Pair<Int, String> {
+    val request =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("Authorization", "Bearer $token")
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", protocolVersion)
+        .apply { origin?.let { header("Origin", it) } }
+        .post(body.toRequestBody("application/json".toMediaType()))
+        .build()
+    client.newCall(request).execute().use {
+      return it.code to it.body.string()
+    }
   }
 
   @Test

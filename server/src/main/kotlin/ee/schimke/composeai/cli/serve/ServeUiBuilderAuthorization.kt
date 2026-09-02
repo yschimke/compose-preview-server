@@ -1,7 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
-import io.ktor.http.HttpHeaders
 import io.ktor.server.application.ApplicationCall
 
 enum class UiBuilderRouteCapability {
@@ -33,30 +32,20 @@ fun interface ServeUiBuilderAuthorization {
       serverToken: String,
       githubAuth: ServeGithubAuth?,
       agentGrants: ServeAgentGrantStore?,
+    ): ServeUiBuilderAuthorization =
+      fromMachineAuthorization(ServeMachineAuthorization(serverToken, githubAuth, agentGrants))
+
+    fun fromMachineAuthorization(
+      authorization: ServeMachineAuthorization
     ): ServeUiBuilderAuthorization = ServeUiBuilderAuthorization { call, capability ->
-      val provided =
-        call.request.queryParameters["token"] ?: call.request.headers[ServeHttpServer.TOKEN_HEADER]
-      if (serverToken.isNotBlank() && ServeUrls.tokensMatch(serverToken, provided)) {
-        return@ServeUiBuilderAuthorization UiBuilderAuthorizationDecision.Authorized("operator")
+      when (
+        val decision = authorization.authorizeCapability(call, capability.agentGrantCapability())
+      ) {
+        is ServeMachineAuthorization.Decision.Authorized ->
+          UiBuilderAuthorizationDecision.Authorized(decision.actorId)
+        ServeMachineAuthorization.Decision.Missing -> UiBuilderAuthorizationDecision.Missing
+        is ServeMachineAuthorization.Decision.Forbidden -> UiBuilderAuthorizationDecision.Forbidden
       }
-
-      val login = githubAuth?.currentLogin(call)
-      if (login != null && githubAuth.hasRepositoryAccess(call)) {
-        return@ServeUiBuilderAuthorization UiBuilderAuthorizationDecision.Authorized(
-          "github:$login"
-        )
-      }
-
-      val presentedGrant = agentGrants?.presentedGrant(call)
-      if (presentedGrant != null) {
-        val required = capability.agentGrantCapability()
-        return@ServeUiBuilderAuthorization if (presentedGrant.allows(required)) {
-          UiBuilderAuthorizationDecision.Authorized("agent:${presentedGrant.fingerprint}")
-        } else {
-          UiBuilderAuthorizationDecision.Forbidden
-        }
-      }
-      UiBuilderAuthorizationDecision.Missing
     }
   }
 }
@@ -67,21 +56,3 @@ private fun UiBuilderRouteCapability.agentGrantCapability(): AgentGrantCapabilit
     UiBuilderRouteCapability.WRITE -> AgentGrantCapability.UI_BUILDER_WRITE
     UiBuilderRouteCapability.EXPORT -> AgentGrantCapability.UI_BUILDER_EXPORT
   }
-
-private fun ServeAgentGrantStore.presentedGrant(
-  call: ApplicationCall
-): ServeAgentGrantStore.Grant? {
-  val bearer =
-    call.request.headers[HttpHeaders.Authorization]
-      ?.takeIf { it.startsWith(BEARER_PREFIX, ignoreCase = true) }
-      ?.substring(BEARER_PREFIX.length)
-      ?.trim()
-  return sequenceOf(
-      call.request.headers[ServeHttpServer.TOKEN_HEADER],
-      bearer,
-      call.request.queryParameters["token"],
-    )
-    .firstNotNullOfOrNull(::grantForToken)
-}
-
-private const val BEARER_PREFIX = "Bearer "

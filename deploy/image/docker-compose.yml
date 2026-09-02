@@ -270,6 +270,9 @@ services:
       SERVE_AGENT_GRANT_MAX_TTL: "${SERVE_AGENT_GRANT_MAX_TTL:-}"
       SERVE_AGENT_GRANT_MAX_ACTIVE: "${SERVE_AGENT_GRANT_MAX_ACTIVE:-}"
       SERVE_AGENT_GRANT_RATE_LIMIT: "${SERVE_AGENT_GRANT_RATE_LIMIT:-}"
+      # Aggregate stateless Streamable HTTP catalog MCP at /mcp. Separate from UI-builder MCP;
+      # requires the authenticated agent-grant lane above.
+      SERVE_CATALOG_MCP: "${SERVE_CATALOG_MCP:-}"
       # Durable browser/MCP design state. The preview_config volume is shared across rolling image
       # replacements, so a design does not disappear when preview.coo.ee updates.
       SERVE_UI_BUILDER_STATE_DIR: "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}"

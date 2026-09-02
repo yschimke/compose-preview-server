@@ -2525,6 +2525,14 @@ public class ServeRunner(
     // repo-access check a real check instead of a no-op.
     val githubAuth = buildGithubAuth()
     val agentGrantStore = buildAgentGrantStore(githubAuth)
+    if (catalogMcp && agentGrantStore == null) {
+      System.err.println(
+        "serve: --catalog-mcp refused — remote MCP requires --agent-grants so its bearer can be " +
+          "short-lived, scoped, approved, and revoked."
+      )
+      throw IllegalArgumentException("--catalog-mcp requires --agent-grants")
+    }
+    val machineAuthorization = ServeMachineAuthorization(token, githubAuth, agentGrantStore)
     val playgroundLane =
       openPlaygroundService(docStore, registry, repoAccessGated = githubAuth != null)
     val catalogFeed =
@@ -2617,10 +2625,12 @@ public class ServeRunner(
           },
         agentGrants = agentGrantStore,
         agentGrantLimiter = agentGrantStore?.let { buildAgentGrantRateLimiter() },
+        catalogMcpEnabled = catalogMcp,
+        machineAuthorization = machineAuthorization,
         uiBuilderService = uiBuilderLane?.service,
         uiBuilderAuthorization =
           uiBuilderLane?.let {
-            ServeUiBuilderAuthorization.fromServeIdentity(token, githubAuth, agentGrantStore)
+            ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)
           },
         playgroundRateLimiter = playgroundLane?.let { buildPlaygroundRateLimiter() },
         // Reads a served preview's Kotlin, for two consumers with different requirements:
@@ -2672,6 +2682,12 @@ public class ServeRunner(
           "${AgentGrantProtocol.formatDuration(agentGrantStore.maxGrantTtlSeconds)}, " +
           "max scope ${agentGrantStore.maxScope.wire}, approved by " +
           (if (githubAuth != null) "a signed-in GitHub user" else "the holder of --token")
+      )
+    }
+    if (catalogMcp) {
+      System.err.println(
+        "serve: aggregate catalog MCP enabled at /mcp (Streamable HTTP; preview scope reads, " +
+          "live scope renders)"
       )
     }
 
