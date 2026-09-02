@@ -25,13 +25,35 @@ import okio.Path.Companion.toPath
  * latched and the viewer showed, and it names a class, not a cause — so issues #4259 and #4265 were
  * both filed against the symptom.
  *
+ * ## The other shape: resolved, but not the recorded bytes
+ *
+ * A coordinate can also come back **wrong** rather than missing.
+ * [CoordinateResolver][ee.schimke.composeai.cli.CoordinateResolver] compares a resolved artifact
+ * against the `sha256` the bundle recorded and, on a mismatch, warns and returns it anyway
+ * ("almost-compatible beats nothing") — which is right for a leaf dependency and fatal for a family
+ * whose artifacts must move together. That is what killed `meshcore-mobile`: its whole Remote
+ * Compose runtime is pinned at `1.0.0-SNAPSHOT` from one androidx.dev build, a stale extraction
+ * served `remote-player-core` from a *different* build, and the resulting classpath carried two
+ * Remote Compose lines. Every IR replay died on `NoSuchFieldError: class
+ * androidx.compose.remote.core.RemoteClock does not have member field … SYSTEM`
+ * (compose-preview-server#187; the resolver-side fix is content-keyed extraction).
+ *
+ * Nothing was *unresolved* there, so the record above stayed silent and the breaker reason named a
+ * class and no cause — the same hole issues #4259 / #4265 opened, reached through a different door.
+ * A version-level skew check would not have found it either: both sides read `1.0.0-SNAPSHOT`. Only
+ * the hash separates them, and the resolver already computed it, so [record] keeps the mismatches
+ * too.
+ *
  * ## What
  *
  * [record] persists the gap as `classpath-gaps.json` next to `daemon-launch.json`.
  * [linkageDiagnosis] reads it at trip time and returns one sentence for [RenderCircuitBreaker] to
  * append to the open breaker's reason — the only diagnosis anyone outside the box ever sees. When
  * the missing class's package matches one of the unresolved coordinates, the sentence names that
- * artifact specifically; otherwise it reports the gap and lets the reader draw the line.
+ * artifact specifically; otherwise it reports the gap and lets the reader draw the line. A
+ * mismatched coordinate that explains the failure is reported ahead of an unresolved one: "these
+ * exact bytes are not the ones the bundle recorded" is a cause, where "something is missing" is a
+ * direction.
  *
  * Read at trip time rather than held in memory, mirroring [SkikoNativePairing.linkageDiagnosis]: a
  * diagnosis nobody needs must not cost anything on the healthy path.
@@ -56,13 +78,19 @@ internal object BundleClasspathGaps {
   @Serializable
   data class Gaps(
     val unresolved: List<Gap> = emptyList(),
+    /**
+     * Coordinates that resolved to bytes whose sha256 is not the one the bundle recorded. Defaulted
+     * so a `classpath-gaps.json` written before this field existed still reads back.
+     */
+    val mismatched: List<Gap> = emptyList(),
     /** How many Maven coordinates the bundle recorded in total, for proportion. */
     val total: Int = 0,
   )
 
   /**
-   * Persist [unresolved] beside the launch descriptor in [destDir] and log the aggregate. A no-op
-   * (and no file) when everything resolved, so the diagnosis can never fire on a healthy catalog.
+   * Persist [unresolved] and [mismatched] beside the launch descriptor in [destDir] and log the
+   * aggregate. A no-op (and no file) when every coordinate resolved to the bytes the bundle
+   * recorded, so the diagnosis can never fire on a healthy catalog.
    */
   fun record(
     destDir: File,
@@ -70,25 +98,31 @@ internal object BundleClasspathGaps {
     total: Int,
     system: String,
     onLog: (String) -> Unit,
+    mismatched: List<BundleReader.ClasspathEntry.Maven> = emptyList(),
     fileSystem: FileSystem = SystemFileSystem,
   ) {
-    if (unresolved.isEmpty()) return
-    onLog(
-      "catalog $system: ${unresolved.size} of $total classpath coordinate(s) did not resolve — " +
-        "the live daemon starts with an incomplete classpath and any render that needs one of " +
-        "them will fail with a linkage error. Unresolved: " +
-        unresolved.joinToString { "${it.group}:${it.artifact}:${it.version}" }
-    )
+    if (unresolved.isEmpty() && mismatched.isEmpty()) return
+    if (unresolved.isNotEmpty()) {
+      onLog(
+        "catalog $system: ${unresolved.size} of $total classpath coordinate(s) did not resolve — " +
+          "the live daemon starts with an incomplete classpath and any render that needs one of " +
+          "them will fail with a linkage error. Unresolved: " +
+          unresolved.joinToString { "${it.group}:${it.artifact}:${it.version}" }
+      )
+    }
+    if (mismatched.isNotEmpty()) {
+      onLog(
+        "catalog $system: ${mismatched.size} of $total classpath coordinate(s) resolved to bytes " +
+          "that are not the ones the bundle recorded — the version string matches but the artifact " +
+          "does not, so the daemon links code from two builds of the same library and a render " +
+          "that crosses the seam fails with NoSuchMethodError / NoSuchFieldError. Mismatched: " +
+          mismatched.joinToString { "${it.group}:${it.artifact}:${it.version}" }
+      )
+    }
     val gaps =
       Gaps(
-        unresolved =
-          unresolved.map {
-            Gap(
-              coordinate = "${it.group}:${it.artifact}:${it.version}",
-              group = it.group,
-              artifact = it.artifact,
-            )
-          },
+        unresolved = unresolved.map { it.toGap() },
+        mismatched = mismatched.map { it.toGap() },
         total = total,
       )
     runCatching {
@@ -119,12 +153,16 @@ internal object BundleClasspathGaps {
           .let { json.decodeFromString(Gaps.serializer(), it) }
       }
         .getOrNull() ?: return null
-    if (gaps.unresolved.isEmpty()) return null
     val dotted = reason.replace('/', '.')
-    val culprit =
-      gaps.unresolved
-        .maxByOrNull { attributionScore(dotted, it) }
-        ?.takeIf { attributionScore(dotted, it) > 0 }
+    // A mismatched coordinate the failing type points at is reported first and alone: it names the
+    // artifact AND says what is wrong with it, which is strictly more than the unresolved list can
+    // say. Unattributed mismatches fall through — "some artifact is the wrong build" without a name
+    // is weaker than an unresolved list that does name one.
+    mismatchDiagnosis(gaps, dotted)?.let {
+      return it
+    }
+    if (gaps.unresolved.isEmpty()) return null
+    val culprit = gaps.unresolved.bestExplanationOf(dotted)
     val head =
       "This catalog's bundle records ${gaps.total} Maven coordinate(s) and this server could not " +
         "resolve ${gaps.unresolved.size} of them, so the daemon is running on an incomplete " +
@@ -136,6 +174,35 @@ internal object BundleClasspathGaps {
       "Republish the catalog from a build whose repositories the bundle records, or give this " +
       "server access to them (--extra-maven-repos)."
   }
+
+  /**
+   * The sentence for a linkage failure inside a coordinate whose bytes are not the ones the bundle
+   * recorded, or null when no mismatch explains this failure.
+   *
+   * Attribution is required here, unlike the unresolved case. A `NoSuchFieldError` in a package no
+   * mismatched artifact ships is not this record's to claim — some other dependency is at fault and
+   * saying "one of these is probably wrong" would send the reader down the wrong path. The whole
+   * mismatch list still rides along once one of them does match, because these artifacts travel in
+   * families and the reader needs to see the rest of the family.
+   */
+  private fun mismatchDiagnosis(gaps: Gaps, dottedReason: String): String? {
+    val culprit = gaps.mismatched.bestExplanationOf(dottedReason) ?: return null
+    return "This catalog's bundle records a sha256 for each of its ${gaps.total} Maven " +
+      "coordinate(s), and ${gaps.mismatched.size} of them resolved to different bytes — including " +
+      "${culprit.coordinate}, which is where the missing member lives. The version string matched, " +
+      "so the daemon linked two builds of one library together; that is a linkage error no retry " +
+      "can clear. Mismatched: ${gaps.mismatched.joinToString { it.coordinate }}. This is expected " +
+      "to be a stale cache when the coordinate is a `-SNAPSHOT` (its version names no single " +
+      "build); republishing the catalog against released versions removes the ambiguity."
+  }
+
+  /** The gap that best explains the type in [dottedReason], or null when none says anything. */
+  private fun List<Gap>.bestExplanationOf(dottedReason: String): Gap? = maxByOrNull {
+    attributionScore(dottedReason, it)
+  }?.takeIf { attributionScore(dottedReason, it) > 0 }
+
+  private fun BundleReader.ClasspathEntry.Maven.toGap() =
+    Gap(coordinate = "$group:$artifact:$version", group = group, artifact = artifact)
 
   /**
    * How well [gap] explains the type named in [dottedReason] (the failure text with `/` rewritten
