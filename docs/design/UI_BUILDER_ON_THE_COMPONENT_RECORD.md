@@ -52,8 +52,8 @@ projection of `components.json` rather than an authored file:
 | `componentId` | the catalog identity |
 | `properties` | non-slot parameters; `jsonType` from the Kotlin type, `allowedValues` from an enum's constants |
 | `PropertyEditorControl` | the parameter's type, replacing `CapabilityCatalogParser.EDITOR_OVERRIDES` |
-| `slots` | `@Composable` lambda parameters; cardinality from nullability/defaults, acceptance from the receiver scope |
-| `code.symbol` / `code.imports` | the symbol FQN |
+| `slots` | `@Composable` lambda parameters. **Only whether the lambda is required** follows from nullability/defaults — child cardinality does not (a required `RowScope` lambda may emit 0..N children), and `acceptedRoles`/`acceptedTraits` are **not** recoverable from a receiver scope. Those come from an explicit child policy the record carries; the scope is recorded because it decides what a child's modifier may call |
+| `code.symbol` / `code.imports` | the record's source-level **callable** FQN, never the JVM file-facade owner — deriving imports from the facade prints `androidx.compose.material3.ButtonKt`, which does not resolve |
 | `wasm.adapterStatus` / `svg.status` | the conformance tier the component proved |
 
 `CapabilityValidator` keeps its job unchanged — it just validates against a table
@@ -123,7 +123,10 @@ first; nothing here can be built on a record that does not exist. Then, here:
 * The renderer, the exporter and the catalog cannot disagree, because two of the
   three are generated and CI diffs them.
 * Every Compose export the server hands a user has been compiled and rendered.
-* A component's slots are its `@Composable` lambda parameters, so "do slots work"
-  is answered by the type system rather than by two tables agreeing.
+* A component's slots are its `@Composable` lambda parameters, so "does this
+  component have a slot, and must it be filled" is answered by the type system
+  rather than by two tables agreeing. What may go *inside* a slot stays an
+  explicit authored policy — the signature genuinely does not encode it, and
+  inferring one from the receiver scope would reject valid documents.
 * Confetti — a typical app — reaches the preview browser and the API panel and
   **no** UI-builder component. If it reaches Tier 3, the gate is too loose.
