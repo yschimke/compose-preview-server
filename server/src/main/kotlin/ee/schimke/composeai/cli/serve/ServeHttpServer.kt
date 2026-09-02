@@ -981,6 +981,7 @@ class ServeHttpServer(
         // the one thing an unguessable-link store must not grow. Registered only when the operator
         // opts in; constant first segments, so they outscore the `/{system}` catch-all.
         if (imageStore != null && imageUploadAuth != null) {
+          get("/images/capability") { handleImageUploadCapability(imageUploadAuth) }
           post("/images") { handleImageUpload(imageStore, imageUploadAuth) }
           get("/i/{id}") { handleImage(imageStore) }
         }
@@ -2572,6 +2573,25 @@ class ServeHttpServer(
   }
 
   // ---- The image lane (`--accept-images`) -----------------------------------------------------
+
+  /**
+   * Whether this browser session may use the image lane for report captures.
+   *
+   * Catalog reports are filed in place rather than through `/report-bug`, so their static page
+   * cannot carry the per-request [imageBrowserLogin] decision that the dedicated report page gets.
+   * The capture bundle probes this narrow route instead. It deliberately admits only the signed
+   * browser-session path: a bearer token or agent grant is useful to a headless uploader, but is
+   * not a credential the catalog page should discover or ask for.
+   */
+  private suspend fun RoutingContext.handleImageUploadCapability(auth: ServeImageUploadAuth) {
+    if (rejectBadToken()) return
+    val login = imageBrowserLogin?.invoke(call, auth.repository)
+    if (login == null) {
+      call.respondText("image uploads unavailable", status = HttpStatusCode.Forbidden)
+      return
+    }
+    call.respondText("", status = HttpStatusCode.NoContent)
+  }
 
   /**
    * `POST /images?name=<label>` (body = the image bytes): ingest a rendered preview and answer with

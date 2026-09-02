@@ -9,7 +9,7 @@
 import "./setup.js";
 import assert from "node:assert/strict";
 import { resetDom } from "./setup.js";
-import { installCapture } from "../src/report/ui.js";
+import { installCapture, storeCapture } from "../src/report/ui.js";
 import { Capture, STORE_KEY } from "../src/report/store.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
@@ -273,6 +273,54 @@ describe("hosting captures in the prefilled issue body", () => {
         );
         assert.match(note(), /uploaded/);
         submitReport();
+        await settled();
+        assert.equal(written.length, 0, "a hosted capture is not copied again");
+        assert.match(note(), /embedded/);
+    });
+
+    it("discovers the image service on a catalog page and embeds its custom capture", async () => {
+        // The real order is capability first, capture second: the browser resolves the local
+        // capability request while the reporter is still choosing which screen/tab to share.
+        // Pre-populating the store here would only test restored captures and miss the shutter
+        // path this regression is about.
+        stubBrowser([]);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: (input: string | URL, init?: RequestInit) => {
+                const url = String(input);
+                if (url.startsWith("data:")) {
+                    return Promise.resolve({
+                        blob: () => Promise.resolve(new Blob(["png"])),
+                    });
+                }
+                if (url.includes("/images/capability")) {
+                    assert.equal(init?.method, "GET");
+                    return Promise.resolve({ ok: true });
+                }
+                assert.equal(init?.method, "POST");
+                return Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            url: "https://preview.example/i/catalog-shot.png",
+                        }),
+                });
+            },
+        });
+        previewPage();
+        installCapture();
+        await settled();
+        assert.equal(storeCapture(capture("shot-1", "Whole catalog")), true);
+        await settled();
+        await settled();
+
+        const body =
+            document.querySelector<HTMLInputElement>("#cp-report-body")!;
+        assert.match(
+            body.value,
+            /!\[Whole catalog\]\(https:\/\/preview\.example\/i\/catalog-shot\.png\)/,
+        );
+        submitReport(".cp-report-form");
         await settled();
         assert.equal(written.length, 0, "a hosted capture is not copied again");
         assert.match(note(), /embedded/);

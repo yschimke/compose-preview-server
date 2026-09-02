@@ -58,6 +58,25 @@ export function installCapture(): void {
     wireHandOff();
     render();
     if (imageUploadEnabled()) void uploadReportCaptures();
+    else void discoverImageUpload();
+}
+
+/**
+ * Persist a capture the shutter just produced and start hosting it when this page has discovered
+ * the image lane.
+ *
+ * Capability discovery normally finishes while the browser's screen-picker is still open. The
+ * discovery-time upload therefore sees an empty store; the newly captured pixels must trigger a
+ * second pass after they land, rather than relying on that earlier pass to somehow find them.
+ *
+ * @returns whether the new capture survived the store's quota/eviction rules.
+ */
+export function storeCapture(capture: Capture): boolean {
+    const kept = addCapture(sessionStore(), capture);
+    render();
+    const stored = kept.some((item) => item.id === capture.id);
+    if (stored && imageUploadEnabled()) void uploadReportCaptures();
+    return stored;
 }
 
 /** The two forms that open a prefilled issue: `/report-bug`'s, and a preview's own. */
@@ -247,6 +266,35 @@ const lastWritten = new WeakMap<HTMLInputElement, string>();
 let uploadGeneration = 0;
 
 /**
+ * Ask the server whether this signed browser session may host report captures.
+ *
+ * `/report-bug` already carries the answer in `data-cp-image-upload`; catalog reports are filed
+ * in place and need the same per-request authorization without plumbing it through every static
+ * page builder. A failed/absent check leaves the existing clipboard hand-off unchanged.
+ */
+async function discoverImageUpload(): Promise<void> {
+    try {
+        // Fixed and same-origin by construction. Hosts without the optional image lane answer 404;
+        // unauthorized browser sessions answer 403 and retain the clipboard path.
+        const endpoint = new URL("/images/capability", location.href);
+        const token = new URLSearchParams(location.search).get("token");
+        if (token) endpoint.searchParams.set("token", token);
+        const response = await fetch(endpoint, {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+        });
+        if (!response.ok) return;
+        document
+            .querySelector<HTMLElement>(".cp-fab, .cp-shots")
+            ?.setAttribute("data-cp-image-upload", "true");
+        await uploadReportCaptures();
+    } catch {
+        // Hosting is optional. The submit-time clipboard hand-off remains the fallback.
+    }
+}
+
+/**
  * Image URLs this page has seen resolve — minted by an upload here, or re-checked with a HEAD.
  *
  * A capture read back from `sessionStorage` can carry a `uploadedUrl` this page never obtained.
@@ -284,7 +332,9 @@ async function uploadReportCaptures(): Promise<void> {
     // upload begins; if that upload fails, falling back to the clipboard must not leave the issue
     // body pointing at the unannotated pixels.
     applyHostedCaptures(mine);
-    const submit = document.querySelector<HTMLButtonElement>(".cp-bug-submit");
+    const submits = document.querySelectorAll<HTMLButtonElement>(
+        ".cp-bug-submit, .cp-report-submit",
+    );
     if (!pending.length) {
         // Nothing to wait for, so nothing may still be holding the button down.
         // Removing the last capture mid-upload arrives exactly here: this call
@@ -292,10 +342,10 @@ async function uploadReportCaptures(): Promise<void> {
         // and declines to re-enable — and returning without doing it ourselves
         // left Submit dead until a reload, on the tool someone reaches for when
         // something is already broken.
-        if (submit) submit.disabled = false;
+        submits.forEach((submit) => (submit.disabled = false));
         return;
     }
-    if (submit) submit.disabled = true;
+    submits.forEach((submit) => (submit.disabled = true));
     note(
         pending.length === 1
             ? "Uploading your capture…"
@@ -344,14 +394,16 @@ async function uploadReportCaptures(): Promise<void> {
             "This server could not host the capture. It will be copied when you open the issue, so paste it into the Screenshot section.",
         );
     } finally {
-        if (generation === uploadGeneration && submit) submit.disabled = false;
+        if (generation === uploadGeneration) {
+            submits.forEach((submit) => (submit.disabled = false));
+        }
     }
 }
 
 function imageUploadEnabled(): boolean {
     return (
         document
-            .querySelector(".cp-shots")
+            .querySelector("[data-cp-image-upload]")
             ?.getAttribute("data-cp-image-upload") === "true"
     );
 }
@@ -636,9 +688,7 @@ async function run(mode: Mode): Promise<void> {
         // tab has simply been carrying around. See [Capture.page].
         page: location.pathname,
     };
-    const kept = addCapture(store, capture);
-    render();
-    if (!kept.some((c) => c.id === capture.id)) {
+    if (!storeCapture(capture)) {
         // Every eviction path failed, which in practice means storage is unavailable or full. The
         // clipboard still works, so the capture is not lost — it just cannot ride to the report
         // page, and saying which is the difference between a bug and a limitation.
