@@ -14,12 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
-  # Cancel superseded runs on a pull request — only the current head's result
-  # matters there. On a push to main every commit gets its own group and runs to
-  # completion: a merge is not "superseded" by the next merge, and cancelling it
-  # leaves a commit that shipped with no verdict that it built and passed.
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gradle:
