@@ -145,11 +145,12 @@ Two consequences for this side:
 
 ### Nullability does not come from the type string
 
-`jsonType` and `PropertyEditorControl` are derived from the Kotlin type, and the obvious way to
-spot an optional property — "the rendered type ends in `?`" — is wrong. A rendered type ends in
-`?` both when the parameter is nullable (`String?`) and when it is a **non-null** function whose
-*return* is nullable (`(Int) -> String?`). Treating the second as optional makes the generated
-adapter pass `null` where the signature forbids it.
+`jsonType` and `PropertyEditorControl` are authored today; the table above is what generating
+them would derive. When that generation is written, the obvious way to decide
+`PropertyCapability.required` — "the rendered type ends in `?`, so the property is optional" —
+is wrong. A rendered type ends in `?` both when the parameter is nullable (`String?`) and when
+it is a **non-null** function whose *return* is nullable (`(Int) -> String?`). Treating the
+second as optional makes the generated adapter pass `null` where the signature forbids it.
 
 `TargetParameter.nullable` carries this structurally, read from metadata. Use it. The producer
 hit this exact trap while generating call sites and caught it only by reverting the change to
