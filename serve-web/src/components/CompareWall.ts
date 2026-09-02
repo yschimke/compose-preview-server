@@ -700,6 +700,19 @@ export class CompareWall extends ControllerElement {
                     : "";
             report.href = focused || report.dataset.bugFallback || report.href;
         }
+        // Exact issue pills travel with the same preview variant as the pictures. The server
+        // serializes every real theme variant in the row so changing theme does not require a
+        // request; only the pill naming the preview now on screen is exposed. Component-wide pills
+        // remain visible across the switch.
+        const activePreview = sources("preview", variant);
+        for (const issue of row.querySelectorAll<HTMLElement>(
+            '[data-bug-scope="variant"]',
+        )) {
+            const ids = (issue.dataset.bugPreviewIds ?? "")
+                .split(/\s+/)
+                .filter(Boolean);
+            issue.hidden = !activePreview || !ids.includes(activePreview);
+        }
         if (
             format === "svg" ||
             format === "reference" ||

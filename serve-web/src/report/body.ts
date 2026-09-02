@@ -18,7 +18,7 @@
 import { fillReport, needsRender } from "../annotate/report.js";
 import { withClassification } from "./classification.js";
 import { fillLocators, fillSelection, type Selection } from "./locator.js";
-import { type ReportScope, withScope } from "./scope.js";
+import { type ReportScope, scopeFromBody, withScope } from "./scope.js";
 
 /** What the page knows so far. Every field is independently optional. */
 export interface ReportInputs {
@@ -82,10 +82,10 @@ export class ReportBody {
     /** Merge in what one producer has learned, and rewrite the field. */
     set(next: ReportInputs): void {
         this.state = { ...this.state, ...next };
-        this.write();
+        this.write(next.scope);
     }
 
-    private write(): void {
+    private write(preferredScope?: ReportScope): void {
         const { input, template } = this;
         if (!input || !template) return;
         // No render URL yet means the page has not finished parsing its own panels. The server's
@@ -108,7 +108,15 @@ export class ReportBody {
                     ),
                     this.state.locators ?? [],
                 ),
-                this.state.scope ?? "component",
+                // Each browser entrypoint is built as its own IIFE, so its imported `reportBody`
+                // is a different singleton. The hidden field is the one piece of shared state
+                // between those bundles: preserve the scope another producer already wrote when
+                // this recomposition is about a score, render URL or selection. A scope control's
+                // own change wins explicitly through [preferredScope].
+                preferredScope ??
+                    scopeFromBody(input.value) ??
+                    this.state.scope ??
+                    "component",
             ),
             this.state.classification ?? "",
         );

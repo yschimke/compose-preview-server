@@ -8449,7 +8449,9 @@ class ServeHttpServer(
           parityIssues =
             renderHost.parityIssues()?.issues.orEmpty().filter { issue ->
               preview.id in issue.previewIds ||
-                (preview.componentId != null && issue.component == preview.componentId)
+                (issue.scope == "component" &&
+                  preview.componentId != null &&
+                  issue.component == preview.componentId)
             },
           // A top-level site's pages carry their session in the ORIGIN, so same-session links
           // drop the `?session=` the rooted legacy form would add. See [ServeSites].

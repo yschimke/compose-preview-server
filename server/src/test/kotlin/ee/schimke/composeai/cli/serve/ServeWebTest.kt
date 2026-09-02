@@ -2289,7 +2289,7 @@ class ServeWebTest {
   }
 
   @Test
-  fun `the Bugs column does not promote an exact issue from the inactive theme`() {
+  fun `the Bugs column serializes an inactive theme's exact issue but keeps it hidden`() {
     val light =
       ServePreview(
         id = "button__ideal__default__light",
@@ -2320,9 +2320,12 @@ class ServeWebTest {
       )
     val cell = html.substringAfter("class=\"cp-compare-bugs\"").substringBefore("</td>")
     assertTrue(cell.contains("/issues/42"), "component scope crosses the theme pair: $cell")
-    assertFalse(
-      cell.contains("/issues/43"),
-      "variant scope stays on the reported dark preview: $cell",
+    assertTrue(
+      cell.contains(
+        "data-bug-scope=\"variant\" data-bug-preview-ids=\"${dark.id}\" hidden " +
+          "href=\"https://github.com/yschimke/m3-catalog/issues/43\""
+      ),
+      "the dark issue is available for the browser's theme switch but hidden at light: $cell",
     )
   }
 

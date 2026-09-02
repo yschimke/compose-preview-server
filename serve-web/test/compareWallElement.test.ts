@@ -106,7 +106,8 @@ function stubScorer(
  */
 const rowHtml = (name: string, have: string[], attrs = "") => `
   <tr class="cp-compare-row" data-label="${name}" data-hay="${name.toLowerCase()}"
-      data-preview-ids="com.example.${name}Preview"
+      data-preview-ids="com.example.${name}Preview" data-preview-light="${name}-light"
+      data-preview-dark="${name}-dark"
       ${have.map((h) => `data-${h}="/a/${name}-${h}"`).join(" ")} ${attrs}>
     <td><img class="cp-compare-png" alt=""></td>
     <td class="cp-compare-diff-cell"><canvas class="cp-compare-diff"></canvas></td>
@@ -270,6 +271,41 @@ describe("<cp-compare-wall>", () => {
             have: ["png-light", "svg-light", "png-dark", "svg-dark"],
         },
     ];
+
+    it("switches exact issue pills with the preview theme", async () => {
+        stubScorer({
+            "/a/Button-svg-light": 90,
+            "/a/Button-svg-dark": 90,
+        });
+        await mount({ rows: [bothThemes[0]] });
+        const cell = document.querySelector<HTMLElement>(
+            '[data-label="Button"] .cp-compare-bugs',
+        )!;
+        cell.insertAdjacentHTML(
+            "afterbegin",
+            '<a id="light-issue" data-bug-scope="variant" data-bug-preview-ids="Button-light">light</a>' +
+                '<a id="dark-issue" data-bug-scope="variant" data-bug-preview-ids="Button-dark" hidden>dark</a>' +
+                '<a id="component-issue" data-bug-scope="component">component</a>',
+        );
+
+        document
+            .querySelector<HTMLElement>('[data-compare-theme="dark"]')!
+            .click();
+        await settle();
+
+        assert.equal(
+            document.querySelector<HTMLElement>("#light-issue")!.hidden,
+            true,
+        );
+        assert.equal(
+            document.querySelector<HTMLElement>("#dark-issue")!.hidden,
+            false,
+        );
+        assert.equal(
+            document.querySelector<HTMLElement>("#component-issue")!.hidden,
+            false,
+        );
+    });
 
     it("does not load the pictures of a row the filter hides", async () => {
         // Dressing assigns both image `src` values, so dressing every row and filtering afterwards

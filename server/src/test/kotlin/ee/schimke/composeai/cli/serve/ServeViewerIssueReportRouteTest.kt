@@ -40,6 +40,12 @@ class ServeViewerIssueReportRouteTest {
     File(dir, "index.html").writeText("<html></html>")
     File(dir, "previews").apply { mkdirs() }
     previewIds.forEach { File(dir, "previews/$it.png").writeBytes(png()) }
+    File(dir, "previews/variants.json")
+      .writeText(
+        previewIds.joinToString(prefix = "{", postfix = "}") { id ->
+          "\"$id\":{\"componentId\":\"Button/Filled\"}"
+        }
+      )
     // A design reference for the first preview, so the focused comparison this catalog can serve
     // is a real pair rather than a 404 — which is what the report filed from it is about (#4765).
     File(dir, "references").apply { mkdirs() }
@@ -51,6 +57,19 @@ class ServeViewerIssueReportRouteTest {
            "id":"button-figma","previewId":"${previewIds.first()}","label":"Figma button",
            "raster":{"path":"references/button.png","width":2,"height":2},
            "source":{"provider":"figma"}}]}
+        """
+          .trimIndent()
+      )
+    File(dir, "parity").mkdirs()
+    File(dir, "parity/issues.json")
+      .writeText(
+        """
+        {"schema":"compose-preview-issues/v1","issues":[
+          {"repository":"example/design-catalog","number":902,
+           "title":"Only the large sibling","url":"https://github.com/example/design-catalog/issues/902",
+           "state":"open","component":"Button/Filled","scope":"variant",
+           "previewIds":["button-large"]}
+        ]}
         """
           .trimIndent()
       )
@@ -225,5 +244,12 @@ class ServeViewerIssueReportRouteTest {
     assertFalse(body.contains(ServeIssueReport.LOCATOR_FENCE), body)
     assertFalse(body.contains(ServeIssueReport.RAW_SCORES_PLACEHOLDER), body)
     assertFalse(body.contains("Raw comparison"), body)
+  }
+
+  @Test
+  fun `the viewer does not broaden an exact issue from a sibling variant`() {
+    server = newServer()
+    val (_, body) = get("/compose-m3/p/button-filled")
+    assertFalse(body.contains("/issues/902"), body)
   }
 }

@@ -1634,12 +1634,12 @@ ${captureControlsHtml().prependIndent("          ")}
 
   /**
    * The issues one **comparison row** carries — component-scoped issues naming any of its preview
-   * [ids] or its component, plus variant-scoped issues naming the [activePreviewId] exactly.
+   * [ids] or its component, plus variant-scoped issues naming one of [variantIds] exactly.
    *
    * Component-wide reports match the row's whole id set because a row IS the variants. Exact
-   * reports deliberately do not: a dark-preview report must not appear while this row is serving
-   * light, and a folded-out sibling's report must not be promoted onto the row that merely carries
-   * its filtering alias.
+   * reports are serialized for every real theme variant so the browser can swap the visible pill
+   * with the pictures. Folded-out siblings remain filtering aliases only and cannot contribute an
+   * exact issue.
    *
    * Open before closed, then newest first: the column is read for "does someone already know?", and
    * a closed report answers that more weakly than an open one.
@@ -1648,13 +1648,14 @@ ${captureControlsHtml().prependIndent("          ")}
     issues: List<ParityIssue>,
     ids: List<String>,
     componentId: String?,
-    activePreviewId: String,
+    variantIds: List<String>,
   ): List<ParityIssue> {
     if (issues.isEmpty()) return emptyList()
     val wanted = ids.toSet()
+    val exact = variantIds.toSet()
     return issues
       .filter { issue ->
-        if (issue.scope == "variant") activePreviewId in issue.previewIds
+        if (issue.scope == "variant") issue.previewIds.any { it in exact }
         else
           issue.previewIds.any { it in wanted } ||
             (componentId != null && issue.component == componentId)
@@ -1684,6 +1685,7 @@ ${captureControlsHtml().prependIndent("          ")}
    */
   private fun compareBugsCellHtml(
     issues: List<ParityIssue>,
+    activePreviewId: String,
     detailHref: String?,
     fallbackHref: String,
   ): String {
@@ -1700,7 +1702,14 @@ ${captureControlsHtml().prependIndent("          ")}
         val titleHtml =
           if (title.isEmpty()) ""
           else "<span class=\"cp-compare-bug-title\">${WebEscaping.htmlEscape(title)}</span>"
-        "<a class=\"cp-compare-bug$closed\" href=\"${WebEscaping.htmlEscape(issue.url)}\" " +
+        val scopeAttrs =
+          if (issue.scope != "variant") " data-bug-scope=\"component\""
+          else {
+            val previewIds = issue.previewIds.joinToString(" ")
+            val hidden = if (activePreviewId in issue.previewIds) "" else " hidden"
+            " data-bug-scope=\"variant\" data-bug-preview-ids=\"${WebEscaping.htmlEscape(previewIds)}\"$hidden"
+          }
+        "<a class=\"cp-compare-bug$closed\"$scopeAttrs href=\"${WebEscaping.htmlEscape(issue.url)}\" " +
           "rel=\"noopener\" title=\"${WebEscaping.htmlEscape(tip)}\">" +
           "<span class=\"cp-compare-bug-num\">#${issue.number}</span>$titleHtml</a>"
       }
@@ -9760,13 +9769,19 @@ ${captureControlsHtml().prependIndent("          ")}
             previewIdsByCard[cardKey].orEmpty().filterNot { it in rowPreviewIds }
           else emptyList()
         val ids = (variants.map { it.id } + folded).distinct().joinToString(" ")
+        val previewAttrs =
+          listOf("light" to card.light, "dark" to card.dark, "neutral" to card.neutral)
+            .mapNotNull { (variant, preview) ->
+              preview?.let { " data-preview-$variant=\"${WebEscaping.htmlEscape(it.id)}\"" }
+            }
+            .joinToString("")
         // Component issues join against the whole row; exact issues join only against `current`.
         val bugs =
           issuesForRow(
             parityIssues,
             variants.map { it.id } + folded,
             ServeIssueReport.componentIdFor(current),
-            current.id,
+            variants.map { it.id },
           )
         // Where "+ file" lands at rest: the focused Reference / Diff / Actual page for the pair
         // this row is SERVED showing, which files a report naming that exact preview and reference.
@@ -9779,7 +9794,8 @@ ${captureControlsHtml().prependIndent("          ")}
               referencesFor(preview.id).firstOrNull()?.let { detailHref(preview, it) }
             }
         val bugCell =
-          if (showBugs) compareBugsCellHtml(bugs, servedDetail, "$viewer#cp-report") else ""
+          if (showBugs) compareBugsCellHtml(bugs, current.id, servedDetail, "$viewer#cp-report")
+          else ""
         // The row's component identity, which a locator has to name and the wall's picker cannot
         // derive: `ServeIssueReport.componentIdFor` reads the catalog's own id where there is one
         // and falls back to a route id parsed out of the preview id, and reproducing that fallback
@@ -9842,7 +9858,7 @@ ${captureControlsHtml().prependIndent("          ")}
             .joinToString("")
         """
           <tr class="cp-compare-row" data-label="${WebEscaping.htmlEscape(label)}"
-            data-hay="${WebEscaping.htmlEscape(hay)}" data-preview-ids="${WebEscaping.htmlEscape(ids)}"$componentIdAttr$pngAttrs$svgAttrs$rcAttrs$referenceAttrs$parallelDataAttrs$declaredBgAttrs>
+            data-hay="${WebEscaping.htmlEscape(hay)}" data-preview-ids="${WebEscaping.htmlEscape(ids)}"$componentIdAttr$previewAttrs$pngAttrs$svgAttrs$rcAttrs$referenceAttrs$parallelDataAttrs$declaredBgAttrs>
             <th scope="row">$pickCell<a href="$viewer">${WebEscaping.htmlEscape(component)}${
             if (variant.isEmpty()) ""
             else "<span class=\"cp-compare-variant\">${WebEscaping.htmlEscape(variant)}</span>"
