@@ -151,7 +151,8 @@ class ServeCatalogAdmin(
       if (
         current.group == resolved &&
           current.listed == entry.listed &&
-          current.loadPriority == entry.loadPriority
+          current.loadPriority == entry.loadPriority &&
+          current.importedFrom == entry.importedFrom
       ) {
         continue
       }
@@ -161,6 +162,7 @@ class ServeCatalogAdmin(
           listed = entry.listed,
           group = resolved,
           loadPriority = entry.loadPriority,
+          importedFrom = entry.importedFrom,
         )
       ) {
         changed++
@@ -240,6 +242,7 @@ class ServeCatalogAdmin(
                 listed = entry.listed,
                 group = resolved,
                 loadPriority = entry.loadPriority,
+                importedFrom = entry.importedFrom,
               )
             }
             loadFailure
@@ -265,7 +268,11 @@ class ServeCatalogAdmin(
       if (
         current.group == resolved &&
           current.listed == entry.listed &&
-          current.loadPriority == entry.loadPriority
+          current.loadPriority == entry.loadPriority &&
+          // Attribution converges like the placement it is: an entry re-posted with an
+          // `importedFrom` the running registration lacks has to reach the tracker, or the only
+          // way to move an import off the staging owner's section is a restart (#5012).
+          current.importedFrom == entry.importedFrom
       ) {
         // Everything the runtime tracks already matches — but the FILE may not, and this branch
         // used to be the dead end that guaranteed it never would. A swap whose runtime half
@@ -292,6 +299,7 @@ class ServeCatalogAdmin(
         listed = entry.listed,
         group = resolved,
         loadPriority = entry.loadPriority,
+        importedFrom = entry.importedFrom,
       )
       onLog("serve: catalog ${entry.system} listing updated via admin API")
       return Result.Ok(entry.system, persist { it.withEntry(entry.copy(repo = repo)) })
@@ -343,6 +351,12 @@ class ServeCatalogAdmin(
       repo = repo,
       branch = "$branchPrefix${entry.system}",
       group = homeGroup(entry, repo, declaredGroups),
+      // Carried, not dropped. The field is persisted with the entry either way, so leaving it out
+      // of the runtime registration made an admin-published import correct in `catalogs.json` and
+      // wrong on the front page until the next restart — filed under the staging repository's
+      // owner, which is how `joreilly` imports appeared under `yschimke repositories`
+      // (compose-ai-tools#5012).
+      importedFrom = entry.importedFrom,
       loadPriority = entry.loadPriority,
     )
 

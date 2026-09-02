@@ -119,11 +119,19 @@ class CatalogLoadTracker(
     group: ServeWeb.HomeGroup?,
     // Deliberately not defaulted: every caller states it, so none can silently reset it to 0.
     loadPriority: Int,
+    // Front-page attribution, and undefaulted for the same reason: a caller that forgot it would
+    // silently strip an import's origin, which is the failure this parameter was added to close.
+    importedFrom: String?,
   ): Boolean =
     synchronized(lock) {
       val existing = states[system] ?: return false
       val updated =
-        existing.config.copy(listed = listed, group = group, loadPriority = loadPriority)
+        existing.config.copy(
+          listed = listed,
+          group = group,
+          loadPriority = loadPriority,
+          importedFrom = importedFrom,
+        )
       states[system] = existing.copy(config = updated)
       val at = ordered.indexOfFirst { it.system == system }
       if (at >= 0) ordered[at] = updated

@@ -156,7 +156,15 @@ class CatalogLoadTrackerTest {
     val tracker = tracker()
     tracker.recordSuccess("reply")
 
-    assertTrue(tracker.relist("reply", listed = false, group = null, loadPriority = 5))
+    assertTrue(
+      tracker.relist(
+        "reply",
+        listed = false,
+        group = null,
+        loadPriority = 5,
+        importedFrom = null,
+      )
+    )
 
     val reply = tracker.snapshot().single { it.config.system == "reply" }
     assertEquals(5, reply.config.loadPriority)

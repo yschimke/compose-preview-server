@@ -6358,6 +6358,14 @@ class ServeHttpServer(
     val webThemeCss: String,
     val degradation: String?,
     val provenance: ServeWeb.CatalogProvenance?,
+    /**
+     * The upstream project the catalog's `catalog.json` declares its Kotlin came from
+     * ([ServeBundleHost.catalogSource]) — for an import, the project itself rather than the staging
+     * repository whose delivery branch [provenance] records. Remembered here so the front door can
+     * attribute an import whose registration carried no `importedFrom`; see
+     * [ServeWeb.HomeSystem.catalogSourceRepo].
+     */
+    val catalogSourceRepo: String?,
     val themeOptimization: ThemeOptimizationSnapshot?,
     val renderCache: CatalogRenderCacheSnapshot?,
     /**
@@ -6464,6 +6472,7 @@ class ServeHttpServer(
         webThemeCss = bundle?.webThemeCss.orEmpty(),
         degradation = host.degradations.firstOrNull()?.detail,
         provenance = bundle?.provenance,
+        catalogSourceRepo = bundle?.catalogSource?.repo?.takeIf { it.isNotBlank() },
         themeOptimization = host.themeOptimizationSnapshot(),
         renderCache = host.catalogRenderCacheSnapshot(),
         // The same two reads the catalog landing gates and names its own compare chip with, so the
@@ -7331,6 +7340,10 @@ class ServeHttpServer(
         views = views.getValue(system),
         trust = meta.trust,
         sourceRepo = meta.provenance?.repo,
+        // What the catalog says about itself, which survives a registration that lost the
+        // operator's `importedFrom` — an import is then still filed under the upstream owner
+        // instead of under whoever hosts its delivery branch (compose-ai-tools#5012).
+        catalogSourceRepo = meta.catalogSourceRepo,
         // Attribution for an imported catalog: the project it was rendered from, which is neither
         // the serving repo nor anything the catalog's own provenance records.
         importedFrom = catalogLoads?.configFor(system)?.importedFrom,

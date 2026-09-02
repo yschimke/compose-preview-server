@@ -13,6 +13,11 @@
       "noun": "sample(s)"
     },
     {
+      "id": "horologist",
+      "heading": "google/horologist",
+      "noun": "catalog(s)"
+    },
+    {
       "id": "thunderbird",
       "heading": "thunderbird/thunderbird-android",
       "noun": "app(s)"
@@ -64,7 +69,11 @@
     {
       "system": "horologist",
       "repo": "yschimke/horologist",
-      "listed": true
+      "listed": true,
+      "group": "horologist",
+      "attributionRepos": [
+        "google/horologist"
+      ]
     },
     {
       "system": "thunderbird",
