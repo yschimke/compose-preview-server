@@ -4,6 +4,7 @@ import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.bundle.BundleVerifier
+import ee.schimke.composeai.daemon.protocol.UiMode
 import ee.schimke.composeai.data.overrides.PreviewOverrideOption
 import ee.schimke.composeai.data.render.PreviewBackdrop
 import ee.schimke.composeai.data.render.PreviewBackground
@@ -3640,14 +3641,25 @@ ${captureControlsHtml().prependIndent("          ")}
     declared: List<ServeTheme>,
     /** Indentation for every chip after the first, so the emitted block reads as written HTML. */
     indent: String = "        ",
+    /**
+     * Built-in choice value → the viewer page of the sticker this catalog publishes in that mode,
+     * for the built-ins that have one. A chip carrying [twinHrefs] is **navigation**: the pixels it
+     * wants are already baked under their own id, so `viewer.ts` follows the link instead of asking
+     * the daemon to redraw this id under a `uiMode` override (compose-ai-tools#4997). Empty for the
+     * landing grid, which switches theme by filtering cards it has already loaded, and for a page
+     * with no published twin — those chips keep the override.
+     */
+    twinHrefs: Map<String, String> = emptyMap(),
   ): String {
     val builtInLabels = builtIns.map { it.second.lowercase() }.toSet() + builtIns.map { it.first }
     val declaredNameCounts = declared.groupingBy { it.name.lowercase() }.eachCount()
     return buildString {
       builtIns.forEachIndexed { index, (value, label) ->
         if (index > 0) append("\n$indent")
-        append("<button type=\"button\" class=\"cp-theme-btn\" data-theme-choice=\"$value\">")
-        append("$label</button>")
+        val twinHref =
+          twinHrefs[value]?.let { " data-theme-href=\"${WebEscaping.htmlEscape(it)}\"" } ?: ""
+        append("<button type=\"button\" class=\"cp-theme-btn\" data-theme-choice=\"$value\"")
+        append("$twinHref>$label</button>")
       }
       declared.forEach { t ->
         val qualified =
@@ -13714,6 +13726,13 @@ ${scriptTag("known-differences.js")}
       // on. While this attribute stayed empty for those, the toggle wrote `uiMode=light` into
       // every URL as though it were a pin, and the same disagreement that costs a daemon render
       // server-side (compose-ai-tools#4997) also pinned a parameter nobody chose.
+      // `data-theme-storage-key` is the catalog-scoped sticky key ([viewerThemeStickyScript] reads
+      // and writes the same one). It rides on the element so a chip that NAVIGATES to the twin card
+      // can record the pick before leaving: the destination reads this key on arrival, and landing
+      // there with the previous value showing would either press the wrong chip or — on an untagged
+      // id, where a remembered choice is still applied — re-override the very render the navigation
+      // existed to avoid. Writing the key directly rather than firing the select's `change` is the
+      // point: `change` is what starts a render, and the whole move is not to start one.
       // `tabindex="-1"` keeps the hidden select out of the tab order, which is what makes the
       // `aria-hidden` wrapper legitimate.
       val bakedThemeName =
@@ -13725,7 +13744,7 @@ ${scriptTag("known-differences.js")}
             ?.lowercase()
       """
         <span class="cp-modes-inputs" aria-hidden="true">
-          <select id="cp-theme" class="cp-knob-theme" data-theme-active="0" data-default-theme="${bakedThemeName.orEmpty()}" data-has-declared-themes="${declaredThemes.isNotEmpty()}" data-fixed-theme="$themeFixed" tabindex="-1"$themeDis>
+          <select id="cp-theme" class="cp-knob-theme" data-theme-active="0" data-default-theme="${bakedThemeName.orEmpty()}" data-theme-storage-key="${WebEscaping.htmlEscape(themeStorageKey(sessionId, basePath))}" data-has-declared-themes="${declaredThemes.isNotEmpty()}" data-fixed-theme="$themeFixed" tabindex="-1"$themeDis>
             $defaults$providerOptions
           </select>
         </span>
@@ -13747,6 +13766,29 @@ ${scriptTag("known-differences.js")}
     // theme's full name is always readable and the chips are one click away. Under
     // [THEME_CHIPS_INLINE] — a plain light/dark catalog, or one with a theme or two — the bar shows
     // as it always has.
+    // A built-in chip whose mode this catalog already BAKED as its own card links there instead of
+    // overriding this one. The pair differs in the theme axis alone ([ServeBakedTheme.twinIn]), so
+    // the twin's card is the same sticker in the other mode — with its own annotations, parity
+    // references and axes, all of which describe the frame the visitor lands on. Re-rendering this
+    // id under `uiMode` instead produced the same picture at the cost of a daemon render, and left
+    // the page's published overlays describing a frame that was no longer on screen.
+    //
+    // Withheld on a pinned revision (its pixels are a permalink to what that commit published, and
+    // must not silently become the tip's) and on a theme specimen (the axis is withdrawn there
+    // entirely — see [themeFixed]).
+    val themeTwinHrefs: Map<String, String> =
+      if (pinned != null || themeFixed) emptyMap()
+      else {
+        val siblingIds = siblings.mapTo(HashSet()) { it.id }
+        buildMap {
+          for (mode in listOf(UiMode.LIGHT, UiMode.DARK)) {
+            ServeBakedTheme.twinIn(preview.id, mode) { it in siblingIds }
+              ?.let {
+                put(mode.name.lowercase(), "$basePath/p/${WebEscaping.urlEncodeSegment(it)}$q")
+              }
+          }
+        }
+      }
     val themeBarHtml =
       themeChipsHtml(
           builtIns =
@@ -13754,6 +13796,7 @@ ${scriptTag("known-differences.js")}
             else listOf("light" to "Light", "dark" to "Dark"),
           declared = viewerDeclaredThemes,
           indent = "          ",
+          twinHrefs = themeTwinHrefs,
         )
         .let {
           "<span class=\"cp-theme cp-theme-bar\" id=\"cp-theme-bar\" role=\"group\"" +

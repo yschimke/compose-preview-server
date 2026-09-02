@@ -438,11 +438,80 @@ function syncThemeBar() {
         b.setAttribute("aria-pressed", state.pressed ? "true" : "false");
     });
 }
+// Record the pick without firing the select's `change` — `change` is what starts a render, and
+// not starting one is the entire point of following the link. The destination reads this same
+// catalog-scoped key on arrival: with the previous value still stored it would press the wrong
+// chip, and on an untagged id (where a remembered choice IS applied) it would re-override the
+// render the navigation just avoided.
+function rememberThemeChoice(value: string) {
+    const key = themeChoice?.getAttribute("data-theme-storage-key");
+    if (!key) return;
+    try {
+        localStorage.setItem(key, value);
+    } catch (_) {
+        // A private window or blocked site data: the pick is not remembered, which costs the
+        // destination its pressed chip and nothing else. Never a reason not to navigate.
+    }
+}
+// A chip whose mode this catalog already baked as its own card carries `data-theme-href`, and
+// following it beats overriding this one: the twin's pixels are on disk, so the page loads from
+// the baked sticker instead of waiting on a daemon re-render of the identical picture
+// (compose-ai-tools#4997), and the card it lands on brings its own annotations, parity references
+// and axes rather than describing a frame it is no longer showing.
+//
+// Only while the frame is otherwise UNMODIFIED, which is the whole safety condition. Navigating
+// discards the visitor's edits — knobs, font scale, locale, size — the way every other link out of
+// this page does, and silently throwing away work someone has done is worse than a render they
+// have already shown they are willing to wait for. So a page carrying any other override keeps the
+// in-place behaviour, and only plain browsing (the case that was paying for it) takes the link.
+function themeTwinHref(b: HTMLButtonElement): string | null {
+    const href = b.getAttribute("data-theme-href");
+    if (!href) return null;
+    return frameIsUnedited() ? href : null;
+}
+// Whether the frame on screen is the preview as published, bar the theme axis itself — the same
+// question `query()` answers when it decides whether this page's URL may stay on the baked
+// snapshot, asked with the same predicates so the two cannot disagree about what counts as an
+// edit. A knob still at its declared default is not one.
+function frameIsUnedited(): boolean {
+    const o = overrides();
+    for (const key of Object.keys(o)) {
+        if (key !== "uiMode") return false;
+    }
+    if (chosenThemeProvider()) return false;
+    let edited = false;
+    controls(".cp-knob").forEach(function (el) {
+        if (edited || el.disabled || !el.getAttribute("data-knob-key")) return;
+        edited = rules.knobEmitted(
+            controlValue(el),
+            el.getAttribute("data-knob-initial") || "",
+            knobKind(el),
+        );
+    });
+    controls(".cp-rc-knob").forEach(function (el) {
+        if (edited || el.disabled || !el.getAttribute("data-rc-name")) return;
+        edited = rules.rcKnobEmitted(
+            controlValue(el),
+            el.getAttribute("data-rc-initial") || "",
+        );
+    });
+    if (edited) return false;
+    const focus = may<HTMLInputElement>("cp-focus");
+    if (focus && !focus.disabled && focus.checked) return false;
+    const gestures = may<HTMLInputElement>("cp-gestures");
+    return !(gestures && !gestures.disabled && gestures.checked);
+}
 themeBarBtns.forEach(function (b) {
     b.addEventListener("click", function () {
         var value = b.getAttribute("data-theme-choice");
         if (!themeChoice || b.disabled || value === null) return;
         if (themeChoice.value === value) return;
+        var twin = themeTwinHref(b);
+        if (twin) {
+            rememberThemeChoice(value);
+            window.location.href = twin;
+            return;
+        }
         themeChoice.value = value;
         themeChoice.dispatchEvent(new Event("change", { bubbles: true }));
         syncThemeBar();
