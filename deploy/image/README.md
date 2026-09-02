@@ -129,8 +129,8 @@ packages the builder lane. To narrow them, set `SERVE_AGENT_GRANT_CAPABILITIES` 
 never in its argv; see [the live-session guide](../../docs/design/UI_BUILDER_LIVE_SESSION.md) and
 the [remote MCP reference](https://github.com/yschimke/compose-ai-tools/blob/main/docs/daemon/MCP.md#remote-ui-builder-tools).
 
-Catalog MCP is a separate opt-in surface. Set `SERVE_CATALOG_MCP=1` to expose each catalog at
-`/<catalog>/mcp`; this requires `SERVE_AGENT_GRANTS=1` (or its authenticated automatic default).
+Catalog MCP is a separate opt-in surface. Set `SERVE_CATALOG_MCP=1` to expose every catalog through
+the aggregate `/mcp`; this requires `SERVE_AGENT_GRANTS=1` (or its authenticated automatic default).
 Catalog discovery and published resources use the `preview` scope, while made-to-order rendering
 uses `live`. It does not reuse the UI-builder tool namespace or its authoring capabilities; the two
 surfaces only share the authenticated grant issuer, expiry, and revocation machinery. See the

@@ -42,15 +42,19 @@ class ServeAgentGrantRoutingTest {
     val dir = Files.createTempDirectory("grants").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText("<html></html>")
     File(dir, "previews").mkdirs()
-    File(dir, "previews/example.png")
-      .writeBytes(
-        Base64.getDecoder()
-          .decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB" +
-              "AScY42YAAAAASUVORK5CYII="
-          )
-      )
+    val pixel =
+      Base64.getDecoder()
+        .decode(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB" +
+            "AScY42YAAAAASUVORK5CYII="
+        )
+    File(dir, "previews/example.png").writeBytes(pixel)
     registry.register("demo", host = ServeBundleHost(dir, label = "demo"), pinned = true)
+    val other = Files.createTempDirectory("grants-other").toFile().also { it.deleteOnExit() }
+    File(other, "index.html").writeText("<html></html>")
+    File(other, "previews").mkdirs()
+    File(other, "previews/example.png").writeBytes(pixel)
+    registry.register("other", host = ServeBundleHost(other, label = "other"), pinned = true)
     val machineAuthorization =
       ServeMachineAuthorization(operatorToken, githubAuth = null, agentGrants = grants)
     ServeHttpServer(
@@ -153,14 +157,14 @@ class ServeAgentGrantRoutingTest {
 
   @Test
   fun `catalog MCP is streamable HTTP and advertises the grant flow`() {
-    val unauthenticated = post("/demo/mcp", initializeRequest(1))
+    val unauthenticated = post("/mcp", initializeRequest(1))
     assertEquals(401, unauthenticated.first)
     assertEquals("authorization_required", str(unauthenticated.second, "error"))
     assertTrue(
       str(unauthenticated.second, "agentAccessRequestUrl").endsWith("/agent-access/request")
     )
 
-    val request = Request.Builder().url(url("/demo/mcp")).get().build()
+    val request = Request.Builder().url(url("/mcp")).get().build()
     client.newCall(request).execute().use { response ->
       assertEquals(405, response.code)
       assertEquals("POST", response.header("Allow"))
@@ -184,8 +188,29 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}""",
       )
     val resources = json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray
-    assertEquals(1, resources.size)
-    val uri = resources.single().jsonObject["uri"]!!.jsonPrimitive.content
+    assertEquals(2, resources.size)
+    val uri =
+      resources
+        .single { it.jsonObject["uri"]!!.jsonPrimitive.content.contains("/demo/") }
+        .jsonObject["uri"]!!
+        .jsonPrimitive
+        .content
+
+    val projects =
+      mcp(
+        token,
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}""",
+      )
+    val projectText =
+      json(projects.second)["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .single()
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    assertTrue(projectText.contains("\"workspaceId\":\"demo\""))
+    assertTrue(projectText.contains("\"workspaceId\":\"other\""))
 
     val read =
       mcp(
@@ -198,9 +223,10 @@ class ServeAgentGrantRoutingTest {
     val storyDoc =
       mcp(
         token,
-        """{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get-documentation-for-story","arguments":{"storyId":"example"}}}""",
+        """{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get-documentation-for-story","arguments":{"storyId":"demo::example"}}}""",
       )
     assertTrue(storyDoc.second.contains("compose-preview-mcp-storybook/v1"))
+    assertTrue(storyDoc.second.contains("demo::example"))
   }
 
   @Test
@@ -224,7 +250,7 @@ class ServeAgentGrantRoutingTest {
     val refused =
       mcp(
         previewToken,
-        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"render_preview","arguments":{"previewId":"example"}}}""",
+        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
       )
     assertTrue(refused.second.contains("'live' was not approved"))
 
@@ -232,7 +258,7 @@ class ServeAgentGrantRoutingTest {
     val rendered =
       mcp(
         liveToken,
-        """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"render_preview","arguments":{"previewId":"example","observe":"png"}}}""",
+        """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png"}}}""",
       )
     val content = json(rendered.second)["result"]!!.jsonObject["content"]!!.jsonArray
     assertEquals("image", content.single().jsonObject["type"]!!.jsonPrimitive.content)
@@ -240,7 +266,7 @@ class ServeAgentGrantRoutingTest {
     val observed =
       mcp(
         liveToken,
-        """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"render_preview","arguments":{"previewId":"example"}}}""",
+        """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"demo","previewId":"example"}}}""",
       )
     val observation =
       json(observed.second)["result"]!!.jsonObject["content"]!!.jsonArray.single().jsonObject
@@ -259,7 +285,7 @@ class ServeAgentGrantRoutingTest {
   ): Pair<Int, String> {
     val request =
       Request.Builder()
-        .url(url("/demo/mcp"))
+        .url(url("/mcp"))
         .header("Authorization", "Bearer $token")
         .header("Accept", "application/json, text/event-stream")
         .header("MCP-Protocol-Version", protocolVersion)

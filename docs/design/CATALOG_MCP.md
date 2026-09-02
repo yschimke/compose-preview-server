@@ -2,7 +2,7 @@
 
 **Status:** implemented behind `compose-preview serve --catalog-mcp`
 
-The preview server can expose any registered catalog directly to a remote MCP client. This covers
+The preview server can expose every registered catalog through one remote MCP endpoint. This covers
 the catalog operations that make sense without a local checkout: discover previews, inspect their
 metadata, read published PNG resources, render with overrides, and retrieve structured preview
 data. Local source registration, file watching, builds, and daemon lifecycle remain local
@@ -28,16 +28,17 @@ The container equivalent is `SERVE_CATALOG_MCP=1`; the existing agent-grant and 
 variables still configure the issuer and approver identity. `--catalog-mcp` without a working
 `--agent-grants` lane is refused at startup rather than exposing an anonymous machine API.
 
-For catalog `compose-m3`, configure an MCP client with:
+Configure an MCP client with:
 
 ```text
-URL: https://preview.example/compose-m3/mcp
+URL: https://preview.example/mcp
 Authorization: Bearer <short-lived grant>
 ```
 
-There is deliberately no default-catalog `/mcp` alias. The separate UI-builder MCP sidecar owns
-that public route, while every catalog endpoint carries its identity in the path. Both can therefore
-be served from one hostname without tool or session ambiguity.
+`list_projects` discovers the current catalog set. Catalog-specific tools take `catalog` alongside
+`previewId`, while resource URIs carry both values, so adding or retiring a catalog needs no MCP
+client reconfiguration. The separate UI-builder MCP sidecar should use its configurable path (for
+example `/ui-builder/mcp`) when both products share a hostname.
 
 ## Get a token
 
@@ -74,17 +75,18 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 
 | Operation | Access | Purpose |
 | --- | --- | --- |
-| `status` | `preview` | Report readiness and the catalog selected by this endpoint |
+| `status` | `preview` | Report readiness and the aggregate catalog set |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
-| `list_projects`, `list_previews` | `preview` | Discover this catalog and preview metadata |
+| `list_projects`, `list_previews` | `preview` | Discover catalogs and preview metadata |
 | `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels |
 | `list_data_products` | `preview` | Discover structured products exposed by previews |
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
 
-Resource URIs use `compose-preview://catalog/<catalog>/<preview-id>` and stay bound to the catalog
-endpoint that issued them.
+Resource URIs use `compose-preview://catalog/<catalog>/<preview-id>`. Storybook-compatible ids are
+qualified as `<catalog>::<preview-id>` so identical preview ids in different catalogs cannot
+collide.
 
 ## Relationship to UI-builder MCP
 
@@ -92,8 +94,8 @@ These are separate MCP products with shared authentication:
 
 | Surface | Endpoint/transport | Authorization | State model |
 | --- | --- | --- | --- |
-| Catalog MCP | `/<catalog>/mcp`, Streamable HTTP | `preview` / `live` scopes | Stateless catalog queries and renders |
-| UI-builder MCP | UI-builder MCP process `/mcp`, Streamable HTTP | `ui-builder-read`, `ui-builder-write`, `ui-builder-export` capabilities | Stateful collaborative design session |
+| Catalog MCP | `/mcp`, Streamable HTTP | `preview` / `live` scopes | Stateless aggregate catalog queries and renders |
+| UI-builder MCP | UI-builder sidecar, configurable path such as `/ui-builder/mcp` | `ui-builder-read`, `ui-builder-write`, `ui-builder-export` capabilities | Stateful collaborative design session |
 
 The UI-builder MCP remains a thin authoring adapter over the preview server's authenticated Design
 API. It may keep a stateful MCP session because revisions and collaboration benefit from one. The

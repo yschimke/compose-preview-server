@@ -2686,7 +2686,7 @@ public class ServeRunner(
     }
     if (catalogMcp) {
       System.err.println(
-        "serve: catalog MCP enabled at /<catalog>/mcp (Streamable HTTP; preview scope reads, " +
+        "serve: aggregate catalog MCP enabled at /mcp (Streamable HTTP; preview scope reads, " +
           "live scope renders)"
       )
     }

@@ -25,21 +25,22 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
- * Stateless MCP 2025-06-18 surface over one served catalog.
+ * Stateless MCP 2025-06-18 surface aggregating every served catalog.
  *
  * Transport is owned by [ServeHttpServer]; this class owns only MCP lifecycle messages and the
  * catalog-facing resources/tools. It shares the HTTP server's render semaphore, so a remote agent
  * cannot open a second, unmetered render lane beside the browser routes.
  */
 class ServeCatalogMcp(
+  private val sessions: ServeSessionRegistry,
   private val renderSemaphore: Semaphore,
   private val renderQueueWaitSeconds: Long = 2,
 ) {
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
+  private data class PreviewTarget(val catalog: String, val previewId: String)
+
   suspend fun handle(
-    system: String,
-    host: ServeHost,
     request: JsonObject,
     liveAuthorization: () -> ServeMachineAuthorization.Decision,
   ): Reply {
@@ -61,12 +62,12 @@ class ServeCatalogMcp(
           "tools/list" -> buildJsonObject { put("tools", tools()) }
           "tools/call" ->
             try {
-              callTool(system, host, params, liveAuthorization)
+              callTool(params, liveAuthorization)
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
             }
-          "resources/list" -> listResources(system, host)
-          "resources/read" -> readResource(system, host, params)
+          "resources/list" -> listResources()
+          "resources/read" -> readResource(params)
           else -> return Reply(error(id, METHOD_NOT_FOUND, "Unknown method '$method'"))
         }
       } catch (e: McpRequestException) {
@@ -104,8 +105,9 @@ class ServeCatalogMcp(
       )
       put(
         "instructions",
-        "This endpoint exposes one hosted Compose Preview catalog. Reading published previews " +
-          "needs preview access; made-to-order renders and data products need live access.",
+        "This endpoint exposes every hosted Compose Preview catalog. Use list_projects to " +
+          "discover catalog ids. Reading published previews needs preview access; made-to-order " +
+          "renders and data products need live access.",
       )
     }
   }
@@ -114,22 +116,22 @@ class ServeCatalogMcp(
     add(
       tool(
         "status",
-        "Report readiness and the catalog selected by this endpoint.",
+        "Report readiness and the aggregate catalog set.",
         EMPTY_SCHEMA,
       )
     )
     add(
       tool(
         "list_projects",
-        "Describe this remote catalog and its preview count.",
+        "List every remote catalog with its stable id and preview count.",
         EMPTY_SCHEMA,
       )
     )
     add(
       tool(
         "list_previews",
-        "List the catalogued Compose previews and their published metadata.",
-        EMPTY_SCHEMA,
+        "List Compose previews and published metadata across every catalog, or one named catalog.",
+        CATALOG_FILTER_SCHEMA,
       )
     )
     add(
@@ -138,14 +140,14 @@ class ServeCatalogMcp(
         "Render one preview. Like local compose-ai-tools, the default semantics observation is " +
           "token-frugal; request observe=png for pixels. This made-to-order lane requires live " +
           "grant scope. Use resources/read for the published snapshot lane.",
-        """{"type":"object","properties":{"uri":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["previewId"]}]}""",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
     add(
       tool(
         "list_data_products",
-        "List structured data-product kinds advertised by previews in this catalog.",
-        """{"type":"object","properties":{"previewId":{"type":"string"}}}""",
+        "List structured data-product kinds across catalogs, optionally filtered by target.",
+        """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}}}""",
       )
     )
     add(
@@ -153,7 +155,7 @@ class ServeCatalogMcp(
         "get_preview_data",
         "Fetch the merged accessibility or annotation product for a preview. This lane " +
           "requires live grant scope.",
-        """{"type":"object","properties":{"uri":{"type":"string"},"previewId":{"type":"string"},"kind":{"type":"string"},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"required":["kind"],"anyOf":[{"required":["uri"]},{"required":["previewId"]}]}""",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"kind":{"type":"string"},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"required":["kind"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
     add(
@@ -180,35 +182,39 @@ class ServeCatalogMcp(
   }
 
   private suspend fun callTool(
-    system: String,
-    host: ServeHost,
     params: JsonObject,
     liveAuthorization: () -> ServeMachineAuthorization.Decision,
   ): JsonObject {
     val name = params.requiredString("name")
     val args = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
     return when (name) {
-      "status" -> textResult(statusJson(system, host).toString())
-      "list_projects" -> textResult(projectsJson(system, host).toString())
-      "list_previews" -> textResult(previewsJson(system, host).toString())
-      "list_data_products" -> textResult(dataProductsJson(host, args).toString())
-      "list-all-documentation" -> textResult(storiesJson(system, host).toString())
+      "status" -> textResult(statusJson().toString())
+      "list_projects" -> textResult(projectsJson().toString())
+      "list_previews" -> textResult(previewsJson(args.optionalString("catalog")).toString())
+      "list_data_products" -> textResult(dataProductsJson(args).toString())
+      "list-all-documentation" -> textResult(storiesJson().toString())
       "get-documentation-for-story" -> {
         val requested = args.firstString("storyId", "id")
-        val preview = resolvePreview(host, previewIdArgument(system, requested))
-        textResult(storyDocumentationJson(system, preview).toString())
+        val target = storyTarget(requested)
+        withCatalog(target.catalog) { host ->
+          val preview = resolvePreview(host, target.previewId)
+          textResult(storyDocumentationJson(target.catalog, preview).toString())
+        }
       }
       "render_preview" -> {
         requireLive(liveAuthorization)
-        val preview = resolvePreview(host, args.previewId(system))
-        val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
-        renderResult(
-          host,
-          preview.id,
-          resourceUri(system, preview.id),
-          overrides,
-          args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics",
-        )
+        val target = args.previewTarget()
+        withCatalog(target.catalog) { host ->
+          val preview = resolvePreview(host, target.previewId)
+          val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
+          renderResult(
+            host,
+            preview.id,
+            resourceUri(target.catalog, preview.id),
+            overrides,
+            args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics",
+          )
+        }
       }
       "preview-stories" -> {
         requireLive(liveAuthorization)
@@ -223,69 +229,76 @@ class ServeCatalogMcp(
         val observe = args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "png"
         val content = buildJsonArray {
           ids.forEach { storyId ->
-            val preview = resolvePreview(host, previewIdArgument(system, storyId))
-            val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
-            renderContent(
-                host,
-                preview.id,
-                resourceUri(system, preview.id),
-                overrides,
-                observe,
-              )
-              .forEach(::add)
+            val target = storyTarget(storyId)
+            withCatalog(target.catalog) { host ->
+              val preview = resolvePreview(host, target.previewId)
+              val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
+              renderContent(
+                  host,
+                  preview.id,
+                  resourceUri(target.catalog, preview.id),
+                  overrides,
+                  observe,
+                )
+                .forEach(::add)
+            }
           }
         }
         buildJsonObject { put("content", content) }
       }
       "get_preview_data" -> {
         requireLive(liveAuthorization)
-        val preview = resolvePreview(host, args.previewId(system))
-        val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
-        dataProductResult(host, preview.id, args.requiredString("kind"), overrides)
+        val target = args.previewTarget()
+        withCatalog(target.catalog) { host ->
+          val preview = resolvePreview(host, target.previewId)
+          val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
+          dataProductResult(host, preview.id, args.requiredString("kind"), overrides)
+        }
       }
       else -> toolError("unknown tool: $name")
     }
   }
 
-  private fun listResources(system: String, host: ServeHost): JsonObject = buildJsonObject {
-    put(
-      "resources",
-      buildJsonArray {
-        host.previews.forEach { preview ->
-          add(
-            buildJsonObject {
-              put("uri", resourceUri(system, preview.id))
-              put("name", preview.label)
-              put("description", "${host.label}: ${preview.id}")
-              put("mimeType", "image/png")
-            }
-          )
+  private suspend fun listResources(): JsonObject {
+    val resources = buildJsonArray {
+      catalogIds().forEach { catalog ->
+        withCatalog(catalog) { host ->
+          host.previews.forEach { preview ->
+            add(
+              buildJsonObject {
+                put("uri", resourceUri(catalog, preview.id))
+                put("name", "${host.label}: ${preview.label}")
+                put("description", "$catalog: ${preview.id}")
+                put("mimeType", "image/png")
+              }
+            )
+          }
         }
-      },
-    )
+      }
+    }
+    return buildJsonObject { put("resources", resources) }
   }
 
-  private suspend fun readResource(
-    system: String,
-    host: ServeHost,
-    params: JsonObject,
-  ): JsonObject {
+  private suspend fun readResource(params: JsonObject): JsonObject {
     val uri = params.requiredString("uri")
-    val preview = resolvePreview(host, previewIdFromUri(system, uri))
-    val png = renderPng(host, preview.id, PreviewOverrides(), preferPublished = true)
-    return buildJsonObject {
-      put(
-        "contents",
-        buildJsonArray {
-          add(
-            buildJsonObject {
-              put("uri", uri)
-              put("mimeType", "image/png")
-              put("blob", Base64.getEncoder().encodeToString(png))
-            }
-          )
-        },
-      )
+    val target = targetFromUri(uri)
+    return withCatalog(target.catalog) { host ->
+      val preview = resolvePreview(host, target.previewId)
+      val png = renderPng(host, preview.id, PreviewOverrides(), preferPublished = true)
+      buildJsonObject {
+        put(
+          "contents",
+          buildJsonArray {
+            add(
+              buildJsonObject {
+                put("uri", uri)
+                put("mimeType", "image/png")
+                put("blob", Base64.getEncoder().encodeToString(png))
+              }
+            )
+          },
+        )
+      }
     }
   }
 
@@ -429,78 +442,120 @@ class ServeCatalogMcp(
       else -> throw McpRequestException("override values must be strings, numbers, or booleans")
     }
 
-  private fun dataProductsJson(host: ServeHost, args: JsonObject): JsonArray {
-    val selected = args["previewId"]?.jsonPrimitive?.contentOrNull
+  private suspend fun dataProductsJson(args: JsonObject): JsonArray {
+    val uriTarget = args.optionalString("uri")?.let(::targetFromUri)
+    val selectedCatalog = uriTarget?.catalog ?: args.optionalString("catalog")
+    val selectedPreview = uriTarget?.previewId ?: args.optionalString("previewId")
+    if (selectedPreview != null && selectedCatalog == null) {
+      throw McpRequestException("'catalog' is required when filtering by 'previewId'")
+    }
     return buildJsonArray {
-      host.previews
-        .filter { selected == null || it.id == selected }
-        .forEach { preview ->
-          val kinds = buildSet {
-            addAll(preview.dataProductKinds)
-            if (host.hasA11yOverlayFor(preview.id)) add("a11y/hierarchy")
-            if (
-              host.hasDesignAnnotationsFor(preview.id) || host.hasPublishedTypographyFor(preview.id)
-            ) {
-              add("compose/annotations")
+      catalogIds(selectedCatalog).forEach { catalog ->
+        withCatalog(catalog) { host ->
+          host.previews
+            .filter { selectedPreview == null || it.id == selectedPreview }
+            .forEach { preview ->
+              val kinds = buildSet {
+                addAll(preview.dataProductKinds)
+                if (host.hasA11yOverlayFor(preview.id)) add("a11y/hierarchy")
+                if (
+                  host.hasDesignAnnotationsFor(preview.id) ||
+                    host.hasPublishedTypographyFor(preview.id)
+                ) {
+                  add("compose/annotations")
+                }
+              }
+              add(
+                buildJsonObject {
+                  put("catalog", catalog)
+                  put("previewId", preview.id)
+                  put("uri", resourceUri(catalog, preview.id))
+                  put("kinds", JsonArray(kinds.sorted().map(::JsonPrimitive)))
+                }
+              )
             }
-          }
-          add(
-            buildJsonObject {
-              put("previewId", preview.id)
-              put("kinds", JsonArray(kinds.sorted().map(::JsonPrimitive)))
-            }
-          )
         }
+      }
     }
   }
 
-  private fun statusJson(system: String, host: ServeHost): JsonObject = buildJsonObject {
+  private suspend fun statusJson(): JsonObject = buildJsonObject {
     put("schema", "compose-preview-mcp-status/v1")
     put("ready", true)
     put("remote", true)
+    put("aggregate", true)
     put("toolCatalog", buildJsonObject { put("status", "ready") })
-    put("projects", projectsJson(system, host)["projects"]!!)
+    put("projects", projectsJson()["projects"]!!)
   }
 
-  private fun projectsJson(system: String, host: ServeHost): JsonObject = buildJsonObject {
-    put("projects", buildJsonArray { add(projectJson(system, host)) })
+  private suspend fun projectsJson(): JsonObject = buildJsonObject {
+    put(
+      "projects",
+      buildJsonArray {
+        catalogIds().forEach { catalog ->
+          withCatalog(catalog) { host -> add(projectJson(catalog, host)) }
+        }
+      },
+    )
   }
 
-  private fun projectJson(system: String, host: ServeHost): JsonObject = buildJsonObject {
-    put("workspaceId", system)
+  private fun projectJson(catalog: String, host: ServeHost): JsonObject = buildJsonObject {
+    put("workspaceId", catalog)
     put("rootProjectName", host.label)
-    put("catalog", system)
+    put("catalog", catalog)
     put("label", host.label)
     put("previewCount", host.previews.size)
     put("remote", true)
   }
 
-  private fun previewsJson(system: String, host: ServeHost): JsonArray =
-    JsonArray(host.previews.map { previewJson(system, it) })
-
-  private fun storiesJson(system: String, host: ServeHost): JsonObject = buildJsonObject {
-    put("schema", "compose-preview-mcp-storybook/v1")
-    put("count", host.previews.size)
-    put("stories", JsonArray(host.previews.map { storyJson(system, it) }))
+  private suspend fun previewsJson(selectedCatalog: String?): JsonObject = buildJsonObject {
+    put(
+      "catalogs",
+      buildJsonArray {
+        catalogIds(selectedCatalog).forEach { catalog ->
+          withCatalog(catalog) { host ->
+            add(
+              buildJsonObject {
+                put("catalog", catalog)
+                put("label", host.label)
+                put("previews", JsonArray(host.previews.map { previewJson(catalog, it) }))
+              }
+            )
+          }
+        }
+      },
+    )
   }
 
-  private fun storyJson(system: String, preview: ServePreview): JsonObject = buildJsonObject {
-    put("id", preview.id)
-    put("storyId", preview.id)
+  private suspend fun storiesJson(): JsonObject = buildJsonObject {
+    val stories = buildJsonArray {
+      catalogIds().forEach { catalog ->
+        withCatalog(catalog) { host -> host.previews.forEach { add(storyJson(catalog, it)) } }
+      }
+    }
+    put("schema", "compose-preview-mcp-storybook/v1")
+    put("count", stories.size)
+    put("stories", stories)
+  }
+
+  private fun storyJson(catalog: String, preview: ServePreview): JsonObject = buildJsonObject {
+    put("id", storyId(catalog, preview.id))
+    put("storyId", storyId(catalog, preview.id))
     put("title", hostTitle(preview))
     put("name", preview.label)
     put("type", "story")
     put("importPath", "virtual:compose-preview/${preview.id}")
-    put("uri", resourceUri(system, preview.id))
+    put("catalog", catalog)
+    put("uri", resourceUri(catalog, preview.id))
   }
 
-  private fun storyDocumentationJson(system: String, preview: ServePreview): JsonObject =
+  private fun storyDocumentationJson(catalog: String, preview: ServePreview): JsonObject =
     JsonObject(
-      storyJson(system, preview) +
-        previewJson(system, preview) +
+      previewJson(catalog, preview) +
+        storyJson(catalog, preview) +
         mapOf(
           "schema" to JsonPrimitive("compose-preview-mcp-storybook/v1"),
-          "workspaceId" to JsonPrimitive(system),
+          "workspaceId" to JsonPrimitive(catalog),
           "note" to
             JsonPrimitive(
               "Render with preview-stories. Native render_preview and get_preview_data also " +
@@ -512,10 +567,11 @@ class ServeCatalogMcp(
   private fun hostTitle(preview: ServePreview): String =
     preview.id.substringBeforeLast('.', missingDelimiterValue = preview.label)
 
-  private fun previewJson(system: String, preview: ServePreview): JsonObject = buildJsonObject {
+  private fun previewJson(catalog: String, preview: ServePreview): JsonObject = buildJsonObject {
     put("id", preview.id)
     put("label", preview.label)
-    put("uri", resourceUri(system, preview.id))
+    put("catalog", catalog)
+    put("uri", resourceUri(catalog, preview.id))
     put("modes", JsonArray(preview.modes.map { JsonPrimitive(it.wire) }))
     put("dataProductKinds", JsonArray(preview.dataProductKinds.sorted().map(::JsonPrimitive)))
     preview.state?.let { put("state", it) }
@@ -525,30 +581,66 @@ class ServeCatalogMcp(
   private fun resolvePreview(host: ServeHost, id: String): ServePreview =
     host.previews.firstOrNull { it.id == id } ?: throw McpRequestException("no such preview '$id'")
 
-  private fun JsonObject.previewId(system: String): String =
-    this["previewId"]?.jsonPrimitive?.contentOrNull
-      ?: this["uri"]?.jsonPrimitive?.contentOrNull?.let { previewIdFromUri(system, it) }
-      ?: throw McpRequestException("'previewId' or 'uri' is required")
+  private fun JsonObject.previewTarget(): PreviewTarget {
+    optionalString("uri")?.let {
+      return targetFromUri(it)
+    }
+    return PreviewTarget(requiredString("catalog"), requiredString("previewId"))
+  }
 
-  private fun previewIdArgument(system: String, value: String): String =
-    if (value.startsWith("compose-preview://catalog/")) previewIdFromUri(system, value) else value
+  private fun storyTarget(value: String): PreviewTarget {
+    if (value.startsWith(RESOURCE_URI_PREFIX)) return targetFromUri(value)
+    val separator = value.indexOf(STORY_ID_SEPARATOR)
+    if (separator <= 0 || separator + STORY_ID_SEPARATOR.length >= value.length) {
+      throw McpRequestException(
+        "story id '$value' is not catalog-qualified; use an id from list-all-documentation"
+      )
+    }
+    return PreviewTarget(
+      value.substring(0, separator),
+      value.substring(separator + STORY_ID_SEPARATOR.length),
+    )
+  }
 
-  private fun resourceUri(system: String, previewId: String): String =
-    "compose-preview://catalog/${WebEscaping.urlEncodeSegment(system)}/" +
+  private fun storyId(catalog: String, previewId: String): String =
+    "$catalog$STORY_ID_SEPARATOR$previewId"
+
+  private fun resourceUri(catalog: String, previewId: String): String =
+    "$RESOURCE_URI_PREFIX${WebEscaping.urlEncodeSegment(catalog)}/" +
       WebEscaping.urlEncodeSegment(previewId)
 
-  private fun previewIdFromUri(system: String, uri: String): String {
-    val prefix = "compose-preview://catalog/"
-    if (!uri.startsWith(prefix)) throw McpRequestException("invalid compose-preview resource URI")
-    val parts = uri.removePrefix(prefix).split('/', limit = 2)
-    if (parts.size != 2 || decode(parts[0]) != system) {
-      throw McpRequestException("resource URI does not belong to catalog '$system'")
+  private fun targetFromUri(uri: String): PreviewTarget {
+    if (!uri.startsWith(RESOURCE_URI_PREFIX)) {
+      throw McpRequestException("invalid compose-preview resource URI")
     }
-    return decode(parts[1])
+    val parts = uri.removePrefix(RESOURCE_URI_PREFIX).split('/', limit = 2)
+    if (parts.size != 2) throw McpRequestException("invalid compose-preview resource URI")
+    return PreviewTarget(decode(parts[0]), decode(parts[1]))
   }
 
   private fun decode(value: String): String =
     URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8)
+
+  private fun catalogIds(selected: String? = null): List<String> {
+    val ids = sessions.knownSessionIds()
+    if (selected == null) return ids
+    if (selected !in ids) throw McpRequestException("no such catalog '$selected'")
+    return listOf(selected)
+  }
+
+  private suspend fun <T> withCatalog(catalog: String, block: suspend (ServeHost) -> T): T {
+    if (catalog !in sessions.knownSessionIds()) {
+      throw McpRequestException("no such catalog '$catalog'")
+    }
+    val lease =
+      withContext(Dispatchers.IO) { sessions.lease(catalog) }
+        ?: throw McpRequestException("catalog '$catalog' is unavailable")
+    return try {
+      block(lease.host)
+    } finally {
+      lease.close()
+    }
+  }
 
   private fun requireLive(check: () -> ServeMachineAuthorization.Decision) {
     when (val decision = check()) {
@@ -623,6 +715,9 @@ class ServeCatalogMcp(
     this[name]?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotBlank)
       ?: throw McpRequestException("'$name' is required")
 
+  private fun JsonObject.optionalString(name: String): String? =
+    (this[name] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+
   private fun JsonObject.firstString(vararg names: String): String =
     names.firstNotNullOfOrNull { name ->
       this[name]?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotBlank)
@@ -658,7 +753,11 @@ class ServeCatalogMcp(
     private const val INVALID_PARAMS = -32602
     private const val INTERNAL_ERROR = -32603
     private const val MAX_STORIES_PER_CALL = 16
+    private const val RESOURCE_URI_PREFIX = "compose-preview://catalog/"
+    private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES = setOf("png", "semantics", "hash")
+    private const val CATALOG_FILTER_SCHEMA =
+      """{"type":"object","properties":{"catalog":{"type":"string"}}}"""
     private val ANNOTATION_KINDS =
       setOf("compose/annotations", "compose/semantics", "compose/typography", "compose/tags")
     private val JSON = Json { ignoreUnknownKeys = false }

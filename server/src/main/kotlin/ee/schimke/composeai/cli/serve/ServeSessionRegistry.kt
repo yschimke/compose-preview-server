@@ -818,6 +818,9 @@ class ServeSessionRegistry(
   /** Total known sessions (resident + suspended). */
   fun activeCount(): Int = lock.withLock { sessions.size }
 
+  /** Stable snapshot of every registered session id, without opening or resuming any session. */
+  fun knownSessionIds(): List<String> = lock.withLock { sessions.keys.sorted() }
+
   /**
    * Any registered session id, or null when none are — used by the module-less server to pick a
    * landing session so `/` resolves to something. Insertion order isn't guaranteed (HashMap), so

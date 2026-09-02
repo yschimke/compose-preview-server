@@ -556,7 +556,8 @@ class ServeHttpServer(
 
   private val renderSemaphore = Semaphore(renderSlots)
   private val catalogMcp =
-    if (catalogMcpEnabled && machineAuthorization != null) ServeCatalogMcp(renderSemaphore)
+    if (catalogMcpEnabled && machineAuthorization != null)
+      ServeCatalogMcp(sessions, renderSemaphore)
     else null
   private val unleasedThemeSemaphore = Semaphore(1)
   private val themeRenderLeases = ThemeRenderLeaseManager(renderSlots)
@@ -842,14 +843,14 @@ class ServeHttpServer(
           }
         }
 
-        // Stateless Streamable HTTP MCP. The catalog id is always explicit so `/mcp` remains
-        // available to the separate, stateful UI-builder MCP sidecar. GET is intentionally 405:
-        // this first version has no server-initiated notifications, so an SSE listen stream would
-        // make a promise the stateless implementation cannot use.
+        // Stateless aggregate Streamable HTTP MCP. One stable endpoint discovers every registered
+        // catalog; resource URIs and catalog-bearing tool arguments select the target. GET is
+        // intentionally 405: this version has no server-initiated notifications, so an SSE listen
+        // stream would make a promise the stateless implementation cannot use.
         if (catalogMcp != null) {
-          post("/{system}/mcp") { handleCatalogMcp() }
-          get("/{system}/mcp") { rejectCatalogMcpListen() }
-          delete("/{system}/mcp") { rejectCatalogMcpListen() }
+          post("/mcp") { handleCatalogMcp() }
+          get("/mcp") { rejectCatalogMcpListen() }
+          delete("/mcp") { rejectCatalogMcpListen() }
         }
 
         // `/status` — the operator/observer view of this running host: published catalogs + their
@@ -7600,22 +7601,16 @@ class ServeHttpServer(
         return
       }
 
-    val system = selectedSessionId(sessionInPath = true)
-    withLeasedSession(system) { renderHost ->
-      val reply =
-        mcp.handle(system, renderHost, request) {
-          authorization.authorizeScope(call, AgentGrantScope.LIVE)
-        }
-      if (reply.accepted) {
-        call.respond(HttpStatusCode.Accepted)
-      } else {
-        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-        call.respondText(
-          reply.body.toString(),
-          ContentType.Application.Json,
-          HttpStatusCode.OK,
-        )
-      }
+    val reply = mcp.handle(request) { authorization.authorizeScope(call, AgentGrantScope.LIVE) }
+    if (reply.accepted) {
+      call.respond(HttpStatusCode.Accepted)
+    } else {
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      call.respondText(
+        reply.body.toString(),
+        ContentType.Application.Json,
+        HttpStatusCode.OK,
+      )
     }
   }
 

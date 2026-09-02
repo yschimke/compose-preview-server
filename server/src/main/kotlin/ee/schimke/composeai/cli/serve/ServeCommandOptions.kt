@@ -556,7 +556,7 @@ public class ServeCommandOptions(
    */
   override val agentGrants: Boolean = "--agent-grants" in args
 
-  /** Serve catalog previews over Streamable HTTP MCP (`/<catalog>/mcp`). */
+  /** Serve every catalog over aggregate Streamable HTTP MCP (`/mcp`). */
   override val catalogMcp: Boolean = "--catalog-mcp" in args
 
   /** Raw `--agent-grant-scopes`; the server parses it (an unknown scope throws there). */
@@ -846,7 +846,7 @@ public class ServeCommandOptions(
                           signed-in GitHub user (with --github-auth-*) or the --token holder; a
                           --public server with neither is refused. Revoke any time from /status.
                           Off by default.
-        --catalog-mcp     Expose each catalog at /<catalog>/mcp using stateless Streamable HTTP.
+        --catalog-mcp     Expose all catalogs at /mcp using stateless Streamable HTTP.
                           Requires --agent-grants. Published reads need preview scope; made-to-order
                           renders and data products need live scope. Separate from UI-builder MCP.
         --agent-grant-scopes <list>

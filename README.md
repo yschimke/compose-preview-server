@@ -66,8 +66,8 @@ it no longer reaches into the frontend project's tasks or output directory.
 
 ## Remote catalog MCP
 
-The server can expose every hosted catalog as a Streamable HTTP MCP endpoint at
-`/<catalog>/mcp`. Enable it with `--agent-grants --catalog-mcp`; published resources require a
+The server can expose every hosted catalog through one aggregate Streamable HTTP MCP endpoint at
+`/mcp`. Enable it with `--agent-grants --catalog-mcp`; published resources require a
 short-lived `preview` grant, while made-to-order renders and structured data products require a
 `live` grant. The endpoint is separate from the stateful UI-builder authoring MCP surface, but both
 use the same authenticated user approval and revocation flow. See

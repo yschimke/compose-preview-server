@@ -246,6 +246,9 @@ data class ServeSites(private val byHost: Map<String, String>) {
         // most, because the route a *human* opens is the approval page, and a site that had
         // claimed the prefix would 404 the link an agent just told someone to click.
         "agent-access",
+        // `POST /mcp` — the aggregate catalog MCP endpoint. Reserved unconditionally so a site
+        // host cannot intercept this stable machine route with its styled 404.
+        "mcp",
         "bundles",
         "bundle",
         "bundle.zip",

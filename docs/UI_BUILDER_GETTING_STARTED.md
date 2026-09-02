@@ -102,6 +102,6 @@ the other's UI.
 
 This authoring MCP is intentionally separate from the preview server's
 [catalog MCP](design/CATALOG_MCP.md). UI-builder tools use named read/write/export capabilities and
-a stateful Streamable HTTP session; catalog tools use cumulative `preview`/`live` scopes and a
-stateless endpoint per catalog. They share the `/agent-access` request, authenticated-user approval,
+a stateful Streamable HTTP session; catalog tools use cumulative `preview`/`live` scopes and the
+aggregate stateless `/mcp` endpoint. They share the `/agent-access` request, authenticated-user approval,
 poll, expiry, and revocation machinery, so an installation does not need a second token issuer.
