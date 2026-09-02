@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.17.0](https://github.com/yschimke/compose-preview-server/compare/v2.16.1...v2.17.0) (2026-09-02)
+
+
+### Features
+
+* **serve:** fill the player wall from the document, not only the run ([#199](https://github.com/yschimke/compose-preview-server/issues/199)) ([dad03e1](https://github.com/yschimke/compose-preview-server/commit/dad03e1f7f3f7e24c53761c08b64a3001a57f0ed))
+
+
+### Bug Fixes
+
+* **serve:** attribute an import by the project it declares ([#203](https://github.com/yschimke/compose-preview-server/issues/203)) ([0132362](https://github.com/yschimke/compose-preview-server/commit/01323627647c7a6b87b7a7d70f2d2a9a8aa0649e))
+* **serve:** follow the baked twin card instead of re-rendering a theme ([#192](https://github.com/yschimke/compose-preview-server/issues/192)) ([3839173](https://github.com/yschimke/compose-preview-server/commit/3839173679474d147a016d3a561ec0187c9d7164))
+* **serve:** name the coordinate that resolved to the wrong bytes when a lane trips ([#193](https://github.com/yschimke/compose-preview-server/issues/193)) ([188f0be](https://github.com/yschimke/compose-preview-server/commit/188f0be306ef6b706046f17406467eb40fdad678))
+* **serve:** never fill a live column that duplicates the baked one ([#200](https://github.com/yschimke/compose-preview-server/issues/200)) ([45857d9](https://github.com/yschimke/compose-preview-server/commit/45857d937ad12a6af76bb3087962df74db35f34e))
+* **serve:** say which of the two reasons a player has no column ([#202](https://github.com/yschimke/compose-preview-server/issues/202)) ([fa8f898](https://github.com/yschimke/compose-preview-server/commit/fa8f898b0ef17879b43cd49471060f12d7d1184d))
+
 ## [2.16.1](https://github.com/yschimke/compose-preview-server/compare/v2.16.0...v2.16.1) (2026-09-02)
 
 

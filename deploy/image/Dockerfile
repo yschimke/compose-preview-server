@@ -12,7 +12,7 @@
 # `# x-release-please-version` can't go on the ARG line (Docker folds it into the value), so use
 # the block-marker form.
 # x-release-please-start-version
-ARG SERVER_VERSION=2.16.1
+ARG SERVER_VERSION=2.17.0
 # x-release-please-end
 # Required build input. The release workflow reads it from gradle/libs.versions.toml so the
 # server's runtime dependencies and its separately packaged daemon sidecars cannot drift.
