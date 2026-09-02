@@ -1240,6 +1240,43 @@ class ServeWebTest {
   }
 
   @Test
+  fun `the report form chooses component-wide or exact-variant issue scope`() {
+    val preview = ServePreview(id = "button__ideal__large", label = "button")
+    val locator =
+      ServeIssueReport.locatorBlock(
+        ServeIssueReport.Locator(
+          repository = "o/r",
+          system = "compose-m3",
+          componentId = "Button/Filled",
+          previewId = preview.id,
+          referenceId = preview.id,
+          variant = "ideal/large",
+          overrides = emptyMap(),
+        )
+      )
+    val html =
+      ServeWeb.viewerPage(
+        preview,
+        token = "t",
+        basePath = "/compose-m3",
+        siblings = listOf(preview),
+        reportIssue =
+          ServeWeb.ReportIssue(
+            action = "https://github.com/o/r/issues/new",
+            body = locator,
+            bodyTemplate = locator,
+            repo = "o/r",
+          ),
+      )
+    assertTrue(html.contains("<cp-report-scope"), html)
+    assertTrue(html.contains("value=\"component\" selected>This component"), html)
+    assertTrue(
+      html.contains("value=\"variant\" disabled hidden>This component + variant"),
+      "the script-dependent choice stays unavailable until its body writer attaches: $html",
+    )
+  }
+
+  @Test
   fun `the report body carries a classification line pointing at the label`() {
     // Written by the server in BOTH the plain body and the template, and pointing at the label
     // rather than pre-writing an answer: a visitor with scripting off can still pick one — the
@@ -2199,6 +2236,16 @@ class ServeWebTest {
               state = "open",
               previewIds = listOf("button"),
             ),
+            ParityIssue(
+              repository = "yschimke/m3-catalog",
+              number = 39,
+              title = "Large variant only",
+              url = "https://github.com/yschimke/m3-catalog/issues/39",
+              state = "open",
+              component = "Button/Filled",
+              scope = "variant",
+              previewIds = listOf("button__ideal__large"),
+            ),
           ),
       )
     assertTrue(html.contains("<th class=\"cp-compare-bugs-head\">Bugs</th>"), html)
@@ -2209,6 +2256,7 @@ class ServeWebTest {
     assertTrue(cell.contains("cp-compare-bug--closed"), "the closed one says so: $cell")
     // Matched on the component as well as on the preview id — an issue may name either.
     assertTrue(cell.contains("/issues/41"), cell)
+    assertFalse(cell.contains("/issues/39"), "an exact-variant issue must not broaden: $cell")
     // The pill says what the issue is, not just that there is one: "does someone already know?" is
     // the question this column exists for and a bare number cannot answer it.
     assertTrue(
@@ -2237,6 +2285,47 @@ class ServeWebTest {
           "#41 verified after the token update\""
       ),
       html,
+    )
+  }
+
+  @Test
+  fun `the Bugs column serializes an inactive theme's exact issue but keeps it hidden`() {
+    val light =
+      ServePreview(
+        id = "button__ideal__default__light",
+        label = "Button",
+        componentId = "Button/Filled",
+        state = "default",
+        theme = "light",
+      )
+    val dark = light.copy(id = "button__ideal__default__dark", theme = "dark")
+    fun issue(number: Int, scope: String) =
+      ParityIssue(
+        repository = "yschimke/m3-catalog",
+        number = number,
+        title = "Dark preview issue",
+        url = "https://github.com/yschimke/m3-catalog/issues/$number",
+        state = "open",
+        component = "Button/Filled",
+        scope = scope,
+        previewIds = listOf(dark.id),
+      )
+    val html =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(light, dark),
+        token = "t",
+        referencesFor = { listOf(referenceFor(it)) },
+        parityIssues = listOf(issue(42, "component"), issue(43, "variant")),
+      )
+    val cell = html.substringAfter("class=\"cp-compare-bugs\"").substringBefore("</td>")
+    assertTrue(cell.contains("/issues/42"), "component scope crosses the theme pair: $cell")
+    assertTrue(
+      cell.contains(
+        "data-bug-scope=\"variant\" data-bug-preview-ids=\"${dark.id}\" hidden " +
+          "href=\"https://github.com/yschimke/m3-catalog/issues/43\""
+      ),
+      "the dark issue is available for the browser's theme switch but hidden at light: $cell",
     )
   }
 

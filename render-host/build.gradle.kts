@@ -105,6 +105,9 @@ dependencies {
   api(libs.composeai.render.session.subprocess)
   api(libs.composeai.data.layoutinspector.core)
   api(libs.composeai.data.theme.core)
+  // `ServeHost.parityIssues()` exposes the shape published by catalogs. The wire contract lives in
+  // compose-preview-contracts; this module owns only validation and storage behavior.
+  api(libs.composeai.parity.issues.protocol)
   // Both reached by FULLY-QUALIFIED name rather than an import, so they are easy to miss when
   // reading the sources for what this module needs: `ServePreview.overrides` and
   // `ServePreview.remoteComposeKnobs` are declared as

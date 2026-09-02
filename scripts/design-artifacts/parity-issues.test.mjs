@@ -19,6 +19,17 @@ test("a locator round-trips the exact identity and canonical overrides", () => {
   assert.deepEqual(parseLocator(body), { ok: true, locator: { repository: "yschimke/m3-catalog", system: "m3", component: "IconButton/Tonal", previewId: "iconbutton-tonal__ideal__default__light", referenceId: "iconbutton-tonal-figma", variant: "ideal/default/light", overrides: { fontScale: "1.5", "knob.label": "Send;now=x" }, element: null, bounds: null, revision: "yschimke/m3-catalog@main" } });
 });
 
+test("report scope defaults to the component and carries an explicit variant choice", () => {
+  const component = buildIssueIndex([{ html_url: "https://github.com/yschimke/m3-catalog/issues/40", title: "Glyph colour", body, state: "open" }]);
+  assert.equal(component.issues[0].scope, "component");
+
+  const scoped = body.replace("component: IconButton/Tonal\n", "component: IconButton/Tonal\nscope: variant\n");
+  assert.equal(parseLocator(scoped).locator.scope, "variant");
+  const variant = buildIssueIndex([{ html_url: "https://github.com/yschimke/m3-catalog/issues/41", title: "Large only", body: scoped, state: "open" }]);
+  assert.equal(variant.issues[0].scope, "variant");
+  assert.equal(parseLocator(scoped.replace("scope: variant", "scope: all")).error, "scope must be component or variant");
+});
+
 test("mangled blocks are reported instead of silently skipped", () => {
   const errors = [];
   const index = buildIssueIndex([{ html_url: "https://github.com/yschimke/m3-catalog/issues/40", title: "x", body: body.replace("overrides:", "overrides"), state: "open" }], { generatedAt: "2026-08-15T10:00:00Z", onError: (_, error) => errors.push(error) });

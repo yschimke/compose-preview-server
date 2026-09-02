@@ -1294,6 +1294,7 @@ ${captureControlsHtml().prependIndent("          ")}
       "<label class=\"cp-report-summary\">Summary" +
       "<input class=\"cp-report-summary-input\" type=\"text\" name=\"title\" required" +
       " autocomplete=\"off\" placeholder=\"Briefly describe what is wrong\"></label>" +
+      reportScopeHtml(r.bodyTemplate) +
       reportClassificationHtml() +
       "<input type=\"hidden\" name=\"body\" id=\"cp-report-body\"" +
       " value=\"${WebEscaping.htmlEscape(r.body)}\"" +
@@ -1347,6 +1348,25 @@ ${captureControlsHtml().prependIndent("          ")}
       "catalog&rsquo;s issue index can tell a difference that is ours from one that is not. " +
       "Leave it on <em>needs investigating</em> if you are not sure — that is what it is for." +
       "</span></cp-report-classification>"
+
+  /** Controls whether the locator joins back to every variant or only the one being reported. */
+  private fun reportScopeHtml(bodyTemplate: String): String {
+    if (
+      ServeIssueReport.LOCATOR_FENCE !in bodyTemplate &&
+        ServeIssueReport.LOCATORS_PLACEHOLDER !in bodyTemplate
+    ) {
+      return ""
+    }
+    return "<cp-report-scope class=\"cp-report-class\">" +
+      "<label class=\"cp-report-class-label\">Show this issue on" +
+      "<select class=\"cp-report-class-input\">" +
+      "<option value=\"component\" selected>This component</option>" +
+      "<option value=\"variant\" disabled hidden>This component + variant</option>" +
+      "</select></label>" +
+      "<span class=\"cp-report-class-note\">Component issues appear on every preview variant; " +
+      "variant issues appear only on the preview you are reporting.</span>" +
+      "</cp-report-scope>"
+  }
 
   /**
    * The three answers, as `label value` → visible text → the sentence the issue body states.
@@ -1609,18 +1629,17 @@ ${captureControlsHtml().prependIndent("          ")}
     preview: ServePreview,
   ): List<ParityIssue> = issues.filter { issue ->
     preview.id in issue.previewIds ||
-      (preview.componentId != null && issue.component == preview.componentId)
+      (issue.scope == "component" && issue.component == ServeIssueReport.componentIdFor(preview))
   }
 
   /**
-   * The issues one **comparison row** carries — any naming one of its preview [ids], or its
-   * component.
+   * The issues one **comparison row** carries — component-scoped issues naming any of its preview
+   * [ids] or its component, plus variant-scoped issues naming one of [variantIds] exactly.
    *
-   * Matched over the row's whole id set rather than over the one variant it is serving, because a
-   * row IS the variants: an issue filed from the dark page is about the same two pictures the light
-   * lane is showing, and joining on the served variant alone would hide it from the reader who
-   * switched theme. The folded-out siblings ride along for the same reason they ride along in the
-   * filter — they have no row of their own to carry their reports.
+   * Component-wide reports match the row's whole id set because a row IS the variants. Exact
+   * reports are serialized for every real theme variant so the browser can swap the visible pill
+   * with the pictures. Folded-out siblings remain filtering aliases only and cannot contribute an
+   * exact issue.
    *
    * Open before closed, then newest first: the column is read for "does someone already know?", and
    * a closed report answers that more weakly than an open one.
@@ -1629,13 +1648,17 @@ ${captureControlsHtml().prependIndent("          ")}
     issues: List<ParityIssue>,
     ids: List<String>,
     componentId: String?,
+    variantIds: List<String>,
   ): List<ParityIssue> {
     if (issues.isEmpty()) return emptyList()
     val wanted = ids.toSet()
+    val exact = variantIds.toSet()
     return issues
       .filter { issue ->
-        issue.previewIds.any { it in wanted } ||
-          (componentId != null && issue.component == componentId)
+        if (issue.scope == "variant") issue.previewIds.any { it in exact }
+        else
+          issue.previewIds.any { it in wanted } ||
+            (componentId != null && issue.component == componentId)
       }
       .sortedWith(compareBy({ it.state != "open" }, { -it.number }))
   }
@@ -1662,6 +1685,7 @@ ${captureControlsHtml().prependIndent("          ")}
    */
   private fun compareBugsCellHtml(
     issues: List<ParityIssue>,
+    activePreviewId: String,
     detailHref: String?,
     fallbackHref: String,
   ): String {
@@ -1678,7 +1702,14 @@ ${captureControlsHtml().prependIndent("          ")}
         val titleHtml =
           if (title.isEmpty()) ""
           else "<span class=\"cp-compare-bug-title\">${WebEscaping.htmlEscape(title)}</span>"
-        "<a class=\"cp-compare-bug$closed\" href=\"${WebEscaping.htmlEscape(issue.url)}\" " +
+        val scopeAttrs =
+          if (issue.scope != "variant") " data-bug-scope=\"component\""
+          else {
+            val previewIds = issue.previewIds.joinToString(" ")
+            val hidden = if (activePreviewId in issue.previewIds) "" else " hidden"
+            " data-bug-scope=\"variant\" data-bug-preview-ids=\"${WebEscaping.htmlEscape(previewIds)}\"$hidden"
+          }
+        "<a class=\"cp-compare-bug$closed\"$scopeAttrs href=\"${WebEscaping.htmlEscape(issue.url)}\" " +
           "rel=\"noopener\" title=\"${WebEscaping.htmlEscape(tip)}\">" +
           "<span class=\"cp-compare-bug-num\">#${issue.number}</span>$titleHtml</a>"
       }
@@ -9738,11 +9769,20 @@ ${captureControlsHtml().prependIndent("          ")}
             previewIdsByCard[cardKey].orEmpty().filterNot { it in rowPreviewIds }
           else emptyList()
         val ids = (variants.map { it.id } + folded).distinct().joinToString(" ")
-        // Every issue the catalog's index names against any of this row's previews, or against the
-        // component itself. Matched on the row's WHOLE id set rather than on `current` alone: an
-        // issue is filed from one theme's page and the row shows both, so joining on the served
-        // variant would hide a dark-lane report from the reader looking at the light lane.
-        val bugs = issuesForRow(parityIssues, variants.map { it.id } + folded, current.componentId)
+        val previewAttrs =
+          listOf("light" to card.light, "dark" to card.dark, "neutral" to card.neutral)
+            .mapNotNull { (variant, preview) ->
+              preview?.let { " data-preview-$variant=\"${WebEscaping.htmlEscape(it.id)}\"" }
+            }
+            .joinToString("")
+        // Component issues join against the whole row; exact issues join only against `current`.
+        val bugs =
+          issuesForRow(
+            parityIssues,
+            variants.map { it.id } + folded,
+            ServeIssueReport.componentIdFor(current),
+            variants.map { it.id },
+          )
         // Where "+ file" lands at rest: the focused Reference / Diff / Actual page for the pair
         // this row is SERVED showing, which files a report naming that exact preview and reference.
         // `<cp-compare-wall>` re-points it at the pair it resolves whenever the lane or theme
@@ -9754,7 +9794,8 @@ ${captureControlsHtml().prependIndent("          ")}
               referencesFor(preview.id).firstOrNull()?.let { detailHref(preview, it) }
             }
         val bugCell =
-          if (showBugs) compareBugsCellHtml(bugs, servedDetail, "$viewer#cp-report") else ""
+          if (showBugs) compareBugsCellHtml(bugs, current.id, servedDetail, "$viewer#cp-report")
+          else ""
         // The row's component identity, which a locator has to name and the wall's picker cannot
         // derive: `ServeIssueReport.componentIdFor` reads the catalog's own id where there is one
         // and falls back to a route id parsed out of the preview id, and reproducing that fallback
@@ -9817,7 +9858,7 @@ ${captureControlsHtml().prependIndent("          ")}
             .joinToString("")
         """
           <tr class="cp-compare-row" data-label="${WebEscaping.htmlEscape(label)}"
-            data-hay="${WebEscaping.htmlEscape(hay)}" data-preview-ids="${WebEscaping.htmlEscape(ids)}"$componentIdAttr$pngAttrs$svgAttrs$rcAttrs$referenceAttrs$parallelDataAttrs$declaredBgAttrs>
+            data-hay="${WebEscaping.htmlEscape(hay)}" data-preview-ids="${WebEscaping.htmlEscape(ids)}"$componentIdAttr$previewAttrs$pngAttrs$svgAttrs$rcAttrs$referenceAttrs$parallelDataAttrs$declaredBgAttrs>
             <th scope="row">$pickCell<a href="$viewer">${WebEscaping.htmlEscape(component)}${
             if (variant.isEmpty()) ""
             else "<span class=\"cp-compare-variant\">${WebEscaping.htmlEscape(variant)}</span>"

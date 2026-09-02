@@ -612,6 +612,7 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:data-remotecompose-core",
       "ee.schimke.composeai:data-render-core",
       "ee.schimke.composeai:data-theme-core",
+      "ee.schimke.composeai:parity-issues-protocol",
       "ee.schimke.composeai:preview-data-api",
       "ee.schimke.composeai:render-session-api",
       "ee.schimke.composeai:render-session-subprocess",
