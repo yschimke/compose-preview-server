@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.15.0](https://github.com/yschimke/compose-preview-server/compare/v2.14.0...v2.15.0) (2026-09-02)
+
+
+### Features
+
+* **ui-builder:** add website design creation flow ([#167](https://github.com/yschimke/compose-preview-server/issues/167)) ([addb694](https://github.com/yschimke/compose-preview-server/commit/addb694482b3beadae052e8bbbb2968f6f73a692))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#169](https://github.com/yschimke/compose-preview-server/issues/169)) ([15026f4](https://github.com/yschimke/compose-preview-server/commit/15026f458246f1406ef1d4bc99114839837d4265))
+* **deps:** update compose-ai-tools ([#176](https://github.com/yschimke/compose-preview-server/issues/176)) ([d0cd7e3](https://github.com/yschimke/compose-preview-server/commit/d0cd7e3dfe401c8ca01b05f0f0f54a590b7bdf1d))
+* **serve:** upload catalog report captures ([#172](https://github.com/yschimke/compose-preview-server/issues/172)) ([d6407e0](https://github.com/yschimke/compose-preview-server/commit/d6407e072cb1784db71ce7addb72edb7872349b4))
+* **ui-builder:** select an enabled creation catalog ([#171](https://github.com/yschimke/compose-preview-server/issues/171)) ([4f81ce3](https://github.com/yschimke/compose-preview-server/commit/4f81ce3666581f150250bb8e01f8f9437ebbd0c4))
+
 ## [2.14.0](https://github.com/yschimke/compose-preview-server/compare/v2.13.0...v2.14.0) (2026-09-01)
 
 
