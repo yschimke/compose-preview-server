@@ -295,6 +295,26 @@ interface ServeHost : AutoCloseable {
   fun bakedRender(previewId: String, overrides: PreviewOverrides): RenderOutcome.Ok? = null
 
   /**
+   * Make [previewId]'s published pixels local, if this host can fetch them and has not already.
+   *
+   * The write half of [bakedRender]'s read: that one is local-only by design, so a preview whose
+   * PNG has never been fetched answers null and its card falls back to the full-resolution
+   * `/render/` URL. Calling this is what lets a *later* [bakedRender] — and therefore
+   * [ServeHeroImages.gridThumbFor] — succeed.
+   *
+   * **Blocking, and never to be called on a request thread.** It performs the delivery-branch fetch
+   * that `bakedRender` exists to avoid doing there; [ServeThumbWarmer] is what calls it, off a
+   * bounded background pool.
+   *
+   * Fetches published bytes only — it must never render, and never wake a suspended daemon.
+   * Best-effort throughout: an unknown id, a deferred (live-only) preview, a host with no fetch
+   * source, or a failed fetch are all silent no-ops, and a failure is not remembered, so the next
+   * attempt retries. Default does nothing, which is right for every host with no published bytes
+   * behind it.
+   */
+  fun warmBakedRender(previewId: String) {}
+
+  /**
    * [previewId]'s baked render size in pixels, read from the PNG header alone — no decode, no
    * fetch, no daemon — or null when the pixels aren't already on this box.
    *

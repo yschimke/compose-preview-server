@@ -1340,6 +1340,19 @@ class ServeBundleHost(
    * admission like any other. Answering null sends it down the ordinary [render] path, which fills
    * it.
    */
+  /**
+   * The fetching counterpart of [bakedRender], for [ServeThumbWarmer].
+   *
+   * [bakedPngFile] is exactly the call [bakedRender] declines to make: it fills a declared-but-not
+   * yet-local PNG from the delivery branch, per-id serialised and atomically moved into place. Here
+   * that is the whole point — this runs off the request thread precisely so the fetch can happen —
+   * and the bytes are discarded because the file landing on disk is the result.
+   */
+  override fun warmBakedRender(previewId: String) {
+    if (previewId !in previewIds) return
+    bakedPngFile(previewId)
+  }
+
   override fun bakedRender(previewId: String, overrides: PreviewOverrides): RenderOutcome.Ok? {
     if (previewId !in previewIds) return null
     val png = localBakedPng(previewId) ?: return null
