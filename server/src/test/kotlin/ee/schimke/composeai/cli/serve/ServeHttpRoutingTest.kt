@@ -1078,6 +1078,14 @@ class ServeHttpRoutingTest {
         headers[ServeHttpServer.DROPPED_OVERRIDES_HEADER],
         "the player WAS applied, so nothing is reported dropped",
       )
+      // These are published bytes, so they cache like published bytes. `no-store` here was a real
+      // cost once the compare wall started pointing a cell at this lane per row: every one of them
+      // re-fetched on every page view and every lazy scroll back into view.
+      assertEquals(
+        "public, max-age=300, stale-while-revalidate=3600",
+        headers["Cache-Control"],
+        "$query is as cacheable as the bare render it is the player-selected twin of",
+      )
     }
   }
 
@@ -1100,6 +1108,13 @@ class ServeHttpRoutingTest {
         "rc-published",
         headers[ServeHttpServer.GENERATION_HEADER],
         "$query did not take the published lane",
+      )
+      // …and it must not pick up the bare selection's cache lifetime either: these pixels DO depend
+      // on the request, which is the whole reason they are not answerable from published bytes.
+      assertNotEquals(
+        "public, max-age=300, stale-while-revalidate=3600",
+        headers["Cache-Control"],
+        "$query is made to order and must not be cached as a fixed answer",
       )
     }
   }
@@ -1139,11 +1154,46 @@ class ServeHttpRoutingTest {
     assertEquals("rc-published", headers[ServeHttpServer.GENERATION_HEADER])
     assertContentEquals(publishedPng(), body)
 
+    // This path returns before the cache decision the daemon-backed lanes reach, so it has to make
+    // the same one — and cmp-jvm is the player it matters most for, since redrawing it costs a
+    // one-shot desktop JVM rather than a daemon round-trip.
+    assertEquals(
+      "public, max-age=300, stale-while-revalidate=3600",
+      headers["Cache-Control"],
+      "the staged raster caches like the published bytes it is",
+    )
+
     // …and only when bare: anything more asks for pixels the parity run never drew.
     val (mixedCode, _, mixedHeaders) =
       getFull("/rc-published/render/$previewId.png?rcPlayer=cmp-jvm&fontScale=2.0")
     assertNotEquals("rc-published", mixedHeaders[ServeHttpServer.GENERATION_HEADER])
     assertNotEquals(200, mixedCode)
+  }
+
+  /**
+   * `scroll=` is not an override param, so neither "bare" test sees it in the override map — but a
+   * full-page capture is a different **product**, which a staged viewport raster cannot answer and
+   * which the daemon makes to order. Both bare-player lanes have to exclude it: the short-circuit
+   * so it does not serve the wrong product, and the cache branch so it does not hand a
+   * made-to-order render the published bytes' lifetime.
+   */
+  @Test
+  fun `a scrolling capture is not a bare player selection, in either lane`() {
+    for (wire in listOf("cmp-jvm", "cmp-android")) {
+      val (code, _, headers) =
+        getFull("/rc-published/render/$previewId.png?rcPlayer=$wire&scroll=long")
+      assertNotEquals(
+        "rc-published",
+        headers[ServeHttpServer.GENERATION_HEADER],
+        "$wire + scroll must not be answered with the viewport raster",
+      )
+      assertNotEquals(
+        "public, max-age=300, stale-while-revalidate=3600",
+        headers["Cache-Control"],
+        "$wire + scroll is made to order and must not be cached as a fixed answer",
+      )
+      assertNotEquals(200, code, "$wire + scroll routes to the renderer, which cannot serve it")
+    }
   }
 
   /**

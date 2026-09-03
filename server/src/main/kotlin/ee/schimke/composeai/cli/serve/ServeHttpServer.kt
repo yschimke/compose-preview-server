@@ -9004,7 +9004,14 @@ class ServeHttpServer(
             call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
           }
         if (staged != null) {
-          markGeneration(RenderOutcome.Generation.RC_PUBLISHED.wire, DYNAMIC_RESOURCE_CACHE_CONTROL)
+          // Cached exactly like the daemon-backed player lanes below, and for the same reason:
+          // these ARE the published bytes. This path returns before that decision is reached, so
+          // it has to make the same one — otherwise the one player whose staged raster costs a
+          // ~4.3s subprocess to redraw is the one the wall refetches on every view.
+          markGeneration(
+            RenderOutcome.Generation.RC_PUBLISHED.wire,
+            if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else DYNAMIC_RESOURCE_CACHE_CONTROL,
+          )
           call.respondBytes(staged, ContentType.Image.PNG)
           return@withLeasedSession
         }
@@ -9231,13 +9238,43 @@ class ServeHttpServer(
                   outcome.generation,
                 )
               } else {
+                // A BARE `?rcPlayer=` is a fixed answer to a fixed URL, the same way an
+                // override-free browse is: it replays a PUBLISHED `ir/<id>.rc` through a named
+                // player at the preview's own spec, and every axis that would make the pixels
+                // depend on the request — a knob, a theme, a device, a font scale — is another
+                // override param and excluded here by `singleOrNull`.
+                //
+                // It was `no-store`, on the reasoning that an override means "pixels that reflect
+                // no published bytes at all". That is untrue of this one twice over. Once by
+                // construction: [RenderOutcome.Generation.RC_PUBLISHED] IS published bytes, read
+                // off the catalog's rc-compare staging, and its own KDoc says it is answerable
+                // exactly as the baked PNG is — measured on the deployed host, `?rcPlayer=cmp-
+                // android` returns bytes md5-identical to the bare render and was still `no-store`.
+                // And once by cost: the compare wall now points a cell at this lane for every
+                // player a run did not publish, so `no-store` re-renders each of them on every page
+                // view and every lazy scroll back into view, against a serial daemon.
+                //
+                // The staleness this accepts is the one the baked lane already accepts: a redeploy
+                // can change the player, and for up to `max-age` a cache answers with the previous
+                // one. `stale-while-revalidate` bounds it the same way there.
+                // `!scroll` for the same reason [bareRcPlayerRequest] excludes it: `scroll=` is not
+                // an override param, so it would otherwise ride through here — but a full-page
+                // capture skips the published/baked chain entirely (`cached = if (scroll) null`)
+                // and is made to order by the daemon. Nothing about it is a replay of published
+                // bytes, so nothing about it earns the published bytes' lifetime.
+                val bareRcPlayer = overrideParams.keys.singleOrNull() == "rcPlayer" && !scroll
+                val bakedBrowse =
+                  outcome.generation == RenderOutcome.Generation.BAKED && overrideParams.isEmpty()
                 markGeneration(
                   outcome.generation.wire,
-                  if (
-                    outcome.generation == RenderOutcome.Generation.BAKED &&
-                      overrideParams.isEmpty() &&
-                      isPublic
-                  ) {
+                  if (!isPublic) DYNAMIC_RESOURCE_CACHE_CONTROL
+                  // A player selection stops at the short public lifetime and never takes the
+                  // `immutable` one, even on a generation-scoped URL: what these bytes depend on is
+                  // the *deployed player*, and a redeploy that swaps it need not move the catalog's
+                  // generation. `max-age` is the bound on how stale that can get; `immutable` would
+                  // have no bound at all.
+                  else if (bareRcPlayer) STATIC_RESOURCE_CACHE_CONTROL
+                  else if (bakedBrowse) {
                     // A frame URL that names its generation is content-addressed: these exact
                     // bytes are what it answers with for as long as it resolves at all, because a
                     // republish moves the page's generation and therefore the URL. That is what
@@ -9249,9 +9286,7 @@ class ServeHttpServer(
                     // generation, not to cache the ambiguity for longer.
                     if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
                     else STATIC_RESOURCE_CACHE_CONTROL
-                  } else {
-                    DYNAMIC_RESOURCE_CACHE_CONTROL
-                  },
+                  } else DYNAMIC_RESOURCE_CACHE_CONTROL,
                 )
                 call.respondBytes(outcome.png, ContentType.Image.PNG)
               }
@@ -9477,10 +9512,14 @@ class ServeHttpServer(
    *
    * The same condition the parsed-override path applies: anything beyond the player selection wants
    * pixels the offline parity run never drew, so it must reach the renderer.
+   *
+   * `scroll=` is excluded for the reason `.svg` is: a full-page capture is a **different product**,
+   * which a staged viewport raster cannot answer however bare the rest of the query is. The
+   * parsed-override path already spells that rule out as `cached = if (scroll) null`.
    */
   private fun RoutingContext.bareRcPlayerRequest(): Boolean =
     call.request.queryParameters.entries().none { (key, _) ->
-      ServeOverrides.isOverrideParam(key) && key != "rcPlayer"
+      (ServeOverrides.isOverrideParam(key) && key != "rcPlayer") || key == "scroll"
     }
 
   /** Whether the caller passed `?fallback=baked` — an explicit "serve the snapshot anyway". */
