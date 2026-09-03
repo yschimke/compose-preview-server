@@ -1126,13 +1126,25 @@ function refreshReportLink() {
     var body = may<HTMLInputElement>("cp-report-body");
     var field = may<HTMLInputElement>("cp-url-png");
     if (!body || !field || !field.value) return;
+    // Whether this lane's pixels are the ones `data-cp-src` names. Live, Wasm and the Remote
+    // Compose players paint into a canvas or an iframe and apply overrides in place, so the stage
+    // image is a stale bystander there and no gate below can speak for what is on screen.
+    var mayName = rules.reportMayCarryLocator(
+        root.getAttribute("data-mode") || "snapshot",
+    );
     // Only while the frame ON SCREEN is the one the controls are asking for. The controls and the
     // copyable links run ahead of the image by a fetch and a decode, so recomposing on every change
     // would let a reporter who submits inside that window — or after the render failed — file a
     // locator and a render link for a frame nobody saw. Skipping leaves the field holding the body
     // that described the previous frame, which is the frame still on the stage; the next landed
     // frame calls this again. See `viewer/reportFrame.ts`, and D4 in the workflow doc.
+    //
+    // Checked only where the frame is knowable. On an interactive lane the recomposition below has
+    // to happen REGARDLESS, because its job there is to take the locator away: skipping would leave
+    // whatever block the field last held — the served one, or one composed on the way in — standing
+    // over pixels nobody can vouch for.
     if (
+        mayName &&
         !rules.reportFollowsDisplayedFrame(
             renderUrl(snapshotExt),
             img.getAttribute("data-cp-src"),
@@ -1145,6 +1157,7 @@ function refreshReportLink() {
     reportBody.set({
         render: stripToken(field.value),
         overrides: renderOverrides(),
+        omitLocator: !mayName,
     });
 }
 function stripToken(url: string) {

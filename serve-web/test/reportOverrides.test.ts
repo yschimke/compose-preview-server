@@ -10,7 +10,7 @@ import "./setup.js";
 import assert from "node:assert/strict";
 import { resetDom } from "./setup.js";
 import { ReportBody } from "../src/report/body.js";
-import { fillOverrides } from "../src/report/locator.js";
+import { fillOverrides, withoutLocators } from "../src/report/locator.js";
 import { classificationFromBody } from "../src/report/classification.js";
 
 const TEMPLATE = [
@@ -136,5 +136,56 @@ describe("report locator overrides", () => {
             classificationFromBody(input.value),
             "this catalog's own rendering",
         );
+    });
+});
+
+describe("a report that may not name a comparison", () => {
+    const LOCATOR = [
+        "```compose-parity-locator/v1",
+        "repository: o/r",
+        "system: catalog",
+        "component: Button/Filled",
+        "preview: button-filled__ideal__large",
+        "reference: button-filled__ideal__large",
+        "variant: ideal/large",
+        "overrides: {}",
+        "```",
+    ].join("\n");
+
+    it("leaves the body a server with no locator would have written", () => {
+        const withBlock =
+            "### Which preview\n\n| Preview | `x` |\n\n" + LOCATOR + "\n";
+        const without = withoutLocators(withBlock);
+        assert.equal(without, "### Which preview\n\n| Preview | `x` |\n");
+        assert.doesNotMatch(without, /compose-parity-locator/);
+    });
+
+    it("removes every block, not just the first", () => {
+        assert.doesNotMatch(
+            withoutLocators("a\n\n" + LOCATOR + "\nb\n\n" + LOCATOR + "\n"),
+            /compose-parity-locator/,
+        );
+    });
+
+    it("leaves a body that never had one untouched", () => {
+        const plain = "### What's wrong\n\nnothing indexable here\n";
+        assert.equal(withoutLocators(plain), plain);
+    });
+
+    it("takes the locator away when the lane cannot vouch for the pixels", () => {
+        // The interactive lanes paint into a canvas or an iframe; a block composed from the
+        // controls there would key the issue to a static frame the reporter left behind.
+        const input = field(TEMPLATE);
+        const body = new ReportBody();
+        body.attach(input);
+        body.set({
+            render: "https://preview.example/render/button.png",
+            overrides: {},
+            omitLocator: true,
+        });
+        assert.doesNotMatch(input.value, /compose-parity-locator/);
+        // …and the rest of the report survives: it is still a filed, classifiable issue.
+        assert.match(input.value, /\[PNG at these settings\]/);
+        assert.match(input.value, /\*\*Where it belongs:\*\*/);
     });
 });
