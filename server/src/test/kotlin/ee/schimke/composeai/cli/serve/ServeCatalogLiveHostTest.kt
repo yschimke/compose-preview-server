@@ -564,7 +564,7 @@ class ServeCatalogLiveHostTest {
   }
 
   @Test
-  fun `a mapped preview with published typography is answered without waking the daemon`() {
+  fun `a mapped preview whose daemon has no semantics lane falls back to published typography`() {
     val baked =
       RecordingHost(
         previews = listOf(ServePreview(catalogId, catalogId)),
@@ -581,39 +581,18 @@ class ServeCatalogLiveHostTest {
     val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
 
     val out = composite.renderAnnotations(catalogId, PreviewOverrides()) as AnnotationsOutcome.Ok
-    assertEquals(catalogId, baked.lastAnnotationsId, "the catalog's published layer answers")
+    assertEquals(daemonId, live.lastAnnotationsId, "the daemon is asked first")
+    assertEquals(catalogId, baked.lastAnnotationsId, "…then the catalog's published layer")
     assertTrue(out.json.decodeToString().contains("\"previewId\":\"$catalogId\""))
-    // The point of the ordering, and the reason it was inverted: an override-free request is
-    // served the BAKED frame, and the published layer was measured over exactly that frame. Asking
-    // the daemon first re-derived the same facts behind a cold start — 16-22s on the deployed
-    // server for the first `.annotations` on a suspended catalog, against 0.4-0.8s for the baked
-    // PNG of the same preview in the same state.
-    assertNull(live.lastAnnotationsId, "an override-free published layer must not wake the daemon")
   }
 
   @Test
-  fun `a mapped preview without published typography still routes to the daemon`() {
-    // The #4254 guard, restated for the inverted ordering: the published layer is asked first, but
-    // a catalog that published nothing for this preview must still reach the daemon rather than
-    // leaving the Typography checkbox drawing nothing.
-    val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
-    val live =
-      RecordingHost(
-        previews = listOf(ServePreview(daemonId, daemonId)),
-        tag = "live",
-        streaming = true,
-        hasDesignAnnotations = true,
-      )
-    val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
-
-    composite.renderAnnotations(catalogId, PreviewOverrides()) as AnnotationsOutcome.Ok
-    assertEquals(daemonId, live.lastAnnotationsId, "the daemon answers what the bundle cannot")
-  }
-
-  @Test
-  fun `an override that moves the render skips the published layer and goes live`() {
-    // `overridesAffectRender` is the gate, unchanged by the reordering: published bounds were
-    // measured at the baked scale, so a font scale must inspect the newly rendered composition.
+  fun `a mapped preview keeps the daemon's layers even when the catalog publishes typography`() {
+    // #213 guard. The published manifest carries only what `drawableAnnotations` draws, which
+    // filters `layout` out, so answering a mapped preview from it would drop the Layout layer the
+    // viewer still offers — measured on the deployed server at 34 of 52 annotations on a jetchat
+    // preview and 5 of 7 on an m3-catalog button. Whatever this lane does about the cold-start
+    // cost, it must not be "prefer the published payload for a preview the daemon can project".
     val baked =
       RecordingHost(
         previews = listOf(ServePreview(catalogId, catalogId)),
@@ -629,10 +608,9 @@ class ServeCatalogLiveHostTest {
       )
     val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
 
-    composite.renderAnnotations(catalogId, PreviewOverrides(fontScale = 1.5f))
-      as AnnotationsOutcome.Ok
-    assertEquals(daemonId, live.lastAnnotationsId, "a font scale inspects the live composition")
-    assertNull(baked.lastAnnotationsId, "the published layer describes the wrong pixels here")
+    composite.renderAnnotations(catalogId, PreviewOverrides()) as AnnotationsOutcome.Ok
+    assertEquals(daemonId, live.lastAnnotationsId, "the daemon projects all three layers")
+    assertNull(baked.lastAnnotationsId, "the published layer is not consulted when live answers")
   }
 
   @Test

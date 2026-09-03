@@ -6451,6 +6451,13 @@ class ServeHttpServer(
   private fun rememberCatalogMeta(id: String, host: ServeHost) {
     val bundle = catalogBundleHost(host)
     val facts = catalogFactsFor(id, host)
+    // A LIVE read, deliberately not carried in [CatalogFacts]. `ServeBundleHost.contentCrop`
+    // answers null (or a provisional gutter) *without memoising* while the render PNG or the
+    // component vector is still landing, so that a card starts cropping as soon as they do.
+    // Freezing the first answer for the host's whole life would defeat exactly that retry and
+    // leave the card uncropped until the next catalog refresh. `contentCrop` keeps its own cache
+    // of the decisions it *can* settle, so this stays a map lookup once the files are present.
+    val heroCrop = facts.heroPreviewId?.let { bundle?.contentCrop(it) }
     catalogMetaSeen[id] =
       CatalogMeta(
         title = bundle?.title?.takeIf { it.isNotBlank() } ?: host.label,
@@ -6462,12 +6469,12 @@ class ServeHttpServer(
         failedRenders = facts.failedRenders,
         deferredPreviews = host.liveOnlyPreviewIds.size,
         heroPreviewId = facts.heroPreviewId,
-        heroCrop = facts.heroCrop,
+        heroCrop = heroCrop,
         // Memoised per (host instance, preview): the decode + scale runs once per catalog, and a
         // refresh — which installs a fresh host — re-bakes under a new hash.
         heroImage =
           bundle?.let { owner ->
-            facts.heroPreviewId?.let { heroImages.heroFor(owner, it, facts.heroCrop) }
+            facts.heroPreviewId?.let { heroImages.heroFor(owner, it, heroCrop) }
           },
         heroRenderSize = facts.heroPreviewId?.let { host.bakedRenderSize(it) },
         darkStage = facts.darkStage,
@@ -6502,9 +6509,10 @@ class ServeHttpServer(
    *
    * Deliberately does **not** cover the members that move while a host is resident — the theme
    * optimization and render-cache snapshots (progress counters, read by `/status`), the hero's
-   * baked render size and the hero thumbnail itself (a catalog fills its images in after it loads,
-   * which is why [ServeHeroImages] memoises a decode failure but never a missing PNG). Those stay
-   * live reads above.
+   * baked render size, the hero's content crop and the hero thumbnail itself (a catalog fills its
+   * images in after it loads, which is why [ServeHeroImages] memoises a decode failure but never a
+   * missing PNG, and why [ServeBundleHost.contentCrop] memoises only a decision it could settle
+   * against files that were actually present). Those stay live reads above.
    */
   private class CatalogFacts(
     /** The id this was built for: [darkStage] is resolved per system, so a reuse must match. */
@@ -6513,7 +6521,6 @@ class ServeHttpServer(
     val components: List<ServeWeb.ComponentSearchEntry>,
     val failedRenders: Int,
     val heroPreviewId: String?,
-    val heroCrop: ContentCrop?,
     val darkStage: Boolean,
     val hasReferenceComparison: Boolean,
     val designToolLabel: String?,
@@ -6546,7 +6553,6 @@ class ServeHttpServer(
       components = ServeWeb.componentSearchEntries(host.previews, darkStage),
       failedRenders = host.previews.count { it.renderFailure != null },
       heroPreviewId = heroId,
-      heroCrop = heroId?.let { bundle?.contentCrop(it) },
       darkStage = darkStage,
       // The same two reads the catalog landing gates and names its own compare chip with, so the
       // front door and the landing cannot disagree about whether a catalog compares — or about
