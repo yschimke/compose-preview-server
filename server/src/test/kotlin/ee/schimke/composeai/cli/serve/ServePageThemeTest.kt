@@ -186,13 +186,99 @@ class ServePageThemeTest {
       ),
       script,
     )
-    assertTrue(script.contains("localStorage.getItem(\"cp-theme:wear-m3\")"), script)
+    // Per-TAB, and above the baked id: the viewer applies this tab's choice on a `__light`
+    // preview too, so the chrome has to follow it or frame a dark render in a light page. The
+    // baked theme is `r`'s own fallback, so it is reached only when the memory cannot be used.
+    assertTrue(script.contains("r(sessionStorage.getItem(\"cp-theme:wear-m3\"))"), script)
+    assertFalse(
+      script.contains("p.get(\"uiMode\")||((decodeURIComponent"),
+      "the baked theme is not a peer of the memory in the chain, it is what `r` falls back to: " +
+        script,
+    )
     assertTrue(
       script.contains("match(/(?:^|__)(light|dark)(?:__|$)/)"),
       "a clean baked preview URL must recover its light/dark variant before first paint: $script",
     )
     // …and only an explicit light/dark says anything about the page's mode.
     assertTrue(script.contains("if(t===\"light\"||t===\"dark\")"), script)
+  }
+
+  /**
+   * A remembered value the mode table cannot answer for must not shadow the baked theme.
+   *
+   * `t = stored || baked` with one resolve at the end paints nothing for a `theme:<provider>` the
+   * catalog has stopped declaring while a tab stayed open: the string is truthy, so the baked theme
+   * is never reached. Resolving each candidate as it is considered is what keeps OS chrome off a
+   * plainly light preview after a catalog update.
+   */
+  @Test
+  fun `an unresolvable remembered theme falls through to the baked one`() {
+    val script = landing().substringAfter("<script>try{var p=new URLSearchParams")
+    assertTrue(
+      script.contains("r(sessionStorage.getItem(\"cp-theme:wear-m3\"))"),
+      "the remembered value is decided by `r`, not read straight into the chain: $script",
+    )
+    assertTrue(
+      script.contains(
+        "r=function(t){t=t;return t===\"light\"||t===\"dark\"?t:((decodeURIComponent"
+      ),
+      "…and one that names no mode gives way to the theme the id bakes: $script",
+    )
+  }
+
+  /**
+   * A viewer that cannot re-render never consults the memory at all.
+   *
+   * A static bundle disables the Theme control, so the stage keeps its baked image whatever the tab
+   * remembers; following the memory there frames a light snapshot in dark chrome.
+   */
+  @Test
+  fun `a viewer that cannot apply a theme resolves the chrome from its baked one`() {
+    val html = viewer()
+    val script = html.substringAfter("<script>try{var p=new URLSearchParams").substringBefore("\n")
+    assertTrue(
+      html.contains("id=\"cp-theme\"") && html.contains(" disabled>"),
+      "this fixture is meant to have no live tier behind its Theme control: $html",
+    )
+    assertFalse(
+      script.contains("sessionStorage.getItem"),
+      "a page that cannot apply a remembered theme must not resolve the chrome from one: $script",
+    )
+    assertTrue(
+      script.contains("match(/(?:^|__)(light|dark)(?:__|$)/)"),
+      "it still opens on the theme its own id bakes: $script",
+    )
+  }
+
+  /**
+   * A remembered choice the destination does not offer gives way to its baked theme.
+   *
+   * One key serves a catalog's viewer, its landing grid and its comparison wall, so `light` picked
+   * on a Wear catalog's wall arrives at a Wear viewer that offers Dark alone. The sticky script
+   * finds no Light option and leaves the dark render up; the chrome has to agree with it.
+   */
+  @Test
+  fun `the pre-paint script checks a remembered theme against what the viewer offers`() {
+    val dark = ServePreview("watch__ideal__default__dark", "Watch", theme = "dark")
+    val html =
+      ServeWeb.viewerPage(
+        dark,
+        token = "t",
+        basePath = "/wear-m3",
+        catalogName = "wear-m3",
+        canApplyOverrides = true,
+        declaredThemes = listOf(ServeTheme("Coral", "com.example.CoralWearTheme")),
+        siblings = listOf(dark),
+      )
+    val script = html.substringAfter("<script>try{var p=new URLSearchParams").substringBefore("\n")
+    assertTrue(
+      script.contains("o={\"dark\":1,\"theme:com.example.CoralWearTheme\":1}"),
+      "a dark-first catalog offers Dark and its declared themes — never Light: $script",
+    )
+    assertTrue(
+      script.contains("r=function(t){return t&&o[t]?"),
+      "and the remembered value is checked against it, not merely resolved: $script",
+    )
   }
 
   @Test

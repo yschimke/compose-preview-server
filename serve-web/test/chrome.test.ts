@@ -150,7 +150,7 @@ describe("window.cpPageTheme", () => {
             "data-cp-theme-key",
             "cp-theme:m3",
         );
-        localStorage.setItem("cp-theme:m3", "light");
+        sessionStorage.setItem("cp-theme:m3", "light");
         at("?theme=dark");
         follow();
         assert.ok(
@@ -173,13 +173,12 @@ describe("window.cpPageTheme", () => {
         );
     });
 
-    it("matches a baked viewer theme instead of a stale remembered catalog theme", () => {
+    it("matches a baked viewer theme when this tab has chosen nothing", () => {
         stubStorage();
         document.documentElement.setAttribute(
             "data-cp-theme-key",
             "cp-theme:m3",
         );
-        localStorage.setItem("cp-theme:m3", "dark");
         document.body.innerHTML = `
           <div class="cp-viewer" data-preview-id="button__ideal__default__light"
                data-bg-theme="light"></div>`;
@@ -189,6 +188,124 @@ describe("window.cpPageTheme", () => {
         assert.ok(
             document.documentElement.classList.contains("cp-scheme-light"),
             "Match the preview theme follows the clean baked URL",
+        );
+        assert.ok(
+            !document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+    });
+
+    it("follows this tab's own choice over the theme the preview bakes", () => {
+        // The viewer applies the remembered choice to a `__light` preview too — it re-renders dark
+        // — so resolving the chrome from the id would frame that dark render in a light page. The
+        // memory is per-tab, so "remembered" here means someone picked it in THIS tab.
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:m3",
+        );
+        sessionStorage.setItem("cp-theme:m3", "dark");
+        document.body.innerHTML = `
+          <div class="cp-viewer" data-preview-id="button__ideal__default__light"
+               data-bg-theme="light"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+        assert.ok(
+            !document.documentElement.classList.contains("cp-scheme-light"),
+        );
+    });
+
+    it("falls back to the baked theme when the remembered one no longer resolves", () => {
+        // A catalog that dropped or renamed a declared theme while this tab stayed open: the
+        // stored `theme:<provider>` is still a truthy string, but no chip declares its mode any
+        // more. Shadowing the baked theme with it would leave OS chrome around a light preview.
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:m3",
+        );
+        sessionStorage.setItem("cp-theme:m3", "theme:com.example.Gone");
+        document.body.innerHTML = `
+          <div class="cp-viewer" data-preview-id="button__ideal__default__light"
+               data-bg-theme="light"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-light"),
+        );
+    });
+
+    it("ignores a remembered theme this page does not offer", () => {
+        // One key per catalog, written by the viewer, the landing chips and the comparison wall
+        // alike. Light picked on a Wear catalog's wall, then a Wear viewer that offers Dark alone:
+        // the sticky script finds no Light option and leaves the dark render up, so the chrome
+        // must not paint light around it.
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:wear",
+        );
+        sessionStorage.setItem("cp-theme:wear", "light");
+        document.body.innerHTML = `
+          <select id="cp-theme"><option value="dark">Dark (Default)</option></select>
+          <div class="cp-viewer" data-preview-id="button__ideal__default__dark"
+               data-bg-theme="dark"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+        assert.ok(
+            !document.documentElement.classList.contains("cp-scheme-light"),
+        );
+    });
+
+    it("takes a remembered theme the page does offer", () => {
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:m3",
+        );
+        sessionStorage.setItem("cp-theme:m3", "dark");
+        document.body.innerHTML = `
+          <select id="cp-theme">
+            <option value="light">Light (Default)</option>
+            <option value="dark">Dark (Default)</option>
+          </select>
+          <div class="cp-viewer" data-preview-id="button__ideal__default__light"
+               data-bg-theme="light"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+    });
+
+    it("ignores the remembered theme when the viewer cannot re-render", () => {
+        // A static bundle (or a fixed-theme specimen) disables the Theme select: the stage keeps
+        // its baked image whatever the tab remembers, so following the memory would frame a light
+        // snapshot in dark chrome.
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:m3",
+        );
+        sessionStorage.setItem("cp-theme:m3", "dark");
+        document.body.innerHTML = `
+          <select id="cp-theme" disabled></select>
+          <div class="cp-viewer" data-preview-id="button__ideal__default__light"
+               data-bg-theme="light"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-light"),
         );
         assert.ok(
             !document.documentElement.classList.contains("cp-scheme-dark"),

@@ -33,6 +33,7 @@ import {
 } from "./spec/sources.js";
 import { type ApiDocLink, usableApiDocs } from "./viewer/apiDocs.js";
 import { reportBody } from "./report/body.js";
+import { writeThemeMemory } from "./chrome/themeMemory.js";
 import {
     effectiveUnseeded,
     isChecked,
@@ -445,14 +446,12 @@ function syncThemeBar() {
 // chip, and on an untagged id (where a remembered choice IS applied) it would re-override the
 // render the navigation just avoided.
 function rememberThemeChoice(value: string) {
-    const key = themeChoice?.getAttribute("data-theme-storage-key");
-    if (!key) return;
-    try {
-        localStorage.setItem(key, value);
-    } catch (_) {
-        // A private window or blocked site data: the pick is not remembered, which costs the
-        // destination its pressed chip and nothing else. Never a reason not to navigate.
-    }
+    // A private window or blocked site data: the pick is not remembered, which costs the
+    // destination its pressed chip and nothing else. Never a reason not to navigate.
+    writeThemeMemory(
+        themeChoice?.getAttribute("data-theme-storage-key") || "",
+        value,
+    );
 }
 // A chip whose mode this catalog already baked as its own card carries `data-theme-href`, and
 // following it beats overriding this one: the twin's pixels are on disk, so the page loads from
@@ -4690,7 +4689,7 @@ function syncUrl() {
 }
 // What the controls hold when the URL names nothing — captured after the server markup and the
 // sticky-theme script have had their say, so Back out of a choice restores the page as it first
-// opened rather than whatever localStorage was last written with.
+// opened rather than whatever the tab's remembered theme was last written with.
 var initialTheme = themeChoice ? themeChoice.value : "";
 var initialThemeActive = themeChoice
     ? themeChoice.getAttribute("data-theme-active")
@@ -4858,9 +4857,9 @@ function hydrateFromUrl(popped: boolean) {
             el.checked = isChecked(value);
         else el.value = value;
     });
-    // The theme select is seeded (from the URL first, then localStorage) by the sticky script
-    // before this file runs, so the initial pass must not touch it. A Back/Forward pass owns it:
-    // the entry's theme, or the one the page opened with when it names none.
+    // The theme select is seeded (from the URL first, then this tab's remembered choice) by the
+    // sticky script before this file runs, so the initial pass must not touch it. A Back/Forward
+    // pass owns it: the entry's theme, or the one the page opened with when it names none.
     if (popped && themeChoice) {
         var provider = q.get("themeProvider");
         var uiMode = q.get("uiMode");

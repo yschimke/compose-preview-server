@@ -32,6 +32,7 @@ import {
     type PickFacts,
 } from "../compare/picks.js";
 import { reportBody } from "../report/body.js";
+import { readThemeMemory, writeThemeMemory } from "../chrome/themeMemory.js";
 import { initialState, poppedState, type WallState } from "../compare/state.js";
 import { GEOMETRY_REPORT_THRESHOLD } from "../compare/thresholds.js";
 import {
@@ -180,12 +181,10 @@ export class CompareWall extends ControllerElement {
     }
 
     private remembered(): string | null {
-        try {
-            return localStorage.getItem(this.themeKey());
-        } catch {
-            // A browser with storage blocked still gets the wall, on the page's default.
-            return null;
-        }
+        // Per-tab, like every other theme choice on this site: a wall compared in dark here does
+        // not re-theme the viewer someone left open in the next tab. A browser with storage
+        // blocked still gets the wall, on the page's default.
+        return readThemeMemory(this.themeKey()) || null;
     }
 
     private wire(): void {
@@ -211,11 +210,8 @@ export class CompareWall extends ControllerElement {
                 const picked = button.getAttribute("data-compare-theme");
                 if (picked !== "light" && picked !== "dark") return;
                 this.state.theme = picked;
-                try {
-                    localStorage.setItem(this.themeKey(), picked);
-                } catch {
-                    // Not remembering is survivable; not comparing is not.
-                }
+                // Not remembering is survivable; not comparing is not.
+                writeThemeMemory(this.themeKey(), picked);
                 window.cpUrlState?.push({ theme: picked });
                 // Paint the page to match the theme being compared, when the visitor's Page theme
                 // setting asks for that.

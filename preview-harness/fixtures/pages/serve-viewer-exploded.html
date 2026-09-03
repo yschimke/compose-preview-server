@@ -12,7 +12,7 @@
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
-        <script>try{var p=new URLSearchParams(location.search),t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||(((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]||localStorage.getItem("cp-theme:compose-m3")));if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
+        <script>try{var p=new URLSearchParams(location.search),o={"light":1,"dark":1},r=function(t){return t&&o[t]?t:((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1];},t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||r(sessionStorage.getItem("cp-theme:compose-m3")));if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
       </head>
       <body>
         <script src="/assets/serve/fixture/serve-chrome.js"></script>
@@ -289,11 +289,8 @@
       <script>(function () {
   var el = document.getElementById("cp-theme");
   if (!el) return;
-  // Runs before viewer.js' initial render. A clean explicit __light/__dark URL is reproducible:
-  // remembered choices never override the path. An explicit query parameter still wins below.
+  // Runs before viewer.js' initial render.
   var root = document.querySelector(".cp-viewer");
-  var pid = (root && root.getAttribute("data-preview-id")) || "";
-  var themed = pid.split("__").some(function (s) { return s === "light" || s === "dark"; });
   // The page's own URL outranks the remembered choice: `?themeProvider=` / `?uiMode=` is there
   // because someone picked it (or was handed the link), so a bookmarked viewer opens on the
   // theme it was bookmarked in — including on an explicit __light/__dark preview.
@@ -316,11 +313,19 @@
     if (pinsTheme(urlChoice)) el.setAttribute("data-theme-active", "1");
   }
   try {
-    var stored = localStorage.getItem("cp-theme:compose-m3");
+    // Per-tab (see the KDoc): this reads back only what someone picked in THIS tab, so applying
+    // it on every preview of the catalog is continuity rather than a stale global preference.
+    var stored = sessionStorage.getItem("cp-theme:compose-m3");
     var declared = stored && stored.indexOf("theme:") === 0;
     var option = null;
     Array.prototype.forEach.call(el.options, function (o) { if (o.value === stored) option = o; });
-    if (!urlOption && !themed && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
+    // `!el.disabled` as well as `!option.disabled`, and they are not the same test: a static
+    // bundle (or a fixed-theme specimen) disables the SELECT while its built-in light/dark
+    // options stay enabled, so an option check alone let a remembered choice through onto a
+    // page that cannot re-render. Nothing downstream honours it there — `syncBg` and
+    // `activeThemeChoice` both fold on `el.disabled` — but the chip read as pressed and the
+    // chrome followed it, framing an unchanged light snapshot in dark page colours.
+    if (!urlOption && !el.disabled && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
       el.value = stored;
       if (pinsTheme(stored)) el.setAttribute("data-theme-active", "1");
     }
@@ -342,7 +347,7 @@
     if (!root) return;
     // Only let the Theme choice drive the stage backing when the control can actually re-render
     // (daemon or Wasm). On a static bundle the select is disabled but the seeding above may still
-    // have copied a remembered localStorage value into el.value — honoring it would tint the
+    // have copied a remembered value into el.value — honoring it would tint the
     // stage while ServeBundleHost keeps returning the UNCHANGED baked PNG. Keep bgDefault there.
     var selectedOption = el.options[el.selectedIndex];
     var chosen = !el.disabled && selectedOption
@@ -355,7 +360,7 @@
   // Round-trip every unified choice, including `theme:<provider>`, to the catalog page.
   el.addEventListener("change", function () {
     el.setAttribute("data-theme-active", "1");
-    try { localStorage.setItem("cp-theme:compose-m3", el.value); } catch (e) {}
+    try { sessionStorage.setItem("cp-theme:compose-m3", el.value); } catch (e) {}
     syncBg();
     // …and the page around the stage, when the Page theme setting says to follow the choice.
     if (window.cpPageTheme) window.cpPageTheme.follow(el.value);

@@ -243,8 +243,8 @@ export class CatalogToolbar extends ControllerElement {
      * Keep the Theme pill naming the theme in force.
      *
      * Folded away, the pill is all that says which theme the grid is on, and the answer is the
-     * visitor's: the landing's own script marks a chip pressed from `localStorage` (or from
-     * `?theme=`) on load, and again on every click, with no page load in between. Mirroring
+     * visitor's: the landing's own script marks a chip pressed from what this tab remembers (or
+     * from `?theme=`) on load, and again on every click, with no page load in between. Mirroring
      * `aria-pressed` keeps this decoupled from that script, which has no hook of its own.
      */
     private watchThemeValue(): void {

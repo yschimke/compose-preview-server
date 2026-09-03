@@ -2119,7 +2119,12 @@ ${captureControlsHtml().prependIndent("          ")}
       .takeIf { it.source != PreviewBackdrop.Source.NONE }
       ?.let { if (it.isDark) "dark" else "light" }
 
-  /** Stable, catalog-specific persistence key shared by that catalog's landing and viewer pages. */
+  /**
+   * Stable, catalog-specific persistence key shared by that catalog's landing and viewer pages.
+   *
+   * Read and written in `sessionStorage`, so the theme choice it names belongs to ONE TAB: it
+   * follows every navigation within that tab and reaches no other. See [viewerThemeStickyScript].
+   */
   private fun themeStorageKey(sessionId: String?, basePath: String): String {
     val catalog = basePath.trim('/').ifBlank { sessionId ?: "default" }
     return "cp-theme:${WebEscaping.urlEncodeSegment(catalog)}"
@@ -3580,9 +3585,9 @@ ${captureControlsHtml().prependIndent("          ")}
    *   thumbnail at `/render/<id>.png?themeProvider=<fqn>` so the grid redraws under that theme.
    *
    * A catalog with no baked pair still gets a leading `default` chip so the declared themes have
-   * something to return to. Persists to the catalog-scoped localStorage key (shared with that
-   * catalog's viewer Theme select, which ignores the `theme:` values it doesn't understand).
-   * Progressive enhancement throughout — a no-JS client sees the full grid on its baked renders.
+   * something to return to. Persists to the catalog-scoped per-tab key (shared with that catalog's
+   * viewer Theme select, which ignores the `theme:` values it doesn't understand). Progressive
+   * enhancement throughout — a no-JS client sees the full grid on its baked renders.
    */
   private fun themePickerHtml(hasBaked: Boolean, declared: List<ServeTheme>): String {
     val builtIns =
@@ -3602,10 +3607,10 @@ ${captureControlsHtml().prependIndent("          ")}
     // sheet for the viewer, and `<cp-catalog-toolbar>` closes it on a pick exactly as
     // `<cp-viewer-drawers>` does.
     //
-    // The pill's value is seeded with the leading built-in and then mirrored from whichever chip is
-    // pressed (`<cp-catalog-toolbar>`), because the choice in force is remembered in `localStorage`
+    // The pill's value is seeded with the leading built-in and then mirrored from whichever chip
+    // is pressed (`<cp-catalog-toolbar>`), because the choice in force is remembered for the tab
     // and changes without a page load — a server-rendered label alone would be wrong on arrival for
-    // anyone who has picked a theme here before.
+    // anyone who has picked a theme in this tab before.
     val seed = builtIns.first().second
     return """
     <div class="cp-toolbar">
@@ -3737,7 +3742,7 @@ ${captureControlsHtml().prependIndent("          ")}
    * the catalog carries light/dark pairs, the sticky Light/Dark **toggle** — which *swaps* each
    * swappable card between its baked light and dark render in place (image, viewer link, id, label,
    * and stage backing), rather than hiding cards. Single-theme / theme-neutral cards carry no swap
-   * data and are left untouched. Theme state persists to a catalog-scoped localStorage key
+   * data and are left untouched. Theme state persists to a catalog-scoped `sessionStorage` key
    * (round-tripped with that catalog's viewer Theme select); the search text is ephemeral. Fully
    * client-side progressive enhancement — a no-JS client sees the full grid on its baked (default)
    * renders.
@@ -3809,7 +3814,7 @@ ${captureControlsHtml().prependIndent("          ")}
       if (hasThemes)
         """
         var stored = null;
-        try { stored = localStorage.getItem("$themeStorageKey"); } catch (e) {}
+        try { stored = sessionStorage.getItem("$themeStorageKey"); } catch (e) {}
         var themeBtns = document.querySelectorAll(".cp-theme-btn");
         function chipOffered(t) {
           var offered = false;
@@ -3842,7 +3847,7 @@ ${captureControlsHtml().prependIndent("          ")}
         var urlTheme = urlParam("theme");
         if (urlTheme && chipOffered(urlTheme)) theme = urlTheme;
         // What the page falls back to when Back lands on an entry with no `?theme=` — the choice
-        // this load resolved to, never the localStorage value a later click overwrote.
+        // this load resolved to, never the remembered value a later click overwrote.
         var initialTheme = theme;
         var appliedTheme = null;
         """
@@ -4266,7 +4271,7 @@ ${captureControlsHtml().prependIndent("          ")}
         """themeBtns.forEach(function (b) {
         b.addEventListener("click", function () {
           theme = b.getAttribute("data-theme-choice");
-          try { localStorage.setItem("$themeStorageKey", theme); } catch (e) {}
+          try { sessionStorage.setItem("$themeStorageKey", theme); } catch (e) {}
           // A discrete pick gets its own history entry, so Back returns to the previous theme
           // rather than leaving the catalog. No navigation: the grid re-points its own images.
           pushUrl({ theme: theme });
@@ -4585,7 +4590,7 @@ ${captureControlsHtml().prependIndent("          ")}
     // Back / Forward: re-read the whole selection off the URL and re-apply it in place — no
     // reload, so nothing is re-fetched that the page already has. A history entry that carries no
     // param for a control falls back to what THIS page load resolved to, never to the
-    // localStorage value a later click wrote: otherwise Back out of a theme would land right back
+    // remembered value a later click wrote: otherwise Back out of a theme would land right back
     // on the theme the visitor was leaving.
     val themePop =
       if (hasThemes)
@@ -5299,20 +5304,25 @@ ${captureControlsHtml().prependIndent("          ")}
 
   /**
    * Viewer half of the catalog-scoped sticky Theme control. The landing page and viewer use the
-   * same values: `light`, `dark`, or `theme:<provider FQN>`. A declared theme always wins over the
-   * baked light/dark token in a preview id; plain day/night choices retain the old behaviour where
-   * an explicit `__light` / `__dark` deep link opens on its baked pixels.
+   * same values: `light`, `dark`, or `theme:<provider FQN>`.
+   *
+   * The memory is `sessionStorage` (see `chrome/themeMemory.ts`), so it is the TAB's choice and
+   * nothing wider: it follows every navigation, reload and Back/Forward inside the tab that made
+   * the pick, and is gone when the tab closes. That is what lets a remembered choice apply
+   * UNIFORMLY, to a `…__s-square` preview and its `…__default__light` sibling alike. It could not
+   * before: a per-origin memory had to be suppressed on ids naming a baked theme, or a shared
+   * `__light` link would open in whatever theme the reader last picked days ago — and the
+   * suppression is exactly what made walking between two variants of one component change theme
+   * halfway. A tab that arrived by a pasted link or a bookmark remembers nothing, so a shared deep
+   * link is reproducible on its own terms rather than by a guard on the id.
    */
   private fun viewerThemeStickyScript(themeStorageKey: String): String =
     """
     (function () {
       var el = document.getElementById("cp-theme");
       if (!el) return;
-      // Runs before viewer.js' initial render. A clean explicit __light/__dark URL is reproducible:
-      // remembered choices never override the path. An explicit query parameter still wins below.
+      // Runs before viewer.js' initial render.
       var root = document.querySelector(".cp-viewer");
-      var pid = (root && root.getAttribute("data-preview-id")) || "";
-      var themed = pid.split("__").some(function (s) { return s === "light" || s === "dark"; });
       // The page's own URL outranks the remembered choice: `?themeProvider=` / `?uiMode=` is there
       // because someone picked it (or was handed the link), so a bookmarked viewer opens on the
       // theme it was bookmarked in — including on an explicit __light/__dark preview.
@@ -5335,11 +5345,19 @@ ${captureControlsHtml().prependIndent("          ")}
         if (pinsTheme(urlChoice)) el.setAttribute("data-theme-active", "1");
       }
       try {
-        var stored = localStorage.getItem("$themeStorageKey");
+        // Per-tab (see the KDoc): this reads back only what someone picked in THIS tab, so applying
+        // it on every preview of the catalog is continuity rather than a stale global preference.
+        var stored = sessionStorage.getItem("$themeStorageKey");
         var declared = stored && stored.indexOf("theme:") === 0;
         var option = null;
         Array.prototype.forEach.call(el.options, function (o) { if (o.value === stored) option = o; });
-        if (!urlOption && !themed && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
+        // `!el.disabled` as well as `!option.disabled`, and they are not the same test: a static
+        // bundle (or a fixed-theme specimen) disables the SELECT while its built-in light/dark
+        // options stay enabled, so an option check alone let a remembered choice through onto a
+        // page that cannot re-render. Nothing downstream honours it there — `syncBg` and
+        // `activeThemeChoice` both fold on `el.disabled` — but the chip read as pressed and the
+        // chrome followed it, framing an unchanged light snapshot in dark page colours.
+        if (!urlOption && !el.disabled && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
           el.value = stored;
           if (pinsTheme(stored)) el.setAttribute("data-theme-active", "1");
         }
@@ -5361,7 +5379,7 @@ ${captureControlsHtml().prependIndent("          ")}
         if (!root) return;
         // Only let the Theme choice drive the stage backing when the control can actually re-render
         // (daemon or Wasm). On a static bundle the select is disabled but the seeding above may still
-        // have copied a remembered localStorage value into el.value — honoring it would tint the
+        // have copied a remembered value into el.value — honoring it would tint the
         // stage while ServeBundleHost keeps returning the UNCHANGED baked PNG. Keep bgDefault there.
         var selectedOption = el.options[el.selectedIndex];
         var chosen = !el.disabled && selectedOption
@@ -5374,7 +5392,7 @@ ${captureControlsHtml().prependIndent("          ")}
       // Round-trip every unified choice, including `theme:<provider>`, to the catalog page.
       el.addEventListener("change", function () {
         el.setAttribute("data-theme-active", "1");
-        try { localStorage.setItem("$themeStorageKey", el.value); } catch (e) {}
+        try { sessionStorage.setItem("$themeStorageKey", el.value); } catch (e) {}
         syncBg();
         // …and the page around the stage, when the Page theme setting says to follow the choice.
         if (window.cpPageTheme) window.cpPageTheme.follow(el.value);
@@ -11523,7 +11541,7 @@ $cards
    * and corrected on load: the choice lives outside this page.
    */
   private const val MOTION_INDEX_SCRIPT =
-    """(function(){var stages=[].slice.call(document.querySelectorAll(".cp-motion-card-stage"));if(!stages.length)return;function attr(el,name){return el.getAttribute(name)||"";}function set(b,on){var img=b.querySelector(".cp-motion-card-img");if(!img)return;var src=attr(b,on?"data-motion-src":"data-motion-poster");if(!src)return;b.setAttribute("aria-pressed",on?"true":"false");if(img.getAttribute("src")!==src||on)img.setAttribute("src",src);}stages.forEach(function(b){b.addEventListener("click",function(){set(b,b.getAttribute("aria-pressed")!=="true");sync();});});var all=document.getElementById("cp-motion-all");function playing(){return stages.filter(function(b){return b.getAttribute("aria-pressed")==="true";}).length;}function sync(){if(!all)return;var on=playing()===stages.length;all.setAttribute("aria-pressed",on?"true":"false");all.textContent=playing()?"Stop all":"Play all";}if(all)all.addEventListener("click",function(){var on=playing()!==stages.length;stages.forEach(function(b){set(b,on);});sync();});var themeBtns=[].slice.call(document.querySelectorAll("[data-motion-theme]"));function applyTheme(theme){stages.forEach(function(b){var src=attr(b,"data-motion-src-"+theme);if(!src)return;b.setAttribute("data-motion-src",src);b.setAttribute("data-motion-poster",attr(b,"data-motion-poster-"+theme));var label=attr(b,"data-motion-label-"+theme);if(label){b.setAttribute("title",label);b.setAttribute("aria-label",label);}var href=attr(b,"data-motion-href-"+theme),link=b.parentNode&&b.parentNode.querySelector(".cp-motion-card-title");if(link&&href)link.setAttribute("href",href);set(b,b.getAttribute("aria-pressed")==="true");});themeBtns.forEach(function(t){t.setAttribute("aria-pressed",attr(t,"data-motion-theme")===theme?"true":"false");});}themeBtns.forEach(function(t){t.addEventListener("click",function(){var theme=attr(t,"data-motion-theme");applyTheme(theme);try{var key=document.documentElement.getAttribute("data-cp-theme-key");if(key)localStorage.setItem(key,theme);}catch(e){}if(window.cpUrlState)window.cpUrlState.push({theme:theme});if(window.cpPageTheme)window.cpPageTheme.follow(theme);});});if(themeBtns.length){var opening="";try{var fromUrl=new URLSearchParams(location.search).get("theme");var key=document.documentElement.getAttribute("data-cp-theme-key");var remembered=key?localStorage.getItem(key):"";opening=fromUrl||remembered||"";}catch(e){}if(opening==="light"||opening==="dark")applyTheme(opening);}})();"""
+    """(function(){var stages=[].slice.call(document.querySelectorAll(".cp-motion-card-stage"));if(!stages.length)return;function attr(el,name){return el.getAttribute(name)||"";}function set(b,on){var img=b.querySelector(".cp-motion-card-img");if(!img)return;var src=attr(b,on?"data-motion-src":"data-motion-poster");if(!src)return;b.setAttribute("aria-pressed",on?"true":"false");if(img.getAttribute("src")!==src||on)img.setAttribute("src",src);}stages.forEach(function(b){b.addEventListener("click",function(){set(b,b.getAttribute("aria-pressed")!=="true");sync();});});var all=document.getElementById("cp-motion-all");function playing(){return stages.filter(function(b){return b.getAttribute("aria-pressed")==="true";}).length;}function sync(){if(!all)return;var on=playing()===stages.length;all.setAttribute("aria-pressed",on?"true":"false");all.textContent=playing()?"Stop all":"Play all";}if(all)all.addEventListener("click",function(){var on=playing()!==stages.length;stages.forEach(function(b){set(b,on);});sync();});var themeBtns=[].slice.call(document.querySelectorAll("[data-motion-theme]"));function applyTheme(theme){stages.forEach(function(b){var src=attr(b,"data-motion-src-"+theme);if(!src)return;b.setAttribute("data-motion-src",src);b.setAttribute("data-motion-poster",attr(b,"data-motion-poster-"+theme));var label=attr(b,"data-motion-label-"+theme);if(label){b.setAttribute("title",label);b.setAttribute("aria-label",label);}var href=attr(b,"data-motion-href-"+theme),link=b.parentNode&&b.parentNode.querySelector(".cp-motion-card-title");if(link&&href)link.setAttribute("href",href);set(b,b.getAttribute("aria-pressed")==="true");});themeBtns.forEach(function(t){t.setAttribute("aria-pressed",attr(t,"data-motion-theme")===theme?"true":"false");});}themeBtns.forEach(function(t){t.addEventListener("click",function(){var theme=attr(t,"data-motion-theme");applyTheme(theme);try{var key=document.documentElement.getAttribute("data-cp-theme-key");if(key)sessionStorage.setItem(key,theme);}catch(e){}if(window.cpUrlState)window.cpUrlState.push({theme:theme});if(window.cpPageTheme)window.cpPageTheme.follow(theme);});});if(themeBtns.length){var opening="";try{var fromUrl=new URLSearchParams(location.search).get("theme");var key=document.documentElement.getAttribute("data-cp-theme-key");var remembered=key?sessionStorage.getItem(key):"";opening=fromUrl||remembered||"";}catch(e){}if(opening==="light"||opening==="dark")applyTheme(opening);}})();"""
 
   /**
    * One **design page**: the sheet itself as inlined SVG, an outline over every component node on
@@ -13979,16 +13997,33 @@ ${scriptTag("known-differences.js")}
     // this control never reached the sibling.
     val themeFixed = isThemeSpecimen(preview)
     val viewerDeclaredThemes = if (themeFixed) emptyList() else declaredThemes
+    /**
+     * Whether a theme choice can actually reach the pixels here — a daemon or a Wasm tier to
+     * re-render with, and not a fixed-theme specimen.
+     *
+     * Hoisted out of the selector markup because the answer is not only about the `<select>`: it
+     * also decides whether the pre-paint chrome script may follow a remembered choice
+     * ([pageThemeScript]). On a page that cannot re-render, the remembered theme describes nothing
+     * on screen — the stage keeps the baked image — so painting the chrome from it frames a light
+     * snapshot in dark chrome.
+     */
+    val themeChoiceApplies =
+      !themeFixed &&
+        ((!wearAlwaysDark && (overridesLive || wasmSrc != null)) ||
+          (viewerDeclaredThemes.isNotEmpty() && overridesLive))
+    /**
+     * What that control actually offers — the built-ins it emits (a dark-first Wear catalog offers
+     * Dark alone) plus every declared theme, which is a live option only while overrides are.
+     *
+     * Handed to the pre-paint script so it checks a remembered choice against the same list the
+     * sticky script will, rather than accepting anything that merely names a mode.
+     */
+    val offeredThemes =
+      (if (wearAlwaysDark) listOf("dark") else listOf("light", "dark")) +
+        (if (overridesLive) viewerDeclaredThemes.map { "theme:${it.providerFqn}" } else emptyList())
     val themeSelectorHtml = run {
       val declaredThemes = viewerDeclaredThemes
-      val themeDis =
-        if (
-          !themeFixed &&
-            ((!wearAlwaysDark && (overridesLive || wasmSrc != null)) ||
-              (declaredThemes.isNotEmpty() && overridesLive))
-        )
-          ""
-        else " disabled"
+      val themeDis = if (themeChoiceApplies) "" else " disabled"
       val providerDis = if (overridesLive) "" else " disabled"
       val grouped = declaredThemes.groupBy { it.group }
       val optionsOf: (List<ServeTheme>) -> String = { list ->
@@ -14779,6 +14814,8 @@ ${scriptTag("known-differences.js")}
       themeCss = themeCss,
       siteName = catalogName,
       themeStorageKey = themeStorageKey(sessionId, basePath),
+      themeChoiceApplies = themeChoiceApplies,
+      offeredThemes = offeredThemes,
       declaredThemes = if (overridesLive) viewerDeclaredThemes else emptyList(),
       // Only the `js` chip paints in this document's canvas, and it only exists when the preview
       // carries a captured document.
@@ -15127,13 +15164,36 @@ ${scriptTag("known-differences.js")}
      */
     themeCss: String = "",
     /**
-     * The catalog-scoped `localStorage` key this page's theme choice is remembered under (as
+     * The catalog-scoped `sessionStorage` key this page's theme choice is remembered under (as
      * produced by [themeStorageKey]) — published to the client on `<html data-cp-theme-key>` and
      * read back by the pre-paint script and the Page theme setting, which need the remembered
      * choice to resolve the page's colour scheme. Empty for a page with no theme control at all
      * (the front door, `/status`, a shared document): those never pin a scheme.
      */
     themeStorageKey: String = "",
+    /**
+     * Whether a remembered theme choice can actually change what this page shows.
+     *
+     * False on a viewer whose Theme control is disabled — a static bundle with no daemon or Wasm
+     * tier behind it, or a fixed-theme specimen. Such a page keeps its baked image whatever is
+     * remembered, so the pre-paint script must resolve the chrome from the baked theme instead:
+     * following the memory there frames a light snapshot in dark chrome and marks a chip the page
+     * cannot honour. Default true — the landing grid's chips re-point at published pixels, so a
+     * remembered choice always applies there.
+     */
+    themeChoiceApplies: Boolean = true,
+    /**
+     * The theme values this page's own control offers, for the pre-paint script to check a
+     * remembered choice against. Empty where the caller does not enumerate them — the script then
+     * trusts a remembered value as far as it can resolve it.
+     *
+     * One key serves a catalog's viewer, its landing grid and its comparison wall, so the memory
+     * routinely arrives naming something the destination does not have: `light` picked on a Wear
+     * catalog's wall and then opened in a Wear viewer, which offers Dark alone. The viewer keeps
+     * its dark render — the sticky script finds no matching option — so the chrome must not paint
+     * light around it.
+     */
+    offeredThemes: List<String> = emptyList(),
     /** The catalog this page belongs to, named in the header bar. See [siteHeader]. */
     siteName: String = "",
     /**
@@ -15303,7 +15363,7 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
-        ${pageThemeScript(themeStorageKey, declaredThemes)}
+        ${pageThemeScript(themeStorageKey, declaredThemes, themeChoiceApplies, offeredThemes)}
       </head>
       <body${bodyClassAttr}>
         ${scriptTag("serve-chrome.js")}
@@ -15329,18 +15389,23 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
    *
    * The order is the same one the grid and the viewer use for the theme itself: the URL wins
    * (`?theme=` on a catalog landing, `?uiMode=` in the viewer — someone picked that chip or was
-   * handed the link), then the choice this catalog remembers. A declared theme moves the chrome
-   * when [ServeTheme.mode] is unambiguous; unqualified themes still follow the visitor's OS.
+   * handed the link), then the choice THIS TAB remembers for the catalog ([themeStorageKey], in
+   * `sessionStorage`), and only then the theme a `…__light` / `…__dark` preview bakes into its id.
+   *
+   * The remembered choice sits above the baked one because the viewer applies it too: a tab that
+   * picked a dark theme and then opened a `__light` preview is looking at a dark re-render, and
+   * resolving the chrome from the id would paint that render into a light page. A tab that picked
+   * nothing remembers nothing, so a shared `__light` link still opens light without a flash.
+   *
+   * A declared theme moves the chrome when [ServeTheme.mode] is unambiguous; unqualified themes
+   * still follow the visitor's OS.
    */
-  private fun pageThemeScript(themeStorageKey: String, declaredThemes: List<ServeTheme>): String {
-    val storedTheme =
-      themeStorageKey
-        .takeIf { it.isNotBlank() }
-        ?.let {
-          "||(((decodeURIComponent(location.pathname).split('/').pop()||\"\")" +
-            ".match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]||" +
-            "localStorage.getItem(${WebEscaping.jsString(it)}))"
-        } ?: ""
+  private fun pageThemeScript(
+    themeStorageKey: String,
+    declaredThemes: List<ServeTheme>,
+    themeChoiceApplies: Boolean = true,
+    offeredThemes: List<String> = emptyList(),
+  ): String {
     val modeEntries = declaredThemes.mapNotNull { theme ->
       theme.mode?.let { mode ->
         WebEscaping.jsString("theme:${theme.providerFqn}") + ":" + WebEscaping.jsString(mode)
@@ -15349,7 +15414,53 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
     val modeInit =
       modeEntries.takeIf { it.isNotEmpty() }?.let { "m={${it.joinToString(",")}}," } ?: ""
     val modeResolve = if (modeEntries.isEmpty()) "" else "t=m[t]||t;"
-    return "<script>try{var p=new URLSearchParams(location.search),$modeInit" +
+    // The theme the preview id bakes, read off the path — the fallback whenever nothing better is
+    // known, and the ONLY candidate on a page whose theme choice cannot reach the pixels.
+    val bakedTheme =
+      "((decodeURIComponent(location.pathname).split('/').pop()||\"\")" +
+        ".match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]"
+    // `r()` decides what the REMEMBERED value contributes, and it is a fallback rather than a
+    // filter: a value this page can take resolves through the mode table, and one it cannot gives
+    // way to the theme the id bakes.
+    //
+    // Deciding here rather than after the whole chain is what keeps an unusable memory from eating
+    // the baked theme. `t = stored || baked` with one resolve at the end paints NOTHING for a
+    // theme removed while the tab stayed open: the stored string is truthy, so the baked theme is
+    // never reached, and the mode table cannot answer for a provider it no longer has an entry
+    // for. The chrome then falls back to the OS over a plainly light preview.
+    //
+    // "Can take" is offer-checked where the caller says what this page offers ([offeredThemes]).
+    // One key serves a catalog's viewer, its landing grid and its comparison wall, so a memory
+    // routinely arrives naming a choice the destination does not have: `light` picked on a Wear
+    // catalog's wall, opened in a Wear viewer that offers Dark alone. It resolves perfectly well
+    // and is still not what the stage is drawing. Where the caller says nothing, resolvability is
+    // the only test available, and an unqualified-but-offered theme deliberately contributes ""
+    // for the OS to answer — the same thing [pageTheme.follow] does with such a theme picked
+    // outright, so the two halves cannot disagree across the first paint.
+    val readsMemory = themeStorageKey.isNotBlank() && themeChoiceApplies
+    val offered = offeredThemes.takeIf { readsMemory && it.isNotEmpty() }
+    val offerInit =
+      offered?.let {
+        "o={${it.joinToString(",") { value -> "${WebEscaping.jsString(value)}:1" }}},"
+      } ?: ""
+    val resolve = if (modeEntries.isEmpty()) "t" else "m[t]||t"
+    // Two shapes, one rule. Where the page says what it offers, being offered IS the test — an
+    // offered theme with no declared mode passes through unresolved for the OS to answer. Where it
+    // does not, a value is trusted as far as it can be read.
+    val resolveFn =
+      when {
+        !readsMemory -> ""
+        offered != null -> "r=function(t){return t&&o[t]?$resolve:$bakedTheme;},"
+        else -> "r=function(t){t=$resolve;return t===\"light\"||t===\"dark\"?t:$bakedTheme;},"
+      }
+    val storedTheme =
+      themeStorageKey
+        .takeIf { it.isNotBlank() }
+        ?.let {
+          if (readsMemory) "||r(sessionStorage.getItem(${WebEscaping.jsString(it)}))"
+          else "||($bakedTheme)"
+        } ?: ""
+    return "<script>try{var p=new URLSearchParams(location.search),$modeInit$offerInit$resolveFn" +
       "t=localStorage.getItem(\"cp-page-theme\")===\"system\"?\"\"" +
       ":(p.get(\"theme\")||(p.get(\"themeProvider\")?\"theme:\"+p.get(\"themeProvider\"):\"\")||p.get(\"uiMode\")$storedTheme);" +
       modeResolve +
