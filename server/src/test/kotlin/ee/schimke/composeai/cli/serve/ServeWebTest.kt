@@ -965,15 +965,6 @@ class ServeWebTest {
       html.contains("data-rc-default=\"cmp-android\""),
       "cmp-android is the default player",
     )
-    // …and what the SERVER draws with no `rcPlayer` at all, which the viewer needs separately: the
-    // two agreeing is exactly what lets a default page load leave the parameter off. It used to
-    // stamp `?rcPlayer=cmp-android` onto every first click from a catalog, on the belief that an
-    // absent parameter meant Java — false since `RemoteOverridablePreview` moved to EMBEDDED, and
-    // measurably so (deployed `remote-m3` answers md5 `e69d5136…` bare AND with the parameter).
-    assertTrue(
-      html.contains("data-rc-server-default=\"cmp-android\""),
-      "the server's absent-player default is the embedded player",
-    )
     assertTrue(html.contains("<option value=\"rc:java\">Java</option>"), html)
     // The combo itself rests on its placeholder — the chip is what names the current lane, and a
     // combo repeating that name beside it read as two controls arguing about the same fact.
@@ -1015,12 +1006,6 @@ class ServeWebTest {
     assertTrue(
       html.contains("data-rc-default=\"js\""),
       "js is the default when it is the only lane",
-    )
-    // A host with no server-side player lane names no server default, so nothing on this page can
-    // conclude that some lane has to ride the render URL.
-    assertTrue(
-      html.contains("data-rc-server-default=\"\""),
-      "a js-only host has no server-side absent-player default",
     )
     for (wire in listOf("cmp-wasm", "java", "cmp-android", "cmp-jvm")) {
       val option = Regex("<option value=\"rc:$wire\"[^>]*>").find(html)?.value ?: ""

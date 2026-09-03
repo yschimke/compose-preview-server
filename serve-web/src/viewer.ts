@@ -646,16 +646,10 @@ function liveOverrides() {
     // (gestures=true). Android-daemon-only, so skipped when disabled.
     var gc = may<HTMLInputElement>("cp-gestures");
     if (gc && !gc.disabled && gc.checked) o["gestures"] = "true";
-    // setOverrides REPLACES the stream's entire override map, so a server-side player that IS
-    // overriding something has to survive into the replacement — otherwise the connect URL selects
-    // it and the first onopen replay clears it back to the server's own default. A lane sitting on
-    // that default sends nothing, which is not a gap: the replacement omitting `rcPlayer` and the
-    // server's unaided choice are the same player.
-    var livePlayer = rules.serverPlayerParam(
-        rcPlayerBackend,
-        !!rcPlayerPicked,
-        rcServerDefaultBackend,
-    );
+    // setOverrides REPLACES the stream's entire override map. Keep an explicit server-side player
+    // in that replacement, especially when CMP Android/JVM is the page default; otherwise the
+    // connect URL selects it and the first onopen replay immediately clears it back to Java.
+    var livePlayer = rules.serverPlayerParam(rcPlayerBackend, !!rcPlayerPicked);
     if (livePlayer) o.rcPlayer = livePlayer;
     return o;
 }
@@ -669,21 +663,10 @@ const specChip = may<HTMLButtonElement>("cp-spec-chip");
 var rcDefaultBackend = laneSelect
     ? laneSelect.getAttribute("data-rc-default") || ""
     : "";
-// What the server draws when `rcPlayer` is absent, which is NOT the same question as the lane this
-// page opens on: the page's default is picked from what the host offers, the server's is the
-// preview's own player (`RemoteOverridablePreview` -> EMBEDDED). See ServeWeb's
-// `serverDefaultRcBackend`.
-var rcServerDefaultBackend = laneSelect
-    ? laneSelect.getAttribute("data-rc-server-default") || ""
-    : "";
 var rcPlayerBackend = rcDefaultBackend;
-// A lane is a "pick" only where it overrides what the server would draw unaided. Seeding this
-// `true` for a cmp-android default — on the since-falsified belief that an absent `rcPlayer` means
-// Java — is what stamped `?rcPlayer=cmp-android` onto every first click from a catalog.
-var rcPlayerPicked = rules.backendRequiresRenderParam(
-    rcDefaultBackend,
-    rcServerDefaultBackend,
-);
+// An absent `rcPlayer` means Java to the server. If the page presents another server-side backend
+// as its default, that backend must ride the very first snapshot request just like a user pick.
+var rcPlayerPicked = rules.backendRequiresRenderParam(rcDefaultBackend);
 // Reconcile the picker (the combo's value AND the chip's label) with the active lane. Hoisted
 // (the real impl is assigned in the picker block below) so the common mode-transition path
 // (enterMode) can call it whenever the viewer leaves a lane through ANY control — not only a
@@ -769,7 +752,6 @@ function query() {
     var serverPlayer = rules.serverPlayerParam(
         rcPlayerBackend,
         !!rcPlayerPicked,
-        rcServerDefaultBackend,
     );
     if (serverPlayer)
         parts.push("rcPlayer=" + encodeURIComponent(serverPlayer));
@@ -831,10 +813,7 @@ function explodeParamOn(raw: string | null) {
 // a player that is no longer drawing anything.
 function dropRcPlayerPick() {
     if (!rcPlayerPicked && rcPlayerBackend === rcDefaultBackend) return;
-    rcPlayerPicked = rules.backendRequiresRenderParam(
-        rcDefaultBackend,
-        rcServerDefaultBackend,
-    );
+    rcPlayerPicked = rules.backendRequiresRenderParam(rcDefaultBackend);
     rcPlayerBackend = rcDefaultBackend;
     if (typeof syncLaneSelect === "function") syncLaneSelect();
 }
@@ -3415,14 +3394,11 @@ function enterMode(m: string) {
         // Browser RC lanes deliberately clear the server-side pick while they paint. Returning to
         // the static lane must restore a non-Java default before query() renders it; otherwise the
         // chip says CMP Android/JVM while the absent rcPlayer parameter silently selects Java.
-        var restoredPlayer = rules.restoreStaticPlayer(
-            {
-                defaultBackend: rcDefaultBackend,
-                pickedBackend: rcPlayerBackend,
-                picked: !!rcPlayerPicked,
-            },
-            rcServerDefaultBackend,
-        );
+        var restoredPlayer = rules.restoreStaticPlayer({
+            defaultBackend: rcDefaultBackend,
+            pickedBackend: rcPlayerBackend,
+            picked: !!rcPlayerPicked,
+        });
         rcPlayerBackend = restoredPlayer.pickedBackend;
         rcPlayerPicked = restoredPlayer.picked;
         closeStream();
@@ -4868,11 +4844,7 @@ function hydrateFromUrl(popped: boolean) {
             });
         }
         rcPlayerPicked =
-            playerOffered ||
-            rules.backendRequiresRenderParam(
-                rcDefaultBackend,
-                rcServerDefaultBackend,
-            );
+            playerOffered || rules.backendRequiresRenderParam(rcDefaultBackend);
         rcPlayerBackend =
             (playerOffered ? wantedPlayer : rcDefaultBackend) || "";
     }
