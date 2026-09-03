@@ -122,7 +122,9 @@ describe("<cp-inspect-layers> over a comparison panel", () => {
         // that makes the render lane answer at all on a gated box.
         await mountPanel();
         await tick("typography");
-        assert.deepEqual(urls, ["/m3/render/plain.Button.annotations?token=t"]);
+        assert.deepEqual(urls, [
+            "/m3/render/plain.Button.annotations?token=t&layers=typography",
+        ]);
     });
 
     it("draws into the panel's layer and legend", async () => {

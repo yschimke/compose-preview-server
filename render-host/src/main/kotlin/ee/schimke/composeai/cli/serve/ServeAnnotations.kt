@@ -56,6 +56,40 @@ object AnnotationKind {
   const val THEME = "theme"
 
   val KNOWN = setOf(TYPOGRAPHY, LAYOUT, THEME)
+
+  /**
+   * The layers a **published bundle** can answer on its own, without a daemon.
+   *
+   * Typography alone, and the narrowness is the point. A producer authors [TYPOGRAPHY] and [LAYOUT]
+   * into `annotations/index.json`, but the published layout layer is the compare page's
+   * producer-side redline over a *reference* raster — [ServeBundleHost.drawableAnnotations] drops
+   * it from the viewer's overlay for that reason — and [THEME] is derived live from a render's
+   * semantics tree and is never authored into a bundle at all. So typography is the one layer for
+   * which "the bundle already has it" is true, and answering a request for either of the others
+   * from published bytes would return a payload silently missing what was asked for.
+   *
+   * [publishedLayersSuffice] is the predicate; this set is the reason it is not simply "whatever
+   * the bundle happens to carry".
+   */
+  val PUBLISHABLE = setOf(TYPOGRAPHY)
+
+  /**
+   * Whether a `.annotations` request naming exactly [layers] can be answered from a bundle's
+   * published index without losing a layer the caller asked for.
+   *
+   * False for a null (unscoped) request — a caller that named no layers is asking for all of them,
+   * which is what every client did before `layers=` existed, and what a hand-typed URL still does.
+   * Answering those from published bytes is precisely the regression #224 reverted.
+   */
+  fun publishedLayersSuffice(layers: Set<String>?): Boolean =
+    layers != null && layers.isNotEmpty() && PUBLISHABLE.containsAll(layers)
+
+  /**
+   * The `layers=` query value parsed into a validated kind set, or null when the request named none
+   * (or none that this build knows). Null means "every layer", the pre-`layers=` behaviour.
+   */
+  fun parseLayers(raw: String?): Set<String>? =
+    raw?.split(',')?.map { it.trim() }?.filter { it in KNOWN }?.toSet()?.takeIf { it.isNotEmpty() }
 }
 
 /**

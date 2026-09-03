@@ -58,6 +58,7 @@ class ServePerPreviewLiveHostTest {
     override fun renderAnnotations(
       previewId: String,
       overrides: PreviewOverrides,
+      layers: Set<String>?,
     ): AnnotationsOutcome {
       lastAnnotationsId = previewId
       lastRenderOverrides = overrides

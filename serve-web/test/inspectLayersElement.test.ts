@@ -210,8 +210,13 @@ describe("<cp-inspect-layers>", () => {
         await mount();
         await tick("typography");
         await tick("theme");
+        // Still ONE fetch, which is the invariant here. The address now narrows to the layer that
+        // was ticked first (`layers=typography`, the one lane a published bundle can answer), and
+        // the theme tick is served from cache because the response came back carrying theme too —
+        // a narrowed request may be answered with the full capture, and the client files a superset
+        // under the wide key precisely so this stays one render.
         assert.deepEqual(stub.urls, [
-            "/m3/render/plain.Button.annotations?at=abc",
+            "/m3/render/plain.Button.annotations?at=abc&layers=typography",
         ]);
         assert.deepEqual(sections(), ["Typography (1)", "Theme (1)"]);
     });

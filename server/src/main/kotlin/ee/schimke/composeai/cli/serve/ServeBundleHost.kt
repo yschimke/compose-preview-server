@@ -386,9 +386,17 @@ class ServeBundleHost(
   override fun renderAnnotations(
     previewId: String,
     overrides: PreviewOverrides,
+    layers: Set<String>?,
   ): AnnotationsOutcome {
     if (previewId !in previewIds) return AnnotationsOutcome.NotFound
-    val published = drawableAnnotations(previewId)
+    // Narrowed to what the caller named, unlike the daemon lane: there the three layers ride on
+    // one capture and filtering saves nothing, while here it makes the response say exactly what
+    // was asked for — which is what lets the HTTP layer's content ETag vary correctly with
+    // `layers=` instead of returning one body under several meanings.
+    val published =
+      drawableAnnotations(previewId).let { all ->
+        if (layers == null) all else all.filter { it.kind in layers }
+      }
     if (published.isEmpty()) return AnnotationsOutcome.NotFound
     return AnnotationsOutcome.Ok(
       ServeAnnotationsPayload.encode(previewId, published, tagIndexForPreview(previewId))

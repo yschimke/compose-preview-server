@@ -713,9 +713,20 @@ interface ServeHost : AutoCloseable {
    * targets. Sharing this response is what keeps the two projections describing one frame; it does
    * *not* couple either of them to the PNG a client already fetched. See
    * [ServeRenderHost.renderAnnotations] for what that still owes.
+   *
+   * [layers] names the inspect layers the caller will actually draw ([AnnotationKind.KNOWN]), or
+   * null for "all of them" — the pre-`layers=` behaviour every unscoped caller still gets. It is a
+   * routing hint, not a filter contract: a host may return a superset (the daemon projects all
+   * three off one capture, so narrowing would cost a second render and save nothing), but must
+   * never return a payload missing a layer that was named. What it buys is
+   * [AnnotationKind.publishedLayersSuffice] — a typography-only request can be answered off a
+   * published bundle without a daemon, which is worth 16-22s on an idle catalog.
    */
-  fun renderAnnotations(previewId: String, overrides: PreviewOverrides): AnnotationsOutcome =
-    AnnotationsOutcome.NotFound
+  fun renderAnnotations(
+    previewId: String,
+    overrides: PreviewOverrides,
+    layers: Set<String>? = null,
+  ): AnnotationsOutcome = AnnotationsOutcome.NotFound
 
   /**
    * Whether [renderAnnotations] describes the **same frame** an override-free `/render/<id>.png`
