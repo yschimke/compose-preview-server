@@ -7981,6 +7981,17 @@ class ServeWebFixtureTest {
       viewerSource().contains("if (tp) o.themeProvider = tp;"),
       "a chosen theme is appended to the /render URL as themeProvider",
     )
+    // …and every key is percent-encoded on the way into the query, not just every value. A
+    // `knob.<key>` / `rc.<name>` is an author-declared string, so a `&`, `=` or `%` in one would
+    // split this URL into parameters nobody wrote and the render would apply a different override
+    // from the one the report's locator names — identity and pixels describing two frames, which is
+    // what the block exists to prevent. Regressed once, when the per-family
+    // `"knob." + encodeURIComponent(key)` pushes were folded into one map (#5000 review).
+    assertTrue(
+      viewerSourceFlat()
+        .contains("parts.push(encodeURIComponent(k) + \"=\" + encodeURIComponent(o[k]));"),
+      "dynamic override keys are encoded into the /render query, not appended verbatim",
+    )
 
     val discoveredNightPreview =
       ServeWeb.viewerPage(

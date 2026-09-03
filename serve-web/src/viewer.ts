@@ -760,7 +760,17 @@ function query() {
     var beforeOverrides = parts.length;
     var o = renderOverrides();
     Object.keys(o).forEach(function (k) {
-        parts.push(k + "=" + encodeURIComponent(o[k]));
+        // The KEY is encoded too, not just the value. The display axes are fixed literals, but a
+        // `knob.<key>` or `rc.<name>` carries an author-declared string, and a `&`, `=` or `%` in
+        // one splits this URL into parameters nobody wrote — the render then applies a different
+        // override from the one the locator's JSON names, so the report identifies a frame other
+        // than the pixels it links. That is the exact mismatch the block exists to prevent, arriving
+        // through the query rather than through the map.
+        //
+        // Byte-identical to the per-family `"knob." + encodeURIComponent(key)` this replaced:
+        // `encodeURIComponent` leaves `.` alone, so a well-formed key encodes to itself and only an
+        // author string carrying a delimiter changes — which is the case being fixed.
+        parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(o[k]));
     });
     // The cache generation, last, and only on the URL that is actually a published frame: every
     // lane above omits itself while it sits at its default precisely so this URL stays on the baked

@@ -36,7 +36,17 @@ class ServeViewerIssueReportRouteTest {
       .also { ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), "png", it) }
       .toByteArray()
 
-  private fun bundle(label: String, previewIds: List<String>): ServeBundleHost {
+  private fun bundle(
+    label: String,
+    previewIds: List<String>,
+    /**
+     * Whether this host can answer a `?at=<sha>` pin — it needs a delivery-branch read seam.
+     *
+     * Off by default so every existing case keeps exactly the host it had: turning pins on adds the
+     * revision chrome to the page, and these assertions are about the report body.
+     */
+    pinnable: Boolean = false,
+  ): ServeBundleHost {
     val dir = Files.createTempDirectory("viewer-report-$label").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText("<html></html>")
     File(dir, "previews").apply { mkdirs() }
@@ -94,15 +104,18 @@ class ServeViewerIssueReportRouteTest {
           toolVersion = "0.16.54",
         ),
       declaredBaked = previewIds,
+      bakedBranchPaths =
+        if (pinnable) previewIds.associateWith { "images/$it.png" } else emptyMap(),
+      fetchPinnedAssetOutcome = if (pinnable) ({ _, _ -> BranchFetch.Ok(png()) }) else null,
     )
   }
 
   private val registry = ServeSessionRegistry(open = { null })
 
-  private fun newServer(): ServeHttpServer {
+  private fun newServer(pinnable: Boolean = false): ServeHttpServer {
     registry.register(
       "compose-m3",
-      host = bundle("compose-m3", listOf("button-filled")),
+      host = bundle("compose-m3", listOf("button-filled"), pinnable = pinnable),
       pinned = true,
     )
     return ServeHttpServer(
@@ -274,6 +287,31 @@ class ServeViewerIssueReportRouteTest {
       html.substringAfter("data-report-template=\"").substringBefore("\"").replace("&amp;", "&")
     assertTrue(template.contains("overrides: ${ServeIssueReport.OVERRIDES_PLACEHOLDER}"), template)
     assertTrue(template.contains(ServeIssueReport.RENDER_PLACEHOLDER), template)
+  }
+
+  @Test
+  fun `a pinned viewer files no locator, because its identity would describe another frame`() {
+    // `?at=<sha>` puts a historical baked artifact on the stage, while the reference mapping and
+    // the
+    // `revision:` line describe the catalog as it is today — so a locator built from the two would
+    // index the issue against a comparison the reporter was not looking at. No row is better than a
+    // wrong one, and the page already withholds its source link, its reference annotations, its
+    // override seeds and its playground link on the same reasoning.
+    server = newServer(pinnable = true)
+    val (code, html) =
+      get("/compose-m3/p/button-filled?at=0123456789abcdef0123456789abcdef01234567")
+    assertEquals(200, code)
+    val body = reportBody(html)
+    assertTrue(body.contains("cp-report-body") || body.isNotEmpty(), body)
+    assertFalse(body.contains(ServeIssueReport.LOCATOR_FENCE), body)
+    assertFalse(html.contains(ServeIssueReport.OVERRIDES_PLACEHOLDER), html)
+    // …and the same server, unpinned, still does file one — so this proves the gate rather than a
+    // host that could never emit a locator anyway.
+    assertTrue(
+      reportBody(get("/compose-m3/p/button-filled").second)
+        .contains("```${ServeIssueReport.LOCATOR_FENCE}"),
+      "the unpinned page on the same host still carries a locator",
+    )
   }
 
   @Test

@@ -8510,7 +8510,19 @@ class ServeHttpServer(
           previewLabel = preview.label,
           system = sessionId,
           componentId = ServeIssueReport.componentIdFor(preview),
-          referenceId = renderHost.designReferencesFor(preview.id).firstOrNull()?.id,
+          // …but not on a PINNED viewer. `?at=<sha>` puts a historical baked artifact on the stage
+          // and `pinnedRenderQuerySuffix` strips every override from the URL beside it, while this
+          // reference mapping — and `revision:`, which names the delivery branch rather than the
+          // pin
+          // — describe the catalog as it is TODAY. A locator built from the two would index an
+          // issue against a comparison the reporter was not looking at, which is worse than no row
+          // at all: the whole point of the block is that identity and pixels name one frame. The
+          // same reasoning already withholds `sourceHref`, `referenceAnnotations`, the override
+          // seeds and the playground link on a pinned page.
+          referenceId =
+            renderHost.designReferencesFor(preview.id).firstOrNull()?.id.takeIf {
+              revisions.pinned == null
+            },
           variant = ServeIssueReport.variantFor(preview),
           overrides = requestOverrideParams(sessionId),
           sourceUrl = sourceHref,
