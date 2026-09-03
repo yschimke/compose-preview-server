@@ -1,0 +1,245 @@
+package ee.schimke.composeai.cli.serve
+
+import ee.schimke.composeai.discovery.ScreenValue
+import ee.schimke.composeai.uibuilder.protocol.AccessibilityV1
+import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
+import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
+import ee.schimke.composeai.uibuilder.protocol.DimensionUnitV1
+import ee.schimke.composeai.uibuilder.protocol.DimensionValueV1
+import ee.schimke.composeai.uibuilder.protocol.MatchParentSizeModifierV1
+import ee.schimke.composeai.uibuilder.protocol.StateTruthyPredicateV1
+import ee.schimke.composeai.uibuilder.protocol.StateValueV1
+import ee.schimke.composeai.uibuilder.protocol.StringValueV1
+import ee.schimke.composeai.uibuilder.protocol.ToggleActionV1
+import ee.schimke.composeai.uibuilder.protocol.UiValueV1
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonPrimitive
+
+/**
+ * What the projection **refuses**, node by node.
+ *
+ * The successful path is covered by the golden in [ScreenGeneratorComposeExportExecutorTest], which
+ * is the better place for it: a golden shows the whole output at once and a per-value assertion
+ * would only restate the table. What is worth asserting one at a time is each refusal, because each
+ * one is a promise that a document holding that content produces an error naming it rather than
+ * source that quietly omits it — which is exactly what the executor this replaced did.
+ */
+class ScreenDocumentProjectionTest {
+
+  private val components = ScreenGeneratorScreenFixture.components()
+
+  private fun document(vararg nodes: DesignNodeV1, roots: List<String> = listOf(nodes.first().id)) =
+    ScreenGeneratorScreenFixture.document().copy(roots = roots, nodes = nodes.associateBy { it.id })
+
+  private fun text(vararg properties: Pair<String, UiValueV1>) =
+    DesignNodeV1(
+      id = "text",
+      componentId = "m3/text",
+      properties = mapOf("text" to StringValueV1("hi")) + properties,
+    )
+
+  private fun refusal(document: DesignDocumentV1): List<String> =
+    (ScreenDocumentProjection.project(document, components)
+        as ScreenDocumentProjection.Outcome.Refused)
+      .reasons
+
+  private fun projected(document: DesignDocumentV1) =
+    (ScreenDocumentProjection.project(document, components)
+        as ScreenDocumentProjection.Outcome.Projected)
+      .document
+
+  @Test
+  fun `a state read is refused by variable name, not dropped`() {
+    assertEquals(
+      listOf(
+        "node `text`.`text` reads the state variable `query`, which needs a " +
+          "`remember { mutableStateOf(…) }` preamble this projection does not emit"
+      ),
+      refusal(
+        document(
+          DesignNodeV1(
+            id = "text",
+            componentId = "m3/text",
+            properties = mapOf("text" to StateValueV1("query")),
+          )
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `an event binding is refused by event name`() {
+    assertEquals(
+      listOf(
+        "node `text` binds the event(s) click, which need an event adapter this projection has " +
+          "no channel for"
+      ),
+      refusal(
+        document(text().copy(eventBindings = mapOf("click" to listOf(ToggleActionV1("expanded")))))
+      ),
+    )
+  }
+
+  @Test
+  fun `a conditional node is refused`() {
+    assertEquals(
+      listOf("node `text` is conditional on a predicate, which reads state"),
+      refusal(document(text().copy(predicate = StateTruthyPredicateV1("visible")))),
+    )
+  }
+
+  @Test
+  fun `an asset binding is refused by slot name`() {
+    assertEquals(
+      listOf(
+        "node `text` binds the asset(s) artwork, which need a caller-supplied artwork adapter"
+      ),
+      refusal(document(text().copy(assetBindings = mapOf("artwork" to "podcast-1")))),
+    )
+  }
+
+  @Test
+  fun `accessibility is refused as the modifier it would have to become`() {
+    assertEquals(
+      listOf(
+        "node `text` sets accessibility, which is a `semantics {}` modifier the component record " +
+          "cannot type-check"
+      ),
+      refusal(document(text().copy(accessibility = AccessibilityV1(label = "Schedule")))),
+    )
+  }
+
+  @Test
+  fun `a scoped modifier is refused rather than emitted out of scope`() {
+    assertEquals(
+      listOf(
+        "node `text` uses `matchParentSize`, which is declared on `BoxScope` and cannot be " +
+          "proven in scope here"
+      ),
+      refusal(document(text().copy(modifiers = listOf(MatchParentSizeModifierV1)))),
+    )
+  }
+
+  @Test
+  fun `a pixel dimension is refused because it needs the composition's density`() {
+    assertEquals(
+      listOf(
+        "node `text`.`color` is in pixels, which needs the composition's density to become a `Dp`"
+      ),
+      refusal(document(text("color" to DimensionValueV1(JsonPrimitive(12), DimensionUnitV1.PX)))),
+    )
+  }
+
+  @Test
+  fun `an unknown colour token names itself`() {
+    assertEquals(
+      listOf(
+        "node `text`.`color` is the colour token `brandTeal`, which is not one this catalog's " +
+          "theme defines"
+      ),
+      refusal(document(text("color" to ColorTokenValueV1("brandTeal")))),
+    )
+  }
+
+  @Test
+  fun `a colour that is not hex is refused with the value quoted`() {
+    assertEquals(
+      listOf(
+        "node `text`.`color` is the colour `rebeccapurple`, which is not #RRGGBB or #AARRGGBB"
+      ),
+      refusal(document(text("color" to ColorValueV1("rebeccapurple")))),
+    )
+  }
+
+  @Test
+  fun `a six-digit colour is made opaque rather than transparent`() {
+    val projected = projected(document(text("color" to ColorValueV1("#6750A4"))))
+    val color = projected.root.arguments.getValue("color") as ScreenValue.Construct
+    // 0xFF6750A4. Left at zero alpha the colour would render invisible, which is a bug that looks
+    // like a theme problem rather than like a parse problem.
+    assertEquals(ScreenValue.Whole(4284960932L), color.positional.single())
+  }
+
+  @Test
+  fun `two roots are refused, because a screen body is one expression`() {
+    assertEquals(
+      listOf(
+        "the document has 2 roots; a generated screen body needs exactly one, so wrap them in a " +
+          "layout component in the builder"
+      ),
+      refusal(
+        document(
+          text(),
+          DesignNodeV1(
+            id = "other",
+            componentId = "m3/text",
+            properties = mapOf("text" to StringValueV1("two")),
+          ),
+          roots = listOf("text", "other"),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `a node the document does not define is refused`() {
+    assertEquals(
+      listOf("the document references node `absent`, which it does not define"),
+      refusal(document(text(), roots = listOf("absent"))),
+    )
+  }
+
+  @Test
+  fun `a slot cycle is refused rather than recursed into`() {
+    assertEquals(
+      listOf("node `card` contains itself through its slots"),
+      refusal(
+        document(
+          DesignNodeV1(
+            id = "card",
+            componentId = "m3/card",
+            slots = mapOf("content" to listOf("card")),
+          )
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `a screen name comes from the title, with an identifier's positional rule applied`() {
+    val document = ScreenGeneratorScreenFixture.document()
+    assertEquals("ScheduleOperations", ScreenDocumentProjection.screenNameFor(document))
+    assertEquals(
+      "Screen2026Review",
+      ScreenDocumentProjection.screenNameFor(document.copy(title = "2026 review")),
+    )
+    assertEquals(
+      "GeneratedScreen",
+      ScreenDocumentProjection.screenNameFor(document.copy(title = "—")),
+    )
+  }
+
+  @Test
+  fun `every refusal in one document is reported, not just the first`() {
+    val reasons =
+      refusal(
+        document(
+          DesignNodeV1(
+            id = "text",
+            componentId = "m3/text",
+            properties =
+              mapOf("text" to StateValueV1("query"), "color" to ColorTokenValueV1("brandTeal")),
+            predicate = StateTruthyPredicateV1("visible"),
+          )
+        )
+      )
+    assertEquals(3, reasons.size, reasons.toString())
+    assertTrue(reasons.any { it.contains("state variable `query`") }, reasons.toString())
+    assertTrue(reasons.any { it.contains("brandTeal") }, reasons.toString())
+    assertTrue(reasons.any { it.contains("predicate") }, reasons.toString())
+  }
+}

@@ -598,6 +598,24 @@ public interface ServeOptions {
     get() = setOf("m3-catalog")
 
   /**
+   * Discovered component record for the UI-builder's catalog (`--ui-builder-components
+   * <components.json>`).
+   *
+   * A **build output**, not a configuration file: it is the `components.json` a preview bundle
+   * carries, holding each component's recovered signature, its opt-in markers and whether a call
+   * site can be printed for it at all. The Compose export path generates from it, so without one
+   * the host can prove nothing about a call site and says exactly that
+   * ([ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD]) rather than emitting
+   * almost-Kotlin.
+   *
+   * Null by default because most hosts serve renders rather than source, and a host that has not
+   * been given the record should refuse a Compose export with a reason, not be prevented from
+   * starting.
+   */
+  public val uiBuilderComponents: File?
+    get() = null
+
+  /**
    * Retained native renderer bundles (`runtimeId` to directory). Each directory contains a verified
    * `runtime-manifest.json`; ids are exact pins and never aliases for a latest runtime.
    */

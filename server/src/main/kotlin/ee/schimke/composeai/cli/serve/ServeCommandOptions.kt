@@ -692,6 +692,10 @@ public class ServeCommandOptions(
       }
       ?.toSet() ?: setOf("m3-catalog")
 
+  /** The bundle's discovered `components.json`, which the Compose export path generates from. */
+  override val uiBuilderComponents: File? =
+    args.flagValue("--ui-builder-components")?.takeIf { it.isNotBlank() }?.let(::File)
+
   /** Exact, retained renderer bundles; unlike the builder shell these paths are immutable pins. */
   override val uiBuilderRuntimeDirs: Map<String, File> =
     args

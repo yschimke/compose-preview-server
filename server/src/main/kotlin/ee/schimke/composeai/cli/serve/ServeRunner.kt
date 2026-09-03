@@ -18,7 +18,6 @@ import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
-import ee.schimke.composeai.uibuilder.service.RevisionPinnedComposeExportExecutor
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -2292,8 +2291,14 @@ public class ServeRunner(
         )
       }
       .getOrNull()
-    val exporter =
-      renderer?.let(::ProductionUiBuilderExportExecutor) ?: RevisionPinnedComposeExportExecutor()
+    // The Compose half of the export is generated from the discovered component record, so it is
+    // constructed here rather than defaulted inside the runtime: `checkUiBuilderRuntimeBoundary`
+    // forbids any compose-ai-tools module but the protocol on that module's classpath, and
+    // `preview-discovery` is a compose-ai-tools module. `:server` is the first layer allowed to
+    // hold both the record reader and the port.
+    val compose =
+      ScreenGeneratorComposeExportExecutor(ComponentRecordSource(uiBuilderComponents)::record)
+    val exporter = renderer?.let { ProductionUiBuilderExportExecutor(it, compose) } ?: compose
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
