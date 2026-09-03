@@ -2281,13 +2281,22 @@ public class ServeRunner(
       throw IllegalStateException("UI-builder state directory is not writable: $directory")
     }
     System.err.println("serve: UI-builder design API persisting to ${directory.absolutePath}")
+    // Whether a Compose export survives the renderer failing is the same question the capability
+    // below answers, so it is asked once, here, and both read it. The handler used to promise
+    // "Compose export remains enabled" unconditionally — which in the packaged deployment, where
+    // catalogs are enabled and no record is passed, told an operator diagnosing a renderer failure
+    // that a fallback existed while the next expression was disabling every export format.
+    val composeExportConfigured = uiBuilderCatalogs.all { it in uiBuilderComponents.keys }
     val renderer = runCatching {
       ServeUiBuilderRenderPort.open(directory.resolve("renderer").toPath())
     }
       .onFailure { failure ->
         System.err.println(
           "serve: UI-builder PNG/SVG renderer unavailable (${failure.message}); " +
-            "Compose export remains enabled"
+            if (composeExportConfigured) "Compose export remains enabled"
+            else
+              "and no catalog has a component record, so this host offers no export at all " +
+                "(pass --ui-builder-components <catalog>=<components.json>)"
         )
       }
       .getOrNull()
@@ -2328,7 +2337,7 @@ public class ServeRunner(
                 svg = false,
                 png = false,
               ))
-            .copy(composeCode = uiBuilderCatalogs.all { it in uiBuilderComponents.keys }),
+            .copy(composeCode = composeExportConfigured),
       )
     val service =
       PersistentUiBuilderService(

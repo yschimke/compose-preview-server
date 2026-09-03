@@ -60,8 +60,9 @@ import kotlinx.serialization.json.doubleOrNull
  *
  * ## What it does not express, deliberately
  *
- * Six kinds of document content have no expression here, and each refuses under its own name rather
- * than being dropped:
+ * Seven kinds of document content have no expression here, and each refuses under its own name
+ * rather than being dropped — the seventh, enum values, has its own section below because this file
+ * claimed the opposite for a round:
  *
  * - **State.** `StateValueV1` and `StateEqualsValueV1` read a state variable, which needs a
  *   `remember { mutableStateOf(…) }` preamble and a hoisting decision. That is the
@@ -74,17 +75,29 @@ import kotlinx.serialization.json.doubleOrNull
  * - **Insets.** `WindowInsets` is read through a composable-scope call, not a value.
  * - **Accessibility.** A `semantics {}` block is a modifier chain the record cannot type-check.
  *
- * ## The two claims it does make
+ * ## The one claim it makes
  *
  * A design token (`colorToken`, `typographyToken`, `shapeToken`) is resolved through a **table of
  * Material 3's own accessors** below. That table is the design-system knowledge the generator
  * deliberately does not hold, and it lives here because this is the layer that knows the catalog is
  * Material 3.
  *
- * An `enum` value is resolved against the **parameter's own recorded type** — the entry name is
- * taken from the document verbatim and appended to `TargetParameter.typeFqn`. That is a genuine
- * claim: nothing here proves `TextAlign` has a `Center`. It is checked as a writable Kotlin name,
- * and a wrong one fails the compile gate rather than shipping.
+ * ## Enum values are the seventh refusal
+ *
+ * An earlier revision of this file resolved an `enum` against the parameter's own recorded type,
+ * appending the document's entry name to `TargetParameter.typeFqn` and calling that a claim the
+ * compile gate would check. It is not a claim, and this documented it as one for a round:
+ *
+ * - the wire values are lower-camel (`center`, `semiBold`), so `TextAlign.center` never compiled;
+ * - and capitalising fixes only the half of them that are members of that type at all. Jetcaster's
+ *   `accountCircle`, `moreVert` and `playCircle` sit on an `ImageVector` parameter whose entries
+ *   live under `Icons`, while `expandedTwoPane`, `fab` and `uncontained` name authored variants
+ *   with no single Kotlin type behind them.
+ *
+ * Nothing in the catalog maps an enum **value** to a Kotlin member — the `code` capability carries
+ * a symbol per component and nothing per entry — so `enum()` refuses every `EnumValueV1` by name,
+ * and the refusal says that is what is missing. A wire-to-Kotlin mapping is where this becomes
+ * expressible, and it belongs in the catalog rather than in a projection.
  */
 internal object ScreenDocumentProjection {
 
