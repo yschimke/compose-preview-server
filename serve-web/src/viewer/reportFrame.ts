@@ -54,3 +54,38 @@ export function reportFollowsDisplayedFrame(
         return false;
     }
 }
+
+/**
+ * The stages on which the stage's `<img>` — and therefore `data-cp-src` — describes what the
+ * visitor is looking at.
+ *
+ * An **allowlist**, deliberately. Live, Wasm and the Remote Compose players paint into a canvas or
+ * an iframe while `#cp-img` still holds the snapshot fetched at page load, and worse, they apply
+ * overrides IN PLACE without ever re-pointing `/render` — `viewer.ts` calls that blob "a stale
+ * bystander" in exactly these lanes. So the frame gate above can pass on a lane whose pixels it
+ * knows nothing about: the controls are unchanged, the landed URL still matches, and the report
+ * would name a static frame the reporter stopped looking at several interactions ago.
+ *
+ * A denylist would make the next interactive lane indexable by default, which is the failure mode
+ * this whole block exists to avoid — silent, and visible only in the filed issue.
+ *
+ * `motion` is out because the stage plays an animated image the still does not describe, and
+ * `source` because the visitor is reading code rather than looking at pixels. `spec` is in: it puts
+ * the imported reference on the stage but the frame it is COMPARING is the snapshot underneath, the
+ * same reading `specBaseline.ts` takes. `svg` is in because that lane is rendered server-side from
+ * the same query, so the landed URL describes it.
+ */
+const FRAME_STAGES = new Set(["snapshot", "svg", "spec"]);
+
+/**
+ * Whether a report filed from [stage] may carry a `compose-parity-locator/v1` block at all.
+ *
+ * The workflow doc requires reporting to stay disabled outright in the interactive lanes, *"not
+ * until overrides land but until the exact displayed frame and its interactive state can actually
+ * be transferred"*. Withholding the locator is the half of that which the index depends on: without
+ * a block the report is an ordinary issue that `buildIssueIndex` skips, which is exactly what it
+ * was before the viewer emitted one — rather than a row keyed to pixels nobody saw.
+ */
+export function reportMayCarryLocator(stage: string): boolean {
+    return FRAME_STAGES.has(stage);
+}

@@ -24,6 +24,7 @@ import {
     fillLocators,
     fillOverrides,
     fillSelection,
+    withoutLocators,
     type Selection,
 } from "./locator.js";
 import { type ReportScope, scopeFromBody, withScope } from "./scope.js";
@@ -67,6 +68,19 @@ export interface ReportInputs {
      * placeholder to fill anyway.
      */
     overrides?: Record<string, string>;
+    /**
+     * Whether this page may name a comparison at all right now.
+     *
+     * The seventh producer, and the only one that can take identity AWAY. A viewer in an
+     * interactive lane paints its pixels into a canvas or an iframe that the landed-frame gate
+     * knows nothing about, so a block written from the controls would key the issue to a static
+     * frame the reporter stopped looking at. Withholding it leaves an ordinary report — filed,
+     * labelled, skipped by the index — which is what such a report was before the viewer emitted a
+     * locator at all.
+     *
+     * Defaults to false so a page that never sets it keeps the block its template carries.
+     */
+    omitLocator?: boolean;
 }
 
 export class ReportBody {
@@ -115,7 +129,7 @@ export class ReportBody {
         // no render at all and would otherwise never be composable — so a picked set of rows could
         // never reach the body.
         if (needsRender(template) && !this.state.render) return;
-        input.value = withClassification(
+        const composed = withClassification(
             withScope(
                 fillLocators(
                     fillSelection(
@@ -146,6 +160,9 @@ export class ReportBody {
             // field. Its own `set` still wins — the state is consulted first.
             this.state.classification || classificationFromBody(input.value),
         );
+        input.value = this.state.omitLocator
+            ? withoutLocators(composed)
+            : composed;
     }
 }
 
