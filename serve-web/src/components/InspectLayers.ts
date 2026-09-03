@@ -39,8 +39,11 @@ import {
     dataUrlFor,
     fallbackUrl,
     inspectParam,
+    carriesBeyond,
     kindsFromParam,
+    layersParamFor,
     sourcesFor,
+    withLayers,
     type LayerSpec,
 } from "../inspect/layers.js";
 import { resolveHost, type InspectHost } from "../inspect/host.js";
@@ -225,18 +228,18 @@ export class InspectLayers extends ControllerElement {
         }
     }
 
-    private urlFor(source: string): string {
+    private urlFor(source: string, kinds: string[]): string {
         const params = new URLSearchParams(location.search);
-        return (
+        const url =
             dataUrlFor(this.frameUrl(), source) ??
             fallbackUrl(this.host?.base ?? "", this.previewId, source, {
                 token: params.get("token") ?? "",
                 session: params.get("session") ?? "",
-            })
-        );
+            });
+        return withLayers(url, layersParamFor(source, kinds));
     }
 
-    private fetchSource(source: string): Promise<unknown> {
+    private fetchSource(source: string, kinds: string[]): Promise<unknown> {
         if (this.isSpec())
             return Promise.resolve(
                 source === "annotations"
@@ -247,15 +250,32 @@ export class InspectLayers extends ControllerElement {
             this.cache = new Map();
             this.cacheKey = this.frameUrl();
         }
-        const cached = this.cache.get(source);
+        // Keyed by endpoint AND layer set: `layers=typography` and `layers=typography,layout` are
+        // different requests with different answers, so one entry per endpoint would serve the
+        // narrow payload to a later, wider tick.
+        const key = `${source}|${layersParamFor(source, kinds)}`;
+        const wideKey = `${source}|`;
+        // A wide payload answers every narrower question about the same frame, so prefer it.
+        const cached = this.cache.get(key) ?? this.cache.get(wideKey);
         if (cached) return cached;
-        const pending = fetch(this.urlFor(source), {
+        const pending = fetch(this.urlFor(source, kinds), {
             credentials: "same-origin",
         })
             .then((response) => {
                 if (!response.ok)
                     throw new Error(`${source} ${response.status}`);
                 return response.json() as unknown;
+            })
+            .then((payload) => {
+                // A narrowed request may still be answered with every layer: the daemon projects
+                // all three off one capture, so the server returns the superset rather than
+                // rendering again to trim it (`ServeHost.renderAnnotations` says so explicitly).
+                // When that happens this IS the wide payload, so file it under the wide key too —
+                // otherwise ticking a second layer would fetch the same render a second time, and
+                // on an override-bearing frame those two renders can describe different pixels.
+                if (key !== wideKey && carriesBeyond(payload, source, kinds))
+                    this.cache.set(wideKey, pending);
+                return payload;
             })
             // A host that cannot produce this product is not an error worth shouting about; the
             // layer simply draws nothing.
@@ -266,11 +286,10 @@ export class InspectLayers extends ControllerElement {
             // frame stayed on screen: every re-tick replayed the stored null, so the overlay looked
             // permanently broken on a server that had already recovered.
             .catch(() => {
-                if (this.cache.get(source) === pending)
-                    this.cache.delete(source);
+                if (this.cache.get(key) === pending) this.cache.delete(key);
                 return null;
             });
-        this.cache.set(source, pending);
+        this.cache.set(key, pending);
         return pending;
     }
 
@@ -298,7 +317,7 @@ export class InspectLayers extends ControllerElement {
         this.host?.legend.setAttribute("aria-busy", "true");
         const names = sourcesFor(kinds);
         const results = await Promise.all(
-            names.map((name) => this.fetchSource(name)),
+            names.map((name) => this.fetchSource(name, kinds)),
         );
         if (generation !== this.generation) return;
         this.host?.legend.removeAttribute("aria-busy");

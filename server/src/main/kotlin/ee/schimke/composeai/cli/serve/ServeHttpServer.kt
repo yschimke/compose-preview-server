@@ -9223,7 +9223,7 @@ class ServeHttpServer(
             return@withLeasedSession
           }
           if (wantAnnotations) {
-            renderAnnotationsResponse(renderHost, previewId, overrides)
+            renderAnnotationsResponse(renderHost, previewId, overrides, requestedInspectLayers())
             return@withLeasedSession
           }
           // The render is blocking (renderNow + await); keep it off the request dispatcher. Cap
@@ -10308,10 +10308,24 @@ class ServeHttpServer(
    * Design-annotation lane of [handleRender]: load-shed like the PNG lane, then respond the
    * typography + theme inspection layers the viewer draws over the frame.
    */
+  /**
+   * The inspect layers this `.annotations` request will actually draw (`?layers=typography,theme`),
+   * or null when it named none — which means all of them, and is what every pre-`layers=` client
+   * and every hand-typed URL still says.
+   *
+   * NOT an override param ([ServeOverrides.isOverrideParam] is an allowlist and this is not on it),
+   * and deliberately so: it selects among projections of one frame rather than changing the pixels,
+   * so it must not turn a cacheable published replay into a `no-store` made-to-order render. It
+   * does change the response body on the published lane, which the content ETag already covers.
+   */
+  private fun RoutingContext.requestedInspectLayers(): Set<String>? =
+    AnnotationKind.parseLayers(call.request.queryParameters["layers"])
+
   private suspend fun RoutingContext.renderAnnotationsResponse(
     renderHost: ServeHost,
     previewId: String,
     overrides: PreviewOverrides,
+    layers: Set<String>?,
   ) {
     val outcome =
       withContext(Dispatchers.IO) {
@@ -10319,7 +10333,7 @@ class ServeHttpServer(
           null
         } else {
           try {
-            renderHost.renderAnnotations(previewId, overrides)
+            renderHost.renderAnnotations(previewId, overrides, layers)
           } finally {
             renderSemaphore.release()
           }

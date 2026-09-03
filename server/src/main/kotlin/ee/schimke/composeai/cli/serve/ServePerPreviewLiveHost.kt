@@ -227,15 +227,26 @@ class ServePerPreviewLiveHost(
   override fun renderAnnotations(
     previewId: String,
     overrides: PreviewOverrides,
+    layers: Set<String>?,
   ): AnnotationsOutcome {
+    // Published-first only when the request named layers a bundle can fully answer, and the
+    // overrides leave the baked frame standing. See [ServeCatalogLiveHost.renderAnnotations] for
+    // why the unscoped case must keep going live.
+    if (
+      AnnotationKind.publishedLayersSuffice(layers) &&
+        !CatalogLiveRouting.overridesAffectRender(previewId, overrides, bakedTheme(previewId))
+    ) {
+      val published = baked.renderAnnotations(previewId, overrides, layers)
+      if (published !is AnnotationsOutcome.NotFound) return published
+    }
     val live =
       alias[previewId]?.let { daemonId ->
-        resolveLive(daemonId)?.renderAnnotations(daemonId, overrides)
+        resolveLive(daemonId)?.renderAnnotations(daemonId, overrides, layers)
       }
     if (live != null && live !is AnnotationsOutcome.NotFound) return live
     if (CatalogLiveRouting.overridesAffectRender(previewId, overrides, bakedTheme(previewId)))
       return AnnotationsOutcome.NotFound
-    return baked.renderAnnotations(previewId, overrides)
+    return baked.renderAnnotations(previewId, overrides, layers)
   }
 
   /**

@@ -1763,23 +1763,28 @@ class ServeCatalogLiveHost(
   }
 
   /**
-   * The typography + theme inspection layers follow [renderA11y] exactly: the baked lane has no
-   * daemon to capture a `compose/semantics` tree from, so a mapped id routes live and an unmapped
-   * one has nothing to inspect.
+   * The inspect layers, routed by **which layers the caller named**.
    *
-   * Live is asked FIRST, and that ordering is load-bearing rather than incidental: the daemon
-   * projects all three layers off the render's own trees — typography and theme from
-   * `compose/semantics` + `compose/theme`, and the container boxes from `layout/inspector` — while
-   * the published manifest carries only what [ServeBundleHost.drawableAnnotations] draws, which
-   * filters `layout` out. Preferring the published payload for a mapped preview therefore answers
-   * the whole `.annotations` request without the Layout layer the viewer still offers, and with the
-   * published Theme projection in place of the daemon's. Measured on the deployed server, layout is
-   * most of the payload: 34 of 52 annotations on a jetchat preview, 5 of 7 on an m3-catalog button.
+   * The daemon projects all three off the render's own trees — typography and theme from
+   * `compose/semantics` + `compose/theme`, the container boxes from `layout/inspector` — while a
+   * published bundle can only answer typography ([AnnotationKind.PUBLISHABLE] says why). So the
+   * question "can this be served without a daemon?" is not a property of the host or of the
+   * overrides alone; it is a property of the *request*.
    *
-   * That the cold-start cost of this ordering is real (16-22s for a suspended catalog's first
-   * `.annotations`, against 0.4-0.8s for the baked PNG) is #213 — the fix is for the request to
-   * name the layers it wants, so a typography-only tick can be answered from published bytes
-   * without silently dropping the two layers it did not ask about.
+   * An unscoped request (`layers == null`) means every layer, and keeps going live. That is the
+   * behaviour #221 broke by preferring published bytes for it — layout is most of a real payload
+   * (34 of 52 annotations on a jetchat preview, 5 of 7 on an m3-catalog button), so the Layout
+   * checkbox stayed offered and drew nothing. #224 reverted it; this restores the win without the
+   * loss, by letting `?inspect=typography` say so.
+   *
+   * The saving is not marginal: measured on the deployed server, a suspended catalog's first
+   * `.annotations` cost 16-22s (jetsnack 16.2s, reply 22.6s, jetchat 22.5s) against 0.4-0.8s for
+   * the baked PNG of the same preview in the same state. All of that is a daemon cold start, and a
+   * typography-only tick no longer pays it.
+   *
+   * Everything that needs the daemon still reaches it: a request naming `layout` or `theme`, an
+   * override that moves the render ([bakedAnnotations] answers `NotFound`), or a catalog that
+   * published no typography for this preview.
    *
    * Without this override the composite inherited [ServeHost]'s daemon-less default — `NotFound` —
    * while the viewer still offered the Typography checkbox from the catalog's *published reference*
@@ -1790,15 +1795,21 @@ class ServeCatalogLiveHost(
   override fun renderAnnotations(
     previewId: String,
     overrides: PreviewOverrides,
+    layers: Set<String>?,
   ): AnnotationsOutcome {
-    val daemonId = alias[previewId] ?: return bakedAnnotations(previewId, overrides)
-    val live = liveHostFor(daemonId).renderAnnotations(daemonId, overrides)
+    if (AnnotationKind.publishedLayersSuffice(layers)) {
+      val published = bakedAnnotations(previewId, overrides, layers)
+      if (published !is AnnotationsOutcome.NotFound) return published
+    }
+    val daemonId = alias[previewId] ?: return bakedAnnotations(previewId, overrides, layers)
+    val live = liveHostFor(daemonId).renderAnnotations(daemonId, overrides, layers)
     // A daemon that carries no semantics lane answers NotFound. The catalog may still have
     // published typography for this preview, so fall back to it rather than leaving the layer
     // blank — under the same rule [bakedAnnotations] states. A `Failed` is a real error and
     // travels, unchanged: quietly answering a broken render with the published facts would
     // describe pixels the visitor is not being shown.
-    return if (live is AnnotationsOutcome.NotFound) bakedAnnotations(previewId, overrides) else live
+    return if (live is AnnotationsOutcome.NotFound) bakedAnnotations(previewId, overrides, layers)
+    else live
   }
 
   /**
@@ -1813,10 +1824,11 @@ class ServeCatalogLiveHost(
   private fun bakedAnnotations(
     previewId: String,
     overrides: PreviewOverrides,
+    layers: Set<String>?,
   ): AnnotationsOutcome =
     if (CatalogLiveRouting.overridesAffectRender(previewId, overrides, bakedTheme(previewId)))
       AnnotationsOutcome.NotFound
-    else baked.renderAnnotations(previewId, overrides)
+    else baked.renderAnnotations(previewId, overrides, layers)
 
   /**
    * The daemon preview id to route a [render] / [renderSvg] to, or null to stay baked. Delegates to
