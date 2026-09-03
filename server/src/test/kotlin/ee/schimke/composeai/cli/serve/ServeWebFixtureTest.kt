@@ -5895,13 +5895,18 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       viewerThemes.contains("stored.indexOf(\"theme:\") === 0") &&
-        viewerThemes.contains("!urlOption && option") &&
+        viewerThemes.contains("!urlOption && !el.disabled && option") &&
         viewerThemes.contains("el.setAttribute(\"data-theme-active\", \"1\")"),
       "a remembered theme is restored uniformly, baked light/dark id or not",
     )
     assertFalse(
       viewerThemes.contains("!themed"),
       "no id-shaped exemption: it made two variants of one component open in different themes",
+    )
+    assertTrue(
+      viewerThemes.contains("!urlOption && !el.disabled && option && !option.disabled"),
+      "a disabled select is a page that cannot re-render, whatever its options say: a remembered " +
+        "theme applied there marks a chip the stage will not honour",
     )
     // The exclusivity rule itself moved to `cli/serve-web/src/viewer/themeChoice.ts`, where
     // `viewerThemeChoice.test.ts` drives it over every value instead of grepping for one spelling

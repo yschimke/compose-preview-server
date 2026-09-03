@@ -202,6 +202,51 @@ class ServePageThemeTest {
     assertTrue(script.contains("if(t===\"light\"||t===\"dark\")"), script)
   }
 
+  /**
+   * A remembered value the mode table cannot answer for must not shadow the baked theme.
+   *
+   * `t = stored || baked` with one resolve at the end paints nothing for a `theme:<provider>` the
+   * catalog has stopped declaring while a tab stayed open: the string is truthy, so the baked theme
+   * is never reached. Resolving each candidate as it is considered is what keeps OS chrome off a
+   * plainly light preview after a catalog update.
+   */
+  @Test
+  fun `an unresolvable remembered theme falls through to the baked one`() {
+    val script = landing().substringAfter("<script>try{var p=new URLSearchParams")
+    assertTrue(
+      script.contains("r=function(t){") && script.contains("r(sessionStorage.getItem("),
+      "the remembered value is resolved as a candidate, not after the fallback chain: $script",
+    )
+    assertTrue(
+      script.contains("r(sessionStorage.getItem(\"cp-theme:wear-m3\"))||"),
+      "…and an unresolvable one gives way to the theme the id bakes: $script",
+    )
+  }
+
+  /**
+   * A viewer that cannot re-render never consults the memory at all.
+   *
+   * A static bundle disables the Theme control, so the stage keeps its baked image whatever the tab
+   * remembers; following the memory there frames a light snapshot in dark chrome.
+   */
+  @Test
+  fun `a viewer that cannot apply a theme resolves the chrome from its baked one`() {
+    val html = viewer()
+    val script = html.substringAfter("<script>try{var p=new URLSearchParams").substringBefore("\n")
+    assertTrue(
+      html.contains("id=\"cp-theme\"") && html.contains(" disabled>"),
+      "this fixture is meant to have no live tier behind its Theme control: $html",
+    )
+    assertFalse(
+      script.contains("sessionStorage.getItem"),
+      "a page that cannot apply a remembered theme must not resolve the chrome from one: $script",
+    )
+    assertTrue(
+      script.contains("match(/(?:^|__)(light|dark)(?:__|$)/)"),
+      "it still opens on the theme its own id bakes: $script",
+    )
+  }
+
   @Test
   fun `the setting can turn the whole thing off`() {
     val script = landing().substringAfter("<script>try{var p=new URLSearchParams")

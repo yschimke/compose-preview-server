@@ -218,6 +218,52 @@ describe("window.cpPageTheme", () => {
         );
     });
 
+    it("falls back to the baked theme when the remembered one no longer resolves", () => {
+        // A catalog that dropped or renamed a declared theme while this tab stayed open: the
+        // stored `theme:<provider>` is still a truthy string, but no chip declares its mode any
+        // more. Shadowing the baked theme with it would leave OS chrome around a light preview.
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:m3",
+        );
+        sessionStorage.setItem("cp-theme:m3", "theme:com.example.Gone");
+        document.body.innerHTML = `
+          <div class="cp-viewer" data-preview-id="button__ideal__default__light"
+               data-bg-theme="light"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-light"),
+        );
+    });
+
+    it("ignores the remembered theme when the viewer cannot re-render", () => {
+        // A static bundle (or a fixed-theme specimen) disables the Theme select: the stage keeps
+        // its baked image whatever the tab remembers, so following the memory would frame a light
+        // snapshot in dark chrome.
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:m3",
+        );
+        sessionStorage.setItem("cp-theme:m3", "dark");
+        document.body.innerHTML = `
+          <select id="cp-theme" disabled></select>
+          <div class="cp-viewer" data-preview-id="button__ideal__default__light"
+               data-bg-theme="light"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-light"),
+        );
+        assert.ok(
+            !document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+    });
+
     it("hands the chrome back to the OS when set to system", () => {
         stubStorage();
         follow("dark");

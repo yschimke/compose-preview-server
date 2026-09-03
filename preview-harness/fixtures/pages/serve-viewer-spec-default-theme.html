@@ -12,7 +12,7 @@
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
-        <script>try{var p=new URLSearchParams(location.search),t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||(sessionStorage.getItem("cp-theme:meshcore-mobile")||((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]));if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
+        <script>try{var p=new URLSearchParams(location.search),t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||(((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]));if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
       </head>
       <body>
         <script src="/assets/serve/fixture/serve-chrome.js"></script>
@@ -275,7 +275,13 @@
     var declared = stored && stored.indexOf("theme:") === 0;
     var option = null;
     Array.prototype.forEach.call(el.options, function (o) { if (o.value === stored) option = o; });
-    if (!urlOption && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
+    // `!el.disabled` as well as `!option.disabled`, and they are not the same test: a static
+    // bundle (or a fixed-theme specimen) disables the SELECT while its built-in light/dark
+    // options stay enabled, so an option check alone let a remembered choice through onto a
+    // page that cannot re-render. Nothing downstream honours it there — `syncBg` and
+    // `activeThemeChoice` both fold on `el.disabled` — but the chip read as pressed and the
+    // chrome followed it, framing an unchanged light snapshot in dark page colours.
+    if (!urlOption && !el.disabled && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
       el.value = stored;
       if (pinsTheme(stored)) el.setAttribute("data-theme-active", "1");
     }

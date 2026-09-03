@@ -88,8 +88,14 @@ function currentChoice(): string {
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("theme") || params.get("uiMode");
     if (fromUrl) return fromUrl;
-    const remembered = readThemeMemory(themeKey());
-    if (remembered) return remembered;
+    if (themeChoiceApplies()) {
+        // Only a remembered value this page can still resolve to a mode. A `theme:<provider>` the
+        // catalog has since stopped declaring is a truthy string that `modeOf` cannot answer for,
+        // and returning it would paint nothing while shadowing the baked theme below — OS chrome
+        // around a plainly light preview, on the first load after a catalog update.
+        const remembered = readThemeMemory(themeKey());
+        if (remembered && modeOf(remembered)) return remembered;
+    }
     const viewer = document.querySelector<HTMLElement>(
         ".cp-viewer[data-preview-id]",
     );
@@ -99,6 +105,21 @@ function currentChoice(): string {
         if (baked === "light" || baked === "dark") return baked;
     }
     return "";
+}
+
+/**
+ * Whether a remembered choice can change what this page shows.
+ *
+ * A disabled Theme select is a viewer that cannot re-render — a static bundle with no daemon or
+ * Wasm tier, a fixed-theme specimen — so the stage keeps its baked image whatever the tab
+ * remembers, and following the memory would frame that image in the opposite chrome. The server
+ * makes the same call for the pre-paint script (`ServeWeb.themeChoiceApplies`); this is the
+ * post-parse half, which can simply look at the control. Pages with no such select (the landing
+ * grid, whose chips re-point at published pixels) always apply.
+ */
+function themeChoiceApplies(): boolean {
+    const select = document.querySelector<HTMLSelectElement>("#cp-theme");
+    return !select || !select.disabled;
 }
 
 function paint(mode: string): void {

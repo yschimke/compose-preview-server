@@ -8,9 +8,15 @@
 // was impossible: the second tab's pick reached back into the first the moment it navigated, and
 // the first tab's next page load silently adopted a theme chosen in a window the reader was no
 // longer looking at. `sessionStorage` is scoped to the tab, so a pick follows every navigation,
-// reload and Back/Forward WITHIN the tab that made it, reaches no other tab, and is gone when the
-// tab closes — which is also what makes a shared or bookmarked link reproducible again, because a
-// freshly opened tab starts with no memory at all.
+// reload and Back/Forward WITHIN the tab that made it, and is gone when the tab closes.
+//
+// One nuance, and it is the behaviour we want rather than a leak: a browsing context CREATED from
+// a page — open-in-new-tab, `target="_blank"`, a duplicated tab — starts with a COPY of the
+// opener's `sessionStorage`. So opening a preview in a new tab from a catalog you have themed
+// carries that theme across, which is the same continuity a click carries. It is a snapshot taken
+// at creation and nothing more: neither side sees the other's later picks, and a tab that reached
+// the page any other way — a pasted link, a bookmark, a link from another site, a fresh window —
+// starts with no memory, which is what makes a shared deep link reproducible.
 //
 // The Page theme SETTING (`cp-page-theme`, whether the chrome follows the previews or the OS) is a
 // standing preference rather than page state and stays in `localStorage`; only the theme choice

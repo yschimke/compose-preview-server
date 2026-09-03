@@ -5306,15 +5306,15 @@ ${captureControlsHtml().prependIndent("          ")}
    * Viewer half of the catalog-scoped sticky Theme control. The landing page and viewer use the
    * same values: `light`, `dark`, or `theme:<provider FQN>`.
    *
-   * The memory is `sessionStorage`, so it is the TAB's choice and nothing wider: it follows every
-   * navigation, reload and Back/Forward inside the tab that made the pick, never reaches a second
-   * tab, and is gone when the tab closes. That is what lets a remembered choice apply UNIFORMLY, to
-   * a `…__s-square` preview and its `…__default__light` sibling alike. It could not before: a
-   * per-origin memory had to be suppressed on ids naming a baked theme, or a shared `__light` link
-   * would open in whatever theme the reader last picked days ago — and the suppression is exactly
-   * what made walking between two variants of one component change theme halfway. A tab that picked
-   * nothing has nothing remembered, so a bookmarked or shared deep link is reproducible on its own
-   * terms rather than by a guard on the id.
+   * The memory is `sessionStorage` (see `chrome/themeMemory.ts`), so it is the TAB's choice and
+   * nothing wider: it follows every navigation, reload and Back/Forward inside the tab that made
+   * the pick, and is gone when the tab closes. That is what lets a remembered choice apply
+   * UNIFORMLY, to a `…__s-square` preview and its `…__default__light` sibling alike. It could not
+   * before: a per-origin memory had to be suppressed on ids naming a baked theme, or a shared
+   * `__light` link would open in whatever theme the reader last picked days ago — and the
+   * suppression is exactly what made walking between two variants of one component change theme
+   * halfway. A tab that arrived by a pasted link or a bookmark remembers nothing, so a shared deep
+   * link is reproducible on its own terms rather than by a guard on the id.
    */
   private fun viewerThemeStickyScript(themeStorageKey: String): String =
     """
@@ -5351,7 +5351,13 @@ ${captureControlsHtml().prependIndent("          ")}
         var declared = stored && stored.indexOf("theme:") === 0;
         var option = null;
         Array.prototype.forEach.call(el.options, function (o) { if (o.value === stored) option = o; });
-        if (!urlOption && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
+        // `!el.disabled` as well as `!option.disabled`, and they are not the same test: a static
+        // bundle (or a fixed-theme specimen) disables the SELECT while its built-in light/dark
+        // options stay enabled, so an option check alone let a remembered choice through onto a
+        // page that cannot re-render. Nothing downstream honours it there — `syncBg` and
+        // `activeThemeChoice` both fold on `el.disabled` — but the chip read as pressed and the
+        // chrome followed it, framing an unchanged light snapshot in dark page colours.
+        if (!urlOption && !el.disabled && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
           el.value = stored;
           if (pinsTheme(stored)) el.setAttribute("data-theme-active", "1");
         }
@@ -13991,16 +13997,23 @@ ${scriptTag("known-differences.js")}
     // this control never reached the sibling.
     val themeFixed = isThemeSpecimen(preview)
     val viewerDeclaredThemes = if (themeFixed) emptyList() else declaredThemes
+    /**
+     * Whether a theme choice can actually reach the pixels here — a daemon or a Wasm tier to
+     * re-render with, and not a fixed-theme specimen.
+     *
+     * Hoisted out of the selector markup because the answer is not only about the `<select>`: it
+     * also decides whether the pre-paint chrome script may follow a remembered choice
+     * ([pageThemeScript]). On a page that cannot re-render, the remembered theme describes nothing
+     * on screen — the stage keeps the baked image — so painting the chrome from it frames a light
+     * snapshot in dark chrome.
+     */
+    val themeChoiceApplies =
+      !themeFixed &&
+        ((!wearAlwaysDark && (overridesLive || wasmSrc != null)) ||
+          (viewerDeclaredThemes.isNotEmpty() && overridesLive))
     val themeSelectorHtml = run {
       val declaredThemes = viewerDeclaredThemes
-      val themeDis =
-        if (
-          !themeFixed &&
-            ((!wearAlwaysDark && (overridesLive || wasmSrc != null)) ||
-              (declaredThemes.isNotEmpty() && overridesLive))
-        )
-          ""
-        else " disabled"
+      val themeDis = if (themeChoiceApplies) "" else " disabled"
       val providerDis = if (overridesLive) "" else " disabled"
       val grouped = declaredThemes.groupBy { it.group }
       val optionsOf: (List<ServeTheme>) -> String = { list ->
@@ -14791,6 +14804,7 @@ ${scriptTag("known-differences.js")}
       themeCss = themeCss,
       siteName = catalogName,
       themeStorageKey = themeStorageKey(sessionId, basePath),
+      themeChoiceApplies = themeChoiceApplies,
       declaredThemes = if (overridesLive) viewerDeclaredThemes else emptyList(),
       // Only the `js` chip paints in this document's canvas, and it only exists when the preview
       // carries a captured document.
@@ -15146,6 +15160,17 @@ ${scriptTag("known-differences.js")}
      * (the front door, `/status`, a shared document): those never pin a scheme.
      */
     themeStorageKey: String = "",
+    /**
+     * Whether a remembered theme choice can actually change what this page shows.
+     *
+     * False on a viewer whose Theme control is disabled — a static bundle with no daemon or Wasm
+     * tier behind it, or a fixed-theme specimen. Such a page keeps its baked image whatever is
+     * remembered, so the pre-paint script must resolve the chrome from the baked theme instead:
+     * following the memory there frames a light snapshot in dark chrome and marks a chip the page
+     * cannot honour. Default true — the landing grid's chips re-point at published pixels, so a
+     * remembered choice always applies there.
+     */
+    themeChoiceApplies: Boolean = true,
     /** The catalog this page belongs to, named in the header bar. See [siteHeader]. */
     siteName: String = "",
     /**
@@ -15315,7 +15340,7 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
-        ${pageThemeScript(themeStorageKey, declaredThemes)}
+        ${pageThemeScript(themeStorageKey, declaredThemes, themeChoiceApplies)}
       </head>
       <body${bodyClassAttr}>
         ${scriptTag("serve-chrome.js")}
@@ -15352,15 +15377,11 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
    * A declared theme moves the chrome when [ServeTheme.mode] is unambiguous; unqualified themes
    * still follow the visitor's OS.
    */
-  private fun pageThemeScript(themeStorageKey: String, declaredThemes: List<ServeTheme>): String {
-    val storedTheme =
-      themeStorageKey
-        .takeIf { it.isNotBlank() }
-        ?.let {
-          "||(sessionStorage.getItem(${WebEscaping.jsString(it)})||" +
-            "((decodeURIComponent(location.pathname).split('/').pop()||\"\")" +
-            ".match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1])"
-        } ?: ""
+  private fun pageThemeScript(
+    themeStorageKey: String,
+    declaredThemes: List<ServeTheme>,
+    themeChoiceApplies: Boolean = true,
+  ): String {
     val modeEntries = declaredThemes.mapNotNull { theme ->
       theme.mode?.let { mode ->
         WebEscaping.jsString("theme:${theme.providerFqn}") + ":" + WebEscaping.jsString(mode)
@@ -15369,7 +15390,35 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
     val modeInit =
       modeEntries.takeIf { it.isNotEmpty() }?.let { "m={${it.joinToString(",")}}," } ?: ""
     val modeResolve = if (modeEntries.isEmpty()) "" else "t=m[t]||t;"
-    return "<script>try{var p=new URLSearchParams(location.search),$modeInit" +
+    // The theme the preview id bakes, read off the path — the fallback whenever nothing better is
+    // known, and the ONLY candidate on a page whose theme choice cannot reach the pixels.
+    val bakedTheme =
+      "((decodeURIComponent(location.pathname).split('/').pop()||\"\")" +
+        ".match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]"
+    // `r()` resolves ONE candidate to a page mode: a declared theme through the mode table, a
+    // day/night name as itself, anything else — a `theme:<provider>` this catalog no longer
+    // declares, a value from a renamed provider — to "".
+    //
+    // Resolving before the fallback rather than after is what keeps a stale remembered value from
+    // eating the baked one. `t = stored || baked` with one resolve at the end paints NOTHING for a
+    // theme that has since been removed while the tab stayed open: the stored string is truthy, so
+    // the baked theme is never reached, and the mode table cannot answer for a provider it has no
+    // entry for. The chrome then falls back to the OS over a plainly light preview.
+    val resolveOne = if (modeEntries.isEmpty()) "t" else "m[t]||t"
+    val readsMemory = themeStorageKey.isNotBlank() && themeChoiceApplies
+    val storedTheme =
+      themeStorageKey
+        .takeIf { it.isNotBlank() }
+        ?.let {
+          if (readsMemory) "||(r(sessionStorage.getItem(${WebEscaping.jsString(it)}))||$bakedTheme)"
+          else "||($bakedTheme)"
+        } ?: ""
+    // Only where something calls it: a page that cannot apply a remembered theme reads the baked
+    // one straight off the path, and an unused helper in the critical head script is pure weight.
+    val resolveFn =
+      if (readsMemory) "r=function(t){t=$resolveOne;return t===\"light\"||t===\"dark\"?t:\"\";},"
+      else ""
+    return "<script>try{var p=new URLSearchParams(location.search),$modeInit$resolveFn" +
       "t=localStorage.getItem(\"cp-page-theme\")===\"system\"?\"\"" +
       ":(p.get(\"theme\")||(p.get(\"themeProvider\")?\"theme:\"+p.get(\"themeProvider\"):\"\")||p.get(\"uiMode\")$storedTheme);" +
       modeResolve +
