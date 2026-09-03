@@ -660,16 +660,32 @@ class ServeBundleHost(
   /**
    * This host is also the one that can answer *which Remote Compose player* drew those pixels, for
    * the same reason: only the session holding the manifest knows whether a preview pinned the
-   * view-backed lane with `@PreviewWrapper(RemoteViewPreviewWrapper::class)`. A bundle's root
-   * `previews.json` records that pin on `params.wrapperClassName`; a published catalog's inline
-   * `previewParams` does not carry the field at all, so those previews fall through to the
-   * interface default. See [ServeHost.bakedRcPlayer].
+   * view-backed lane with `@PreviewWrapper(RemoteViewPreviewWrapper::class)`.
+   *
+   * Two manifests can answer, and a session with neither answers **null** rather than guessing —
+   * see [ServeHost.bakedRcPlayer] for what a null buys. Overridden here rather than defaulted
+   * because this host is the one that holds them.
    */
-  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
-    if (!hasRemoteComposeDoc(previewId)) null
-    else if (previewParamsById[previewId]?.wrapperClassName == REMOTE_VIEW_PREVIEW_WRAPPER)
-      RemoteComposePlayerKind.VIEW
-    else RemoteComposePlayerKind.EMBEDDED
+  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? {
+    if (!hasRemoteComposeDoc(previewId)) return null
+    // A bundle's root `previews.json` answers implicitly: an ENTRY for this preview means the
+    // manifest speaks for it, and its `wrapperClassName` is the pin or null for "pinned nothing".
+    // Presence of the entry is the test, not presence of the field — every unpinned preview has a
+    // null field, and reading that as "unknown" would give up provenance we actually have.
+    previewParamsById[previewId]?.let {
+      return if (it.wrapperClassName == REMOTE_VIEW_PREVIEW_WRAPPER) RemoteComposePlayerKind.VIEW
+      else RemoteComposePlayerKind.EMBEDDED
+    }
+    // A published catalog stages no such manifest, so it must say so explicitly
+    // ([ServeCatalogStore.PreviewParamsMeta.capturePlayer]) or be taken as unknown. Inferring the
+    // embedded default here is what would serve a view-pinned preview's capture in answer to
+    // `?rcPlayer=cmp-android`; an unknown costs a redundant query parameter instead.
+    return variantMeta[previewId]
+      ?.previewParams
+      ?.capturePlayer
+      ?.let { wire -> RcPlayerBackend.entries.firstOrNull { it.wire == wire } }
+      ?.playerKind
+  }
 
   /**
    * The catalog's declared hero ([declaredHero]) resolved to one of this host's actual preview ids,

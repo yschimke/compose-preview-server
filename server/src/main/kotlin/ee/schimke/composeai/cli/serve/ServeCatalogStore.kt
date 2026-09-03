@@ -3221,6 +3221,19 @@ class ServeCatalogStore(
      * density, which a published catalog does not carry.
      */
     val captureGutter: CaptureGutterPx? = null,
+    /**
+     * The [RcPlayerBackend.wire] id of the Remote Compose player this render was **captured** with,
+     * when the exporter recorded it. Null means "not recorded" — NOT "the default one".
+     *
+     * A bundle's root `previews.json` answers this implicitly, by carrying the preview's
+     * `@PreviewWrapper` pin. A published catalog stages no such manifest, so without this field a
+     * reader has to infer, and the only available inference (`RemoteOverridablePreview` defaults to
+     * the embedded player) is wrong for a preview pinned to `RemoteViewPreviewWrapper` — it would
+     * serve that view-backed capture in answer to `?rcPlayer=cmp-android` under a
+     * confident 200. [ServeHost.bakedRcPlayer] therefore answers **unknown** for a catalog that
+     * does not carry this, which costs a redundant query parameter rather than the wrong pixels.
+     */
+    val capturePlayer: String? = null,
   )
 
   /**
