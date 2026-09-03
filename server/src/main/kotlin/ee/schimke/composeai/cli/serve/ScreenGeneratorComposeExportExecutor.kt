@@ -81,7 +81,9 @@ class ScreenGeneratorComposeExportExecutor(
         is ScreenDocumentProjection.Outcome.Refused ->
           return refused(UNEXPRESSIBLE_DOCUMENT, projection.reasons)
       }
-    return when (val generated = ScreenGenerator.generate(document, record, packageName)) {
+    return when (
+      val generated = ScreenGenerator.generate(document, record, packageName, EXPRESSION_PACKAGES)
+    ) {
       is ScreenGenerator.Result.Refused -> refused(UNPROVEN_CALL_SITE, generated.reasons)
       is ScreenGenerator.Result.Emitted ->
         ExportArtifactV1(
@@ -135,6 +137,23 @@ class ScreenGeneratorComposeExportExecutor(
     }
 
   companion object {
+    /**
+     * The only packages a generated screen may call.
+     *
+     * `ScreenGenerator` refuses every projection-supplied callable outside this set, and its
+     * default is empty — a caller that declares nothing generates nothing. That is not a formality
+     * here: a `DesignDocumentV1` arrives over the authenticated HTTP API, and without a boundary a
+     * construct naming `java.nio.file.Files.readString` would be emitted into source this server
+     * hands back and `UiBuilderGeneratedPreviewAdapter` exists to compile and render.
+     *
+     * One prefix, because [ScreenDocumentProjection] emits one vocabulary: Material 3's theme
+     * accessors, `Color`, `Dp`/`TextUnit`, `PaddingValues`, the layout and draw modifier
+     * extensions, and the two shape constants are all under `androidx.compose`. Widening this set
+     * is widening what a document can make this server execute, so it is a decision rather than a
+     * list to keep topped up.
+     */
+    private val EXPRESSION_PACKAGES = setOf("androidx.compose")
+
     /** The host was never given a component record for this catalog. Not the document's fault. */
     const val NO_COMPONENT_RECORD = "NO_COMPONENT_RECORD"
 
