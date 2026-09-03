@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.RemoteNamedValue
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
@@ -132,6 +133,12 @@ class ServeHttpRoutingTest {
 
       override fun remoteComposeDoc(previewId: String): ByteArray? = rcDocBytes
 
+      // This session CAN name the player its baked pixels came from — the ordinary case, and the
+      // premise every cmp-android assertion below rests on. Stated rather than inherited: the
+      // interface default is "cannot say", so a host that has the fact has to say so.
+      override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
+        RemoteComposePlayerKind.EMBEDDED
+
       override fun render(previewId: String, overrides: PreviewOverrides): RenderOutcome =
         RenderOutcome.Ok(png(), RenderOutcome.Generation.BAKED)
 
@@ -170,6 +177,12 @@ class ServeHttpRoutingTest {
       override val canRenderOverrides = true
 
       override fun remoteComposeDoc(previewId: String): ByteArray? = rcDocBytes
+
+      // This session CAN name the player its baked pixels came from — the ordinary case, and the
+      // premise every cmp-android assertion below rests on. Stated rather than inherited: the
+      // interface default is "cannot say", so a host that has the fact has to say so.
+      override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
+        RemoteComposePlayerKind.EMBEDDED
 
       override fun rcCompare(): RcCompareManifest =
         RcCompareManifest(

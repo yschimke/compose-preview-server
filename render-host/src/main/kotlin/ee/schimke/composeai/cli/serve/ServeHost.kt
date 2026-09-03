@@ -163,33 +163,34 @@ interface ServeHost : AutoCloseable {
   fun bakedTheme(previewId: String): UiMode? = ServeBakedTheme.token(previewId)
 
   /**
-   * The Remote Compose player [previewId]'s **baked** pixels were drawn with.
+   * The Remote Compose player [previewId]'s **baked** pixels were drawn with, or null when this
+   * session cannot name one.
    *
-   * A capture goes through `RemoteOverridablePreview`, which defaults to
-   * [RemoteComposePlayerKind.EMBEDDED] — so for all but one case the baked PNG already *is* the
-   * answer to `?rcPlayer=cmp-android`, and both the routing predicates
-   * ([CatalogLiveRouting.overridesAffectRender]) and the published-parity shortcut in the HTTP
-   * layer need to know that rather than each assuming it. That is the whole reason this is a
-   * question put to the host: the one exception is a preview that pins the view-backed lane with
-   * `@PreviewWrapper(RemoteViewPreviewWrapper::class)`, and whether it did is a fact about the
-   * session's manifest, not about the id.
+   * Both the routing predicates ([CatalogLiveRouting.overridesAffectRender]) and the
+   * published-parity shortcut in the HTTP layer need this: when a request names the player that
+   * already drew the baked PNG, the snapshot answers it exactly and the parameter is a no-op, which
+   * is what lets a default link stop carrying one. Naming any OTHER player is a genuine re-render.
    *
-   * **Null for a preview with no Remote Compose document at all** — an ordinary Compose preview's
-   * baked PNG is not any player's output, so no `rcPlayer` request is ever a no-op against it and
-   * every one of them stays a genuine (and refusable) override. That is the difference between "we
-   * know which player drew this" and "there was no player", and collapsing the two would answer
-   * `?rcPlayer=cmp-android` on a plain preview with an unrelated snapshot under a confident 200.
+   * It is a question put to the host because the answer is a fact about the session's **manifest**,
+   * not about the id. A capture goes through `RemoteOverridablePreview`, which defaults to
+   * [RemoteComposePlayerKind.EMBEDDED] — but a preview pinning the view-backed lane with
+   * `@PreviewWrapper(RemoteViewPreviewWrapper::class)` does not, and only whoever holds the
+   * manifest knows which this is.
    *
-   * Otherwise the default answers EMBEDDED, which is what a session with no manifest to consult can
-   * honestly say: every capture path in this project reaches the embedded player unless a wrapper
-   * is pinned, and [RcPlayerBackend.JAVA]'s `rcCompareLane = null` is already built on the same
-   * fact. [ServeBundleHost] overrides it, because a bundle's `previews.json` records the pin and
-   * can therefore name [RemoteComposePlayerKind.VIEW] for the previews that carry it. A published
-   * catalog carries no such manifest, so its RC previews take the default — the known gap
-   * [ServeRcCompare.LANES]' `baked` row documents.
+   * **The default is null: not "no player", but "this session cannot say".** Both unknowns fail the
+   * same safe way — every `rcPlayer` survives as a genuine, refusable override, exactly as a null
+   * [bakedTheme] keeps every `uiMode` routing to a real render — and the cost is a redundant query
+   * parameter rather than another player's pixels under a confident 200. Guessing the common answer
+   * here is precisely the mistake this seam exists to stop: it is right for every catalog we
+   * publish today and silently wrong for the one preview shape that matters.
+   *
+   * [ServeBundleHost] overrides it, because it holds the two manifests that can answer — a bundle's
+   * root `previews.json` (which records the pin) and a published catalog's
+   * [ServeCatalogStore.PreviewParamsMeta.capturePlayer] (which records the player outright, once an
+   * exporter carries it). A catalog published before that field existed reads back null and keeps
+   * naming its player, which is the behaviour that predates this seam.
    */
-  fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
-    if (hasRemoteComposeDoc(previewId)) RemoteComposePlayerKind.EMBEDDED else null
+  fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? = null
 
   /** Human label for the tenant (module Gradle path, `module@rev`, or a bundle name). */
   val label: String
@@ -625,6 +626,23 @@ interface ServeHost : AutoCloseable {
    * [RcPlayerBackend.JAVA] / [RcPlayerBackend.CMP_ANDROID] lanes (they ride
    * `remoteCompose.player`).
    */
+  /**
+   * [bakedRcPlayer] as the backend that names it, or null when this session cannot say.
+   *
+   * Every `enabledRcPlayersFor` must union this in, including the two that override the default: a
+   * bare URL serves those pixels, so the picker has to offer that lane even when the parity run
+   * staged no column for it — and it never does for [RcPlayerBackend.JAVA], whose `rcCompareLane`
+   * is null. A host that has just established which player drew its snapshot, and then greys out
+   * that exact chip while the snapshot sits on the stage, is disagreeing with itself.
+   *
+   * Factored here rather than spelled out at each site, because three copies of one fact drifting
+   * apart is the bug this whole seam exists to stop.
+   */
+  fun bakedRcPlayerBackend(previewId: String): RcPlayerBackend? =
+    bakedRcPlayer(previewId)?.let { kind ->
+      RcPlayerBackend.entries.firstOrNull { it.playerKind == kind }
+    }
+
   fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> =
     if (hasRemoteComposeDoc(previewId)) {
       buildList {
@@ -640,6 +658,8 @@ interface ServeHost : AutoCloseable {
         addAll(
           stagedRcPlayers(previewId).filterNot { it == RcPlayerBackend.CMP_WASM || it in this }
         )
+        // …and the player the BAKED artifact already is ([bakedRcPlayerBackend]).
+        bakedRcPlayerBackend(previewId)?.let { if (it !in this) add(it) }
       }
         .sortedBy { RcPlayerBackend.UNIVERSE.indexOf(it) }
     } else {

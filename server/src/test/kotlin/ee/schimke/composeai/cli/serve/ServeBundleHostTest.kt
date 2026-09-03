@@ -224,6 +224,65 @@ class ServeBundleHostTest {
     assertEquals(null, host.bakedRcPlayer("com.example.Absent"))
   }
 
+  /**
+   * …and a session holding NO manifest says so, rather than inferring the common answer.
+   *
+   * A published catalog stages no `previews.json`, so nothing there records a `@PreviewWrapper`
+   * pin. Inferring the `RemoteOverridablePreview` default would be right for every catalog we
+   * publish today and silently wrong for a view-pinned preview — it would answer
+   * `?rcPlayer=cmp-android` with the view player's capture under a confident 200, and have the
+   * viewer drop the parameter and label those pixels CMP Android. Unknown costs a redundant query
+   * parameter instead, which is the behaviour that predates this seam.
+   */
+  @Test
+  fun `a catalog that records no capture player is unknown, not assumed embedded`() {
+    val dir = bundle("com.example.Card" to byteArrayOf(1))
+    File(dir, "ir").mkdirs()
+    File(dir, "ir/com.example.Card.rc").writeBytes(byteArrayOf(9))
+    assertEquals(null, ServeBundleHost(dir, label = "remote-m3").bakedRcPlayer("com.example.Card"))
+  }
+
+  /** …and one that DOES record it is believed, which is the channel that closes the gap above. */
+  @Test
+  fun `a catalog's recorded capture player is read back`() {
+    val dir = bundle("com.example.Card" to byteArrayOf(1), "com.example.Pinned" to byteArrayOf(2))
+    File(dir, "ir").mkdirs()
+    File(dir, "ir/com.example.Card.rc").writeBytes(byteArrayOf(9))
+    File(dir, "ir/com.example.Pinned.rc").writeBytes(byteArrayOf(9))
+    File(dir, "previews").mkdirs()
+    File(dir, "previews/variants.json")
+      .writeText(
+        """
+        {
+          "com.example.Card": {"previewParams":{"capturePlayer":"cmp-android"}},
+          "com.example.Pinned": {"previewParams":{"capturePlayer":"java"}}
+        }
+        """
+          .trimIndent()
+      )
+    val host = ServeBundleHost(dir, label = "remote-m3")
+    assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
+    assertEquals(RemoteComposePlayerKind.VIEW, host.bakedRcPlayer("com.example.Pinned"))
+
+    // …and the picker offers that lane. A bare URL serves those pixels, so greying out the chip
+    // for the very player the snapshot came from would have the host disagree with itself — and
+    // `java` can never arrive any other way, because [RcPlayerBackend.JAVA] has no rc-compare
+    // column to be staged from.
+    assertTrue(
+      RcPlayerBackend.CMP_ANDROID in host.enabledRcPlayersFor("com.example.Card"),
+      "the embedded lane is offered where baked is that player",
+    )
+    assertTrue(
+      RcPlayerBackend.JAVA in host.enabledRcPlayersFor("com.example.Pinned"),
+      "the view lane is offered where baked is that player: " +
+        "${host.enabledRcPlayersFor("com.example.Pinned")}",
+    )
+    assertFalse(
+      RcPlayerBackend.JAVA in host.enabledRcPlayersFor("com.example.Card"),
+      "…and not offered where it is someone else's pixels",
+    )
+  }
+
   @Test
   fun `declared themes are read from the bundle's previews_json when present`() {
     val dir = bundle("com.example.Card" to byteArrayOf(1))

@@ -673,7 +673,14 @@ class ServeCatalogStore(
             image.supportsGestures ||
             image.fixedTheme ||
             image.secondary ||
-            planned.componentParameters.isNotEmpty()
+            planned.componentParameters.isNotEmpty() ||
+            // The ground, the device frame and the capture player. Without this an image whose
+            // ONLY metadata is `previewParams` — a flat component with no componentId, state,
+            // theme, section or knobs — was dropped from the manifest entirely, so the exporter's
+            // record never reached [ServeBundleHost] and the field read back as absent. That was
+            // already true of `captureGutter` and `device`; it matters more now that a missing
+            // record is the difference between naming the baked player and answering unknown.
+            image.previewParams != null
         ) {
           variants[id] =
             VariantMeta(
@@ -3221,6 +3228,19 @@ class ServeCatalogStore(
      * density, which a published catalog does not carry.
      */
     val captureGutter: CaptureGutterPx? = null,
+    /**
+     * The [RcPlayerBackend.wire] id of the Remote Compose player this render was **captured** with,
+     * when the exporter recorded it. Null means "not recorded" — NOT "the default one".
+     *
+     * A bundle's root `previews.json` answers this implicitly, by carrying the preview's
+     * `@PreviewWrapper` pin. A published catalog stages no such manifest, so without this field a
+     * reader has to infer, and the only available inference (`RemoteOverridablePreview` defaults to
+     * the embedded player) is wrong for a preview pinned to `RemoteViewPreviewWrapper` — it would
+     * serve that view-backed capture in answer to `?rcPlayer=cmp-android` under a
+     * confident 200. [ServeHost.bakedRcPlayer] therefore answers **unknown** for a catalog that
+     * does not carry this, which costs a redundant query parameter rather than the wrong pixels.
+     */
+    val capturePlayer: String? = null,
   )
 
   /**

@@ -850,6 +850,9 @@ internal constructor(
         add(RcPlayerBackend.JAVA)
         add(RcPlayerBackend.CMP_ANDROID)
       }
+      // Inert today — a daemon-only host carries no baked artifact to name a player for — but
+      // stated so this override cannot drift from the other two if it ever gains one.
+      bakedRcPlayerBackend(previewId)?.let { if (it !in this) add(it) }
     }
   }
 
