@@ -58,45 +58,77 @@ export interface LanePick {
     picked: boolean;
 }
 
-/** Whether a finished server-side RC lane must name its backend on `/render`. */
-export function backendRequiresRenderParam(backend: string): boolean {
-    // The server's absent-player default is the Java view player. Browser players do not use the
-    // snapshot route, while both embedded players need an explicit wire id.
-    return backend === "cmp-android" || backend === "cmp-jvm";
+/** The server-side lanes — the ones drawn by `/render`, as opposed to in the browser. */
+function isServerSideBackend(backend: string): boolean {
+    return (
+        backend === "java" || backend === "cmp-android" || backend === "cmp-jvm"
+    );
 }
 
-/** The server-side player parameter represented by a pick, or nothing for a browser lane. */
+/**
+ * Whether a finished server-side RC lane must name its backend on `/render`.
+ *
+ * A lane names itself only when it differs from what the server draws WITH NO PARAMETER, which the
+ * page states as `data-rc-server-default` because only the server knows it. Browser lanes never
+ * ride the render URL at all.
+ *
+ * This used to answer "cmp-android or cmp-jvm", on the reasoning that the server's absent-player
+ * default was the Java view player. That stopped being true when `RemoteOverridablePreview` moved
+ * to `RemoteComposePlayerKind.EMBEDDED`: an absent `rcPlayer` already draws cmp-android, and the
+ * deployed `remote-m3` host answers md5 `e69d5136…` to the bare render and to
+ * `?rcPlayer=cmp-android` alike (`?rcPlayer=java` answers `822c80a4…`). The cost of the stale
+ * answer was that the viewer treated its own default as a visitor pick and stamped it on load, so a
+ * first click from a catalog produced `…?rcPlayer=cmp-android` — a URL that reads as a deliberate
+ * player choice, is a byte-for-byte no-op, and splits one rendering across two cache entries.
+ */
+export function backendRequiresRenderParam(
+    backend: string,
+    serverDefault: string,
+): boolean {
+    if (!isServerSideBackend(backend)) return false;
+    return backend !== serverDefault;
+}
+
+/**
+ * The server-side player parameter represented by a pick, or nothing for a browser lane.
+ *
+ * A pick equal to the server's own default emits nothing, so there is exactly ONE url for the
+ * default rendering however the visitor arrived at it — picking `cmp-android` explicitly from the
+ * combo describes the same pixels as never touching it, and a shared link should say so.
+ */
 export function serverPlayerParam(
     backend: string,
     picked: boolean,
+    serverDefault: string,
 ): string | null {
     if (!picked) return null;
-    return backend === "java" ||
-        backend === "cmp-android" ||
-        backend === "cmp-jvm"
-        ? backend
-        : null;
+    if (!isServerSideBackend(backend)) return null;
+    return backend === serverDefault ? null : backend;
 }
 
 /** Restore the server-rendered default when returning from a browser-only player lane. */
-export function restoreStaticPlayer(pick: LanePick): LanePick {
+export function restoreStaticPlayer(
+    pick: LanePick,
+    serverDefault: string,
+): LanePick {
     if (pick.picked) return pick;
-    const retained = serverPlayerParam(pick.pickedBackend, true);
+    const retained = serverPlayerParam(pick.pickedBackend, true, serverDefault);
     if (retained) {
         return {
             defaultBackend: pick.defaultBackend,
             pickedBackend: retained,
-            // Java only needs an explicit parameter when it overrides a non-Java default. Embedded
-            // defaults always need one because the server's absent-player fallback is Java.
+            // A lane is a "pick" only where it overrides what the server would do unaided — either
+            // because it is not the page's default, or because the page's default is not the
+            // server's.
             picked:
                 retained !== pick.defaultBackend ||
-                backendRequiresRenderParam(pick.defaultBackend),
+                backendRequiresRenderParam(pick.defaultBackend, serverDefault),
         };
     }
     return {
         defaultBackend: pick.defaultBackend,
         pickedBackend: pick.defaultBackend,
-        picked: backendRequiresRenderParam(pick.defaultBackend),
+        picked: backendRequiresRenderParam(pick.defaultBackend, serverDefault),
     };
 }
 

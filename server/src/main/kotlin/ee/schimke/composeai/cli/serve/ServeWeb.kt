@@ -13188,6 +13188,27 @@ ${scriptTag("known-differences.js")}
         RcPlayerBackend.JS.wire in rcEnabled -> RcPlayerBackend.JS.wire
         else -> enabledRcPlayers.firstOrNull().orEmpty()
       }
+    // What the SERVER draws for this preview when `?rcPlayer=` is absent — which is a different
+    // question from [defaultRcBackend], the lane this PAGE opens on, and the viewer needs both to
+    // know whether its lane has to name itself on the render URL.
+    //
+    // They are chosen differently. The page's default is picked by what this host offers
+    // (cmp-android, else java, else js). The server's is a property of the capture: the daemon
+    // renders with the preview's own player, and `RemoteOverridablePreview` defaults to
+    // `RemoteComposePlayerKind.EMBEDDED` — so wherever the embedded lane exists at all, an absent
+    // `rcPlayer` already IS cmp-android. Measured on the deployed `remote-m3` host,
+    // `appcard__ideal__default__compact` answers md5 `e69d5136…` to the bare render and to
+    // `?rcPlayer=cmp-android` alike, while `?rcPlayer=java` answers `822c80a4…`.
+    //
+    // The viewer used to assume this was `java` and therefore stamped `?rcPlayer=cmp-android` onto
+    // every default page load, so a first click from a catalog produced a URL that looks like a
+    // deliberate player pick and is a byte-for-byte no-op. Empty when this host has no server-side
+    // player lane at all (a desktop session offering only js/cmp-jvm), where nothing rides the
+    // render URL by default anyway. `java` never appears without cmp-android beside it — the two
+    // are offered together by a player-selectable daemon, and `java` stages no rc-compare column —
+    // so there is no host where the absent-player default is the view player.
+    val serverDefaultRcBackend =
+      if (RcPlayerBackend.CMP_ANDROID.wire in rcEnabled) RcPlayerBackend.CMP_ANDROID.wire else ""
     // Every lane this preview can be drawn by, in display order: the Remote Compose players (or the
     // plain snapshot, when this isn't a Remote Compose preview), the in-browser Wasm app, and the
     // imported design spec. A player the host doesn't offer is still listed — as a disabled option,
@@ -13518,6 +13539,7 @@ ${scriptTag("known-differences.js")}
               "aria-label=\"Switch renderer\" " +
               "title=\"Draw this preview with a different renderer\" " +
               "data-default=\"$defaultLane\" data-rc-default=\"$defaultRcBackend\"" +
+              " data-rc-server-default=\"$serverDefaultRcBackend\"" +
               // Catalog mode drops the renderer chip with the rest of the Live control, and that
               // chip is what made this a *command* menu: "switch renderer…" at rest is only honest
               // while something beside it names the renderer in use. Without it the menu is the
