@@ -18,6 +18,8 @@
 // so a page served under `?theme=dark` never flashes light; this keeps it in step afterwards and
 // owns the Settings menu.
 
+import { readThemeMemory } from "./themeMemory.js";
+
 const SETTING_KEY = "cp-page-theme";
 
 /** "match" follows the picked preview theme (the default); "system" follows the OS. */
@@ -35,22 +37,26 @@ declare global {
     }
 }
 
-function stored(key: string): string | null {
+/**
+ * The Page theme SETTING, which is a standing preference and stays in `localStorage` — unlike the
+ * theme CHOICE, which is per-tab ({@link readThemeMemory}).
+ */
+function storedSetting(): string | null {
     try {
-        return localStorage.getItem(key);
+        return localStorage.getItem(SETTING_KEY);
     } catch {
         return null;
     }
 }
 
 export function setting(): PageThemeSetting {
-    return stored(SETTING_KEY) === "system" ? "system" : "match";
+    return storedSetting() === "system" ? "system" : "match";
 }
 
 /**
- * The localStorage key this catalog remembers its theme choice under, shared with the landing grid
- * and the viewer. Empty on a page with no theme control at all (the front door, `/status`), which
- * simply never pins a scheme.
+ * The per-tab storage key this catalog remembers its theme choice under, shared with the landing
+ * grid and the viewer. Empty on a page with no theme control at all (the front door, `/status`),
+ * which simply never pins a scheme.
  */
 function themeKey(): string {
     return document.documentElement.getAttribute("data-cp-theme-key") || "";
@@ -69,13 +75,21 @@ function modeOf(choice: string): string {
 
 /**
  * The theme choice in force on load, resolved exactly as the pre-paint script does: the URL first
- * (someone picked that chip, or was handed the link), then the choice this catalog remembers.
- * `uiMode` is the viewer's spelling of the same axis.
+ * (someone picked that chip, or was handed the link), then the choice this tab remembers for this
+ * catalog, and only then the theme a `__light` / `__dark` preview bakes. `uiMode` is the viewer's
+ * spelling of the same axis.
+ *
+ * The remembered choice OUTRANKS the baked one, because the viewer applies it too: a tab that
+ * picked Expressive Dark and then opened a `…__light` preview is looking at a dark re-render, and
+ * painting the chrome from the id would leave that render inside a light page. A tab that picked
+ * nothing has nothing remembered, so a shared `__light` link still opens light, chrome and all.
  */
 function currentChoice(): string {
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("theme") || params.get("uiMode");
     if (fromUrl) return fromUrl;
+    const remembered = readThemeMemory(themeKey());
+    if (remembered) return remembered;
     const viewer = document.querySelector<HTMLElement>(
         ".cp-viewer[data-preview-id]",
     );
@@ -84,8 +98,7 @@ function currentChoice(): string {
         const baked = viewer?.getAttribute("data-bg-theme") || "";
         if (baked === "light" || baked === "dark") return baked;
     }
-    const key = themeKey();
-    return (key && stored(key)) || "";
+    return "";
 }
 
 function paint(mode: string): void {

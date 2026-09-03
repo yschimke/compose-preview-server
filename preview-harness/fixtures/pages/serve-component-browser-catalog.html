@@ -12,7 +12,7 @@
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
-        <script>try{var p=new URLSearchParams(location.search),m={"theme:com.example.LightThemeCatalog":"light"},t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||(((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]||localStorage.getItem("cp-theme:compose-m3")));t=m[t]||t;if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
+        <script>try{var p=new URLSearchParams(location.search),m={"theme:com.example.LightThemeCatalog":"light"},t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||(sessionStorage.getItem("cp-theme:compose-m3")||((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]));t=m[t]||t;if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
       </head>
       <body class="cp-component-browser">
         <script src="/assets/serve/fixture/serve-chrome.js"></script>
@@ -301,7 +301,7 @@
       reflectTabs();
       document.documentElement.classList.add("cp-js");
       var stored = null;
-try { stored = localStorage.getItem("cp-theme:compose-m3"); } catch (e) {}
+try { stored = sessionStorage.getItem("cp-theme:compose-m3"); } catch (e) {}
 var themeBtns = document.querySelectorAll(".cp-theme-btn");
 function chipOffered(t) {
   var offered = false;
@@ -334,7 +334,7 @@ if (!known && themeBtns.length) theme = themeBtns[0].getAttribute("data-theme-ch
 var urlTheme = urlParam("theme");
 if (urlTheme && chipOffered(urlTheme)) theme = urlTheme;
 // What the page falls back to when Back lands on an entry with no `?theme=` — the choice
-// this load resolved to, never the localStorage value a later click overwrote.
+// this load resolved to, never the remembered value a later click overwrote.
 var initialTheme = theme;
 var appliedTheme = null;
 var themeBase = ["/compose-m3/render/button-filled-default.png", "/compose-m3/render/button-outlined-default.png", "/compose-m3/render/card-elevated-default.png", "/compose-m3/render/card-filled-default.png", "/compose-m3/render/navigation-bar-default.png", "/compose-m3/render/profile-screen-default.png"];
@@ -741,7 +741,7 @@ applyThemeChoice();
       themeBtns.forEach(function (b) {
         b.addEventListener("click", function () {
           theme = b.getAttribute("data-theme-choice");
-          try { localStorage.setItem("cp-theme:compose-m3", theme); } catch (e) {}
+          try { sessionStorage.setItem("cp-theme:compose-m3", theme); } catch (e) {}
           // A discrete pick gets its own history entry, so Back returns to the previous theme
           // rather than leaving the catalog. No navigation: the grid re-points its own images.
           pushUrl({ theme: theme });

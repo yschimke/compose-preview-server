@@ -150,7 +150,7 @@ describe("window.cpPageTheme", () => {
             "data-cp-theme-key",
             "cp-theme:m3",
         );
-        localStorage.setItem("cp-theme:m3", "light");
+        sessionStorage.setItem("cp-theme:m3", "light");
         at("?theme=dark");
         follow();
         assert.ok(
@@ -173,13 +173,12 @@ describe("window.cpPageTheme", () => {
         );
     });
 
-    it("matches a baked viewer theme instead of a stale remembered catalog theme", () => {
+    it("matches a baked viewer theme when this tab has chosen nothing", () => {
         stubStorage();
         document.documentElement.setAttribute(
             "data-cp-theme-key",
             "cp-theme:m3",
         );
-        localStorage.setItem("cp-theme:m3", "dark");
         document.body.innerHTML = `
           <div class="cp-viewer" data-preview-id="button__ideal__default__light"
                data-bg-theme="light"></div>`;
@@ -192,6 +191,30 @@ describe("window.cpPageTheme", () => {
         );
         assert.ok(
             !document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+    });
+
+    it("follows this tab's own choice over the theme the preview bakes", () => {
+        // The viewer applies the remembered choice to a `__light` preview too — it re-renders dark
+        // — so resolving the chrome from the id would frame that dark render in a light page. The
+        // memory is per-tab, so "remembered" here means someone picked it in THIS tab.
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:m3",
+        );
+        sessionStorage.setItem("cp-theme:m3", "dark");
+        document.body.innerHTML = `
+          <div class="cp-viewer" data-preview-id="button__ideal__default__light"
+               data-bg-theme="light"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+        assert.ok(
+            !document.documentElement.classList.contains("cp-scheme-light"),
         );
     });
 

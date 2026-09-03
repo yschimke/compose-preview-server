@@ -186,7 +186,14 @@ class ServePageThemeTest {
       ),
       script,
     )
-    assertTrue(script.contains("localStorage.getItem(\"cp-theme:wear-m3\")"), script)
+    // Per-TAB, and above the baked id: the viewer applies this tab's choice on a `__light`
+    // preview too, so the chrome has to follow it or frame a dark render in a light page.
+    assertTrue(script.contains("sessionStorage.getItem(\"cp-theme:wear-m3\")"), script)
+    assertTrue(
+      script.indexOf("sessionStorage.getItem(\"cp-theme:wear-m3\")") <
+        script.indexOf("match(/(?:^|__)(light|dark)(?:__|$)/)"),
+      "this tab's own choice outranks the theme the preview id bakes: $script",
+    )
     assertTrue(
       script.contains("match(/(?:^|__)(light|dark)(?:__|$)/)"),
       "a clean baked preview URL must recover its light/dark variant before first paint: $script",

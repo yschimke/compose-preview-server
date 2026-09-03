@@ -5776,12 +5776,12 @@ class ServeWebFixtureTest {
       "non-Wear systems retain day/night overrides",
     )
     assertTrue(
-      landingThemed.contains("localStorage.getItem(\"cp-theme:compose-m3\")") &&
-        landingThemed.contains("localStorage.setItem(\"cp-theme:compose-m3\", theme)"),
-      "the catalog landing persists theme under its own catalog key",
+      landingThemed.contains("sessionStorage.getItem(\"cp-theme:compose-m3\")") &&
+        landingThemed.contains("sessionStorage.setItem(\"cp-theme:compose-m3\", theme)"),
+      "the catalog landing persists theme under its own catalog key, for this tab",
     )
     assertTrue(
-      viewerGestures.contains("localStorage.getItem(\"cp-theme:wear-m3\")") &&
+      viewerGestures.contains("sessionStorage.getItem(\"cp-theme:wear-m3\")") &&
         !viewerGestures.contains("cp-theme:compose-m3"),
       "a viewer reads only its own catalog's sticky theme",
     )
@@ -5836,7 +5836,7 @@ class ServeWebFixtureTest {
       "a non-dark-first viewer with no theme token leaves the stage default (light)",
     )
     // The stage only follows the Theme choice when the control can actually re-render: on a static
-    // bundle the select is disabled (but may carry a seeded localStorage value), so syncBg must
+    // bundle the select is disabled (but may carry a seeded remembered value), so syncBg must
     // gate
     // on !el.disabled or it would tint the stage under an unchanged baked PNG.
     assertTrue(
@@ -5872,25 +5872,36 @@ class ServeWebFixtureTest {
     // The combined filter composes search with theme: on a themed catalog the script still persists
     // the theme choice, so search didn't displace the theme half.
     assertTrue(
-      landingThemed.contains("localStorage.setItem(\"cp-theme:compose-m3\"") &&
+      landingThemed.contains("sessionStorage.setItem(\"cp-theme:compose-m3\"") &&
         landingThemed.contains("getElementById(\"cp-search\")"),
       "the themed landing's filter script drives both the theme toggle and the search box",
     )
     // The viewer seeds the unified Theme select from the catalog-scoped key and writes every
-    // choice back. Explicit baked light/dark ids remain reproducible and ignore remembered themes.
+    // choice back. The store is `sessionStorage`, so the memory is this TAB's: a second tab keeps
+    // its own theme, and a link opened in a fresh tab is reproducible because nothing is remembered
+    // there yet.
     assertTrue(
-      viewer.contains("localStorage.getItem(\"cp-theme:default\""),
+      viewer.contains("sessionStorage.getItem(\"cp-theme:default\""),
       "viewer seeds its Theme select from the catalog-scoped theme key on load",
     )
     assertTrue(
-      viewer.contains("localStorage.setItem(\"cp-theme:default\""),
+      viewer.contains("sessionStorage.setItem(\"cp-theme:default\""),
       "viewer Theme change writes the catalog-scoped theme key",
+    )
+    assertFalse(
+      viewer.contains("localStorage.getItem(\"cp-theme:default\"") ||
+        viewer.contains("localStorage.setItem(\"cp-theme:default\""),
+      "the theme choice never reaches a store shared with the reader's other tabs",
     )
     assertTrue(
       viewerThemes.contains("stored.indexOf(\"theme:\") === 0") &&
-        viewerThemes.contains("!urlOption && !themed && option") &&
+        viewerThemes.contains("!urlOption && option") &&
         viewerThemes.contains("el.setAttribute(\"data-theme-active\", \"1\")"),
-      "a remembered catalog theme is restored only when the preview path has no baked theme",
+      "a remembered theme is restored uniformly, baked light/dark id or not",
+    )
+    assertFalse(
+      viewerThemes.contains("!themed"),
+      "no id-shaped exemption: it made two variants of one component open in different themes",
     )
     // The exclusivity rule itself moved to `cli/serve-web/src/viewer/themeChoice.ts`, where
     // `viewerThemeChoice.test.ts` drives it over every value instead of grepping for one spelling
