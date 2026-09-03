@@ -1643,6 +1643,9 @@ class ServeCatalogLiveHost(
       // preferred embedded default in the enabled set on a box whose daemon is down or absent,
       // rather than silently demoting the page to the JS canvas.
       addAll(stagedRcPlayers(previewId).filterNot { it in this })
+      // …and the lane the baked artifact already is, which neither the daemon's selectable pair
+      // nor the staged columns necessarily cover. See [ServeHost.bakedRcPlayerBackend].
+      bakedRcPlayerBackend(previewId)?.let { if (it !in this) add(it) }
     }
       .sortedBy { RcPlayerBackend.UNIVERSE.indexOf(it) }
   }

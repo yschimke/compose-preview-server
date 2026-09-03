@@ -606,6 +606,23 @@ interface ServeHost : AutoCloseable {
    * [RcPlayerBackend.JAVA] / [RcPlayerBackend.CMP_ANDROID] lanes (they ride
    * `remoteCompose.player`).
    */
+  /**
+   * [bakedRcPlayer] as the backend that names it, or null when this session cannot say.
+   *
+   * Every `enabledRcPlayersFor` must union this in, including the two that override the default: a
+   * bare URL serves those pixels, so the picker has to offer that lane even when the parity run
+   * staged no column for it — and it never does for [RcPlayerBackend.JAVA], whose `rcCompareLane`
+   * is null. A host that has just established which player drew its snapshot, and then greys out
+   * that exact chip while the snapshot sits on the stage, is disagreeing with itself.
+   *
+   * Factored here rather than spelled out at each site, because three copies of one fact drifting
+   * apart is the bug this whole seam exists to stop.
+   */
+  fun bakedRcPlayerBackend(previewId: String): RcPlayerBackend? =
+    bakedRcPlayer(previewId)?.let { kind ->
+      RcPlayerBackend.entries.firstOrNull { it.playerKind == kind }
+    }
+
   fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> =
     if (hasRemoteComposeDoc(previewId)) {
       buildList {
@@ -621,14 +638,8 @@ interface ServeHost : AutoCloseable {
         addAll(
           stagedRcPlayers(previewId).filterNot { it == RcPlayerBackend.CMP_WASM || it in this }
         )
-        // …and the player the BAKED artifact already is ([bakedRcPlayer]). A bare URL serves those
-        // pixels, so the picker has to offer that lane even when the parity run staged no column
-        // for it — and it never does for [RcPlayerBackend.JAVA], whose `rcCompareLane` is null. A
-        // host that has just established which player drew its snapshot, and then greys out that
-        // exact chip while the snapshot sits on the stage, is disagreeing with itself.
-        bakedRcPlayer(previewId)
-          ?.let { kind -> RcPlayerBackend.entries.firstOrNull { it.playerKind == kind } }
-          ?.let { if (it !in this) add(it) }
+        // …and the player the BAKED artifact already is ([bakedRcPlayerBackend]).
+        bakedRcPlayerBackend(previewId)?.let { if (it !in this) add(it) }
       }
         .sortedBy { RcPlayerBackend.UNIVERSE.indexOf(it) }
     } else {
