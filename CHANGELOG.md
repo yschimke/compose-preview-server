@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.19.1](https://github.com/yschimke/compose-preview-server/compare/v2.19.0...v2.19.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **serve:** answer unknown when no manifest records the capture player ([#233](https://github.com/yschimke/compose-preview-server/issues/233)) ([cf56799](https://github.com/yschimke/compose-preview-server/commit/cf56799618171d5b1ff68442b63cdd1ab08e2ddd))
+* **serve:** make the theme choice per-tab, and apply it uniformly ([#234](https://github.com/yschimke/compose-preview-server/issues/234)) ([9e52e62](https://github.com/yschimke/compose-preview-server/commit/9e52e62f62a19f151f9c31bd05924ba16264b495))
+
+
+### Performance Improvements
+
+* **serve:** warm a catalog's thumbnails from the page build that missed ([#232](https://github.com/yschimke/compose-preview-server/issues/232)) ([2488c3d](https://github.com/yschimke/compose-preview-server/commit/2488c3d9cf5a9ca59314acfef15fbb9890c00ee3))
+
 ## [2.19.0](https://github.com/yschimke/compose-preview-server/compare/v2.18.2...v2.19.0) (2026-09-03)
 
 
