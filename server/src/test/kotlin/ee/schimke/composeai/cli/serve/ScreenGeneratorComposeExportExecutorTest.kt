@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
@@ -131,6 +132,63 @@ class ScreenGeneratorComposeExportExecutorTest {
     val diagnostic = artifact.diagnostics.single()
     assertEquals(ScreenGeneratorComposeExportExecutor.UNPROVEN_CALL_SITE, diagnostic.code)
     assertEquals("no component `m3/marquee` in this catalog", diagnostic.message)
+  }
+
+  @Test
+  fun `the default package is the one the preview adapter imports from`() {
+    // `UiBuilderGeneratedPreviewAdapter` writes `import generated.uibuilder.$composableName`, and
+    // the exporter this replaces emitted the same package. A different default compiles on its own
+    // and fails the moment a production artifact reaches that lane — and the golden above would not
+    // catch it, because it passes a package explicitly.
+    val document = ScreenGeneratorScreenFixture.document()
+    val artifact =
+      ScreenGeneratorComposeExportExecutor({ ScreenGeneratorScreenFixture.components() })
+        .export(
+          RevisionPinnedUiBuilderExport(
+            actor = AuthenticatedUiBuilderActor("tester"),
+            designId = document.id,
+            revision = document.revision,
+            documentHash = "hash",
+            document = document,
+            catalog = catalog,
+            format = ExportFormatV1.COMPOSE,
+          )
+        )
+    assertTrue(artifact.content.startsWith("package generated.uibuilder\n"), artifact.content)
+    assertTrue(
+      UiBuilderGeneratedPreviewAdapter.previewEntry("Screen", 1, 1)
+        .contains("import generated.uibuilder.Screen")
+    )
+  }
+
+  @Test
+  fun `a refusal keeps every physical line commented, whatever the document put in it`() {
+    // A refusal quotes document-supplied text, and catalog validation admits arbitrary strings in
+    // a typed colour property. A newline there used to leave everything after it uncommented in an
+    // artifact this executor calls a harmless parseable refusal.
+    val document = ScreenGeneratorScreenFixture.document()
+    val artifact =
+      export(
+        document.copy(
+          roots = listOf("text"),
+          nodes =
+            mapOf(
+              "text" to
+                DesignNodeV1(
+                  id = "text",
+                  componentId = "m3/text",
+                  properties =
+                    mapOf(
+                      "text" to StringValueV1("hi"),
+                      "color" to ColorValueV1("bad\nval injected = 1\u2028val also = 2"),
+                    ),
+                )
+            ),
+        )
+      )
+    val lines = artifact.content.trimEnd('\n').split("\n")
+    assertTrue(lines.size >= 3, artifact.content)
+    assertTrue(lines.all { it.startsWith("// ") }, artifact.content)
   }
 
   private companion object {

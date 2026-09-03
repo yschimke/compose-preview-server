@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
 
 /**
@@ -48,11 +49,16 @@ class ComponentRecordSource(private val files: Map<String, File>) {
 
   private data class Identity(val length: Long, val lastModified: Long)
 
-  private val last = mutableMapOf<String, Parsed>()
-
-  /** Whether any catalog has a record configured — what the export capability is set from. */
-  val configured: Boolean
-    get() = files.isNotEmpty()
+  /**
+   * Concurrent, because `PersistentUiBuilderService` runs up to four exports at once on its own
+   * `ui-builder-export-*` workers and every one of them reaches this cache. A plain map here loses
+   * or corrupts entries under exactly the simultaneous exports the service is built to allow.
+   *
+   * Two exports racing on one cold key may both parse the file; that is deliberate and harmless —
+   * the parse is pure, the result is equal, and holding a lock across a file read to prevent it
+   * would serialise every export behind the slowest disk.
+   */
+  private val last = ConcurrentHashMap<String, Parsed>()
 
   /** The parsed record for [catalogSystemId], or null when there is no usable one. */
   fun record(catalogSystemId: String): ComponentRecordFile? {

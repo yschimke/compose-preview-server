@@ -44,7 +44,13 @@ import java.security.MessageDigest
  */
 class ScreenGeneratorComposeExportExecutor(
   private val components: (catalogSystemId: String) -> ComponentRecordFile?,
-  private val packageName: String = "generated.screen",
+  /**
+   * `generated.uibuilder`, matching the exporter this replaces and the package
+   * `UiBuilderGeneratedPreviewAdapter` imports its composable from. A different default would
+   * compile on its own and fail the moment a production artifact was handed to that lane, and the
+   * golden test would not have caught it — it passes a package explicitly.
+   */
+  private val packageName: String = "generated.uibuilder",
 ) : UiBuilderExportExecutor {
 
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
@@ -101,7 +107,15 @@ class ScreenGeneratorComposeExportExecutor(
    * covers the content, so two identical refusals are identical artifacts.
    */
   private fun refused(code: String, reasons: List<String>): ExportArtifactV1 {
-    val content = reasons.joinToString("\n") { "// $it" } + "\n"
+    // Split on physical lines, not on reasons. A refusal quotes document-supplied text — a colour
+    // string, a token name, a node id — and catalog validation admits arbitrary strings there, so a
+    // value carrying a newline would have left everything after it uncommented in an artifact this
+    // executor calls a harmless parseable refusal. `\u2028` and `\u2029` are line terminators to
+    // the Kotlin lexer too, so they are folded here rather than trusted to `lines()`.
+    val content =
+      reasons
+        .flatMap { it.replace('\u2028', '\n').replace('\u2029', '\n').lines() }
+        .joinToString("\n") { "// $it" } + "\n"
     return ExportArtifactV1(
       format = ExportFormatV1.COMPOSE,
       mediaType = "text/x-kotlin; charset=utf-8",

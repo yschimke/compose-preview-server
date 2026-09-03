@@ -96,6 +96,35 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `component record arguments are catalog-keyed, and malformed ones are rejected`() {
+    val options =
+      options(
+        listOf("--ui-builder-components", "m3-catalog=/srv/m3.json,remote-m3=/srv/remote.json")
+      )
+    assertEquals(
+      mapOf(
+        "m3-catalog" to java.io.File("/srv/m3.json"),
+        "remote-m3" to java.io.File("/srv/remote.json"),
+      ),
+      options.uiBuilderComponents,
+    )
+    // A bare path is rejected rather than guessed at: a host serving two catalogs has no way to
+    // say which one an unkeyed record belongs to.
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-components", "/srv/components.json"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-components", "m3-catalog="))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-components", "not/a/catalog=/srv/one.json"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-components", "m3-catalog=/one,m3-catalog=/two"))
+    }
+  }
+
+  @Test
   fun `UI builder catalog allowlist rejects duplicates and unsafe ids`() {
     assertFailsWith<IllegalArgumentException> {
       options(listOf("--ui-builder-catalogs", "remote-m3,remote-m3"))

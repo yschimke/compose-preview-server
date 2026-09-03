@@ -1158,6 +1158,11 @@ public class ServeCommandOptions(
                           Explicit catalog allowlist for catalog-scoped builder instances at
                           /ui-builder/<system>/. Defaults to m3-catalog. Serving a catalog does not
                           enable its builder automatically.
+        --ui-builder-components <catalog>=<components.json>[,<catalog>=<file>…]
+                          Discovered component records the Compose export generates from — the
+                          components.json a preview bundle carries, one per catalog. A catalog with
+                          no record refuses a Compose export naming it; a host missing a record for
+                          any enabled catalog reports composeCode = false and offers no export.
         --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]
                           Retained immutable native renderer bundles. Each directory must contain
                           runtime-manifest.json. Runtime ids are exact pins; there is no latest

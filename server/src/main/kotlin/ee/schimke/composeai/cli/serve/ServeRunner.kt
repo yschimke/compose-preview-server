@@ -2302,11 +2302,17 @@ public class ServeRunner(
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
-        // `composeCode` follows whether this host was given any component record, because the
-        // service gates the export on this flag. Advertising it unconditionally would put a
-        // supported export action in the builder's UI that can only ever come back refused —
-        // which is what the packaged image would have done: its entrypoint enables the builder
-        // and passes no `--ui-builder-components`.
+        // `composeCode` requires a **usable record for every enabled catalog**, not merely one
+        // somewhere. The flag is copied verbatim into each catalog's capabilities by
+        // `CurrentM3UiBuilderCatalogExecutor`, so with `m3-catalog,remote-m3` enabled and only
+        // `m3-catalog` configured, the remote catalog would advertise an export that always comes
+        // back `NO_COMPONENT_RECORD`. Deriving it per catalog instead would mean a new shape for
+        // that executor's published API, so the conservative reading is taken here: all or none.
+        //
+        // `record()` rather than a key check, so a configured-but-unparseable file is not counted
+        // — and the read warms the cache and prints its reason at startup rather than on the first
+        // export. Unconditional advertising is what the packaged image would have done: its
+        // entrypoint enables the builder and passes no `--ui-builder-components`.
         exportCapabilities =
           ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
               ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
@@ -2314,7 +2320,7 @@ public class ServeRunner(
                 svg = false,
                 png = false,
               ))
-            .copy(composeCode = records.configured),
+            .copy(composeCode = uiBuilderCatalogs.all { records.record(it) != null }),
       )
     val service =
       PersistentUiBuilderService(
