@@ -7886,6 +7886,20 @@ class ServeWebFixtureTest {
         !refreshReportLinkSource.contains(".href = "),
       "the report prefill goes into a form input, not a navigation sink",
     )
+    // …and only while the frame ON SCREEN is the one the controls asked for. The controls run ahead
+    // of the image by a fetch and a decode, so an ungated refresh lets a reporter who submits
+    // inside
+    // that window file a locator and a render link for a frame nobody saw — D4, and the one defect
+    // that makes every issue filed afterwards wrong in a way nobody notices. The decision itself is
+    // `viewer/reportFrame.ts`, with its own tests; what is pinned here is that the gate is applied.
+    assertTrue(
+      viewerSourceFlat()
+        .contains(
+          "if ( !rules.reportFollowsDisplayedFrame( renderUrl(snapshotExt), " +
+            "img.getAttribute(\"data-cp-src\"), ) ) return;"
+        ),
+      "the report is only recomposed while the landed frame is the requested one",
+    )
     // The URL is copied by a plainly-named button rather than by clicking a field whose only clue
     // was a `title`. The field itself stays in the DOM (refreshLinks writes it, both copy buttons
     // read it) but off-screen — nobody reads a 200-character absolute /render URL.

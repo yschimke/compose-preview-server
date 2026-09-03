@@ -967,6 +967,10 @@ function refreshSnapshot(isRetry?: boolean) {
                 setSnapshotLoading(false);
                 clearModeError();
                 syncSpecBaseline();
+                // The frame is on the stage NOW, so this is the moment the report may describe it.
+                // Every other caller runs from a control change, when the controls have moved ahead
+                // of the image and the gate above declines.
+                refreshReportLink();
                 snapshotSettled();
             };
             next.onerror = function () {
@@ -1122,6 +1126,19 @@ function refreshReportLink() {
     var body = may<HTMLInputElement>("cp-report-body");
     var field = may<HTMLInputElement>("cp-url-png");
     if (!body || !field || !field.value) return;
+    // Only while the frame ON SCREEN is the one the controls are asking for. The controls and the
+    // copyable links run ahead of the image by a fetch and a decode, so recomposing on every change
+    // would let a reporter who submits inside that window — or after the render failed — file a
+    // locator and a render link for a frame nobody saw. Skipping leaves the field holding the body
+    // that described the previous frame, which is the frame still on the stage; the next landed
+    // frame calls this again. See `viewer/reportFrame.ts`, and D4 in the workflow doc.
+    if (
+        !rules.reportFollowsDisplayedFrame(
+            renderUrl(snapshotExt),
+            img.getAttribute("data-cp-src"),
+        )
+    )
+        return;
     if (!reportBody.attach(body)) return;
     // One pass, one source: the identity the locator states and the pixels the body links are
     // read off the same controls at the same instant, so they cannot describe two frames.
