@@ -630,6 +630,19 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
 .cp-section-unit .cp-section-title .cp-head {
   font-size: var(--md-sys-typescale-title-large-size);
   line-height: var(--md-sys-typescale-title-large-line); }
+/* Below the band's own two-column minimum every unit takes the full width and stacks its cards,
+   as the full-width sections around it already do. The number is the band's arithmetic, not the
+   phone breakpoint: two 300px tracks plus the 22px gap need 622px of content, which is a 678px
+   viewport at the page's 28px body padding — and ~693px once a classic scrollbar takes its 15px.
+   700px clears both. Without this a viewport in that range leaves the band ONE track while a
+   `data-span="2"` unit still asks for two: grid invents an implicit track and squeezes both of
+   that unit's cards to about half the width `.cp-syslist` would give them. Keep this in step with
+   the 300px track and 22px gap above. */
+@media (max-width: 700px) {
+  .cp-section-band { grid-template-columns: 1fr; }
+  .cp-section-unit[data-span="1"], .cp-section-unit[data-span="2"] { grid-column: 1 / -1; }
+  .cp-section-unit-grid[data-cols="2"] { grid-template-columns: 1fr; }
+}
 .cp-section-count, .cp-catalog-id { color: var(--cp-fg-faint);
   font-size: var(--md-sys-typescale-label-medium-size);
   letter-spacing: var(--md-sys-typescale-label-medium-tracking); }
@@ -3634,11 +3647,6 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   .cp-section, .cp-grid-groups { --cp-card-w: 140px; --cp-card-gap: 12px; }
   .cp-subgroup { margin-bottom: 20px; }
   .cp-syslist, .cp-syslist.cp-grid { grid-template-columns: 1fr; }
-  /* One column wide: a two-card unit can no longer span two of them, so every unit takes the full
-     width and stacks its cards — same as the full-width sections around it. */
-  .cp-section-band { grid-template-columns: 1fr; }
-  .cp-section-unit[data-span="1"], .cp-section-unit[data-span="2"] { grid-column: 1 / -1; }
-  .cp-section-unit-grid[data-cols="2"] { grid-template-columns: 1fr; }
   .cp-card.cp-sys { grid-template-rows: 220px 1fr; }
   .cp-imgwrap img { max-height: 200px; }
   /* …and a clip window shrinks by the same cap, so a cropped card stays the size of the plain
