@@ -7,6 +7,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -211,5 +212,36 @@ class BundleClasspathGapsTest {
     assertEquals(1, logs.size, "nothing was unresolved, so only the mismatch line: $logs")
     assertContains(logs.single(), "2 of 119 classpath coordinate(s) resolved to bytes")
     assertContains(logs.single(), "androidx.compose.remote:remote-player-view:1.0.0-SNAPSHOT")
+  }
+
+  /**
+   * The generic half fires on any unresolved coordinate, related or not. Split out so a caller with
+   * a more specific diagnosis — a Remote Compose family split, say — can sit between attribution
+   * and "something is missing", instead of having its answer swallowed by one unrelated optional
+   * dependency the server could not fetch (Codex review on compose-preview-server#219).
+   */
+  @Test
+  fun `an unattributed gap answers last, not first`() {
+    BundleClasspathGaps.record(
+      destDir = destDir,
+      unresolved = listOf(maven("com.squareup.okhttp3", "okhttp", "5.5.0")),
+      total = 84,
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+    )
+    val reason = "java.lang.NoSuchFieldError: androidx.compose.remote.core.RemoteClock"
+
+    assertNull(
+      BundleClasspathGaps.attributedDiagnosis(reason, descriptor),
+      "an unresolved okhttp explains nothing about a Remote Compose field",
+    )
+    val unattributed = BundleClasspathGaps.unattributedDiagnosis(reason, descriptor)
+    assertNotNull(unattributed, "it is still worth saying once nothing better has been found")
+    assertContains(unattributed, "one of them is likely where the missing type lives")
+    assertEquals(
+      unattributed,
+      BundleClasspathGaps.linkageDiagnosis(reason, descriptor),
+      "the combined entry point keeps its old answer",
+    )
   }
 }

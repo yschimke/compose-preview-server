@@ -252,8 +252,40 @@ public object ServeBundleDaemon {
           "whose Skiko this server ships, or give the server network access to Maven Central."
       )
     }
+    // Resolved before the partition below: which Remote Compose artifacts the sidecar ships decides
+    // whether the bundle's own are safe to promote ahead of it.
+    val backendLaunch =
+      when (backend) {
+        "android" -> androidBundleDaemonLaunch(system, onLog)
+        else -> desktopBundleDaemonLaunch(system, onLog)
+      } ?: return null
+    // `androidx.compose.remote:*` is a family compiled against itself, and the daemon's own IR
+    // replay connector calls into it. Promoting the bundle's copies ahead of the sidecar is right
+    // when the bundle carries the WHOLE family — the sidecar's line is then shadowed entire — and
+    // fatal when it carries only part of it: the rest falls through to the sidecar's pin and the
+    // first replay dies on `NoSuchFieldError: … RemoteClock … SYSTEM`, latching the lane for good
+    // (#187). On an IR bundle the sidecar is authoritative in that state, because it is the
+    // sidecar's replay code that links against the family and a replayed document has no consumer
+    // class of its own; demoting the bundle's partial line keeps its jars reachable (in the child
+    // loader, and on the parent behind the sidecar) while one coherent set answers.
+    //
+    // Gated on `hasIr` deliberately. A bundle with no IR is the opposite case — its previews ARE
+    // consumer bytecode compiled against the versions it records — so the catalog keeps its own
+    // Remote Compose versions there and the split is reported without being rearranged. Scoped to
+    // the groups actually split, too: the base and Wear lines version independently, so a bundle
+    // whose base family is coherent keeps it even when its Wear artifacts are not. See
+    // [RemoteComposePairing].
+    val remoteComposeLine =
+      RemoteComposePairing.Line(
+        bundle = RemoteComposePairing.bundleMembers(resolvedDependencies.map { it.coordinate }),
+        sidecar = RemoteComposePairing.sidecarMembers(backendLaunch.daemonClasspath),
+      )
+    val demotedRemoteComposeGroups =
+      if (hasIr) RemoteComposePairing.skewedGroups(remoteComposeLine) else emptySet()
     val (parentOverlayDependencies, childDependencies) =
-      resolvedDependencies.partition { shouldPrecedeDaemonSidecar(it.coordinate) }
+      resolvedDependencies.partition {
+        overlaysDaemonSidecar(it.coordinate, demotedRemoteComposeGroups)
+      }
     // Android app-resource carriage: a classic `@Preview` that calls `stringResource(R.string.…)`
     // needs the app's own `0x7f` resource table at render time. Extract the bundle's carried
     // `android/` payload and synthesize the Robolectric `test_config.properties` onto the daemon
@@ -274,11 +306,6 @@ public object ServeBundleDaemon {
           }
       else emptyList()
 
-    val backendLaunch =
-      when (backend) {
-        "android" -> androidBundleDaemonLaunch(system, onLog)
-        else -> desktopBundleDaemonLaunch(system, onLog)
-      } ?: return null
     val classpaths =
       bundleDaemonClasspaths(
         classesDir = classesDir,
@@ -303,6 +330,21 @@ public object ServeBundleDaemon {
     SkikoNativePairing.classpathSkew(classpaths.daemonClasspath)?.let {
       onLog("catalog $system: $it")
     }
+    // The same "two artifacts must move together" property for Remote Compose, read off the two
+    // sides rather than the assembled `-cp`: a resolved `.aar` reaches the classpath as
+    // `extracted/<sha256>/classes.jar` and carries neither artifact nor version in its path. A
+    // bundle that records only part of the family leaves the rest at the sidecar's pin, and the
+    // first IR replay dies on `NoSuchFieldError: … RemoteClock … SYSTEM` (#187). Recorded beside
+    // the launch descriptor so the trip can name the seam — see [RemoteComposePairing].
+    RemoteComposePairing.record(
+      destDir = destDir,
+      bundle = remoteComposeLine.bundle,
+      sidecar = remoteComposeLine.sidecar,
+      system = system,
+      onLog = onLog,
+      demoted = demotedRemoteComposeGroups.isNotEmpty(),
+      fileSystem = fileSystem,
+    )
 
     val descriptor =
       DaemonLaunchDescriptor(
@@ -761,6 +803,23 @@ public object ServeBundleDaemon {
     val daemonClasspath: List<String>,
     val userClassPath: String,
   )
+
+  /**
+   * [shouldPrecedeDaemonSidecar] with the one exception the Remote Compose family earns: when an
+   * **IR-carrying** bundle covers only part of a Remote Compose group and the sidecar supplies the
+   * rest at another version ([demotedRemoteComposeGroups], from `hasIr` and
+   * [RemoteComposePairing.skewedGroups]), promoting the bundle's half of that group wins nothing
+   * and links the two halves together. Demoted, the group answers whole from the sidecar — the side
+   * whose IR replay code calls into it. A bundle with no IR never demotes: its previews are
+   * consumer bytecode compiled against the versions it records, which is exactly what
+   * [shouldPrecedeDaemonSidecar] protects. See [RemoteComposePairing].
+   */
+  internal fun overlaysDaemonSidecar(
+    coordinate: BundleReader.ClasspathEntry.Maven,
+    demotedRemoteComposeGroups: Set<String>,
+  ): Boolean =
+    shouldPrecedeDaemonSidecar(coordinate) &&
+      !RemoteComposePairing.isDemoted(coordinate, demotedRemoteComposeGroups)
 
   /**
    * Dependencies whose packages [ee.schimke.composeai.daemon.UserClassLoaderHolder] deliberately
