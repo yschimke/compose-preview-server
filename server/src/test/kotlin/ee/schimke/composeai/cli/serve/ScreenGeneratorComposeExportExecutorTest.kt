@@ -112,6 +112,18 @@ class ScreenGeneratorComposeExportExecutorTest {
   }
 
   @Test
+  fun `a record on an unreadable schema refuses per export, naming the version`() {
+    // The advertised capability is a configuration fact and cannot know what is on disk now, so
+    // the version question is asked here — where a repaired or replaced file is seen on the very
+    // next request rather than never.
+    val artifact =
+      export(components = { ScreenGeneratorScreenFixture.components().copy(schemaVersion = 99) })
+    val diagnostic = artifact.diagnostics.single()
+    assertEquals(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD, diagnostic.code)
+    assertTrue(diagnostic.message.contains("is schema 99"), diagnostic.message)
+  }
+
+  @Test
   fun `a node the catalog cannot place is a separate code from one it cannot express`() {
     val document = ScreenGeneratorScreenFixture.document()
     val artifact =

@@ -2302,21 +2302,25 @@ public class ServeRunner(
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
-        // `composeCode` requires a **usable record for every enabled catalog**, not merely one
-        // somewhere. The flag is copied verbatim into each catalog's capabilities by
-        // `CurrentM3UiBuilderCatalogExecutor`, so with `m3-catalog,remote-m3` enabled and only
-        // `m3-catalog` configured, the remote catalog would advertise an export that always comes
-        // back `NO_COMPONENT_RECORD`. Deriving it per catalog instead would mean a new shape for
-        // that executor's published API, so the conservative reading is taken here: all or none.
+        // `composeCode` answers a **configuration** question — is this host set up to export
+        // Compose? — and deliberately not a filesystem one.
         //
-        // `record()` and then `generatesFrom`, because parsing is not the question the capability
-        // asks. The source ignores unknown keys so a newer record still deserializes, and the
-        // generator refuses a schema it does not understand — so a version check has to happen
-        // here too, or an upgraded host advertises an export that every call refuses. The read
-        // also warms the cache and prints its reason at startup rather than on the first export.
+        // It has to, because this value is computed once and baked into every catalog by
+        // `CurrentM3UiBuilderCatalogExecutor`, and `PersistentUiBuilderService` then gates each
+        // request on it. Anything read from disk here is a cache of a mutable fact with no
+        // invalidation: a record repaired after startup could never lift the flag, which would
+        // defeat `ComponentRecordSource`'s hot reload outright — the source would re-read a file
+        // the service has already refused to ask it about.
         //
-        // Unconditional advertising is what the packaged image would have done: its entrypoint
-        // enables the builder and passes no `--ui-builder-components`.
+        // So the question is whether every enabled catalog has a record **configured**, which is
+        // fixed for the process. The packaged image passes none, so it advertises nothing and the
+        // builder offers no action that can only fail — the point of gating this at all.
+        //
+        // The cost, stated: a configured record that is missing, malformed, or on a schema this
+        // generator will not read is still advertised, and every export of it refuses. That is the
+        // better failure. The refusal names the catalog, the file and the reason, an operator who
+        // repairs the file is served on the next request, and nothing needs a restart. The
+        // alternative trades a precise per-request diagnostic for a silent permanent one.
         exportCapabilities =
           ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
               ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
@@ -2324,14 +2328,7 @@ public class ServeRunner(
                 svg = false,
                 png = false,
               ))
-            .copy(
-              composeCode =
-                uiBuilderCatalogs.all { catalog ->
-                  records
-                    .record(catalog)
-                    ?.let(ScreenGeneratorComposeExportExecutor::generatesFrom) == true
-                }
-            ),
+            .copy(composeCode = uiBuilderCatalogs.all { it in uiBuilderComponents.keys }),
       )
     val service =
       PersistentUiBuilderService(

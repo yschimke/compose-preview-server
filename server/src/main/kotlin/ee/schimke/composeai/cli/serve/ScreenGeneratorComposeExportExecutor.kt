@@ -76,6 +76,21 @@ internal class ScreenGeneratorComposeExportExecutor(
               "it as `--ui-builder-components $catalogSystemId=<components.json>`"
           ),
         )
+    if (!generatesFrom(record)) {
+      // The capability advertised for this catalog is a configuration fact and cannot know today's
+      // file, so the version check lives here, where it can name the version. `ScreenGenerator`
+      // would refuse this too, but as an unproven call site — which reads like a stale document
+      // rather than like a record this build will not read.
+      return refused(
+        NO_COMPONENT_RECORD,
+        listOf(
+          "the component record for catalog `$catalogSystemId` is schema " +
+            "${record.schemaVersion}, and this build generates from " +
+            "$COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to $COMPONENT_RECORD_SCHEMA_VERSION; " +
+            "re-run discovery against a matching plugin version"
+        ),
+      )
+    }
     val projection = ScreenDocumentProjection.project(request.document)
     val document =
       when (projection) {
@@ -170,7 +185,11 @@ internal class ScreenGeneratorComposeExportExecutor(
       record.schemaVersion in
         COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA..COMPONENT_RECORD_SCHEMA_VERSION
 
-    /** The host was never given a component record for this catalog. Not the document's fault. */
+    /**
+     * This host has no **usable** record for the design's pinned catalog — none configured, none
+     * readable, or one on a schema this build will not generate from. Not the document's fault in
+     * any of those cases, which is why they share a code.
+     */
     const val NO_COMPONENT_RECORD = "NO_COMPONENT_RECORD"
 
     /** The document holds something no Kotlin value expresses — state, an event, an asset. */
