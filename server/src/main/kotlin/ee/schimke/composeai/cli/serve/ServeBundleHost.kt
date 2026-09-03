@@ -665,8 +665,9 @@ class ServeBundleHost(
    * `previewParams` does not carry the field at all, so those previews fall through to the
    * interface default. See [ServeHost.bakedRcPlayer].
    */
-  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind =
-    if (previewParamsById[previewId]?.wrapperClassName == REMOTE_VIEW_PREVIEW_WRAPPER)
+  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
+    if (!hasRemoteComposeDoc(previewId)) null
+    else if (previewParamsById[previewId]?.wrapperClassName == REMOTE_VIEW_PREVIEW_WRAPPER)
       RemoteComposePlayerKind.VIEW
     else RemoteComposePlayerKind.EMBEDDED
 

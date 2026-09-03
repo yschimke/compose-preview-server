@@ -1282,6 +1282,14 @@ class ServeHttpRoutingTest {
     }
     // …and the page opens on the embedded player rather than demoting to the JS canvas.
     assertTrue(body.contains("data-rc-default=\"cmp-android\""), "embedded is the default lane")
+    // The wire between the two halves of this change: the page reports which player the BAKED
+    // artifact carries, and the viewer drops `?rcPlayer=` for exactly that lane rather than
+    // assuming which one it is. Without this attribute the viewer names every lane, which is the
+    // stamped-parameter behaviour this PR exists to remove.
+    assertTrue(
+      body.contains("data-rc-baked-player=\"cmp-android\""),
+      "the bare render names itself as cmp-android",
+    )
     // A player nothing staged, and which no renderer here can produce, stays honestly unavailable.
     assertTrue(body.contains("<option value=\"rc:java\" disabled>"), "unstaged java stays greyed")
   }

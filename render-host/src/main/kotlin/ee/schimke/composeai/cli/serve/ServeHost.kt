@@ -174,15 +174,22 @@ interface ServeHost : AutoCloseable {
    * `@PreviewWrapper(RemoteViewPreviewWrapper::class)`, and whether it did is a fact about the
    * session's manifest, not about the id.
    *
-   * The default answers EMBEDDED, which is what a session with no manifest to consult can honestly
-   * say: every capture path in this project reaches the embedded player unless a wrapper is pinned,
-   * and [RcPlayerBackend.JAVA]'s `rcCompareLane = null` is already built on the same fact.
-   * [ServeBundleHost] overrides it, because a bundle's `previews.json` records the pin and can
-   * therefore name [RemoteComposePlayerKind.VIEW] for the previews that carry it. A published
-   * catalog carries no such manifest, so its previews take the default — the known gap
+   * **Null for a preview with no Remote Compose document at all** — an ordinary Compose preview's
+   * baked PNG is not any player's output, so no `rcPlayer` request is ever a no-op against it and
+   * every one of them stays a genuine (and refusable) override. That is the difference between "we
+   * know which player drew this" and "there was no player", and collapsing the two would answer
+   * `?rcPlayer=cmp-android` on a plain preview with an unrelated snapshot under a confident 200.
+   *
+   * Otherwise the default answers EMBEDDED, which is what a session with no manifest to consult can
+   * honestly say: every capture path in this project reaches the embedded player unless a wrapper
+   * is pinned, and [RcPlayerBackend.JAVA]'s `rcCompareLane = null` is already built on the same
+   * fact. [ServeBundleHost] overrides it, because a bundle's `previews.json` records the pin and
+   * can therefore name [RemoteComposePlayerKind.VIEW] for the previews that carry it. A published
+   * catalog carries no such manifest, so its RC previews take the default — the known gap
    * [ServeRcCompare.LANES]' `baked` row documents.
    */
-  fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED
+  fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
+    if (hasRemoteComposeDoc(previewId)) RemoteComposePlayerKind.EMBEDDED else null
 
   /** Human label for the tenant (module Gradle path, `module@rev`, or a bundle name). */
   val label: String

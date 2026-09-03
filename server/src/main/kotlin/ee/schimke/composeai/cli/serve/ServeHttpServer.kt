@@ -8748,6 +8748,15 @@ class ServeHttpServer(
                 add(RcPlayerBackend.CMP_WASM.wire)
               }
             },
+          // Which of those lanes a *bare* `/render` URL already is, so the viewer can stop naming
+          // it. Empty when the session cannot say — the viewer then keeps naming every lane, which
+          // is what it did before any of this.
+          bakedRcPlayer =
+            renderHost
+              .bakedRcPlayer(preview.id)
+              ?.let { kind -> RcPlayerBackend.entries.firstOrNull { it.playerKind == kind } }
+              ?.wire
+              .orEmpty(),
           wasmSrc = wasmSrc,
           wasmSameOrigin = wasmSameOrigin,
           basePath = basePath,

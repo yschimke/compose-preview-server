@@ -193,6 +193,11 @@ class ServeBundleHostTest {
   @Test
   fun `the baked player is read from a preview's pinned wrapper`() {
     val dir = bundle("com.example.Card" to byteArrayOf(1), "com.example.Pinned" to byteArrayOf(2))
+    // Both are Remote Compose previews — a captured `ir/<id>.rc` is what makes "which player drew
+    // the baked PNG" a question with an answer at all.
+    File(dir, "ir").mkdirs()
+    File(dir, "ir/com.example.Card.rc").writeBytes(byteArrayOf(9))
+    File(dir, "ir/com.example.Pinned.rc").writeBytes(byteArrayOf(9))
     File(dir, "previews.json")
       .writeText(
         """
@@ -213,8 +218,10 @@ class ServeBundleHostTest {
     val host = ServeBundleHost(dir, label = "compose-m3")
     assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
     assertEquals(RemoteComposePlayerKind.VIEW, host.bakedRcPlayer("com.example.Pinned"))
-    // An id the manifest says nothing about takes the honest default rather than throwing.
-    assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Absent"))
+    // An id with no captured document had no player draw it, which is a different answer from
+    // "the embedded one did" — every `rcPlayer` request on it stays a genuine, refusable override
+    // rather than being cleared against an unrelated snapshot.
+    assertEquals(null, host.bakedRcPlayer("com.example.Absent"))
   }
 
   @Test

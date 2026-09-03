@@ -146,7 +146,7 @@ class ServePerPreviewLiveHost(
   override fun bakedTheme(previewId: String): UiMode? = baked.bakedTheme(previewId)
 
   /** Delegated to the baked surface for the same reason [bakedTheme] is. */
-  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind =
+  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
     baked.bakedRcPlayer(previewId)
 
   /**

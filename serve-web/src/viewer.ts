@@ -664,10 +664,19 @@ const specChip = may<HTMLButtonElement>("cp-spec-chip");
 var rcDefaultBackend = laneSelect
     ? laneSelect.getAttribute("data-rc-default") || ""
     : "";
+// The player a BARE `/render` URL already produces, as the server reports it
+// (`ServeHost.bakedRcPlayer`). Empty when the session cannot name one — a non-Remote-Compose
+// preview, or a server that predates the attribute — and everything then names itself, as before.
+var rcBakedPlayer = laneSelect
+    ? laneSelect.getAttribute("data-rc-baked-player") || ""
+    : "";
 var rcPlayerBackend = rcDefaultBackend;
-// An absent `rcPlayer` means Java to the server. If the page presents another server-side backend
-// as its default, that backend must ride the very first snapshot request just like a user pick.
-var rcPlayerPicked = rules.backendRequiresRenderParam(rcDefaultBackend);
+// Every server-side backend must ride the very first snapshot request like a user pick — except
+// the one the bare URL already is, which would only be a parameter that changes nothing.
+var rcPlayerPicked = rules.backendRequiresRenderParam(
+    rcDefaultBackend,
+    rcBakedPlayer,
+);
 // Reconcile the picker (the combo's value AND the chip's label) with the active lane. Hoisted
 // (the real impl is assigned in the picker block below) so the common mode-transition path
 // (enterMode) can call it whenever the viewer leaves a lane through ANY control — not only a
@@ -830,7 +839,10 @@ function explodeParamOn(raw: string | null) {
 // a player that is no longer drawing anything.
 function dropRcPlayerPick() {
     if (!rcPlayerPicked && rcPlayerBackend === rcDefaultBackend) return;
-    rcPlayerPicked = rules.backendRequiresRenderParam(rcDefaultBackend);
+    rcPlayerPicked = rules.backendRequiresRenderParam(
+        rcDefaultBackend,
+        rcBakedPlayer,
+    );
     rcPlayerBackend = rcDefaultBackend;
     if (typeof syncLaneSelect === "function") syncLaneSelect();
 }
@@ -3452,11 +3464,14 @@ function enterMode(m: string) {
         // Browser RC lanes deliberately clear the server-side pick while they paint. Returning to
         // the static lane must restore a non-Java default before query() renders it; otherwise the
         // chip says CMP Android/JVM while the absent rcPlayer parameter silently selects Java.
-        var restoredPlayer = rules.restoreStaticPlayer({
-            defaultBackend: rcDefaultBackend,
-            pickedBackend: rcPlayerBackend,
-            picked: !!rcPlayerPicked,
-        });
+        var restoredPlayer = rules.restoreStaticPlayer(
+            {
+                defaultBackend: rcDefaultBackend,
+                pickedBackend: rcPlayerBackend,
+                picked: !!rcPlayerPicked,
+            },
+            rcBakedPlayer,
+        );
         rcPlayerBackend = restoredPlayer.pickedBackend;
         rcPlayerPicked = restoredPlayer.picked;
         closeStream();
@@ -4902,7 +4917,8 @@ function hydrateFromUrl(popped: boolean) {
             });
         }
         rcPlayerPicked =
-            playerOffered || rules.backendRequiresRenderParam(rcDefaultBackend);
+            playerOffered ||
+            rules.backendRequiresRenderParam(rcDefaultBackend, rcBakedPlayer);
         rcPlayerBackend =
             (playerOffered ? wantedPlayer : rcDefaultBackend) || "";
     }

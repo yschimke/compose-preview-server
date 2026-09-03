@@ -28,7 +28,7 @@ internal object CatalogLiveRouting {
     overrides: PreviewOverrides,
     alias: Map<String, String>,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
-    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
+    bakedRcPlayer: RemoteComposePlayerKind? = null,
   ): String? {
     // No daemon twin (an Android-only variant) ⇒ always baked; it has no live lane.
     val daemonId = alias[previewId] ?: return null
@@ -49,7 +49,7 @@ internal object CatalogLiveRouting {
     alias: Map<String, String>,
     liveOnly: Set<String>,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
-    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
+    bakedRcPlayer: RemoteComposePlayerKind? = null,
   ): String? =
     if (previewId in liveOnly) alias[previewId]
     else daemonIdForOverrideRender(previewId, overrides, alias, bakedTheme, bakedRcPlayer)
@@ -69,7 +69,7 @@ internal object CatalogLiveRouting {
     previewId: String,
     o: PreviewOverrides,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
-    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
+    bakedRcPlayer: RemoteComposePlayerKind? = null,
   ): Boolean = withoutBakedNoOps(previewId, o, bakedTheme, bakedRcPlayer) != PreviewOverrides()
 
   /**
@@ -95,7 +95,7 @@ internal object CatalogLiveRouting {
     previewId: String,
     o: PreviewOverrides,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
-    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
+    bakedRcPlayer: RemoteComposePlayerKind? = null,
   ): List<String> {
     // Name from the no-op-free copy, not the raw request: an override that merely restates the
     // baked pixels was honoured, so naming it would refuse a request the snapshot answers truly.
@@ -189,7 +189,7 @@ internal object CatalogLiveRouting {
     previewId: String,
     o: PreviewOverrides,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
-    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
+    bakedRcPlayer: RemoteComposePlayerKind? = null,
   ): List<String> {
     val dropped = withoutBakedNoOps(previewId, o, bakedTheme, bakedRcPlayer)
     val names = mutableListOf<String>()
@@ -218,19 +218,22 @@ internal object CatalogLiveRouting {
    *   re-render.
    * - an `rcPlayer` naming [bakedRcPlayer] — the player the capture actually went through, which
    *   the session resolves ([ServeHost.bakedRcPlayer]) and which is
-   *   [RemoteComposePlayerKind.EMBEDDED] for every preview that does not pin the view-backed lane.
-   *   The baked PNG *is* the answer to "draw this with that player", and reporting it dropped
-   *   refused a request the snapshot satisfies exactly. That refusal is why a bare browse and
-   *   `?rcPlayer=cmp-android` could not be made to agree, and so why the viewer had to keep
-   *   stamping the parameter onto every default link. Any OTHER player is a genuine re-render and
-   *   still counts as dropped — including `cmp-android` on a preview that baked through the view
-   *   player, which is the case this reads the host for rather than assuming away.
+   *   [RemoteComposePlayerKind.EMBEDDED] for every Remote Compose preview that does not pin the
+   *   view-backed lane. A **null** names nothing, exactly as a null [bakedTheme] does, so on a
+   *   preview with no captured document — or for a caller with no session in hand — every
+   *   `rcPlayer` survives and routes to a real render. The baked PNG *is* the answer to "draw this
+   *   with that player", and reporting it dropped refused a request the snapshot satisfies exactly.
+   *   That refusal is why a bare browse and `?rcPlayer=cmp-android` could not be made to agree, and
+   *   so why the viewer had to keep stamping the parameter onto every default link. Any OTHER
+   *   player is a genuine re-render and still counts as dropped — including `cmp-android` on a
+   *   preview that baked through the view player, which is the case this reads the host for rather
+   *   than assuming away.
    */
   private fun withoutBakedNoOps(
     previewId: String,
     o: PreviewOverrides,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
-    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
+    bakedRcPlayer: RemoteComposePlayerKind? = null,
   ): PreviewOverrides =
     o.copy(
       uiMode = o.uiMode?.takeIf { it != bakedTheme },

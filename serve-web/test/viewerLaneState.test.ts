@@ -20,22 +20,53 @@ import {
 } from "../src/viewer/laneState.js";
 
 describe("backendRequiresRenderParam", () => {
-    it("names only the lane a bare render is not", () => {
-        assert.equal(backendRequiresRenderParam("cmp-jvm"), true);
-        assert.equal(backendRequiresRenderParam("js"), false);
+    // What the server reports for an ordinary Remote Compose preview: the baked artifact is the
+    // embedded player's capture, so a bare `/render` URL already is cmp-android.
+    const BAKED_EMBEDDED = "cmp-android";
+
+    it("names every lane a bare render is not", () => {
+        assert.equal(
+            backendRequiresRenderParam("cmp-jvm", BAKED_EMBEDDED),
+            true,
+        );
+        assert.equal(backendRequiresRenderParam("java", BAKED_EMBEDDED), true);
     });
 
-    it("does NOT name cmp-android, which is what a bare render already is", () => {
-        // The regression this exists for. While this answered `true`, the viewer seeded its pick
-        // state from it and stamped `?rcPlayer=cmp-android` onto every first click from a catalog —
-        // a URL that reads as a deliberate player choice and is a no-op.
-        assert.equal(backendRequiresRenderParam("cmp-android"), false);
+    it("does NOT name the lane the bare render already is", () => {
+        // The regression this exists for. While this answered `true` for cmp-android, the viewer
+        // seeded its pick state from it and stamped `?rcPlayer=cmp-android` onto every first click
+        // from a catalog — a URL that reads as a deliberate player choice and is a no-op.
+        assert.equal(
+            backendRequiresRenderParam("cmp-android", BAKED_EMBEDDED),
+            false,
+        );
     });
 
-    it("does not name java either, because asking for it is a deliberate change", () => {
-        // `serverPlayerParam` still emits it on a real pick; what this answers is only whether a
-        // lane must name itself while nobody has picked anything.
-        assert.equal(backendRequiresRenderParam("java"), false);
+    it("follows the server's answer rather than assuming cmp-android", () => {
+        // A preview pinning `RemoteViewPreviewWrapper` bakes through the view player. There
+        // cmp-android is a genuine re-render and must name itself, while `java` is the silent one —
+        // the exact inversion that hardcoding the default would have got backwards.
+        assert.equal(backendRequiresRenderParam("cmp-android", "java"), true);
+        assert.equal(backendRequiresRenderParam("java", "java"), false);
+    });
+
+    it("names everything when the server cannot say which player baked", () => {
+        // A non-Remote-Compose preview, or a server predating `data-rc-baked-player`. Naming a lane
+        // that turns out to be redundant costs a cache entry; NOT naming one that turns out to be a
+        // real re-render serves the wrong pixels, so the unknown case names.
+        for (const absent of ["", null, undefined]) {
+            assert.equal(
+                backendRequiresRenderParam("cmp-android", absent),
+                true,
+            );
+            assert.equal(backendRequiresRenderParam("java", absent), true);
+            assert.equal(backendRequiresRenderParam("cmp-jvm", absent), true);
+        }
+    });
+
+    it("never names a browser lane, which does not use /render at all", () => {
+        assert.equal(backendRequiresRenderParam("js", BAKED_EMBEDDED), false);
+        assert.equal(backendRequiresRenderParam("js", ""), false);
     });
 });
 
@@ -48,31 +79,55 @@ describe("server-side player persistence", () => {
         assert.equal(serverPlayerParam("js", true), null);
     });
 
-    it("restores a non-Java default after leaving a browser player", () => {
+    it("restores a default that needs no parameter after a browser player", () => {
         assert.deepEqual(
-            restoreStaticPlayer({
-                defaultBackend: "cmp-android",
-                pickedBackend: "cmp-android",
-                picked: false,
-            }),
+            restoreStaticPlayer(
+                {
+                    defaultBackend: "cmp-android",
+                    pickedBackend: "cmp-android",
+                    picked: false,
+                },
+                "cmp-android",
+            ),
             {
                 defaultBackend: "cmp-android",
                 pickedBackend: "cmp-android",
                 // Returning to the static lane on the default needs no parameter to describe it:
-                // the bare render is already this player.
+                // the bare render is already this player, and the server said so.
                 picked: false,
             },
         );
         assert.deepEqual(
-            restoreStaticPlayer({
-                defaultBackend: "java",
-                pickedBackend: "java",
-                picked: false,
-            }),
+            restoreStaticPlayer(
+                {
+                    defaultBackend: "java",
+                    pickedBackend: "java",
+                    picked: false,
+                },
+                "java",
+            ),
             {
                 defaultBackend: "java",
                 pickedBackend: "java",
                 picked: false,
+            },
+        );
+    });
+
+    it("keeps naming the restored default when the baked player is unreported", () => {
+        // Without `data-rc-baked-player` nothing establishes that a bare URL is this lane, so the
+        // restore names it rather than betting on it. The old code bet, and on `cmp-android` it
+        // happened to be right — which is why the bet went unnoticed until a pinned preview.
+        assert.deepEqual(
+            restoreStaticPlayer({
+                defaultBackend: "cmp-android",
+                pickedBackend: "cmp-android",
+                picked: false,
+            }),
+            {
+                defaultBackend: "cmp-android",
+                pickedBackend: "cmp-android",
+                picked: true,
             },
         );
     });
