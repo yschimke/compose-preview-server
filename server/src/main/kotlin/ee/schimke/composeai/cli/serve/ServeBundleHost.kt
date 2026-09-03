@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.bundle.BundleVerifier
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import ee.schimke.composeai.daemon.protocol.UiMode
@@ -655,6 +656,20 @@ class ServeBundleHost(
    */
   override fun bakedTheme(previewId: String): UiMode? =
     ServeBakedTheme.resolve(previewId, variantMeta[previewId]?.theme) { it in publishedIds }
+
+  /**
+   * This host is also the one that can answer *which Remote Compose player* drew those pixels, for
+   * the same reason: only the session holding the manifest knows whether a preview pinned the
+   * view-backed lane with `@PreviewWrapper(RemoteViewPreviewWrapper::class)`. A bundle's root
+   * `previews.json` records that pin on `params.wrapperClassName`; a published catalog's inline
+   * `previewParams` does not carry the field at all, so those previews fall through to the
+   * interface default. See [ServeHost.bakedRcPlayer].
+   */
+  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
+    if (!hasRemoteComposeDoc(previewId)) null
+    else if (previewParamsById[previewId]?.wrapperClassName == REMOTE_VIEW_PREVIEW_WRAPPER)
+      RemoteComposePlayerKind.VIEW
+    else RemoteComposePlayerKind.EMBEDDED
 
   /**
    * The catalog's declared hero ([declaredHero]) resolved to one of this host's actual preview ids,
@@ -1666,6 +1681,16 @@ class ServeBundleHost(
     private const val IR_SUBDIR = "ir"
     private const val RC_SUFFIX = ".rc"
     private const val PREVIEWS_JSON = "previews.json"
+
+    /**
+     * FQN of the published `PreviewWrapperProvider` that pins a preview to the view-backed Remote
+     * Compose player. A preview naming it on `params.wrapperClassName` bakes through
+     * [RemoteComposePlayerKind.VIEW] rather than the `RemoteOverridablePreview` default — see
+     * [ServeHost.bakedRcPlayer]. Matched by name because the wrapper lives in the app's own
+     * classpath, not this server's.
+     */
+    private const val REMOTE_VIEW_PREVIEW_WRAPPER =
+      "ee.schimke.composeai.daemon.RemoteViewPreviewWrapper"
     private val OVERRIDES_JSON = Json { ignoreUnknownKeys = true }
 
     /** True when [dir] contains at least one baked preview or structured render failure. */

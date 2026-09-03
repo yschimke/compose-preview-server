@@ -58,11 +58,40 @@ export interface LanePick {
     picked: boolean;
 }
 
-/** Whether a finished server-side RC lane must name its backend on `/render`. */
-export function backendRequiresRenderParam(backend: string): boolean {
-    // The server's absent-player default is the Java view player. Browser players do not use the
-    // snapshot route, while both embedded players need an explicit wire id.
-    return backend === "cmp-android" || backend === "cmp-jvm";
+/**
+ * Whether a server-side RC lane must name its backend on `/render`.
+ *
+ * Every lane names itself EXCEPT the one a bare URL already produces: `bakedPlayer` is the player
+ * the preview's baked artifact was drawn with, reported by the server as `data-rc-baked-player`
+ * (`ServeHost.bakedRcPlayer`). Naming that lane is a parameter that changes nothing — it splits one
+ * rendering across two cache entries and reads as a deliberate choice the visitor never made.
+ *
+ * This used to answer `true` for `cmp-android` unconditionally, on the reasoning that "the server's
+ * absent-player default is the Java view player". That has not been true for some time, and
+ * believing it cost a URL: the viewer seeds its pick state from this answer, so a first click from
+ * a catalog produced `…?rcPlayer=cmp-android`.
+ *
+ * Fixing it by hardcoding `cmp-android` instead would only have moved the assumption. A preview
+ * pinning `RemoteViewPreviewWrapper` bakes through the VIEW player, so on it `cmp-android` is a
+ * genuine re-render that MUST keep naming itself while `java` becomes the silent one — and the
+ * server agrees, because it decides from the same fact. An absent or unrecognised `bakedPlayer`
+ * (a non–Remote Compose preview, an older server) names everything, which is the conservative
+ * answer this started from.
+ */
+export function backendRequiresRenderParam(
+    backend: string,
+    bakedPlayer?: string | null,
+): boolean {
+    // A browser lane paints from the `.rc` bytes and never calls `/render`, so it names nothing
+    // whatever baked. Only the three server-side lanes are candidates at all.
+    if (
+        backend !== "java" &&
+        backend !== "cmp-android" &&
+        backend !== "cmp-jvm"
+    )
+        return false;
+    if (!bakedPlayer) return true;
+    return backend !== bakedPlayer;
 }
 
 /** The server-side player parameter represented by a pick, or nothing for a browser lane. */
@@ -79,24 +108,27 @@ export function serverPlayerParam(
 }
 
 /** Restore the server-rendered default when returning from a browser-only player lane. */
-export function restoreStaticPlayer(pick: LanePick): LanePick {
+export function restoreStaticPlayer(
+    pick: LanePick,
+    bakedPlayer?: string | null,
+): LanePick {
     if (pick.picked) return pick;
     const retained = serverPlayerParam(pick.pickedBackend, true);
     if (retained) {
         return {
             defaultBackend: pick.defaultBackend,
             pickedBackend: retained,
-            // Java only needs an explicit parameter when it overrides a non-Java default. Embedded
-            // defaults always need one because the server's absent-player fallback is Java.
+            // A retained player needs an explicit parameter when it overrides the page default, or
+            // when that default is itself a lane the bare URL does not already produce.
             picked:
                 retained !== pick.defaultBackend ||
-                backendRequiresRenderParam(pick.defaultBackend),
+                backendRequiresRenderParam(pick.defaultBackend, bakedPlayer),
         };
     }
     return {
         defaultBackend: pick.defaultBackend,
         pickedBackend: pick.defaultBackend,
-        picked: backendRequiresRenderParam(pick.defaultBackend),
+        picked: backendRequiresRenderParam(pick.defaultBackend, bakedPlayer),
     };
 }
 

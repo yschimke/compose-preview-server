@@ -12570,6 +12570,19 @@ ${scriptTag("known-differences.js")}
      * a Remote Compose preview).
      */
     enabledRcPlayers: List<String> = emptyList(),
+    /**
+     * The [RcPlayerBackend.wire] id of the player this preview's **baked** artifact was drawn with
+     * ([ServeHost.bakedRcPlayer]), or empty when the session cannot name one — a preview with no
+     * captured Remote Compose document, or a host that does not track it.
+     *
+     * Emitted as `data-rc-baked-player` so the viewer can tell which of its chips is the one a
+     * *bare* `/render` URL already produces. That is exactly the lane that must NOT name itself in
+     * the query string: naming it splits one rendering across two cache entries and reads as a
+     * deliberate choice the visitor never made. Every other lane keeps naming itself, including
+     * `cmp-android` on a preview that pinned the view player — which is why this is reported rather
+     * than assumed viewer-side (`backendRequiresRenderParam`).
+     */
+    bakedRcPlayer: String = "",
     wasmSrc: String? = null,
     /**
      * Whether the Wasm iframe may run with `allow-same-origin` (real origin) rather than the
@@ -13614,6 +13627,7 @@ ${scriptTag("known-differences.js")}
               "aria-label=\"Switch renderer\" " +
               "title=\"Draw this preview with a different renderer\" " +
               "data-default=\"$defaultLane\" data-rc-default=\"$defaultRcBackend\"" +
+              (if (bakedRcPlayer.isNotEmpty()) " data-rc-baked-player=\"$bakedRcPlayer\"" else "") +
               // Catalog mode drops the renderer chip with the rest of the Live control, and that
               // chip is what made this a *command* menu: "switch renderer…" at rest is only honest
               // while something beside it names the renderer in use. Without it the menu is the

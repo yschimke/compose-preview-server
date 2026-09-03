@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import ee.schimke.composeai.daemon.protocol.UiMode
@@ -254,6 +255,10 @@ class ServeCatalogLiveHost(
   // routing below asks it rather than the id, so an untagged half of a folded light/dark pair
   // replays instead of waking a daemon. See [ServeBakedTheme].
   override fun bakedTheme(previewId: String): UiMode? = baked.bakedTheme(previewId)
+
+  /** Delegated to the baked surface for the same reason [bakedTheme] is. */
+  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
+    baked.bakedRcPlayer(previewId)
 
   // ── Non-blocking cold start ────────────────────────────────────────────────────────────────────
   // The no-override SVG lane prefers the daemon's per-variant vector over the baked per-slug one
@@ -1826,7 +1831,14 @@ class ServeCatalogLiveHost(
     overrides: PreviewOverrides,
     layers: Set<String>?,
   ): AnnotationsOutcome =
-    if (CatalogLiveRouting.overridesAffectRender(previewId, overrides, bakedTheme(previewId)))
+    if (
+      CatalogLiveRouting.overridesAffectRender(
+        previewId,
+        overrides,
+        bakedTheme(previewId),
+        bakedRcPlayer(previewId),
+      )
+    )
       AnnotationsOutcome.NotFound
     else baked.renderAnnotations(previewId, overrides, layers)
 
@@ -1842,6 +1854,7 @@ class ServeCatalogLiveHost(
       alias,
       liveOnlyPreviewIds,
       bakedTheme(previewId),
+      bakedRcPlayer(previewId),
     )
 
   /** Live streaming is available only for aliased ids; others have no stream (snapshot only). */

@@ -156,10 +156,12 @@ object ServeRcCompare {
         // cares about.
         // That player is now the embedded `RcPlayer`: `RemoteOverridablePreview` defaults to
         // `RemoteComposePlayerKind.EMBEDDED`, so a capture goes through it unless the preview pins
-        // the view-backed lane with `RemoteViewPreviewWrapper`. Neither the bundle nor
-        // `rc-compare-summary.json` records which renderer produced a row, so a catalog whose
-        // previews mix the two is mislabelled here rather than detected — carry provenance per row
-        // before scoring such a catalog.
+        // the view-backed lane with `RemoteViewPreviewWrapper`. [ServeHost.bakedRcPlayer] is where
+        // that question is now asked, and a bundle answers it from its `previews.json` pin — but
+        // `rc-compare-summary.json` still records no per-row renderer, and a published catalog's
+        // inline `previewParams` does not carry the wrapper either. So a *catalog* whose previews
+        // mix the two is still mislabelled in this column rather than detected: carry the player
+        // per row into the published catalog before scoring such a catalog.
         label = "AndroidX Embedded · baked",
         short = "baked",
         renderDir = "rc-baked",
