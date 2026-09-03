@@ -14011,6 +14011,16 @@ ${scriptTag("known-differences.js")}
       !themeFixed &&
         ((!wearAlwaysDark && (overridesLive || wasmSrc != null)) ||
           (viewerDeclaredThemes.isNotEmpty() && overridesLive))
+    /**
+     * What that control actually offers — the built-ins it emits (a dark-first Wear catalog offers
+     * Dark alone) plus every declared theme, which is a live option only while overrides are.
+     *
+     * Handed to the pre-paint script so it checks a remembered choice against the same list the
+     * sticky script will, rather than accepting anything that merely names a mode.
+     */
+    val offeredThemes =
+      (if (wearAlwaysDark) listOf("dark") else listOf("light", "dark")) +
+        (if (overridesLive) viewerDeclaredThemes.map { "theme:${it.providerFqn}" } else emptyList())
     val themeSelectorHtml = run {
       val declaredThemes = viewerDeclaredThemes
       val themeDis = if (themeChoiceApplies) "" else " disabled"
@@ -14805,6 +14815,7 @@ ${scriptTag("known-differences.js")}
       siteName = catalogName,
       themeStorageKey = themeStorageKey(sessionId, basePath),
       themeChoiceApplies = themeChoiceApplies,
+      offeredThemes = offeredThemes,
       declaredThemes = if (overridesLive) viewerDeclaredThemes else emptyList(),
       // Only the `js` chip paints in this document's canvas, and it only exists when the preview
       // carries a captured document.
@@ -15171,6 +15182,18 @@ ${scriptTag("known-differences.js")}
      * remembered choice always applies there.
      */
     themeChoiceApplies: Boolean = true,
+    /**
+     * The theme values this page's own control offers, for the pre-paint script to check a
+     * remembered choice against. Empty where the caller does not enumerate them — the script then
+     * trusts a remembered value as far as it can resolve it.
+     *
+     * One key serves a catalog's viewer, its landing grid and its comparison wall, so the memory
+     * routinely arrives naming something the destination does not have: `light` picked on a Wear
+     * catalog's wall and then opened in a Wear viewer, which offers Dark alone. The viewer keeps
+     * its dark render — the sticky script finds no matching option — so the chrome must not paint
+     * light around it.
+     */
+    offeredThemes: List<String> = emptyList(),
     /** The catalog this page belongs to, named in the header bar. See [siteHeader]. */
     siteName: String = "",
     /**
@@ -15340,7 +15363,7 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
-        ${pageThemeScript(themeStorageKey, declaredThemes, themeChoiceApplies)}
+        ${pageThemeScript(themeStorageKey, declaredThemes, themeChoiceApplies, offeredThemes)}
       </head>
       <body${bodyClassAttr}>
         ${scriptTag("serve-chrome.js")}
@@ -15381,6 +15404,7 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
     themeStorageKey: String,
     declaredThemes: List<ServeTheme>,
     themeChoiceApplies: Boolean = true,
+    offeredThemes: List<String> = emptyList(),
   ): String {
     val modeEntries = declaredThemes.mapNotNull { theme ->
       theme.mode?.let { mode ->
@@ -15395,30 +15419,48 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
     val bakedTheme =
       "((decodeURIComponent(location.pathname).split('/').pop()||\"\")" +
         ".match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]"
-    // `r()` resolves ONE candidate to a page mode: a declared theme through the mode table, a
-    // day/night name as itself, anything else — a `theme:<provider>` this catalog no longer
-    // declares, a value from a renamed provider — to "".
+    // `r()` decides what the REMEMBERED value contributes, and it is a fallback rather than a
+    // filter: a value this page can take resolves through the mode table, and one it cannot gives
+    // way to the theme the id bakes.
     //
-    // Resolving before the fallback rather than after is what keeps a stale remembered value from
-    // eating the baked one. `t = stored || baked` with one resolve at the end paints NOTHING for a
-    // theme that has since been removed while the tab stayed open: the stored string is truthy, so
-    // the baked theme is never reached, and the mode table cannot answer for a provider it has no
-    // entry for. The chrome then falls back to the OS over a plainly light preview.
-    val resolveOne = if (modeEntries.isEmpty()) "t" else "m[t]||t"
+    // Deciding here rather than after the whole chain is what keeps an unusable memory from eating
+    // the baked theme. `t = stored || baked` with one resolve at the end paints NOTHING for a
+    // theme removed while the tab stayed open: the stored string is truthy, so the baked theme is
+    // never reached, and the mode table cannot answer for a provider it no longer has an entry
+    // for. The chrome then falls back to the OS over a plainly light preview.
+    //
+    // "Can take" is offer-checked where the caller says what this page offers ([offeredThemes]).
+    // One key serves a catalog's viewer, its landing grid and its comparison wall, so a memory
+    // routinely arrives naming a choice the destination does not have: `light` picked on a Wear
+    // catalog's wall, opened in a Wear viewer that offers Dark alone. It resolves perfectly well
+    // and is still not what the stage is drawing. Where the caller says nothing, resolvability is
+    // the only test available, and an unqualified-but-offered theme deliberately contributes ""
+    // for the OS to answer — the same thing [pageTheme.follow] does with such a theme picked
+    // outright, so the two halves cannot disagree across the first paint.
     val readsMemory = themeStorageKey.isNotBlank() && themeChoiceApplies
+    val offered = offeredThemes.takeIf { readsMemory && it.isNotEmpty() }
+    val offerInit =
+      offered?.let {
+        "o={${it.joinToString(",") { value -> "${WebEscaping.jsString(value)}:1" }}},"
+      } ?: ""
+    val resolve = if (modeEntries.isEmpty()) "t" else "m[t]||t"
+    // Two shapes, one rule. Where the page says what it offers, being offered IS the test — an
+    // offered theme with no declared mode passes through unresolved for the OS to answer. Where it
+    // does not, a value is trusted as far as it can be read.
+    val resolveFn =
+      when {
+        !readsMemory -> ""
+        offered != null -> "r=function(t){return t&&o[t]?$resolve:$bakedTheme;},"
+        else -> "r=function(t){t=$resolve;return t===\"light\"||t===\"dark\"?t:$bakedTheme;},"
+      }
     val storedTheme =
       themeStorageKey
         .takeIf { it.isNotBlank() }
         ?.let {
-          if (readsMemory) "||(r(sessionStorage.getItem(${WebEscaping.jsString(it)}))||$bakedTheme)"
+          if (readsMemory) "||r(sessionStorage.getItem(${WebEscaping.jsString(it)}))"
           else "||($bakedTheme)"
         } ?: ""
-    // Only where something calls it: a page that cannot apply a remembered theme reads the baked
-    // one straight off the path, and an unused helper in the critical head script is pure weight.
-    val resolveFn =
-      if (readsMemory) "r=function(t){t=$resolveOne;return t===\"light\"||t===\"dark\"?t:\"\";},"
-      else ""
-    return "<script>try{var p=new URLSearchParams(location.search),$modeInit$resolveFn" +
+    return "<script>try{var p=new URLSearchParams(location.search),$modeInit$offerInit$resolveFn" +
       "t=localStorage.getItem(\"cp-page-theme\")===\"system\"?\"\"" +
       ":(p.get(\"theme\")||(p.get(\"themeProvider\")?\"theme:\"+p.get(\"themeProvider\"):\"\")||p.get(\"uiMode\")$storedTheme);" +
       modeResolve +

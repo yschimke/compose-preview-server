@@ -89,12 +89,15 @@ function currentChoice(): string {
     const fromUrl = params.get("theme") || params.get("uiMode");
     if (fromUrl) return fromUrl;
     if (themeChoiceApplies()) {
-        // Only a remembered value this page can still resolve to a mode. A `theme:<provider>` the
-        // catalog has since stopped declaring is a truthy string that `modeOf` cannot answer for,
-        // and returning it would paint nothing while shadowing the baked theme below — OS chrome
-        // around a plainly light preview, on the first load after a catalog update.
+        // Only a remembered value THIS page can actually take. The memory is one key per catalog,
+        // written by the viewer's select, the landing chips and the compare wall alike, so it
+        // routinely arrives carrying a choice the destination does not offer — `light` picked on a
+        // Wear catalog's comparison wall, opened in a Wear viewer that only offers Dark — or one
+        // nothing declares any more, after a catalog dropped or renamed a theme. Either way the
+        // page goes on showing its baked render, and honouring the memory would paint the chrome
+        // for a theme that is not on the stage.
         const remembered = readThemeMemory(themeKey());
-        if (remembered && modeOf(remembered)) return remembered;
+        if (remembered && usableChoice(remembered)) return remembered;
     }
     const viewer = document.querySelector<HTMLElement>(
         ".cp-viewer[data-preview-id]",
@@ -105,6 +108,46 @@ function currentChoice(): string {
         if (baked === "light" || baked === "dark") return baked;
     }
     return "";
+}
+
+/**
+ * The theme values this page's own control offers, or `null` when it carries no theme control.
+ *
+ * Three shapes for one question, because three different pages remember into the same key: the
+ * viewer's `<select>` (a disabled option is not on offer), the landing grid's chips, and the
+ * comparison wall's Light/Dark pair.
+ */
+function offeredChoices(): Set<string> | null {
+    const select = document.querySelector<HTMLSelectElement>("#cp-theme");
+    if (select)
+        return new Set(
+            Array.from(select.options)
+                .filter((option) => !option.disabled)
+                .map((option) => option.value),
+        );
+    const values = (selector: string, attribute: string) =>
+        Array.from(document.querySelectorAll(selector))
+            .map((el) => el.getAttribute(attribute) || "")
+            .filter(Boolean);
+    const chips = values(".cp-theme-btn", "data-theme-choice");
+    if (chips.length) return new Set(chips);
+    const compare = values("[data-compare-theme]", "data-compare-theme");
+    if (compare.length) return new Set(compare);
+    return null;
+}
+
+/**
+ * Whether [choice] describes something this page could be showing.
+ *
+ * Offered wins over resolvable where a control exists: an offered theme whose mode is unqualified
+ * is still what the stage is drawing, and the honest chrome for it is the visitor's OS — the same
+ * answer {@link follow} gives when that theme is picked outright. Where no control exists there is
+ * nothing to ask, so a value is trusted only as far as it can be read: one that names no mode is
+ * indistinguishable from a stale one, and giving way to the baked theme is the safer reading.
+ */
+function usableChoice(choice: string): boolean {
+    const offered = offeredChoices();
+    return offered ? offered.has(choice) : !!modeOf(choice);
 }
 
 /**

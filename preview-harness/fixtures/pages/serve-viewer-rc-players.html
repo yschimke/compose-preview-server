@@ -13,7 +13,7 @@
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
-        <script>try{var p=new URLSearchParams(location.search),r=function(t){t=t;return t==="light"||t==="dark"?t:"";},t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||(r(sessionStorage.getItem("cp-theme:remote-m3"))||((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]));if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
+        <script>try{var p=new URLSearchParams(location.search),o={"light":1,"dark":1},r=function(t){return t&&o[t]?t:((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1];},t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||r(sessionStorage.getItem("cp-theme:remote-m3")));if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
       </head>
       <body>
         <script src="/assets/serve/fixture/serve-chrome.js"></script>

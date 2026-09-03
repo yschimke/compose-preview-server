@@ -239,6 +239,54 @@ describe("window.cpPageTheme", () => {
         );
     });
 
+    it("ignores a remembered theme this page does not offer", () => {
+        // One key per catalog, written by the viewer, the landing chips and the comparison wall
+        // alike. Light picked on a Wear catalog's wall, then a Wear viewer that offers Dark alone:
+        // the sticky script finds no Light option and leaves the dark render up, so the chrome
+        // must not paint light around it.
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:wear",
+        );
+        sessionStorage.setItem("cp-theme:wear", "light");
+        document.body.innerHTML = `
+          <select id="cp-theme"><option value="dark">Dark (Default)</option></select>
+          <div class="cp-viewer" data-preview-id="button__ideal__default__dark"
+               data-bg-theme="dark"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+        assert.ok(
+            !document.documentElement.classList.contains("cp-scheme-light"),
+        );
+    });
+
+    it("takes a remembered theme the page does offer", () => {
+        stubStorage();
+        document.documentElement.setAttribute(
+            "data-cp-theme-key",
+            "cp-theme:m3",
+        );
+        sessionStorage.setItem("cp-theme:m3", "dark");
+        document.body.innerHTML = `
+          <select id="cp-theme">
+            <option value="light">Light (Default)</option>
+            <option value="dark">Dark (Default)</option>
+          </select>
+          <div class="cp-viewer" data-preview-id="button__ideal__default__light"
+               data-bg-theme="light"></div>`;
+
+        follow();
+
+        assert.ok(
+            document.documentElement.classList.contains("cp-scheme-dark"),
+        );
+    });
+
     it("ignores the remembered theme when the viewer cannot re-render", () => {
         // A static bundle (or a fixed-theme specimen) disables the Theme select: the stage keeps
         // its baked image whatever the tab remembers, so following the memory would frame a light
