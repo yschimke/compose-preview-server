@@ -23,13 +23,19 @@ class ServeThumbWarmerTest {
     val warmed = ConcurrentHashMap.newKeySet<String>()
     val threads = ConcurrentHashMap.newKeySet<String>()
     val calls = AtomicInteger()
+    /** Counts warms that have FINISHED. Entry is not completion — see [drain]. */
+    val done = AtomicInteger()
 
     override fun warmBakedRender(previewId: String) {
       calls.incrementAndGet()
       warmed.add(previewId)
       threads.add(Thread.currentThread().name)
       gate?.await(5, TimeUnit.SECONDS)
-      if (fail) throw IllegalStateException("branch blip")
+      try {
+        if (fail) throw IllegalStateException("branch blip")
+      } finally {
+        done.incrementAndGet()
+      }
     }
 
     // Unused by the warmer, which only ever calls [warmBakedRender] — that narrowness is the
@@ -51,9 +57,17 @@ class ServeThumbWarmerTest {
     override fun close() {}
   }
 
+  /**
+   * Wait for [expected] warms to FINISH, then stop the pool.
+   *
+   * Deliberately on `done`, not `calls`: a worker increments `calls` on entry and populates the
+   * recorded sets after it, so waiting on entry lets `stop()` — which does not await termination —
+   * race a worker that has not written its result yet, and the assertions flake.
+   */
   private fun drain(warmer: ServeThumbWarmer, host: WarmHost, expected: Int) {
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-    while (host.calls.get() < expected && System.nanoTime() < deadline) Thread.sleep(5)
+    while (host.done.get() < expected && System.nanoTime() < deadline) Thread.sleep(5)
+    assertEquals(expected, host.done.get(), "every queued warm finished before the pool stopped")
     warmer.stop()
   }
 
