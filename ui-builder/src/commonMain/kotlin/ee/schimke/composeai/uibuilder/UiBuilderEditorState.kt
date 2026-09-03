@@ -122,9 +122,27 @@ fun ScreenEnvironmentSettings.validationError(): String? =
     else -> null
   }
 
+/**
+ * A detached copy of one subtree, held outside the document.
+ *
+ * Detached on purpose: the nodes are snapshotted at copy time rather than referenced by id, so a
+ * cut works (its source is gone by the time you paste), and so copying, deleting the original and
+ * pasting behaves the way every editor has taught people it does. Referencing the source by id
+ * would make those two cases silently paste nothing.
+ *
+ * It is not the system clipboard. Nothing here reaches outside the editor session, so a paste
+ * cannot import a subtree from another origin — which also means copy between two designs works
+ * only inside one editor.
+ */
+data class EditorClipboard(val rootNodeId: String, val nodes: Map<String, UiBuilderNode>) {
+  val rootComponentId: String
+    get() = nodes.getValue(rootNodeId).componentId
+}
+
 data class UiBuilderEditorState(
   val collaboration: CollaborationState,
   val selectedNodeId: String? = null,
+  val clipboard: EditorClipboard? = null,
   val catalogQuery: String = "",
   val operationSequence: Int = 0,
   val lastOutcome: CommandOutcome? = null,
@@ -184,6 +202,13 @@ sealed interface UiBuilderEditorEvent {
 
   data object DuplicateSelected : UiBuilderEditorEvent
 
+  data object CopySelected : UiBuilderEditorEvent
+
+  data object CutSelected : UiBuilderEditorEvent
+
+  /** Paste the clipboard into the selected node's first accepting slot, or beside it. */
+  data object Paste : UiBuilderEditorEvent
+
   data object Undo : UiBuilderEditorEvent
 
   data object Redo : UiBuilderEditorEvent
@@ -229,6 +254,9 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.ApplyTheme -> applyTheme(state, event.settings)
       UiBuilderEditorEvent.DeleteSelected -> deleteSelected(state)
       UiBuilderEditorEvent.DuplicateSelected -> duplicateSelected(state)
+      UiBuilderEditorEvent.CopySelected -> copySelected(state)
+      UiBuilderEditorEvent.CutSelected -> cutSelected(state)
+      UiBuilderEditorEvent.Paste -> paste(state)
       UiBuilderEditorEvent.Undo -> undo(state)
       UiBuilderEditorEvent.Redo -> redo(state)
     }
@@ -278,6 +306,29 @@ class UiBuilderEditorReducer(
     val parentNode = state.document.nodes.getValue(parent.nodeId)
     val slot = catalog.componentsById[parentNode.componentId]?.slot(parent.slot) ?: return false
     return slot.cardinality.max?.let { parentNode.slots[parent.slot].orEmpty().size < it } ?: true
+  }
+
+  fun canCopySelected(state: UiBuilderEditorState): Boolean =
+    state.selectedNodeId?.let(state.document.nodes::containsKey) == true
+
+  /** Cut is a copy the document has to survive, so it needs delete's cardinality check too. */
+  fun canCutSelected(state: UiBuilderEditorState): Boolean =
+    canCopySelected(state) && canDeleteSelected(state)
+
+  /**
+   * Whether [paste] would land somewhere.
+   *
+   * Asked of the *clipboard's* component rather than the selection's, because that is what has to
+   * be accepted: pasting a `m3/text` beside a full `Row` is a different question from duplicating
+   * the `Row`. A false here is why the paste affordance is disabled rather than offered and
+   * refused.
+   */
+  fun canPaste(state: UiBuilderEditorState): Boolean = pasteDestination(state) != null
+
+  private fun pasteDestination(state: UiBuilderEditorState): ParentSlot? {
+    val clipboard = state.clipboard ?: return null
+    val capability = catalog.componentsById[clipboard.rootComponentId] ?: return null
+    return findDestination(state.document, state.selectedNodeId, capability)
   }
 
   fun catalogItems(query: String): List<EditorCatalogItem> {
@@ -630,7 +681,7 @@ class UiBuilderEditorReducer(
     }
     val operations = mutableListOf<DesignOperation>()
     val copyId = "$nodeId-copy-${sequence.toString().padStart(3, '0')}"
-    state.document.appendDuplicateSubtree(
+    state.document.nodes.appendDuplicateSubtree(
       sourceNodeId = nodeId,
       copyNodeId = copyId,
       parent = state.document.location(nodeId),
@@ -638,6 +689,65 @@ class UiBuilderEditorReducer(
       operations = operations,
     )
     return state.apply(sequence, operations, selectionAfter = copyId)
+  }
+
+  private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {
+    val nodeId = state.selectedNodeId?.takeIf(state.document.nodes::containsKey) ?: return state
+    // No operation and no sequence bump: copying changes the editor, not the document, so it must
+    // not become an undo step. Undoing a copy would otherwise "undo" whatever real edit preceded
+    // it, which is the kind of surprise that makes people stop trusting undo.
+    return state.copy(clipboard = state.document.clip(nodeId))
+  }
+
+  private fun cutSelected(state: UiBuilderEditorState): UiBuilderEditorState {
+    val sequence = state.operationSequence + 1
+    val nodeId = state.selectedNodeId?.takeIf(state.document.nodes::containsKey) ?: return state
+    if (!canDeleteSelected(state)) {
+      // The clipboard is deliberately left alone on a rejected cut. Taking the copy anyway would
+      // leave the editor claiming it holds something the user can see is still in the document.
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_DOCUMENT,
+        "Cutting $nodeId would violate root or slot cardinality",
+      )
+    }
+    val clipboard = state.document.clip(nodeId)
+    val parent = state.document.location(nodeId)
+    val selectionAfter = parent?.nodeId ?: state.document.roots.firstOrNull { it != nodeId }
+    // One apply, so cut is one undo step rather than a copy the user cannot see followed by a
+    // delete they can.
+    return state
+      .apply(
+        sequence = sequence,
+        operations = listOf(DesignOperation.DeleteNode(nodeId)),
+        selectionAfter = selectionAfter,
+      )
+      .copy(clipboard = clipboard)
+  }
+
+  private fun paste(state: UiBuilderEditorState): UiBuilderEditorState {
+    val sequence = state.operationSequence + 1
+    val clipboard = state.clipboard ?: return state
+    val destination =
+      pasteDestination(state)
+        ?: return state.rejected(
+          sequence,
+          RejectionCode.INVALID_DOCUMENT,
+          "Nothing here accepts a ${clipboard.rootComponentId}; select a container with room for one",
+        )
+    val operations = mutableListOf<DesignOperation>()
+    val pasteId = state.document.freshNodeId("${clipboard.rootNodeId}-paste", sequence)
+    // The clipboard's own nodes are the source, not the document's — the subtree it names may have
+    // been cut, or edited since, and a paste has to reproduce what was copied either way.
+    clipboard.nodes.appendDuplicateSubtree(
+      sourceNodeId = clipboard.rootNodeId,
+      copyNodeId = pasteId,
+      parent = destination,
+      afterNodeId =
+        state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull(),
+      operations = operations,
+    )
+    return state.apply(sequence, operations, selectionAfter = pasteId)
   }
 
   private fun undo(state: UiBuilderEditorState): UiBuilderEditorState {
@@ -988,14 +1098,45 @@ private fun defaultChildFor(
   return catalog.componentsById[preferredId]?.takeIf(slot::accepts)
 }
 
-private fun UiBuilderDocument.appendDuplicateSubtree(
+/**
+ * Every node reachable from [nodeId], detached from this document.
+ *
+ * A map rather than a node, because a subtree's children live in the document's flat `nodes` and
+ * would be lost by copying the root alone.
+ */
+private fun UiBuilderDocument.clip(nodeId: String): EditorClipboard {
+  val collected = linkedMapOf<String, UiBuilderNode>()
+  fun visit(id: String) {
+    val node = nodes[id] ?: return
+    if (collected.put(id, node) != null) return
+    node.slots.values.flatten().forEach(::visit)
+  }
+  visit(nodeId)
+  return EditorClipboard(rootNodeId = nodeId, nodes = collected)
+}
+
+/**
+ * An id [preferred] that this document does not already hold.
+ *
+ * Pasting twice from one clipboard would otherwise produce the same id twice, and the second insert
+ * would be rejected as a duplicate — so the paste that looks identical to the first silently fails.
+ */
+private fun UiBuilderDocument.freshNodeId(preferred: String, sequence: Int): String {
+  val numbered = "$preferred-${sequence.toString().padStart(3, '0')}"
+  if (numbered !in nodes) return numbered
+  var suffix = 2
+  while ("$numbered-$suffix" in nodes) suffix++
+  return "$numbered-$suffix"
+}
+
+private fun Map<String, UiBuilderNode>.appendDuplicateSubtree(
   sourceNodeId: String,
   copyNodeId: String,
   parent: ParentSlot?,
   afterNodeId: String?,
   operations: MutableList<DesignOperation>,
 ) {
-  val source = nodes.getValue(sourceNodeId)
+  val source = getValue(sourceNodeId)
   operations +=
     DesignOperation.InsertNode(
       node = source.copy(id = copyNodeId, slots = source.slots.mapValues { emptyList() }),

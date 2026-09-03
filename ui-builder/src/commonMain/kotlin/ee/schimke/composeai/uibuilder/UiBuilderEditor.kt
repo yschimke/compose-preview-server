@@ -291,6 +291,9 @@ fun UiBuilderEditor(
             state = state,
             canDelete = reducer.canDeleteSelected(state),
             canDuplicate = reducer.canDuplicateSelected(state),
+            canCopy = reducer.canCopySelected(state),
+            canCut = reducer.canCutSelected(state),
+            canPaste = reducer.canPaste(state),
             canUndo = reducer.canUndo(state),
             canRedo = reducer.canRedo(state),
             onNewDesign =
@@ -306,6 +309,9 @@ fun UiBuilderEditor(
             state = state,
             canDelete = reducer.canDeleteSelected(state),
             canDuplicate = reducer.canDuplicateSelected(state),
+            canCopy = reducer.canCopySelected(state),
+            canCut = reducer.canCutSelected(state),
+            canPaste = reducer.canPaste(state),
             canUndo = reducer.canUndo(state),
             canRedo = reducer.canRedo(state),
             sessionLabel = sessionLabel,
@@ -485,6 +491,9 @@ private fun MobileEditorToolbar(
   state: UiBuilderEditorState,
   canDelete: Boolean,
   canDuplicate: Boolean,
+  canCopy: Boolean,
+  canCut: Boolean,
+  canPaste: Boolean,
   canUndo: Boolean,
   canRedo: Boolean,
   onNewDesign: (() -> Unit)?,
@@ -524,6 +533,30 @@ private fun MobileEditorToolbar(
             onClick = {
               expanded = false
               dispatch(UiBuilderEditorEvent.DuplicateSelected)
+            },
+          )
+          DropdownMenuItem(
+            text = { Text("Copy") },
+            enabled = canCopy,
+            onClick = {
+              expanded = false
+              dispatch(UiBuilderEditorEvent.CopySelected)
+            },
+          )
+          DropdownMenuItem(
+            text = { Text("Cut") },
+            enabled = canCut,
+            onClick = {
+              expanded = false
+              dispatch(UiBuilderEditorEvent.CutSelected)
+            },
+          )
+          DropdownMenuItem(
+            text = { Text("Paste") },
+            enabled = canPaste,
+            onClick = {
+              expanded = false
+              dispatch(UiBuilderEditorEvent.Paste)
             },
           )
           DropdownMenuItem(
@@ -598,6 +631,9 @@ private fun EditorToolbar(
   state: UiBuilderEditorState,
   canDelete: Boolean,
   canDuplicate: Boolean,
+  canCopy: Boolean,
+  canCut: Boolean,
+  canPaste: Boolean,
   canUndo: Boolean,
   canRedo: Boolean,
   sessionLabel: String,
@@ -656,6 +692,24 @@ private fun EditorToolbar(
         shortcut = "Ctrl/⌘+D",
         enabled = canDuplicate,
         onClick = { dispatch(UiBuilderEditorEvent.DuplicateSelected) },
+      )
+      EditorAction(
+        label = "Copy",
+        shortcut = "Ctrl/⌘+C",
+        enabled = canCopy,
+        onClick = { dispatch(UiBuilderEditorEvent.CopySelected) },
+      )
+      EditorAction(
+        label = "Cut",
+        shortcut = "Ctrl/⌘+X",
+        enabled = canCut,
+        onClick = { dispatch(UiBuilderEditorEvent.CutSelected) },
+      )
+      EditorAction(
+        label = "Paste",
+        shortcut = "Ctrl/⌘+V",
+        enabled = canPaste,
+        onClick = { dispatch(UiBuilderEditorEvent.Paste) },
       )
       EditorAction(
         label = "Delete",
@@ -719,6 +773,9 @@ private fun editorShortcut(
       command && event.key == Key.Y -> UiBuilderEditorEvent.Redo
       command && event.key == Key.Z -> UiBuilderEditorEvent.Undo
       command && event.key == Key.D -> UiBuilderEditorEvent.DuplicateSelected
+      command && event.key == Key.C -> UiBuilderEditorEvent.CopySelected
+      command && event.key == Key.X -> UiBuilderEditorEvent.CutSelected
+      command && event.key == Key.V -> UiBuilderEditorEvent.Paste
       !command && event.key in setOf(Key.Delete, Key.Backspace) ->
         UiBuilderEditorEvent.DeleteSelected
       else -> null

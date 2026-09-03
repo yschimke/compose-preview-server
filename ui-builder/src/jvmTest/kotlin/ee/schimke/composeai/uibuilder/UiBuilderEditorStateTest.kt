@@ -650,4 +650,86 @@ class UiBuilderEditorStateTest {
   }
 
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
+
+  @Test
+  fun `a copied subtree pastes into a different parent, with fresh ids for every node`() {
+    val copied =
+      reducer.reduce(reducer.initial(document, "discover-grid"), UiBuilderEditorEvent.CopySelected)
+    val clipboard = assertIs<EditorClipboard>(copied.clipboard)
+    // The whole subtree, not just the root — children live in the document's flat `nodes` map and
+    // copying the root alone would paste an empty container.
+    assertTrue(clipboard.nodes.size > 1, clipboard.nodes.keys.toString())
+
+    val pasted = reducer.reduce(copied, UiBuilderEditorEvent.Paste)
+    val newId = assertIs<String>(pasted.selectedNodeId)
+    assertTrue(newId !in document.nodes, newId)
+    assertEquals(
+      document.nodes.getValue("discover-grid").componentId,
+      pasted.document.nodes.getValue(newId).componentId,
+    )
+    // Every node of the pasted subtree is new; none reuses an id already in the document.
+    val added = pasted.document.nodes.keys - document.nodes.keys
+    assertEquals(clipboard.nodes.size, added.size, added.toString())
+  }
+
+  @Test
+  fun `pasting twice from one clipboard makes two subtrees, not one silent failure`() {
+    val copied =
+      reducer.reduce(reducer.initial(document, "discover-grid"), UiBuilderEditorEvent.CopySelected)
+    val once = reducer.reduce(copied, UiBuilderEditorEvent.Paste)
+    val twice = reducer.reduce(once, UiBuilderEditorEvent.Paste)
+
+    val first = assertIs<String>(once.selectedNodeId)
+    val second = assertIs<String>(twice.selectedNodeId)
+    assertTrue(first != second, "$first == $second")
+    assertTrue(first in twice.document.nodes && second in twice.document.nodes)
+  }
+
+  @Test
+  fun `a cut subtree is still pasteable, because the clipboard is detached`() {
+    // The point of snapshotting rather than referencing by id: by paste time the source is gone.
+    val initial = reducer.initial(document, "discover-grid")
+    val cut = reducer.reduce(initial, UiBuilderEditorEvent.CutSelected)
+    assertFalse("discover-grid" in cut.document.nodes)
+
+    val pasted = reducer.reduce(cut, UiBuilderEditorEvent.Paste)
+    val restored = assertIs<String>(pasted.selectedNodeId)
+    assertEquals(
+      document.nodes.getValue("discover-grid").componentId,
+      pasted.document.nodes.getValue(restored).componentId,
+    )
+  }
+
+  @Test
+  fun `copying is not an undo step`() {
+    // Undo after a copy has to undo the edit before it, not the copy. Copying touches the editor,
+    // never the document, so it must not consume a sequence number or record an operation.
+    val initial = reducer.initial(document, "discover-grid")
+    val copied = reducer.reduce(initial, UiBuilderEditorEvent.CopySelected)
+
+    assertEquals(initial.operationSequence, copied.operationSequence)
+    assertEquals(initial.document.revision, copied.document.revision)
+    assertEquals(initial.canUndo, copied.canUndo)
+  }
+
+  @Test
+  fun `a rejected cut leaves the clipboard alone`() {
+    // Otherwise the editor claims to hold a subtree the user can still see in the document.
+    val root = document.roots.single()
+    val initial = reducer.initial(document, root)
+    val cut = reducer.reduce(initial, UiBuilderEditorEvent.CutSelected)
+
+    assertFalse(reducer.canCutSelected(initial), "the single root should not be cuttable")
+    assertNull(cut.clipboard)
+    assertTrue(root in cut.document.nodes)
+  }
+
+  @Test
+  fun `paste is offered on the clipboard's component, not the selection's`() {
+    val copied =
+      reducer.reduce(reducer.initial(document, "discover-grid"), UiBuilderEditorEvent.CopySelected)
+    assertTrue(reducer.canPaste(copied))
+    // With nothing copied there is nowhere to paste, so the affordance is off rather than failing.
+    assertFalse(reducer.canPaste(reducer.initial(document, "discover-grid")))
+  }
 }
