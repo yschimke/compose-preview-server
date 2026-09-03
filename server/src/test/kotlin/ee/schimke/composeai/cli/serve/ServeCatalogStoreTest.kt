@@ -2037,6 +2037,51 @@ class ServeCatalogStoreTest {
     )
   }
 
+  /**
+   * A catalog image whose ONLY metadata is `previewParams` still gets a manifest entry.
+   *
+   * The emission gate lists the metadata worth writing a record for, and `previewParams` was not on
+   * it — so a flat component with no componentId, state, theme, section or knobs was dropped
+   * entirely and its ground, device frame and capture player never reached [ServeBundleHost]. That
+   * was already true of `captureGutter`; it matters more now that a missing record is the
+   * difference between naming the player a bare URL already is and answering unknown
+   * ([ServeHost.bakedRcPlayer]).
+   */
+  @Test
+  fun `an image whose only metadata is previewParams still reaches the manifest`() {
+    val flat =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3","components":[
+        {"images":[
+          {"path":"images/card/plain.png","previewParams":{"capturePlayer":"cmp-android"}}]}]}
+      """
+        .trimIndent()
+    val root = tempRoot()
+    val store =
+      ServeCatalogStore(
+        root = root,
+        register = { n, h -> registered[n] = h },
+        trust = { TrustStore.EMPTY },
+        fetch = { url ->
+          when {
+            url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> flat.toByteArray()
+            url.endsWith(".png") -> png()
+            else -> null
+          }
+        },
+        registerWasm = { s, d ->
+          if (d == null) registeredWasm.remove(s) else registeredWasm[s] = d
+        },
+      )
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+    val text =
+      File(store.liveDir("compose-m3")!!, "previews/${ServeCatalogStore.VARIANTS_FILE}").readText()
+    assertTrue(
+      text.contains("\"capturePlayer\":\"cmp-android\""),
+      "the record survives with nothing else to carry it: $text",
+    )
+  }
+
   @Test
   fun `a state-bearing catalog writes a variants manifest that round-trips onto host previews`() {
     // A checkbox with a default + a non-default (unchecked) state, each in light and dark.

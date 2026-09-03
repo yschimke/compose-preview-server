@@ -673,7 +673,14 @@ class ServeCatalogStore(
             image.supportsGestures ||
             image.fixedTheme ||
             image.secondary ||
-            planned.componentParameters.isNotEmpty()
+            planned.componentParameters.isNotEmpty() ||
+            // The ground, the device frame and the capture player. Without this an image whose
+            // ONLY metadata is `previewParams` — a flat component with no componentId, state,
+            // theme, section or knobs — was dropped from the manifest entirely, so the exporter's
+            // record never reached [ServeBundleHost] and the field read back as absent. That was
+            // already true of `captureGutter` and `device`; it matters more now that a missing
+            // record is the difference between naming the baked player and answering unknown.
+            image.previewParams != null
         ) {
           variants[id] =
             VariantMeta(
