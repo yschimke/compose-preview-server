@@ -20,109 +20,46 @@ import {
 } from "../src/viewer/laneState.js";
 
 describe("backendRequiresRenderParam", () => {
-    // The server's absent-player default, as the page reports it in `data-rc-server-default`.
-    const EMBEDDED = "cmp-android";
-
-    it("names only a lane that differs from what the server draws unaided", () => {
-        assert.equal(backendRequiresRenderParam("java", EMBEDDED), true);
-        assert.equal(backendRequiresRenderParam("cmp-jvm", EMBEDDED), true);
-        assert.equal(backendRequiresRenderParam("js", EMBEDDED), false);
-    });
-
-    it("does NOT name the server's own default", () => {
-        // The regression this exists for. While this answered `true` for cmp-android, the viewer
-        // seeded its pick state from it and stamped `?rcPlayer=cmp-android` onto every first click
-        // from a catalog — a URL that reads as a deliberate player choice and is a byte-for-byte
-        // no-op (deployed `remote-m3`: md5 `e69d5136…` bare AND with the parameter).
-        assert.equal(
-            backendRequiresRenderParam("cmp-android", EMBEDDED),
-            false,
-        );
-    });
-
-    it("still names a lane on a host whose server default is something else", () => {
-        // The guard the old behaviour was really protecting: if the page's lane and the server's
-        // unaided choice ever disagree, the lane has to say so.
-        assert.equal(backendRequiresRenderParam("cmp-android", "java"), true);
-        assert.equal(backendRequiresRenderParam("java", "java"), false);
-    });
-
-    it("never names a browser lane, whatever the server default is", () => {
-        for (const serverDefault of ["", "cmp-android", "java"]) {
-            assert.equal(
-                backendRequiresRenderParam("js", serverDefault),
-                false,
-                serverDefault,
-            );
-            assert.equal(
-                backendRequiresRenderParam("cmp-wasm", serverDefault),
-                false,
-                serverDefault,
-            );
-        }
+    it("names embedded server players whose default differs from Java", () => {
+        assert.equal(backendRequiresRenderParam("cmp-android"), true);
+        assert.equal(backendRequiresRenderParam("cmp-jvm"), true);
+        assert.equal(backendRequiresRenderParam("java"), false);
+        assert.equal(backendRequiresRenderParam("js"), false);
     });
 });
 
 describe("server-side player persistence", () => {
     it("keeps the explicit player in full live override replacements", () => {
-        assert.equal(
-            serverPlayerParam("cmp-jvm", true, "cmp-android"),
-            "cmp-jvm",
-        );
-        assert.equal(serverPlayerParam("java", true, "cmp-android"), "java");
-        assert.equal(
-            serverPlayerParam("cmp-android", false, "cmp-android"),
-            null,
-        );
-        assert.equal(serverPlayerParam("js", true, "cmp-android"), null);
-    });
-
-    it("emits nothing for a pick that IS the server default", () => {
-        // So there is exactly one url for the default rendering however the visitor reached it:
-        // choosing cmp-android from the combo describes the same pixels as never touching it.
-        assert.equal(
-            serverPlayerParam("cmp-android", true, "cmp-android"),
-            null,
-        );
-        assert.equal(serverPlayerParam("java", true, "java"), null);
-        // …and it is still emitted where it really is an override.
-        assert.equal(
-            serverPlayerParam("cmp-android", true, "java"),
-            "cmp-android",
-        );
+        assert.equal(serverPlayerParam("cmp-android", true), "cmp-android");
+        assert.equal(serverPlayerParam("cmp-jvm", true), "cmp-jvm");
+        assert.equal(serverPlayerParam("java", true), "java");
+        assert.equal(serverPlayerParam("cmp-android", false), null);
+        assert.equal(serverPlayerParam("js", true), null);
     });
 
     it("restores a non-Java default after leaving a browser player", () => {
         assert.deepEqual(
-            restoreStaticPlayer(
-                {
-                    defaultBackend: "cmp-android",
-                    pickedBackend: "cmp-android",
-                    picked: false,
-                },
-                "cmp-android",
-            ),
+            restoreStaticPlayer({
+                defaultBackend: "cmp-android",
+                pickedBackend: "cmp-android",
+                picked: false,
+            }),
             {
                 defaultBackend: "cmp-android",
                 pickedBackend: "cmp-android",
-                // No longer a "pick": returning to the static lane on the server's own default
-                // needs no parameter to describe it.
-                picked: false,
+                picked: true,
             },
         );
         assert.deepEqual(
-            restoreStaticPlayer(
-                {
-                    defaultBackend: "java",
-                    pickedBackend: "java",
-                    picked: false,
-                },
-                "cmp-android",
-            ),
+            restoreStaticPlayer({
+                defaultBackend: "java",
+                pickedBackend: "java",
+                picked: false,
+            }),
             {
                 defaultBackend: "java",
                 pickedBackend: "java",
-                picked: true,
+                picked: false,
             },
         );
     });
@@ -133,19 +70,16 @@ describe("server-side player persistence", () => {
             pickedBackend: "cmp-jvm",
             picked: true,
         };
-        assert.strictEqual(restoreStaticPlayer(pick, "cmp-android"), pick);
+        assert.strictEqual(restoreStaticPlayer(pick), pick);
     });
 
     it("restores the retained visitor pick after a browser-only lane", () => {
         assert.deepEqual(
-            restoreStaticPlayer(
-                {
-                    defaultBackend: "cmp-android",
-                    pickedBackend: "java",
-                    picked: false,
-                },
-                "cmp-android",
-            ),
+            restoreStaticPlayer({
+                defaultBackend: "cmp-android",
+                pickedBackend: "java",
+                picked: false,
+            }),
             {
                 defaultBackend: "cmp-android",
                 pickedBackend: "java",
@@ -153,14 +87,11 @@ describe("server-side player persistence", () => {
             },
         );
         assert.deepEqual(
-            restoreStaticPlayer(
-                {
-                    defaultBackend: "cmp-android",
-                    pickedBackend: "cmp-jvm",
-                    picked: false,
-                },
-                "cmp-android",
-            ),
+            restoreStaticPlayer({
+                defaultBackend: "cmp-android",
+                pickedBackend: "cmp-jvm",
+                picked: false,
+            }),
             {
                 defaultBackend: "cmp-android",
                 pickedBackend: "cmp-jvm",
