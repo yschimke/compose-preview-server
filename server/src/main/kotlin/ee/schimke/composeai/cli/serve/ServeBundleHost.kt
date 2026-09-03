@@ -1284,9 +1284,14 @@ class ServeBundleHost(
   /**
    * Distinguishes this host's staging files from those of any other host over the same generation
    * directory. See the partial-file naming in [bakedPngFile] for why that is not hypothetical.
+   *
+   * Deliberately NOT `System.identityHashCode`: that is a 32-bit value with no uniqueness
+   * guarantee, so two live hosts can share one — and two hosts sharing a tag is exactly the case
+   * this exists to rule out, which would put both back on a single `.partial` and defeat the
+   * staging. A monotonic counter makes it unique within the process; the random salt covers two
+   * processes over one generation directory, which the counter alone cannot see.
    */
-  private val instanceTag: String =
-    java.lang.Long.toHexString(System.identityHashCode(this).toLong())
+  private val instanceTag: String = nextInstanceTag()
 
   private val fillLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
@@ -1654,6 +1659,15 @@ class ServeBundleHost(
     private const val RENDER_ERROR_SCHEMA = "compose-preview-error/v1"
     /** Suffix of the sibling a lazy fill writes before moving it into place atomically. */
     private const val PARTIAL_SUFFIX = ".partial"
+
+    private val instanceCounter = java.util.concurrent.atomic.AtomicLong()
+
+    /** Per-process, so two servers over one generation directory cannot collide on the counter. */
+    private val processSalt: String =
+      java.lang.Long.toHexString(java.util.concurrent.ThreadLocalRandom.current().nextLong())
+
+    /** A staging tag no other live host can hold. See [instanceTag]. Visible for tests. */
+    internal fun nextInstanceTag(): String = "$processSalt-${instanceCounter.getAndIncrement()}"
 
     /**
      * How many pinned (`?at=<sha>`) assets one catalog host keeps resident. Small on purpose: this

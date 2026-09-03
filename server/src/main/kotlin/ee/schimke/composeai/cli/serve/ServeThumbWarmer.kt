@@ -1,6 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
-import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -34,10 +34,10 @@ import java.util.concurrent.TimeUnit
  * - **Never blocks a request.** [enqueue] only offers to a bounded queue and returns; the page
  *   build that missed still emits the plain URL for this render, exactly as before.
  * - **Never retries in a loop.** A full queue drops the request and a failed fetch is not
- *   remembered as failed — the next page build re-offers it. Both paths release the [inFlight] key,
- *   the drop via the rejection handler; forgetting that is how a "drop" silently becomes a
- *   permanent deduplication. That is the same self-healing rule `ServeBundleHost.bakedPngFile`
- *   already applies to a transient branch blip, and it is why this needs no backoff of its own.
+ *   remembered as failed — the next page build re-offers it. Both paths release the claim, the drop
+ *   via the rejection handler; forgetting that is how a "drop" silently becomes a permanent
+ *   deduplication. That is the same self-healing rule `ServeBundleHost.bakedPngFile` already
+ *   applies to a transient branch blip, and it is why this needs no backoff of its own.
  *
  * ## Bounds
  *
@@ -52,18 +52,39 @@ internal class ServeThumbWarmer(
   queueDepth: Int = QUEUE,
 ) {
   /**
-   * `host identity + preview id` for every fetch queued or running.
+   * The previews queued or running, per host.
    *
    * Keyed on the host **instance** rather than the session id for the same reason [ServeHeroImages]
    * keys its bakes that way: a catalog refresh installs a fresh host, and the new one's pixels are
-   * a different question from the old one's. Entries are removed when the fetch finishes, so a
-   * preview whose fetch failed is retried on the next page build rather than being remembered as
-   * hopeless.
+   * a different question from the old one's. A [WeakHashMap] for the same reason too — a retired
+   * catalog's entry goes with its host rather than being retained for the life of the process.
+   *
+   * Deliberately keyed by the host OBJECT, not by `System.identityHashCode`: that is a 32-bit value
+   * with no uniqueness guarantee, so two live hosts can share one and each would dedupe the other's
+   * previews out of its own queue. `WeakHashMap` compares keys by identity, which is the property
+   * actually wanted here and cannot collide.
+   *
+   * A claim is released when the fetch finishes OR is rejected, so a dropped or failed preview is
+   * retried on the next page build rather than remembered as hopeless.
    */
-  private val inFlight: MutableSet<String> = Collections.synchronizedSet(HashSet())
+  private val inFlight = WeakHashMap<ServeHost, MutableSet<String>>()
 
-  /** One queued warm, carrying the [inFlight] key so a rejection can release it. */
-  private class WarmTask(val key: String, private val body: () -> Unit) : Runnable {
+  private val inFlightLock = Any()
+
+  /** True when [previewId] was not already queued or running for [host]. */
+  private fun claim(host: ServeHost, previewId: String): Boolean =
+    synchronized(inFlightLock) { inFlight.getOrPut(host) { HashSet() }.add(previewId) }
+
+  private fun release(host: ServeHost, previewId: String) {
+    synchronized(inFlightLock) { inFlight[host]?.remove(previewId) }
+  }
+
+  /** One queued warm, carrying what it claimed so a rejection can release it. */
+  private class WarmTask(
+    val host: ServeHost,
+    val previewId: String,
+    private val body: () -> Unit,
+  ) : Runnable {
     override fun run() = body()
   }
 
@@ -78,13 +99,13 @@ internal class ServeThumbWarmer(
         // Drop when the queue is full — but release the key on the way out.
         //
         // NOT `DiscardPolicy`: that returns normally without running the task, so the `finally`
-        // that clears [inFlight] never fires and the preview stays marked in flight forever. It
+        // that releases the claim never fires and the preview stays marked in flight forever. It
         // would then be deduplicated out of every later page build — the exact opposite of the
         // "a drop is re-offered next time" rule this class depends on, and silent.
         //
         // NOT `CallerRunsPolicy` either: running here would put a delivery-branch round trip on
         // the page-build thread, which is the one thing this whole lane exists to avoid.
-        { r, _ -> (r as? WarmTask)?.let { inFlight.remove(it.key) } },
+        { r, _ -> (r as? WarmTask)?.let { release(it.host, it.previewId) } },
       )
       .apply { allowCoreThreadTimeOut(true) }
 
@@ -95,16 +116,15 @@ internal class ServeThumbWarmer(
    * a preview already queued, already running, or already local costs a set lookup.
    */
   fun enqueue(host: ServeHost, previewId: String) {
-    val key = "${System.identityHashCode(host)}:$previewId"
-    if (!inFlight.add(key)) return
+    if (!claim(host, previewId)) return
     val task =
-      WarmTask(key) {
+      WarmTask(host, previewId) {
         try {
           host.warmBakedRender(previewId)
         } catch (e: Exception) {
           onLog("thumbnail warm failed for $previewId: ${e.message}")
         } finally {
-          inFlight.remove(key)
+          release(host, previewId)
         }
       }
     try {
@@ -112,7 +132,7 @@ internal class ServeThumbWarmer(
     } catch (e: RuntimeException) {
       // A shutdown pool rejects by throwing, which the handler above never sees. Same rule: this
       // preview was not queued, so it must not stay marked in flight.
-      inFlight.remove(key)
+      release(host, previewId)
       throw e
     }
   }

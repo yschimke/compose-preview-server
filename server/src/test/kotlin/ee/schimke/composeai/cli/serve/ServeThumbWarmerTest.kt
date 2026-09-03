@@ -193,3 +193,24 @@ class ServeThumbWarmerTest {
     warmer.stop()
   }
 }
+
+/**
+ * The staging tag behind [ServeBundleHost]'s `.partial` naming.
+ *
+ * Its whole job is to differ between two hosts over one generation directory, so that two
+ * concurrent fills stage to different temp files and only the atomic move races. A tag that can
+ * repeat puts both writers back on one file and silently undoes that.
+ */
+class ServeBundleHostInstanceTagTest {
+  @Test
+  fun `every staging tag is distinct`() {
+    val tags = (1..10_000).map { ServeBundleHost.nextInstanceTag() }
+    assertEquals(tags.size, tags.toSet().size, "a repeated tag would re-share one .partial file")
+  }
+
+  @Test
+  fun `tags are usable as a file name segment`() {
+    // They are interpolated straight into a path, so anything needing escaping would be a bug.
+    assertTrue(ServeBundleHost.nextInstanceTag().all { it.isLetterOrDigit() || it == '-' })
+  }
+}
