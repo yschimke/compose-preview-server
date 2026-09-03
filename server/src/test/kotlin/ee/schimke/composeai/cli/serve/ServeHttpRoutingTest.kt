@@ -1001,7 +1001,10 @@ class ServeHttpRoutingTest {
    */
   @Test
   fun `a cold replayed preview is 503, not a terminal refusal — the axis decides`() {
-    for (query in listOf("rcPlayer=java", "rcPlayer=cmp-android", "fontScale=2.0", "uiMode=dark")) {
+    // `rcPlayer=cmp-android` is deliberately NOT in this list: the baked snapshot IS the embedded
+    // player's capture, so it answers that request outright rather than waiting on a daemon. The
+    // case below pins that, and it is a strictly better outcome than the retry this asserts.
+    for (query in listOf("rcPlayer=java", "fontScale=2.0", "uiMode=dark")) {
       val (code, body, headers) = getFull("/live-down-rc/render/$previewId.png?$query")
       assertEquals(503, code, "$query is retryable on a replayed preview")
       assertEquals("2", headers["Retry-After"], "$query offers a retry")
@@ -1012,6 +1015,28 @@ class ServeHttpRoutingTest {
         "$query is still named as un-applied",
       )
     }
+  }
+
+  /**
+   * …and the embedded player is answered from the snapshot even with the daemon down, because the
+   * snapshot is that player's own capture.
+   *
+   * This is what makes the parameter droppable from a default link: a bare browse and
+   * `?rcPlayer=cmp-android` now agree on every host, including one that can render nothing at all.
+   */
+  @Test
+  fun `a cold daemon still answers the embedded player, from the baked capture`() {
+    val bare = getFullBytes("/live-down-rc/render/$previewId.png")
+    val (code, body, headers) =
+      getFullBytes("/live-down-rc/render/$previewId.png?rcPlayer=cmp-android")
+    assertEquals(200, code, "the snapshot answers it; no daemon needed")
+    assertEquals("baked", headers[ServeHttpServer.GENERATION_HEADER])
+    assertEquals(
+      null,
+      headers[ServeHttpServer.DROPPED_OVERRIDES_HEADER],
+      "nothing was dropped — the baked capture is exactly what was asked for",
+    )
+    assertContentEquals(bare.second, body, "identical to the bare browse")
   }
 
   /**
@@ -1068,7 +1093,9 @@ class ServeHttpRoutingTest {
   @Test
   fun `a bare player selection is served from the published parity staging`() {
     val published = publishedPng()
-    for (query in listOf("rcPlayer=cmp-android", "rcPlayer=embedded")) {
+    // cmp-android is NOT in this list: baked is already that player's capture, so it is answered
+    // from baked rather than from the staged `embedded` column. See the test below.
+    for (query in listOf("rcPlayer=cmp-jvm")) {
       val (code, body, headers) = getFullBytes("/rc-published/render/$previewId.png?$query")
       assertEquals(200, code, "$query is answered")
       assertContentEquals(published, body, "$query serves the published raster")
@@ -1085,6 +1112,40 @@ class ServeHttpRoutingTest {
         "public, max-age=300, stale-while-revalidate=3600",
         headers["Cache-Control"],
         "$query is as cacheable as the bare render it is the player-selected twin of",
+      )
+    }
+  }
+
+  /**
+   * A bare browse and `?rcPlayer=cmp-android` are the SAME request, and must answer with the same
+   * bytes.
+   *
+   * They did not. The staged `embedded` column is the vendored player under this repo's Robolectric
+   * harness — a different render of the same player, drawn to be compared against baked rather than
+   * to stand in for it — so routing the parameter there while a bare browse went to baked gave two
+   * answers to one question. That is what made dropping the viewer's `?rcPlayer=cmp-android` stamp
+   * unsafe, and it traced back to a stale claim in `publishedRcPlayerRender` that baked was the
+   * Java player's capture. It is the cmp-android capture.
+   */
+  @Test
+  fun `cmp-android is answered from baked, not from the staged embedded column`() {
+    val bare = getFullBytes("/rc-published/render/$previewId.png")
+    assertEquals(200, bare.first)
+    assertEquals("baked", bare.third[ServeHttpServer.GENERATION_HEADER])
+
+    for (query in listOf("rcPlayer=cmp-android", "rcPlayer=embedded")) {
+      val (code, body, headers) = getFullBytes("/rc-published/render/$previewId.png?$query")
+      assertEquals(200, code, "$query is answered")
+      assertEquals(
+        "baked",
+        headers[ServeHttpServer.GENERATION_HEADER],
+        "$query takes the baked artifact, which is already this player's capture",
+      )
+      assertContentEquals(body, bare.second, "$query is byte-identical to the bare browse")
+      // …and the staged column really is a different artifact, so this asserts something.
+      assertFalse(
+        body.contentEquals(publishedPng()),
+        "the staged embedded raster is distinguishable from baked",
       )
     }
   }
@@ -1131,8 +1192,10 @@ class ServeHttpRoutingTest {
     assertEquals(200, baked.first)
     assertEquals("baked", baked.third[ServeHttpServer.GENERATION_HEADER])
 
-    val (code, body, headers) =
-      getFullBytes("/rc-published/render/$previewId.png?rcPlayer=cmp-android")
+    // Asked on cmp-jvm, not cmp-android. The ordering this pins matters exactly where baked is
+    // ANOTHER player's pixels, which for cmp-android it is not — see the test above, where the
+    // same question has the opposite answer for that one backend.
+    val (code, body, headers) = getFullBytes("/rc-published/render/$previewId.png?rcPlayer=cmp-jvm")
     assertEquals(200, code)
     assertEquals("rc-published", headers[ServeHttpServer.GENERATION_HEADER])
     assertContentEquals(publishedPng(), body, "the requested player's raster, not the baked PNG")

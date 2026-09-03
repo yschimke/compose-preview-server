@@ -20,11 +20,22 @@ import {
 } from "../src/viewer/laneState.js";
 
 describe("backendRequiresRenderParam", () => {
-    it("names embedded server players whose default differs from Java", () => {
-        assert.equal(backendRequiresRenderParam("cmp-android"), true);
+    it("names only the lane a bare render is not", () => {
         assert.equal(backendRequiresRenderParam("cmp-jvm"), true);
-        assert.equal(backendRequiresRenderParam("java"), false);
         assert.equal(backendRequiresRenderParam("js"), false);
+    });
+
+    it("does NOT name cmp-android, which is what a bare render already is", () => {
+        // The regression this exists for. While this answered `true`, the viewer seeded its pick
+        // state from it and stamped `?rcPlayer=cmp-android` onto every first click from a catalog —
+        // a URL that reads as a deliberate player choice and is a no-op.
+        assert.equal(backendRequiresRenderParam("cmp-android"), false);
+    });
+
+    it("does not name java either, because asking for it is a deliberate change", () => {
+        // `serverPlayerParam` still emits it on a real pick; what this answers is only whether a
+        // lane must name itself while nobody has picked anything.
+        assert.equal(backendRequiresRenderParam("java"), false);
     });
 });
 
@@ -47,7 +58,9 @@ describe("server-side player persistence", () => {
             {
                 defaultBackend: "cmp-android",
                 pickedBackend: "cmp-android",
-                picked: true,
+                // Returning to the static lane on the default needs no parameter to describe it:
+                // the bare render is already this player.
+                picked: false,
             },
         );
         assert.deepEqual(

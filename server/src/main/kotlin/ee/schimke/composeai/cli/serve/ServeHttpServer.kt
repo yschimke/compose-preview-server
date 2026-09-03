@@ -9246,12 +9246,17 @@ class ServeHttpServer(
             else
               renderHost.cachedRender(previewId, overrides)
                 // BEFORE the baked snapshot, not after. `bakedRender` answers from the preview's
-                // published PNG without consulting the overrides at all, so a host that has both
-                // local baked pixels and staged rc-compare rasters would return the baked bytes for
-                // a bare `?rcPlayer=…` and never reach this lane — and those bytes are the *Java*
-                // player's capture, so the request would then be refused for dropping `rcPlayer`
-                // while the very raster it asked for sat unread. A player selection is the more
-                // specific answer, so it wins; everything else falls through to baked as before.
+                // published PNG without consulting the overrides at all, so a host with both local
+                // baked pixels and staged rc-compare rasters would return baked for a bare
+                // `?rcPlayer=…` and never reach this lane, and the request would then be refused
+                // for dropping `rcPlayer` while the very raster it asked for sat unread.
+                //
+                // That argument used to be stated as "those bytes are the *Java* player's capture".
+                // They are not — baked is the cmp-android capture — and the correction matters,
+                // because it is exactly the backend for which reaching this lane FIRST was the bug:
+                // see [publishedRcPlayerRender], which now declines cmp-android so it falls through
+                // to the baked bytes that are already that player's. The ordering still holds for
+                // every other backend, where baked really is someone else's pixels.
                 ?: publishedRcPlayerRender(renderHost, previewId, overrides)
                 ?: renderHost.bakedRender(previewId, overrides)
           // A "pure declared-theme render" — the classification the burst lease admits on. Read
@@ -9441,9 +9446,13 @@ class ServeHttpServer(
    * The catalog's offline parity run already drew every `ir/<id>.rc` document with every player, so
    * the commonest Remote Compose page view there is — a viewer opening on its default player, with
    * nothing else selected — is answerable from published bytes. Before this it went to the daemon:
-   * `?rcPlayer=cmp-android` measured ~0.75s warm on a warm public box, and on a cold one it fell
-   * back to baked pixels and refused. Note the catalog's ordinary baked PNG cannot stand in,
-   * because it is the **Java** player's capture — the reference the other lanes are scored against.
+   * `?rcPlayer=cmp-jvm` measured ~0.75s warm on a warm public box, and on a cold one it fell back
+   * to baked pixels and refused.
+   *
+   * This used to add "the catalog's ordinary baked PNG cannot stand in, because it is the **Java**
+   * player's capture". That has not been true since `RemoteOverridablePreview` began defaulting to
+   * `RemoteComposePlayerKind.EMBEDDED`: baked IS the cmp-android capture, which is why that backend
+   * is excluded below and answered from baked instead.
    *
    * "Bare" is the whole safety condition. Any other override — a font scale, a device, a knob, a
    * theme — asks for pixels the parity run never drew, so the player selection is stripped and what
@@ -9459,6 +9468,25 @@ class ServeHttpServer(
     val rc = overrides.remoteCompose ?: return null
     val player = rc.player ?: return null
     val backend = RcPlayerBackend.entries.firstOrNull { it.playerKind == player } ?: return null
+    // [RcPlayerBackend.CMP_ANDROID] is served from the BAKED artifact, not from its staged
+    // rc-compare column, and that is the difference between this lane being an optimisation and
+    // being a source of two answers to one question.
+    //
+    // The catalog's baked capture already goes through this player — `RemoteOverridablePreview`
+    // defaults to `RemoteComposePlayerKind.EMBEDDED`. The staged `embedded` column is a DIFFERENT
+    // render of the same player: the vendored player under this repo's Robolectric harness, drawn
+    // to be compared against baked rather than to stand in for it, and the committed harness model
+    // measures the two apart (0.03% on `serve-rc-lanes.html`'s first row). Answering the viewer
+    // from it made a bare browse and `?rcPlayer=cmp-android` disagree — so an explicit pick, or a
+    // viewer that stopped stamping one, silently changed which artifact you got.
+    //
+    // Falling through to baked is also simply faster than the staged lookup this lane exists to
+    // provide: a local file rather than an index into the published comparison.
+    //
+    // Same reasoning that already sets [RcPlayerBackend.JAVA]'s `rcCompareLane` to null. Every
+    // other backend keeps the shortcut, because for them baked genuinely is another player's
+    // pixels.
+    if (backend == RcPlayerBackend.CMP_ANDROID) return null
     // Everything the request asks for beyond "draw it with this player".
     val withoutPlayer =
       overrides.copy(

@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.RemoteNamedValue
 import ee.schimke.composeai.daemon.protocol.UiMode
 
@@ -200,7 +201,7 @@ internal object CatalogLiveRouting {
 
   /**
    * [o] with the fields the baked PNG **already satisfies** cleared, so what remains is exactly
-   * what a baked answer would fail to honour. Two of them:
+   * what a baked answer would fail to honour. Three of them:
    * - a `uiMode` matching [bakedTheme] — the mode the sticker was drawn in, resolved by the session
    *   that owns the manifest ([ServeHost.bakedTheme] / [ServeBakedTheme]) and defaulting to the
    *   id's own `__light` / `__dark` token for a caller with no session in hand. A null theme names
@@ -209,6 +210,12 @@ internal object CatalogLiveRouting {
    *   *preserve* the preview's authored background, which is what the baked render drew — so it is
    *   satisfied, not dropped. Only `true` ("crisp outline", strip the background) needs a
    *   re-render.
+   * - `rcPlayer=cmp-android` (`RemoteComposePlayerKind.EMBEDDED`). The capture goes through that
+   *   player — `RemoteOverridablePreview` defaults to it — so the baked PNG *is* the answer to
+   *   "draw this with the embedded player", and reporting it dropped refused a request the snapshot
+   *   satisfies exactly. That refusal is why a bare browse and `?rcPlayer=cmp-android` could not be
+   *   made to agree, and so why the viewer had to keep stamping the parameter onto every default
+   *   link. Any OTHER player is a genuine re-render and still counts as dropped.
    */
   private fun withoutBakedNoOps(
     previewId: String,
@@ -218,5 +225,13 @@ internal object CatalogLiveRouting {
     o.copy(
       uiMode = o.uiMode?.takeIf { it != bakedTheme },
       clearBackground = o.clearBackground?.takeIf { it },
+      remoteCompose =
+        o.remoteCompose
+          ?.let { rc ->
+            if (rc.player == RemoteComposePlayerKind.EMBEDDED) rc.copy(player = null) else rc
+          }
+          // An `rc` facet that held nothing but that player is now empty, and an empty facet is not
+          // the same as no facet to the `!= PreviewOverrides()` comparison above.
+          ?.takeIf { it.profile != null || it.player != null || it.namedValues.isNotEmpty() },
     )
 }

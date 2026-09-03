@@ -58,11 +58,27 @@ export interface LanePick {
     picked: boolean;
 }
 
-/** Whether a finished server-side RC lane must name its backend on `/render`. */
+/**
+ * Whether a finished server-side RC lane must name its backend on `/render`.
+ *
+ * Only `cmp-jvm`. A bare render IS cmp-android — that is the product default, the player the
+ * catalogs capture through (`RemoteOverridablePreview` defaults to
+ * `RemoteComposePlayerKind.EMBEDDED`), and what the baked artifact a bare URL serves already
+ * contains. Naming it would be a parameter that changes nothing.
+ *
+ * This used to answer `true` for cmp-android too, on the reasoning that "the server's absent-player
+ * default is the Java view player". That has not been true for some time, and believing it cost a
+ * URL: the viewer seeded its pick state from this answer, so a first click from a catalog produced
+ * `…?rcPlayer=cmp-android` — a URL that reads as a deliberate player choice, is a no-op, and splits
+ * one rendering across two cache entries.
+ *
+ * Dropping it here is only safe because the server no longer answers `?rcPlayer=cmp-android` from
+ * the staged `embedded` comparison raster; both routes now resolve to the same baked artifact. See
+ * `publishedRcPlayerRender`. `java` is not listed because asking for it is a deliberate change away
+ * from the default, which `serverPlayerParam` still emits.
+ */
 export function backendRequiresRenderParam(backend: string): boolean {
-    // The server's absent-player default is the Java view player. Browser players do not use the
-    // snapshot route, while both embedded players need an explicit wire id.
-    return backend === "cmp-android" || backend === "cmp-jvm";
+    return backend === "cmp-jvm";
 }
 
 /** The server-side player parameter represented by a pick, or nothing for a browser lane. */
