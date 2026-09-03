@@ -1,6 +1,5 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
@@ -16,6 +15,7 @@ import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -46,7 +46,9 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   private fun export(
     document: DesignDocumentV1 = ScreenGeneratorScreenFixture.document(),
-    components: (String) -> ComponentRecordFile? = { ScreenGeneratorScreenFixture.components() },
+    components: (String) -> ComponentRecordSource.Lookup = {
+      ComponentRecordSource.Lookup.Found(ScreenGeneratorScreenFixture.components())
+    },
   ) =
     ScreenGeneratorComposeExportExecutor(components, ScreenGeneratorScreenFixture.PACKAGE_NAME)
       .export(
@@ -78,11 +80,23 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   @Test
   fun `a host with no component record says so, rather than refusing every node`() {
-    val artifact = export(components = { null })
+    val artifact = export(components = { ComponentRecordSource.Lookup.Unconfigured })
     val diagnostic = artifact.diagnostics.single()
     assertEquals(DiagnosticSeverityV1.ERROR, diagnostic.severity)
     assertEquals(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD, diagnostic.code)
     assertTrue(diagnostic.message.contains("catalog `test-catalog`"), diagnostic.message)
+  }
+
+  @Test
+  fun `a configured record that will not load names the path, not the flag`() {
+    // The distinction the previous message lost: an operator who never passed
+    // `--ui-builder-components` needs to be told to; one who passed a path with a typo in it needs
+    // the path. Both used to get the first sentence.
+    val artifact =
+      export(components = { ComponentRecordSource.Lookup.Unusable("no readable file at `/nope`") })
+    val message = artifact.diagnostics.single().message
+    assertTrue(message.contains("/nope"), message)
+    assertFalse(message.contains("--ui-builder-components"), message)
   }
 
   @Test
@@ -117,7 +131,13 @@ class ScreenGeneratorComposeExportExecutorTest {
     // the version question is asked here — where a repaired or replaced file is seen on the very
     // next request rather than never.
     val artifact =
-      export(components = { ScreenGeneratorScreenFixture.components().copy(schemaVersion = 99) })
+      export(
+        components = {
+          ComponentRecordSource.Lookup.Found(
+            ScreenGeneratorScreenFixture.components().copy(schemaVersion = 99)
+          )
+        }
+      )
     val diagnostic = artifact.diagnostics.single()
     assertEquals(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD, diagnostic.code)
     assertTrue(diagnostic.message.contains("is schema 99"), diagnostic.message)
@@ -154,7 +174,9 @@ class ScreenGeneratorComposeExportExecutorTest {
     // catch it, because it passes a package explicitly.
     val document = ScreenGeneratorScreenFixture.document()
     val artifact =
-      ScreenGeneratorComposeExportExecutor({ ScreenGeneratorScreenFixture.components() })
+      ScreenGeneratorComposeExportExecutor({
+          ComponentRecordSource.Lookup.Found(ScreenGeneratorScreenFixture.components())
+        })
         .export(
           RevisionPinnedUiBuilderExport(
             actor = AuthenticatedUiBuilderActor("tester"),

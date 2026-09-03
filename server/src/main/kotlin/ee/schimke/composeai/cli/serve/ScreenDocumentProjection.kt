@@ -119,12 +119,15 @@ internal object ScreenDocumentProjection {
       // One root is not a limitation of the generator; it is what a `@Composable fun Screen()`
       // body is. Two roots need a container around them, and choosing `Column` over `Box` is a
       // layout decision the document did not make and this projection must not invent.
-      return Outcome.Refused(
-        listOf(
-          "the document has ${roots.size} roots; a generated screen body needs exactly one, so " +
-            "wrap them in a layout component in the builder"
-        )
-      )
+      //
+      // Every root is still visited before returning. Refusing on the count alone hid whatever
+      // else was wrong inside those roots until after someone had wrapped them and exported
+      // again — one export per problem, which is the thing `Outcome.Refused` exists to avoid.
+      val counted =
+        "the document has ${roots.size} roots; a generated screen body needs exactly one, so " +
+          "wrap them in a layout component in the builder"
+      roots.forEach { pass.node(it) }
+      return Outcome.Refused((listOf(counted) + pass.reasons).distinct())
     }
     val root = pass.node(roots.single())
     if (pass.reasons.isNotEmpty()) return Outcome.Refused(pass.reasons.distinct())
@@ -322,6 +325,23 @@ internal object ScreenDocumentProjection {
           }
       }
 
+    /**
+     * The receiver for a `.dp` or `.sp` chain.
+     *
+     * Whole when the number is one, because `16.dp` reading as `16.0.dp` in generated source is
+     * noise a human would not have written — but **only inside the `Int` range**. Compose declares
+     * these extensions on `Int`, `Double` and `Float` and not on `Long`, so a padding of
+     * `2147483648` rendered a `Long` receiver and `2147483648.dp` does not compile, while the
+     * export was returned as a clean success. Out of range it falls back to the fractional literal,
+     * which `Double.dp` accepts.
+     */
+    private fun unitReceiver(number: Double): ScreenValue {
+      val whole = number.toLong()
+      return if (number == whole.toDouble() && whole in Int.MIN_VALUE..Int.MAX_VALUE)
+        ScreenValue.Whole(whole)
+      else ScreenValue.Fractional(number)
+    }
+
     /** A `Dp` for a JSON number, or null when the field was absent or not a number. */
     private fun dp(value: JsonElement?): ScreenValue? {
       val number = (value as? JsonPrimitive)?.doubleOrNull ?: return null
@@ -334,9 +354,7 @@ internal object ScreenDocumentProjection {
         // same in the generated file as in the file it was copied from. The receiver is a whole
         // number when it is one, because `.dp` is declared on `Int` and on `Float` alike and an
         // `Int` receiver keeps `16.dp` from rendering as `16.0.dp`.
-        receiver =
-          if (number == number.toLong().toDouble()) ScreenValue.Whole(number.toLong())
-          else ScreenValue.Fractional(number),
+        receiver = unitReceiver(number),
         links = listOf(ChainLink("androidx.compose.ui.unit.dp", property = true)),
         typeFqn = DP,
       )
@@ -452,9 +470,7 @@ internal object ScreenDocumentProjection {
         DimensionUnitV1.DP -> dp(number)
         DimensionUnitV1.SP ->
           ScreenValue.Chain(
-            receiver =
-              if (number == number.toLong().toDouble()) ScreenValue.Whole(number.toLong())
-              else ScreenValue.Fractional(number),
+            receiver = unitReceiver(number),
             links = listOf(ChainLink("androidx.compose.ui.unit.sp", property = true)),
             typeFqn = "androidx.compose.ui.unit.TextUnit",
           )

@@ -45,7 +45,7 @@ import java.security.MessageDigest
  * that was never given the record.
  */
 internal class ScreenGeneratorComposeExportExecutor(
-  private val components: (catalogSystemId: String) -> ComponentRecordFile?,
+  private val components: (catalogSystemId: String) -> ComponentRecordSource.Lookup,
   /**
    * `generated.uibuilder`, matching the exporter this replaces and the package
    * `UiBuilderGeneratedPreviewAdapter` imports its composable from. A different default would
@@ -67,15 +67,29 @@ internal class ScreenGeneratorComposeExportExecutor(
 
     val catalogSystemId = request.document.catalogPin.systemId
     val record =
-      components(catalogSystemId)
-        ?: return refused(
-          NO_COMPONENT_RECORD,
-          listOf(
-            "this host has no discovered component record for catalog `$catalogSystemId`, so no " +
-              "call site can be proven; run a preview bundle for that catalog's module and pass " +
-              "it as `--ui-builder-components $catalogSystemId=<components.json>`"
-          ),
-        )
+      when (val lookup = components(catalogSystemId)) {
+        is ComponentRecordSource.Lookup.Found -> lookup.record
+        // Two ways to have no record, and they need different sentences. Telling an operator who
+        // already passed `--ui-builder-components` to pass it is advice they cannot act on; what
+        // they need is the path and what went wrong with it, which only the source knows.
+        ComponentRecordSource.Lookup.Unconfigured ->
+          return refused(
+            NO_COMPONENT_RECORD,
+            listOf(
+              "this host has no discovered component record for catalog `$catalogSystemId`, so " +
+                "no call site can be proven; run a preview bundle for that catalog's module and " +
+                "pass it as `--ui-builder-components $catalogSystemId=<components.json>`"
+            ),
+          )
+        is ComponentRecordSource.Lookup.Unusable ->
+          return refused(
+            NO_COMPONENT_RECORD,
+            listOf(
+              "the component record configured for catalog `$catalogSystemId` could not be " +
+                "loaded: ${lookup.reason}"
+            ),
+          )
+      }
     if (!generatesFrom(record)) {
       // The capability advertised for this catalog is a configuration fact and cannot know today's
       // file, so the version check lives here, where it can name the version. `ScreenGenerator`
@@ -187,7 +201,8 @@ internal class ScreenGeneratorComposeExportExecutor(
    */
   private fun List<String>.commented(): String = flatMap {
     it.replace('\u2028', '\n').replace('\u2029', '\n').lines()
-  }.joinToString("\n") { "// $it" }
+  }
+    .joinToString("\n") { "// $it" }
 
   private fun String.sha256(): String =
     MessageDigest.getInstance("SHA-256").digest(toByteArray(Charsets.UTF_8)).joinToString("") {

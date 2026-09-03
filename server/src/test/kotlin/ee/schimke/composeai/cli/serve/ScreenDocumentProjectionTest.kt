@@ -22,6 +22,8 @@ import ee.schimke.composeai.uibuilder.protocol.ToggleActionV1
 import ee.schimke.composeai.uibuilder.protocol.UiValueV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -419,5 +421,56 @@ class ScreenDocumentProjectionTest {
     assertTrue(reasons.any { it.contains("state variable `query`") }, reasons.toString())
     assertTrue(reasons.any { it.contains("brandTeal") }, reasons.toString())
     assertTrue(reasons.any { it.contains("predicate") }, reasons.toString())
+  }
+
+  @Test
+  fun `a multi-root document reports what is wrong inside the roots too`() {
+    // Refusing on the count alone made this two exports: wrap the roots, export again, discover
+    // the padding. `Outcome.Refused` promises one pass.
+    val document =
+      ScreenGeneratorScreenFixture.document().let { base ->
+        base.copy(
+          roots = listOf("heading", "time"),
+          nodes =
+            base.nodes +
+              ("heading" to
+                base.nodes.getValue("heading").copy(modifiers = listOf(MatchParentSizeModifierV1))),
+        )
+      }
+    val reasons =
+      assertIs<ScreenDocumentProjection.Outcome.Refused>(ScreenDocumentProjection.project(document))
+        .reasons
+    assertTrue(reasons.any { it.contains("2 roots") }, reasons.toString())
+    assertTrue(reasons.any { it.contains("matchParentSize") }, reasons.toString())
+  }
+
+  @Test
+  fun `a dimension past the Int range keeps a receiver that has a dp extension`() {
+    // `2147483648.dp` does not compile: Compose declares `dp` on Int, Double and Float, never on
+    // Long. It used to be emitted as a clean success.
+    val document =
+      ScreenGeneratorScreenFixture.document().let { base ->
+        base.copy(
+          roots = listOf("heading"),
+          nodes =
+            base.nodes +
+              ("heading" to
+                base.nodes
+                  .getValue("heading")
+                  .copy(
+                    modifiers =
+                      listOf(
+                        SizeModifierV1(widthDp = JsonPrimitive(2147483648L), heightDp = JsonNull)
+                      )
+                  )),
+        )
+      }
+    val projected =
+      assertIs<ScreenDocumentProjection.Outcome.Projected>(
+        ScreenDocumentProjection.project(document)
+      )
+    val rendered = projected.document.toString()
+    assertTrue(rendered.contains("Fractional"), rendered)
+    assertFalse(rendered.contains("Whole(value=2147483648)"), rendered)
   }
 }

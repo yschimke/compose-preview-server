@@ -45,7 +45,7 @@ import kotlinx.serialization.json.Json
  */
 internal class ComponentRecordSource(private val files: Map<String, File>) {
 
-  private data class Parsed(val identity: Identity?, val record: ComponentRecordFile?)
+  private data class Parsed(val identity: Identity?, val lookup: Lookup)
 
   private data class Identity(val length: Long, val lastModified: Long)
 
@@ -60,28 +60,53 @@ internal class ComponentRecordSource(private val files: Map<String, File>) {
    */
   private val last = ConcurrentHashMap<String, Parsed>()
 
-  /** The parsed record for [catalogSystemId], or null when there is no usable one. */
-  fun record(catalogSystemId: String): ComponentRecordFile? {
-    val path = files[catalogSystemId] ?: return null
+  /**
+   * What this host has for [catalogSystemId].
+   *
+   * Three outcomes rather than a nullable record, because "no record was configured" and "the
+   * record you configured will not load" are different things to be told. An export that collapses
+   * them can only offer the caller advice for the first — pass `--ui-builder-components` — which is
+   * useless to an operator who passed it and is looking at a typo in the path.
+   */
+  sealed interface Lookup {
+    /** No path was configured for this catalog. */
+    data object Unconfigured : Lookup
+
+    /**
+     * A path was configured and did not yield a record. [reason] names the path and the failure.
+     */
+    data class Unusable(val reason: String) : Lookup
+
+    data class Found(val record: ComponentRecordFile) : Lookup
+  }
+
+  /** The record for [catalogSystemId], or which of the two ways there isn't one. */
+  fun record(catalogSystemId: String): Lookup {
+    val path = files[catalogSystemId] ?: return Lookup.Unconfigured
     val identity = path.takeIf { it.isFile }?.let { Identity(it.length(), it.lastModified()) }
-    last[catalogSystemId]?.let { if (it.identity == identity) return it.record }
-    val record =
+    last[catalogSystemId]?.let { if (it.identity == identity) return it.lookup }
+    val lookup =
       if (identity == null) {
+        // Still logged as well as returned. The export names the failure to whoever asked for it;
+        // the operator watching the process is a different reader with a different problem.
         System.err.println(
           "serve: UI-builder component record for $catalogSystemId not readable at $path"
         )
-        null
+        Lookup.Unusable("no readable file at `$path`")
       } else {
         runCatching { JSON.decodeFromString<ComponentRecordFile>(path.readText()) }
-          .onFailure {
-            System.err.println(
-              "serve: UI-builder component record at $path is not readable: ${it.message}"
-            )
-          }
-          .getOrNull()
+          .fold(
+            onSuccess = { Lookup.Found(it) },
+            onFailure = {
+              System.err.println(
+                "serve: UI-builder component record at $path is not readable: ${it.message}"
+              )
+              Lookup.Unusable("the file at `$path` did not parse as a component record")
+            },
+          )
       }
-    last[catalogSystemId] = Parsed(identity, record)
-    return record
+    last[catalogSystemId] = Parsed(identity, lookup)
+    return lookup
   }
 
   private companion object {
