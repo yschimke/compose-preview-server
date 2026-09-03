@@ -1763,28 +1763,39 @@ class ServeCatalogLiveHost(
   }
 
   /**
-   * The typography + theme inspection layers follow [renderA11y] exactly: the baked lane has no
-   * daemon to capture a `compose/semantics` tree from, so a mapped id routes live and an unmapped
-   * one has nothing to inspect.
+   * The typography + theme inspection layers, answered from the catalog's **published** annotations
+   * wherever those describe the frame on screen, and from the daemon only where they cannot.
    *
-   * Without this the composite inherited [ServeHost]'s daemon-less default — `NotFound` — while the
-   * viewer still offered the Typography checkbox from the catalog's *published reference*
-   * annotations (issue #4254). Ticking it on the Compose render fetched `<frame>.annotations`, got
-   * a 404, and drew nothing: a control that looked live on every catalog page and worked on none of
-   * them.
+   * Unlike [renderA11y] this lane has a daemon-free source: a published catalog carries
+   * `annotations/index.json`, whose preview layer was measured over the very PNG the baked host
+   * serves ([ServeBundleHost.annotationsFollowBakedFrame]). So when the request's overrides do not
+   * move the pixels — the same condition [render] stays baked under — the published layer is not
+   * merely the cheap answer but the truthful one, drawn over the frame it was measured on.
+   *
+   * This used to ask the daemon **first** and treat the published layer as a fallback for a
+   * `NotFound`. That inverted the cost of the common case: an override-free Typography tick on an
+   * idle catalog paid a daemon cold start to re-derive facts already on disk. Measured on the
+   * deployed server, the first `.annotations` on a suspended catalog took 16-22s (jetsnack 16.2s,
+   * reply 22.6s, jetchat 22.5s) while the baked PNG of the same preview in the same state replayed
+   * in 0.4-0.8s — and the viewer had already decided to offer the checkbox by asking
+   * [hasPublishedTypographyFor], i.e. on the strength of the very data it then declined to read.
+   *
+   * Everything that genuinely needs the daemon still reaches it. [bakedAnnotations] answers
+   * `NotFound` the instant an override moves the render, and so does a catalog that published no
+   * typography for this preview; both fall through to the live lane below, where a `Failed` is a
+   * real error and travels unchanged.
+   *
+   * The daemon-less default this overrides is [ServeHost]'s `NotFound`, which is what made the
+   * Typography checkbox draw nothing on every catalog page (issue #4254).
    */
   override fun renderAnnotations(
     previewId: String,
     overrides: PreviewOverrides,
   ): AnnotationsOutcome {
-    val daemonId = alias[previewId] ?: return bakedAnnotations(previewId, overrides)
-    val live = liveHostFor(daemonId).renderAnnotations(daemonId, overrides)
-    // A daemon that carries no semantics lane answers NotFound. The catalog may still have
-    // published typography for this preview, so fall back to it rather than leaving the layer
-    // blank — under the same rule [bakedAnnotations] states. A `Failed` is a real error and
-    // travels, unchanged: quietly answering a broken render with the published facts would
-    // describe pixels the visitor is not being shown.
-    return if (live is AnnotationsOutcome.NotFound) bakedAnnotations(previewId, overrides) else live
+    val published = bakedAnnotations(previewId, overrides)
+    if (published !is AnnotationsOutcome.NotFound) return published
+    val daemonId = alias[previewId] ?: return AnnotationsOutcome.NotFound
+    return liveHostFor(daemonId).renderAnnotations(daemonId, overrides)
   }
 
   /**

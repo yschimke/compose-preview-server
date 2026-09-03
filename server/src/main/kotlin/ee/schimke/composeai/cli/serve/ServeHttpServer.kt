@@ -62,6 +62,7 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
@@ -6448,51 +6449,122 @@ class ServeHttpServer(
    */
   private fun rememberCatalogMeta(id: String, host: ServeHost) {
     val bundle = catalogBundleHost(host)
-    val heroId = bundle?.declaredHeroPreviewId ?: ServeWeb.representativePreviewId(host.previews)
-    val heroCrop = heroId?.let { bundle?.contentCrop(it) }
-    val darkStage = ServeWeb.SystemDisplay.resolveDarkFirst(id, bundle?.stageSurface)
+    val facts = catalogFactsFor(id, host)
     catalogMetaSeen[id] =
       CatalogMeta(
         title = bundle?.title?.takeIf { it.isNotBlank() } ?: host.label,
         subtitle = bundle?.subtitle,
         trust = bundle?.let { BundleVerifier.summary(it.trust) },
         previews = host.previews.size,
-        previewIds = host.previews.map { it.id },
-        components = ServeWeb.componentSearchEntries(host.previews, darkStage),
-        failedRenders = host.previews.count { it.renderFailure != null },
+        previewIds = facts.previewIds,
+        components = facts.components,
+        failedRenders = facts.failedRenders,
         deferredPreviews = host.liveOnlyPreviewIds.size,
-        heroPreviewId = heroId,
-        heroCrop = heroCrop,
+        heroPreviewId = facts.heroPreviewId,
+        heroCrop = facts.heroCrop,
         // Memoised per (host instance, preview): the decode + scale runs once per catalog, and a
         // refresh — which installs a fresh host — re-bakes under a new hash.
         heroImage =
-          bundle?.let { owner -> heroId?.let { heroImages.heroFor(owner, it, heroCrop) } },
-        heroRenderSize = heroId?.let { host.bakedRenderSize(it) },
-        darkStage = darkStage,
+          bundle?.let { owner ->
+            facts.heroPreviewId?.let { heroImages.heroFor(owner, it, facts.heroCrop) }
+          },
+        heroRenderSize = facts.heroPreviewId?.let { host.bakedRenderSize(it) },
+        darkStage = facts.darkStage,
         webThemeCss = bundle?.webThemeCss.orEmpty(),
         degradation = host.degradations.firstOrNull()?.detail,
         provenance = bundle?.provenance,
         catalogSourceRepo = bundle?.catalogSource?.repo?.takeIf { it.isNotBlank() },
         themeOptimization = host.themeOptimizationSnapshot(),
         renderCache = host.catalogRenderCacheSnapshot(),
-        // The same two reads the catalog landing gates and names its own compare chip with, so the
-        // front door and the landing cannot disagree about whether a catalog compares — or about
-        // what it compares against. Kept apart for the reason they are apart there: references
-        // whose provider names no design tool (`png`, `svg`, an unmapped token) still have a
-        // working `compare?format=reference`, they just get the neutral label.
-        //
-        // Availability is the same condition `comparisonPage` turns the `reference` format on with,
-        // so the action can never deep-link a format that page does not offer. The parity feed's
-        // Figma lane is deliberately NOT a fallback for either (it is on the landing, for the
-        // "design parity" label): only published references put anything behind the route.
-        hasReferenceComparison = host.previews.any { host.designReferencesFor(it.id).isNotEmpty() },
-        designToolLabel =
-          host.previews.firstNotNullOfOrNull { preview ->
-            host.designReferencesFor(preview.id).firstNotNullOfOrNull {
-              ServeWeb.designToolLabel(it.source.provider)
-            }
-          },
+        hasReferenceComparison = facts.hasReferenceComparison,
+        designToolLabel = facts.designToolLabel,
       )
+  }
+
+  /**
+   * The half of [CatalogMeta] that is derived by **walking [ServeHost.previews]**, memoised on host
+   * identity.
+   *
+   * Every field here is fixed for the life of a host instance: `previews` is an immutable `val` on
+   * each implementation, and design references, the declared hero and the stage surface all come
+   * off the delivery branch rather than the daemon. A catalog refresh installs a *fresh* host, so
+   * host identity is the same invalidation key [ServeHeroImages.heroFor] already uses — and the
+   * weak map lets a retired catalog's entry go with it.
+   *
+   * Split out because [rememberCatalogMeta] runs on **every** home-index request, once per listed
+   * catalog ([homeSystemsFor]), and these are the expensive members:
+   * [ServeWeb.componentSearchEntries] filters, groups and sorts the whole preview list and then
+   * makes a second grouping pass for duplicate labels; `designToolLabel` walks every preview and
+   * finds nothing at all for a catalog that publishes no design references. Measured on the
+   * deployed server, `/` cost ~590ms of server time for 6.6 KB of gzipped HTML, on every request,
+   * rebuilding this for 27 catalogs whose published contents had not moved.
+   *
+   * Deliberately does **not** cover the members that move while a host is resident — the theme
+   * optimization and render-cache snapshots (progress counters, read by `/status`), the hero's
+   * baked render size and the hero thumbnail itself (a catalog fills its images in after it loads,
+   * which is why [ServeHeroImages] memoises a decode failure but never a missing PNG). Those stay
+   * live reads above.
+   */
+  private class CatalogFacts(
+    /** The id this was built for: [darkStage] is resolved per system, so a reuse must match. */
+    val system: String,
+    val previewIds: List<String>,
+    val components: List<ServeWeb.ComponentSearchEntry>,
+    val failedRenders: Int,
+    val heroPreviewId: String?,
+    val heroCrop: ContentCrop?,
+    val darkStage: Boolean,
+    val hasReferenceComparison: Boolean,
+    val designToolLabel: String?,
+  )
+
+  private val catalogFactsByHost = WeakHashMap<ServeHost, CatalogFacts>()
+
+  private val catalogFactsLock = Any()
+
+  private fun catalogFactsFor(id: String, host: ServeHost): CatalogFacts {
+    synchronized(catalogFactsLock) { catalogFactsByHost[host] }
+      ?.takeIf { it.system == id }
+      ?.let {
+        return it
+      }
+    // Built outside the lock, like the hero bake: two callers racing a cold catalog build it twice
+    // and agree, because every input is immutable for this host.
+    val built = buildCatalogFacts(id, host)
+    synchronized(catalogFactsLock) { catalogFactsByHost[host] = built }
+    return built
+  }
+
+  private fun buildCatalogFacts(id: String, host: ServeHost): CatalogFacts {
+    val bundle = catalogBundleHost(host)
+    val heroId = bundle?.declaredHeroPreviewId ?: ServeWeb.representativePreviewId(host.previews)
+    val darkStage = ServeWeb.SystemDisplay.resolveDarkFirst(id, bundle?.stageSurface)
+    return CatalogFacts(
+      system = id,
+      previewIds = host.previews.map { it.id },
+      components = ServeWeb.componentSearchEntries(host.previews, darkStage),
+      failedRenders = host.previews.count { it.renderFailure != null },
+      heroPreviewId = heroId,
+      heroCrop = heroId?.let { bundle?.contentCrop(it) },
+      darkStage = darkStage,
+      // The same two reads the catalog landing gates and names its own compare chip with, so the
+      // front door and the landing cannot disagree about whether a catalog compares — or about
+      // what it compares against. Kept apart for the reason they are apart there: references
+      // whose provider names no design tool (`png`, `svg`, an unmapped token) still have a
+      // working `compare?format=reference`, they just get the neutral label.
+      //
+      // Availability is the same condition `comparisonPage` turns the `reference` format on with,
+      // so the action can never deep-link a format that page does not offer. The parity feed's
+      // Figma lane is deliberately NOT a fallback for either (it is on the landing, for the
+      // "design parity" label): only published references put anything behind the route.
+      hasReferenceComparison = host.previews.any { host.designReferencesFor(it.id).isNotEmpty() },
+      designToolLabel =
+        host.previews.firstNotNullOfOrNull { preview ->
+          host.designReferencesFor(preview.id).firstNotNullOfOrNull {
+            ServeWeb.designToolLabel(it.source.provider)
+          }
+        },
+    )
   }
 
   /**
@@ -10098,11 +10170,55 @@ class ServeHttpServer(
           status = HttpStatusCode.ServiceUnavailable,
         )
       }
-      is A11yOutcome.Ok -> call.respondBytes(outcome.json, ContentType.Application.Json)
+      is A11yOutcome.Ok -> respondInspectionJson(renderHost, outcome.json)
       A11yOutcome.NotFound -> call.respondText("no such preview", status = HttpStatusCode.NotFound)
       is A11yOutcome.Failed ->
         call.respondText(outcome.reason, status = HttpStatusCode.InternalServerError)
     }
+  }
+
+  /**
+   * Respond one inspection payload — `<id>.a11y` or `<id>.annotations` — with the validators and
+   * lifetime the rest of this route has always had and these two lanes never did.
+   *
+   * They used to end in a bare `respondBytes`: no `Cache-Control`, no `ETag`, no `Last-Modified`.
+   * `cp-inspect-layers` keeps only a per-page in-memory map keyed on the frame URL, so every
+   * navigation into an `?inspect=` link refetched a payload that had not moved, and no revalidation
+   * was possible because there was nothing to revalidate against.
+   *
+   * The `ETag` is unconditional and strong: these payloads are deterministic and a couple of
+   * kilobytes at most, so hashing one costs nothing next to the request it saves, and it gives even
+   * an unscoped URL a 304 instead of a full refetch.
+   *
+   * The lifetime follows the rule the raster lanes already state, for the same reasons:
+   * - a request carrying overrides names inspection of made-to-order pixels, which reflect no
+   *   published bytes and belong in nobody's cache ([DYNAMIC_RESOURCE_CACHE_CONTROL]);
+   * - a request naming the generation on disk is content-addressed — a republish moves the
+   *   generation and therefore the URL — so it takes the `immutable` lifetime
+   *   ([carriesCurrentGeneration], [prebakedImageCacheControl]);
+   * - anything else is the moving target an unscoped URL always is, and gets the short public
+   *   lifetime with `stale-while-revalidate` ([STATIC_RESOURCE_CACHE_CONTROL]) — which the `ETag`
+   *   now lets end in a 304.
+   *
+   * A private (token-gated) box never caches any of it, exactly as [prebakedImageCacheControl]
+   * decides for the hero lane.
+   */
+  private suspend fun RoutingContext.respondInspectionJson(renderHost: ServeHost, json: ByteArray) {
+    val etag = contentEtag(json)
+    markGeneration(
+      "inspection",
+      when {
+        !isPublic || requestCarriesOverrides() -> DYNAMIC_RESOURCE_CACHE_CONTROL
+        carriesCurrentGeneration(renderHost) -> prebakedImageCacheControl(isPublic)
+        else -> STATIC_RESOURCE_CACHE_CONTROL
+      },
+    )
+    call.response.headers.append(HttpHeaders.ETag, etag)
+    if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    call.respondBytes(json, ContentType.Application.Json)
   }
 
   /**
@@ -10134,7 +10250,7 @@ class ServeHttpServer(
           status = HttpStatusCode.ServiceUnavailable,
         )
       }
-      is AnnotationsOutcome.Ok -> call.respondBytes(outcome.json, ContentType.Application.Json)
+      is AnnotationsOutcome.Ok -> respondInspectionJson(renderHost, outcome.json)
       AnnotationsOutcome.NotFound ->
         call.respondText("no such preview", status = HttpStatusCode.NotFound)
       is AnnotationsOutcome.Failed ->
@@ -11453,6 +11569,20 @@ class ServeHttpServer(
     internal class PlayerAsset(val bytes: ByteArray, val etag: String)
 
     private val playerAssets = java.util.concurrent.ConcurrentHashMap<String, PlayerAsset>()
+
+    /**
+     * A strong ETag over exactly [bytes] — size and a SHA-256 prefix, the same shape [playerAsset]
+     * builds for a vendored bundle. Used where a response body is produced per request rather than
+     * loaded once, so there is no natural hash to reach for.
+     */
+    internal fun contentEtag(bytes: ByteArray): String {
+      val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+      return "\"" +
+        bytes.size.toString(16) +
+        "-" +
+        digest.take(8).joinToString("") { "%02x".format(it.toInt() and 0xff) } +
+        "\""
+    }
 
     /** Load (once per classpath resource) a vendored player bundle. */
     internal fun playerAsset(resource: String): PlayerAsset =

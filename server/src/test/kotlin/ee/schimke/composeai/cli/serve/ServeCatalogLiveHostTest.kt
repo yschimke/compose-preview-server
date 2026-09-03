@@ -564,7 +564,7 @@ class ServeCatalogLiveHostTest {
   }
 
   @Test
-  fun `a mapped preview whose daemon has no semantics lane falls back to published typography`() {
+  fun `a mapped preview with published typography is answered without waking the daemon`() {
     val baked =
       RecordingHost(
         previews = listOf(ServePreview(catalogId, catalogId)),
@@ -581,9 +581,58 @@ class ServeCatalogLiveHostTest {
     val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
 
     val out = composite.renderAnnotations(catalogId, PreviewOverrides()) as AnnotationsOutcome.Ok
-    assertEquals(daemonId, live.lastAnnotationsId, "the daemon is asked first")
-    assertEquals(catalogId, baked.lastAnnotationsId, "…then the catalog's published layer")
+    assertEquals(catalogId, baked.lastAnnotationsId, "the catalog's published layer answers")
     assertTrue(out.json.decodeToString().contains("\"previewId\":\"$catalogId\""))
+    // The point of the ordering, and the reason it was inverted: an override-free request is
+    // served the BAKED frame, and the published layer was measured over exactly that frame. Asking
+    // the daemon first re-derived the same facts behind a cold start — 16-22s on the deployed
+    // server for the first `.annotations` on a suspended catalog, against 0.4-0.8s for the baked
+    // PNG of the same preview in the same state.
+    assertNull(live.lastAnnotationsId, "an override-free published layer must not wake the daemon")
+  }
+
+  @Test
+  fun `a mapped preview without published typography still routes to the daemon`() {
+    // The #4254 guard, restated for the inverted ordering: the published layer is asked first, but
+    // a catalog that published nothing for this preview must still reach the daemon rather than
+    // leaving the Typography checkbox drawing nothing.
+    val baked = RecordingHost(previews = listOf(ServePreview(catalogId, catalogId)), tag = "baked")
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+        hasDesignAnnotations = true,
+      )
+    val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
+
+    composite.renderAnnotations(catalogId, PreviewOverrides()) as AnnotationsOutcome.Ok
+    assertEquals(daemonId, live.lastAnnotationsId, "the daemon answers what the bundle cannot")
+  }
+
+  @Test
+  fun `an override that moves the render skips the published layer and goes live`() {
+    // `overridesAffectRender` is the gate, unchanged by the reordering: published bounds were
+    // measured at the baked scale, so a font scale must inspect the newly rendered composition.
+    val baked =
+      RecordingHost(
+        previews = listOf(ServePreview(catalogId, catalogId)),
+        tag = "baked",
+        publishedTypography = setOf(catalogId),
+      )
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+        hasDesignAnnotations = true,
+      )
+    val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
+
+    composite.renderAnnotations(catalogId, PreviewOverrides(fontScale = 1.5f))
+      as AnnotationsOutcome.Ok
+    assertEquals(daemonId, live.lastAnnotationsId, "a font scale inspects the live composition")
+    assertNull(baked.lastAnnotationsId, "the published layer describes the wrong pixels here")
   }
 
   @Test
