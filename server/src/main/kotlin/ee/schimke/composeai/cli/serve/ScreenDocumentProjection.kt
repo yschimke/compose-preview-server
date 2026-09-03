@@ -1,7 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ChainLink
-import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenDocument
 import ee.schimke.composeai.discovery.ScreenNode
 import ee.schimke.composeai.discovery.ScreenValue
@@ -96,12 +95,12 @@ object ScreenDocumentProjection {
     data class Refused(val reasons: List<String>) : Outcome
   }
 
-  fun project(
-    document: DesignDocumentV1,
-    components: ComponentRecordFile,
-    screenName: String = screenNameFor(document),
-  ): Outcome {
-    val pass = Pass(document, components)
+  fun project(document: DesignDocumentV1, screenName: String = screenNameFor(document)): Outcome {
+    // No component record parameter. It was here only so an enum value could be qualified with
+    // its parameter's recorded type, and `enum` refuses instead — see its KDoc. A parameter kept
+    // "in case" is how a reader starts believing this projection type-checks against the record,
+    // which it does not: `ScreenGenerator` does that, once, with the record it is handed.
+    val pass = Pass(document)
     val roots = document.roots
     if (roots.size != 1) {
       // One root is not a limitation of the generator; it is what a `@Composable fun Screen()`
@@ -144,25 +143,9 @@ object ScreenDocumentProjection {
     }
   }
 
-  private class Pass(val document: DesignDocumentV1, val components: ComponentRecordFile) {
+  private class Pass(val document: DesignDocumentV1) {
     val reasons = mutableListOf<String>()
     private val visiting = mutableSetOf<String>()
-
-    /**
-     * Parameter types by component id and parameter name, for the one thing that needs them: an
-     * enum entry, whose owning type is the parameter's own.
-     *
-     * Keyed by every id a record answers to — canonical and catalog alias alike — because a
-     * document holds whichever its palette was built from, and this has to answer for the same
-     * strings the generator resolves.
-     */
-    private val parameterTypes: Map<String, Map<String, String?>> =
-      buildMap<String, Map<String, String?>> {
-        for (record in components.components) {
-          val byName = record.parameters.associate { it.name to it.typeFqn }
-          for (id in listOf(record.canonicalId) + record.componentIds) put(id, byName)
-        }
-      }
 
     fun node(id: String): ScreenNode? {
       val node = document.nodes[id]
@@ -256,27 +239,45 @@ object ScreenDocumentProjection {
                 dp(modifier.bottomDp)?.let { put("bottom", it) }
               },
           )
-        is SizeModifierV1 ->
-          ChainLink(
-            "androidx.compose.foundation.layout.size",
-            named =
-              buildMap {
-                dp(modifier.widthDp)?.let { put("width", it) }
-                dp(modifier.heightDp)?.let { put("height", it) }
-              },
-          )
+        is SizeModifierV1 -> {
+          // `size` has two overloads and neither accepts one named axis: `size(size: Dp)` names
+          // its parameter `size`, and `size(width: Dp, height: Dp)` requires both. So a modifier
+          // carrying one axis has to become `width(…)` or `height(…)`, which the renderer treats
+          // the same way and the compiler accepts.
+          val width = dp(modifier.widthDp)
+          val height = dp(modifier.heightDp)
+          when {
+            width != null && height != null ->
+              ChainLink(
+                "androidx.compose.foundation.layout.size",
+                named = mapOf("width" to width, "height" to height),
+              )
+            width != null ->
+              ChainLink("androidx.compose.foundation.layout.width", positional = listOf(width))
+            height != null ->
+              ChainLink("androidx.compose.foundation.layout.height", positional = listOf(height))
+            else -> {
+              reasons += "node `$nodeId` sizes to neither a width nor a height"
+              null
+            }
+          }
+        }
         is ClipModifierV1 -> {
-          val shape = SHAPES[modifier.shape]
+          // A theme shape first, then the two constants. `medium` and `large` are what real
+          // documents clip to and they are `MaterialTheme.shapes` roles, not constants — refusing
+          // them lost a clip the previous exporter rendered correctly.
+          val shape =
+            SHAPE_TOKENS[modifier.shape]?.let { path ->
+              ScreenValue.Reference(path.first(), path.drop(1), typeFqn = SHAPE)
+            } ?: SHAPE_CONSTANTS[modifier.shape]?.let { ScreenValue.Reference(it, typeFqn = SHAPE) }
           if (shape == null) {
             reasons +=
-              "node `$nodeId` clips to shape `${modifier.shape}`, which is not one of " +
-                SHAPES.keys.sorted().joinToString(", ")
+              "node `$nodeId` clips to shape `${modifier.shape}`, which is neither a theme shape " +
+                "(${SHAPE_TOKENS.keys.sorted().joinToString(", ")}) nor one of " +
+                SHAPE_CONSTANTS.keys.sorted().joinToString(", ")
             null
           } else {
-            ChainLink(
-              "androidx.compose.ui.draw.clip",
-              positional = listOf(ScreenValue.Reference(shape, typeFqn = SHAPE)),
-            )
+            ChainLink("androidx.compose.ui.draw.clip", positional = listOf(shape))
           }
         }
         // `matchParentSize` is declared on `BoxScope`, so it compiles inside a `Box` slot and
@@ -342,7 +343,7 @@ object ScreenDocumentProjection {
               },
             typeFqn = "androidx.compose.foundation.layout.PaddingValues",
           )
-        is EnumValueV1 -> enum(value.value, node.componentId, property, where)
+        is EnumValueV1 -> enum(value.value, where)
         is StateValueV1 ->
           refuse(
             "$where reads the state variable `${value.variable}`, which needs a " +
@@ -437,23 +438,31 @@ object ScreenDocumentProjection {
       }
     }
 
-    private fun enum(
-      entry: String,
-      componentId: String,
-      property: String,
-      where: String,
-    ): ScreenValue? {
-      val typeFqn = parameterTypes[componentId]?.get(property)
-      if (typeFqn == null) {
-        return refuse(
-          "$where is the enum entry `$entry`, and the component record does not say what type " +
-            "`$property` is, so there is nothing to qualify it with"
-        )
-      }
-      // The entry name is taken verbatim. See the class KDoc: this is the projection's second
-      // claim, and the compile gate is what checks it.
-      return ScreenValue.Reference(rootFqn = typeFqn, members = listOf(entry), typeFqn = typeFqn)
-    }
+    /**
+     * Refuses, and says what is missing.
+     *
+     * This reverses what the first version of this projection claimed. It appended the document's
+     * value to the parameter's recorded type — `TextAlign` + `Center` — and called that a claim the
+     * compile gate would check. Two things about the real documents make it not a claim but a known
+     * error. The wire values are **lower-camel**: the checked-in Confetti document stores `center`
+     * and `semiBold`, so the emitted reference was `TextAlign.center`, which does not exist. And
+     * many of them are not members of the parameter's type at all — the Jetcaster document's
+     * `accountCircle`, `moreVert` and `playCircle` sit on an `ImageVector` parameter whose entries
+     * live under `Icons`, and `expandedTwoPane`, `fab` and `uncontained` name authored layout
+     * variants with no single Kotlin type behind them.
+     *
+     * Capitalising the first letter would fix the first case and leave the second emitting nonsense
+     * with no diagnostic, which is the failure mode this whole change exists to remove. So the
+     * value is refused by name, and the missing thing is named with it: the catalog's `code`
+     * capability carries a symbol per component but nothing per **enum value**, and that is where
+     * the wire-to-Kotlin mapping belongs.
+     */
+    private fun enum(entry: String, where: String): ScreenValue? =
+      refuse(
+        "$where is the enum value `$entry`, and nothing maps a catalog enum value to its Kotlin " +
+          "member — the wire spelling is lower-camel and some values name icons or authored " +
+          "variants rather than members of the parameter's own type"
+      )
 
     private fun refuse(reason: String): ScreenValue? {
       reasons += reason
@@ -498,6 +507,13 @@ object ScreenDocumentProjection {
         "surfaceVariant",
         "onSurfaceVariant",
         "surfaceTint",
+        "surfaceBright",
+        "surfaceDim",
+        "surfaceContainer",
+        "surfaceContainerLowest",
+        "surfaceContainerLow",
+        "surfaceContainerHigh",
+        "surfaceContainerHighest",
         "inverseSurface",
         "inverseOnSurface",
         "error",
@@ -507,6 +523,18 @@ object ScreenDocumentProjection {
         "outline",
         "outlineVariant",
         "scrim",
+        "primaryFixed",
+        "primaryFixedDim",
+        "onPrimaryFixed",
+        "onPrimaryFixedVariant",
+        "secondaryFixed",
+        "secondaryFixedDim",
+        "onSecondaryFixed",
+        "onSecondaryFixedVariant",
+        "tertiaryFixed",
+        "tertiaryFixedDim",
+        "onTertiaryFixed",
+        "onTertiaryFixedVariant",
       )
       .associateWith { listOf(THEME, "colorScheme", it) } +
       mapOf(
@@ -541,8 +569,13 @@ object ScreenDocumentProjection {
       listOf(THEME, "shapes", it)
     }
 
-  /** Shapes a `clip` modifier can name, which are constants rather than theme roles. */
-  private val SHAPES: Map<String, String> =
+  /**
+   * The two shapes a `clip` modifier can name that are **not** theme roles.
+   *
+   * Theme roles come from [SHAPE_TOKENS], which `clip` consults first — `medium` and `large` are
+   * what real documents clip to, and they are `MaterialTheme.shapes` accessors.
+   */
+  private val SHAPE_CONSTANTS: Map<String, String> =
     mapOf(
       "circle" to "androidx.compose.foundation.shape.CircleShape",
       "rectangle" to "androidx.compose.ui.graphics.RectangleShape",

@@ -598,22 +598,23 @@ public interface ServeOptions {
     get() = setOf("m3-catalog")
 
   /**
-   * Discovered component record for the UI-builder's catalog (`--ui-builder-components
-   * <components.json>`).
+   * Discovered component records for the UI-builder's catalogs (`--ui-builder-components
+   * <system>=<components.json>[,<system>=<file>]`).
    *
-   * A **build output**, not a configuration file: it is the `components.json` a preview bundle
-   * carries, holding each component's recovered signature, its opt-in markers and whether a call
-   * site can be printed for it at all. The Compose export path generates from it, so without one
-   * the host can prove nothing about a call site and says exactly that
+   * A **build output** per catalog, not a configuration file: each is the `components.json` a
+   * preview bundle carries, holding that catalog's recovered signatures, opt-in markers and whether
+   * a call site can be printed for each component at all. The Compose export path generates from
+   * the record whose key matches the design's pinned catalog, so a host serving several catalogs
+   * cannot generate one catalog's call site for another's document.
+   *
+   * Empty by default because most hosts serve renders rather than source. A catalog with no record
+   * refuses a Compose export naming that catalog
    * ([ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD]) rather than emitting
-   * almost-Kotlin.
-   *
-   * Null by default because most hosts serve renders rather than source, and a host that has not
-   * been given the record should refuse a Compose export with a reason, not be prevented from
-   * starting.
+   * almost-Kotlin, and a host with no records at all reports `composeCode = false` so the builder
+   * does not offer an export action that can only fail.
    */
-  public val uiBuilderComponents: File?
-    get() = null
+  public val uiBuilderComponents: Map<String, File>
+    get() = emptyMap()
 
   /**
    * Retained native renderer bundles (`runtimeId` to directory). Each directory contains a verified

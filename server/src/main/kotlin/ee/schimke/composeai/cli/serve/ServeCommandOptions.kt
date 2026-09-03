@@ -692,9 +692,35 @@ public class ServeCommandOptions(
       }
       ?.toSet() ?: setOf("m3-catalog")
 
-  /** The bundle's discovered `components.json`, which the Compose export path generates from. */
-  override val uiBuilderComponents: File? =
-    args.flagValue("--ui-builder-components")?.takeIf { it.isNotBlank() }?.let(::File)
+  /**
+   * Each catalog's discovered `components.json`, which the Compose export path generates from.
+   *
+   * `<system>=<path>` pairs rather than a bare path, because a host serving `m3-catalog,remote-m3`
+   * has two records and no way to say which is which otherwise.
+   */
+  override val uiBuilderComponents: Map<String, File> =
+    args
+      .flagValue("--ui-builder-components")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.map { entry ->
+        val system = entry.substringBefore('=', missingDelimiterValue = "").trim()
+        val path = entry.substringAfter('=', missingDelimiterValue = "").trim()
+        require(system.isNotEmpty() && path.isNotEmpty()) {
+          "--ui-builder-components entries must be <catalog>=<components.json>, got `$entry`"
+        }
+        require(UI_BUILDER_CATALOG_ID.matches(system)) {
+          "--ui-builder-components names an invalid catalog id `$system`"
+        }
+        system to File(path)
+      }
+      ?.also { pairs ->
+        require(pairs.map { it.first }.distinct().size == pairs.size) {
+          "--ui-builder-components names a catalog twice"
+        }
+      }
+      ?.toMap() ?: emptyMap()
 
   /** Exact, retained renderer bundles; unlike the builder shell these paths are immutable pins. */
   override val uiBuilderRuntimeDirs: Map<String, File> =

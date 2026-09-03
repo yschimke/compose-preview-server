@@ -3,23 +3,25 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
+import ee.schimke.composeai.uibuilder.protocol.ClipModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
-import ee.schimke.composeai.uibuilder.protocol.EnumValueV1
 import ee.schimke.composeai.uibuilder.protocol.FillMaxSizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.FillMaxWidthModifierV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.PaddingModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ShapeTokenValueV1
+import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.TypographyTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import java.io.File
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -97,7 +99,7 @@ object ScreenGeneratorScreenFixture {
             DesignNodeV1(
               id = "surface",
               componentId = "m3/surface",
-              properties = mapOf("color" to ColorTokenValueV1("background")),
+              properties = mapOf("color" to ColorTokenValueV1("surfaceContainer")),
               modifiers = listOf(FillMaxSizeModifierV1),
               slots = mapOf("content" to listOf("column")),
             ),
@@ -132,7 +134,7 @@ object ScreenGeneratorScreenFixture {
               id = "card",
               componentId = "m3/card",
               properties = mapOf("shape" to ShapeTokenValueV1("medium")),
-              modifiers = listOf(FillMaxWidthModifierV1),
+              modifiers = listOf(FillMaxWidthModifierV1, ClipModifierV1(shape = "medium")),
               slots = mapOf("content" to listOf("session", "time")),
             ),
           "session" to
@@ -143,8 +145,8 @@ object ScreenGeneratorScreenFixture {
                 mapOf(
                   "text" to StringValueV1("Opening keynote"),
                   "style" to TypographyTokenValueV1("bodyMedium"),
-                  "textAlign" to EnumValueV1("Center"),
                 ),
+              modifiers = listOf(SizeModifierV1(widthDp = JsonPrimitive(120), heightDp = JsonNull)),
             ),
           "time" to
             DesignNodeV1(

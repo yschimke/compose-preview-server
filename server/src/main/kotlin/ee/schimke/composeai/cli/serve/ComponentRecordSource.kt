@@ -5,7 +5,23 @@ import java.io.File
 import kotlinx.serialization.json.Json
 
 /**
- * Reads a bundle's `components.json` for the Compose export path, re-reading it when it changes.
+ * Reads a bundle's `components.json` for the Compose export path, per catalog, re-reading each one
+ * when it changes.
+ *
+ * ## Per catalog, because a host serves several
+ *
+ * The packaged image runs `--ui-builder-catalogs m3-catalog,remote-m3`. One global record for both
+ * would resolve every export against whichever record the host happened to be given: a component id
+ * present in both catalogs would generate the *other* catalog's call site, and an id present in
+ * neither would refuse a document that is perfectly valid against its own. Keyed by catalog system
+ * id, an export either finds its own catalog's record or is told that catalog has none.
+ *
+ * ## What this still does not pin
+ *
+ * A record is **not revision-pinned**. A design pinned to an older catalog revision exports against
+ * whatever `components.json` is on disk now, so regenerating the file changes what a pinned export
+ * produces. Fixing that means storing a record per catalog *revision*, which needs a retention
+ * story this option does not have — recorded here rather than left to be discovered.
  *
  * ## Why a source rather than a value
  *
@@ -26,22 +42,28 @@ import kotlinx.serialization.json.Json
  * record is a startup-shaped problem, and a builder exporting in a loop would otherwise fill the
  * log with the same line.
  */
-class ComponentRecordSource(private val file: File?) {
+class ComponentRecordSource(private val files: Map<String, File>) {
 
   private data class Parsed(val identity: Identity?, val record: ComponentRecordFile?)
 
   private data class Identity(val length: Long, val lastModified: Long)
 
-  private var last: Parsed? = null
+  private val last = mutableMapOf<String, Parsed>()
 
-  /** The parsed record, or null when there is no usable one. */
-  fun record(): ComponentRecordFile? {
-    val path = file ?: return null
+  /** Whether any catalog has a record configured — what the export capability is set from. */
+  val configured: Boolean
+    get() = files.isNotEmpty()
+
+  /** The parsed record for [catalogSystemId], or null when there is no usable one. */
+  fun record(catalogSystemId: String): ComponentRecordFile? {
+    val path = files[catalogSystemId] ?: return null
     val identity = path.takeIf { it.isFile }?.let { Identity(it.length(), it.lastModified()) }
-    last?.let { if (it.identity == identity) return it.record }
+    last[catalogSystemId]?.let { if (it.identity == identity) return it.record }
     val record =
       if (identity == null) {
-        System.err.println("serve: UI-builder component record not readable at $path")
+        System.err.println(
+          "serve: UI-builder component record for $catalogSystemId not readable at $path"
+        )
         null
       } else {
         runCatching { JSON.decodeFromString<ComponentRecordFile>(path.readText()) }
@@ -52,7 +74,7 @@ class ComponentRecordSource(private val file: File?) {
           }
           .getOrNull()
       }
-    last = Parsed(identity, record)
+    last[catalogSystemId] = Parsed(identity, record)
     return record
   }
 

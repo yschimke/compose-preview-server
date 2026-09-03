@@ -45,7 +45,7 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   private fun export(
     document: DesignDocumentV1 = ScreenGeneratorScreenFixture.document(),
-    components: () -> ComponentRecordFile? = { ScreenGeneratorScreenFixture.components() },
+    components: (String) -> ComponentRecordFile? = { ScreenGeneratorScreenFixture.components() },
   ) =
     ScreenGeneratorComposeExportExecutor(components, ScreenGeneratorScreenFixture.PACKAGE_NAME)
       .export(
@@ -81,7 +81,7 @@ class ScreenGeneratorComposeExportExecutorTest {
     val diagnostic = artifact.diagnostics.single()
     assertEquals(DiagnosticSeverityV1.ERROR, diagnostic.severity)
     assertEquals(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD, diagnostic.code)
-    assertTrue(diagnostic.message.contains("run a preview bundle"), diagnostic.message)
+    assertTrue(diagnostic.message.contains("catalog `test-catalog`"), diagnostic.message)
   }
 
   @Test
@@ -150,17 +150,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 
 @Composable
 fun ScheduleOperations() {
-    Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize(), color = androidx.compose.material3.MaterialTheme.colorScheme.background, content = {
+    Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize(), color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer, content = {
         Column(modifier = androidx.compose.ui.Modifier.padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 16.dp), content = {
             androidx.compose.material3.Text(text = "Schedule", color = androidx.compose.material3.MaterialTheme.colorScheme.onBackground, style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
-            androidx.compose.material3.Card(modifier = androidx.compose.ui.Modifier.fillMaxWidth(), shape = androidx.compose.material3.MaterialTheme.shapes.medium, content = {
-                androidx.compose.material3.Text(text = "Opening keynote", textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+            androidx.compose.material3.Card(modifier = androidx.compose.ui.Modifier.fillMaxWidth().clip(androidx.compose.material3.MaterialTheme.shapes.medium), shape = androidx.compose.material3.MaterialTheme.shapes.medium, content = {
+                androidx.compose.material3.Text(text = "Opening keynote", modifier = androidx.compose.ui.Modifier.width(120.dp), style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
                 androidx.compose.material3.Text(text = "09:00", color = androidx.compose.ui.graphics.Color(4284960932L))
             })
         })

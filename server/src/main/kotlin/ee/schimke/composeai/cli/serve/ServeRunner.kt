@@ -2296,19 +2296,25 @@ public class ServeRunner(
     // forbids any compose-ai-tools module but the protocol on that module's classpath, and
     // `preview-discovery` is a compose-ai-tools module. `:server` is the first layer allowed to
     // hold both the record reader and the port.
-    val compose =
-      ScreenGeneratorComposeExportExecutor(ComponentRecordSource(uiBuilderComponents)::record)
+    val records = ComponentRecordSource(uiBuilderComponents)
+    val compose = ScreenGeneratorComposeExportExecutor(records::record)
     val exporter = renderer?.let { ProductionUiBuilderExportExecutor(it, compose) } ?: compose
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
+        // `composeCode` follows whether this host was given any component record, because the
+        // service gates the export on this flag. Advertising it unconditionally would put a
+        // supported export action in the builder's UI that can only ever come back refused —
+        // which is what the packaged image would have done: its entrypoint enables the builder
+        // and passes no `--ui-builder-components`.
         exportCapabilities =
-          (exporter as? ProductionUiBuilderExportExecutor)?.capabilities
-            ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-              composeCode = true,
-              svg = false,
-              png = false,
-            ),
+          ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
+              ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
+                composeCode = true,
+                svg = false,
+                png = false,
+              ))
+            .copy(composeCode = records.configured),
       )
     val service =
       PersistentUiBuilderService(

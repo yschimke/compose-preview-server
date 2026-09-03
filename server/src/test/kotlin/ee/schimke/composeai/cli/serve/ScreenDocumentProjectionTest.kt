@@ -1,14 +1,18 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.discovery.ChainLink
 import ee.schimke.composeai.discovery.ScreenValue
 import ee.schimke.composeai.uibuilder.protocol.AccessibilityV1
+import ee.schimke.composeai.uibuilder.protocol.ClipModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DimensionUnitV1
 import ee.schimke.composeai.uibuilder.protocol.DimensionValueV1
+import ee.schimke.composeai.uibuilder.protocol.EnumValueV1
 import ee.schimke.composeai.uibuilder.protocol.MatchParentSizeModifierV1
+import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.StateTruthyPredicateV1
 import ee.schimke.composeai.uibuilder.protocol.StateValueV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
@@ -17,6 +21,7 @@ import ee.schimke.composeai.uibuilder.protocol.UiValueV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -30,8 +35,6 @@ import kotlinx.serialization.json.JsonPrimitive
  */
 class ScreenDocumentProjectionTest {
 
-  private val components = ScreenGeneratorScreenFixture.components()
-
   private fun document(vararg nodes: DesignNodeV1, roots: List<String> = listOf(nodes.first().id)) =
     ScreenGeneratorScreenFixture.document().copy(roots = roots, nodes = nodes.associateBy { it.id })
 
@@ -42,14 +45,18 @@ class ScreenDocumentProjectionTest {
       properties = mapOf("text" to StringValueV1("hi")) + properties,
     )
 
+  private fun dp(value: Long) =
+    ScreenValue.Chain(
+      receiver = ScreenValue.Whole(value),
+      links = listOf(ChainLink("androidx.compose.ui.unit.dp", property = true)),
+      typeFqn = "androidx.compose.ui.unit.Dp",
+    )
+
   private fun refusal(document: DesignDocumentV1): List<String> =
-    (ScreenDocumentProjection.project(document, components)
-        as ScreenDocumentProjection.Outcome.Refused)
-      .reasons
+    (ScreenDocumentProjection.project(document) as ScreenDocumentProjection.Outcome.Refused).reasons
 
   private fun projected(document: DesignDocumentV1) =
-    (ScreenDocumentProjection.project(document, components)
-        as ScreenDocumentProjection.Outcome.Projected)
+    (ScreenDocumentProjection.project(document) as ScreenDocumentProjection.Outcome.Projected)
       .document
 
   @Test
@@ -162,6 +169,130 @@ class ScreenDocumentProjectionTest {
     // 0xFF6750A4. Left at zero alpha the colour would render invisible, which is a bug that looks
     // like a theme problem rather than like a parse problem.
     assertEquals(ScreenValue.Whole(4284960932L), color.positional.single())
+  }
+
+  @Test
+  fun `an enum value is refused, because nothing maps the wire spelling to a Kotlin member`() {
+    // The checked-in documents store `center` and `semiBold`, and `accountCircle` / `moreVert` on
+    // an `ImageVector` parameter whose entries are not members of that type at all. Appending
+    // either to the parameter's recorded type emits a reference that does not exist.
+    assertEquals(
+      listOf(
+        "node `text`.`textAlign` is the enum value `center`, and nothing maps a catalog enum " +
+          "value to its Kotlin member — the wire spelling is lower-camel and some values name " +
+          "icons or authored variants rather than members of the parameter's own type"
+      ),
+      refusal(document(text("textAlign" to EnumValueV1("center")))),
+    )
+  }
+
+  @Test
+  fun `a one-axis size becomes width or height, never a one-named-axis size call`() {
+    // `size(size: Dp)` names its parameter `size` and `size(width, height)` requires both, so
+    // `.size(width = 120.dp)` compiles as neither.
+    val width =
+      projected(
+          document(text().copy(modifiers = listOf(SizeModifierV1(JsonPrimitive(120), JsonNull))))
+        )
+        .root
+        .arguments
+        .getValue("modifier") as ScreenValue.Chain
+    assertEquals(
+      listOf(ChainLink("androidx.compose.foundation.layout.width", listOf(dp(120)))),
+      width.links,
+    )
+    val height =
+      projected(
+          document(text().copy(modifiers = listOf(SizeModifierV1(JsonNull, JsonPrimitive(40)))))
+        )
+        .root
+        .arguments
+        .getValue("modifier") as ScreenValue.Chain
+    assertEquals(
+      listOf(ChainLink("androidx.compose.foundation.layout.height", listOf(dp(40)))),
+      height.links,
+    )
+    val both =
+      projected(
+          document(
+            text().copy(modifiers = listOf(SizeModifierV1(JsonPrimitive(10), JsonPrimitive(20))))
+          )
+        )
+        .root
+        .arguments
+        .getValue("modifier") as ScreenValue.Chain
+    assertEquals(
+      listOf(
+        ChainLink(
+          "androidx.compose.foundation.layout.size",
+          named = mapOf("width" to dp(10), "height" to dp(20)),
+        )
+      ),
+      both.links,
+    )
+  }
+
+  @Test
+  fun `a clip to a theme shape resolves through MaterialTheme, not a constant`() {
+    val chain =
+      projected(document(text().copy(modifiers = listOf(ClipModifierV1(shape = "medium")))))
+        .root
+        .arguments
+        .getValue("modifier") as ScreenValue.Chain
+    assertEquals(
+      listOf(
+        ChainLink(
+          "androidx.compose.ui.draw.clip",
+          positional =
+            listOf(
+              ScreenValue.Reference(
+                "androidx.compose.material3.MaterialTheme",
+                listOf("shapes", "medium"),
+                typeFqn = "androidx.compose.ui.graphics.Shape",
+              )
+            ),
+        )
+      ),
+      chain.links,
+    )
+  }
+
+  @Test
+  fun `a clip to a constant shape still resolves, and an unknown one names both sets`() {
+    val chain =
+      projected(document(text().copy(modifiers = listOf(ClipModifierV1(shape = "circle")))))
+        .root
+        .arguments
+        .getValue("modifier") as ScreenValue.Chain
+    assertEquals(
+      "androidx.compose.foundation.shape.CircleShape",
+      (chain.links.single().positional.single() as ScreenValue.Reference).rootFqn,
+    )
+    assertTrue(
+      refusal(document(text().copy(modifiers = listOf(ClipModifierV1(shape = "squircle")))))
+        .single()
+        .startsWith("node `text` clips to shape `squircle`, which is neither a theme shape")
+    )
+  }
+
+  @Test
+  fun `the surface container roles the catalog offers are expressible`() {
+    // All four appear in the checked-in Jetcaster and Confetti documents and are real
+    // `MaterialTheme.colorScheme` accessors; the first table omitted every one of them.
+    for (role in
+      listOf(
+        "surfaceContainer",
+        "surfaceContainerLow",
+        "surfaceContainerHigh",
+        "surfaceContainerHighest",
+      )) {
+      val color =
+        projected(document(text("color" to ColorTokenValueV1(role))))
+          .root
+          .arguments
+          .getValue("color") as ScreenValue.Reference
+      assertEquals(listOf("colorScheme", role), color.members, role)
+    }
   }
 
   @Test

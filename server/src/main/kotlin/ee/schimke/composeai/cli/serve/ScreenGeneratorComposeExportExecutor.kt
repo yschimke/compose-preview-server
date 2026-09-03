@@ -43,7 +43,7 @@ import java.security.MessageDigest
  * that was never given the record.
  */
 class ScreenGeneratorComposeExportExecutor(
-  private val components: () -> ComponentRecordFile?,
+  private val components: (catalogSystemId: String) -> ComponentRecordFile?,
   private val packageName: String = "generated.screen",
 ) : UiBuilderExportExecutor {
 
@@ -57,16 +57,18 @@ class ScreenGeneratorComposeExportExecutor(
     require(request.revision == request.document.revision) { "export revision/document mismatch" }
     require(request.document.id == request.designId) { "export design/document mismatch" }
 
+    val catalogSystemId = request.document.catalogPin.systemId
     val record =
-      components()
+      components(catalogSystemId)
         ?: return refused(
           NO_COMPONENT_RECORD,
           listOf(
-            "this host has no discovered component record for the pinned catalog, so no call " +
-              "site can be proven; run a preview bundle for the catalog's module to produce one"
+            "this host has no discovered component record for catalog `$catalogSystemId`, so no " +
+              "call site can be proven; run a preview bundle for that catalog's module and pass " +
+              "it as `--ui-builder-components $catalogSystemId=<components.json>`"
           ),
         )
-    val projection = ScreenDocumentProjection.project(request.document, record)
+    val projection = ScreenDocumentProjection.project(request.document)
     val document =
       when (projection) {
         is ScreenDocumentProjection.Outcome.Projected -> projection.document
