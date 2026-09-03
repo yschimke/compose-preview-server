@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.18.0](https://github.com/yschimke/compose-preview-server/compare/v2.17.0...v2.18.0) (2026-09-03)
+
+
+### Features
+
+* **serve:** bake the cmp-jvm sidecar and give the java player a column ([#206](https://github.com/yschimke/compose-preview-server/issues/206)) ([6f8735d](https://github.com/yschimke/compose-preview-server/commit/6f8735d9a37373e6122324f96b28c0f2a28c5df4))
+
+
+### Bug Fixes
+
+* **serve:** cache a bare player selection like the published bytes it is ([#209](https://github.com/yschimke/compose-preview-server/issues/209)) ([eaf9f19](https://github.com/yschimke/compose-preview-server/commit/eaf9f192668195042e0b9376ec18021c60ec043b))
+
 ## [2.17.0](https://github.com/yschimke/compose-preview-server/compare/v2.16.1...v2.17.0) (2026-09-02)
 
 
