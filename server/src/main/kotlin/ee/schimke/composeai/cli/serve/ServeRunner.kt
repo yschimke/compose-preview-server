@@ -18,7 +18,6 @@ import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
-import ee.schimke.composeai.uibuilder.service.RevisionPinnedComposeExportExecutor
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -2282,28 +2281,70 @@ public class ServeRunner(
       throw IllegalStateException("UI-builder state directory is not writable: $directory")
     }
     System.err.println("serve: UI-builder design API persisting to ${directory.absolutePath}")
+    // Whether a Compose export survives the renderer failing is the same question the capability
+    // below answers, so it is asked once, here, and both read it. The handler used to promise
+    // "Compose export remains enabled" unconditionally — which in the packaged deployment, where
+    // catalogs are enabled and no record is passed, told an operator diagnosing a renderer failure
+    // that a fallback existed while the next expression was disabling every export format.
+    // Named, not counted. `composeCode` is all-or-none across enabled catalogs, so one missing
+    // record disables the export for every catalog — and a message saying "no catalog has a
+    // record" then sends an operator who configured `m3-catalog` looking for the record that is
+    // already there. What they need is the name of the one that is not.
+    val catalogsWithoutRecords = uiBuilderCatalogs.filterNot { it in uiBuilderComponents.keys }
+    val composeExportConfigured = catalogsWithoutRecords.isEmpty()
     val renderer = runCatching {
       ServeUiBuilderRenderPort.open(directory.resolve("renderer").toPath())
     }
       .onFailure { failure ->
         System.err.println(
           "serve: UI-builder PNG/SVG renderer unavailable (${failure.message}); " +
-            "Compose export remains enabled"
+            if (composeExportConfigured) "Compose export remains enabled"
+            else
+              "and ${catalogsWithoutRecords.sorted().joinToString(", ")} " +
+                (if (catalogsWithoutRecords.size == 1) "has" else "have") +
+                " no component record, so this host offers no export at all " +
+                "(pass --ui-builder-components <catalog>=<components.json>)"
         )
       }
       .getOrNull()
-    val exporter =
-      renderer?.let(::ProductionUiBuilderExportExecutor) ?: RevisionPinnedComposeExportExecutor()
+    // The Compose half of the export is generated from the discovered component record, so it is
+    // constructed here rather than defaulted inside the runtime: `checkUiBuilderRuntimeBoundary`
+    // forbids any compose-ai-tools module but the protocol on that module's classpath, and
+    // `preview-discovery` is a compose-ai-tools module. `:server` is the first layer allowed to
+    // hold both the record reader and the port.
+    val records = ComponentRecordSource(uiBuilderComponents)
+    val compose = ScreenGeneratorComposeExportExecutor(records::record)
+    val exporter = renderer?.let { ProductionUiBuilderExportExecutor(it, compose) } ?: compose
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
+        // `composeCode` answers a **configuration** question — is this host set up to export
+        // Compose? — and deliberately not a filesystem one.
+        //
+        // It has to, because this value is computed once and baked into every catalog by
+        // `CurrentM3UiBuilderCatalogExecutor`, and `PersistentUiBuilderService` then gates each
+        // request on it. Anything read from disk here is a cache of a mutable fact with no
+        // invalidation: a record repaired after startup could never lift the flag, which would
+        // defeat `ComponentRecordSource`'s hot reload outright — the source would re-read a file
+        // the service has already refused to ask it about.
+        //
+        // So the question is whether every enabled catalog has a record **configured**, which is
+        // fixed for the process. The packaged image passes none, so it advertises nothing and the
+        // builder offers no action that can only fail — the point of gating this at all.
+        //
+        // The cost, stated: a configured record that is missing, malformed, or on a schema this
+        // generator will not read is still advertised, and every export of it refuses. That is the
+        // better failure. The refusal names the catalog, the file and the reason, an operator who
+        // repairs the file is served on the next request, and nothing needs a restart. The
+        // alternative trades a precise per-request diagnostic for a silent permanent one.
         exportCapabilities =
-          (exporter as? ProductionUiBuilderExportExecutor)?.capabilities
-            ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-              composeCode = true,
-              svg = false,
-              png = false,
-            ),
+          ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
+              ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
+                composeCode = true,
+                svg = false,
+                png = false,
+              ))
+            .copy(composeCode = composeExportConfigured),
       )
     val service =
       PersistentUiBuilderService(

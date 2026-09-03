@@ -692,6 +692,36 @@ public class ServeCommandOptions(
       }
       ?.toSet() ?: setOf("m3-catalog")
 
+  /**
+   * Each catalog's discovered `components.json`, which the Compose export path generates from.
+   *
+   * `<system>=<path>` pairs rather than a bare path, because a host serving `m3-catalog,remote-m3`
+   * has two records and no way to say which is which otherwise.
+   */
+  override val uiBuilderComponents: Map<String, File> =
+    args
+      .flagValue("--ui-builder-components")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.map { entry ->
+        val system = entry.substringBefore('=', missingDelimiterValue = "").trim()
+        val path = entry.substringAfter('=', missingDelimiterValue = "").trim()
+        require(system.isNotEmpty() && path.isNotEmpty()) {
+          "--ui-builder-components entries must be <catalog>=<components.json>, got `$entry`"
+        }
+        require(UI_BUILDER_CATALOG_ID.matches(system)) {
+          "--ui-builder-components names an invalid catalog id `$system`"
+        }
+        system to File(path)
+      }
+      ?.also { pairs ->
+        require(pairs.map { it.first }.distinct().size == pairs.size) {
+          "--ui-builder-components names a catalog twice"
+        }
+      }
+      ?.toMap() ?: emptyMap()
+
   /** Exact, retained renderer bundles; unlike the builder shell these paths are immutable pins. */
   override val uiBuilderRuntimeDirs: Map<String, File> =
     args
@@ -1128,6 +1158,11 @@ public class ServeCommandOptions(
                           Explicit catalog allowlist for catalog-scoped builder instances at
                           /ui-builder/<system>/. Defaults to m3-catalog. Serving a catalog does not
                           enable its builder automatically.
+        --ui-builder-components <catalog>=<components.json>[,<catalog>=<file>…]
+                          Discovered component records the Compose export generates from — the
+                          components.json a preview bundle carries, one per catalog. A catalog with
+                          no record refuses a Compose export naming it; a host missing a record for
+                          any enabled catalog reports composeCode = false and offers no export.
         --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]
                           Retained immutable native renderer bundles. Each directory must contain
                           runtime-manifest.json. Runtime ids are exact pins; there is no latest

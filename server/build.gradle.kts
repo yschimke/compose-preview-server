@@ -288,6 +288,10 @@ dependencies {
   // Published wire-format DTOs and the bundle format. `api` because they appear in this module's
   // own signatures, which `:cli` reads.
   api(libs.composeai.preview.data.api)
+  // `ScreenGenerator` and the component record it reads. Pure-JVM and published: the UI-builder
+  // runtime cannot take it (its boundary forbids any composeai module but the protocol), which is
+  // exactly why the Compose-source executor is constructed here instead.
+  implementation(libs.composeai.preview.discovery)
   implementation(libs.composeai.common.image.crop)
   api(libs.composeai.bundle.format)
   api(libs.composeai.agent.grant.protocol)
@@ -614,6 +618,7 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:data-theme-core",
       "ee.schimke.composeai:parity-issues-protocol",
       "ee.schimke.composeai:preview-data-api",
+      "ee.schimke.composeai:preview-discovery",
       "ee.schimke.composeai:render-session-api",
       "ee.schimke.composeai:render-session-subprocess",
       "ee.schimke.composeai:ui-builder-protocol",
