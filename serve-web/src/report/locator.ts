@@ -284,3 +284,37 @@ export function fillLocators(template: string, blocks: string[]): string {
     lines.splice(at, 1, ...(filled ? filled.split("\n").slice(0, -1) : []));
     return lines.join("\n");
 }
+
+/**
+ * [body] with every `compose-parity-locator/v1` block removed, and the blank line that separated it.
+ *
+ * For a page that has a locator in its template but must not file one right now — the viewer in an
+ * interactive lane, where the stage's pixels are painted by a canvas or an iframe that
+ * `data-cp-src` knows nothing about. Removing the block leaves an ordinary report: still filed,
+ * still labelled, simply not joined to a comparison it cannot honestly name.
+ *
+ * Line-oriented, and it removes the SEPARATOR too, so the result is the body a server with no
+ * locator to write produces on its own. Leaving the blank line behind would be harmless to a reader
+ * and is still worth not doing: the two bodies being byte-identical is what makes "no locator" one
+ * state rather than two.
+ */
+export function withoutLocators(body: string): string {
+    const lines = body.split("\n");
+    const out: string[] = [];
+    let inside = false;
+    for (const line of lines) {
+        if (!inside && line === "```" + LOCATOR_FENCE) {
+            inside = true;
+            // Drop the blank line the block was separated from the prose by, if this writer put
+            // one there. Only one, and only when it is the last thing kept.
+            if (out.length && out[out.length - 1] === "") out.pop();
+            continue;
+        }
+        if (inside) {
+            if (line === "```") inside = false;
+            continue;
+        }
+        out.push(line);
+    }
+    return out.join("\n");
+}

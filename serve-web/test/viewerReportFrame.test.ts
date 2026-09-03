@@ -1,7 +1,10 @@
 // The D4 gate: the report describes the frame on screen, not the controls that asked for one.
 
 import assert from "node:assert/strict";
-import { reportFollowsDisplayedFrame } from "../src/viewer/reportFrame.js";
+import {
+    reportFollowsDisplayedFrame,
+    reportMayCarryLocator,
+} from "../src/viewer/reportFrame.js";
 
 const REQUESTED =
     "http://host/compose-m3/render/button-filled.png?uiMode=dark&knob.label=Send";
@@ -66,5 +69,36 @@ describe("report follows the displayed frame", () => {
 
     it("answers false rather than throwing on an unparseable landed URL", () => {
         assert.equal(reportFollowsDisplayedFrame(REQUESTED, "http://"), false);
+    });
+});
+
+describe("report may carry a locator", () => {
+    it("names a comparison from the lanes whose pixels the stage image is", () => {
+        for (const stage of ["snapshot", "svg", "spec"]) {
+            assert.equal(reportMayCarryLocator(stage), true, stage);
+        }
+    });
+
+    it("withholds it from every lane that paints its own pixels", () => {
+        // Live, Wasm and the Remote Compose players draw into a canvas or an iframe and apply
+        // overrides in place, so `data-cp-src` names a frame the reporter stopped looking at
+        // several interactions ago. `motion` plays an animation the still does not describe.
+        for (const stage of [
+            "live",
+            "wasm",
+            "rc",
+            "rc-wasm",
+            "motion",
+            "source",
+        ]) {
+            assert.equal(reportMayCarryLocator(stage), false, stage);
+        }
+    });
+
+    it("withholds it from a lane it has never heard of", () => {
+        // An allowlist: the next interactive lane must not be indexable by default. That failure
+        // would be silent and visible only in the filed issue.
+        assert.equal(reportMayCarryLocator("holographic"), false);
+        assert.equal(reportMayCarryLocator(""), false);
     });
 });

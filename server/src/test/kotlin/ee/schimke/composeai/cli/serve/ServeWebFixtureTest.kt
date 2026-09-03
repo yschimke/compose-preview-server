@@ -7895,10 +7895,23 @@ class ServeWebFixtureTest {
     assertTrue(
       viewerSourceFlat()
         .contains(
-          "if ( !rules.reportFollowsDisplayedFrame( renderUrl(snapshotExt), " +
+          "if ( mayName && !rules.reportFollowsDisplayedFrame( renderUrl(snapshotExt), " +
             "img.getAttribute(\"data-cp-src\"), ) ) return;"
         ),
       "the report is only recomposed while the landed frame is the requested one",
+    )
+    // …and the locator is withheld outright on a lane whose pixels the stage image is not. Live,
+    // Wasm and the Remote Compose players paint into a canvas or an iframe and apply overrides in
+    // place, so no frame gate can speak for what is on screen there; the workflow doc requires
+    // reporting to stay disabled in those lanes, and withholding the block is the half of that the
+    // index depends on.
+    assertTrue(
+      viewerSourceFlat()
+        .contains(
+          "var mayName = rules.reportMayCarryLocator( " +
+            "root.getAttribute(\"data-mode\") || \"snapshot\", );"
+        ) && viewerSourceFlat().contains("omitLocator: !mayName,"),
+      "an interactive lane files a report with no locator in it",
     )
     // The URL is copied by a plainly-named button rather than by clicking a field whose only clue
     // was a `title`. The field itself stays in the DOM (refreshLinks writes it, both copy buttons
