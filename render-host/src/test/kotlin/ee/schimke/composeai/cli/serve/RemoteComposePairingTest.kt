@@ -6,6 +6,7 @@ import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -259,6 +260,81 @@ class RemoteComposePairingTest {
     assertTrue(
       ServeBundleDaemon.overlaysDaemonSidecar(material3, demoteRemoteCompose = true),
       "the demotion is the Remote Compose family's alone — Material3 still wins for the catalog",
+    )
+  }
+
+  /**
+   * The demotion's justification is that the sidecar's IR replay links against the family. A bundle
+   * with no IR has consumer bytecode compiled against the versions it records, so the catalog keeps
+   * them — the split is reported without being rearranged (Codex review on #219).
+   */
+  @Test
+  fun `only an IR bundle demotes, a class-backed one keeps its own versions`() {
+    val skewed =
+      RemoteComposePairing.Line(
+        bundle = listOf(RemoteComposePairing.Member("remote-creation", "1.0.0-SNAPSHOT")),
+        sidecar = listOf(RemoteComposePairing.Member("remote-core", "1.0.0-alpha18")),
+      )
+    assertNotNull(RemoteComposePairing.skew(skewed), "the split itself is reported either way")
+
+    for (hasIr in listOf(true, false)) {
+      val demote = hasIr && RemoteComposePairing.skew(skewed) != null
+      assertEquals(
+        hasIr,
+        ServeBundleDaemon.overlaysDaemonSidecar(maven("remote-core", "1.0.0-SNAPSHOT"), demote)
+          .not(),
+        "hasIr=$hasIr must decide whether the family falls behind the sidecar",
+      )
+    }
+  }
+
+  /**
+   * Two sides reading one `-SNAPSHOT` are not two sides reading one build. Not enough to demote on,
+   * but enough to say once a linkage error has actually happened (Codex review on #219).
+   */
+  @Test
+  fun `a mutable version on both sides is not proof of coherence once something breaks`() {
+    val line =
+      RemoteComposePairing.Line(
+        bundle = listOf(RemoteComposePairing.Member("remote-creation", "1.0.0-SNAPSHOT")),
+        sidecar = listOf(RemoteComposePairing.Member("remote-player-core", "1.0.0-SNAPSHOT")),
+      )
+    RemoteComposePairing.record(
+      destDir = destDir,
+      bundle = line.bundle,
+      sidecar = line.sidecar,
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+    )
+
+    assertTrue(logs.isEmpty(), "a matching version must not demote or shout at materialization")
+    val diagnosis =
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.NoSuchFieldError: androidx.compose.remote.core.RemoteClock",
+        descriptor,
+      )
+    assertNotNull(diagnosis, "a Remote Compose trip is the evidence the version string withheld")
+    assertContains(diagnosis, "names no single build")
+    assertContains(diagnosis, "remote-player-core")
+  }
+
+  @Test
+  fun `released versions that agree stay coherent even after a trip`() {
+    RemoteComposePairing.record(
+      destDir = destDir,
+      bundle =
+        RemoteComposePairing.bundleMembers(listOf(maven("remote-creation", "1.0.0-alpha18"))),
+      sidecar = RemoteComposePairing.sidecarMembers(sidecar("remote-core-1.0.0-alpha18.jar")),
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+    )
+
+    assertNull(
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.NoSuchFieldError: androidx.compose.remote.core.RemoteClock",
+        descriptor,
+      ),
+      "one released version on both sides names one build — this failure is someone else's",
     )
   }
 

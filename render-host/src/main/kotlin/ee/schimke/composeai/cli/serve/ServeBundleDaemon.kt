@@ -264,16 +264,21 @@ public object ServeBundleDaemon {
     // when the bundle carries the WHOLE family — the sidecar's line is then shadowed entire — and
     // fatal when it carries only part of it: the rest falls through to the sidecar's pin and the
     // first replay dies on `NoSuchFieldError: … RemoteClock … SYSTEM`, latching the lane for good
-    // (#187). In that state the sidecar is authoritative, because it is the sidecar's replay code
-    // that links against the family; demoting the bundle's partial line keeps its jars reachable
-    // (in the child loader, and for an IR bundle on the parent behind the sidecar) while one
-    // coherent set answers. See [RemoteComposePairing].
+    // (#187). On an IR bundle the sidecar is authoritative in that state, because it is the
+    // sidecar's replay code that links against the family and a replayed document has no consumer
+    // class of its own; demoting the bundle's partial line keeps its jars reachable (in the child
+    // loader, and on the parent behind the sidecar) while one coherent set answers.
+    //
+    // Gated on `hasIr` deliberately. A bundle with no IR is the opposite case — its previews ARE
+    // consumer bytecode compiled against the versions it records — so the catalog keeps its own
+    // Remote Compose versions there and the split is reported without being rearranged. See
+    // [RemoteComposePairing].
     val remoteComposeLine =
       RemoteComposePairing.Line(
         bundle = RemoteComposePairing.bundleMembers(resolvedDependencies.map { it.coordinate }),
         sidecar = RemoteComposePairing.sidecarMembers(backendLaunch.daemonClasspath),
       )
-    val demoteRemoteCompose = RemoteComposePairing.skew(remoteComposeLine) != null
+    val demoteRemoteCompose = hasIr && RemoteComposePairing.skew(remoteComposeLine) != null
     val (parentOverlayDependencies, childDependencies) =
       resolvedDependencies.partition { overlaysDaemonSidecar(it.coordinate, demoteRemoteCompose) }
     // Android app-resource carriage: a classic `@Preview` that calls `stringResource(R.string.…)`
@@ -795,11 +800,14 @@ public object ServeBundleDaemon {
   )
 
   /**
-   * [shouldPrecedeDaemonSidecar] with the one exception the Remote Compose family earns: when this
-   * bundle covers only part of the family and the sidecar supplies the rest at another version
-   * ([demoteRemoteCompose], from [RemoteComposePairing.skew]), promoting the bundle's half wins
-   * nothing and links the two halves together. Demoted, the whole family answers from the sidecar —
-   * which is the side whose IR replay code calls into it. See [RemoteComposePairing].
+   * [shouldPrecedeDaemonSidecar] with the one exception the Remote Compose family earns: when an
+   * **IR-carrying** bundle covers only part of the family and the sidecar supplies the rest at
+   * another version ([demoteRemoteCompose], from `hasIr` and [RemoteComposePairing.skew]),
+   * promoting the bundle's half wins nothing and links the two halves together. Demoted, the whole
+   * family answers from the sidecar — which is the side whose IR replay code calls into it. A
+   * bundle with no IR never demotes: its previews are consumer bytecode compiled against the
+   * versions it records, which is exactly what [shouldPrecedeDaemonSidecar] protects. See
+   * [RemoteComposePairing].
    */
   internal fun overlaysDaemonSidecar(
     coordinate: BundleReader.ClasspathEntry.Maven,

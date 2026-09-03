@@ -54,15 +54,23 @@ import okio.Path.Companion.toPath
  *
  * ## Which side wins
  *
- * In that one state [ServeBundleDaemon] also stops promoting the bundle's copies ahead of the
- * sidecar ([isFamilyMember] drops them out of the parent overlay), because the **sidecar** is what
- * links against the family: `RemoteComposeIrReplay` is sidecar code, and a document has no consumer
- * class of its own to keep a version priority for. That is a deliberate exception to
- * [ServeBundleDaemon.shouldPrecedeDaemonSidecar]'s "the catalog's framework versions win" rule, and
- * it costs nothing that rule was protecting: a half-promoted family wins nothing — it links its own
- * half against the sidecar's other half and every render dies. The worst case after demotion is a
- * document the sidecar's player is too old to replay, which fails that render and leaves the lane,
- * the rest of the catalog and the background optimizer pass alive.
+ * In that one state, and **only on a bundle that carries IR** ([ServeBundleDaemon] passes `hasIr`),
+ * the bundle's copies stop being promoted ahead of the sidecar ([isFamilyMember] drops them out of
+ * the parent overlay). The gate matters: what makes the sidecar authoritative is that
+ * `RemoteComposeIrReplay` is **sidecar** code and a replayed document has no consumer class of its
+ * own to keep a version priority for. A bundle with no IR has the opposite property — its previews
+ * are consumer bytecode compiled against the versions the bundle records — so
+ * [ServeBundleDaemon.shouldPrecedeDaemonSidecar]'s "the catalog's framework versions win" rule
+ * stands there untouched, and a split family is reported without being rearranged.
+ *
+ * On an IR bundle the exception costs nothing that rule was protecting: a half-promoted family wins
+ * nothing — it links its own half against the sidecar's other half and every render dies. A mixed
+ * bundle (IR previews *and* class-backed ones) is the one place the trade is real, and it goes the
+ * same way: the class-backed previews may lose their own Remote Compose versions, but the
+ * alternative is the fatal breaker latching the lane for **every** preview in the catalog, IR or
+ * not. The worst case after demotion is a document the sidecar's player is too old to replay, which
+ * fails that render and leaves the lane, the rest of the catalog and the background optimizer pass
+ * alive.
  */
 internal object RemoteComposePairing {
 
@@ -125,6 +133,10 @@ internal object RemoteComposePairing {
    * The sentence for a classpath that will load two Remote Compose lines, or null when the family
    * is coherent — one side supplies all of it, or both sides agree on the version.
    *
+   * A version both sides agree on is taken at face value here even when it is a `-SNAPSHOT` that
+   * names no single build: acting on that suspicion at materialization would demote a family that
+   * is probably fine. [mutableVersionSuspicion] carries it to the one place it is evidence.
+   *
    * "Coherent" is judged per artifact and not per version count: the bundle's copies precede the
    * sidecar's, so a family artifact the bundle carries is the bundle's whatever else is behind it,
    * and only an artifact the bundle does **not** carry falls through to the sidecar's version.
@@ -183,6 +195,34 @@ internal object RemoteComposePairing {
   }
 
   /**
+   * The split a **mutable** version hides: the two sides read the same `-SNAPSHOT`, which names no
+   * single build, so version equality proves nothing about whether they came from one. Null when
+   * the family is not split at all, or when the versions that agree are released ones.
+   *
+   * Not enough to act on at materialization — demoting a family that is probably coherent would
+   * cost every catalog on a snapshot line its own versions for no evidence. It IS enough once a
+   * Remote Compose linkage error has actually happened, which is the only place it is read: at that
+   * point the classpath has demonstrated the split that the version strings could not rule out.
+   * This is the shape that killed `meshcore-mobile` before content-keyed extraction landed
+   * (compose-ai-tools#5015) — both sides said `1.0.0-SNAPSHOT` and a stale extraction served one of
+   * them from another build.
+   */
+  private fun mutableVersionSuspicion(line: Line): String? {
+    val carried = line.bundle.mapTo(mutableSetOf()) { it.artifact }
+    val fallthrough = line.sidecar.filter { it.artifact !in carried }
+    if (line.bundle.isEmpty() || fallthrough.isEmpty()) return null
+    val versions = (line.bundle + fallthrough).map { it.version }.distinct()
+    val version = versions.singleOrNull() ?: return null
+    if (!version.endsWith("-SNAPSHOT")) return null
+    return "This catalog's bundle carries ${line.bundle.size} Remote Compose artifact(s) and " +
+      "${fallthrough.size} more that the render needs come from the daemon sidecar instead — " +
+      "${fallthrough.joinToString { it.artifact }}. Both sides read $version, which names no " +
+      "single build, so that is not evidence they came from one; a linkage error inside these " +
+      "packages is exactly what two builds of one snapshot look like. Republish the catalog " +
+      "against released Remote Compose versions, which do name a build."
+  }
+
+  /**
    * One sentence attributing a **fatal** linkage [reason] inside the Remote Compose packages to a
    * classpath that mixes two of its lines — or null when the failure is not Remote Compose's, the
    * record is unreadable, or the family was coherent and the failure has some other cause.
@@ -206,7 +246,7 @@ internal object RemoteComposePairing {
           .let { json.decodeFromString(Line.serializer(), it) }
       }
         .getOrNull() ?: return null
-    return skew(line)
+    return skew(line) ?: mutableVersionSuspicion(line)
   }
 
   /**
