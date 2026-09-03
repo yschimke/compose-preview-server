@@ -81,13 +81,43 @@ internal object RemoteComposePairing {
    */
   private const val FAMILY_MARKER = "compose.remote"
 
+  /**
+   * The family's main line, and the group a sidecar jar belongs to unless its artifact says Wear.
+   */
+  const val BASE_GROUP: String = "androidx.compose.remote"
+
+  /** The Wear line, versioned independently of [BASE_GROUP]. */
+  private const val WEAR_GROUP = "androidx.wear.compose.remote"
+
+  /**
+   * Artifacts published by [WEAR_GROUP] rather than [BASE_GROUP]. Needed only for the sidecar side,
+   * where the group is not in the path — a `:cli:installDist` `lib/` is flat, so `remote-material3`
+   * is all there is to go on. The bundle side carries its real group on the coordinate.
+   */
+  private val WEAR_ARTIFACTS = setOf("remote-material3")
+
   /** File name written beside the launch descriptor, mirroring [BundleClasspathGaps]. */
   private const val FILE_NAME = "remote-compose-line.json"
 
   private val json = Json { ignoreUnknownKeys = true }
 
-  /** One Remote Compose artifact and the version the classpath will load it at. */
-  @Serializable data class Member(val artifact: String, val version: String)
+  /**
+   * One Remote Compose artifact, the version the classpath will load it at, and the line it belongs
+   * to.
+   *
+   * [group] is what keeps the **base** family (`androidx.compose.remote`) and the **Wear** one
+   * (`androidx.wear.compose.remote`) from being compared against each other. They version
+   * independently and legitimately — this server's own sidecar ships `remote-core` at
+   * `1.0.0-alpha18` beside `remote-material3` at `1.0.0-alpha10` — so a single "one version across
+   * the whole family" rule would call every such bundle skewed. Defaulted to the base group so a
+   * record written before this field existed still reads back as what it was.
+   */
+  @Serializable
+  data class Member(
+    val artifact: String,
+    val version: String,
+    val group: String = BASE_GROUP,
+  )
 
   /**
    * What each side of the daemon `-cp` contributes to the family: the artifacts the bundle carries
@@ -109,9 +139,20 @@ internal object RemoteComposePairing {
   fun isFamilyMember(coordinate: BundleReader.ClasspathEntry.Maven): Boolean =
     coordinate.group.contains(FAMILY_MARKER)
 
+  /**
+   * Whether [coordinate] is in one of the [skewedGroups] this bundle must stop promoting — the
+   * group's own supply is split, so its version priority is worth nothing. A group the bundle
+   * covers coherently keeps its priority even when a sibling group next to it does not.
+   */
+  fun isDemoted(coordinate: BundleReader.ClasspathEntry.Maven, skewedGroups: Set<String>): Boolean =
+    isFamilyMember(coordinate) && coordinate.group in skewedGroups
+
   /** The family members among the bundle's **resolved** coordinates. */
   fun bundleMembers(coords: List<BundleReader.ClasspathEntry.Maven>): List<Member> =
-    coords.filter { isFamilyMember(it) }.map { Member(it.artifact, it.version) }.distinct()
+    coords
+      .filter { isFamilyMember(it) }
+      .map { Member(it.artifact, it.version, it.group) }
+      .distinct()
 
   /**
    * The family members on the daemon sidecar's own classpath, read off jar filenames.
@@ -125,7 +166,14 @@ internal object RemoteComposePairing {
     sidecarClasspath
       .mapNotNull { path ->
         val filename = path.replace('\\', '/').substringAfterLast('/')
-        REMOTE_ARTIFACT.matchEntire(filename)?.let { Member(it.groupValues[1], it.groupValues[2]) }
+        REMOTE_ARTIFACT.matchEntire(filename)?.let {
+          val artifact = it.groupValues[1]
+          Member(
+            artifact,
+            it.groupValues[2],
+            if (artifact in WEAR_ARTIFACTS) WEAR_GROUP else BASE_GROUP,
+          )
+        }
       }
       .distinct()
 
@@ -142,30 +190,62 @@ internal object RemoteComposePairing {
    * and only an artifact the bundle does **not** carry falls through to the sidecar's version.
    */
   fun skew(line: Line): String? {
-    val bundle = line.bundle
-    val sidecar = line.sidecar
-    if (bundle.isEmpty() || sidecar.isEmpty()) return null
-    val carried = bundle.mapTo(mutableSetOf()) { it.artifact }
-    val fallthrough = sidecar.filter { it.artifact !in carried }
-    if (fallthrough.isEmpty()) return null
+    val split = skewedGroups(line)
+    if (split.isEmpty()) return null
+    val bundle = line.bundle.filter { it.group in split }
+    val fallthrough = line.fallthrough().filter { it.group in split }
     val bundleVersions = bundle.map { it.version }.distinct()
     val fallthroughVersions = fallthrough.map { it.version }.distinct()
-    if (bundleVersions.size == 1 && bundleVersions == fallthroughVersions) return null
     val remedy =
       if (line.demoted)
-        "The server therefore let the sidecar's line win the whole family: the bundle's copies " +
+        "The server therefore let the sidecar's line win those artifacts: the bundle's copies " +
           "stay on the classpath but behind the sidecar's, so the daemon's own IR replay links " +
           "against one coherent set. A document authored against a newer player may still fail to " +
           "replay — as a per-render error, not a dead lane."
       else
         "These artifacts are compiled against each other, so a render that crosses the seam fails " +
           "with NoSuchFieldError / NoSuchMethodError and no retry can clear it."
-    return "This catalog's bundle carries ${bundle.size} Remote Compose artifact(s) at " +
-      "${bundleVersions.joinToString()}, but ${fallthrough.size} more that the render needs are " +
-      "not in the bundle and come from the daemon sidecar instead, at " +
+    return "This catalog's bundle carries ${bundle.size} artifact(s) of ${split.joinToString()} " +
+      "at ${bundleVersions.joinToString()}, but ${fallthrough.size} more that the render needs " +
+      "are not in the bundle and come from the daemon sidecar instead, at " +
       "${fallthroughVersions.joinToString()} — ${fallthrough.joinToString { it.artifact }}. " +
       "$remedy Republish the catalog against the Remote Compose version this server ships, or " +
       "against one whose whole family the bundle records."
+  }
+
+  /**
+   * The Remote Compose groups whose supply is split between the bundle and the sidecar at differing
+   * versions — the groups [ServeBundleDaemon] must stop promoting on an IR bundle, and empty when
+   * the classpath is coherent.
+   *
+   * Judged **per group**, never across the family as a whole. `androidx.compose.remote` and
+   * `androidx.wear.compose.remote` version independently (alpha18 beside alpha10 in this server's
+   * own sidecar), so a bundle carrying both lines is normal and comparing one against the other
+   * would report a skew that is not there — and then demote a base family the bundle carries
+   * coherently, which is the failure this whole file exists to prevent.
+   *
+   * Within a group it is judged per artifact and not per version count: the bundle's copies precede
+   * the sidecar's, so an artifact the bundle carries is the bundle's whatever else is behind it,
+   * and only an artifact it does **not** carry falls through to the sidecar's version.
+   */
+  fun skewedGroups(line: Line): Set<String> {
+    if (line.bundle.isEmpty()) return emptySet()
+    val fallthrough = line.fallthrough()
+    return line.bundle
+      .map { it.group }
+      .distinct()
+      .filterTo(mutableSetOf()) { group ->
+        val carried = line.bundle.filter { it.group == group }.map { it.version }.distinct()
+        val missing = fallthrough.filter { it.group == group }
+        if (missing.isEmpty()) false
+        else carried.size != 1 || carried != missing.map { it.version }.distinct()
+      }
+  }
+
+  /** The family artifacts the render takes from the sidecar because the bundle records none. */
+  private fun Line.fallthrough(): List<Member> {
+    val carried = bundle.mapTo(mutableSetOf()) { it.group to it.artifact }
+    return sidecar.filter { (it.group to it.artifact) !in carried }
   }
 
   /**
@@ -208,18 +288,25 @@ internal object RemoteComposePairing {
    * them from another build.
    */
   private fun mutableVersionSuspicion(line: Line): String? {
-    val carried = line.bundle.mapTo(mutableSetOf()) { it.artifact }
-    val fallthrough = line.sidecar.filter { it.artifact !in carried }
-    if (line.bundle.isEmpty() || fallthrough.isEmpty()) return null
-    val versions = (line.bundle + fallthrough).map { it.version }.distinct()
-    val version = versions.singleOrNull() ?: return null
-    if (!version.endsWith("-SNAPSHOT")) return null
-    return "This catalog's bundle carries ${line.bundle.size} Remote Compose artifact(s) and " +
-      "${fallthrough.size} more that the render needs come from the daemon sidecar instead — " +
-      "${fallthrough.joinToString { it.artifact }}. Both sides read $version, which names no " +
-      "single build, so that is not evidence they came from one; a linkage error inside these " +
-      "packages is exactly what two builds of one snapshot look like. Republish the catalog " +
-      "against released Remote Compose versions, which do name a build."
+    if (line.bundle.isEmpty()) return null
+    val fallthrough = line.fallthrough()
+    for (group in line.bundle.map { it.group }.distinct()) {
+      val missing = fallthrough.filter { it.group == group }
+      if (missing.isEmpty()) continue
+      val version =
+        (line.bundle.filter { it.group == group } + missing)
+          .map { it.version }
+          .distinct()
+          .singleOrNull() ?: continue
+      if (!version.endsWith("-SNAPSHOT")) continue
+      return "This catalog's bundle carries ${line.bundle.count { it.group == group }} artifact(s) " +
+        "of $group and ${missing.size} more that the render needs come from the daemon sidecar " +
+        "instead — ${missing.joinToString { it.artifact }}. Both sides read $version, which names " +
+        "no single build, so that is not evidence they came from one; a linkage error inside these " +
+        "packages is exactly what two builds of one snapshot look like. Republish the catalog " +
+        "against released Remote Compose versions, which do name a build."
+    }
+    return null
   }
 
   /**

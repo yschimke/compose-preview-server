@@ -143,16 +143,28 @@ internal object BundleClasspathGaps {
     reason: String,
     descriptorPath: File,
     fileSystem: FileSystem = SystemFileSystem,
+  ): String? =
+    attributedDiagnosis(reason, descriptorPath, fileSystem)
+      ?: unattributedDiagnosis(reason, descriptorPath, fileSystem)
+
+  /**
+   * The half of [linkageDiagnosis] that names the artifact the failing type actually lives in: a
+   * mismatched coordinate, or an unresolved one whose group and artifact tokens appear in the
+   * failure. Null when this record can point at nothing in particular.
+   *
+   * Split from [unattributedDiagnosis] so a caller with a **more specific** diagnosis of its own
+   * can sit between the two. The generic half fires on any unresolved coordinate, related or not —
+   * a catalog missing one optional dependency would otherwise answer every linkage failure in the
+   * process with "something is missing", including the ones
+   * [RemoteComposePairing][RemoteComposePairing.linkageDiagnosis] can explain exactly. Attribution
+   * earns the first word; a bare gap does not.
+   */
+  fun attributedDiagnosis(
+    reason: String,
+    descriptorPath: File,
+    fileSystem: FileSystem = SystemFileSystem,
   ): String? {
-    if (MISSING_TYPE_MARKERS.none { it in reason }) return null
-    val file = File(descriptorPath.parentFile ?: return null, FILE_NAME)
-    val gaps =
-      runCatching {
-        fileSystem
-          .read(file.path.toPath()) { readUtf8() }
-          .let { json.decodeFromString(Gaps.serializer(), it) }
-      }
-        .getOrNull() ?: return null
+    val gaps = readGaps(reason, descriptorPath, fileSystem) ?: return null
     val dotted = reason.replace('/', '.')
     // A mismatched coordinate the failing type points at is reported first and alone: it names the
     // artifact AND says what is wrong with it, which is strictly more than the unresolved list can
@@ -161,18 +173,45 @@ internal object BundleClasspathGaps {
     mismatchDiagnosis(gaps, dotted)?.let {
       return it
     }
+    val culprit = gaps.unresolved.bestExplanationOf(dotted) ?: return null
+    return unresolvedSentence(
+      gaps,
+      " — including ${culprit.coordinate}, which is where the missing type lives",
+    )
+  }
+
+  /**
+   * The half that reports the gap without naming a culprit — "these ${'$'}n coordinates are missing
+   * and one of them is probably it". A direction rather than a cause, and correspondingly the last
+   * diagnosis to be tried.
+   */
+  fun unattributedDiagnosis(
+    reason: String,
+    descriptorPath: File,
+    fileSystem: FileSystem = SystemFileSystem,
+  ): String? {
+    val gaps = readGaps(reason, descriptorPath, fileSystem) ?: return null
     if (gaps.unresolved.isEmpty()) return null
-    val culprit = gaps.unresolved.bestExplanationOf(dotted)
-    val head =
-      "This catalog's bundle records ${gaps.total} Maven coordinate(s) and this server could not " +
-        "resolve ${gaps.unresolved.size} of them, so the daemon is running on an incomplete " +
-        "classpath"
-    val attribution =
-      culprit?.let { " — including ${it.coordinate}, which is where the missing type lives" }
-        ?: " — one of them is likely where the missing type lives"
-    return "$head$attribution. Unresolved: ${gaps.unresolved.joinToString { it.coordinate }}. " +
+    return unresolvedSentence(gaps, " — one of them is likely where the missing type lives")
+  }
+
+  private fun unresolvedSentence(gaps: Gaps, attribution: String): String =
+    "This catalog's bundle records ${gaps.total} Maven coordinate(s) and this server could not " +
+      "resolve ${gaps.unresolved.size} of them, so the daemon is running on an incomplete " +
+      "classpath$attribution. Unresolved: ${gaps.unresolved.joinToString { it.coordinate }}. " +
       "Republish the catalog from a build whose repositories the bundle records, or give this " +
       "server access to them (--extra-maven-repos)."
+
+  /** The record beside [descriptorPath], or null when [reason] is not a linkage failure at all. */
+  private fun readGaps(reason: String, descriptorPath: File, fileSystem: FileSystem): Gaps? {
+    if (MISSING_TYPE_MARKERS.none { it in reason }) return null
+    val file = File(descriptorPath.parentFile ?: return null, FILE_NAME)
+    return runCatching {
+      fileSystem
+        .read(file.path.toPath()) { readUtf8() }
+        .let { json.decodeFromString(Gaps.serializer(), it) }
+    }
+      .getOrNull()
   }
 
   /**

@@ -249,17 +249,25 @@ class RemoteComposePairingTest {
     val remoteCore = maven("remote-core", "1.0.0-SNAPSHOT")
     val material3 = maven("material3", "1.10.0", "androidx.compose.material3")
 
+    val base = setOf(RemoteComposePairing.BASE_GROUP)
     assertTrue(
-      ServeBundleDaemon.overlaysDaemonSidecar(remoteCore, demoteRemoteCompose = false),
+      ServeBundleDaemon.overlaysDaemonSidecar(remoteCore, demotedRemoteComposeGroups = emptySet()),
       "a coherent family keeps the catalog's own versions, as every other androidx artifact does",
     )
     assertTrue(
-      ServeBundleDaemon.overlaysDaemonSidecar(remoteCore, demoteRemoteCompose = true).not(),
+      ServeBundleDaemon.overlaysDaemonSidecar(remoteCore, demotedRemoteComposeGroups = base).not(),
       "a half-carried family must fall behind the sidecar so one line answers the IR replay",
     )
     assertTrue(
-      ServeBundleDaemon.overlaysDaemonSidecar(material3, demoteRemoteCompose = true),
+      ServeBundleDaemon.overlaysDaemonSidecar(material3, demotedRemoteComposeGroups = base),
       "the demotion is the Remote Compose family's alone — Material3 still wins for the catalog",
+    )
+    assertTrue(
+      ServeBundleDaemon.overlaysDaemonSidecar(
+        maven("remote-material3", "1.0.0-alpha10", "androidx.wear.compose.remote"),
+        demotedRemoteComposeGroups = base,
+      ),
+      "a split base line must not drag the independently-versioned Wear line down with it",
     )
   }
 
@@ -278,10 +286,10 @@ class RemoteComposePairingTest {
     assertNotNull(RemoteComposePairing.skew(skewed), "the split itself is reported either way")
 
     for (hasIr in listOf(true, false)) {
-      val demote = hasIr && RemoteComposePairing.skew(skewed) != null
+      val demoted = if (hasIr) RemoteComposePairing.skewedGroups(skewed) else emptySet()
       assertEquals(
         hasIr,
-        ServeBundleDaemon.overlaysDaemonSidecar(maven("remote-core", "1.0.0-SNAPSHOT"), demote)
+        ServeBundleDaemon.overlaysDaemonSidecar(maven("remote-core", "1.0.0-SNAPSHOT"), demoted)
           .not(),
         "hasIr=$hasIr must decide whether the family falls behind the sidecar",
       )
@@ -335,6 +343,61 @@ class RemoteComposePairingTest {
         descriptor,
       ),
       "one released version on both sides names one build — this failure is someone else's",
+    )
+  }
+
+  /**
+   * `androidx.compose.remote` and `androidx.wear.compose.remote` version independently — this
+   * server's own sidecar ships `remote-core` alpha18 beside `remote-material3` alpha10 — so one
+   * "single version across the whole family" rule would call every such bundle skewed and demote a
+   * base family it carries coherently (Codex review on #219).
+   */
+  @Test
+  fun `the base and Wear lines are compared apart, not against each other`() {
+    val line =
+      RemoteComposePairing.Line(
+        bundle =
+          RemoteComposePairing.bundleMembers(
+            listOf(
+              maven("remote-core", "1.0.0-alpha18"),
+              maven("remote-player-core", "1.0.0-alpha18"),
+              maven("remote-material3", "1.0.0-alpha10", "androidx.wear.compose.remote"),
+            )
+          ),
+        sidecar =
+          RemoteComposePairing.sidecarMembers(
+            sidecar("remote-core-1.0.0-alpha18.jar", "remote-material3-1.0.0-alpha10.jar")
+          ),
+      )
+
+    assertTrue(
+      RemoteComposePairing.skewedGroups(line).isEmpty(),
+      "two lines at their own versions are two coherent lines, not one skewed family",
+    )
+    assertNull(RemoteComposePairing.skew(line))
+  }
+
+  @Test
+  fun `only a group whose own supply is split is demoted`() {
+    val line =
+      RemoteComposePairing.Line(
+        bundle =
+          RemoteComposePairing.bundleMembers(
+            listOf(
+              maven("remote-creation", "1.0.0-SNAPSHOT"),
+              maven("remote-material3", "1.0.0-alpha10", "androidx.wear.compose.remote"),
+            )
+          ),
+        sidecar =
+          RemoteComposePairing.sidecarMembers(
+            sidecar("remote-core-1.0.0-alpha18.jar", "remote-material3-1.0.0-alpha10.jar")
+          ),
+      )
+
+    assertEquals(
+      setOf(RemoteComposePairing.BASE_GROUP),
+      RemoteComposePairing.skewedGroups(line),
+      "the base line is split snapshot-against-alpha18; the Wear line the bundle covers is intact",
     )
   }
 

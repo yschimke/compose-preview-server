@@ -271,16 +271,21 @@ public object ServeBundleDaemon {
     //
     // Gated on `hasIr` deliberately. A bundle with no IR is the opposite case — its previews ARE
     // consumer bytecode compiled against the versions it records — so the catalog keeps its own
-    // Remote Compose versions there and the split is reported without being rearranged. See
+    // Remote Compose versions there and the split is reported without being rearranged. Scoped to
+    // the groups actually split, too: the base and Wear lines version independently, so a bundle
+    // whose base family is coherent keeps it even when its Wear artifacts are not. See
     // [RemoteComposePairing].
     val remoteComposeLine =
       RemoteComposePairing.Line(
         bundle = RemoteComposePairing.bundleMembers(resolvedDependencies.map { it.coordinate }),
         sidecar = RemoteComposePairing.sidecarMembers(backendLaunch.daemonClasspath),
       )
-    val demoteRemoteCompose = hasIr && RemoteComposePairing.skew(remoteComposeLine) != null
+    val demotedRemoteComposeGroups =
+      if (hasIr) RemoteComposePairing.skewedGroups(remoteComposeLine) else emptySet()
     val (parentOverlayDependencies, childDependencies) =
-      resolvedDependencies.partition { overlaysDaemonSidecar(it.coordinate, demoteRemoteCompose) }
+      resolvedDependencies.partition {
+        overlaysDaemonSidecar(it.coordinate, demotedRemoteComposeGroups)
+      }
     // Android app-resource carriage: a classic `@Preview` that calls `stringResource(R.string.…)`
     // needs the app's own `0x7f` resource table at render time. Extract the bundle's carried
     // `android/` payload and synthesize the Robolectric `test_config.properties` onto the daemon
@@ -337,7 +342,7 @@ public object ServeBundleDaemon {
       sidecar = remoteComposeLine.sidecar,
       system = system,
       onLog = onLog,
-      demoted = demoteRemoteCompose,
+      demoted = demotedRemoteComposeGroups.isNotEmpty(),
       fileSystem = fileSystem,
     )
 
@@ -801,20 +806,20 @@ public object ServeBundleDaemon {
 
   /**
    * [shouldPrecedeDaemonSidecar] with the one exception the Remote Compose family earns: when an
-   * **IR-carrying** bundle covers only part of the family and the sidecar supplies the rest at
-   * another version ([demoteRemoteCompose], from `hasIr` and [RemoteComposePairing.skew]),
-   * promoting the bundle's half wins nothing and links the two halves together. Demoted, the whole
-   * family answers from the sidecar — which is the side whose IR replay code calls into it. A
-   * bundle with no IR never demotes: its previews are consumer bytecode compiled against the
-   * versions it records, which is exactly what [shouldPrecedeDaemonSidecar] protects. See
-   * [RemoteComposePairing].
+   * **IR-carrying** bundle covers only part of a Remote Compose group and the sidecar supplies the
+   * rest at another version ([demotedRemoteComposeGroups], from `hasIr` and
+   * [RemoteComposePairing.skewedGroups]), promoting the bundle's half of that group wins nothing
+   * and links the two halves together. Demoted, the group answers whole from the sidecar — the side
+   * whose IR replay code calls into it. A bundle with no IR never demotes: its previews are
+   * consumer bytecode compiled against the versions it records, which is exactly what
+   * [shouldPrecedeDaemonSidecar] protects. See [RemoteComposePairing].
    */
   internal fun overlaysDaemonSidecar(
     coordinate: BundleReader.ClasspathEntry.Maven,
-    demoteRemoteCompose: Boolean,
+    demotedRemoteComposeGroups: Set<String>,
   ): Boolean =
     shouldPrecedeDaemonSidecar(coordinate) &&
-      !(demoteRemoteCompose && RemoteComposePairing.isFamilyMember(coordinate))
+      !RemoteComposePairing.isDemoted(coordinate, demotedRemoteComposeGroups)
 
   /**
    * Dependencies whose packages [ee.schimke.composeai.daemon.UserClassLoaderHolder] deliberately

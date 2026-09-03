@@ -1993,18 +1993,20 @@ internal constructor(
         label = label,
         declaredThemes = declaredThemes,
         onLog = onLog,
-        // Three causes, tried in order of specificity: a split Skiko pair (which names the exact
-        // versions), then a classpath the bundle asked for and this server could not assemble
-        // (missing bytes, or the wrong ones), then a Remote Compose family split across the bundle
-        // and the sidecar. The gaps record goes first because it speaks from what the resolver
-        // actually observed about *these* artifacts; the family split is the diagnosis for the case
-        // where every coordinate resolved to the recorded bytes and the classpath is still
-        // incoherent. Either way the open breaker's reason — the only report anyone outside the box
-        // reads — turns from a bare missing symbol into something that says what to do about it.
+        // Four diagnoses, tried in order of how specifically each one explains THIS failure — the
+        // open breaker's reason is the only report anyone outside the box reads, so the most
+        // specific true thing goes in it. A split Skiko pair names the exact versions; a gap record
+        // that can attribute the failing type to a coordinate names that artifact and what is wrong
+        // with it; a Remote Compose family split across bundle and sidecar names the seam. Last,
+        // and only last, the unattributed gap: "n coordinates are missing, one of them is probably
+        // it" fires on any unresolved coordinate, related or not, so ahead of the family split it
+        // would answer a Remote Compose trip on a catalog missing one unrelated optional dependency
+        // by sending the operator to fix repositories.
         linkageDiagnosis = { reason ->
           SkikoNativePairing.linkageDiagnosis(reason, descriptorPath)
-            ?: BundleClasspathGaps.linkageDiagnosis(reason, descriptorPath)
+            ?: BundleClasspathGaps.attributedDiagnosis(reason, descriptorPath)
             ?: RemoteComposePairing.linkageDiagnosis(reason, descriptorPath)
+            ?: BundleClasspathGaps.unattributedDiagnosis(reason, descriptorPath)
         },
       )
     }
