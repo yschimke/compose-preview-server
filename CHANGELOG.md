@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.1](https://github.com/yschimke/compose-preview-server/compare/v2.18.0...v2.18.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **deps:** take the compose-ai-tools release that names a curved run's font ([#210](https://github.com/yschimke/compose-preview-server/issues/210)) ([c10b966](https://github.com/yschimke/compose-preview-server/commit/c10b966cf84d11685102fcf24f482c223f506b0c))
+
 ## [2.18.0](https://github.com/yschimke/compose-preview-server/compare/v2.17.0...v2.18.0) (2026-09-03)
 
 
