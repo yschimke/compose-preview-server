@@ -4,6 +4,7 @@ import ee.schimke.composeai.daemon.protocol.GestureOverride
 import ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposeOverride
+import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.RemoteComposeProfile
 import ee.schimke.composeai.daemon.protocol.RemoteNamedValue
 import ee.schimke.composeai.daemon.protocol.UiMode
@@ -21,6 +22,88 @@ import kotlin.test.assertTrue
 class CatalogLiveRoutingTest {
 
   private val lightId = "button-filled__ideal__default__light"
+
+  private fun player(kind: RemoteComposePlayerKind) =
+    PreviewOverrides(remoteCompose = RemoteComposeOverride(player = kind))
+
+  /**
+   * The player the request names is a no-op exactly when the capture went through it.
+   *
+   * `RemoteOverridablePreview` defaults to the embedded player, so for an ordinary preview the
+   * baked PNG *is* the answer to `?rcPlayer=cmp-android` — reporting it dropped refused a request
+   * the snapshot satisfies, which is why the viewer had to keep stamping the parameter onto every
+   * default link. Any other player is a genuine re-render.
+   */
+  @Test
+  fun `the baked player is a no-op and every other player is dropped`() {
+    assertFalse(
+      CatalogLiveRouting.overridesAffectRender(
+        lightId,
+        player(RemoteComposePlayerKind.EMBEDDED),
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.EMBEDDED,
+      ),
+      "the embedded player drew the baked pixels, so asking for it changes nothing",
+    )
+    assertEquals(
+      emptyList(),
+      CatalogLiveRouting.droppedOverrideNames(
+        lightId,
+        player(RemoteComposePlayerKind.EMBEDDED),
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.EMBEDDED,
+      ),
+    )
+    assertTrue(
+      CatalogLiveRouting.overridesAffectRender(
+        lightId,
+        player(RemoteComposePlayerKind.VIEW),
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.EMBEDDED,
+      ),
+      "the view player is someone else's pixels",
+    )
+  }
+
+  /**
+   * …and the no-op follows the *session's* answer, not a constant.
+   *
+   * A preview pinning `RemoteViewPreviewWrapper` baked through the view player, so on it the
+   * cmp-android request is the genuine re-render and `rcPlayer=java` is the one the snapshot
+   * answers. Reading [ServeHost.bakedRcPlayer] rather than assuming EMBEDDED is what keeps that
+   * preview from being handed the wrong player's capture under a confident 200.
+   */
+  @Test
+  fun `a view-pinned preview inverts which player is the no-op`() {
+    assertTrue(
+      CatalogLiveRouting.overridesAffectRender(
+        lightId,
+        player(RemoteComposePlayerKind.EMBEDDED),
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.VIEW,
+      ),
+      "this preview did not bake through the embedded player",
+    )
+    assertEquals(
+      listOf("rcPlayer"),
+      CatalogLiveRouting.droppedOverrideNames(
+        lightId,
+        player(RemoteComposePlayerKind.EMBEDDED),
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.VIEW,
+      ),
+      "and it is named, so the response can say what it could not apply",
+    )
+    assertFalse(
+      CatalogLiveRouting.overridesAffectRender(
+        lightId,
+        player(RemoteComposePlayerKind.VIEW),
+        UiMode.LIGHT,
+        RemoteComposePlayerKind.VIEW,
+      ),
+      "the view player is the one this preview's capture answers",
+    )
+  }
 
   @Test
   fun `an override-free request drops nothing`() {

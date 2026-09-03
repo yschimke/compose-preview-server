@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import ee.schimke.composeai.daemon.protocol.UiMode
@@ -160,6 +161,28 @@ interface ServeHost : AutoCloseable {
    * replaying a sticker whose mode nothing established.
    */
   fun bakedTheme(previewId: String): UiMode? = ServeBakedTheme.token(previewId)
+
+  /**
+   * The Remote Compose player [previewId]'s **baked** pixels were drawn with.
+   *
+   * A capture goes through `RemoteOverridablePreview`, which defaults to
+   * [RemoteComposePlayerKind.EMBEDDED] — so for all but one case the baked PNG already *is* the
+   * answer to `?rcPlayer=cmp-android`, and both the routing predicates
+   * ([CatalogLiveRouting.overridesAffectRender]) and the published-parity shortcut in the HTTP
+   * layer need to know that rather than each assuming it. That is the whole reason this is a
+   * question put to the host: the one exception is a preview that pins the view-backed lane with
+   * `@PreviewWrapper(RemoteViewPreviewWrapper::class)`, and whether it did is a fact about the
+   * session's manifest, not about the id.
+   *
+   * The default answers EMBEDDED, which is what a session with no manifest to consult can honestly
+   * say: every capture path in this project reaches the embedded player unless a wrapper is pinned,
+   * and [RcPlayerBackend.JAVA]'s `rcCompareLane = null` is already built on the same fact.
+   * [ServeBundleHost] overrides it, because a bundle's `previews.json` records the pin and can
+   * therefore name [RemoteComposePlayerKind.VIEW] for the previews that carry it. A published
+   * catalog carries no such manifest, so its previews take the default — the known gap
+   * [ServeRcCompare.LANES]' `baked` row documents.
+   */
+  fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED
 
   /** Human label for the tenant (module Gradle path, `module@rev`, or a bundle name). */
   val label: String

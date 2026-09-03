@@ -5975,6 +5975,7 @@ class ServeHttpServer(
           preview.id,
           parsed.overrides,
           renderHost.bakedTheme(preview.id),
+          renderHost.bakedRcPlayer(preview.id),
         )
         .toSet()
     return seeds(if (dropped.isEmpty()) params else params.filterKeys { it !in dropped })
@@ -9451,8 +9452,9 @@ class ServeHttpServer(
    *
    * This used to add "the catalog's ordinary baked PNG cannot stand in, because it is the **Java**
    * player's capture". That has not been true since `RemoteOverridablePreview` began defaulting to
-   * `RemoteComposePlayerKind.EMBEDDED`: baked IS the cmp-android capture, which is why that backend
-   * is excluded below and answered from baked instead.
+   * `RemoteComposePlayerKind.EMBEDDED` — so the backend that matches the session's own
+   * [ServeHost.bakedRcPlayer] is excluded below and answered from baked instead, which for an
+   * ordinary preview means cmp-android.
    *
    * "Bare" is the whole safety condition. Any other override — a font scale, a device, a knob, a
    * theme — asks for pixels the parity run never drew, so the player selection is stripped and what
@@ -9468,12 +9470,14 @@ class ServeHttpServer(
     val rc = overrides.remoteCompose ?: return null
     val player = rc.player ?: return null
     val backend = RcPlayerBackend.entries.firstOrNull { it.playerKind == player } ?: return null
-    // [RcPlayerBackend.CMP_ANDROID] is served from the BAKED artifact, not from its staged
+    // The player the catalog BAKED with is served from the baked artifact, not from its staged
     // rc-compare column, and that is the difference between this lane being an optimisation and
     // being a source of two answers to one question.
     //
-    // The catalog's baked capture already goes through this player — `RemoteOverridablePreview`
-    // defaults to `RemoteComposePlayerKind.EMBEDDED`. The staged `embedded` column is a DIFFERENT
+    // For all but a view-pinned preview that player is [RcPlayerBackend.CMP_ANDROID], because
+    // `RemoteOverridablePreview` defaults to `RemoteComposePlayerKind.EMBEDDED` — but which one it
+    // was is a fact about the session's manifest, so it is asked ([ServeHost.bakedRcPlayer]) rather
+    // than assumed here. The staged `embedded` column is a DIFFERENT
     // render of the same player: the vendored player under this repo's Robolectric harness, drawn
     // to be compared against baked rather than to stand in for it, and the committed harness model
     // measures the two apart (0.03% on `serve-rc-lanes.html`'s first row). Answering the viewer
@@ -9485,8 +9489,9 @@ class ServeHttpServer(
     //
     // Same reasoning that already sets [RcPlayerBackend.JAVA]'s `rcCompareLane` to null. Every
     // other backend keeps the shortcut, because for them baked genuinely is another player's
-    // pixels.
-    if (backend == RcPlayerBackend.CMP_ANDROID) return null
+    // pixels — and on a view-pinned preview that includes cmp-android, which then keeps its staged
+    // column instead of being handed the view player's capture under a confident 200.
+    if (player == renderHost.bakedRcPlayer(previewId)) return null
     // Everything the request asks for beyond "draw it with this player".
     val withoutPlayer =
       overrides.copy(
@@ -9498,6 +9503,7 @@ class ServeHttpServer(
         previewId,
         withoutPlayer,
         renderHost.bakedTheme(previewId),
+        renderHost.bakedRcPlayer(previewId),
       )
     )
       return null
@@ -9516,6 +9522,7 @@ class ServeHttpServer(
         previewId,
         overrides,
         renderHost.bakedTheme(previewId),
+        renderHost.bakedRcPlayer(previewId),
       )
     } else if (renderHost.hasRemoteComposeDoc(previewId)) {
       // A real render happened — and still could not apply everything, because this preview is
@@ -9526,6 +9533,7 @@ class ServeHttpServer(
         previewId,
         overrides,
         renderHost.bakedTheme(previewId),
+        renderHost.bakedRcPlayer(previewId),
       )
     } else {
       emptyList()
@@ -9558,6 +9566,7 @@ class ServeHttpServer(
         previewId,
         overrides,
         renderHost.bakedTheme(previewId),
+        renderHost.bakedRcPlayer(previewId),
       )
     } else {
       emptyList()

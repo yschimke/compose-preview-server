@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import ee.schimke.composeai.daemon.protocol.UiMode
@@ -144,6 +145,10 @@ class ServePerPreviewLiveHost(
   // replays instead of waking a daemon. See [ServeBakedTheme].
   override fun bakedTheme(previewId: String): UiMode? = baked.bakedTheme(previewId)
 
+  /** Delegated to the baked surface for the same reason [bakedTheme] is. */
+  override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind =
+    baked.bakedRcPlayer(previewId)
+
   /**
    * Snapshots stay static (baked PNGs) so browsing is instant — the live lane is opt-in per edit.
    */
@@ -234,7 +239,12 @@ class ServePerPreviewLiveHost(
     // why the unscoped case must keep going live.
     if (
       AnnotationKind.publishedLayersSuffice(layers) &&
-        !CatalogLiveRouting.overridesAffectRender(previewId, overrides, bakedTheme(previewId))
+        !CatalogLiveRouting.overridesAffectRender(
+          previewId,
+          overrides,
+          bakedTheme(previewId),
+          bakedRcPlayer(previewId),
+        )
     ) {
       val published = baked.renderAnnotations(previewId, overrides, layers)
       if (published !is AnnotationsOutcome.NotFound) return published
@@ -244,7 +254,14 @@ class ServePerPreviewLiveHost(
         resolveLive(daemonId)?.renderAnnotations(daemonId, overrides, layers)
       }
     if (live != null && live !is AnnotationsOutcome.NotFound) return live
-    if (CatalogLiveRouting.overridesAffectRender(previewId, overrides, bakedTheme(previewId)))
+    if (
+      CatalogLiveRouting.overridesAffectRender(
+        previewId,
+        overrides,
+        bakedTheme(previewId),
+        bakedRcPlayer(previewId),
+      )
+    )
       return AnnotationsOutcome.NotFound
     return baked.renderAnnotations(previewId, overrides, layers)
   }
@@ -262,6 +279,7 @@ class ServePerPreviewLiveHost(
         alias,
         liveOnlyPreviewIds,
         bakedTheme(previewId),
+        bakedRcPlayer(previewId),
       ) ?: return baked.render(previewId, overrides)
     val live =
       resolveLive(daemonId)
@@ -299,6 +317,7 @@ class ServePerPreviewLiveHost(
         alias,
         liveOnlyPreviewIds,
         bakedTheme(previewId),
+        bakedRcPlayer(previewId),
       )
       ?.let { daemonId ->
         resolveLive(daemonId)?.let {

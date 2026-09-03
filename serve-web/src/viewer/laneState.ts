@@ -73,9 +73,16 @@ export interface LanePick {
  * one rendering across two cache entries.
  *
  * Dropping it here is only safe because the server no longer answers `?rcPlayer=cmp-android` from
- * the staged `embedded` comparison raster; both routes now resolve to the same baked artifact. See
- * `publishedRcPlayerRender`. `java` is not listed because asking for it is a deliberate change away
- * from the default, which `serverPlayerParam` still emits.
+ * the staged `embedded` comparison raster: it asks the session which player the capture went
+ * through (`ServeHost.bakedRcPlayer`) and, when that is the embedded one, both routes resolve to
+ * the same baked artifact. See `publishedRcPlayerRender`. `java` is not listed because asking for it
+ * is a deliberate change away from the default, which `serverPlayerParam` still emits.
+ *
+ * The residue is a label, not pixels. A preview pinning `RemoteViewPreviewWrapper` baked through the
+ * view player, so its bare URL serves that capture while this chip still reads "CMP Android" — the
+ * server answers such a request correctly (the parameter is a real re-render there, not a no-op),
+ * but nothing yet reports the per-preview default back to the viewer for it to label. No preview in
+ * any catalog we publish pins that wrapper today.
  */
 export function backendRequiresRenderParam(backend: string): boolean {
     return backend === "cmp-jvm";

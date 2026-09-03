@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.imagecrop.CropOffset
 import ee.schimke.composeai.imagecrop.RenderSize
@@ -178,6 +179,42 @@ class ServeBundleHostTest {
     assertEquals(listOf("group/com.example.Red"), host.previews.map { it.id })
     val ok = host.render("group/com.example.Red", PreviewOverrides()) as RenderOutcome.Ok
     assertTrue(byteArrayOf(4, 2).contentEquals(ok.png))
+  }
+
+  /**
+   * Which Remote Compose player drew the baked pixels is a fact about the manifest, not the id.
+   *
+   * Everything bakes through the embedded player — `RemoteOverridablePreview` defaults to it — so
+   * `?rcPlayer=cmp-android` on an ordinary preview is a request the snapshot answers exactly, and
+   * the routing predicates are allowed to treat it as a no-op. A preview that pins
+   * `RemoteViewPreviewWrapper` is the one exception, and the whole point of asking the host is that
+   * it does not get swept into the default: for that preview cmp-android is a genuine re-render.
+   */
+  @Test
+  fun `the baked player is read from a preview's pinned wrapper`() {
+    val dir = bundle("com.example.Card" to byteArrayOf(1), "com.example.Pinned" to byteArrayOf(2))
+    File(dir, "previews.json")
+      .writeText(
+        """
+        {
+          "module": ":samples:cmp",
+          "variant": "debug",
+          "previews": [
+            { "id": "com.example.Card", "functionName": "Card", "className": "com.example.CardKt" },
+            { "id": "com.example.Pinned", "functionName": "Pinned",
+              "className": "com.example.CardKt",
+              "params": { "wrapperClassName":
+                          "ee.schimke.composeai.daemon.RemoteViewPreviewWrapper" } }
+          ]
+        }
+        """
+          .trimIndent()
+      )
+    val host = ServeBundleHost(dir, label = "compose-m3")
+    assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
+    assertEquals(RemoteComposePlayerKind.VIEW, host.bakedRcPlayer("com.example.Pinned"))
+    // An id the manifest says nothing about takes the honest default rather than throwing.
+    assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Absent"))
   }
 
   @Test

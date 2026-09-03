@@ -28,10 +28,12 @@ internal object CatalogLiveRouting {
     overrides: PreviewOverrides,
     alias: Map<String, String>,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
+    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
   ): String? {
     // No daemon twin (an Android-only variant) ⇒ always baked; it has no live lane.
     val daemonId = alias[previewId] ?: return null
-    return if (overridesAffectRender(previewId, overrides, bakedTheme)) daemonId else null
+    return if (overridesAffectRender(previewId, overrides, bakedTheme, bakedRcPlayer)) daemonId
+    else null
   }
 
   /**
@@ -47,9 +49,10 @@ internal object CatalogLiveRouting {
     alias: Map<String, String>,
     liveOnly: Set<String>,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
+    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
   ): String? =
     if (previewId in liveOnly) alias[previewId]
-    else daemonIdForOverrideRender(previewId, overrides, alias, bakedTheme)
+    else daemonIdForOverrideRender(previewId, overrides, alias, bakedTheme, bakedRcPlayer)
 
   /**
    * Whether [o] would change pixels vs the preview's baked sticker, so the render must go to the
@@ -66,7 +69,8 @@ internal object CatalogLiveRouting {
     previewId: String,
     o: PreviewOverrides,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
-  ): Boolean = withoutBakedNoOps(previewId, o, bakedTheme) != PreviewOverrides()
+    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
+  ): Boolean = withoutBakedNoOps(previewId, o, bakedTheme, bakedRcPlayer) != PreviewOverrides()
 
   /**
    * The overrides in [o] that the **baked** PNG for [previewId] does not reflect, named as the
@@ -91,10 +95,11 @@ internal object CatalogLiveRouting {
     previewId: String,
     o: PreviewOverrides,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
+    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
   ): List<String> {
     // Name from the no-op-free copy, not the raw request: an override that merely restates the
     // baked pixels was honoured, so naming it would refuse a request the snapshot answers truly.
-    val dropped = withoutBakedNoOps(previewId, o, bakedTheme)
+    val dropped = withoutBakedNoOps(previewId, o, bakedTheme, bakedRcPlayer)
     if (dropped == PreviewOverrides()) return emptyList()
     val names = mutableListOf<String>()
     fun add(name: String, value: Any?) {
@@ -184,8 +189,9 @@ internal object CatalogLiveRouting {
     previewId: String,
     o: PreviewOverrides,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
+    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
   ): List<String> {
-    val dropped = withoutBakedNoOps(previewId, o, bakedTheme)
+    val dropped = withoutBakedNoOps(previewId, o, bakedTheme, bakedRcPlayer)
     val names = mutableListOf<String>()
     if (dropped.localeTag != null) names += "localeTag"
     if (dropped.themeProvider != null) names += "themeProvider"
@@ -210,26 +216,28 @@ internal object CatalogLiveRouting {
    *   *preserve* the preview's authored background, which is what the baked render drew — so it is
    *   satisfied, not dropped. Only `true` ("crisp outline", strip the background) needs a
    *   re-render.
-   * - `rcPlayer=cmp-android` (`RemoteComposePlayerKind.EMBEDDED`). The capture goes through that
-   *   player — `RemoteOverridablePreview` defaults to it — so the baked PNG *is* the answer to
-   *   "draw this with the embedded player", and reporting it dropped refused a request the snapshot
-   *   satisfies exactly. That refusal is why a bare browse and `?rcPlayer=cmp-android` could not be
-   *   made to agree, and so why the viewer had to keep stamping the parameter onto every default
-   *   link. Any OTHER player is a genuine re-render and still counts as dropped.
+   * - an `rcPlayer` naming [bakedRcPlayer] — the player the capture actually went through, which
+   *   the session resolves ([ServeHost.bakedRcPlayer]) and which is
+   *   [RemoteComposePlayerKind.EMBEDDED] for every preview that does not pin the view-backed lane.
+   *   The baked PNG *is* the answer to "draw this with that player", and reporting it dropped
+   *   refused a request the snapshot satisfies exactly. That refusal is why a bare browse and
+   *   `?rcPlayer=cmp-android` could not be made to agree, and so why the viewer had to keep
+   *   stamping the parameter onto every default link. Any OTHER player is a genuine re-render and
+   *   still counts as dropped — including `cmp-android` on a preview that baked through the view
+   *   player, which is the case this reads the host for rather than assuming away.
    */
   private fun withoutBakedNoOps(
     previewId: String,
     o: PreviewOverrides,
     bakedTheme: UiMode? = ServeBakedTheme.token(previewId),
+    bakedRcPlayer: RemoteComposePlayerKind = RemoteComposePlayerKind.EMBEDDED,
   ): PreviewOverrides =
     o.copy(
       uiMode = o.uiMode?.takeIf { it != bakedTheme },
       clearBackground = o.clearBackground?.takeIf { it },
       remoteCompose =
         o.remoteCompose
-          ?.let { rc ->
-            if (rc.player == RemoteComposePlayerKind.EMBEDDED) rc.copy(player = null) else rc
-          }
+          ?.let { rc -> if (rc.player == bakedRcPlayer) rc.copy(player = null) else rc }
           // An `rc` facet that held nothing but that player is now empty, and an empty facet is not
           // the same as no facet to the `!= PreviewOverrides()` comparison above.
           ?.takeIf { it.profile != null || it.player != null || it.namedValues.isNotEmpty() },
