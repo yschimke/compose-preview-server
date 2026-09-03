@@ -25,8 +25,9 @@ import okhttp3.Request
  *
  * The body's shape is covered by [ServeIssueReportTest]; what is checked here is the wiring: that
  * the form is emitted, that it targets the repo owning the preview's Kotlin, that it carries the
- * overrides on screen, and that the two reference-scoped facts stay off a page that cannot name
- * them.
+ * overrides on screen, that it names the preview's design reference so the filed issue reaches the
+ * parity index, and that the parity SCORE — the one reference-scoped fact this page cannot honestly
+ * state — stays off it.
  */
 class ServeViewerIssueReportRouteTest {
 
@@ -35,7 +36,17 @@ class ServeViewerIssueReportRouteTest {
       .also { ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), "png", it) }
       .toByteArray()
 
-  private fun bundle(label: String, previewIds: List<String>): ServeBundleHost {
+  private fun bundle(
+    label: String,
+    previewIds: List<String>,
+    /**
+     * Whether this host can answer a `?at=<sha>` pin — it needs a delivery-branch read seam.
+     *
+     * Off by default so every existing case keeps exactly the host it had: turning pins on adds the
+     * revision chrome to the page, and these assertions are about the report body.
+     */
+    pinnable: Boolean = false,
+  ): ServeBundleHost {
     val dir = Files.createTempDirectory("viewer-report-$label").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText("<html></html>")
     File(dir, "previews").apply { mkdirs() }
@@ -93,15 +104,18 @@ class ServeViewerIssueReportRouteTest {
           toolVersion = "0.16.54",
         ),
       declaredBaked = previewIds,
+      bakedBranchPaths =
+        if (pinnable) previewIds.associateWith { "images/$it.png" } else emptyMap(),
+      fetchPinnedAssetOutcome = if (pinnable) ({ _, _ -> BranchFetch.Ok(png()) }) else null,
     )
   }
 
   private val registry = ServeSessionRegistry(open = { null })
 
-  private fun newServer(): ServeHttpServer {
+  private fun newServer(pinnable: Boolean = false): ServeHttpServer {
     registry.register(
       "compose-m3",
-      host = bundle("compose-m3", listOf("button-filled")),
+      host = bundle("compose-m3", listOf("button-filled"), pinnable = pinnable),
       pinned = true,
     )
     return ServeHttpServer(
@@ -144,6 +158,9 @@ class ServeViewerIssueReportRouteTest {
       .substringAfter("id=\"cp-report-body\"")
       .substringAfter("value=\"")
       .substringBefore("\"")
+      // `&amp;` last: the entities below expand to text that must not be re-read as an entity.
+      .replace("&quot;", "\"")
+      .replace("&#39;", "'")
       .replace("&amp;", "&")
 
   @Test
@@ -234,14 +251,91 @@ class ServeViewerIssueReportRouteTest {
   }
 
   @Test
-  fun `reference-scoped facts stay on the comparison, which is the page that can name them`() {
-    // A viewer names no design reference and has run no parity scorer, so the locator fence and
-    // the raw-comparison row must be absent rather than emitted empty or with a placeholder the
-    // viewer's own script never fills.
+  fun `a report filed from the viewer carries a parity locator`() {
+    // #5000. `parity/issues.json` is built from this fence, so a viewer report without one is
+    // filed, labelled `parity:`, and silently absent from the index — while the form beside it
+    // tells the reporter their label feeds that index. Every field is concrete on this page: the
+    // reference is the preview's own, resolved the way the comparison link beside it resolves one.
+    server = newServer()
+    val body = reportBody(get("/compose-m3/p/button-filled").second)
+    assertTrue(body.contains("```${ServeIssueReport.LOCATOR_FENCE}"), body)
+    assertTrue(body.contains("system: compose-m3"), body)
+    assertTrue(body.contains("component: Button/Filled"), body)
+    assertTrue(body.contains("preview: button-filled"), body)
+    assertTrue(body.contains("reference: button-figma"), body)
+    assertTrue(body.contains("overrides: {}"), body)
+  }
+
+  @Test
+  fun `the viewer's served body states the overrides it was served at`() {
+    // What a visitor with scripting off files. The placeholder below is for the live case; this
+    // one has to be a real, parseable locator on its own.
+    server = newServer()
+    val body = reportBody(get("/compose-m3/p/button-filled?uiMode=dark").second)
+    assertTrue(body.contains("overrides: {\"uiMode\":\"dark\"}"), body)
+    assertFalse(body.contains(ServeIssueReport.OVERRIDES_PLACEHOLDER), body)
+  }
+
+  @Test
+  fun `an accepted baked fallback records only the overrides the pixels could have used`() {
+    // `?fallback=baked` says "serve the published snapshot even though it ignores my override".
+    // The render lane then answers with pixels that applied none of it and names what it dropped,
+    // and `seedableOverrideParams` withholds those axes from the controls for the same reason. A
+    // locator built from the RAW query would claim a frame the picture is not showing — and this is
+    // the body a visitor with scripting off files, so no later substitution corrects it.
+    server = newServer()
+    val body = reportBody(get("/compose-m3/p/button-filled?uiMode=dark&fallback=baked").second)
+    assertTrue(body.contains("```${ServeIssueReport.LOCATOR_FENCE}"), body)
+    assertTrue(body.contains("overrides: {}"), body)
+    assertFalse(body.contains("\"uiMode\""), body)
+  }
+
+  @Test
+  fun `the viewer's template leaves the overrides for its own script to fill`() {
+    // The controls re-render the frame in place, so the served overrides stop describing it the
+    // moment a knob moves. The template hands that one value to the page, next to `{{render}}` —
+    // both filled on one pass, so the identity and the pixels name one frame.
+    server = newServer()
+    val (_, html) = get("/compose-m3/p/button-filled")
+    val template =
+      html.substringAfter("data-report-template=\"").substringBefore("\"").replace("&amp;", "&")
+    assertTrue(template.contains("overrides: ${ServeIssueReport.OVERRIDES_PLACEHOLDER}"), template)
+    assertTrue(template.contains(ServeIssueReport.RENDER_PLACEHOLDER), template)
+  }
+
+  @Test
+  fun `a pinned viewer files no locator, because its identity would describe another frame`() {
+    // `?at=<sha>` puts a historical baked artifact on the stage, while the reference mapping and
+    // the
+    // `revision:` line describe the catalog as it is today — so a locator built from the two would
+    // index the issue against a comparison the reporter was not looking at. No row is better than a
+    // wrong one, and the page already withholds its source link, its reference annotations, its
+    // override seeds and its playground link on the same reasoning.
+    server = newServer(pinnable = true)
+    val (code, html) =
+      get("/compose-m3/p/button-filled?at=0123456789abcdef0123456789abcdef01234567")
+    assertEquals(200, code)
+    val body = reportBody(html)
+    assertTrue(body.contains("cp-report-body") || body.isNotEmpty(), body)
+    assertFalse(body.contains(ServeIssueReport.LOCATOR_FENCE), body)
+    assertFalse(html.contains(ServeIssueReport.OVERRIDES_PLACEHOLDER), html)
+    // …and the same server, unpinned, still does file one — so this proves the gate rather than a
+    // host that could never emit a locator anyway.
+    assertTrue(
+      reportBody(get("/compose-m3/p/button-filled").second)
+        .contains("```${ServeIssueReport.LOCATOR_FENCE}"),
+      "the unpinned page on the same host still carries a locator",
+    )
+  }
+
+  @Test
+  fun `the parity score stays on the comparison, which is the page that measures one`() {
+    // The viewer's always-available number is a render-fidelity measurement against the generated
+    // SVG, unrelated to the design reference — so a `Raw comparison` row here would either be
+    // filed with the placeholder verbatim or with a plausible, mislabelled number feeding an index.
     server = newServer()
     val (_, body) = get("/compose-m3/p/button-filled")
     assertTrue(body.contains("cp-report-body"), body)
-    assertFalse(body.contains(ServeIssueReport.LOCATOR_FENCE), body)
     assertFalse(body.contains(ServeIssueReport.RAW_SCORES_PLACEHOLDER), body)
     assertFalse(body.contains("Raw comparison"), body)
   }

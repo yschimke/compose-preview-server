@@ -40,7 +40,12 @@ const limits = {
     "design page": 44_000,
     parity: 52_000,
     viewer: 68_000,
-    "spatial viewer": 180_000,
+    // 180_000 until the report form's body writer learned to fill a locator's `overrides:` from
+    // live viewer state (#5000). That put `fillOverrides` and the classification read-back into
+    // `viewer-components.js`, which this page carries for its report affordance: measured at
+    // +192 gzip bytes, against 57 bytes of headroom. Raised by 2_000 rather than to the new
+    // measurement, so the next small change to a shared report control is not another budget edit.
+    "spatial viewer": 182_000,
 };
 
 const gzipBytes = new Map();

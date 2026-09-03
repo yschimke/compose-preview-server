@@ -32,6 +32,7 @@ import {
     type SpecSource,
 } from "./spec/sources.js";
 import { type ApiDocLink, usableApiDocs } from "./viewer/apiDocs.js";
+import { reportBody } from "./report/body.js";
 import {
     effectiveUnseeded,
     isChecked,
@@ -673,24 +674,18 @@ var rcPlayerPicked = rules.backendRequiresRenderParam(rcDefaultBackend);
 // pick — so the combo can't keep naming a renderer that Live / SVG has taken off the stage. A
 // no-op stub for a single-lane preview (no combo present).
 var syncLaneSelect = function () {};
-function query() {
+/**
+ * The render lane's whole override map, as the controls stand right now.
+ *
+ * Split out of [query] rather than derived from the URL it builds, because a second consumer needs
+ * the map and not the query: the report form's `compose-parity-locator/v1` block carries
+ * `overrides:` as canonical JSON, and its identity has to name the same frame the body's render
+ * link does. Re-parsing that link would mean re-deriving which of its parameters are overrides —
+ * `token`, `session`, `at` and `gen` are not — and a second rule for that is a second thing to get
+ * wrong. One collector, two serialisations.
+ */
+function renderOverrides(): Overrides {
     var o = overrides();
-    // Public routes are open, so a page that arrived without a token stays token-free — only
-    // carry token= when this page's own URL had one (a token-gated box).
-    var parts: string[] = [];
-    if (token) parts.push("token=" + encodeURIComponent(token));
-    if (session) parts.push("session=" + encodeURIComponent(session));
-    // The pin rides with the request rather than being applied per route server-side, because the
-    // server cannot tell the viewer's own snapshot request from any other /render call. A pinned
-    // page has every re-rendering control disabled, so the overrides below are empty in practice —
-    // the pin is what this URL is for.
-    if (pinnedAt) parts.push("at=" + encodeURIComponent(pinnedAt));
-    // Everything pushed from here on is an override of some kind, which is exactly what decides
-    // whether this URL may name a generation — see `rules.generationEmitted` below.
-    var beforeOverrides = parts.length;
-    Object.keys(o).forEach(function (k) {
-        parts.push(k + "=" + encodeURIComponent(o[k]));
-    });
     // Author-declared knobs: knob.<key>=<value>. The server infers the type from the preview's
     // declaration, so no <kind>: prefix. A knob still at its declared default is omitted — that
     // keeps the URL on the instant baked snapshot (any knob.* param routes a published catalog
@@ -708,9 +703,7 @@ function query() {
             )
         )
             return;
-        parts.push(
-            "knob." + encodeURIComponent(key) + "=" + encodeURIComponent(val),
-        );
+        o["knob." + key] = val;
     });
     // Remote Compose knobs: rc.<name>=<kind>:<value>. The <kind>: prefix types the seed
     // (color:%23AARRGGBB, int:…, bool:true, …). A knob still at its declared default is omitted
@@ -723,26 +716,21 @@ function query() {
         var val = controlValue(el);
         if (!rules.rcKnobEmitted(val, el.getAttribute("data-rc-initial") || ""))
             return;
-        parts.push(
-            "rc." +
-                encodeURIComponent(name) +
-                "=" +
-                encodeURIComponent(rules.rcKnobValue(kind, val)),
-        );
+        o["rc." + name] = rules.rcKnobValue(kind, val);
     });
     // App-declared theme (themeProvider = provider FQN). Routes to the daemon like a knob; a
     // published catalog re-renders on demand. Omitted at "(default)" so the URL stays on the
     // instant baked snapshot until a theme is actually chosen.
     var tp = chosenThemeProvider();
-    if (tp) parts.push("themeProvider=" + encodeURIComponent(tp));
+    if (tp) o.themeProvider = tp;
     // Detected-feature: keyboard focus (focus=0). Routes to the daemon like a knob; omitted when
     // unchecked so the URL stays on the baked snapshot.
     var fc = may<HTMLInputElement>("cp-focus");
-    if (fc && !fc.disabled && fc.checked) parts.push("focus=0");
+    if (fc && !fc.disabled && fc.checked) o.focus = "0";
     // Detected-feature: one-handed gesture hints (gestures=true). Routes to the daemon like a
     // knob; omitted when unchecked so the URL stays on the baked snapshot.
     var gc = may<HTMLInputElement>("cp-gestures");
-    if (gc && !gc.disabled && gc.checked) parts.push("gestures=true");
+    if (gc && !gc.disabled && gc.checked) o.gestures = "true";
     // Remote Compose render backend: a server-side player selection rides the render as
     // rcPlayer=<wire>. Emitted for a visitor pick or a non-Java server-side default, and only
     // for a server-side lane — java / cmp-android render through the daemon, cmp-jvm through its
@@ -753,8 +741,37 @@ function query() {
         rcPlayerBackend,
         !!rcPlayerPicked,
     );
-    if (serverPlayer)
-        parts.push("rcPlayer=" + encodeURIComponent(serverPlayer));
+    if (serverPlayer) o.rcPlayer = serverPlayer;
+    return o;
+}
+function query() {
+    // Public routes are open, so a page that arrived without a token stays token-free — only
+    // carry token= when this page's own URL had one (a token-gated box).
+    var parts: string[] = [];
+    if (token) parts.push("token=" + encodeURIComponent(token));
+    if (session) parts.push("session=" + encodeURIComponent(session));
+    // The pin rides with the request rather than being applied per route server-side, because the
+    // server cannot tell the viewer's own snapshot request from any other /render call. A pinned
+    // page has every re-rendering control disabled, so the overrides below are empty in practice —
+    // the pin is what this URL is for.
+    if (pinnedAt) parts.push("at=" + encodeURIComponent(pinnedAt));
+    // Everything pushed from here on is an override of some kind, which is exactly what decides
+    // whether this URL may name a generation — see `rules.generationEmitted` below.
+    var beforeOverrides = parts.length;
+    var o = renderOverrides();
+    Object.keys(o).forEach(function (k) {
+        // The KEY is encoded too, not just the value. The display axes are fixed literals, but a
+        // `knob.<key>` or `rc.<name>` carries an author-declared string, and a `&`, `=` or `%` in
+        // one splits this URL into parameters nobody wrote — the render then applies a different
+        // override from the one the locator's JSON names, so the report identifies a frame other
+        // than the pixels it links. That is the exact mismatch the block exists to prevent, arriving
+        // through the query rather than through the map.
+        //
+        // Byte-identical to the per-family `"knob." + encodeURIComponent(key)` this replaced:
+        // `encodeURIComponent` leaves `.` alone, so a well-formed key encodes to itself and only an
+        // author string carrying a delimiter changes — which is the case being fixed.
+        parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(o[k]));
+    });
     // The cache generation, last, and only on the URL that is actually a published frame: every
     // lane above omits itself while it sits at its default precisely so this URL stays on the baked
     // snapshot, which makes "nothing was pushed" the same question as "is this the published
@@ -950,6 +967,10 @@ function refreshSnapshot(isRetry?: boolean) {
                 setSnapshotLoading(false);
                 clearModeError();
                 syncSpecBaseline();
+                // The frame is on the stage NOW, so this is the moment the report may describe it.
+                // Every other caller runs from a control change, when the controls have moved ahead
+                // of the image and the gate above declines.
+                refreshReportLink();
                 snapshotSettled();
             };
             next.onerror = function () {
@@ -1086,21 +1107,45 @@ function refreshLinks(skipUrlSync?: boolean) {
 }
 // Keep the "report an issue" report pointed at what is on screen. The server filled the form's
 // hidden `body` for the settings the page was served at (so this works with JS off); the
-// template it carries has the render URL as a `{{render}}` placeholder, which we swap for the
-// live /render URL so a report filed after fiddling with the knobs shows the render that
-// prompted it. The token is stripped for the same reason the server strips it: an issue body is
-// public, a session token is a capability.
+// template it carries names the render URL as `{{render}}` and, inside its
+// `compose-parity-locator/v1` block, the override map as `{{overrides}}`. Both are filled here
+// from the state the controls are in, so a report filed after fiddling with the knobs shows the
+// render that prompted it AND is indexed against the frame it shows. The token is stripped for
+// the same reason the server strips it: an issue body is public, a session token is a capability.
 //
-// Note this writes an INPUT VALUE, never an href: the affordance is a GET form whose action is a
+// Handed to `reportBody` rather than assigned here. The field has other producers on this page —
+// `<cp-report-classification>` and `<cp-report-scope>`, the latter of which only exists now that
+// this page's template carries a locator — and the last plain `body.value = …` to run would drop
+// whatever the others had contributed. That store composes from the template every time, so each
+// producer supplies its own fragment and none can clobber another.
+//
+// Note it writes an INPUT VALUE, never an href: the affordance is a GET form whose action is a
 // server-rendered literal, so no page-derived string ever reaches a navigation sink. The browser
 // does the query encoding on submit, which is why the substituted URL goes in raw here.
 function refreshReportLink() {
     var body = may<HTMLInputElement>("cp-report-body");
-    if (!body) return;
-    var tpl = body.getAttribute("data-report-template");
     var field = may<HTMLInputElement>("cp-url-png");
-    if (!tpl || !field || !field.value) return;
-    body.value = tpl.replace("{{render}}", stripToken(field.value));
+    if (!body || !field || !field.value) return;
+    // Only while the frame ON SCREEN is the one the controls are asking for. The controls and the
+    // copyable links run ahead of the image by a fetch and a decode, so recomposing on every change
+    // would let a reporter who submits inside that window — or after the render failed — file a
+    // locator and a render link for a frame nobody saw. Skipping leaves the field holding the body
+    // that described the previous frame, which is the frame still on the stage; the next landed
+    // frame calls this again. See `viewer/reportFrame.ts`, and D4 in the workflow doc.
+    if (
+        !rules.reportFollowsDisplayedFrame(
+            renderUrl(snapshotExt),
+            img.getAttribute("data-cp-src"),
+        )
+    )
+        return;
+    if (!reportBody.attach(body)) return;
+    // One pass, one source: the identity the locator states and the pixels the body links are
+    // read off the same controls at the same instant, so they cannot describe two frames.
+    reportBody.set({
+        render: stripToken(field.value),
+        overrides: renderOverrides(),
+    });
 }
 function stripToken(url: string) {
     var cut = url.indexOf("?");

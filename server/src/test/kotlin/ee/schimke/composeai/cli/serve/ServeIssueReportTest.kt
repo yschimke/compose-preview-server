@@ -119,9 +119,52 @@ class ServeIssueReportTest {
 
   @Test
   fun `comparison template exposes placeholders for browser-computed values`() {
-    val template = ServeIssueReport.body(full, renderPlaceholder = true)
+    val template =
+      ServeIssueReport.body(full, renderPlaceholder = true, rawScoresPlaceholder = true)
     assertTrue(template.contains("{{render}}"), template)
     assertTrue(template.contains("{{rawScores}}"), template)
+  }
+
+  @Test
+  fun `the score placeholder is the scoring page's to ask for, not a consequence of a reference`() {
+    // It used to be inferred from `renderPlaceholder && referenceId != null`, which made naming a
+    // design reference and measuring a parity score one decision. They are not: the viewer names a
+    // reference so its report reaches the parity index (#5000) and measures nothing, so a template
+    // it never fills would file `{{rawScores}}` verbatim.
+    val template = ServeIssueReport.body(full, renderPlaceholder = true)
+    assertFalse(template.contains("{{rawScores}}"), template)
+    assertFalse(template.contains("Raw comparison"), template)
+    assertTrue(template.contains("```${ServeIssueReport.LOCATOR_FENCE}"), template)
+  }
+
+  @Test
+  fun `the overrides placeholder replaces the value alone, and only when asked`() {
+    // A page whose controls move after it is served hands the locator's `overrides:` to its own
+    // script. Only the VALUE: the key stays server-written so the filler can match the whole line
+    // rather than the first catalog-authored value carrying the literal.
+    val overridden = full.copy(overrides = linkedMapOf("uiMode" to "dark"))
+    val template =
+      ServeIssueReport.body(overridden, renderPlaceholder = true, overridesPlaceholder = true)
+    assertTrue(template.contains("\noverrides: {{overrides}}\n"), template)
+    assertFalse(template.contains("\"uiMode\""), template)
+    // Everything else in the block is unchanged, so a filled template is the served body again.
+    assertEquals(
+      ServeIssueReport.body(overridden),
+      template
+        .replace("overrides: {{overrides}}", "overrides: {\"uiMode\":\"dark\"}")
+        .replace(
+          "{{render}}",
+          "https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark",
+        ),
+    )
+  }
+
+  @Test
+  fun `a served body never carries the overrides placeholder`() {
+    // What a visitor with scripting off files has to be a parseable locator on its own.
+    val body = ServeIssueReport.body(full.copy(overrides = linkedMapOf("uiMode" to "dark")))
+    assertFalse(body.contains(ServeIssueReport.OVERRIDES_PLACEHOLDER), body)
+    assertTrue(body.contains("overrides: {\"uiMode\":\"dark\"}"), body)
   }
 
   @Test

@@ -16,8 +16,16 @@
 // `ServeIssueReport.action`.
 
 import { fillReport, needsRender } from "../annotate/report.js";
-import { withClassification } from "./classification.js";
-import { fillLocators, fillSelection, type Selection } from "./locator.js";
+import {
+    classificationFromBody,
+    withClassification,
+} from "./classification.js";
+import {
+    fillLocators,
+    fillOverrides,
+    fillSelection,
+    type Selection,
+} from "./locator.js";
 import { type ReportScope, scopeFromBody, withScope } from "./scope.js";
 
 /** What the page knows so far. Every field is independently optional. */
@@ -47,6 +55,18 @@ export interface ReportInputs {
      * the template's placeholder with nothing, reproducing the body the server wrote.
      */
     locators?: string[];
+    /**
+     * The render lane's whole normalised override map, as the controls stand right now.
+     *
+     * The sixth producer, and the only one that changes what the report's identity SAYS rather than
+     * adding to it: the viewer re-renders in place, so its locator's `overrides:` goes on
+     * describing the settings the page was served at until this replaces it. Handed in beside
+     * [render] on the same refresh, because the two describe one frame — a body carrying the new
+     * pixels and the old identity is the mismatch `compose-parity-locator/v1` exists to prevent.
+     * Undefined on every page whose server wrote the value for certain, whose template has no
+     * placeholder to fill anyway.
+     */
+    overrides?: Record<string, string>;
 }
 
 export class ReportBody {
@@ -99,10 +119,13 @@ export class ReportBody {
             withScope(
                 fillLocators(
                     fillSelection(
-                        fillReport(
-                            template,
-                            this.state.render ?? "",
-                            this.state.scores ?? null,
+                        fillOverrides(
+                            fillReport(
+                                template,
+                                this.state.render ?? "",
+                                this.state.scores ?? null,
+                            ),
+                            this.state.overrides ?? {},
                         ),
                         this.state.selection ?? {},
                     ),
@@ -118,7 +141,10 @@ export class ReportBody {
                     this.state.scope ??
                     "component",
             ),
-            this.state.classification ?? "",
+            // Read back for the reason the scope above is: the classification control lives in
+            // another bundle, so this store may never have been told the answer standing in the
+            // field. Its own `set` still wins — the state is consulted first.
+            this.state.classification || classificationFromBody(input.value),
         );
     }
 }

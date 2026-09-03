@@ -33,3 +33,22 @@ export function withClassification(body: string, sentence: string): string {
     lines[at] = CLASSIFICATION_PREFIX + sentence;
     return lines.join("\n");
 }
+
+/**
+ * The sentence a body's classification line already states, or `""` when it has none.
+ *
+ * The counterpart of [scopeFromBody], and here for the same reason: each browser entrypoint is
+ * built as its own IIFE, so the `<cp-report-classification>` in the chrome bundle and the viewer's
+ * own recomposition hold different `reportBody` singletons. The hidden field is the only state they
+ * share, so a recomposition about a render URL or an override map reads the standing answer back
+ * out of it rather than composing a body that silently drops the one the reporter picked.
+ *
+ * Returns the server's own "as labelled on this issue" when nobody has answered yet, which
+ * [withClassification] then rewrites to itself.
+ */
+export function classificationFromBody(body: string): string {
+    const line = body
+        .split("\n")
+        .find((one) => one.startsWith(CLASSIFICATION_PREFIX));
+    return line ? line.slice(CLASSIFICATION_PREFIX.length) : "";
+}
