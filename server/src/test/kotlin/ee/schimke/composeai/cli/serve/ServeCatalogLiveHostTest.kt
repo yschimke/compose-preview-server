@@ -86,6 +86,7 @@ class ServeCatalogLiveHostTest {
     var lastStreamId: String? = null
     var lastA11yId: String? = null
     var lastAnnotationsId: String? = null
+    var lastAnnotationsLayers: Set<String>? = null
     var renderCalls = 0
     val renderedIds = Collections.synchronizedList(mutableListOf<String>())
     var closed = false
@@ -135,9 +136,11 @@ class ServeCatalogLiveHostTest {
     override fun renderAnnotations(
       previewId: String,
       overrides: PreviewOverrides,
+      layers: Set<String>?,
     ): AnnotationsOutcome {
       lastAnnotationsId = previewId
       lastRenderOverrides = overrides
+      lastAnnotationsLayers = layers
       if (!hasDesignAnnotations && previewId !in publishedTypography)
         return AnnotationsOutcome.NotFound
       return AnnotationsOutcome.Ok(
@@ -584,6 +587,99 @@ class ServeCatalogLiveHostTest {
     assertEquals(daemonId, live.lastAnnotationsId, "the daemon is asked first")
     assertEquals(catalogId, baked.lastAnnotationsId, "…then the catalog's published layer")
     assertTrue(out.json.decodeToString().contains("\"previewId\":\"$catalogId\""))
+  }
+
+  @Test
+  fun `a typography-only request is answered from the bundle without waking the daemon`() {
+    // #213. The whole point of `layers=`: typography is the one layer a published bundle can
+    // answer (theme is derived live and never authored into a bundle; the published layout layer
+    // is the compare page's, and `drawableAnnotations` drops it), so a request that names only
+    // typography can be replayed off the catalog. Measured on the deployed server, that is the
+    // difference between 16-22s and a local read on an idle catalog.
+    val baked =
+      RecordingHost(
+        previews = listOf(ServePreview(catalogId, catalogId)),
+        tag = "baked",
+        publishedTypography = setOf(catalogId),
+      )
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+        hasDesignAnnotations = true,
+      )
+    val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
+
+    val out =
+      composite.renderAnnotations(catalogId, PreviewOverrides(), setOf(AnnotationKind.TYPOGRAPHY))
+        as AnnotationsOutcome.Ok
+    assertEquals(catalogId, baked.lastAnnotationsId, "the published layer answers")
+    assertNull(live.lastAnnotationsId, "a typography-only request must not wake the daemon")
+    assertTrue(out.json.decodeToString().contains("\"previewId\":\"$catalogId\""))
+  }
+
+  @Test
+  fun `a request naming a live-only layer still routes to the daemon`() {
+    // Theme and layout are not answerable from a bundle, so naming either must reach the daemon
+    // even though the catalog publishes typography. This is the guard on the gate itself: widen
+    // `AnnotationKind.PUBLISHABLE` carelessly and this is what breaks.
+    val baked =
+      RecordingHost(
+        previews = listOf(ServePreview(catalogId, catalogId)),
+        tag = "baked",
+        publishedTypography = setOf(catalogId),
+      )
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+        hasDesignAnnotations = true,
+      )
+    val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
+
+    for (layer in listOf(AnnotationKind.THEME, AnnotationKind.LAYOUT)) {
+      live.lastAnnotationsId = null
+      composite.renderAnnotations(catalogId, PreviewOverrides(), setOf(layer))
+        as AnnotationsOutcome.Ok
+      assertEquals(daemonId, live.lastAnnotationsId, "$layer is a live-only layer")
+    }
+    live.lastAnnotationsId = null
+    composite.renderAnnotations(
+      catalogId,
+      PreviewOverrides(),
+      setOf(AnnotationKind.TYPOGRAPHY, AnnotationKind.LAYOUT),
+    ) as AnnotationsOutcome.Ok
+    assertEquals(daemonId, live.lastAnnotationsId, "a mixed set is not publishable")
+  }
+
+  @Test
+  fun `a typography-only request under a render-moving override still goes live`() {
+    // The published bounds were measured at the baked scale, so `layers=typography` does not buy a
+    // published replay when the pixels have moved — `bakedAnnotations` answers NotFound and the
+    // request falls through, exactly as an unscoped one would.
+    val baked =
+      RecordingHost(
+        previews = listOf(ServePreview(catalogId, catalogId)),
+        tag = "baked",
+        publishedTypography = setOf(catalogId),
+      )
+    val live =
+      RecordingHost(
+        previews = listOf(ServePreview(daemonId, daemonId)),
+        tag = "live",
+        streaming = true,
+        hasDesignAnnotations = true,
+      )
+    val composite = ServeCatalogLiveHost(mapOf(catalogId to daemonId), live, baked)
+
+    composite.renderAnnotations(
+      catalogId,
+      PreviewOverrides(fontScale = 1.5f),
+      setOf(AnnotationKind.TYPOGRAPHY),
+    ) as AnnotationsOutcome.Ok
+    assertEquals(daemonId, live.lastAnnotationsId, "moved pixels need a live capture")
   }
 
   @Test

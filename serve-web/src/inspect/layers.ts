@@ -58,6 +58,63 @@ export function dataUrlFor(frameUrl: string, suffix: string): string | null {
     return `${path}.${suffix}${query}`;
 }
 
+/**
+ * The `layers=` value for one endpoint: the ticked layers that endpoint actually serves, in
+ * declared order. Empty for an endpoint that carries no layer choice (`slots`, `a11y`) — those
+ * are one product each, so naming layers on them would say nothing.
+ *
+ * This is what lets the server skip a daemon. `typography`, `theme` and `layout` share the
+ * `annotations` endpoint but not the same producer: only typography is authored into a published
+ * bundle, so a typography-only tick can be replayed from the catalog while anything naming the
+ * other two still needs a live capture. Sending the set is how the server can tell the difference
+ * instead of assuming the worst — which cost 16-22s on an idle catalog.
+ */
+export function layersParamFor(source: string, kinds: string[]): string {
+    const asked = LAYERS.filter(
+        (spec) => spec.source === source && kinds.includes(spec.kind),
+    ).map((spec) => spec.kind);
+    // Narrowed for exactly ONE combination: typography alone, the only layer a published bundle
+    // can answer without a daemon. Everything else asks unscoped.
+    //
+    // Deliberately not "send whatever is ticked". A URL per combination would key the cache per
+    // combination too, so ticking Theme and then Layout — one payload, by construction — would
+    // fetch twice, and on a frame the daemon has to render that is two renders which can disagree
+    // about the pixels. Two possible addresses per frame means the wide one is shared by every
+    // combination that needs it, and flipping back to typography alone is a cache hit.
+    return asked.length === 1 && asked[0] === "typography" ? "typography" : "";
+}
+
+/**
+ * Whether an annotations payload carries a layer beyond the ones [kinds] asked this endpoint for —
+ * i.e. the server answered a narrowed request with the full capture, which is explicitly allowed.
+ *
+ * Read off the payload rather than assumed from the request, because which lane answered is the
+ * server's decision (published replay vs daemon) and the client cannot predict it.
+ */
+export function carriesBeyond(
+    payload: unknown,
+    source: string,
+    kinds: string[],
+): boolean {
+    if (source !== "annotations" || !payload || typeof payload !== "object")
+        return false;
+    const asked = LAYERS.filter(
+        (spec) => spec.source === source && kinds.includes(spec.kind),
+    ).map((spec) => spec.kind);
+    const list = (payload as { annotations?: unknown }).annotations;
+    if (!Array.isArray(list)) return false;
+    return list.some((item) => {
+        const kind = (item as { kind?: unknown } | null)?.kind;
+        return typeof kind === "string" && !asked.includes(kind);
+    });
+}
+
+/** Append a non-empty `layers=` to a data URL, preserving whatever query it already carries. */
+export function withLayers(url: string, layers: string): string {
+    if (!layers) return url;
+    return `${url}${url.includes("?") ? "&" : "?"}layers=${encodeURIComponent(layers)}`;
+}
+
 /** The address to use before any frame has decoded: the preview's own, carrying the session keys. */
 export function fallbackUrl(
     base: string,

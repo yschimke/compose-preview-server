@@ -1463,7 +1463,12 @@ internal constructor(
    */
   override fun renderAnnotations(
     previewId: String,
+    // Accepted and deliberately ignored: all three layers come off ONE semantics + theme + layout
+    // capture, so narrowing the response would save no work and would fragment `annotationsCache`
+    // by layer set. The contract ([ServeHost.renderAnnotations]) permits a superset; what `layers`
+    // decides is whether this host is asked at all, which is settled before the call reaches here.
     overrides: PreviewOverrides,
+    @Suppress("UNUSED_PARAMETER") layers: Set<String>?,
   ): AnnotationsOutcome {
     check(!closed.get()) { "ServeRenderHost is closed" }
     if (previewId !in previewIds) return AnnotationsOutcome.NotFound
