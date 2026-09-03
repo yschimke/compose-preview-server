@@ -1993,13 +1993,18 @@ internal constructor(
         label = label,
         declaredThemes = declaredThemes,
         onLog = onLog,
-        // Two causes, tried in order of specificity: a split Skiko pair (which names the exact
-        // versions), then a classpath the bundle asked for and this server could not assemble.
-        // Either turns the open breaker's reason — the only report anyone outside the box reads —
-        // from a bare missing symbol into something that says what to do about it.
+        // Three causes, tried in order of specificity: a split Skiko pair (which names the exact
+        // versions), then a classpath the bundle asked for and this server could not assemble
+        // (missing bytes, or the wrong ones), then a Remote Compose family split across the bundle
+        // and the sidecar. The gaps record goes first because it speaks from what the resolver
+        // actually observed about *these* artifacts; the family split is the diagnosis for the case
+        // where every coordinate resolved to the recorded bytes and the classpath is still
+        // incoherent. Either way the open breaker's reason — the only report anyone outside the box
+        // reads — turns from a bare missing symbol into something that says what to do about it.
         linkageDiagnosis = { reason ->
           SkikoNativePairing.linkageDiagnosis(reason, descriptorPath)
             ?: BundleClasspathGaps.linkageDiagnosis(reason, descriptorPath)
+            ?: RemoteComposePairing.linkageDiagnosis(reason, descriptorPath)
         },
       )
     }

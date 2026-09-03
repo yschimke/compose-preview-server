@@ -1,0 +1,274 @@
+package ee.schimke.composeai.cli.serve
+
+import ee.schimke.composeai.bundle.BundleReader
+import java.io.File
+import java.nio.file.Files
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertContains
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * Coverage for [RemoteComposePairing] — the diagnosis for a daemon classpath that carries two
+ * Remote Compose lines because the bundle recorded part of the family and the sidecar supplied the
+ * rest (compose-preview-server#187: `NoSuchFieldError … RemoteClock … SYSTEM` on every IR replay,
+ * with a breaker reason that named no cause).
+ */
+class RemoteComposePairingTest {
+
+  private val destDir = Files.createTempDirectory("remote-compose-line-test-").toFile()
+  private val descriptor = File(destDir, "daemon-launch.json")
+  private val logs = mutableListOf<String>()
+
+  @AfterTest fun cleanup() = destDir.deleteRecursively().let {}
+
+  private fun maven(artifact: String, version: String, group: String = "androidx.compose.remote") =
+    BundleReader.ClasspathEntry.Maven(
+      group = group,
+      artifact = artifact,
+      version = version,
+      type = "aar",
+      sha256 = null,
+    )
+
+  private fun sidecar(vararg jars: String) = jars.map { "/opt/compose-preview/lib/$it" }
+
+  /** The `meshcore-mobile` shape: a snapshot bundle half-covering a sidecar on released alphas. */
+  private fun recordMeshcoreShape() =
+    RemoteComposePairing.record(
+      destDir = destDir,
+      bundle =
+        RemoteComposePairing.bundleMembers(
+          listOf(
+            maven("remote-player-core", "1.0.0-SNAPSHOT"),
+            maven("remote-creation", "1.0.0-SNAPSHOT"),
+          )
+        ),
+      sidecar =
+        RemoteComposePairing.sidecarMembers(
+          sidecar(
+            "remote-core-1.0.0-alpha18.jar",
+            "remote-player-core-1.0.0-alpha18.jar",
+            "kotlin-stdlib-2.4.10.jar",
+          )
+        ),
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+    )
+
+  @Test
+  fun `a bundle carrying part of the family at another version is a skew`() {
+    recordMeshcoreShape()
+
+    val logged = logs.singleOrNull()
+    assertNotNull(logged, "a mixed family must be logged at materialization: $logs")
+    assertContains(logged, "remote-core")
+    assertContains(logged, "1.0.0-SNAPSHOT")
+    assertContains(logged, "1.0.0-alpha18")
+  }
+
+  @Test
+  fun `the skew is the diagnosis a Remote Compose linkage trip carries`() {
+    recordMeshcoreShape()
+
+    val diagnosis =
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.NoSuchFieldError: Class androidx.compose.remote.core.RemoteClock does not " +
+          "have member field 'androidx.compose.remote.core.RemoteClock SYSTEM'",
+        descriptor,
+      )
+
+    assertNotNull(diagnosis, "the trip that this record exists for must be diagnosed")
+    assertContains(diagnosis, "remote-core")
+  }
+
+  @Test
+  fun `the internal class-name form is diagnosed too`() {
+    recordMeshcoreShape()
+
+    assertNotNull(
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.NoClassDefFoundError: androidx/compose/remote/player/core/RemoteDocument",
+        descriptor,
+      )
+    )
+  }
+
+  @Test
+  fun `a bundle carrying the whole family shadows the sidecar and is coherent`() {
+    RemoteComposePairing.record(
+      destDir = destDir,
+      bundle =
+        RemoteComposePairing.bundleMembers(
+          listOf(
+            maven("remote-core", "1.0.0-SNAPSHOT"),
+            maven("remote-player-core", "1.0.0-SNAPSHOT"),
+          )
+        ),
+      sidecar =
+        RemoteComposePairing.sidecarMembers(
+          sidecar("remote-core-1.0.0-alpha18.jar", "remote-player-core-1.0.0-alpha18.jar")
+        ),
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+    )
+
+    assertTrue(logs.isEmpty(), "a fully-carried family is coherent whatever its version: $logs")
+    assertNull(
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.NoSuchFieldError: androidx.compose.remote.core.RemoteClock",
+        descriptor,
+      )
+    )
+  }
+
+  @Test
+  fun `a bundle on the sidecar's own version is coherent`() {
+    RemoteComposePairing.record(
+      destDir = destDir,
+      bundle = RemoteComposePairing.bundleMembers(listOf(maven("remote-core", "1.0.0-alpha18"))),
+      sidecar =
+        RemoteComposePairing.sidecarMembers(
+          sidecar("remote-core-1.0.0-alpha18.jar", "remote-player-core-1.0.0-alpha18.jar")
+        ),
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+    )
+
+    assertTrue(logs.isEmpty(), "one version across both sides is one line: $logs")
+  }
+
+  @Test
+  fun `a bundle that names no Remote Compose artifact records nothing`() {
+    RemoteComposePairing.record(
+      destDir = destDir,
+      bundle = RemoteComposePairing.bundleMembers(listOf(maven("material3", "1.10.0", "androidx"))),
+      sidecar = RemoteComposePairing.sidecarMembers(sidecar("remote-core-1.0.0-alpha18.jar")),
+      system = "desktop-catalog",
+      onLog = { logs += it },
+    )
+
+    assertTrue(logs.isEmpty(), "a catalog with no Remote Compose previews says nothing: $logs")
+    assertTrue(
+      File(destDir, "remote-compose-line.json").exists().not(),
+      "no record is written for a catalog the family cannot explain",
+    )
+  }
+
+  @Test
+  fun `a failure outside the Remote Compose packages is not this record's to claim`() {
+    recordMeshcoreShape()
+
+    assertNull(
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.NoSuchMethodError: androidx.compose.material3.AppBarKt.TopAppBar-gNPyAyM",
+        descriptor,
+      ),
+      "a Material3 linkage error says nothing about the Remote Compose family",
+    )
+  }
+
+  @Test
+  fun `a non-linkage failure is not diagnosed`() {
+    recordMeshcoreShape()
+
+    assertNull(
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.IllegalStateException: androidx.compose.remote.core.RemoteClock is not ready",
+        descriptor,
+      )
+    )
+  }
+
+  @Test
+  fun `an unrelated remote- jar on the sidecar is not read as a family member`() {
+    assertTrue(
+      RemoteComposePairing.sidecarMembers(sidecar("remote-config-21.6.0.jar")).isEmpty(),
+      "only the published Remote Compose artifacts count",
+    )
+  }
+
+  @Test
+  fun `the wear family travels with the rest`() {
+    assertContains(
+      RemoteComposePairing.bundleMembers(
+          listOf(maven("remote-material3", "1.0.0-alpha10", "androidx.wear.compose.remote"))
+        )
+        .map { it.artifact },
+      "remote-material3",
+    )
+  }
+
+  @Test
+  fun `a demoted line says the sidecar won, and the record remembers it`() {
+    RemoteComposePairing.record(
+      destDir = destDir,
+      bundle =
+        RemoteComposePairing.bundleMembers(listOf(maven("remote-creation", "1.0.0-SNAPSHOT"))),
+      sidecar =
+        RemoteComposePairing.sidecarMembers(
+          sidecar("remote-core-1.0.0-alpha18.jar", "remote-player-core-1.0.0-alpha18.jar")
+        ),
+      system = "meshcore-mobile",
+      onLog = { logs += it },
+      demoted = true,
+    )
+
+    val logged = logs.single()
+    assertContains(logged, "sidecar's line win")
+    val diagnosis =
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.NoSuchFieldError: androidx.compose.remote.core.RemoteClock",
+        descriptor,
+      )
+    assertNotNull(diagnosis)
+    assertContains(diagnosis, "sidecar's line win")
+  }
+
+  @Test
+  fun `family membership is what the demotion keys on`() {
+    assertTrue(RemoteComposePairing.isFamilyMember(maven("remote-core", "1.0.0-alpha18")))
+    assertTrue(
+      RemoteComposePairing.isFamilyMember(
+        maven("remote-material3", "1.0.0-alpha10", "androidx.wear.compose.remote")
+      )
+    )
+    assertTrue(
+      RemoteComposePairing.isFamilyMember(
+          maven("material3", "1.10.0", "androidx.compose.material3")
+        )
+        .not()
+    )
+  }
+
+  @Test
+  fun `a skewed family is demoted out of the parent overlay, and nothing else is`() {
+    val remoteCore = maven("remote-core", "1.0.0-SNAPSHOT")
+    val material3 = maven("material3", "1.10.0", "androidx.compose.material3")
+
+    assertTrue(
+      ServeBundleDaemon.overlaysDaemonSidecar(remoteCore, demoteRemoteCompose = false),
+      "a coherent family keeps the catalog's own versions, as every other androidx artifact does",
+    )
+    assertTrue(
+      ServeBundleDaemon.overlaysDaemonSidecar(remoteCore, demoteRemoteCompose = true).not(),
+      "a half-carried family must fall behind the sidecar so one line answers the IR replay",
+    )
+    assertTrue(
+      ServeBundleDaemon.overlaysDaemonSidecar(material3, demoteRemoteCompose = true),
+      "the demotion is the Remote Compose family's alone — Material3 still wins for the catalog",
+    )
+  }
+
+  @Test
+  fun `a missing record diagnoses nothing`() {
+    assertNull(
+      RemoteComposePairing.linkageDiagnosis(
+        "java.lang.NoSuchFieldError: androidx.compose.remote.core.RemoteClock",
+        descriptor,
+      )
+    )
+  }
+}
