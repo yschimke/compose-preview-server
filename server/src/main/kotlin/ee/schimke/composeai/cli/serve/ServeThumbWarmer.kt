@@ -34,9 +34,10 @@ import java.util.concurrent.TimeUnit
  * - **Never blocks a request.** [enqueue] only offers to a bounded queue and returns; the page
  *   build that missed still emits the plain URL for this render, exactly as before.
  * - **Never retries in a loop.** A full queue drops the request and a failed fetch is not
- *   remembered as failed — the next page build re-offers it. That is the same self-healing rule
- *   `ServeBundleHost.bakedPngFile` already applies to a transient branch blip, and it is why this
- *   needs no backoff of its own.
+ *   remembered as failed — the next page build re-offers it. Both paths release the [inFlight] key,
+ *   the drop via the rejection handler; forgetting that is how a "drop" silently becomes a
+ *   permanent deduplication. That is the same self-healing rule `ServeBundleHost.bakedPngFile`
+ *   already applies to a transient branch blip, and it is why this needs no backoff of its own.
  *
  * ## Bounds
  *
@@ -61,6 +62,11 @@ internal class ServeThumbWarmer(
    */
   private val inFlight: MutableSet<String> = Collections.synchronizedSet(HashSet())
 
+  /** One queued warm, carrying the [inFlight] key so a rejection can release it. */
+  private class WarmTask(val key: String, private val body: () -> Unit) : Runnable {
+    override fun run() = body()
+  }
+
   private val pool =
     ThreadPoolExecutor(
         threads,
@@ -69,10 +75,16 @@ internal class ServeThumbWarmer(
         TimeUnit.SECONDS,
         ArrayBlockingQueue(queueDepth),
         { r -> Thread(r, "serve-thumb-warm").apply { isDaemon = true } },
-        // Drop silently when the queue is full. The alternative — running the fetch on the caller
-        // — would put a network round trip on the page-build thread, which is the one thing this
-        // whole lane exists to avoid.
-        ThreadPoolExecutor.DiscardPolicy(),
+        // Drop when the queue is full — but release the key on the way out.
+        //
+        // NOT `DiscardPolicy`: that returns normally without running the task, so the `finally`
+        // that clears [inFlight] never fires and the preview stays marked in flight forever. It
+        // would then be deduplicated out of every later page build — the exact opposite of the
+        // "a drop is re-offered next time" rule this class depends on, and silent.
+        //
+        // NOT `CallerRunsPolicy` either: running here would put a delivery-branch round trip on
+        // the page-build thread, which is the one thing this whole lane exists to avoid.
+        { r, _ -> (r as? WarmTask)?.let { inFlight.remove(it.key) } },
       )
       .apply { allowCoreThreadTimeOut(true) }
 
@@ -85,8 +97,8 @@ internal class ServeThumbWarmer(
   fun enqueue(host: ServeHost, previewId: String) {
     val key = "${System.identityHashCode(host)}:$previewId"
     if (!inFlight.add(key)) return
-    try {
-      pool.execute {
+    val task =
+      WarmTask(key) {
         try {
           host.warmBakedRender(previewId)
         } catch (e: Exception) {
@@ -95,9 +107,11 @@ internal class ServeThumbWarmer(
           inFlight.remove(key)
         }
       }
+    try {
+      pool.execute(task)
     } catch (e: RuntimeException) {
-      // DiscardPolicy does not throw, but a shutdown pool rejects. Either way this preview was not
-      // queued, so it must not be left marked in flight or it would never be offered again.
+      // A shutdown pool rejects by throwing, which the handler above never sees. Same rule: this
+      // preview was not queued, so it must not stay marked in flight.
       inFlight.remove(key)
       throw e
     }

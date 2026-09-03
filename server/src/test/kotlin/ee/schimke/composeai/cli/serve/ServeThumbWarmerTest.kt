@@ -123,6 +123,37 @@ class ServeThumbWarmerTest {
   }
 
   @Test
+  fun `a dropped preview is offerable again on the next page build`() {
+    // The bug this pins: with `DiscardPolicy` the task is silently not run, so the `finally` that
+    // clears the in-flight key never fires and that preview is deduplicated out of EVERY later page
+    // build — a "drop" that is really a permanent forget. The rejection handler has to release the
+    // key itself.
+    val gate = CountDownLatch(1)
+    val host = WarmHost(gate = gate)
+    val warmer = ServeThumbWarmer(threads = 1, queueDepth = 1)
+
+    // One worker parked on the gate, one queued, the rest rejected.
+    repeat(30) { warmer.enqueue(host, "p$it") }
+    val dropped = (0 until 30).map { "p$it" }.filterNot { it in host.warmed }
+    assertTrue(dropped.isNotEmpty(), "the queue is meant to overflow here")
+
+    // Let the pool drain, then re-offer a dropped preview exactly as the next page build would.
+    gate.countDown()
+    val victim = dropped.last()
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (victim !in host.warmed && System.nanoTime() < deadline) {
+      warmer.enqueue(host, victim)
+      Thread.sleep(5)
+    }
+    warmer.stop()
+
+    assertTrue(
+      victim in host.warmed,
+      "a dropped preview must be accepted again, not deduplicated forever",
+    )
+  }
+
+  @Test
   fun `a full queue drops rather than running the fetch on the caller`() {
     // DiscardPolicy, not CallerRuns: running here would put a delivery-branch round trip on the
     // page-build thread, which is the one thing this lane exists to avoid.
