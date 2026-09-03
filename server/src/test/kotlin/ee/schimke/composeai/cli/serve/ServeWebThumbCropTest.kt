@@ -535,6 +535,88 @@ class ServeWebThumbCropTest {
   }
 
   @Test
+  fun `small sections share a row, and a big one keeps its own`() {
+    // Only adjacency is banded: the page's order is meaningful, so a small section is never pulled
+    // past a big one to fill a row.
+    val rows =
+      ServeWeb.homeRows(listOf("big" to 5, "one" to 1, "two" to 2, "solo" to 1)) { it.second }
+
+    assertEquals(
+      listOf(listOf("big"), listOf("one", "two", "solo")),
+      rows.map { row -> row.map { it.first } },
+    )
+  }
+
+  @Test
+  fun `a lone small section is not banded`() {
+    // Nothing to share the row with, and a band would only shrink its cards.
+    val rows = ServeWeb.homeRows(listOf("one" to 1, "big" to 4, "two" to 2)) { it.second }
+
+    assertEquals(
+      listOf(listOf("one"), listOf("big"), listOf("two")),
+      rows.map { r -> r.map { it.first } },
+    )
+  }
+
+  @Test
+  fun `adjacent one and two catalog sections render side by side on the front page`() {
+    fun system(id: String, repo: String) =
+      ServeWeb.HomeSystem(
+        system = id,
+        title = id,
+        subtitle = null,
+        previewCount = 1,
+        trust = null,
+        sourceRepo = repo,
+        heroPreviewId = null,
+      )
+
+    val html =
+      ServeWeb.homeIndexPage(
+        listOf(
+          system("bitwarden-android", "bitwarden/android"),
+          system("home-assistant-android", "home-assistant/android"),
+          system("home-assistant-wear", "home-assistant/wear"),
+        ),
+        token = "t",
+        isPublic = true,
+      )
+
+    assertTrue(html.contains("<div class=\"cp-section-band\">"), "small sections share a band")
+    assertTrue(html.contains("<section class=\"cp-section-unit\" data-span=\"1\">"))
+    assertTrue(html.contains("<section class=\"cp-section-unit\" data-span=\"2\">"))
+    // Grid ids still follow section order, so nothing after a band is renumbered.
+    assertTrue(html.contains("id=\"cp-grid\" data-cols=\"1\""))
+    assertTrue(html.contains("id=\"cp-grid-1\" data-cols=\"2\""))
+    assertTrue(html.contains("<h1 class=\"cp-head\">bitwarden repositories</h1>"))
+    assertTrue(html.contains("<h1 class=\"cp-head\">home-assistant repositories</h1>"))
+  }
+
+  @Test
+  fun `a section of three keeps a full-width row of its own`() {
+    fun system(id: String) =
+      ServeWeb.HomeSystem(
+        system = id,
+        title = id,
+        subtitle = null,
+        previewCount = 1,
+        trust = null,
+        sourceRepo = "joreilly/$id",
+        heroPreviewId = null,
+      )
+
+    val html =
+      ServeWeb.homeIndexPage(
+        listOf(system("confetti"), system("bikeshare"), system("climatetrace")),
+        token = "t",
+        isPublic = true,
+      )
+
+    assertFalse(html.contains("cp-section-band"), "3+ catalogs are not collapsed onto a shared row")
+    assertTrue(html.contains("<div class=\"cp-grid cp-syslist\" id=\"cp-grid\">"))
+  }
+
+  @Test
   fun `a section heading from config is escaped, never injected into the page`() {
     val system =
       ServeWeb.HomeSystem(

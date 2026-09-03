@@ -65,11 +65,11 @@
     <input id="cp-browser-catalog-search" class="cp-browser-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search catalogs" aria-label="Search catalogs">
   </label>
 </div>
-<p id="cp-browser-catalog-empty" class="cp-empty" hidden>No catalogs match your search.</p><script>(function(){var q=document.getElementById("cp-browser-catalog-search"),e=document.getElementById("cp-browser-catalog-empty");if(!q)return;q.addEventListener("input",function(){var n=q.value.trim().toLowerCase(),shown=0;document.querySelectorAll(".cp-sys").forEach(function(c){var hit=!n||(c.getAttribute("data-browser-search")||"").indexOf(n)>=0;c.hidden=!hit;if(hit)shown++;});document.querySelectorAll(".cp-section-title").forEach(function(h){var g=h.nextElementSibling;h.hidden=!!g&&!Array.prototype.some.call(g.children,function(c){return !c.hidden;});});if(e)e.hidden=shown!==0;});})();</script>
-      <div class="cp-section-title">
-        <h1 class="cp-head">Design Systems</h1>
-        <span class="cp-section-count">3 design systems</span>
-      </div>
+<p id="cp-browser-catalog-empty" class="cp-empty" hidden>No catalogs match your search.</p><script>(function(){var q=document.getElementById("cp-browser-catalog-search"),e=document.getElementById("cp-browser-catalog-empty");if(!q)return;q.addEventListener("input",function(){var n=q.value.trim().toLowerCase(),shown=0;document.querySelectorAll(".cp-sys").forEach(function(c){var hit=!n||(c.getAttribute("data-browser-search")||"").indexOf(n)>=0;c.hidden=!hit;if(hit)shown++;});document.querySelectorAll(".cp-section-title").forEach(function(h){var g=h.nextElementSibling;h.hidden=!!g&&!Array.prototype.some.call(g.children,function(c){return !c.hidden;});});document.querySelectorAll(".cp-section-unit").forEach(function(u){u.hidden=!u.querySelector(".cp-sys:not([hidden])");});if(e)e.hidden=shown!==0;});})();</script>
+<div class="cp-section-title">
+  <h1 class="cp-head">Design Systems</h1>
+  <span class="cp-section-count">3 design systems</span>
+</div>
       <div class="cp-grid cp-syslist" id="cp-grid">
       <div class="cp-card cp-sys" data-browser-search="compose material 3 compose-m3 androidx.compose.material3:material3 yschimke/compose-ai-tools">
   <div class="cp-imgwrap"><img loading="eager" decoding="async" width="168" height="68" alt="Compose Material 3 preview" src="/hero/compose-m3/1f0c9a4b7d2e6503.png"></div>
@@ -101,11 +101,13 @@
   </div>
 </div>
       </div>
+<div class="cp-section-band">
+      <section class="cp-section-unit" data-span="2">
       <div class="cp-section-title">
-        <h1 class="cp-head">yschimke repositories</h1>
-        <span class="cp-section-count">2 catalogs</span>
-      </div>
-      <div class="cp-grid cp-syslist" id="cp-grid-1">
+  <h1 class="cp-head">yschimke repositories</h1>
+  <span class="cp-section-count">2 catalogs</span>
+</div>
+      <div class="cp-grid cp-syslist cp-section-unit-grid" id="cp-grid-1" data-cols="2">
       <div class="cp-card cp-sys" data-browser-search="meshcore meshcore-mobile ee.schimke.meshcore yschimke/meshcore-mobile">
   <div class="cp-imgwrap"><img loading="lazy" alt="MeshCore preview" src="/meshcore-mobile/render/device-manycontacts__ideal__default__compact.png"></div>
   <div class="cp-meta">
@@ -126,11 +128,13 @@
   </div>
 </div>
       </div>
+      </section>
+      <section class="cp-section-unit" data-span="1">
       <div class="cp-section-title">
-        <h1 class="cp-head">joreilly repositories</h1>
-        <span class="cp-section-count">1 catalog</span>
-      </div>
-      <div class="cp-grid cp-syslist" id="cp-grid-2">
+  <h1 class="cp-head">joreilly repositories</h1>
+  <span class="cp-section-count">1 catalog</span>
+</div>
+      <div class="cp-grid cp-syslist cp-section-unit-grid" id="cp-grid-2" data-cols="1">
       <div class="cp-card cp-sys" data-bg-theme="dark" data-browser-search="confetti (wear) confetti-wear dev.johnoreilly.confetti joreilly/confetti">
   <div class="cp-imgwrap"><img loading="lazy" alt="Confetti (Wear) preview" src="/confetti-wear/render/conference-screen__ideal__default__dark.png"></div>
   <div class="cp-meta">
@@ -141,6 +145,8 @@
   </div>
 </div>
       </div>
+      </section>
+</div>
 <span hidden data-cp-global-components="/api/components"></span>
 
         </main>

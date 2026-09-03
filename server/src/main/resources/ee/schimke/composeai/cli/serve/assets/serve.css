@@ -609,6 +609,40 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
 .cp-section-title .cp-head { margin: 0; font-size: var(--md-sys-typescale-headline-small-size);
   line-height: var(--md-sys-typescale-headline-small-line); letter-spacing: 0; font-weight: 400; }
 .cp-grid + .cp-section-title { margin-top: 44px; }
+/* A band of small sections shares one row. It carries the SAME track as `.cp-syslist` below, and
+   each unit spans exactly as many columns as it has cards (laying its own cards on those columns),
+   so a one- and a two-catalog section sit side by side with cards the width they'd have on a row of
+   their own — instead of each buying a full row for one card. */
+.cp-section-band { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 22px; align-items: start; }
+.cp-grid + .cp-section-band, .cp-section-band + .cp-section-title,
+.cp-section-band + .cp-section-band { margin-top: 44px; }
+.cp-section-unit { min-width: 0; }
+.cp-section-unit[data-span="1"] { grid-column: span 1; }
+.cp-section-unit[data-span="2"] { grid-column: span 2; }
+/* The unit's own cards ride the band's columns: n columns of the band = n tracks plus the gaps
+   between them, so `repeat(n, 1fr)` here is exactly the card width of a full-width section. */
+.cp-section-unit-grid[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
+.cp-section-unit-grid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* A unit's heading is a section heading in a narrower column, so it drops a step off the page's
+   headline scale rather than wrapping across three lines beside its one card. */
+.cp-section-unit .cp-section-title { margin-bottom: 12px; }
+.cp-section-unit .cp-section-title .cp-head {
+  font-size: var(--md-sys-typescale-title-large-size);
+  line-height: var(--md-sys-typescale-title-large-line); }
+/* Below the band's own two-column minimum every unit takes the full width and stacks its cards,
+   as the full-width sections around it already do. The number is the band's arithmetic, not the
+   phone breakpoint: two 300px tracks plus the 22px gap need 622px of content, which is a 678px
+   viewport at the page's 28px body padding — and ~693px once a classic scrollbar takes its 15px.
+   700px clears both. Without this a viewport in that range leaves the band ONE track while a
+   `data-span="2"` unit still asks for two: grid invents an implicit track and squeezes both of
+   that unit's cards to about half the width `.cp-syslist` would give them. Keep this in step with
+   the 300px track and 22px gap above. */
+@media (max-width: 700px) {
+  .cp-section-band { grid-template-columns: 1fr; }
+  .cp-section-unit[data-span="1"], .cp-section-unit[data-span="2"] { grid-column: 1 / -1; }
+  .cp-section-unit-grid[data-cols="2"] { grid-template-columns: 1fr; }
+}
 .cp-section-count, .cp-catalog-id { color: var(--cp-fg-faint);
   font-size: var(--md-sys-typescale-label-medium-size);
   letter-spacing: var(--md-sys-typescale-label-medium-tracking); }

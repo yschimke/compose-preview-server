@@ -5809,7 +5809,7 @@ ${captureControlsHtml().prependIndent("          ")}
     }
     // Headings and nouns come from operator config (and, for the fallback sections, from a
     // catalog's own provenance), so they're escaped like any other data on the page.
-    fun section(heading: String, list: List<HomeSystem>, noun: String, gridId: String): String {
+    fun sectionTitle(heading: String, list: List<HomeSystem>, noun: String): String {
       val head = WebEscaping.htmlEscape(heading)
       val count = WebEscaping.htmlEscape(counted(list.size, noun))
       return """
@@ -5817,11 +5817,42 @@ ${captureControlsHtml().prependIndent("          ")}
         <h1 class="cp-head">$head</h1>
         ${if (componentBrowser) "" else "<span class=\"cp-section-count\">$count</span>"}
       </div>
+      """
+        .trimIndent()
+    }
+    fun section(heading: String, list: List<HomeSystem>, noun: String, gridId: String): String =
+      sectionTitle(heading, list, noun) +
+        "\n" +
+        """
       <div class="cp-grid cp-syslist" id="$gridId">
       ${list.joinToString("\n") { card(it) }}
       </div>
       """
-        .trimIndent()
+          .trimIndent()
+
+    /**
+     * A run of [COMPACT_SECTION_MAX]-or-smaller sections rendered side by side in one band.
+     *
+     * Each unit spans exactly as many of the band's columns as it has cards, and lays its own cards
+     * out on that same track, so a one-card section is one card wide and a two-card section two —
+     * the cards line up with the full-width sections above and below instead of each tiny section
+     * buying a whole row for one card and a lot of white space.
+     */
+    fun band(row: List<Pair<HomeSection, String>>): String {
+      val units =
+        row.joinToString("\n") { (s, gridId) ->
+          val span = s.systems.size.coerceAtMost(COMPACT_SECTION_MAX)
+          """
+      <section class="cp-section-unit" data-span="$span">
+      ${sectionTitle(s.heading, s.systems, s.noun)}
+      <div class="cp-grid cp-syslist cp-section-unit-grid" id="$gridId" data-cols="$span">
+      ${s.systems.joinToString("\n") { card(it) }}
+      </div>
+      </section>
+      """
+            .trimIndent()
+        }
+      return "<div class=\"cp-section-band\">\n$units\n</div>"
     }
     val sections = homeSections(systems)
     val catalogSearch =
@@ -5838,7 +5869,7 @@ ${captureControlsHtml().prependIndent("          ")}
         """
           .trimIndent() +
           """
-          <script>(function(){var q=document.getElementById("cp-browser-catalog-search"),e=document.getElementById("cp-browser-catalog-empty");if(!q)return;q.addEventListener("input",function(){var n=q.value.trim().toLowerCase(),shown=0;document.querySelectorAll(".cp-sys").forEach(function(c){var hit=!n||(c.getAttribute("data-browser-search")||"").indexOf(n)>=0;c.hidden=!hit;if(hit)shown++;});document.querySelectorAll(".cp-section-title").forEach(function(h){var g=h.nextElementSibling;h.hidden=!!g&&!Array.prototype.some.call(g.children,function(c){return !c.hidden;});});if(e)e.hidden=shown!==0;});})();</script>
+          <script>(function(){var q=document.getElementById("cp-browser-catalog-search"),e=document.getElementById("cp-browser-catalog-empty");if(!q)return;q.addEventListener("input",function(){var n=q.value.trim().toLowerCase(),shown=0;document.querySelectorAll(".cp-sys").forEach(function(c){var hit=!n||(c.getAttribute("data-browser-search")||"").indexOf(n)>=0;c.hidden=!hit;if(hit)shown++;});document.querySelectorAll(".cp-section-title").forEach(function(h){var g=h.nextElementSibling;h.hidden=!!g&&!Array.prototype.some.call(g.children,function(c){return !c.hidden;});});document.querySelectorAll(".cp-section-unit").forEach(function(u){u.hidden=!u.querySelector(".cp-sys:not([hidden])");});if(e)e.hidden=shown!==0;});})();</script>
           """
             .trimIndent()
     val body =
@@ -5848,11 +5879,23 @@ ${captureControlsHtml().prependIndent("          ")}
       } else {
         catalogSearch +
           "\n" +
-          sections
-            .mapIndexed { index, s ->
-              section(s.heading, s.systems, s.noun, if (index == 0) "cp-grid" else "cp-grid-$index")
+          // Grid ids stay keyed to the section's position in `homeSections` order, so banding two
+          // sections onto one row doesn't renumber the anchors of the sections after them.
+          homeRows(
+              sections.mapIndexed { index, s ->
+                s to if (index == 0) "cp-grid" else "cp-grid-$index"
+              }
+            ) {
+              it.first.systems.size
             }
-            .joinToString("\n")
+            .joinToString("\n") { row ->
+              if (row.size == 1) {
+                val (s, gridId) = row.single()
+                section(s.heading, s.systems, s.noun, gridId)
+              } else {
+                band(row)
+              }
+            }
       }
     val globalComponents =
       if (systems.isEmpty()) ""
@@ -6002,6 +6045,49 @@ ${captureControlsHtml().prependIndent("          ")}
     // "Other" is the unattributed bucket, so it reads last regardless of when it first appeared.
     return ordered.filterNot { it.heading == OTHER_HEADING } +
       ordered.filter { it.heading == OTHER_HEADING }
+  }
+
+  /**
+   * The most catalogs a section can hold and still share a row with its neighbours.
+   *
+   * Two, because a section's cards keep the width they'd have on a row of their own: a unit is as
+   * many columns wide as it has cards, so at three the band is already a full row and there is
+   * nothing to share. Sections above this stay on their own row(s), which is what makes a large
+   * publisher read as a block rather than as one more entry in a shelf of small ones.
+   */
+  internal const val COMPACT_SECTION_MAX = 2
+
+  /**
+   * Groups the front page's sections into rows: a run of small ([COMPACT_SECTION_MAX]-or-fewer
+   * catalogs) sections becomes one row they share, and everything else keeps a row of its own.
+   *
+   * The front page's order is meaningful ([homeSections] sorts by group priority, then by
+   * configured order), so a row is only ever built from sections that are **already adjacent** —
+   * banding never reaches past a big section to pull a small one forward. A run of exactly one
+   * small section is left as an ordinary section: there is no neighbour to share with, and wrapping
+   * it in a band would shrink its cards for nothing.
+   */
+  internal fun <T> homeRows(sections: List<T>, size: (T) -> Int): List<List<T>> {
+    val rows = mutableListOf<List<T>>()
+    val run = mutableListOf<T>()
+    fun flush() {
+      when (run.size) {
+        0 -> Unit
+        1 -> rows += listOf(run.single())
+        else -> rows += run.toList()
+      }
+      run.clear()
+    }
+    for (s in sections) {
+      if (size(s) <= COMPACT_SECTION_MAX) {
+        run += s
+      } else {
+        flush()
+        rows += listOf(s)
+      }
+    }
+    flush()
+    return rows
   }
 
   /** The heading an ungrouped catalog falls back to: its repo owner's, else the "Other" bucket. */
