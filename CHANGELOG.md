@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.19.0](https://github.com/yschimke/compose-preview-server/compare/v2.18.2...v2.19.0) (2026-09-03)
+
+
+### Features
+
+* **serve:** band small front-page sections onto a shared row ([#228](https://github.com/yschimke/compose-preview-server/issues/228)) ([8154d86](https://github.com/yschimke/compose-preview-server/commit/8154d864792291d66309e74a484d6277d20f71e0))
+
+
+### Bug Fixes
+
+* **serve:** make the bare render the CMP Android one, and drop the param ([#226](https://github.com/yschimke/compose-preview-server/issues/226)) ([b5118e6](https://github.com/yschimke/compose-preview-server/commit/b5118e690b5fafe13ed80b45537f6890c35eaa55))
+
+
+### Performance Improvements
+
+* **serve:** draw the viewer's component drawer from the thumbnail lane ([#229](https://github.com/yschimke/compose-preview-server/issues/229)) ([2a0de4d](https://github.com/yschimke/compose-preview-server/commit/2a0de4dc2e55f167460a0c39f8e3e4e3fc367da3))
+
 ## [2.18.2](https://github.com/yschimke/compose-preview-server/compare/v2.18.1...v2.18.2) (2026-09-03)
 
 
