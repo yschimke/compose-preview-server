@@ -12,6 +12,8 @@ import ee.schimke.composeai.uibuilder.protocol.DimensionUnitV1
 import ee.schimke.composeai.uibuilder.protocol.DimensionValueV1
 import ee.schimke.composeai.uibuilder.protocol.EnumValueV1
 import ee.schimke.composeai.uibuilder.protocol.MatchParentSizeModifierV1
+import ee.schimke.composeai.uibuilder.protocol.PaddingModifierV1
+import ee.schimke.composeai.uibuilder.protocol.PaddingValueV1
 import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.StateTruthyPredicateV1
 import ee.schimke.composeai.uibuilder.protocol.StateValueV1
@@ -293,6 +295,51 @@ class ScreenDocumentProjectionTest {
           .getValue("color") as ScreenValue.Reference
       assertEquals(listOf("colorScheme", role), color.members, role)
     }
+  }
+
+  @Test
+  fun `every unexpressible modifier is reported, not only the first`() {
+    // The promise of `Outcome.Refused` is that a document can be fixed in one pass. A non-local
+    // return out of the modifier loop broke it silently: the second problem only appeared after
+    // the first was fixed and the export re-run.
+    val reasons =
+      refusal(
+        document(
+          text()
+            .copy(
+              modifiers =
+                listOf(
+                  MatchParentSizeModifierV1,
+                  SizeModifierV1(JsonNull, JsonNull),
+                  ClipModifierV1(shape = "squircle"),
+                )
+            )
+        )
+      )
+    assertEquals(3, reasons.size, reasons.toString())
+    assertTrue(reasons.any { it.contains("matchParentSize") }, reasons.toString())
+    assertTrue(reasons.any { it.contains("neither a width nor a height") }, reasons.toString())
+    assertTrue(reasons.any { it.contains("squircle") }, reasons.toString())
+  }
+
+  @Test
+  fun `a padding with no numeric axis is refused, not emitted as an ambiguous call`() {
+    // `Modifier.padding()` and `PaddingValues()` are each ambiguous between fully-defaulted
+    // overloads, so an empty argument list compiles as none of them. Catalog validation checks the
+    // modifier type and not its axes, and the renderer reads a bad number as zero, so a document
+    // like this really does arrive here.
+    assertEquals(
+      listOf("node `text` pads with no axis that is a number"),
+      refusal(
+        document(
+          text().copy(modifiers = listOf(PaddingModifierV1(JsonNull, JsonNull, JsonNull, JsonNull)))
+        )
+      ),
+    )
+    assertEquals(
+      listOf("node `text`.`color` has no axis that is a number"),
+      refusal(document(text("color" to PaddingValueV1(JsonNull, JsonNull, JsonNull, JsonNull)))),
+    )
   }
 
   @Test

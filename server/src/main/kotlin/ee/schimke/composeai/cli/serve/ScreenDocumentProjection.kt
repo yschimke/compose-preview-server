@@ -86,7 +86,7 @@ import kotlinx.serialization.json.doubleOrNull
  * claim: nothing here proves `TextAlign` has a `Center`. It is checked as a writable Kotlin name,
  * and a wrong one fails the compile gate rather than shipping.
  */
-object ScreenDocumentProjection {
+internal object ScreenDocumentProjection {
 
   sealed interface Outcome {
     data class Projected(val document: ScreenDocument) : Outcome
@@ -216,10 +216,14 @@ object ScreenDocumentProjection {
 
     /** The `modifier` argument for a node's modifier list, or null having said why not. */
     private fun modifiers(node: DesignNodeV1): ScreenValue? {
-      val links = node.modifiers.map { link(it, node.id) ?: return null }
+      // Every modifier is visited even after one fails. A non-local `return` out of the map stopped
+      // at the first, which quietly broke this projection's one promise: `Outcome.Refused` carries
+      // *every* unexpressible thing so a document can be fixed in one pass, not one per export.
+      val links = node.modifiers.map { link(it, node.id) }
+      if (links.any { it == null }) return null
       return ScreenValue.Chain(
         receiver = ScreenValue.Reference(MODIFIER, typeFqn = MODIFIER),
-        links = links,
+        links = links.filterNotNull(),
         typeFqn = MODIFIER,
       )
     }
@@ -228,17 +232,24 @@ object ScreenDocumentProjection {
       when (modifier) {
         FillMaxWidthModifierV1 -> ChainLink("androidx.compose.foundation.layout.fillMaxWidth")
         FillMaxSizeModifierV1 -> ChainLink("androidx.compose.foundation.layout.fillMaxSize")
-        is PaddingModifierV1 ->
-          ChainLink(
-            "androidx.compose.foundation.layout.padding",
-            named =
-              buildMap {
-                dp(modifier.startDp)?.let { put("start", it) }
-                dp(modifier.topDp)?.let { put("top", it) }
-                dp(modifier.endDp)?.let { put("end", it) }
-                dp(modifier.bottomDp)?.let { put("bottom", it) }
-              },
-          )
+        is PaddingModifierV1 -> {
+          val axes = buildMap {
+            dp(modifier.startDp)?.let { put("start", it) }
+            dp(modifier.topDp)?.let { put("top", it) }
+            dp(modifier.endDp)?.let { put("end", it) }
+            dp(modifier.bottomDp)?.let { put("bottom", it) }
+          }
+          // No usable axis emits `Modifier.padding()`, which is ambiguous between Compose's two
+          // fully-defaulted overloads and compiles as neither. Catalog validation checks that the
+          // modifier *type* is allowed and not that its axes are numbers, and the renderer reads a
+          // bad number as zero, so such a document reaches here rather than being stopped earlier.
+          if (axes.isEmpty()) {
+            reasons += "node `$nodeId` pads with no axis that is a number"
+            null
+          } else {
+            ChainLink("androidx.compose.foundation.layout.padding", named = axes)
+          }
+        }
         is SizeModifierV1 -> {
           // `size` has two overloads and neither accepts one named axis: `size(size: Dp)` names
           // its parameter `size`, and `size(width: Dp, height: Dp)` requires both. So a modifier
@@ -331,18 +342,23 @@ object ScreenDocumentProjection {
           token(value.value, TYPOGRAPHY_TOKENS, TEXT_STYLE, "typography", where)
         is ShapeTokenValueV1 -> token(value.value, SHAPE_TOKENS, SHAPE, "shape", where)
         is DimensionValueV1 -> dimension(value, where)
-        is PaddingValueV1 ->
-          ScreenValue.Construct(
-            callableFqn = "androidx.compose.foundation.layout.PaddingValues",
-            named =
-              buildMap {
-                dp(value.startDp)?.let { put("start", it) }
-                dp(value.topDp)?.let { put("top", it) }
-                dp(value.endDp)?.let { put("end", it) }
-                dp(value.bottomDp)?.let { put("bottom", it) }
-              },
-            typeFqn = "androidx.compose.foundation.layout.PaddingValues",
-          )
+        is PaddingValueV1 -> {
+          val axes = buildMap {
+            dp(value.startDp)?.let { put("start", it) }
+            dp(value.topDp)?.let { put("top", it) }
+            dp(value.endDp)?.let { put("end", it) }
+            dp(value.bottomDp)?.let { put("bottom", it) }
+          }
+          // `PaddingValues()` is ambiguous for the same reason `Modifier.padding()` is: every
+          // overload is fully defaulted, so an argument list with nothing in it picks none of them.
+          if (axes.isEmpty()) refuse("$where has no axis that is a number")
+          else
+            ScreenValue.Construct(
+              callableFqn = "androidx.compose.foundation.layout.PaddingValues",
+              named = axes,
+              typeFqn = "androidx.compose.foundation.layout.PaddingValues",
+            )
+        }
         is EnumValueV1 -> enum(value.value, where)
         is StateValueV1 ->
           refuse(

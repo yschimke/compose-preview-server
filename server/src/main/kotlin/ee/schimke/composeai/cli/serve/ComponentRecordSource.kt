@@ -43,7 +43,7 @@ import kotlinx.serialization.json.Json
  * record is a startup-shaped problem, and a builder exporting in a loop would otherwise fill the
  * log with the same line.
  */
-class ComponentRecordSource(private val files: Map<String, File>) {
+internal class ComponentRecordSource(private val files: Map<String, File>) {
 
   private data class Parsed(val identity: Identity?, val record: ComponentRecordFile?)
 

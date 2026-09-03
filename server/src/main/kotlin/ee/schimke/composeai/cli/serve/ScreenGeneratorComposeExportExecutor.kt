@@ -1,5 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.discovery.COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA
+import ee.schimke.composeai.discovery.COMPONENT_RECORD_SCHEMA_VERSION
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
@@ -42,7 +44,7 @@ import java.security.MessageDigest
  * with "no component in this catalog", which reads like a stale document rather than like a host
  * that was never given the record.
  */
-class ScreenGeneratorComposeExportExecutor(
+internal class ScreenGeneratorComposeExportExecutor(
   private val components: (catalogSystemId: String) -> ComponentRecordFile?,
   /**
    * `generated.uibuilder`, matching the exporter this replaces and the package
@@ -153,6 +155,20 @@ class ScreenGeneratorComposeExportExecutor(
      * list to keep topped up.
      */
     private val EXPRESSION_PACKAGES = setOf("androidx.compose")
+
+    /**
+     * Whether [record] is a schema `ScreenGenerator` will actually generate from.
+     *
+     * Parsing is not the same question. `ComponentRecordSource` ignores unknown keys on purpose so
+     * a record from a newer producer still deserializes, leaving the version judgement to the
+     * generator — which refuses anything below [COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA] or above
+     * [COMPONENT_RECORD_SCHEMA_VERSION]. A host that only checked deserialization would advertise
+     * `composeCode = true` for a record every export then refuses, which is the export action that
+     * cannot succeed this capability exists to avoid.
+     */
+    fun generatesFrom(record: ComponentRecordFile): Boolean =
+      record.schemaVersion in
+        COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA..COMPONENT_RECORD_SCHEMA_VERSION
 
     /** The host was never given a component record for this catalog. Not the document's fault. */
     const val NO_COMPONENT_RECORD = "NO_COMPONENT_RECORD"

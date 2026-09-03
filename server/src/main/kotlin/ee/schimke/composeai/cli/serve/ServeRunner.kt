@@ -2309,10 +2309,14 @@ public class ServeRunner(
         // back `NO_COMPONENT_RECORD`. Deriving it per catalog instead would mean a new shape for
         // that executor's published API, so the conservative reading is taken here: all or none.
         //
-        // `record()` rather than a key check, so a configured-but-unparseable file is not counted
-        // — and the read warms the cache and prints its reason at startup rather than on the first
-        // export. Unconditional advertising is what the packaged image would have done: its
-        // entrypoint enables the builder and passes no `--ui-builder-components`.
+        // `record()` and then `generatesFrom`, because parsing is not the question the capability
+        // asks. The source ignores unknown keys so a newer record still deserializes, and the
+        // generator refuses a schema it does not understand — so a version check has to happen
+        // here too, or an upgraded host advertises an export that every call refuses. The read
+        // also warms the cache and prints its reason at startup rather than on the first export.
+        //
+        // Unconditional advertising is what the packaged image would have done: its entrypoint
+        // enables the builder and passes no `--ui-builder-components`.
         exportCapabilities =
           ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
               ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
@@ -2320,7 +2324,14 @@ public class ServeRunner(
                 svg = false,
                 png = false,
               ))
-            .copy(composeCode = uiBuilderCatalogs.all { records.record(it) != null }),
+            .copy(
+              composeCode =
+                uiBuilderCatalogs.all { catalog ->
+                  records
+                    .record(catalog)
+                    ?.let(ScreenGeneratorComposeExportExecutor::generatesFrom) == true
+                }
+            ),
       )
     val service =
       PersistentUiBuilderService(
