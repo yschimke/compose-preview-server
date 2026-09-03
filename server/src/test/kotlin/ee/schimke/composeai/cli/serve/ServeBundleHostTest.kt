@@ -263,6 +263,24 @@ class ServeBundleHostTest {
     val host = ServeBundleHost(dir, label = "remote-m3")
     assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
     assertEquals(RemoteComposePlayerKind.VIEW, host.bakedRcPlayer("com.example.Pinned"))
+
+    // …and the picker offers that lane. A bare URL serves those pixels, so greying out the chip
+    // for the very player the snapshot came from would have the host disagree with itself — and
+    // `java` can never arrive any other way, because [RcPlayerBackend.JAVA] has no rc-compare
+    // column to be staged from.
+    assertTrue(
+      RcPlayerBackend.CMP_ANDROID in host.enabledRcPlayersFor("com.example.Card"),
+      "the embedded lane is offered where baked is that player",
+    )
+    assertTrue(
+      RcPlayerBackend.JAVA in host.enabledRcPlayersFor("com.example.Pinned"),
+      "the view lane is offered where baked is that player: " +
+        "${host.enabledRcPlayersFor("com.example.Pinned")}",
+    )
+    assertFalse(
+      RcPlayerBackend.JAVA in host.enabledRcPlayersFor("com.example.Card"),
+      "…and not offered where it is someone else's pixels",
+    )
   }
 
   @Test

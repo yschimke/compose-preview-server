@@ -621,6 +621,14 @@ interface ServeHost : AutoCloseable {
         addAll(
           stagedRcPlayers(previewId).filterNot { it == RcPlayerBackend.CMP_WASM || it in this }
         )
+        // …and the player the BAKED artifact already is ([bakedRcPlayer]). A bare URL serves those
+        // pixels, so the picker has to offer that lane even when the parity run staged no column
+        // for it — and it never does for [RcPlayerBackend.JAVA], whose `rcCompareLane` is null. A
+        // host that has just established which player drew its snapshot, and then greys out that
+        // exact chip while the snapshot sits on the stage, is disagreeing with itself.
+        bakedRcPlayer(previewId)
+          ?.let { kind -> RcPlayerBackend.entries.firstOrNull { it.playerKind == kind } }
+          ?.let { if (it !in this) add(it) }
       }
         .sortedBy { RcPlayerBackend.UNIVERSE.indexOf(it) }
     } else {
