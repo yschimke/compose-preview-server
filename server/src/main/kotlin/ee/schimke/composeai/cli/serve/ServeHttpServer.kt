@@ -8482,6 +8482,16 @@ class ServeHttpServer(
               preview.sourceFile,
             )
           }
+      // The request's override params, split into what this page's controls may open on and what
+      // they must not — see [seedableOverrideParams]. Both halves reach the page: the seeds paint
+      // the markup, the rest is published so the viewer's own URL restore defers on them too.
+      //
+      // Computed here rather than beside the markup it paints, because the report below needs the
+      // same answer: `seeded` is by construction "the overrides this page's picture can be
+      // showing",
+      // which is exactly what a locator may claim.
+      val overrideSeeds =
+        seedableOverrideParams(renderHost, preview, sessionId, revisions.pinned, wasmSrc)
       // The prefilled "report an issue" report for the preview on screen, filed against the repo
       // that owns its Kotlin.
       //
@@ -8524,7 +8534,16 @@ class ServeHttpServer(
               revisions.pinned == null
             },
           variant = ServeIssueReport.variantFor(preview),
-          overrides = requestOverrideParams(sessionId),
+          // The SEEDED map, not the request's raw one. On an accepted baked fallback
+          // (`?fallback=baked`) the render lane answers with pixels that ignored an axis it could
+          // not apply and `respondDroppedOverrides` names what it dropped, so the raw query claims
+          // a frame the picture is not showing. That claim is harmless on a link and fatal in a
+          // locator: the body a visitor with scripting off files — and the one standing in the
+          // field before the first client render — would be indexed under an override the pixels
+          // never used. `seedableOverrideParams` already answers "what can this picture be
+          // showing"; the page's controls open on it, so the client-side `{{overrides}}` pass
+          // collects the same set and the two forms of the body agree.
+          overrides = overrideSeeds.seeded,
           sourceUrl = sourceHref,
           catalog = bundleHost?.provenance?.let { "${it.repo}@${it.branch}" },
           toolVersion = bundleHost?.provenance?.toolVersion,
@@ -8574,11 +8593,6 @@ class ServeHttpServer(
         projectHistory
           ?.takeIf { catalogBundleHost(renderHost)?.provenance == null }
           ?.let { history -> withContext(Dispatchers.IO) { history.timelineJsonFor(preview.id) } }
-      // The request's override params, split into what this page's controls may open on and what
-      // they must not — see [seedableOverrideParams]. Both halves reach the page: the seeds paint
-      // the markup, the rest is published so the viewer's own URL restore defers on them too.
-      val overrideSeeds =
-        seedableOverrideParams(renderHost, preview, sessionId, revisions.pinned, wasmSrc)
       // The publication-aware HEAD probe is network I/O; keep it off Ktor's request dispatcher.
       val executableBundleAvailable =
         withContext(Dispatchers.IO) { renderHost.canDownloadExecutableBundle(preview.id) }

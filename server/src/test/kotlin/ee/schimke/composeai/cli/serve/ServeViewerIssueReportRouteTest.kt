@@ -277,6 +277,20 @@ class ServeViewerIssueReportRouteTest {
   }
 
   @Test
+  fun `an accepted baked fallback records only the overrides the pixels could have used`() {
+    // `?fallback=baked` says "serve the published snapshot even though it ignores my override".
+    // The render lane then answers with pixels that applied none of it and names what it dropped,
+    // and `seedableOverrideParams` withholds those axes from the controls for the same reason. A
+    // locator built from the RAW query would claim a frame the picture is not showing — and this is
+    // the body a visitor with scripting off files, so no later substitution corrects it.
+    server = newServer()
+    val body = reportBody(get("/compose-m3/p/button-filled?uiMode=dark&fallback=baked").second)
+    assertTrue(body.contains("```${ServeIssueReport.LOCATOR_FENCE}"), body)
+    assertTrue(body.contains("overrides: {}"), body)
+    assertFalse(body.contains("\"uiMode\""), body)
+  }
+
+  @Test
   fun `the viewer's template leaves the overrides for its own script to fill`() {
     // The controls re-render the frame in place, so the served overrides stop describing it the
     // moment a knob moves. The template hands that one value to the page, next to `{{render}}` —
