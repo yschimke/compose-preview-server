@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.18.2](https://github.com/yschimke/compose-preview-server/compare/v2.18.1...v2.18.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **serve:** emit a parity locator from the viewer's report form ([#220](https://github.com/yschimke/compose-preview-server/issues/220)) ([995ee83](https://github.com/yschimke/compose-preview-server/commit/995ee83294bd3716cba3854997287ec25a53d931))
+* **serve:** file no parity locator from the viewer's interactive lanes ([#225](https://github.com/yschimke/compose-preview-server/issues/225)) ([cf1606e](https://github.com/yschimke/compose-preview-server/commit/cf1606ee60431557db78e4f4fb0e6501dc385099))
+* **serve:** keep a catalog's Remote Compose family on one line ([#219](https://github.com/yschimke/compose-preview-server/issues/219)) ([c263cc5](https://github.com/yschimke/compose-preview-server/commit/c263cc538ae529b71bd42dc914c50a858ce15b55))
+* **serve:** keep the daemon's inspect layers and the hero crop's retry ([#224](https://github.com/yschimke/compose-preview-server/issues/224)) ([ab0602f](https://github.com/yschimke/compose-preview-server/commit/ab0602fd23c49528424f542bcd510ee94429c14a))
+* **serve:** stop stamping the default player onto every preview url ([#218](https://github.com/yschimke/compose-preview-server/issues/218)) ([22ac32b](https://github.com/yschimke/compose-preview-server/commit/22ac32b5f44e4c04e6e9d3d6511de425ca6cbaea))
+
+
+### Performance Improvements
+
+* **serve:** let a .annotations request name the layers it will draw ([#227](https://github.com/yschimke/compose-preview-server/issues/227)) ([49cec02](https://github.com/yschimke/compose-preview-server/commit/49cec027cac8b9fce1a8c82724a5d8ff64cbb654))
+* stop re-deriving catalog facts and waking daemons for published data ([#221](https://github.com/yschimke/compose-preview-server/issues/221)) ([544cfa1](https://github.com/yschimke/compose-preview-server/commit/544cfa164d6d94466c04e8870b732294e7117a5b))
+
+
+### Reverts
+
+* "fix(serve): stop stamping the default player onto every preview url" ([#223](https://github.com/yschimke/compose-preview-server/issues/223)) ([6a9e118](https://github.com/yschimke/compose-preview-server/commit/6a9e118a20a005e11806d25094e6743248e5179a))
+
 ## [2.18.1](https://github.com/yschimke/compose-preview-server/compare/v2.18.0...v2.18.1) (2026-09-03)
 
 
