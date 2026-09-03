@@ -8862,6 +8862,16 @@ class ServeHttpServer(
           // A top-level site's pages carry their session in the ORIGIN, so same-session links
           // drop the `?session=` the rooted legacy form would add. See [ServeSites].
           sessionInOrigin = siteSystem() != null,
+          // The component drawer's rows, on the same prebaked-thumbnail lane the catalog grid's
+          // cards use and for the same reason: the drawer lists every sibling component at ~40px,
+          // which on the plain `/render` URL is a full-resolution PNG apiece. Same rule as the
+          // grid — bakes from local pixels only, never fetches, since this runs on the request
+          // thread.
+          navThumbHash = { id ->
+            heroImages
+              .gridThumbFor(renderHost, id, catalogBundleHost(renderHost)?.contentCrop(id))
+              ?.hash
+          },
         ),
         ContentType.Text.Html,
       )

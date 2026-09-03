@@ -125,6 +125,61 @@ class ServeWebBreakpointFoldTest {
   }
 
   @Test
+  fun `a drawer row points at the prebaked thumbnail lane when the preview has one`() {
+    // #215. The drawer's rows are ~40px thumbnails, one per sibling component — 57 of them on the
+    // m3 catalog — and each used to load the preview's FULL-resolution render: 849 KB at
+    // `max-age=300` with no validator, so the expiry could not even end in a 304. The grid's cards
+    // already had the answer; this puts the drawer on the same `?thumb=<hash>` lane, which the
+    // render route serves out of memory as an `immutable`, ETagged, downscaled copy.
+    val html =
+      ServeWeb.viewerPage(
+        alertDialog.first(),
+        token = "t",
+        basePath = "/wear",
+        siblings = catalog,
+        navThumbHash = { id -> "hash-${id.take(4)}" },
+      )
+    val drawer = html.substringAfter("<ul class=\"cp-nav-list\"").substringBefore("</ul>")
+    val thumbs =
+      Regex("<img class=\"cp-nav-thumb\"[^>]*src=\"([^\"]*)\"")
+        .findAll(drawer)
+        .map { it.groupValues[1] }
+        .toList()
+
+    assertTrue(thumbs.isNotEmpty(), "the drawer draws a thumbnail per row")
+    assertTrue(
+      thumbs.all { it.contains("thumb=hash-") },
+      "every row rides the prebaked lane: $thumbs",
+    )
+    // The hash is appended to the row's OWN url, so the id and the link query are untouched — the
+    // same rule the grid's `renderSrc` follows, which is what keeps one URL shape across the two
+    // surfaces.
+    assertTrue(
+      thumbs.all { it.startsWith("/wear/render/") && it.contains(".png?") },
+      "the thumbnail is the row's own render URL with a parameter added: $thumbs",
+    )
+  }
+
+  @Test
+  fun `a drawer row keeps the plain render when no thumbnail is baked`() {
+    // The fallback is not a degradation to avoid — a catalog fills its images in after it loads, so
+    // a preview with no locally baked pixels yet keeps the full render and picks a thumbnail up on
+    // a later page build. Pinned so the lane can never become mandatory.
+    val html =
+      ServeWeb.viewerPage(
+        alertDialog.first(),
+        token = "t",
+        basePath = "/wear",
+        siblings = catalog,
+        navThumbHash = { null },
+      )
+    val drawer = html.substringAfter("<ul class=\"cp-nav-list\"").substringBefore("</ul>")
+
+    assertTrue(drawer.contains("<img class=\"cp-nav-thumb\""), "the row still draws an image")
+    assertFalse(drawer.contains("thumb="), "with nothing baked there is no thumbnail to name")
+  }
+
+  @Test
   fun `the viewer's component drawer names each component once`() {
     val html =
       ServeWeb.viewerPage(alertDialog.first(), token = "t", basePath = "/wear", siblings = catalog)

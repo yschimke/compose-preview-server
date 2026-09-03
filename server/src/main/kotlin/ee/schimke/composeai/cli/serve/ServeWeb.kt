@@ -12741,6 +12741,16 @@ ${scriptTag("known-differences.js")}
      * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
      */
     changelogHref: String = "",
+    /**
+     * Per-preview **prebaked thumbnail** lookup for the component drawer, the same
+     * [ServeHeroImages.gridThumbFor] hash the catalog grid's cards carry. See [navDrawerHtml] for
+     * why the drawer needs it: its rows are ~40px thumbnails, and without this each one loads the
+     * preview's full-resolution render.
+     *
+     * The default `{ null }` keeps every row on the plain render URL — used by the fixture goldens,
+     * which must not churn with the bake.
+     */
+    navThumbHash: (String) -> String? = { null },
   ): String {
     @Suppress("NAME_SHADOWING")
     val designReference = designReference?.takeUnless { componentBrowser }
@@ -14265,7 +14275,16 @@ ${scriptTag("known-differences.js")}
     // Empty for a component with no second render, exactly as the chip rows were.
     val axesTree = componentSubtreeHtml(preview, siblings, basePath, q, viewerDarkFirst)
     val navDrawer =
-      navDrawerHtml(preview, siblings, basePath, q, viewerTheme, axesTree, viewerDarkFirst)
+      navDrawerHtml(
+        preview,
+        siblings,
+        basePath,
+        q,
+        viewerTheme,
+        axesTree,
+        viewerDarkFirst,
+        navThumbHash,
+      )
     val navToggle =
       if (navDrawer.isEmpty()) ""
       else
@@ -14670,6 +14689,28 @@ ${scriptTag("known-differences.js")}
   }
 
   /**
+   * A drawer row's pixel URL: the prebaked thumbnail lane when this preview has one, the plain
+   * render otherwise.
+   *
+   * Deliberately the same shape the grid's `renderSrc` builds — `?thumb=<hash>` appended to the
+   * card's own URL, everything else identical — so the two surfaces cannot drift about how a
+   * thumbnail is addressed. Kept as a named helper rather than inlined because the row markup is
+   * already a long interpolation, and because a future surface that lists previews should reach for
+   * this rather than reinvent the query-append.
+   */
+  private fun navThumbSrc(
+    basePath: String,
+    previewId: String,
+    q: String,
+    thumbHash: (String) -> String?,
+  ): String {
+    val base = "$basePath/render/${WebEscaping.urlEncodeSegment(previewId)}.png$q"
+    val hash = thumbHash(previewId) ?: return base
+    val sep = if (base.contains('?')) "&" else "?"
+    return "$base$sep${ServeHeroImages.THUMB_PARAM}=${WebEscaping.urlEncodeSegment(hash)}"
+  }
+
+  /**
    * The left-hand component-nav drawer: a filterable list of the session's [siblings], each linking
    * to its own viewer page (same `$basePath/p/<id>$q` shape the landing cards use). The current
    * [preview] is marked `aria-current="page"`. Returns "" when there is nothing to navigate *to* —
@@ -14697,6 +14738,12 @@ ${scriptTag("known-differences.js")}
      * The catalog's primary lane, so the size fold resolves per lane exactly as the grid's does.
      */
     darkFirst: Boolean = false,
+    /**
+     * Per-preview prebaked-thumbnail hash, exactly as the grid's cards use it. Null for a preview
+     * whose pixels are not baked locally yet — that row keeps the plain render URL and picks a
+     * thumbnail up on a later page build.
+     */
+    thumbHash: (String) -> String? = { null },
   ): String {
     // Collapse to ONE entry per component — the same folding the landing grid does — so the nav
     // reads as a list of components, not of every baked state/theme/props/size permutation
@@ -14761,13 +14808,22 @@ ${scriptTag("known-differences.js")}
         // exactly what they already knew — the name in slug form. The caption is the sentence that
         // answers "what IS this", which is the question a list of forty component names provokes.
         val tip = p.caption?.takeIf { it.isNotBlank() } ?: p.id
-        // A small thumbnail render to the left of the name — the same baked PNG the landing cards
-        // use, so the nav reads like a mini gallery. `alt=""` since the name label beside it
-        // already
-        // names the component (decorative image).
+        // A small thumbnail render to the left of the name — the same prebaked thumbnail the
+        // landing cards use, on the same `?thumb=<hash>` lane, so the nav reads like a mini gallery
+        // without shipping a full-resolution render per row. `alt=""` since the name label beside
+        // it already names the component (decorative image).
+        //
+        // The lane matters here for the same reason it does on the grid, at the same scale: a
+        // viewer page lists every sibling component (57 rows on the m3 catalog), each drawn at
+        // ~40px. On the plain `/render` URL that was 849 KB of full-resolution PNGs at
+        // `max-age=300` with no validator, so the five-minute expiry could not even end in a 304;
+        // the
+        // thumbnail lane serves the same 57 in 357 KB, `immutable` and ETagged, straight out of
+        // memory with no trip through the render machinery.
+        val thumbSrc = navThumbSrc(basePath, p.id, q, thumbHash)
         "<li><a class=\"cp-nav-item\" href=\"$basePath/p/$segItem$q\"$current " +
           "title=\"${WebEscaping.htmlEscape(tip)}\" data-search=\"$labelItem $idItem\">" +
-          "<img class=\"cp-nav-thumb\" loading=\"lazy\" alt=\"\" src=\"$basePath/render/$segItem.png$q\">" +
+          "<img class=\"cp-nav-thumb\" loading=\"lazy\" alt=\"\" src=\"$thumbSrc\">" +
           "<span class=\"cp-nav-name\">$labelItem</span></a></li>"
       }
     return """
