@@ -906,10 +906,21 @@ class ServeBundleHost(
       // truncated PNG.
       return runCatching {
         path.parent?.let(fileSystem::createDirectories)
-        // Named per destination, not a shared temp: two ids filling concurrently hold
-        // different locks, so a single shared partial name would let one preview's bytes be
-        // published under another's id.
-        val partial = path.parent!!.resolve(path.name + PARTIAL_SUFFIX)
+        // Named per destination AND per host instance, not a shared temp.
+        //
+        // Per destination because two ids filling concurrently hold different locks, so a single
+        // shared partial name would let one preview's bytes be published under another's id.
+        //
+        // Per instance because [fillLocks] is per host, while this path is derived from the
+        // generation directory and is therefore shared by every host over it. Two instances DO
+        // coexist: the registry detaches and closes a session's host when it goes idle and builds
+        // a fresh one on the next resume, so a fill still running against the old instance can
+        // overlap a fill through the new one. They would take different locks and write the same
+        // `.partial`, interleaving two byte streams into one file that is then published atomically
+        // as a truncated PNG. With a per-instance name each writes its own temp and both move
+        // their complete copy onto the same destination, which is atomic and idempotent — the
+        // bytes are the same published render either way.
+        val partial = path.parent!!.resolve("${path.name}.$instanceTag$PARTIAL_SUFFIX")
         fileSystem.write(partial) { write(bytes) }
         fileSystem.atomicMove(partial, path)
         path
@@ -1270,6 +1281,18 @@ class ServeBundleHost(
   private fun localBakedPng(previewId: String): okio.Path? =
     previewFile(previewId, PNG_SUFFIX)?.toOkioPath()?.takeIf(fileSystem::exists)
 
+  /**
+   * Distinguishes this host's staging files from those of any other host over the same generation
+   * directory. See the partial-file naming in [bakedPngFile] for why that is not hypothetical.
+   *
+   * Deliberately NOT `System.identityHashCode`: that is a 32-bit value with no uniqueness
+   * guarantee, so two live hosts can share one — and two hosts sharing a tag is exactly the case
+   * this exists to rule out, which would put both back on a single `.partial` and defeat the
+   * staging. A monotonic counter makes it unique within the process; the random salt covers two
+   * processes over one generation directory, which the counter alone cannot see.
+   */
+  private val instanceTag: String = nextInstanceTag()
+
   private val fillLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
   /**
@@ -1307,7 +1330,8 @@ class ServeBundleHost(
       // hand, so serve them and let the next request try the disk again.
       runCatching {
         path.parent?.let(fileSystem::createDirectories)
-        val partial = path.parent!!.resolve(path.name + PARTIAL_SUFFIX)
+        // Per host instance, for the reason the baked-PNG fill states at length.
+        val partial = path.parent!!.resolve("${path.name}.$instanceTag$PARTIAL_SUFFIX")
         fileSystem.write(partial) { write(bytes) }
         fileSystem.atomicMove(partial, path)
       }
@@ -1340,6 +1364,19 @@ class ServeBundleHost(
    * admission like any other. Answering null sends it down the ordinary [render] path, which fills
    * it.
    */
+  /**
+   * The fetching counterpart of [bakedRender], for [ServeThumbWarmer].
+   *
+   * [bakedPngFile] is exactly the call [bakedRender] declines to make: it fills a declared-but-not
+   * yet-local PNG from the delivery branch, per-id serialised and atomically moved into place. Here
+   * that is the whole point — this runs off the request thread precisely so the fetch can happen —
+   * and the bytes are discarded because the file landing on disk is the result.
+   */
+  override fun warmBakedRender(previewId: String) {
+    if (previewId !in previewIds) return
+    bakedPngFile(previewId)
+  }
+
   override fun bakedRender(previewId: String, overrides: PreviewOverrides): RenderOutcome.Ok? {
     if (previewId !in previewIds) return null
     val png = localBakedPng(previewId) ?: return null
@@ -1622,6 +1659,15 @@ class ServeBundleHost(
     private const val RENDER_ERROR_SCHEMA = "compose-preview-error/v1"
     /** Suffix of the sibling a lazy fill writes before moving it into place atomically. */
     private const val PARTIAL_SUFFIX = ".partial"
+
+    private val instanceCounter = java.util.concurrent.atomic.AtomicLong()
+
+    /** Per-process, so two servers over one generation directory cannot collide on the counter. */
+    private val processSalt: String =
+      java.lang.Long.toHexString(java.util.concurrent.ThreadLocalRandom.current().nextLong())
+
+    /** A staging tag no other live host can hold. See [instanceTag]. Visible for tests. */
+    internal fun nextInstanceTag(): String = "$processSalt-${instanceCounter.getAndIncrement()}"
 
     /**
      * How many pinned (`?at=<sha>`) assets one catalog host keeps resident. Small on purpose: this

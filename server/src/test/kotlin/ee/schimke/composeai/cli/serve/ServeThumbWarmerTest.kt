@@ -1,0 +1,216 @@
+package ee.schimke.composeai.cli.serve
+
+import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.StreamCodec
+import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+class ServeThumbWarmerTest {
+
+  private class WarmHost(
+    override val previews: List<ServePreview> = emptyList(),
+    val gate: CountDownLatch? = null,
+    val fail: Boolean = false,
+  ) : ServeHost {
+    override val label: String = "warm"
+    val warmed = ConcurrentHashMap.newKeySet<String>()
+    val threads = ConcurrentHashMap.newKeySet<String>()
+    val calls = AtomicInteger()
+    /** Counts warms that have FINISHED. Entry is not completion — see [drain]. */
+    val done = AtomicInteger()
+
+    override fun warmBakedRender(previewId: String) {
+      calls.incrementAndGet()
+      warmed.add(previewId)
+      threads.add(Thread.currentThread().name)
+      gate?.await(5, TimeUnit.SECONDS)
+      try {
+        if (fail) throw IllegalStateException("branch blip")
+      } finally {
+        done.incrementAndGet()
+      }
+    }
+
+    // Unused by the warmer, which only ever calls [warmBakedRender] — that narrowness is the
+    // contract: warming must never render, and never wake a daemon.
+    override fun render(previewId: String, overrides: PreviewOverrides): RenderOutcome =
+      throw AssertionError("the warmer must never render")
+
+    override fun subscribeStream(
+      previewId: String,
+      overrides: PreviewOverrides,
+      codec: StreamCodec?,
+      maxFps: Int?,
+      onUnavailable: ((String) -> Unit)?,
+      onFrame: (StreamFrameParams) -> Unit,
+    ): StreamHandle? = throw AssertionError("the warmer must never stream")
+
+    override fun activeStreamCount(): Int = 0
+
+    override fun close() {}
+  }
+
+  /**
+   * Wait for [expected] warms to FINISH, then stop the pool.
+   *
+   * Deliberately on `done`, not `calls`: a worker increments `calls` on entry and populates the
+   * recorded sets after it, so waiting on entry lets `stop()` — which does not await termination —
+   * race a worker that has not written its result yet, and the assertions flake.
+   */
+  private fun drain(warmer: ServeThumbWarmer, host: WarmHost, expected: Int) {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (host.done.get() < expected && System.nanoTime() < deadline) Thread.sleep(5)
+    assertEquals(expected, host.done.get(), "every queued warm finished before the pool stopped")
+    warmer.stop()
+  }
+
+  @Test
+  fun `a queued preview is warmed off the caller's thread`() {
+    val host = WarmHost()
+    val warmer = ServeThumbWarmer()
+    warmer.enqueue(host, "a")
+    warmer.enqueue(host, "b")
+    drain(warmer, host, 2)
+
+    assertEquals(setOf("a", "b"), host.warmed)
+  }
+
+  @Test
+  fun `the same preview is not warmed twice while it is in flight`() {
+    // A catalog page reloaded while its fetches are still running must not queue them again — the
+    // whole point of the miss being cheap is that every build can report it.
+    val gate = CountDownLatch(1)
+    val host = WarmHost(gate = gate)
+    val warmer = ServeThumbWarmer()
+    repeat(20) { warmer.enqueue(host, "a") }
+    // One worker has picked it up and is parked on the gate; the other 19 offers were deduped.
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (host.calls.get() < 1 && System.nanoTime() < deadline) Thread.sleep(5)
+    assertEquals(1, host.calls.get(), "an in-flight preview is offered once")
+    gate.countDown()
+    warmer.stop()
+  }
+
+  @Test
+  fun `a failed fetch is retried on the next page build`() {
+    // `bakedPngFile` already declines to remember a failure so a transient branch blip self-heals.
+    // The warmer must not undo that by keeping the preview marked in flight forever.
+    val host = WarmHost(fail = true)
+    val warmer = ServeThumbWarmer()
+    warmer.enqueue(host, "a")
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (host.calls.get() < 1 && System.nanoTime() < deadline) Thread.sleep(5)
+
+    // Second offer, as the next page build would make: it must be accepted, not swallowed.
+    while (host.calls.get() < 2 && System.nanoTime() < deadline) {
+      warmer.enqueue(host, "a")
+      Thread.sleep(5)
+    }
+    warmer.stop()
+    assertTrue(host.calls.get() >= 2, "a failure leaves the preview offerable again")
+  }
+
+  @Test
+  fun `two hosts of the same catalog are warmed independently`() {
+    // Keyed on the host instance, like ServeHeroImages' bakes: a refresh installs a fresh host and
+    // its pixels are a different question from the retired one's.
+    val old = WarmHost()
+    val fresh = WarmHost()
+    val warmer = ServeThumbWarmer()
+    warmer.enqueue(old, "a")
+    warmer.enqueue(fresh, "a")
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while ((old.calls.get() + fresh.calls.get()) < 2 && System.nanoTime() < deadline) Thread.sleep(
+      5
+    )
+    warmer.stop()
+
+    assertEquals(setOf("a"), old.warmed)
+    assertEquals(setOf("a"), fresh.warmed)
+  }
+
+  @Test
+  fun `a dropped preview is offerable again on the next page build`() {
+    // The bug this pins: with `DiscardPolicy` the task is silently not run, so the `finally` that
+    // clears the in-flight key never fires and that preview is deduplicated out of EVERY later page
+    // build — a "drop" that is really a permanent forget. The rejection handler has to release the
+    // key itself.
+    val gate = CountDownLatch(1)
+    val host = WarmHost(gate = gate)
+    val warmer = ServeThumbWarmer(threads = 1, queueDepth = 1)
+
+    // One worker parked on the gate, one queued, the rest rejected.
+    repeat(30) { warmer.enqueue(host, "p$it") }
+    val dropped = (0 until 30).map { "p$it" }.filterNot { it in host.warmed }
+    assertTrue(dropped.isNotEmpty(), "the queue is meant to overflow here")
+
+    // Let the pool drain, then re-offer a dropped preview exactly as the next page build would.
+    gate.countDown()
+    val victim = dropped.last()
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (victim !in host.warmed && System.nanoTime() < deadline) {
+      warmer.enqueue(host, victim)
+      Thread.sleep(5)
+    }
+    warmer.stop()
+
+    assertTrue(
+      victim in host.warmed,
+      "a dropped preview must be accepted again, not deduplicated forever",
+    )
+  }
+
+  @Test
+  fun `a full queue drops rather than running the fetch on the caller`() {
+    // DiscardPolicy, not CallerRuns: running here would put a delivery-branch round trip on the
+    // page-build thread, which is the one thing this lane exists to avoid.
+    val gate = CountDownLatch(1)
+    val host = WarmHost(gate = gate)
+    val warmer = ServeThumbWarmer(threads = 1, queueDepth = 1)
+    val caller = Thread.currentThread().name
+    repeat(50) { warmer.enqueue(host, "p$it") }
+
+    assertTrue(
+      host.warmed.size < 50,
+      "with one worker parked and a queue of one, most offers are dropped: ${host.warmed.size}",
+    )
+    assertFalse(
+      caller in host.threads,
+      "no fetch ran on the calling thread — that would be a round trip on the page build",
+    )
+    assertTrue(
+      host.threads.all { it.startsWith("serve-thumb-warm") },
+      "every fetch ran on a warmer thread: ${host.threads}",
+    )
+    gate.countDown()
+    warmer.stop()
+  }
+}
+
+/**
+ * The staging tag behind [ServeBundleHost]'s `.partial` naming.
+ *
+ * Its whole job is to differ between two hosts over one generation directory, so that two
+ * concurrent fills stage to different temp files and only the atomic move races. A tag that can
+ * repeat puts both writers back on one file and silently undoes that.
+ */
+class ServeBundleHostInstanceTagTest {
+  @Test
+  fun `every staging tag is distinct`() {
+    val tags = (1..10_000).map { ServeBundleHost.nextInstanceTag() }
+    assertEquals(tags.size, tags.toSet().size, "a repeated tag would re-share one .partial file")
+  }
+
+  @Test
+  fun `tags are usable as a file name segment`() {
+    // They are interpolated straight into a path, so anything needing escaping would be a bug.
+    assertTrue(ServeBundleHost.nextInstanceTag().all { it.isLetterOrDigit() || it == '-' })
+  }
+}

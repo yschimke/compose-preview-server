@@ -88,6 +88,10 @@ class ServePerPreviewLiveHost(
 
   override val label: String = baked.label
 
+  // Straight through to the published host, as [bakedRenderSize] is: warming is about the delivery
+  // branch's bytes, which the per-preview live lane has nothing to say about.
+  override fun warmBakedRender(previewId: String) = baked.warmBakedRender(previewId)
+
   // The published pixels' size, which is what an unfurl card advertises — the live lane never
   // changes it, and asking the baked host costs a PNG header read.
   override fun bakedRenderSize(previewId: String): Pair<Int, Int>? =

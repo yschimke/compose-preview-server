@@ -609,6 +609,13 @@ class ServeHttpServer(
   private val heroImages = ServeHeroImages()
 
   /**
+   * Fills the baked PNGs a page build asked for and could not find, off the request thread, so the
+   * NEXT build of that page can thumbnail them ([ServeThumbWarmer] has the measurements).
+   */
+  private val thumbWarmer =
+    ServeThumbWarmer(onLog = { System.err.println("serve: thumbnail warm: $it") })
+
+  /**
    * Drawn link-unfurl cards, served by the `/social/` route. Composed from the hero thumbnails
    * above — so a card costs no render and no extra decode of a full-resolution PNG — and memoised
    * by its inputs. See [ServeSocialCard].
@@ -1590,6 +1597,7 @@ class ServeHttpServer(
   /** Stop with a short grace period. Idempotent enough for a shutdown hook. */
   fun stop() {
     readinessProber?.interrupt()
+    thumbWarmer.stop()
     server.stop(gracePeriodMillis = 500, timeoutMillis = 2000)
   }
 
@@ -3184,6 +3192,11 @@ class ServeHttpServer(
             heroImages
               .gridThumbFor(renderHost, id, catalogBundleHost(renderHost)?.contentCrop(id))
               ?.hash
+              // A miss means this preview's PNG is not local yet, so the card falls back to the
+              // full-resolution URL — and that URL is what used to be the only thing that ever
+              // fetched it. Ask for the fetch off-thread instead, so the next build of this page
+              // thumbnails the card rather than waiting for a reader to download 50 kB of it.
+              .also { if (it == null) thumbWarmer.enqueue(renderHost, id) }
           },
           // A heartbeat while the tab is open, so a visitor reading the grid keeps their session —
           // and its daemon — alive. Especially now: the cards above are cacheable, so browsing this
@@ -8881,6 +8894,9 @@ class ServeHttpServer(
             heroImages
               .gridThumbFor(renderHost, id, catalogBundleHost(renderHost)?.contentCrop(id))
               ?.hash
+              // Same warm as the grid's cards, for the same reason: the drawer's rows are the other
+              // surface that falls back to a full-resolution render when the pixels are not local.
+              .also { if (it == null) thumbWarmer.enqueue(renderHost, id) }
           },
         ),
         ContentType.Text.Html,

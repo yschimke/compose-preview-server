@@ -1368,6 +1368,10 @@ class ServeCatalogLiveHost(
    * browse (the default page) always lands here, which is the point: a default page view must
    * replay published pixels, never generate them.
    */
+  // Straight through to the published host: warming is about the delivery branch's bytes, and the
+  // live lane has nothing to contribute to that question.
+  override fun warmBakedRender(previewId: String) = baked.warmBakedRender(previewId)
+
   override fun bakedRender(previewId: String, overrides: PreviewOverrides): RenderOutcome.Ok? {
     cachedRender(previewId, overrides)?.let {
       return it
