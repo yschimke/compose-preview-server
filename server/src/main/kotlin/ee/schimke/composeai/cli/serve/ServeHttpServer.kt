@@ -4132,6 +4132,7 @@ class ServeHttpServer(
               reportContext,
               renderPlaceholder = true,
               selectionPlaceholder = true,
+              rawScoresPlaceholder = true,
             ),
           repo = reportContext.repo,
           login = githubAuth?.currentLogin(call),
@@ -8487,11 +8488,21 @@ class ServeHttpServer(
       // Built here rather than only on the focused comparison. Every fact a *preview* bug turns on
       // is concrete on this page — which preview, which component, which variant, the overrides in
       // force, the catalog build it came from, and the PNG at those exact settings — and the viewer
-      // is where someone actually notices a button rendering wrongly. Only the two reference-scoped
-      // facts are unavailable, and both are optional by construction: with `referenceId` left null
-      // the body drops its "Raw comparison" row and [ServeIssueReport.locator] returns null, so no
-      // parity-locator fence is emitted. Those stay exclusive to the comparison, which is the only
-      // page that can honestly name a design reference or a parity score.
+      // is where someone actually notices a button rendering wrongly.
+      //
+      // Including the design reference, which this page already resolves the same way the parity
+      // dashboard and the "compare" affordance below do. It used to be left null, on the reasoning
+      // that a design reference and a parity score are one page's business — but the two are not
+      // alike, and conflating them cost every report filed from here its place in the index
+      // (#5000): `parity/issues.json` is built from the locator fence, `ServeIssueReport.locator`
+      // returns null without a `referenceId`, and so an issue filed from the viewer — the form on
+      // every preview page and every catalog card — was silently unindexable while its own form
+      // told the reporter their `parity:` label fed that index. Naming the preview's first design
+      // reference asserts nothing about pixels the page is not showing; it says which comparison
+      // the report is about, which is exactly what the locator is for. The *score* stays exclusive
+      // to the comparison, which is the only page that measures one — see `rawScoresPlaceholder`
+      // below, and `referenceUrl`, which stays null because this page has no reference on the
+      // stage to embed.
       val reportContext =
         ServeIssueReport.Context(
           repo = ServeIssueReport.repoFor(bundleHost?.catalogSource, bundleHost?.provenance),
@@ -8499,6 +8510,7 @@ class ServeHttpServer(
           previewLabel = preview.label,
           system = sessionId,
           componentId = ServeIssueReport.componentIdFor(preview),
+          referenceId = renderHost.designReferencesFor(preview.id).firstOrNull()?.id,
           variant = ServeIssueReport.variantFor(preview),
           overrides = requestOverrideParams(sessionId),
           sourceUrl = sourceHref,
@@ -8515,7 +8527,18 @@ class ServeHttpServer(
         ServeWeb.ReportIssue(
           action = ServeIssueReport.action(reportContext.repo),
           body = ServeIssueReport.body(reportContext),
-          bodyTemplate = ServeIssueReport.body(reportContext, renderPlaceholder = true),
+          // The template the page's script fills. It carries the overrides placeholder as well as
+          // the render one: this page's controls re-render the frame in place, so the locator's
+          // `overrides:` has to move with them or the identity names the served defaults while the
+          // render URL two lines up names what the reporter dialled in. Both are substituted on one
+          // pass from one source, so they cannot disagree. No `{{rawScores}}`: nothing here
+          // measures parity, and no `{{selection}}`: this page has no element selector.
+          bodyTemplate =
+            ServeIssueReport.body(
+              reportContext,
+              renderPlaceholder = true,
+              overridesPlaceholder = true,
+            ),
           repo = reportContext.repo,
           login = githubAuth?.currentLogin(call),
         )

@@ -25,8 +25,9 @@ import okhttp3.Request
  *
  * The body's shape is covered by [ServeIssueReportTest]; what is checked here is the wiring: that
  * the form is emitted, that it targets the repo owning the preview's Kotlin, that it carries the
- * overrides on screen, and that the two reference-scoped facts stay off a page that cannot name
- * them.
+ * overrides on screen, that it names the preview's design reference so the filed issue reaches the
+ * parity index, and that the parity SCORE — the one reference-scoped fact this page cannot honestly
+ * state — stays off it.
  */
 class ServeViewerIssueReportRouteTest {
 
@@ -144,6 +145,9 @@ class ServeViewerIssueReportRouteTest {
       .substringAfter("id=\"cp-report-body\"")
       .substringAfter("value=\"")
       .substringBefore("\"")
+      // `&amp;` last: the entities below expand to text that must not be re-read as an entity.
+      .replace("&quot;", "\"")
+      .replace("&#39;", "'")
       .replace("&amp;", "&")
 
   @Test
@@ -234,14 +238,52 @@ class ServeViewerIssueReportRouteTest {
   }
 
   @Test
-  fun `reference-scoped facts stay on the comparison, which is the page that can name them`() {
-    // A viewer names no design reference and has run no parity scorer, so the locator fence and
-    // the raw-comparison row must be absent rather than emitted empty or with a placeholder the
-    // viewer's own script never fills.
+  fun `a report filed from the viewer carries a parity locator`() {
+    // #5000. `parity/issues.json` is built from this fence, so a viewer report without one is
+    // filed, labelled `parity:`, and silently absent from the index — while the form beside it
+    // tells the reporter their label feeds that index. Every field is concrete on this page: the
+    // reference is the preview's own, resolved the way the comparison link beside it resolves one.
+    server = newServer()
+    val body = reportBody(get("/compose-m3/p/button-filled").second)
+    assertTrue(body.contains("```${ServeIssueReport.LOCATOR_FENCE}"), body)
+    assertTrue(body.contains("system: compose-m3"), body)
+    assertTrue(body.contains("component: Button/Filled"), body)
+    assertTrue(body.contains("preview: button-filled"), body)
+    assertTrue(body.contains("reference: button-figma"), body)
+    assertTrue(body.contains("overrides: {}"), body)
+  }
+
+  @Test
+  fun `the viewer's served body states the overrides it was served at`() {
+    // What a visitor with scripting off files. The placeholder below is for the live case; this
+    // one has to be a real, parseable locator on its own.
+    server = newServer()
+    val body = reportBody(get("/compose-m3/p/button-filled?uiMode=dark").second)
+    assertTrue(body.contains("overrides: {\"uiMode\":\"dark\"}"), body)
+    assertFalse(body.contains(ServeIssueReport.OVERRIDES_PLACEHOLDER), body)
+  }
+
+  @Test
+  fun `the viewer's template leaves the overrides for its own script to fill`() {
+    // The controls re-render the frame in place, so the served overrides stop describing it the
+    // moment a knob moves. The template hands that one value to the page, next to `{{render}}` —
+    // both filled on one pass, so the identity and the pixels name one frame.
+    server = newServer()
+    val (_, html) = get("/compose-m3/p/button-filled")
+    val template =
+      html.substringAfter("data-report-template=\"").substringBefore("\"").replace("&amp;", "&")
+    assertTrue(template.contains("overrides: ${ServeIssueReport.OVERRIDES_PLACEHOLDER}"), template)
+    assertTrue(template.contains(ServeIssueReport.RENDER_PLACEHOLDER), template)
+  }
+
+  @Test
+  fun `the parity score stays on the comparison, which is the page that measures one`() {
+    // The viewer's always-available number is a render-fidelity measurement against the generated
+    // SVG, unrelated to the design reference — so a `Raw comparison` row here would either be
+    // filed with the placeholder verbatim or with a plausible, mislabelled number feeding an index.
     server = newServer()
     val (_, body) = get("/compose-m3/p/button-filled")
     assertTrue(body.contains("cp-report-body"), body)
-    assertFalse(body.contains(ServeIssueReport.LOCATOR_FENCE), body)
     assertFalse(body.contains(ServeIssueReport.RAW_SCORES_PLACEHOLDER), body)
     assertFalse(body.contains("Raw comparison"), body)
   }

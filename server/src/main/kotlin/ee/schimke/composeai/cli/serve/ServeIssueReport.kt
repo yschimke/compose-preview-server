@@ -48,6 +48,29 @@ internal object ServeIssueReport {
   const val RAW_SCORES_PLACEHOLDER: String = "{{rawScores}}"
 
   /**
+   * Stand-in for the locator's `overrides:` VALUE, on a page whose controls move after it is
+   * served.
+   *
+   * The viewer is that page. The server fills the form's hidden `body` for the settings the page
+   * was *served* at, and the controls then re-render the frame in place without another request —
+   * so a locator written entirely server-side would name the default variant while the render URL
+   * beside it in the same body names whatever the reporter dialled in. The index would key the
+   * issue to one identity and the pixels would show another, which is the failure
+   * `compose-parity-locator/v1` exists to prevent.
+   *
+   * So `overrides:` gets its own placeholder next to [RENDER_PLACEHOLDER], substituted from live
+   * viewer state on the same refresh pass that substitutes the render URL — one pass, one source,
+   * so the two halves cannot disagree with each other. Only the *value* is a placeholder, not the
+   * whole line: the key stays server-written, so `report/locator.ts` can match the line exactly
+   * (`overrides: {{overrides}}`) rather than rewriting the first catalog-authored value that
+   * happens to carry the literal.
+   *
+   * Carried only by the template form — a visitor with scripting off files the server's own body,
+   * whose overrides are the ones their URL asked for and whose render URL is the matching one.
+   */
+  const val OVERRIDES_PLACEHOLDER: String = "{{overrides}}"
+
+  /**
    * Stand-in for the selection's `element:` / `bounds:` lines inside the locator block.
    *
    * Occupies a **whole line** and is substituted with its newline, so a body with nothing selected
@@ -291,13 +314,18 @@ internal object ServeIssueReport {
   /**
    * Issue body, in markdown. [renderPlaceholder] swaps the render link for [RENDER_PLACEHOLDER] so
    * the viewer JS can substitute the live URL; the server-rendered `href` uses the real one, which
-   * is what a visitor with JS off gets.
+   * is what a visitor with JS off gets. [overridesPlaceholder] does the same for the locator's
+   * `overrides:` value, and belongs with it — the two describe one frame, and a body that
+   * substituted only the render URL would file pixels the identity beside them does not name.
+   * [rawScoresPlaceholder] is for the one page that measures ([RAW_SCORES_PLACEHOLDER]).
    */
   fun body(
     ctx: Context,
     renderPlaceholder: Boolean = false,
     selectionPlaceholder: Boolean = false,
     locatorsPlaceholder: Boolean = false,
+    overridesPlaceholder: Boolean = false,
+    rawScoresPlaceholder: Boolean = false,
   ): String {
     val rows = buildList {
       ctx.system?.trim()?.takeIf { it.isNotEmpty() }?.let { add("| Design system | `$it` |") }
@@ -307,8 +335,15 @@ internal object ServeIssueReport {
       ctx.toolVersion
         ?.takeIf { it.isNotBlank() }
         ?.let { add("| Rendered by | compose-ai-tools $it |") }
+      // The placeholder belongs to a page that actually SCORES, which is the focused comparison and
+      // nothing else. It used to be inferred from `renderPlaceholder && referenceId != null`, and
+      // that inference stopped holding the moment the viewer started naming a reference too (#5000)
+      // — the viewer's only always-available number is `scoreSvgUrls`, a render-fidelity
+      // measurement unrelated to the design reference, so a `{{rawScores}}` row there would either
+      // be filed verbatim or filled with a plausible, mislabelled number. Asked of the caller
+      // instead: the page that fills it is the page that says so.
       val scores =
-        if (renderPlaceholder && !ctx.referenceId.isNullOrBlank()) RAW_SCORES_PLACEHOLDER
+        if (rawScoresPlaceholder && !ctx.referenceId.isNullOrBlank()) RAW_SCORES_PLACEHOLDER
         else ctx.rawScores?.let(::formatRawScores)
       scores?.let { add("| Raw comparison | `$it` |") }
     }
@@ -412,7 +447,9 @@ internal object ServeIssueReport {
       append(rows.joinToString("\n"))
       if (links.isNotEmpty()) append("\n\n").append(links.joinToString(" · "))
       append("\n")
-      locator(ctx)?.let { append("\n").append(locatorBlock(it, selectionPlaceholder)) }
+      locator(ctx)?.let {
+        append("\n").append(locatorBlock(it, selectionPlaceholder, overridesPlaceholder))
+      }
       // No leading blank line of its own: the placeholder is a line the filler either replaces
       // (writing its own separator ahead of the blocks) or deletes outright, and a blank line the
       // server had already committed to would survive the deletion and leave a body that is not the
@@ -474,11 +511,16 @@ internal object ServeIssueReport {
 
   /**
    * The block, as markdown. [selectionPlaceholder] swaps the selection's two lines for
-   * [SELECTION_PLACEHOLDER] so the page's JS can write in what the reporter picked; the
-   * server-rendered body uses the real (usually absent) values, which is what a visitor with JS off
-   * files.
+   * [SELECTION_PLACEHOLDER] so the page's JS can write in what the reporter picked;
+   * [overridesPlaceholder] does the same for the `overrides:` value on a page whose controls move
+   * after it is served (see [OVERRIDES_PLACEHOLDER]). The server-rendered body uses the real values
+   * for both, which is what a visitor with JS off files.
    */
-  fun locatorBlock(locator: Locator, selectionPlaceholder: Boolean = false): String = buildString {
+  fun locatorBlock(
+    locator: Locator,
+    selectionPlaceholder: Boolean = false,
+    overridesPlaceholder: Boolean = false,
+  ): String = buildString {
     append("```$LOCATOR_FENCE\n")
     append("repository: ${locator.repository}\n")
     append("system: ${locator.system}\n")
@@ -486,7 +528,8 @@ internal object ServeIssueReport {
     append("preview: ${locator.previewId}\n")
     append("reference: ${locator.referenceId}\n")
     append("variant: ${locator.variant}\n")
-    append("overrides: ${canonicalOverrides(locator.overrides)}\n")
+    if (overridesPlaceholder) append("overrides: $OVERRIDES_PLACEHOLDER\n")
+    else append("overrides: ${canonicalOverrides(locator.overrides)}\n")
     if (selectionPlaceholder) append("$SELECTION_PLACEHOLDER\n")
     else {
       locator.element?.let { append("element: ${canonicalElement(it)}\n") }

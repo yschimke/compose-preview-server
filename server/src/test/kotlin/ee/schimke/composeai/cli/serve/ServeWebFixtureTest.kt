@@ -202,9 +202,16 @@ class ServeWebFixtureTest {
     referenceId: String? = null,
     variant: String = "",
     overrides: Map<String, String> = emptyMap(),
-    // The focused comparison serves the template with the selection placeholder in it, because that
-    // is the one page carrying a selector. The viewer's report has no element to name.
-    selectionPlaceholder: Boolean = false,
+    /**
+     * Which of the two reporting pages this stands in for: the focused comparison, or the viewer.
+     *
+     * They differ in more than one place and every one of those follows from this, so it is one
+     * flag rather than four that can be set inconsistently. The comparison names the pair it is
+     * showing and fills a selection and a score after the page is served; the viewer names one
+     * render and fills the locator's overrides, because its controls re-render in place. Both name
+     * the design reference — that is the locator's identity, not a claim about pixels on screen.
+     */
+    comparison: Boolean = false,
   ) =
     ServeIssueReport.Context(
         repo = "yschimke/compose-ai-tools",
@@ -224,10 +231,11 @@ class ServeWebFixtureTest {
           ),
         catalog = "yschimke/compose-ai-tools@design-artifacts/compose-m3",
         toolVersion = provenance.toolVersion,
-        viewerUrl =
-          if (referenceId == null) "https://preview.coo.ee/compose-m3/p/$previewId" else null,
+        viewerUrl = if (!comparison) "https://preview.coo.ee/compose-m3/p/$previewId" else null,
         comparisonUrl =
-          referenceId?.let { "https://preview.coo.ee/compose-m3/compare/$previewId?reference=$it" },
+          referenceId
+            ?.takeIf { comparison }
+            ?.let { "https://preview.coo.ee/compose-m3/compare/$previewId?reference=$it" },
         renderUrl =
           "https://preview.coo.ee/compose-m3/render/$previewId.png" +
             overrides.entries
@@ -238,7 +246,10 @@ class ServeWebFixtureTest {
         // The comparison's other panel, exactly as `handleReferenceComparison` supplies it — a
         // report from that page carries the pair (#4765), and a golden that carried only the
         // render would show a report this server no longer serves.
-        referenceUrl = referenceId?.let { "https://preview.coo.ee/compose-m3/reference/$it.png" },
+        referenceUrl =
+          referenceId
+            ?.takeIf { comparison }
+            ?.let { "https://preview.coo.ee/compose-m3/reference/$it.png" },
         // The goldens stand in for preview.coo.ee, whose render lane is token-free — so they
         // capture the embedded-image form of the body.
         publicRender = true,
@@ -251,7 +262,9 @@ class ServeWebFixtureTest {
             ServeIssueReport.body(
               ctx,
               renderPlaceholder = true,
-              selectionPlaceholder = selectionPlaceholder,
+              selectionPlaceholder = comparison,
+              overridesPlaceholder = !comparison,
+              rawScoresPlaceholder = comparison,
             ),
           repo = ctx.repo,
           login = "yschimke",
@@ -1089,6 +1102,13 @@ class ServeWebFixtureTest {
             "com.example.ProfileScreenPreview",
             "Profile screen",
             "src/main/kotlin/com/example/ProfileScreen.kt",
+            // Named so this golden captures the viewer's report panel as the handler now serves it:
+            // a preview with a design reference gets a `compose-parity-locator/v1` block, and the
+            // block is what puts the "Show this issue on" scope control in the panel (#5000). A
+            // golden without one would go on showing the panel a preview outside a parity catalog
+            // gets, which is the smaller of the two shapes.
+            componentId = "Profile/Screen",
+            referenceId = "profile-screen-figma",
           ),
         // …and the "open in playground" handoff, so the golden captures the full provenance row a
         // host with the compile lane renders — the row is where every one of these affordances
@@ -1955,7 +1975,7 @@ class ServeWebFixtureTest {
             referenceId = comparisonReferences.first().id,
             variant = ServeIssueReport.variantFor(themedPreviews.first()),
             overrides = mapOf("fontScale" to "1.5", "knob.label" to "Send;now=x"),
-            selectionPlaceholder = true,
+            comparison = true,
           ),
         // The DERIVED semantics layers, which this page could not show until the inspection
         // machinery learned to mount over a host other than the viewer. They are what gives the
@@ -2217,7 +2237,7 @@ class ServeWebFixtureTest {
             componentId = ServeIssueReport.componentIdFor(themedPreviews.first()),
             referenceId = comparisonReferences.first().id,
             variant = ServeIssueReport.variantFor(themedPreviews.first()),
-            selectionPlaceholder = true,
+            comparison = true,
           ),
         // No `tagIndexUrl`, and the reason said out loud. The pinned page is where the frame gate
         // is visible: the published index describes the CURRENT render, so a tag selection here
@@ -4570,7 +4590,7 @@ class ServeWebFixtureTest {
             componentId = ServeIssueReport.componentIdFor(themedPreviews.first()),
             referenceId = comparisonReferences.first().id,
             variant = ServeIssueReport.variantFor(themedPreviews.first()),
-            selectionPlaceholder = true,
+            comparison = true,
           ),
       )
     assertTrue(
@@ -4612,7 +4632,7 @@ class ServeWebFixtureTest {
             componentId = ServeIssueReport.componentIdFor(themedPreviews.first()),
             referenceId = comparisonReferences.first().id,
             variant = ServeIssueReport.variantFor(themedPreviews.first()),
-            selectionPlaceholder = true,
+            comparison = true,
           ),
       )
     assertTrue(
@@ -4650,7 +4670,7 @@ class ServeWebFixtureTest {
             componentId = ServeIssueReport.componentIdFor(themedPreviews.first()),
             referenceId = comparisonReferences.first().id,
             variant = ServeIssueReport.variantFor(themedPreviews.first()),
-            selectionPlaceholder = true,
+            comparison = true,
           ),
       )
     assertTrue(
@@ -7842,22 +7862,27 @@ class ServeWebFixtureTest {
       viewerSource().contains("new ClipboardItem({ \"image/png\": pngBlob })"),
       "Copy PNG writes image/png to the clipboard so it pastes as a picture",
     )
-    // The prefilled "report an issue" link follows the on-screen overrides, and never carries the
-    // session token into a body destined for a public issue.
-    assertTrue(
-      viewerSource().contains("function refreshReportLink()") &&
-        viewerSource().contains("{{render}}") &&
-        viewerSource().contains("stripToken("),
-      "the report body is re-substituted at the current render, token stripped",
-    )
-    // …by writing an INPUT VALUE, never an href. The affordance is a GET form whose action is a
-    // server-rendered literal, so no page-derived string can reach a navigation sink.
+    // The prefilled "report an issue" report follows the on-screen overrides — BOTH halves of it,
+    // the render URL it links and the identity its locator states — and never carries the session
+    // token into a body destined for a public issue.
     val refreshReportLinkSource =
       viewerSource()
         .substringAfter("function refreshReportLink()")
         .substringBefore("function stripToken(")
     assertTrue(
-      refreshReportLinkSource.contains("body.value = tpl.replace(") &&
+      viewerSource().contains("function refreshReportLink()") &&
+        refreshReportLinkSource.contains("render: stripToken(field.value)") &&
+        refreshReportLinkSource.contains("overrides: renderOverrides()"),
+      "the report body is re-substituted at the current render and the overrides that made it",
+    )
+    // …by handing them to the shared body writer, which composes from the template and is the one
+    // thing that writes the field — a plain assignment here would undo whatever the classification
+    // and scope controls had contributed. And an INPUT VALUE either way, never an href: the
+    // affordance is a GET form whose action is a server-rendered literal, so no page-derived string
+    // can reach a navigation sink.
+    assertTrue(
+      refreshReportLinkSource.contains("reportBody.set({") &&
+        !refreshReportLinkSource.contains("body.value =") &&
         !refreshReportLinkSource.contains(".href = "),
       "the report prefill goes into a form input, not a navigation sink",
     )
@@ -7953,7 +7978,7 @@ class ServeWebFixtureTest {
       "declared choices route through the daemon (knob) path",
     )
     assertTrue(
-      viewerSource().contains("parts.push(\"themeProvider=\""),
+      viewerSource().contains("if (tp) o.themeProvider = tp;"),
       "a chosen theme is appended to the /render URL as themeProvider",
     )
 

@@ -122,6 +122,43 @@ export function fillSelection(template: string, selection: Selection): string {
     return lines.join("\n");
 }
 
+/**
+ * The placeholder the server leaves for the locator's `overrides:` VALUE, and the whole line it
+ * sits in. `ServeIssueReport.OVERRIDES_PLACEHOLDER`.
+ *
+ * The viewer's controls re-render the frame in place, so the overrides the page was SERVED at stop
+ * describing what is on screen the moment anyone touches a knob. The server writes the key and
+ * leaves the value, and this fills it from live state on the same pass that fills `{{render}}` —
+ * one pass, one source, so the identity and the pixels the body links cannot disagree.
+ */
+export const OVERRIDES_PLACEHOLDER = "{{overrides}}";
+const OVERRIDES_PLACEHOLDER_LINE = `overrides: ${OVERRIDES_PLACEHOLDER}`;
+
+/**
+ * [template] with its `overrides: {{overrides}}` line rewritten from [overrides].
+ *
+ * Matched as a WHOLE line, for the reason [fillSelection] and [fillLocators] are: every other value
+ * in the block is catalog-authored (a preview id, a component id, a variant derived from one), so a
+ * first-occurrence substring replace could rewrite one of those and file the real placeholder
+ * verbatim — a malformed locator that takes the whole issue out of the parity index, with nothing
+ * to notice it. Anchoring on the server-written `overrides: ` key makes that unreachable: no other
+ * line in the block can equal this one.
+ *
+ * A template without the line is returned unchanged — that is every page whose overrides the server
+ * already knew for certain (the focused comparison), and rewriting a value it wrote would be a
+ * guess replacing a fact.
+ */
+export function fillOverrides(
+    template: string,
+    overrides: Record<string, string>,
+): string {
+    const lines = template.split("\n");
+    const at = lines.indexOf(OVERRIDES_PLACEHOLDER_LINE);
+    if (at < 0) return template;
+    lines[at] = `overrides: ${canonicalOverrides(overrides)}`;
+    return lines.join("\n");
+}
+
 // ---- the whole block, for a report the server could not write ---------------------------------
 //
 // Everything above fills in a block `ServeIssueReport` already wrote. What follows writes one from
