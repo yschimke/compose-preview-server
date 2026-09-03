@@ -473,4 +473,51 @@ class ScreenDocumentProjectionTest {
     assertTrue(rendered.contains("Fractional"), rendered)
     assertFalse(rendered.contains("Whole(value=2147483648)"), rendered)
   }
+
+  @Test
+  fun `a dimension that cannot survive the narrowing to Float is refused`() {
+    // `1e100.dp` compiles — Compose declares `dp` on `Double` too — and evaluates to
+    // `Float.POSITIVE_INFINITY`, because `Dp` is a value class over `Float`. A success carrying a
+    // number the design never contained is worse than a refusal.
+    val document =
+      ScreenGeneratorScreenFixture.document().let { base ->
+        base.copy(
+          roots = listOf("heading"),
+          nodes =
+            base.nodes +
+              ("heading" to
+                base.nodes
+                  .getValue("heading")
+                  .copy(
+                    properties =
+                      base.nodes.getValue("heading").properties +
+                        ("size" to DimensionValueV1(JsonPrimitive(1e100), DimensionUnitV1.DP))
+                  )),
+        )
+      }
+    val reasons =
+      assertIs<ScreenDocumentProjection.Outcome.Refused>(ScreenDocumentProjection.project(document))
+        .reasons
+    assertTrue(reasons.any { it.contains("narrowing to `Float`") }, reasons.toString())
+  }
+
+  @Test
+  fun `a colour without the hash is refused, because the renderer reads it as a token`() {
+    val document =
+      ScreenGeneratorScreenFixture.document().let { base ->
+        base.copy(
+          roots = listOf("time"),
+          nodes =
+            base.nodes +
+              ("time" to
+                base.nodes
+                  .getValue("time")
+                  .copy(properties = mapOf("color" to ColorValueV1("6750A4")))),
+        )
+      }
+    val reasons =
+      assertIs<ScreenDocumentProjection.Outcome.Refused>(ScreenDocumentProjection.project(document))
+        .reasons
+    assertTrue(reasons.any { it.contains("`#6750A4`") }, reasons.toString())
+  }
 }

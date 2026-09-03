@@ -2286,7 +2286,12 @@ public class ServeRunner(
     // "Compose export remains enabled" unconditionally — which in the packaged deployment, where
     // catalogs are enabled and no record is passed, told an operator diagnosing a renderer failure
     // that a fallback existed while the next expression was disabling every export format.
-    val composeExportConfigured = uiBuilderCatalogs.all { it in uiBuilderComponents.keys }
+    // Named, not counted. `composeCode` is all-or-none across enabled catalogs, so one missing
+    // record disables the export for every catalog — and a message saying "no catalog has a
+    // record" then sends an operator who configured `m3-catalog` looking for the record that is
+    // already there. What they need is the name of the one that is not.
+    val catalogsWithoutRecords = uiBuilderCatalogs.filterNot { it in uiBuilderComponents.keys }
+    val composeExportConfigured = catalogsWithoutRecords.isEmpty()
     val renderer = runCatching {
       ServeUiBuilderRenderPort.open(directory.resolve("renderer").toPath())
     }
@@ -2295,7 +2300,9 @@ public class ServeRunner(
           "serve: UI-builder PNG/SVG renderer unavailable (${failure.message}); " +
             if (composeExportConfigured) "Compose export remains enabled"
             else
-              "and no catalog has a component record, so this host offers no export at all " +
+              "and ${catalogsWithoutRecords.sorted().joinToString(", ")} " +
+                (if (catalogsWithoutRecords.size == 1) "has" else "have") +
+                " no component record, so this host offers no export at all " +
                 "(pass --ui-builder-components <catalog>=<components.json>)"
         )
       }

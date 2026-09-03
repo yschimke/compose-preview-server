@@ -326,16 +326,23 @@ internal object ScreenDocumentProjection {
       }
 
     /**
-     * The receiver for a `.dp` or `.sp` chain.
+     * The receiver for a `.dp` or `.sp` chain, or null when no receiver expresses this number.
      *
      * Whole when the number is one, because `16.dp` reading as `16.0.dp` in generated source is
      * noise a human would not have written — but **only inside the `Int` range**. Compose declares
-     * these extensions on `Int`, `Double` and `Float` and not on `Long`, so a padding of
-     * `2147483648` rendered a `Long` receiver and `2147483648.dp` does not compile, while the
-     * export was returned as a clean success. Out of range it falls back to the fractional literal,
-     * which `Double.dp` accepts.
+     * these extensions on `Int`, `Double` and `Float` and not on `Long`, so `2147483648` rendered a
+     * `Long` receiver and `2147483648.dp` does not compile, while the export was returned as a
+     * clean success.
+     *
+     * The `Double` overload exists — checked against `ui-unit`'s own bytecode, which carries
+     * `getDp(int)`, `getDp(double)` and `getDp(float)` — so the fractional fallback compiles. What
+     * it does **not** do is preserve the value: `Dp` is a value class over `Float`, so the `Double`
+     * overload narrows, and `1e100.dp` compiles into `Float.POSITIVE_INFINITY`. That is a success
+     * carrying a number the design never contained, which is worse than a refusal, so anything that
+     * does not survive the narrowing is refused instead.
      */
-    private fun unitReceiver(number: Double): ScreenValue {
+    private fun unitReceiver(number: Double): ScreenValue? {
+      if (!number.isFinite() || !number.toFloat().isFinite()) return null
       val whole = number.toLong()
       return if (number == whole.toDouble() && whole in Int.MIN_VALUE..Int.MAX_VALUE)
         ScreenValue.Whole(whole)
@@ -348,16 +355,18 @@ internal object ScreenDocumentProjection {
       return dp(number)
     }
 
-    private fun dp(number: Double): ScreenValue =
-      ScreenValue.Chain(
-        // `16.dp` rather than `Dp(16f)`: the extension is what a human writes, and it reads the
-        // same in the generated file as in the file it was copied from. The receiver is a whole
-        // number when it is one, because `.dp` is declared on `Int` and on `Float` alike and an
-        // `Int` receiver keeps `16.dp` from rendering as `16.0.dp`.
-        receiver = unitReceiver(number),
-        links = listOf(ChainLink("androidx.compose.ui.unit.dp", property = true)),
-        typeFqn = DP,
-      )
+    private fun dp(number: Double): ScreenValue? =
+      unitReceiver(number)?.let { receiver ->
+        ScreenValue.Chain(
+          // `16.dp` rather than `Dp(16f)`: the extension is what a human writes, and it reads the
+          // same in the generated file as in the file it was copied from. The receiver is a whole
+          // number when it is one, because `.dp` is declared on `Int` and on `Float` alike and an
+          // `Int` receiver keeps `16.dp` from rendering as `16.0.dp`.
+          receiver = receiver,
+          links = listOf(ChainLink("androidx.compose.ui.unit.dp", property = true)),
+          typeFqn = DP,
+        )
+      }
 
     /** The Kotlin value for one property, or null having said why there isn't one. */
     private fun value(value: UiValueV1, node: DesignNodeV1, property: String): ScreenValue? {
@@ -422,8 +431,24 @@ internal object ScreenDocumentProjection {
 
     private fun color(value: String, where: String): ScreenValue? {
       val digits = value.removePrefix("#")
+      // The prefix is required, not optional. `UiBuilderRenderer.color` reads a literal only when
+      // the string starts with `#` and sends everything else to a token table whose `else` branch
+      // raises, so `6750A4` renders as an error while it exported here as a perfectly good
+      // `Color(0xFF6750A4)`. An artifact that disagrees with what the design renders is what this
+      // executor exists to stop producing, even when the Kotlin compiles.
+      //
+      // Only hex digits get this message, though. Suggesting `#rebeccapurple` to someone who wrote
+      // a CSS colour name would be worse than the shape refusal below, which is what that is.
+      if (
+        !value.startsWith("#") && digits.length in setOf(6, 8) && digits.toLongOrNull(16) != null
+      ) {
+        return refuse(
+          "$where is the colour `$value`, which the renderer reads as a token rather than a " +
+            "literal; write it as `#$value` if a literal was meant"
+        )
+      }
       val argb =
-        when (digits.length) {
+        when (if (value.startsWith("#")) digits.length else -1) {
           // `RRGGBB` is opaque by convention everywhere this format appears, so the alpha is
           // supplied rather than left at zero — which would render every six-digit colour
           // invisible.
@@ -467,10 +492,20 @@ internal object ScreenDocumentProjection {
         return refuse("$where is a dimension whose value is not a number")
       }
       return when (value.unit) {
-        DimensionUnitV1.DP -> dp(number)
+        DimensionUnitV1.DP ->
+          dp(number)
+            ?: refuse(
+              "$where is $number, which does not survive the narrowing to `Float` that `Dp` " +
+                "performs"
+            )
         DimensionUnitV1.SP ->
           ScreenValue.Chain(
-            receiver = unitReceiver(number),
+            receiver =
+              unitReceiver(number)
+                ?: return refuse(
+                  "$where is $number, which does not survive the narrowing to `Float` that " +
+                    "`TextUnit` performs"
+                ),
             links = listOf(ChainLink("androidx.compose.ui.unit.sp", property = true)),
             typeFqn = "androidx.compose.ui.unit.TextUnit",
           )
