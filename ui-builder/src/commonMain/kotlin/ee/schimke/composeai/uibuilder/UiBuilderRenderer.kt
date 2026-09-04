@@ -453,8 +453,15 @@ private fun RenderNode(
   onTextLayout: (String, TextLayoutResult) -> Unit,
   semanticActions: MutableMap<String, UiBuilderSemanticActionEntry>,
   modifier: Modifier = Modifier,
+  ancestors: Set<String> = emptySet(),
 ) {
-  val node = requireNotNull(document.nodes[nodeId]) { "unknown node: $nodeId" }
+  // A reference to a node that is not there, and a reference to one already on this path, are both
+  // things the export gate reports — `UNKNOWN_CHILD`, `GRAPH_CYCLE`. `requireNotNull` and an
+  // unbounded recursion took the whole composition down instead, which meant the editor could not
+  // draw the document its own Issues panel exists to describe. Drawing nothing for the bad
+  // reference and everything else as usual is what leaves the diagnostic to the panel.
+  val node = document.nodes[nodeId]
+  if (node == null || nodeId in ancestors) return
   val enabled = node.bool("enabled", true)
   val activate = { node.dispatch("click", state, onState) }
   if (node.eventBindings["click"] != null) {
@@ -468,6 +475,7 @@ private fun RenderNode(
       }
       .then(node.actionModifier(activate, enabled))
   fun slot(name: String) = node.slots[name].orEmpty()
+  val here = ancestors + nodeId
   val child: @Composable (String, Modifier) -> Unit = { id, next ->
     RenderNode(
       document,
@@ -478,6 +486,7 @@ private fun RenderNode(
       onTextLayout,
       semanticActions,
       next,
+      here,
     )
   }
 

@@ -22,6 +22,7 @@
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { whenParsed } from "../dom/whenParsed.js";
 import { compareApi, type NormalisedPair } from "../compare/api.js";
+import { readingAt, summarise } from "../spec/pick.js";
 import { urlState } from "../urlState.js";
 import { sameOrigin } from "../dom/sameOrigin.js";
 import {
@@ -189,6 +190,29 @@ export class SpecCompare extends ControllerElement {
     private scoreTip: string | null = null;
     /** Bumped to abandon a comparison in flight. */
     private generation = 0;
+    /**
+     * The two normalised sides as readable pixels, for the eyedropper.
+     *
+     * Read back once per pair rather than per hover: `getImageData` over a full frame is the
+     * expensive part, and the buffers are immutable for as long as the pair is. Cleared whenever
+     * [frames] is replaced, so a reading can never describe the previous comparison.
+     */
+    private pickPixels: {
+        reference: Uint8ClampedArray;
+        candidate: Uint8ClampedArray;
+    } | null = null;
+    /** A frozen reading holds the panel still; pointer moves are ignored until it is released. */
+    private pickFrozen = false;
+    /**
+     * Whether the frames on the stage are the pair currently being asked for.
+     *
+     * An in-lane source switch re-labels the lane at once and re-normalises asynchronously, so
+     * between the two the canvases still hold the PREVIOUS source. A reading taken then would be
+     * the old pixels under the new source's name — a confidently wrong attribution, which is worse
+     * than no reading. The picker goes quiet from the moment the requested pair changes until its
+     * frames arrive.
+     */
+    private pickSettled = false;
     private cleanups: Array<() => void> = [];
     private annotationKey = "";
     private annotationPromise: Promise<unknown> | null = null;
@@ -223,7 +247,12 @@ export class SpecCompare extends ControllerElement {
             this.choice = prefer(this.choice, next);
         },
         hydrate: (next) => {
+            const before = this.choice.view;
             this.choice = hydrate(this.choice, next);
+            // Back and Forward change the view exactly as the buttons do, so a reading has to go
+            // the same way: it names a point on a panel the restored view may not show, and a
+            // frozen one restored into Slider is the same trap `setView` avoids.
+            if (this.choice.view !== before) this.releasePick();
             this.apply();
         },
         open: (url, source) => {
@@ -249,6 +278,10 @@ export class SpecCompare extends ControllerElement {
             // URL carrying it. `syncUrl` re-emits it from `view()` in the same push that records
             // `mode=spec`, which is where it belongs.
             this.choice = onOpen(this.choice);
+            // Claim the readout's row now, while nothing is being read. Claiming it on the first
+            // reading instead would reflow the header mid-hover and move the picture under the
+            // cursor, so the reading on screen would describe a pixel that had just walked away.
+            this.setPick("");
             this.apply();
         },
         close: () => {
@@ -264,6 +297,10 @@ export class SpecCompare extends ControllerElement {
             // possibly override-specific — number onto the chip while the published render is back.
             this.generation++;
             this.setChipVerdict(null);
+            // The reading described the pair that was on the stage. There is none now, and the
+            // lane header outlives the lane, so anything left in it would be describing a picture
+            // that is gone.
+            this.releasePick();
             this.apply();
         },
         baseline: (atBaseline) => {
@@ -319,6 +356,7 @@ export class SpecCompare extends ControllerElement {
         // is the shareable state; where the seam happened to stop is not.
         if (range) this.on(range, "input", () => this.drawWipe());
         this.bindDrag();
+        this.bindPick();
         this.on(window, "resize", () => this.placeTypography());
         this.on(
             window,
@@ -342,6 +380,177 @@ export class SpecCompare extends ControllerElement {
 
     private canvas(id: string): HTMLCanvasElement | null {
         return document.getElementById(id) as HTMLCanvasElement | null;
+    }
+
+    // ---- The eyedropper --------------------------------------------------------------------
+    //
+    // All three panels paint the SAME normalised space — that is what `normaliseImageUrls` returns
+    // and what makes the delta map arithmetic rather than guesswork — so one mapping serves every
+    // one of them, and hovering the diff is as meaningful as hovering either side: it says what the
+    // magenta is made of.
+
+    /**
+     * The panels a reading can be taken from, each carrying the shared normalised space.
+     *
+     * The wipe canvas is one of them: `drawWipe` sizes it to the pair and draws both sides at the
+     * origin, so a point on it names the same feature the other three do. It also has to be here
+     * rather than merely allowed — the Slider view hides all three panels
+     * (`[data-view="slider"] .cp-spec-panel { display: none }`), so without it the eyedropper is
+     * simply absent from one of the four views.
+     */
+    private pickPanels(): HTMLCanvasElement[] {
+        return [
+            this.canvas("cp-spec-reference"),
+            this.canvas("cp-spec-diff"),
+            this.canvas("cp-spec-actual"),
+            this.canvas("cp-spec-wipe-canvas"),
+        ].filter((c): c is HTMLCanvasElement => c !== null);
+    }
+
+    private bindPick(): void {
+        if (!this.compare) return;
+        this.on(this.compare, "pointermove", (event) => {
+            if (this.pickFrozen) return;
+            this.pickAt(event as PointerEvent);
+        });
+        this.on(this.compare, "pointerleave", () => {
+            if (!this.pickFrozen) this.setPick("");
+        });
+        // Click freezes the reading so it can be read and copied without the cursor holding still;
+        // clicking again, or Escape, releases it. Only a settled reading is announced — the panel
+        // is rewritten on every pointermove, and a live region around that would queue a stream of
+        // pixel values over everything else on the page.
+        this.on(this.compare, "click", (event) => {
+            // On the wipe canvas a press is a SEEK — `bindDrag` moves the split on pointerdown —
+            // so freezing there would hijack the slider's own gesture. It stays readable on hover;
+            // it is the one surface a reading cannot be frozen from.
+            if (
+                this.canvas("cp-spec-wipe-canvas")?.contains(
+                    event.target as Node,
+                )
+            )
+                return;
+            const reading = this.pickFrozen
+                ? ""
+                : this.pickAt(event as PointerEvent);
+            if (!this.pickFrozen && !reading) return;
+            this.pickFrozen = !this.pickFrozen;
+            this.announcePick(this.pickFrozen ? reading : "");
+            document
+                .getElementById("cp-spec-pick")
+                ?.classList.toggle("cp-spec-pick--frozen", this.pickFrozen);
+        });
+        this.on(document, "keydown", (event) => {
+            if ((event as KeyboardEvent).key !== "Escape" || !this.pickFrozen)
+                return;
+            this.pickFrozen = false;
+            this.announcePick("");
+            document
+                .getElementById("cp-spec-pick")
+                ?.classList.remove("cp-spec-pick--frozen");
+            this.setPick("");
+        });
+    }
+
+    /** Read both sides under the pointer; returns the line shown, or "" when there is nothing. */
+    private pickAt(event: PointerEvent | MouseEvent): string {
+        const pair = this.frames;
+        if (!pair || !this.pickSettled) return "";
+        const panel = this.pickPanels().find((c) =>
+            c.contains(event.target as Node),
+        );
+        if (!panel) {
+            this.setPick("");
+            return "";
+        }
+        const pixels = this.pickBuffers(pair);
+        if (!pixels) return "";
+        const rect = panel.getBoundingClientRect();
+        if (!(rect.width > 0 && rect.height > 0)) return "";
+        // The panel is the normalised space scaled to fit its box, so the mapping is that scale
+        // and nothing else — no per-side offset, because both sides already share this origin.
+        const x = ((event.clientX - rect.left) * pair.width) / rect.width;
+        const y = ((event.clientY - rect.top) * pair.height) / rect.height;
+        const line = summarise(
+            readingAt(
+                pixels.reference,
+                pixels.candidate,
+                pair.width,
+                pair.height,
+                x,
+                y,
+            ),
+            this.sourceLabel || "Spec",
+            "Render",
+        );
+        this.setPick(line);
+        return line;
+    }
+
+    /**
+     * The pair's pixels, read back once. A tainted canvas throws here exactly as it does for the
+     * score, and the answer is the same: no reading rather than a wrong one.
+     */
+    private pickBuffers(pair: NormalisedPair) {
+        if (this.pickPixels) return this.pickPixels;
+        try {
+            const read = (canvas: HTMLCanvasElement) =>
+                canvas
+                    .getContext("2d", { willReadFrequently: true })!
+                    .getImageData(0, 0, pair.width, pair.height).data;
+            this.pickPixels = {
+                reference: read(pair.reference),
+                candidate: read(pair.candidate),
+            };
+        } catch {
+            this.pickPixels = null;
+        }
+        return this.pickPixels;
+    }
+
+    /**
+     * Drop everything the eyedropper holds: the readout, the announcement, the frozen latch and
+     * the two readbacks.
+     *
+     * Called wherever the pair a reading describes stops being the pair on the stage — new frames,
+     * and leaving the lane. Leaving matters as much as replacing: `cp-spec-lane` carries the source
+     * buttons, so it stays in the page off the lane, and a readout left in it would go on naming
+     * two colours beside a picture neither came from. The latch has to go with it or the lane opens
+     * next time already frozen, ignoring the pointer until someone guesses to press Escape.
+     *
+     * The buffers are the largest thing this element retains — two full-frame RGBA readbacks, tens
+     * of megabytes on a large pair — and nothing off the lane can read them. `pickBuffers` reads
+     * them again on the next hover, which is the same work as the first hover of any pair.
+     */
+    private releasePick(): void {
+        this.pickPixels = null;
+        this.pickFrozen = false;
+        this.pickSettled = false;
+        this.setPick("");
+        this.announcePick("");
+        document
+            .getElementById("cp-spec-pick")
+            ?.classList.remove("cp-spec-pick--frozen");
+    }
+
+    /**
+     * The readout's text, and — while the lane is open — its empty row.
+     *
+     * An empty reading leaves the row in place rather than removing it. The lane wraps, so a row
+     * that came and went with the pointer re-laid the header out under the cursor and moved the
+     * picture with it; the row is claimed once, when the lane opens and nothing is being read, and
+     * given up once, when it closes.
+     */
+    private setPick(text: string): void {
+        const readout = document.getElementById("cp-spec-pick");
+        if (!readout) return;
+        readout.textContent = text;
+        readout.hidden = text === "" && !this.open;
+    }
+
+    private announcePick(text: string): void {
+        const live = document.getElementById("cp-spec-pick-live");
+        if (live) live.textContent = text ? "Frozen reading. " + text : "";
     }
 
     private range(): HTMLInputElement | null {
@@ -404,6 +613,13 @@ export class SpecCompare extends ControllerElement {
         const before = this.choice.view;
         this.choice = choose(this.choice, next);
         if (this.choice.view === before) return;
+        // A reading names a point on a panel, and the view decides which panels exist. Carried
+        // across a switch it describes a surface that may not be on screen — the plain Spec view
+        // shows no canvases at all — and a frozen one carried into Slider is a trap: pointer moves
+        // are latched, and the wipe canvas is the one surface a click cannot release the latch
+        // from, so the reading could only be dismissed with Escape. `apply()` re-settles the
+        // picker for the view it is switching to.
+        this.releasePick();
         this.apply();
         // A discrete choice, so it PUSHES: Back returns to the view you were looking at, the same
         // way it returns to the previous lane or theme.
@@ -501,10 +717,20 @@ export class SpecCompare extends ControllerElement {
             this.frames = null;
             this.framesKey = "";
             this.framesAnnotationUrl = "";
+            this.pickSettled = false;
             this.setScore(UNAVAILABLE);
             return;
         }
+        // Asking for a different pair than the one on the stage: quiet until it lands.
+        if (key !== this.framesKey) this.releasePick();
         if (key === this.framesKey && this.frames) {
+            // Returning cached frames is a decision that THIS pair is what the stage holds, so any
+            // normalisation still in flight has to be abandoned with it. Without this, B → A → B
+            // (with B cached) left A's request passing its own generation check when it resolved,
+            // and it painted A over the stage while every label still said B — measured: the
+            // reference canvas carried the paired catalog's pixels under the Figma caption.
+            this.generation++;
+            this.pickSettled = true;
             this.drawWipe();
             // The readout still holds this pair's live numbers, so the chip has to come back to the
             // same ones. Without this an override-bearing page re-entering the lane showed the
@@ -521,6 +747,12 @@ export class SpecCompare extends ControllerElement {
             if (generation !== this.generation) return;
             this.frames = next;
             this.framesKey = key;
+            // New pixels: whatever the eyedropper had read described the previous pair, and a
+            // frozen reading over it would now be asserting the old comparison against the new
+            // picture. Released BEFORE the pair is declared settled — `releasePick` drops that
+            // flag with everything else, so settling first would immediately unsettle again.
+            this.releasePick();
+            this.pickSettled = true;
             // Keep inspection facts tied to the same candidate that produced these canvases. The
             // hidden render image can advance while a comparison remains open; reading its URL
             // later would put new bounds and typography over old pixels.
