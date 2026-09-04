@@ -263,6 +263,10 @@ export class SpecCompare extends ControllerElement {
             // URL carrying it. `syncUrl` re-emits it from `view()` in the same push that records
             // `mode=spec`, which is where it belongs.
             this.choice = onOpen(this.choice);
+            // Claim the readout's row now, while nothing is being read. Claiming it on the first
+            // reading instead would reflow the header mid-hover and move the picture under the
+            // cursor, so the reading on screen would describe a pixel that had just walked away.
+            this.setPick("");
             this.apply();
         },
         close: () => {
@@ -278,6 +282,10 @@ export class SpecCompare extends ControllerElement {
             // possibly override-specific — number onto the chip while the published render is back.
             this.generation++;
             this.setChipVerdict(null);
+            // The reading described the pair that was on the stage. There is none now, and the
+            // lane header outlives the lane, so anything left in it would be describing a picture
+            // that is gone.
+            this.releasePick();
             this.apply();
         },
         baseline: (atBaseline) => {
@@ -467,11 +475,43 @@ export class SpecCompare extends ControllerElement {
         return this.pickPixels;
     }
 
+    /**
+     * Drop everything the eyedropper holds: the readout, the announcement, the frozen latch and
+     * the two readbacks.
+     *
+     * Called wherever the pair a reading describes stops being the pair on the stage — new frames,
+     * and leaving the lane. Leaving matters as much as replacing: `cp-spec-lane` carries the source
+     * buttons, so it stays in the page off the lane, and a readout left in it would go on naming
+     * two colours beside a picture neither came from. The latch has to go with it or the lane opens
+     * next time already frozen, ignoring the pointer until someone guesses to press Escape.
+     *
+     * The buffers are the largest thing this element retains — two full-frame RGBA readbacks, tens
+     * of megabytes on a large pair — and nothing off the lane can read them. `pickBuffers` reads
+     * them again on the next hover, which is the same work as the first hover of any pair.
+     */
+    private releasePick(): void {
+        this.pickPixels = null;
+        this.pickFrozen = false;
+        this.setPick("");
+        this.announcePick("");
+        document
+            .getElementById("cp-spec-pick")
+            ?.classList.remove("cp-spec-pick--frozen");
+    }
+
+    /**
+     * The readout's text, and — while the lane is open — its empty row.
+     *
+     * An empty reading leaves the row in place rather than removing it. The lane wraps, so a row
+     * that came and went with the pointer re-laid the header out under the cursor and moved the
+     * picture with it; the row is claimed once, when the lane opens and nothing is being read, and
+     * given up once, when it closes.
+     */
     private setPick(text: string): void {
         const readout = document.getElementById("cp-spec-pick");
         if (!readout) return;
         readout.textContent = text;
-        readout.hidden = text === "";
+        readout.hidden = text === "" && !this.open;
     }
 
     private announcePick(text: string): void {
@@ -659,10 +699,7 @@ export class SpecCompare extends ControllerElement {
             // New pixels: whatever the eyedropper had read described the previous pair, and a
             // frozen reading over it would now be asserting the old comparison against the new
             // picture.
-            this.pickPixels = null;
-            this.pickFrozen = false;
-            this.setPick("");
-            this.announcePick("");
+            this.releasePick();
             // Keep inspection facts tied to the same candidate that produced these canvases. The
             // hidden render image can advance while a comparison remains open; reading its URL
             // later would put new bounds and typography over old pixels.

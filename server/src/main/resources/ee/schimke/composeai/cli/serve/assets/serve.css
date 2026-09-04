@@ -2437,7 +2437,14 @@ cp-history-menu { display: contents; }
 .cp-spec-score[hidden] { display: none; }
 /* The eyedropper's reading. Tabular figures so the coordinates and channel numbers do not jitter
    as the pointer moves, and a monospace face because every value in it is a literal. */
-.cp-spec-pick { font-size: 0.72rem; color: var(--cp-fg-muted); white-space: nowrap;
+/* Its own row in the wrapping lane, reserved from the moment the lane opens rather than claimed
+   when a reading arrives. The lane is `flex-wrap: wrap`, so a readout appearing inline added a
+   second line to the header and pushed the stage down 26px — under the cursor, mid-hover. The
+   first reading a user saw was then taken from where the picture HAD been: at one screen point,
+   `146,122 · Δ 22` before the shift and `146,94 · identical` after it. Reserving the row moves the
+   stage once, on entering the lane, while nothing is being read. */
+.cp-spec-pick { flex-basis: 100%; line-height: 1.4; min-height: 1.4em; font-size: 0.72rem;
+  color: var(--cp-fg-muted); white-space: nowrap;
   font-family: var(--cp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-variant-numeric: tabular-nums; }
 .cp-spec-pick[hidden] { display: none; }

@@ -81,6 +81,8 @@ async function mount(options: { baseline?: boolean } = {}): Promise<void> {
           <button type="button" data-cp-spec-view="slider" aria-pressed="false">Slider</button>
         </span>
         <span id="cp-spec-score" hidden></span>
+        <span class="cp-spec-pick" id="cp-spec-pick" hidden></span>
+        <span class="cp-spec-pick-live" id="cp-spec-pick-live" aria-live="polite"></span>
         <label><input class="cp-inspect" data-cp-inspect="typography" type="checkbox">Typography</label>
         <div class="cp-spec-compare" id="cp-spec-compare" hidden data-view="spec"
              data-reference="/reference/Button.png">
@@ -120,6 +122,9 @@ async function mount(options: { baseline?: boolean } = {}): Promise<void> {
 const lane = () => window.cpSpecCompare!;
 const chip = () => document.getElementById("cp-spec-chip") as HTMLElement;
 const score = () => document.getElementById("cp-spec-score") as HTMLElement;
+const pick = () => document.getElementById("cp-spec-pick") as HTMLElement;
+const pickLive = () =>
+    document.getElementById("cp-spec-pick-live") as HTMLElement;
 const panel = () => document.getElementById("cp-spec-compare") as HTMLElement;
 const viewer = () => document.querySelector(".cp-viewer") as HTMLElement;
 const press = (view: string) =>
@@ -132,6 +137,39 @@ describe("<cp-spec-compare>", () => {
         delete window.ComposePreviewCompare;
         delete window.cpSpecCompare;
         resetDom();
+    });
+
+    it("claims the eyedropper's row as the lane opens", async () => {
+        // The lane wraps, so a readout that appeared with the first reading added a line to the
+        // header and pushed the stage 26px down — under the cursor, mid-hover, which made the
+        // first reading on screen describe a pixel the pointer had just left. The row is claimed
+        // while nothing is being read instead.
+        stubCompare();
+        await mount();
+        assert.equal(pick().hidden, true, "no row before the lane is entered");
+        lane().open("/render/Button.png");
+        assert.equal(pick().hidden, false);
+        assert.equal(pick().textContent, "", "reserved, not filled");
+    });
+
+    it("takes a frozen reading away when the lane closes", async () => {
+        // `cp-spec-lane` carries the source buttons, so it stays in the page off the lane. A
+        // reading left in it goes on naming two colours beside a picture neither came from, and
+        // the latch would still be holding when the lane is next opened — the pointer ignored
+        // until someone guesses to press Escape.
+        stubCompare();
+        await mount();
+        lane().open("/render/Button.png");
+        pick().textContent = "146,122 · Figma #494451 · Render #332e3c · Δ 22";
+        pick().hidden = false;
+        pick().classList.add("cp-spec-pick--frozen");
+        pickLive().textContent = "Frozen reading. 146,122 · Δ 22";
+
+        lane().close();
+        assert.equal(pick().textContent, "");
+        assert.equal(pick().hidden, true);
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), false);
+        assert.equal(pickLive().textContent, "");
     });
 
     it("hands viewer.js the global it calls", async () => {

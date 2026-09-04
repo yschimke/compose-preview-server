@@ -30,6 +30,19 @@ Two rules in the readout are deliberate and are the tests' subject as much as th
 - **A transparent pixel reads `transparent`, not its RGB.** An unpainted buffer hands back whatever
   happens to sit there; printing that as a colour states a fact about the picture that is not true.
 
+The readout sits on a **row of its own, claimed when the lane opens** rather than when the first
+reading arrives. The lane header is `flex-wrap: wrap`, so a readout appearing among the controls
+added a line to it and pushed the stage down 26px — under the cursor, mid-hover. The reading on
+screen then described a pixel the pointer had already left: at one fixed screen point, `146,122 ·
+Δ 22` before the shift and `146,94 · identical` after it. Reserving the row moves the stage once,
+on entering the lane, while nothing is being read; the same measurement now reads identically
+before and after the readout appears.
+
+Leaving the lane takes the reading away with it — text, announcement, frozen latch and both pixel
+readbacks. `cp-spec-lane` carries the source buttons, so it outlives the lane; a reading left in it
+would go on naming two colours beside a picture neither came from, and the latch would still be
+holding when the lane was next opened.
+
 The readout is not itself an `aria-live` region — it updates on every pointer move, and a live region
 that changed at pointer rate would talk over everything else on the page. A separate off-screen
 region announces the settled reading instead.

@@ -13280,14 +13280,16 @@ ${scriptTag("known-differences.js")}
           "aria-label=\"$comparisonAriaLabel\" hidden>$viewButtons</span>" +
           "<span class=\"cp-spec-score\" id=\"cp-spec-score\" role=\"status\" " +
           "aria-live=\"polite\" hidden></span>" +
-          // The eyedropper's readout. Deliberately NOT a live region: it is rewritten on every
-          // pointermove, and announcing that queues a stream of pixel values over everything else
-          // a screen-reader user is doing. Only a frozen reading is announced, into the
-          // visually-hidden region beside it.
+          "$detailLink" +
+          // The eyedropper's readout, LAST in the lane and on a row of its own (see `serve.css`):
+          // the lane wraps, so a readout among the controls re-flowed them the moment a reading
+          // arrived. Deliberately NOT a live region either — it is rewritten on every pointermove,
+          // and announcing that queues a stream of pixel values over everything else a screen
+          // reader user is doing. Only a frozen reading is announced, into the visually-hidden
+          // region beside it.
           "<span class=\"cp-spec-pick\" id=\"cp-spec-pick\" hidden></span>" +
           "<span class=\"cp-spec-pick-live\" id=\"cp-spec-pick-live\" " +
-          "aria-live=\"polite\"></span>" +
-          "$detailLink</span>"
+          "aria-live=\"polite\"></span></span>"
       }
     // ---- The renderer picker -------------------------------------------------------------------
     //
