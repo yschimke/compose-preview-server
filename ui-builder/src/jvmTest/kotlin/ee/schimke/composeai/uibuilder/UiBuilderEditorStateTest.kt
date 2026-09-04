@@ -546,9 +546,36 @@ class UiBuilderEditorStateTest {
       listOf("main-episode-card", copyId),
       duplicated.document.nodes.getValue("discover-grid").slots.getValue("items").takeLast(2),
     )
+    // Every property is carried across **except** the ones that identify the instance. The card
+    // sits in a lazy grid and the exporter turns `stableKey` into that item's `key(…)`; two
+    // siblings sharing one is a runtime failure in Compose, not a cosmetic clash. The copy takes
+    // its own node id, which is unique by construction.
     assertEquals(
-      document.nodes.getValue("main-episode-card").properties,
-      duplicated.document.nodes.getValue(copyId).properties,
+      document.nodes.getValue("main-episode-card").properties.filterKeys { it != "stableKey" },
+      duplicated.document.nodes.getValue(copyId).properties.filterKeys { it != "stableKey" },
+    )
+    assertEquals(
+      copyId,
+      duplicated.document.nodes
+        .getValue(copyId)
+        .properties
+        .getValue("stableKey")
+        .jsonObject
+        .getValue("value")
+        .jsonPrimitive
+        .content,
+    )
+    assertEquals(
+      "episode-140",
+      document.nodes
+        .getValue("main-episode-card")
+        .properties
+        .getValue("stableKey")
+        .jsonObject
+        .getValue("value")
+        .jsonPrimitive
+        .content,
+      "the original keeps its own key",
     )
     assertTrue(
       duplicated.document.nodes
