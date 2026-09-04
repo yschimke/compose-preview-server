@@ -244,6 +244,30 @@ class EditorWrapOrderTest {
   }
 
   @Test
+  fun `a value that is not of the declared type is refused rather than coerced`() {
+    // The encoder's fallbacks are `false`, `0` and `0.0`, so this used to insert a control that
+    // wrote a different value from the one asked for — authored-looking and wrong.
+    val flag =
+      withState(
+        "expanded",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("value"),
+            "valueType" to JsonPrimitive("bool"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(false),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+      )
+
+    val refused = insertWith(flag, EditorStateAction.Set("expanded", "yes"))
+
+    val outcome = assertIs<CommandOutcome.Rejected>(refused.lastOutcome)
+    assertTrue(outcome.message.contains("not a boolean value"), outcome.message)
+  }
+
+  @Test
   fun `toggling a flag is accepted`() {
     val flag =
       withState(

@@ -344,6 +344,33 @@ sealed interface EditorStateAction {
  * a flag is a real Kotlin `Boolean` and assigning it a quoted string does not compile. The action
  * carries the declaration's own kind rather than whatever the editor typed.
  */
+/**
+ * Why an action's value cannot be written to its variable, or null when it can.
+ *
+ * The encoder types a value against the declaration, and its fallbacks are `false`, `0` and `0.0` —
+ * so `Set("expanded", "yes")` inserted a control that wrote `false`. Storing a different value than
+ * the one asked for is worse than refusing: the design looks authored and does something else. The
+ * encoder keeps its fallbacks; nothing reaches it that needs them.
+ */
+private fun EditorStateAction.valueRefusal(declaration: JsonObject?): String? {
+  val raw =
+    when (this) {
+      is EditorStateAction.Toggle -> return null
+      is EditorStateAction.Set -> value
+      is EditorStateAction.SelectOrClear -> value
+    }
+  val kind = declaredStateKind(declaration)
+  val parses =
+    when (kind) {
+      StateKind.BOOLEAN -> raw.toBooleanStrictOrNull() != null
+      StateKind.INTEGER -> raw.toLongOrNull() != null
+      StateKind.DECIMAL -> raw.toDoubleOrNull() != null
+      StateKind.STRING -> true
+    }
+  return if (parses) null
+  else "`$raw` is not a ${kind.name.lowercase()} value for state variable `$variable`"
+}
+
 /** What a state variable holds, as the document declares it. */
 private enum class StateKind {
   BOOLEAN,
@@ -892,6 +919,9 @@ class UiBuilderEditorReducer(
           RejectionCode.INVALID_PROPERTY,
           "State variable `${action.variable}` is not a flag, so it cannot be toggled",
         )
+      }
+      action.valueRefusal(declaration)?.let { why ->
+        return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, why)
       }
       val bindings = JsonObject(mapOf("click" to JsonArray(listOf(action.encoded(declaration)))))
       val index = operations.indexOfFirst { it is DesignOperation.InsertNode }

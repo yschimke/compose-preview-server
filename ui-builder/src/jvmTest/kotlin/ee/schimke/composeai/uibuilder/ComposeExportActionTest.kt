@@ -395,6 +395,79 @@ class ComposeExportActionTest {
   }
 
   @Test
+  fun `a float variable seeded with a whole number still declares a Double`() {
+    val document =
+      documentDeclaring(
+        "ratio",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("value"),
+            "valueType" to JsonPrimitive("float"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(1),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+        emptyList(),
+      )
+    val source = assertNotNull(CapabilityComposeCodeExporter.export(document, catalog).source)
+
+    // `mutableStateOf(1)` behind a `Double` property is an Int delegate and does not compile.
+    assertTrue(source.contains("var ratio: Double by remember { mutableStateOf(1.0) }"), source)
+  }
+
+  @Test
+  fun `a malformed declaration is a diagnostic rather than an exception`() {
+    // Export validation never reads `stateVariables`, so a document carrying `"nullable": {}` or
+    // `"valueType": []` reached the declaration parser. An accessor that throws on a non-primitive
+    // turned that into an exception out of export() instead of source plus diagnostics.
+    val document =
+      documentDeclaring(
+        "odd",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("text"),
+            "valueType" to JsonArray(emptyList()),
+            "nullable" to JsonObject(emptyMap()),
+            "initialValue" to JsonPrimitive("a"),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+        emptyList(),
+      )
+
+    val source = assertNotNull(CapabilityComposeCodeExporter.export(document, catalog).source)
+
+    assertTrue(source.contains("var odd: String by remember"), source)
+  }
+
+  @Test
+  fun `a later action naming an undeclared variable does not export as an assignment`() {
+    val result =
+      CapabilityComposeCodeExporter.export(
+        documentWith(
+          listOf(
+            JsonObject(
+              mapOf("type" to JsonPrimitive("toggle"), "variable" to JsonPrimitive("expanded"))
+            ),
+            JsonObject(
+              mapOf(
+                "type" to JsonPrimitive("set"),
+                "variable" to JsonPrimitive("doesNotExist"),
+                "value" to JsonPrimitive(true),
+              )
+            ),
+          )
+        ),
+        catalog,
+      )
+
+    val source = assertNotNull(result.source, result.diagnostics.joinToString { it.message })
+    assertFalse(source.contains("doesNotExist = true"), source)
+    assertTrue(source.contains("Undeclared state variable"), source)
+  }
+
+  @Test
   fun `only components whose click the exporter emits are offered for action insertion`() {
     // `click` is universal in the renderer, so this used to offer every component the destination
     // accepted. The exporter emits a handler only where the component's emitter takes an onClick;

@@ -297,7 +297,7 @@ private class ComposeEmitter(
       .sortedBy { entry -> entry.key }
       .forEach { (name, declarationElement) ->
         val declaration = StateDeclaration.of(declarationElement as? JsonObject)
-        val initial = declaration.initialValue.kotlinLiteral()
+        val initial = declaration.initialValue.literalAs(declaration.kotlinType)
         line(
           level,
           "var ${name.identifier()}: ${declaration.kotlinType} by remember { " +
@@ -529,7 +529,12 @@ private class ComposeEmitter(
     line(level + 1, "selected = ${node.boolExpression("selected")},")
     line(
       level + 1,
-      "onClick = { ${node.actionExpression("click", booleanStateVariables, nullableStateVariables)} },",
+      "onClick = { ${node.actionExpression(
+        "click",
+        booleanStateVariables,
+        nullableStateVariables,
+        document.stateVariables.keys,
+      )} },",
     )
     line(level + 1, "enabled = ${node.boolValue("enabled", true)},")
     line(
@@ -675,7 +680,12 @@ private class ComposeEmitter(
       }
     line(
       level,
-      "$symbol(onClick = { ${node.actionExpression("click", booleanStateVariables, nullableStateVariables)} }, $colors${node.modifierArgument()}) {",
+      "$symbol(onClick = { ${node.actionExpression(
+        "click",
+        booleanStateVariables,
+        nullableStateVariables,
+        document.stateVariables.keys,
+      )} }, $colors${node.modifierArgument()}) {",
     )
     if (node.string("style") == "fab") {
       line(level + 1, "Box(Modifier.padding(horizontal = 16.dp)) {")
@@ -817,6 +827,7 @@ private fun UiBuilderNode.actionExpression(
   event: String,
   booleanState: Set<String>,
   nullableState: Set<String>,
+  declaredState: Set<String>,
 ): String {
   val actions = (eventBindings[event] as? JsonArray).orEmpty()
   if (actions.isEmpty()) return "Unit"
@@ -827,6 +838,12 @@ private fun UiBuilderNode.actionExpression(
     // producing the structured diagnostic `fieldCoverageDiagnostics` already reports for it.
     val action = element as? JsonObject ?: return@joinToString "TODO(\"Malformed action\")"
     val name = action.optionalString("variable")
+    // Emitting every action means a later one naming an undeclared variable now reaches the
+    // source, where `doesNotExist = true` compiles into nothing and reports success. Nothing else
+    // checks this: export validation does not read `stateVariables`.
+    if (name != null && name !in declaredState) {
+      return@joinToString "TODO(\"Undeclared state variable ${name.escape()}\")"
+    }
     val variable = name?.identifier()
     val value = action["value"].kotlinLiteral()
     when (action.optionalString("type")) {
@@ -1094,10 +1111,19 @@ private data class StateDeclaration(
     fun of(declaration: JsonObject?): StateDeclaration {
       val initial = declaration?.get("initialValue")
       val primitive = initial as? kotlinx.serialization.json.JsonPrimitive
+      // Read with safe casts, not `jsonPrimitive`/`optionalString`. A document arriving over the
+      // wire can carry `"nullable": {}` or `"valueType": []`, and export validation does not look
+      // at `stateVariables` at all, so an accessor that throws on a non-primitive turns malformed
+      // data into an exception out of `export()` instead of the diagnostic it should be.
       val nullable =
-        declaration?.get("nullable")?.jsonPrimitive?.booleanOrNull ?: (initial is JsonNull)
+        (declaration?.get("nullable") as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull
+          ?: (initial is JsonNull)
+      val declaredType =
+        (declaration?.get("valueType") as? kotlinx.serialization.json.JsonPrimitive)
+          ?.takeIf { it.isString }
+          ?.contentOrNull
       val base =
-        when (declaration?.optionalString("valueType")) {
+        when (declaredType) {
           "bool" -> "Boolean"
           // `Int`, not `Long`. Every integer this exporter writes — the initial value, and the
           // operand of a `stateEquals` or `selectOrClear` — goes through `kotlinLiteral`, which
@@ -1120,6 +1146,24 @@ private data class StateDeclaration(
       return StateDeclaration(if (nullable) "$base?" else base, nullable, initial)
     }
   }
+}
+
+/**
+ * A literal written for the Kotlin type its variable is declared as.
+ *
+ * `kotlinLiteral` emits a JSON number verbatim, so a `float`-declared variable seeded with `1`
+ * produced `var x: Double by remember { mutableStateOf(1) }` — an `Int` delegate behind a `Double`
+ * property. The declaration is the authority; the literal is spelled to match it.
+ */
+private fun JsonElement?.literalAs(kotlinType: String): String {
+  val bare = kotlinType.removeSuffix("?")
+  val primitive = this as? kotlinx.serialization.json.JsonPrimitive
+  if (bare == "Double" && primitive != null && !primitive.isString) {
+    primitive.doubleOrNull?.let { value ->
+      return if (value % 1.0 == 0.0 && !value.isInfinite()) "${value.toLong()}.0" else "$value"
+    }
+  }
+  return kotlinLiteral()
 }
 
 private fun JsonElement?.kotlinLiteral(): String =
