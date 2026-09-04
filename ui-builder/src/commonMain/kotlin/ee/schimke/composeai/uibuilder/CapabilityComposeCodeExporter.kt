@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -239,11 +240,19 @@ object CapabilityComposeCodeExporter {
   }
 }
 
-/** The asset keys no adapter binds, which are both a provenance fallback and a warning. */
+/**
+ * The asset keys no adapter binds, which are both a provenance fallback and a warning.
+ *
+ * The key is read as a primitive *if it is one*. `UiBuilderNode.string` goes through
+ * `jsonPrimitive`, which throws on an array or an object — and a malformed `assetKey` is precisely
+ * what `INVALID_PROPERTY_TYPE` already reports, so decoding it eagerly turned a diagnostic into a
+ * crash. The editor asks for these diagnostics on every document now, which is what made a latent
+ * throw in the export path a way to take the whole editor down.
+ */
 private fun UiBuilderDocument.unboundAssetKeys(assetAdapter: ComposeAssetAdapter?): List<String> =
   nodes.values
     .filter { it.componentId == "asset/image" }
-    .map { it.string("assetKey") }
+    .mapNotNull { (it.obj("assetKey")["value"] as? JsonPrimitive)?.contentOrNull }
     .filter { it !in assetAdapter?.bindings.orEmpty() }
     .distinct()
     .sorted()
