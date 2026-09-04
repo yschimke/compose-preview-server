@@ -200,8 +200,19 @@ object ServeWeb {
   private fun viewerViewCountHtml(views: Long): String =
     if (views <= 0) "" else "<span class=\"cp-viewer-engage\">${formatViews(views)}</span>"
 
+  /**
+   * The visit tally, wrapped in the marker that keeps it out of a page's `ETag`.
+   *
+   * This is the one run of markup on an assembled page that changes on essentially every request —
+   * the request that revalidates a page *is* the visit that bumps the number — so hashing it would
+   * mean no repeat navigation ever revalidates to a `304` (#217). Measured on the deployed
+   * `/m3-catalog/`, two consecutive responses differ in this text and in nothing else, out of 369
+   * KB. [ServeHttpServer] elides exactly this element when it hashes a page, so a cached page can
+   * show a count up to its own `max-age` old — the staleness `s-maxage=300` already accepts at the
+   * CDN for every anonymous visitor.
+   */
   private fun formatViews(views: Long): String =
-    "${formatCount(views)} ${if (views == 1L) "view" else "views"}"
+    "<span $VOLATILE_ATTR>${formatCount(views)} ${if (views == 1L) "view" else "views"}</span>"
 
   private fun formatCount(n: Long): String =
     if (n < 1000) n.toString()
@@ -552,6 +563,17 @@ object ServeWeb {
    * the session lapse. Cheap at this rate: one empty POST per open tab per four minutes.
    */
   internal const val PRESENCE_INTERVAL_SECONDS = 240
+
+  /**
+   * Marks an element whose text changes on essentially every request, so it must not decide whether
+   * a page revalidates. `ServeHttpServer.pageEntityTag` elides these elements before it hashes an
+   * assembled page; nothing else reads the attribute, and no stylesheet keys off it.
+   *
+   * Only [formatViews] carries it today. Anything added here is content a repeat visitor may see up
+   * to one `max-age` stale, so it belongs on a tally or a relative time, never on a fact the page
+   * would be wrong without.
+   */
+  internal const val VOLATILE_ATTR = "data-cp-volatile"
 
   /**
    * Where the Catalog / Dev switch remembers the visitor's choice: a host-wide cookie, read by the

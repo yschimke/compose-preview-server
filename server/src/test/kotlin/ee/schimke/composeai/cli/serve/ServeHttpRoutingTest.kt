@@ -840,6 +840,31 @@ class ServeHttpRoutingTest {
     assertEquals(0, ordinaryBurstHostRenders.get())
   }
 
+  /**
+   * #216: a PURE declared-theme render is a fixed answer to a fixed URL — the theme comes from the
+   * catalog's own `declaredThemes`, not from the caller — so the browser may keep it. Under
+   * `no-store` a visitor toggling the chip row paid a full round trip per toggle, including back to
+   * a theme they were looking at two seconds ago, against a serial daemon.
+   */
+  @Test
+  fun `a pure declared-theme render is cacheable while a made-to-order one is not`() {
+    val (themed, _, themedHeaders) =
+      getFullBytes("/burst/render/$previewId.png?themeProvider=com.example.Brand")
+    assertEquals(200, themed)
+    assertEquals(
+      "public, max-age=300, stale-while-revalidate=3600",
+      themedHeaders["Cache-Control"],
+    )
+
+    // Everything genuinely made to order keeps `no-store`: these pixels reflect no published bytes
+    // and belong in nobody's cache.
+    for (query in listOf("?fontScale=1.5", "?themeProvider=com.example.Brand&fontScale=1.5")) {
+      val (code, _, headers) = getFullBytes("/burst/render/$previewId.png$query")
+      assertEquals(200, code, query)
+      assertEquals("no-store", headers["Cache-Control"], query)
+    }
+  }
+
   @Test
   fun `a theme render whose lease has gone falls back to the serial lane, it is not refused`() {
     // A page holds several short-lived claims over its life — one for the on-screen batch, one per
@@ -1978,7 +2003,11 @@ class ServeHttpRoutingTest {
     // also carries no ?token — the route needs none.
     assertTrue(landing.contains("href=\"/compose-m3/p/$previewId\""), "path card link: $landing")
     assertTrue(!landing.contains("token="), "public path landing links are token-free: $landing")
-    assertTrue(landing.contains("1 preview · 1 view"), "catalog visit counted: $landing")
+    // The tally is wrapped in the marker that keeps it out of the page's ETag (#217).
+    assertTrue(
+      landing.contains("1 preview · <span ${ServeWeb.VOLATILE_ATTR}>1 view</span>"),
+      "catalog visit counted: $landing",
+    )
 
     val (viewerCode, viewer) = get("/compose-m3/p/$previewId")
     assertEquals(200, viewerCode)
@@ -3000,7 +3029,8 @@ class ServeHttpRoutingTest {
 
   /** The viewer's rendered view tally, or 0 when the page shows none. */
   private fun viewCount(html: String): Int =
-    Regex("""cp-viewer-engage[^>]*>([\d,]+)""")
+    // …through the marker element the tally is wrapped in (`ServeWeb.VOLATILE_ATTR`).
+    Regex("""cp-viewer-engage[^>]*>(?:<[^>]*>)?([\d,]+)""")
       .find(html)
       ?.groupValues
       ?.get(1)

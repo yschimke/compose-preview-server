@@ -1107,8 +1107,16 @@ class ServeWebTest {
         engagement = mapOf("plain.Button" to ServeWeb.PreviewEngagement(12)),
         systemViews = 1234,
       )
-    assertTrue(landing.contains("""<div class="cp-engage">12 views</div>"""), landing)
-    assertTrue(landing.contains("2 previews · 1.2k views"), landing)
+    assertTrue(
+      landing.contains(
+        """<div class="cp-engage"><span ${ServeWeb.VOLATILE_ATTR}>12 views</span></div>"""
+      ),
+      landing,
+    )
+    assertTrue(
+      landing.contains("2 previews · <span ${ServeWeb.VOLATILE_ATTR}>1.2k views</span>"),
+      landing,
+    )
 
     val viewer =
       ServeWeb.viewerPage(
@@ -1117,7 +1125,12 @@ class ServeWebTest {
         siblings = previews,
         engagement = ServeWeb.PreviewEngagement(13),
       )
-    assertTrue(viewer.contains("""<span class="cp-viewer-engage">13 views</span>"""), viewer)
+    assertTrue(
+      viewer.contains(
+        """<span class="cp-viewer-engage"><span ${ServeWeb.VOLATILE_ATTR}>13 views</span></span>"""
+      ),
+      viewer,
+    )
   }
 
   @Test
@@ -1138,7 +1151,10 @@ class ServeWebTest {
           ),
         token = "t",
       )
-    assertTrue(html.contains("42 previews · 12.3k views"), html)
+    assertTrue(
+      html.contains("42 previews · <span ${ServeWeb.VOLATILE_ATTR}>12.3k views</span>"),
+      html,
+    )
   }
 
   @Test

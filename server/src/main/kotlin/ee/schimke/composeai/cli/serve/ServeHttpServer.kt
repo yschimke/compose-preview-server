@@ -19,9 +19,12 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
+import io.ktor.http.content.TextContent
 import io.ktor.http.decodeURLQueryComponent
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.call
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
@@ -36,6 +39,7 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
 import io.ktor.server.request.queryString
 import io.ktor.server.request.receiveStream
+import io.ktor.server.response.ApplicationSendPipeline
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondRedirect
@@ -49,6 +53,7 @@ import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
 import io.ktor.util.AttributeKey
+import io.ktor.util.pipeline.PipelinePhase
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
@@ -759,6 +764,46 @@ class ServeHttpServer(
             onCall { call -> auth.refreshSession(call) }
           }
         )
+      }
+      // A strong validator on every HTML page a cache is allowed to keep, so the revalidation the
+      // page's own lifetime *demands* can end in a `304` instead of a full re-render.
+      //
+      // [ANON_PAGE_CACHE_CONTROL] is `max-age=0, … must-revalidate`: correct about who may store
+      // the bytes and how long, and — with no `ETag` beside it — a standing instruction to ask
+      // again on every navigation and be answered with the whole body every time. Measured on the
+      // deployed host that is 367 KB of assembled markup (45 KB gzipped) per visit to
+      // `/m3-catalog/`, plus the server-side assembly behind it. The same held for
+      // [STATIC_PAGE_CACHE_CONTROL] once its minute was up.
+      //
+      // The `ETag` changes none of the privacy rules: `Vary: Cookie` and the `private`/`public`
+      // split still decide **who** may store a response. This decides only whether a permitted
+      // revalidation ends in `304` or in `200` + body. `no-store` pages are skipped outright —
+      // there is nothing to revalidate against a cache that was told to keep nothing — as is any
+      // HTML that named no lifetime at all, and any status but `200`: a `304` is an assertion
+      // about a cacheable success, not about an error page.
+      //
+      // The validator is [pageEntityTag] — the markup, minus the one element that moves under
+      // every visitor — and costs one SHA-256 over a page that was just assembled, against a
+      // request it can remove entirely. Registered as its own phase BEFORE `ContentEncoding` so
+      // the hash is over the page, identical for a gzipped and an unencoded delivery of it, and so
+      // [AutoHeadResponse] (which runs in `After`) still sees a response carrying the `ETag` a
+      // `curl -I` is asking about.
+      sendPipeline.insertPhaseBefore(ApplicationSendPipeline.ContentEncoding, HTML_ENTITY_TAG_PHASE)
+      sendPipeline.intercept(HTML_ENTITY_TAG_PHASE) { message ->
+        val html = message as? TextContent
+        if (html == null || html.contentType.withoutParameters() != ContentType.Text.Html) {
+          return@intercept
+        }
+        val status = html.status ?: call.response.status() ?: HttpStatusCode.OK
+        val cacheControl = call.response.headers[HttpHeaders.CacheControl]
+        if (status != HttpStatusCode.OK || cacheControl == null || "no-store" in cacheControl) {
+          return@intercept
+        }
+        val etag = pageEntityTag(html.text)
+        call.response.headers.append(HttpHeaders.ETag, etag)
+        if (ifNoneMatchHits(call.request.headers[HttpHeaders.IfNoneMatch], etag)) {
+          proceedWith(NotModifiedResponse)
+        }
       }
       // Compress the text-ish lanes only. Every page, `/status.json`, the figma-svg exports and
       // the baked CSS/JS are markup that gzips 3-8x, and the biggest of them (a vendored editor,
@@ -9486,6 +9531,24 @@ class ServeHttpServer(
                 val bareRcPlayer = overrideParams.keys.singleOrNull() == "rcPlayer" && !scroll
                 val bakedBrowse =
                   outcome.generation == RenderOutcome.Generation.BAKED && overrideParams.isEmpty()
+                // A PURE declared-theme selection is a fixed answer to a fixed URL by the same
+                // construction the player carve-out above rests on: the theme is one of the
+                // catalog's own [ServeHost.declaredThemes], named by the request but *defined* by
+                // the catalog, and [pureThemeProvider] is the classification the burst lease
+                // already admits on — every axis that would make the pixels depend on the caller
+                // (`fontScale`, `device`, `knob.…`, an `rc.` seed) is another override param and
+                // excluded there.
+                //
+                // It was `no-store`, which threw away a render the server itself answers from the
+                // catalog theme cache at the network floor: a visitor toggling the chip row paid a
+                // round trip per toggle, including back to a theme they were looking at two
+                // seconds ago. `no-store` also forbids the browser's memory cache, so this was not
+                // a revalidation — it was the whole PNG again.
+                //
+                // `!scroll` for the reason [bareRcPlayerRequest] excludes it: `scroll=` is not an
+                // override param, so a full-page capture would otherwise ride through a query that
+                // reads as bare — and that capture is made to order by the daemon, not a replay.
+                val pureThemeRender = pureThemeProvider != null && !scroll
                 markGeneration(
                   outcome.generation.wire,
                   if (!isPublic) DYNAMIC_RESOURCE_CACHE_CONTROL
@@ -9505,6 +9568,15 @@ class ServeHttpServer(
                     // An unscoped URL keeps the old short public lifetime. It is still the moving
                     // target it always was; the fix for that is to have the page name a
                     // generation, not to cache the ambiguity for longer.
+                    if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
+                    else STATIC_RESOURCE_CACHE_CONTROL
+                  } else if (pureThemeRender) {
+                    // Scoped to a generation, a themed render is content-addressed the way the
+                    // baked frame beside it is: the pixels are this publish's preview drawn under
+                    // this publish's declared theme, and a republish that moves either moves the
+                    // generation and therefore the URL. Unscoped it keeps the short public
+                    // lifetime, bounded by `max-age` + `stale-while-revalidate` exactly as the
+                    // player lane is.
                     if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
                     else STATIC_RESOURCE_CACHE_CONTROL
                   } else DYNAMIC_RESOURCE_CACHE_CONTROL,
@@ -11813,6 +11885,55 @@ class ServeHttpServer(
     internal class PlayerAsset(val bytes: ByteArray, val etag: String)
 
     private val playerAssets = java.util.concurrent.ConcurrentHashMap<String, PlayerAsset>()
+
+    /**
+     * The send-pipeline phase that stamps an `ETag` on an assembled HTML page, inserted before
+     * `ContentEncoding` so it reads the page rather than a gzip frame of it. See its interceptor.
+     */
+    private val HTML_ENTITY_TAG_PHASE = PipelinePhase("HtmlEntityTag")
+
+    /**
+     * The body of a `304`: no bytes, and every header already staged on the response — the
+     * `Cache-Control`, the `Vary`, the `ETag` — still delivered, which is exactly what a
+     * revalidating cache is asking to be told.
+     */
+    private object NotModifiedResponse : OutgoingContent.NoContent() {
+      override val status: HttpStatusCode = HttpStatusCode.NotModified
+    }
+
+    /**
+     * The one element an assembled page's `ETag` is computed WITHOUT — see
+     * [ServeWeb.VOLATILE_ATTR].
+     */
+    private val VOLATILE_MARKUP = Regex("<span ${ServeWeb.VOLATILE_ATTR}>[^<]*</span>")
+
+    /**
+     * A strong ETag for an assembled page: [contentEtag] over the markup with every volatile
+     * element elided.
+     *
+     * Hashing the delivered bytes outright looks more honest and is useless here. The one run that
+     * moves between two otherwise byte-identical renderings is the visit tally, and the request
+     * that revalidates a page is itself the visit that bumps it — so a body hash turns over on
+     * every navigation and no page a visitor returns to ever answers `304`. Eliding it costs a
+     * count at most one `max-age` stale, which is what a shared cache serving under `s-maxage=300`
+     * has always handed anonymous visitors anyway.
+     *
+     * Everything a page's meaning depends on is still hashed, so a `304` remains a true statement
+     * about the page.
+     */
+    internal fun pageEntityTag(html: String): String =
+      contentEtag(VOLATILE_MARKUP.replace(html, "").encodeToByteArray())
+
+    /**
+     * Whether an `If-None-Match` names [etag]. A list, `*`, and a tag some intermediary weakened to
+     * `W/"…"` all count: the question a revalidation asks is "do you still have these bytes", and
+     * answering `200` to a client that plainly does is the round trip the header exists to avoid.
+     */
+    internal fun ifNoneMatchHits(header: String?, etag: String): Boolean {
+      val value = header?.trim() ?: return false
+      if (value == "*") return true
+      return value.split(',').any { it.trim().removePrefix("W/") == etag }
+    }
 
     /**
      * A strong ETag over exactly [bytes] — size and a SHA-256 prefix, the same shape [playerAsset]
