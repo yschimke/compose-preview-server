@@ -286,6 +286,9 @@ sealed interface UiBuilderEditorEvent {
   /** Put the selection inside a new container of [componentId], where it already sits. */
   data class WrapSelection(val componentId: String) : UiBuilderEditorEvent
 
+  /** Lift the selected container's children out and delete it. */
+  data object UnwrapSelection : UiBuilderEditorEvent
+
   data object CopySelected : UiBuilderEditorEvent
 
   data object CutSelected : UiBuilderEditorEvent
@@ -346,6 +349,7 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.SelectRelative -> selectRelative(state, event.move)
       is UiBuilderEditorEvent.MoveSelected -> moveSelected(state, event.direction)
       is UiBuilderEditorEvent.WrapSelection -> wrapSelection(state, event.componentId)
+      UiBuilderEditorEvent.UnwrapSelection -> unwrapSelection(state)
       UiBuilderEditorEvent.CopySelected -> copySelected(state)
       UiBuilderEditorEvent.CutSelected -> cutSelected(state)
       UiBuilderEditorEvent.Paste -> paste(state)
@@ -1228,6 +1232,68 @@ class UiBuilderEditorReducer(
     // One apply: inserting a container and leaving the children outside it is not a state the
     // document should be able to rest in, and undo should not have to be pressed twice.
     return state.apply(sequence, operations, selectionAfter = containerId)
+  }
+
+  /**
+   * Whether the selected node's children can be lifted into its own parent.
+   *
+   * Wrap without unwrap is a one-way door, and the door is worse here than for a binding: a
+   * container added by mistake cannot be deleted either, because deleting it takes the children
+   * with it.
+   *
+   * The parent slot has to accept every child and have room for all of them at once — the container
+   * leaves and its children arrive, so occupancy changes by `children - 1`.
+   */
+  fun canUnwrapSelected(state: UiBuilderEditorState): Boolean = unwrapPlan(state) != null
+
+  private fun unwrapPlan(state: UiBuilderEditorState): Pair<String, List<String>>? {
+    val nodeId =
+      state.selection.singleOrNull()?.takeIf(state.document.nodes::containsKey) ?: return null
+    val node = state.document.nodes.getValue(nodeId)
+    val parent = state.document.location(nodeId) ?: return null
+    val children = node.slots.values.flatten()
+    if (children.isEmpty()) return null
+    val parentNode = state.document.nodes[parent.nodeId] ?: return null
+    val parentSlot =
+      catalog.componentsById[parentNode.componentId]?.slot(parent.slot) ?: return null
+    val capabilities =
+      children
+        .mapNotNull { state.document.nodes[it]?.componentId }
+        .mapNotNull(catalog.componentsById::get)
+    if (capabilities.size != children.size) return null
+    if (!capabilities.all(parentSlot::accepts)) return null
+    val occupancy = parentNode.slots[parent.slot].orEmpty().size - 1 + children.size
+    if (parentSlot.cardinality.max?.let { occupancy > it } == true) return null
+    return nodeId to children
+  }
+
+  private fun unwrapSelection(state: UiBuilderEditorState): UiBuilderEditorState {
+    val sequence = state.operationSequence + 1
+    val nodeId = state.selection.singleOrNull() ?: return state
+    val plan = unwrapPlan(state)
+    if (plan == null) {
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_LOCATION,
+        "`$nodeId` cannot be unwrapped here: its parent does not accept these children",
+      )
+    }
+    val (containerId, children) = plan
+    val parent = state.document.location(containerId) ?: return state
+    val operations = mutableListOf<DesignOperation>()
+    // Children move out first, then the emptied container goes. The other order would delete them
+    // along with it — a delete takes its subtree — so this is not a stylistic ordering.
+    var after: String? = containerId
+    children.forEach { childId ->
+      operations += DesignOperation.MoveNode(nodeId = childId, parent = parent, afterNodeId = after)
+      after = childId
+    }
+    operations += DesignOperation.DeleteNode(containerId)
+    // The lifted children are what you were working on, so they are what stays selected.
+    return state.apply(sequence, operations, selectionAfter = children.last()).let { unwrapped ->
+      if (unwrapped.selection == listOf(children.last())) unwrapped.copy(selection = children)
+      else unwrapped
+    }
   }
 
   private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {

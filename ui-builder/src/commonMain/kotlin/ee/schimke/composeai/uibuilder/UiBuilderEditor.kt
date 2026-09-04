@@ -299,6 +299,7 @@ fun UiBuilderEditor(
             canCut = reducer.canCutSelected(state),
             canPaste = reducer.canPaste(state),
             wrapCandidates = reducer.wrapCandidates(state),
+            canUnwrap = reducer.canUnwrapSelected(state),
             canUndo = reducer.canUndo(state),
             canRedo = reducer.canRedo(state),
             onNewDesign =
@@ -318,6 +319,7 @@ fun UiBuilderEditor(
             canCut = reducer.canCutSelected(state),
             canPaste = reducer.canPaste(state),
             wrapCandidates = reducer.wrapCandidates(state),
+            canUnwrap = reducer.canUnwrapSelected(state),
             canUndo = reducer.canUndo(state),
             canRedo = reducer.canRedo(state),
             sessionLabel = sessionLabel,
@@ -501,6 +503,7 @@ private fun MobileEditorToolbar(
   canCut: Boolean,
   canPaste: Boolean,
   wrapCandidates: List<EditorCatalogItem>,
+  canUnwrap: Boolean,
   canUndo: Boolean,
   canRedo: Boolean,
   onNewDesign: (() -> Unit)?,
@@ -642,6 +645,7 @@ private fun EditorToolbar(
   canCut: Boolean,
   canPaste: Boolean,
   wrapCandidates: List<EditorCatalogItem>,
+  canUnwrap: Boolean,
   canUndo: Boolean,
   canRedo: Boolean,
   sessionLabel: String,
@@ -726,6 +730,12 @@ private fun EditorToolbar(
           }
         }
       }
+      EditorAction(
+        label = "Unwrap",
+        shortcut = "",
+        enabled = canUnwrap,
+        onClick = { dispatch(UiBuilderEditorEvent.UnwrapSelection) },
+      )
       EditorAction(
         label = "Copy",
         shortcut = "Ctrl/⌘+C",

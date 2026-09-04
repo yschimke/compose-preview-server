@@ -1324,4 +1324,78 @@ class UiBuilderEditorStateTest {
       )
     }
   }
+
+  @Test
+  fun `wrapping and unwrapping returns the document to where it started`() {
+    // Wrap without unwrap is a one-way door, and worse than for a binding: a container added by
+    // mistake cannot be deleted either, because deleting it takes the children with it.
+    val rows = reducer.treeRows(document)
+    val siblings =
+      rows.groupBy { it.parent }.values.first { it.size > 2 && it.first().parent != null }
+    val parent = requireNotNull(siblings.first().parent)
+    val before = rows.filter { it.parent == parent }.map { it.nodeId }
+    val two = siblings.take(2).map { it.nodeId }
+    val selected =
+      reducer.reduce(reducer.initial(document, two[0]), UiBuilderEditorEvent.ToggleNode(two[1]))
+    val candidate = reducer.wrapCandidates(selected).firstOrNull() ?: return
+
+    val wrapped =
+      reducer.reduce(selected, UiBuilderEditorEvent.WrapSelection(candidate.componentId))
+    val unwrapped = reducer.reduce(wrapped, UiBuilderEditorEvent.UnwrapSelection)
+
+    val after =
+      reducer.treeRows(unwrapped.document).filter { it.parent == parent }.map { it.nodeId }
+    assertEquals(before, after)
+    // The container is gone rather than left behind empty.
+    assertFalse(wrapped.selectedNodeId!! in unwrapped.document.nodes)
+  }
+
+  @Test
+  fun `unwrapping keeps the children rather than deleting them with their container`() {
+    // Deleting the container first would take its subtree; the move-then-delete order is the whole
+    // correctness of this operation.
+    val rows = reducer.treeRows(document)
+    val container = rows.first { row ->
+      rows.count { it.parent?.nodeId == row.nodeId } > 1 && row.parent != null
+    }
+    val children = rows.filter { it.parent?.nodeId == container.nodeId }.map { it.nodeId }
+    val state = reducer.initial(document, container.nodeId)
+    if (!reducer.canUnwrapSelected(state)) return
+
+    val unwrapped = reducer.reduce(state, UiBuilderEditorEvent.UnwrapSelection)
+
+    children.forEach {
+      assertTrue(it in unwrapped.document.nodes, "$it was deleted with its parent")
+    }
+    assertFalse(container.nodeId in unwrapped.document.nodes)
+    // One undo step for the whole operation.
+    assertEquals(document.revision + 1, unwrapped.document.revision)
+  }
+
+  @Test
+  fun `a node with no children cannot be unwrapped`() {
+    val rows = reducer.treeRows(document)
+    val leaf = rows.first { row ->
+      row.parent != null && rows.none { it.parent?.nodeId == row.nodeId }
+    }
+
+    assertFalse(reducer.canUnwrapSelected(reducer.initial(document, leaf.nodeId)))
+  }
+
+  @Test
+  fun `unwrap is offered only where the parent would accept the children`() {
+    val rows = reducer.treeRows(document)
+    rows
+      .filter { it.parent != null }
+      .forEach { row ->
+        val state = reducer.initial(document, row.nodeId)
+        if (reducer.canUnwrapSelected(state)) {
+          val unwrapped = reducer.reduce(state, UiBuilderEditorEvent.UnwrapSelection)
+          assertTrue(
+            unwrapped.lastOutcome !is CommandOutcome.Rejected,
+            "${row.nodeId}: ${unwrapped.lastOutcome}",
+          )
+        }
+      }
+  }
 }
