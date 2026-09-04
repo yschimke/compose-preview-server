@@ -9531,6 +9531,24 @@ class ServeHttpServer(
                 val bareRcPlayer = overrideParams.keys.singleOrNull() == "rcPlayer" && !scroll
                 val bakedBrowse =
                   outcome.generation == RenderOutcome.Generation.BAKED && overrideParams.isEmpty()
+                // A PURE declared-theme selection is a fixed answer to a fixed URL by the same
+                // construction the player carve-out above rests on: the theme is one of the
+                // catalog's own [ServeHost.declaredThemes], named by the request but *defined* by
+                // the catalog, and [pureThemeProvider] is the classification the burst lease
+                // already admits on — every axis that would make the pixels depend on the caller
+                // (`fontScale`, `device`, `knob.…`, an `rc.` seed) is another override param and
+                // excluded there.
+                //
+                // It was `no-store`, which threw away a render the server itself answers from the
+                // catalog theme cache at the network floor: a visitor toggling the chip row paid a
+                // round trip per toggle, including back to a theme they were looking at two
+                // seconds ago. `no-store` also forbids the browser's memory cache, so this was not
+                // a revalidation — it was the whole PNG again.
+                //
+                // `!scroll` for the reason [bareRcPlayerRequest] excludes it: `scroll=` is not an
+                // override param, so a full-page capture would otherwise ride through a query that
+                // reads as bare — and that capture is made to order by the daemon, not a replay.
+                val pureThemeRender = pureThemeProvider != null && !scroll
                 markGeneration(
                   outcome.generation.wire,
                   if (!isPublic) DYNAMIC_RESOURCE_CACHE_CONTROL
@@ -9550,6 +9568,15 @@ class ServeHttpServer(
                     // An unscoped URL keeps the old short public lifetime. It is still the moving
                     // target it always was; the fix for that is to have the page name a
                     // generation, not to cache the ambiguity for longer.
+                    if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
+                    else STATIC_RESOURCE_CACHE_CONTROL
+                  } else if (pureThemeRender) {
+                    // Scoped to a generation, a themed render is content-addressed the way the
+                    // baked frame beside it is: the pixels are this publish's preview drawn under
+                    // this publish's declared theme, and a republish that moves either moves the
+                    // generation and therefore the URL. Unscoped it keeps the short public
+                    // lifetime, bounded by `max-age` + `stale-while-revalidate` exactly as the
+                    // player lane is.
                     if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
                     else STATIC_RESOURCE_CACHE_CONTROL
                   } else DYNAMIC_RESOURCE_CACHE_CONTROL,
