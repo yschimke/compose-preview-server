@@ -187,8 +187,15 @@ private val editorIssuesPreviewDocument: UiBuilderDocument by lazy {
           placeholder.id to
             placeholder.copy(properties = JsonObject(placeholder.properties - "text")),
           // Dropping the child leaves the icon in `nodes` with no parent, which is the shape a
-          // botched delete leaves behind.
-          searchInput.id to searchInput.copy(slots = searchInput.slots - "trailingIcon"),
+          // botched delete leaves behind. The slot it moves to names a node that was never there,
+          // which is the other half: the canvas and the layers panel both walk that reference, and
+          // both used to take the editor down on it rather than leave it to the panel to report.
+          searchInput.id to
+            searchInput.copy(
+              slots =
+                searchInput.slots - "trailingIcon" +
+                  mapOf("leadingIcon" to listOf("search-leading-icon", "icon-that-was-deleted"))
+            ),
         )
   )
 }
