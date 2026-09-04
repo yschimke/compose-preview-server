@@ -268,6 +268,85 @@ class EditorWrapOrderTest {
   }
 
   @Test
+  fun `a comparison operand is typed against the variable it compares with`() {
+    // The operand is compared against the variable in the exported Kotlin, so a string encoding
+    // gave `expanded == "true"` against a `Boolean`. The fourth place in this reducer where a
+    // declaration and the literal written against it had to be made to agree.
+    val flag =
+      withState(
+        "expanded",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("value"),
+            "valueType" to JsonPrimitive("bool"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(false),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+      )
+    val bound =
+      reducer.reduce(
+        reducer.initial(flag, selectedNodeId = "chip-crime"),
+        UiBuilderEditorEvent.BindPropertyToState("chip-crime", "selected", "expanded", "true"),
+      )
+    assertIs<CommandOutcome.Accepted>(bound.lastOutcome)
+
+    val encoded = bound.document.nodes.getValue("chip-crime").properties["selected"] as JsonObject
+    assertEquals(JsonPrimitive(true), encoded["value"], encoded.toString())
+  }
+
+  @Test
+  fun `a comparison operand that is not of the declared type is refused`() {
+    val flag =
+      withState(
+        "expanded",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("value"),
+            "valueType" to JsonPrimitive("bool"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(false),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+      )
+
+    val refused =
+      reducer.reduce(
+        reducer.initial(flag, selectedNodeId = "chip-crime"),
+        UiBuilderEditorEvent.BindPropertyToState("chip-crime", "selected", "expanded", "yes"),
+      )
+
+    val outcome = assertIs<CommandOutcome.Rejected>(refused.lastOutcome)
+    assertTrue(outcome.message.contains("not a boolean value"), outcome.message)
+  }
+
+  @Test
+  fun `an integer past the exported Int range is refused`() {
+    // The exporter declares an integer variable as `Int`, so a value only a Long can hold would be
+    // authored here and emitted as a literal the generated Kotlin cannot take.
+    val number =
+      withState(
+        "count",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("value"),
+            "valueType" to JsonPrimitive("int"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(0),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+      )
+
+    val refused = insertWith(number, EditorStateAction.Set("count", "2147483648"))
+
+    val outcome = assertIs<CommandOutcome.Rejected>(refused.lastOutcome)
+    assertTrue(outcome.message.contains("not a integer value"), outcome.message)
+  }
+
+  @Test
   fun `toggling a flag is accepted`() {
     val flag =
       withState(

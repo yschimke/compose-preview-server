@@ -363,7 +363,9 @@ private fun EditorStateAction.valueRefusal(declaration: JsonObject?): String? {
   val parses =
     when (kind) {
       StateKind.BOOLEAN -> raw.toBooleanStrictOrNull() != null
-      StateKind.INTEGER -> raw.toLongOrNull() != null
+      // `toIntOrNull`, because the exporter declares an integer variable as `Int`. A value past
+      // that range parses as a Long and then emits a literal the generated Kotlin cannot hold.
+      StateKind.INTEGER -> raw.toIntOrNull() != null
       StateKind.DECIMAL -> raw.toDoubleOrNull() != null
       StateKind.STRING -> true
     }
@@ -409,14 +411,24 @@ private fun declaredNullable(declaration: JsonObject?): Boolean =
   declaration?.get("nullable")?.jsonPrimitive?.booleanOrNull
     ?: (declaration?.get("initialValue") is JsonNull)
 
+/**
+ * One authored value, typed against the variable it will be written to or compared with.
+ *
+ * `Int`, not `Long`, for a whole number: the exporter declares an integer variable as `Int`, so a
+ * value past that range would be authored here and then emitted as a literal the generated Kotlin
+ * cannot hold. Callers check with [EditorStateAction.valueRefusal] first, so the fallbacks are
+ * unreachable rather than load-bearing.
+ */
+private fun typedStateValue(raw: String, declaration: JsonObject?): JsonPrimitive =
+  when (declaredStateKind(declaration)) {
+    StateKind.BOOLEAN -> JsonPrimitive(raw.toBooleanStrictOrNull() ?: false)
+    StateKind.INTEGER -> JsonPrimitive(raw.toIntOrNull() ?: 0)
+    StateKind.DECIMAL -> JsonPrimitive(raw.toDoubleOrNull() ?: 0.0)
+    StateKind.STRING -> JsonPrimitive(raw)
+  }
+
 private fun EditorStateAction.encoded(declaration: JsonObject?): JsonObject {
-  fun typed(raw: String): JsonPrimitive =
-    when (declaredStateKind(declaration)) {
-      StateKind.BOOLEAN -> JsonPrimitive(raw.toBooleanStrictOrNull() ?: false)
-      StateKind.INTEGER -> JsonPrimitive(raw.toLongOrNull() ?: 0L)
-      StateKind.DECIMAL -> JsonPrimitive(raw.toDoubleOrNull() ?: 0.0)
-      StateKind.STRING -> JsonPrimitive(raw)
-    }
+  fun typed(raw: String): JsonPrimitive = typedStateValue(raw, declaration)
   return when (this) {
     is EditorStateAction.Toggle ->
       JsonObject(mapOf("type" to JsonPrimitive("toggle"), "variable" to JsonPrimitive(variable)))
@@ -1275,6 +1287,17 @@ class UiBuilderEditorReducer(
         propertyName,
       )
     }
+    val declaration = state.document.stateVariables[variable] as? JsonObject
+    if (equalsValue != null) {
+      // The operand is compared against the variable in the exported Kotlin, so it has to be the
+      // same type the variable is declared as. Encoding it as a string regardless produced
+      // `expanded == "true"` against a `Boolean` and `selectedDay == "1"` against an `Int` —
+      // neither compiles. The fourth place in this file where a declaration and the literal
+      // written against it had to be made to agree.
+      EditorStateAction.Set(variable, equalsValue).valueRefusal(declaration)?.let { why ->
+        return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, why, nodeId, propertyName)
+      }
+    }
     val encoded =
       if (equalsValue == null)
         JsonObject(mapOf("type" to JsonPrimitive("state"), "variable" to JsonPrimitive(variable)))
@@ -1283,7 +1306,7 @@ class UiBuilderEditorReducer(
           mapOf(
             "type" to JsonPrimitive("stateEquals"),
             "variable" to JsonPrimitive(variable),
-            "value" to JsonPrimitive(equalsValue),
+            "value" to typedStateValue(equalsValue, declaration),
           )
         )
     validator.validate(state.document, nodeId, propertyName, encoded)?.let { issue ->
