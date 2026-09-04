@@ -1500,12 +1500,20 @@ class UiBuilderEditorReducer(
   /**
    * The components that can be inserted already wired to a click action.
    *
-   * Any component the destination accepts: `click` is universal in this renderer, so the limit is
-   * where the node may go rather than what it is.
+   * Two limits, not one. Where the node may go, and whether the Compose export emits a handler for
+   * it: `click` is universal in the *renderer* — `actionModifier` makes anything carrying a click
+   * binding clickable — but the exporter emits one only for the components whose emitter takes an
+   * `onClick`, and reports `UNEMITTED_EVENT` for the rest. Offering the others built a control that
+   * worked in the preview and silently lost its interaction on export, which is the divergence this
+   * builder exists to not have.
    */
   fun actionInsertCandidates(state: UiBuilderEditorState): List<EditorCatalogItem> =
     if (state.document.stateVariables.isEmpty()) emptyList()
-    else catalogItems("").filter { dropTarget(state, it.componentId) != null }
+    else
+      catalogItems("").filter {
+        it.componentId in COMPOSE_EMITTED_CLICK_COMPONENTS &&
+          dropTarget(state, it.componentId) != null
+      }
 
   private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {
     val roots = state.selectionRoots()

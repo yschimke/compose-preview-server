@@ -1190,6 +1190,18 @@ private val SUPPORTED_MODIFIERS =
 
 private val SUPPORTED_ACTIONS = setOf("select", "selectOrClear", "setText", "set", "toggle")
 
+/**
+ * The components whose `click` binding the Compose export actually emits.
+ *
+ * Derived from `HANDLED_FIELDS` rather than listed again, so the editor cannot offer a wiring this
+ * exporter would drop. The renderer makes anything with a click binding clickable; the exporter
+ * emits a handler only where the component's own emitter takes one, and everything else reports
+ * `UNEMITTED_EVENT` and generates nothing.
+ */
+internal val COMPOSE_EMITTED_CLICK_COMPONENTS: Set<String> by lazy {
+  HANDLED_FIELDS.filterValues { "click" in it.events }.keys
+}
+
 private val HANDLED_FIELDS =
   mapOf(
     "asset/image" to HandledFields(setOf("assetKey", "contentDescription", "contentScale")),

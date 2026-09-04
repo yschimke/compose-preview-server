@@ -306,5 +306,41 @@ class ComposeExportActionTest {
     )
   }
 
+  @Test
+  fun `only components whose click the exporter emits are offered for action insertion`() {
+    // `click` is universal in the renderer, so this used to offer every component the destination
+    // accepted. The exporter emits a handler only where the component's emitter takes an onClick;
+    // everything else reported UNEMITTED_EVENT and generated nothing, so the control worked in the
+    // preview and lost its interaction on export.
+    val reducer = UiBuilderEditorReducer(catalog)
+    val withState =
+      fixture.copy(
+        stateVariables =
+          JsonObject(
+            mapOf(
+              "expanded" to
+                JsonObject(
+                  mapOf(
+                    "type" to JsonPrimitive("value"),
+                    "valueType" to JsonPrimitive("bool"),
+                    "initialValue" to JsonPrimitive(false),
+                    "persistence" to JsonPrimitive("preview"),
+                  )
+                )
+            )
+          )
+      )
+    val state = reducer.initial(withState, selectedNodeId = "main-episode-footer")
+
+    val candidates = reducer.actionInsertCandidates(state).map { it.componentId }
+
+    assertTrue(candidates.isNotEmpty(), "the row accepts something")
+    assertTrue(
+      candidates.all { it in COMPOSE_EMITTED_CLICK_COMPONENTS },
+      "offered a component the export would drop the click of: $candidates",
+    )
+    assertFalse(candidates.contains("m3/text"), candidates.toString())
+  }
+
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
 }
