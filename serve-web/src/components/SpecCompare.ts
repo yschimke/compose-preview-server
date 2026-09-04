@@ -608,6 +608,13 @@ export class SpecCompare extends ControllerElement {
         const before = this.choice.view;
         this.choice = choose(this.choice, next);
         if (this.choice.view === before) return;
+        // A reading names a point on a panel, and the view decides which panels exist. Carried
+        // across a switch it describes a surface that may not be on screen — the plain Spec view
+        // shows no canvases at all — and a frozen one carried into Slider is a trap: pointer moves
+        // are latched, and the wipe canvas is the one surface a click cannot release the latch
+        // from, so the reading could only be dismissed with Escape. `apply()` re-settles the
+        // picker for the view it is switching to.
+        this.releasePick();
         this.apply();
         // A discrete choice, so it PUSHES: Back returns to the view you were looking at, the same
         // way it returns to the previous lane or theme.

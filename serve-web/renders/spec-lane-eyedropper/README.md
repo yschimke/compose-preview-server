@@ -51,6 +51,11 @@ source's name. Measured mid-switch, with the paired catalog's raster held back 2
 readout said `153,163 · M3 Wear OS Apps Design Kit #332e3c · …` over Figma's pixels; now it says
 nothing until the pair lands, then answers under the label it belongs to.
 
+A view switch drops the reading too. The view decides which panels exist — the plain Spec view has
+no canvases at all — so a reading carried across a switch describes a surface that may not be on
+screen, and a *frozen* one carried into Slider was a trap: pointer moves are latched, and the wipe
+canvas is the one surface whose click cannot release the latch, leaving Escape as the only way out.
+
 Leaving the lane takes the reading away with it — text, announcement, frozen latch and both pixel
 readbacks. `cp-spec-lane` carries the source buttons, so it outlives the lane; a reading left in it
 would go on naming two colours beside a picture neither came from, and the latch would still be

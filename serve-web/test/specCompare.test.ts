@@ -152,6 +152,28 @@ describe("<cp-spec-compare>", () => {
         assert.equal(pick().textContent, "", "reserved, not filled");
     });
 
+    it("lets a frozen reading go when the view changes", async () => {
+        // The view decides which panels exist, so a reading outliving a switch describes a surface
+        // that may not be on screen. Carried into Slider it is also a trap: moves are latched, and
+        // the wipe canvas is the one surface whose click cannot release the latch, leaving Escape
+        // as the only way out.
+        stubCompare();
+        await mount();
+        lane().open("/render/Button.png");
+        for (let i = 0; i < 5; i++) await flush();
+        pick().textContent =
+            "145,121 · Figma #332e3c · Render #332e3c · identical";
+        pick().hidden = false;
+        pick().classList.add("cp-spec-pick--frozen");
+        pickLive().textContent = "Frozen reading. 145,121 · …";
+
+        press("slider");
+        await flush();
+        assert.equal(pick().textContent, "");
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), false);
+        assert.equal(pickLive().textContent, "");
+    });
+
     it("takes a frozen reading away when the lane closes", async () => {
         // `cp-spec-lane` carries the source buttons, so it stays in the page off the lane. A
         // reading left in it goes on naming two colours beside a picture neither came from, and
