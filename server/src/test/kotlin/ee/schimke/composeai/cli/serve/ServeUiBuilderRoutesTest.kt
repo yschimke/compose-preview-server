@@ -391,6 +391,35 @@ class ServeUiBuilderRoutesTest {
     return client.newCall(builder.build()).execute().use { it.code }
   }
 
+  @Test
+  fun `device presets are read-gated and derived from the render catalog`() {
+    assertEquals(401, devicePresets(null).use { it.code })
+    assertEquals(403, devicePresets("forbidden").use { it.code })
+
+    val body =
+      devicePresets("actor").use {
+        assertEquals(200, it.code)
+        assertEquals(UiBuilderRouteCapability.READ, capabilities.last())
+        it.body.string()
+      }
+    val payload = json.decodeFromString(UiBuilderDevicePresetsV1.serializer(), body)
+    assertEquals(1, payload.schemaVersion)
+    // The editor's whole reason for fetching this: the frames are the ones the backend renders.
+    val tablet = payload.presets.single { it.id == "id:pixel_tablet" }
+    assertEquals(1280, tablet.widthDp)
+    assertEquals(800, tablet.heightDp)
+    assertEquals(2.0, tablet.density)
+    assertEquals("Pixel Tablet", tablet.label)
+    assertEquals("Tablets", tablet.group)
+  }
+
+  private fun devicePresets(authenticatedActor: String?): Response {
+    val builder =
+      Request.Builder().url("http://127.0.0.1:${server.port}$UI_BUILDER_DEVICE_PRESETS_PATH")
+    if (authenticatedActor != null) builder.header(ACTOR_HEADER, authenticatedActor)
+    return client.newCall(builder.build()).execute()
+  }
+
   private fun decode(response: Response): HttpResponseEnvelopeV1 = response.use {
     json.decodeFromString(HttpResponseEnvelopeV1.serializer(), it.body.string())
   }
