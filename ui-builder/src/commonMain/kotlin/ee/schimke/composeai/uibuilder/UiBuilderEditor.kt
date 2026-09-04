@@ -97,6 +97,15 @@ import kotlin.math.roundToInt
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
+/**
+ * The inspector's width, named because two places have to agree on it.
+ *
+ * A default on [PropertyInspector] alone does nothing: the desktop layout passes its own modifier,
+ * so widening the default for a fourth tab widened the preview and left every real editor at the
+ * three-tab width. Four tabs share it, and the widest label has to stay legible.
+ */
+private val INSPECTOR_WIDTH = 360.dp
+
 private val EditorColors =
   darkColorScheme(
     background = Color(0xff121316),
@@ -340,7 +349,7 @@ fun UiBuilderEditor(
                 Modifier.weight(1f).fillMaxHeight().background(Color(0xff0d0e11)).padding(20.dp),
                 Alignment.TopStart,
               )
-              inspector(Modifier.width(300.dp).fillMaxHeight())
+              inspector(Modifier.width(INSPECTOR_WIDTH).fillMaxHeight())
             }
           } else {
             canvas(
@@ -1483,8 +1492,7 @@ private fun PropertyInspector(
   themeSettings: EditorThemeSettings,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
-  // Four tabs rather than three, and the widest of them has to stay legible.
-  modifier: Modifier = Modifier.width(360.dp).fillMaxHeight(),
+  modifier: Modifier = Modifier.width(INSPECTOR_WIDTH).fillMaxHeight(),
 ) {
   val node = state.selectedNodeId?.let(state.document.nodes::get)
   Surface(modifier, color = MaterialTheme.colorScheme.surface) {
@@ -1772,15 +1780,15 @@ private fun ProblemsInspector(
 ) {
   if (problems.isEmpty()) {
     Text(
-      "Nothing is blocking an export of this design.",
+      "Nothing is blocking a Compose export of this design.",
       Modifier.padding(top = 16.dp),
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     return
   }
   Text(
-    "These are what the export gate refuses, checked against the whole document rather than the " +
-      "last edit.",
+    "These are what the Compose export gate refuses, checked against the whole document rather " +
+      "than the last edit.",
     color = MaterialTheme.colorScheme.onSurfaceVariant,
     style = MaterialTheme.typography.labelSmall,
   )

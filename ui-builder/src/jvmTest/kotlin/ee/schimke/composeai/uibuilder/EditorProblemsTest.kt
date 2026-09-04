@@ -8,6 +8,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /**
@@ -79,9 +80,9 @@ class EditorProblemsTest {
 
   @Test
   fun `the panel reports exactly what the export gate refuses`() {
-    // The point of reading `validateDocumentForExport` rather than writing a second set of rules:
-    // a panel with its own opinion would eventually disagree with the thing that actually refuses,
-    // and the disagreement would surface at export time — the moment this exists to avoid.
+    // The point of reading the exporter rather than writing a second set of rules: a panel with
+    // its own opinion would eventually disagree with the thing that actually refuses, and the
+    // disagreement would surface at export time — the moment this exists to avoid.
     val placeholder = document.nodes.getValue("search-placeholder")
     val broken =
       document.copy(
@@ -95,9 +96,63 @@ class EditorProblemsTest {
       )
 
     assertEquals(
-      validateDocumentForExport(broken, catalog).map { it.code to it.message },
+      CapabilityComposeCodeExporter.diagnose(broken, catalog)
+        .filter { it.severity == ComposeExportSeverity.ERROR }
+        .map { it.code to it.message },
       problems(broken).map { it.code to it.message },
     )
+  }
+
+  @Test
+  fun `something only the Compose projection refuses is reported too`() {
+    // A structurally valid document the Compose export still will not take:
+    // `remote-compose/document`
+    // is a declared container with a Kotlin symbol and no typed call emitter. Reading only
+    // `validateDocumentForExport` made the panel say nothing was blocking an export right up until
+    // the export refused — which is the one moment this panel exists to come before.
+    val player =
+      UiBuilderNode(
+        id = "player",
+        componentId = "remote-compose/document",
+        properties =
+          JsonObject(
+            mapOf(
+              "documentBase64" to
+                JsonObject(
+                  mapOf("type" to JsonPrimitive("string"), "value" to JsonPrimitive("AAAA"))
+                )
+            )
+          ),
+      )
+    val onlyThePlayer = document.copy(roots = listOf(player.id), nodes = mapOf(player.id to player))
+
+    assertEquals(
+      emptyList(),
+      validateDocumentForExport(onlyThePlayer, catalog),
+      "the document itself is valid",
+    )
+
+    val reported = problems(onlyThePlayer)
+    assertTrue(
+      reported.any { it.code == "UNSUPPORTED_CODE_COMPONENT" && it.nodeId == player.id },
+      "$reported",
+    )
+  }
+
+  @Test
+  fun `a warning the export proceeds through is not listed as a blocker`() {
+    // The panel's one claim is what stops the build. A diagnostic the export notes and carries on
+    // past would make that claim untrue in the other direction. The checked-in fixture holds a
+    // carousel, whose compatibility note is exactly such a warning.
+    val diagnostics = CapabilityComposeCodeExporter.diagnose(document, catalog)
+    assertTrue(
+      diagnostics.any {
+        it.code == "CAROUSEL_COMPATIBILITY_HELPER" && it.severity == ComposeExportSeverity.WARNING
+      },
+      "the fixture should still raise the warning this test is about: $diagnostics",
+    )
+
+    assertEquals(emptyList(), problems(document))
   }
 
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()

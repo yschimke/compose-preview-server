@@ -917,7 +917,7 @@ class UiBuilderEditorReducer(
   }
 
   /**
-   * Everything the export gate would refuse, against the document as it stands.
+   * Everything the Compose export gate would refuse, against the document as it stands.
    *
    * The editor validates each write as it happens, so a rejected edit never lands — but nothing was
    * checking the document as a whole. A node can become unreachable when its parent is deleted, a
@@ -925,20 +925,31 @@ class UiBuilderEditorReducer(
    * those is a rejected write, and all of them are a failed export. Until now the first anyone knew
    * was the export refusing.
    *
+   * Read from [CapabilityComposeCodeExporter.diagnose] rather than from `validateDocumentForExport`
+   * alone, because those are two different questions and only the wider one is the promise this
+   * panel makes. A design can satisfy every structural rule and still hold a component the exporter
+   * has no emitter for, or a modifier the catalog does not allow on it — and against the narrower
+   * gate the panel said nothing was blocking an export right up until the export refused.
+   *
+   * Errors only. A warning is something the export notes and proceeds through, so listing it beside
+   * the things that stop the build would make the panel's one claim untrue in the other direction.
+   *
    * A node id that no longer exists is dropped rather than offered as something to select.
    *
    * Takes the document rather than the state because it reads nothing else, which is what lets the
    * caller cache it against the document alone.
    */
   fun problems(document: UiBuilderDocument): List<EditorProblem> =
-    validateDocumentForExport(document, catalog).map { issue ->
-      EditorProblem(
-        code = issue.code,
-        message = issue.message,
-        nodeId = issue.nodeId?.takeIf(document.nodes::containsKey),
-        componentId = issue.componentId,
-      )
-    }
+    CapabilityComposeCodeExporter.diagnose(document, catalog)
+      .filter { it.severity == ComposeExportSeverity.ERROR }
+      .map { diagnostic ->
+        EditorProblem(
+          code = diagnostic.code,
+          message = diagnostic.message,
+          nodeId = diagnostic.nodeId?.takeIf(document.nodes::containsKey),
+          componentId = diagnostic.componentId,
+        )
+      }
 
   fun themeSettings(state: UiBuilderEditorState): EditorThemeSettings {
     val host = state.document.themeHost() ?: return EditorThemeSettings()
