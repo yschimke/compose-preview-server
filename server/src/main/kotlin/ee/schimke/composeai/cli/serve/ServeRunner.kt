@@ -2642,8 +2642,14 @@ public class ServeRunner(
         imageBrowserLogin =
           githubAuth?.let { auth ->
             { call, repository ->
+              // The IMAGE bit, against the IMAGE repository. This asked the sign-in question until
+              // the two gates were allowed to differ, and on a box where they do it can only ever
+              // answer false — so the approver who may hand an agent `images` would themselves be
+              // refused an upload from the bug-report page. Case-insensitive like every other
+              // comparison of a `owner/repo` pair here.
               auth.currentLogin(call)?.takeIf {
-                auth.hasRepositoryAccess(call) && auth.accessRepository() == repository
+                auth.hasImageRepositoryAccess(call) &&
+                  auth.imageAccessRepository().equals(repository, ignoreCase = true)
               }
             }
           },

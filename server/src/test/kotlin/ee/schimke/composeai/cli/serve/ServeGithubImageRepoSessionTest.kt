@@ -2,6 +2,8 @@ package ee.schimke.composeai.cli.serve
 
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -64,7 +66,7 @@ class ServeGithubImageRepoSessionTest {
       }
       .build()
 
-  private fun config(imageRepository: String?) =
+  private fun config(imageRepository: String? = null) =
     ServeGithubAuthConfig(
       clientId = "client",
       clientSecret = "secret",
@@ -130,6 +132,60 @@ class ServeGithubImageRepoSessionTest {
     assertTrue(refused.endsWith("|no-image-repo"), refused)
     // The sign-in bit is still its own field, unmoved, so the older parsers keep reading it.
     assertTrue(refused.split("|")[1] == "repo", refused)
+  }
+
+  /**
+   * What the *upload* paths ask, on the cookie shapes a running box actually holds.
+   *
+   * The image bit reaches every gate through this one call — the bug-report page's uploader as well
+   * as the agent-grant approval page — so its treatment of a cookie minted before the field existed
+   * decides whether shipping the field signs everybody's uploads out for a week.
+   */
+  @Test
+  fun `a legacy cookie still uploads when both lanes gate on one repository`() {
+    val sameRepo = ServeGithubAuth(config(imageRepository = null))
+    assertTrue(sameRepo.hasImageRepositoryAccess(legacyCookie(repositoryAccess = true)))
+    assertFalse(sameRepo.hasImageRepositoryAccess(legacyCookie(repositoryAccess = false)))
+    // Naming the same repository explicitly is the same box, so it answers the same.
+    val named = ServeGithubAuth(config(imageRepository = AUTH_REPO.uppercase()))
+    assertTrue(named.hasImageRepositoryAccess(legacyCookie(repositoryAccess = true)))
+  }
+
+  /**
+   * …and never on a box whose lanes gate on different repositories: there the sign-in bit is an
+   * answer about a repository the image lane does not publish to, which is the conflation the
+   * appended field exists to end. Such a visitor gets the capability back by signing in again.
+   */
+  @Test
+  fun `a legacy cookie confers nothing when the image lane gates elsewhere`() {
+    val split = ServeGithubAuth(config(IMAGE_REPO))
+    assertFalse(split.hasImageRepositoryAccess(legacyCookie(repositoryAccess = true)))
+  }
+
+  /** The repository a session's image verdict speaks for — what an upload path compares against. */
+  @Test
+  fun `the image verdict names the image repository, falling back to the sign-in one`() {
+    assertEquals(IMAGE_REPO, ServeGithubAuth(config(IMAGE_REPO)).imageAccessRepository())
+    assertEquals(AUTH_REPO, ServeGithubAuth(config(imageRepository = null)).imageAccessRepository())
+    assertEquals(AUTH_REPO, ServeGithubAuth(config(imageRepository = "  ")).imageAccessRepository())
+  }
+
+  /**
+   * A 4-part cookie — login, repo flag, expiry, sign-in stamp — signed the way the server signs.
+   */
+  private fun legacyCookie(repositoryAccess: Boolean): String {
+    val now = System.currentTimeMillis()
+    val expiry = now + ServeGithubAuth.SESSION_TTL_SECONDS * 1000
+    val payload = "octo|${if (repositoryAccess) "repo" else "no-repo"}|$expiry|$now"
+    val encoded =
+      Base64.getUrlEncoder().withoutPadding().encodeToString(payload.toByteArray(Charsets.UTF_8))
+    val mac = Mac.getInstance("HmacSHA256")
+    mac.init(SecretKeySpec("x".repeat(32).toByteArray(Charsets.UTF_8), "HmacSHA256"))
+    val sig =
+      Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString(mac.doFinal(encoded.toByteArray(Charsets.UTF_8)))
+    return "$encoded.$sig"
   }
 
   /** Runs the callback against [client] and returns the decoded session payload. */

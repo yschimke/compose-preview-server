@@ -19,12 +19,17 @@ import okhttp3.ResponseBody.Companion.toResponseBody
  */
 class ServeGithubAuthScopeTest {
 
-  private fun config(repository: String = "yschimke/compose-ai-tools", scope: String? = null) =
+  private fun config(
+    repository: String = "yschimke/compose-ai-tools",
+    scope: String? = null,
+    imageRepository: String? = null,
+  ) =
     ServeGithubAuthConfig(
       clientId = "id",
       clientSecret = "secret",
       cookieSecret = "0123456789012345678901234567890123",
       repository = repository,
+      imageRepository = imageRepository,
       oauthScope = scope,
     )
 
@@ -110,6 +115,72 @@ class ServeGithubAuthScopeTest {
 
     assertEquals(1, calls)
   }
+
+  /**
+   * The image lane may gate on a **second** repository, and the callback reads that one with the
+   * same token. A public sign-in repo beside a private image repo is the trap this covers: derive
+   * the scope from the sign-in repo alone and the token consented to `read:user`, which cannot read
+   * the image repo — so the access check answers false, `images` can never be granted, and the
+   * feature simply never works with nothing failing loudly enough to notice.
+   */
+  @Test
+  fun `a private image repo widens the scope even when sign-in is public`() {
+    val auth =
+      ServeGithubAuth(
+        config(imageRepository = "yschimke/private-uploads"),
+        anonymousClient = perRepo(mapOf("yschimke/compose-ai-tools" to 200)),
+      )
+    assertEquals(ServeGithubAuth.PRIVATE_REPO_SCOPE, auth.requestedScope())
+  }
+
+  @Test
+  fun `two public repos still ask for no repository scope`() {
+    val auth =
+      ServeGithubAuth(
+        config(imageRepository = "yschimke/compose-preview-server"),
+        anonymousClient =
+          perRepo(
+            mapOf(
+              "yschimke/compose-ai-tools" to 200,
+              "yschimke/compose-preview-server" to 200,
+            )
+          ),
+      )
+    assertEquals(ServeGithubAuth.PUBLIC_REPO_SCOPE, auth.requestedScope())
+  }
+
+  /** Naming the same repository twice is one question, so it is one probe. */
+  @Test
+  fun `an image repo equal to the sign-in repo is probed once`() {
+    val probed = mutableListOf<String>()
+    val auth =
+      ServeGithubAuth(
+        config(imageRepository = "yschimke/Compose-AI-Tools"),
+        anonymousClient = perRepo(mapOf("yschimke/compose-ai-tools" to 200), probed),
+      )
+    assertEquals(ServeGithubAuth.PUBLIC_REPO_SCOPE, auth.requestedScope())
+    assertEquals(listOf("/repos/yschimke/compose-ai-tools"), probed)
+  }
+
+  /** Answers [codes] per `owner/repo`, and 404 for anything not listed. */
+  private fun perRepo(
+    codes: Map<String, Int>,
+    probed: MutableList<String> = mutableListOf(),
+  ): OkHttpClient =
+    OkHttpClient.Builder()
+      .addInterceptor { chain ->
+        val path = chain.request().url.encodedPath
+        probed += path
+        val code = codes.entries.firstOrNull { path.endsWith(it.key) }?.value ?: 404
+        Response.Builder()
+          .request(chain.request())
+          .protocol(Protocol.HTTP_1_1)
+          .code(code)
+          .message(if (code == 200) "OK" else "Not Found")
+          .body("{}".toResponseBody("application/json".toMediaType()))
+          .build()
+      }
+      .build()
 
   /** An override must not probe GitHub at all — there is nothing for the answer to change. */
   @Test
