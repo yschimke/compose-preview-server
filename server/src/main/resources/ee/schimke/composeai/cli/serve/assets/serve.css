@@ -2435,6 +2435,32 @@ cp-history-menu { display: contents; }
    control that produced it rather than buried under the stage. */
 .cp-spec-score { font-size: 0.72rem; color: var(--cp-fg-muted); white-space: nowrap; }
 .cp-spec-score[hidden] { display: none; }
+/* The eyedropper's reading. Tabular figures so the coordinates and channel numbers do not jitter
+   as the pointer moves, and a monospace face because every value in it is a literal. */
+/* Its own row in the wrapping lane, reserved from the moment the lane opens rather than claimed
+   when a reading arrives. The lane is `flex-wrap: wrap`, so a readout appearing inline added a
+   second line to the header and pushed the stage down 26px — under the cursor, mid-hover. The
+   first reading a user saw was then taken from where the picture HAD been: at one screen point,
+   `146,122 · Δ 22` before the shift and `146,94 · identical` after it. Reserving the row moves the
+   stage once, on entering the lane, while nothing is being read. */
+/* `nowrap` keeps the reserved row and the filled one the same height — wrapping would put the
+   shift straight back, since a reading's length varies with the source's name. So the row scrolls
+   itself instead: `html { overflow-x: clip }` means an overflowing line is CLIPPED, not reachable
+   by scrolling the page, and on a phone `146,122 · M3 Wear OS Apps Design Kit #494451 · Render
+   #332e3c · Δ 22` is wider than the content column — the delta, which is the answer, is the part
+   that falls off the end. */
+.cp-spec-pick { flex-basis: 100%; line-height: 1.4; min-height: 1.4em; font-size: 0.72rem;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  color: var(--cp-fg-muted); white-space: nowrap;
+  font-family: var(--cp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-variant-numeric: tabular-nums; }
+.cp-spec-pick[hidden] { display: none; }
+/* A frozen reading is held for reading and copying, so it stops looking like a live hover. */
+.cp-spec-pick--frozen { color: var(--cp-fg); }
+/* Announcements only: off-screen rather than display:none, which would take it out of the
+   accessibility tree and silence it. */
+.cp-spec-pick-live { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; }
 /* The motion lane's carrier — the per-capture picker and the caption readout — shown only while a
    recording is actually on the stage. `[hidden]` needs its own rule here because the `inline-flex`
    above would otherwise win over the attribute's UA `display: none`. */
