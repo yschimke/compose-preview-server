@@ -4,6 +4,7 @@ import ee.schimke.composeai.uibuilder.capability.CapabilityCatalogParser
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -46,7 +47,7 @@ class EditorCopyIdentityTest {
       )
     assertIs<CommandOutcome.Accepted>(duplicated.lastOutcome)
 
-    val copyId = "main-episode-card-copy-001"
+    val copyId = assertNotNull(duplicated.selectedNodeId)
     val original = stringProperty(duplicated, "main-episode-card", "stableKey")
     val copy = stringProperty(duplicated, copyId, "stableKey")
 
