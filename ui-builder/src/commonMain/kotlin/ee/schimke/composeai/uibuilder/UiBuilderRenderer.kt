@@ -40,6 +40,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
@@ -103,6 +104,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -598,6 +600,10 @@ private fun RenderNode(
         modifier = measured,
         state = lazyState,
         contentPadding = node.obj("contentPadding").paddingValues(),
+        // The catalog declares both on this component and nothing read either, so a grid's
+        // spacing was authored, stored, offered in the inspector, and drawn as zero.
+        verticalArrangement = Arrangement.spacedBy(node.float("verticalSpacingDp").dp),
+        horizontalArrangement = Arrangement.spacedBy(node.float("horizontalSpacingDp").dp),
       ) {
         items(
           items = slot("items"),
@@ -693,6 +699,7 @@ private fun RenderNode(
         measured,
         shape = node.shape(themeCornerRadius),
         color = node.color("containerColor", Color.Transparent),
+        tonalElevation = node.float("tonalElevationDp").dp,
       ) {
         slot("content").forEach { child(it, Modifier) }
       }
@@ -744,6 +751,9 @@ private fun RenderNode(
     "m3/horizontal-divider" ->
       HorizontalDivider(
         measured,
+        // Absent means Material's own thickness, not zero — a hairline is what a divider is, and
+        // `float(name)`'s zero fallback would have drawn nothing at all.
+        thickness = node.dimension("thicknessDp") ?: DividerDefaults.Thickness,
         color = node.color("color", MaterialTheme.colorScheme.outlineVariant),
       )
     "m3/icon" -> BuilderIcon(node, measured)
@@ -1408,6 +1418,10 @@ private fun UiBuilderNode.string(name: String): String =
 
 private fun UiBuilderNode.float(name: String, fallback: Float = 0f): Float =
   obj(name)["value"]?.jsonPrimitive?.floatOrNull ?: fallback
+
+/** A dimension the document actually carries, or null — which is not the same as zero. */
+private fun UiBuilderNode.dimension(name: String): Dp? =
+  obj(name)["value"]?.jsonPrimitive?.floatOrNull?.dp
 
 private fun UiBuilderNode.integer(name: String, fallback: Int = 0): Int =
   obj(name)["value"]?.jsonPrimitive?.intOrNull ?: fallback

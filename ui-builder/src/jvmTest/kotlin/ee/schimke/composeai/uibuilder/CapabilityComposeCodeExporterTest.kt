@@ -448,6 +448,78 @@ class CapabilityComposeCodeExporterTest {
       }
   }
 
+  @Test
+  fun `a dimension the inspector offers is a dimension the export emits`() {
+    // Every `…Dp` the catalog exposes as a number field used to be editable whether or not any
+    // emitter read it, so a grid's spacing, a card's elevation, a divider's thickness and a
+    // surface's tonal elevation were authored, stored, and discarded by both projections.
+    val edited =
+      document.copy(
+        nodes =
+          document.nodes.mapValues { (_, node) ->
+            when (node.componentId) {
+              "layout/lazy-grid" ->
+                node.copy(
+                  properties =
+                    JsonObject(
+                      node.properties +
+                        mapOf(
+                          "verticalSpacingDp" to property("float", JsonPrimitive(12)),
+                          "horizontalSpacingDp" to property("float", JsonPrimitive(10)),
+                        )
+                    )
+                )
+              "m3/card" ->
+                node.copy(
+                  properties =
+                    JsonObject(
+                      node.properties + mapOf("elevationDp" to property("float", JsonPrimitive(6)))
+                    )
+                )
+              "m3/horizontal-divider" ->
+                node.copy(
+                  properties =
+                    JsonObject(
+                      node.properties + mapOf("thicknessDp" to property("float", JsonPrimitive(3)))
+                    )
+                )
+              "m3/surface" ->
+                node.copy(
+                  properties =
+                    JsonObject(
+                      node.properties +
+                        mapOf("tonalElevationDp" to property("float", JsonPrimitive(4)))
+                    )
+                )
+              else -> node
+            }
+          }
+      )
+
+    val source =
+      CapabilityComposeCodeExporter.export(edited, catalog, artworkAdapter).requireSource()
+
+    assertTrue(source.contains("verticalArrangement = Arrangement.spacedBy(12.dp)"), source)
+    assertTrue(source.contains("horizontalArrangement = Arrangement.spacedBy(10.dp)"), source)
+    assertTrue(
+      source.contains("elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)"),
+      source,
+    )
+    assertTrue(source.contains("thickness = 3.dp"), source)
+    assertTrue(source.contains("tonalElevation = 4.dp"), source)
+  }
+
+  @Test
+  fun `a divider with no declared thickness keeps Material's own`() {
+    // `0.dp` is a thickness too, and it draws nothing. Absent has to stay absent rather than
+    // become the number fallback every other dimension uses.
+    val source = CapabilityComposeCodeExporter.export(document, catalog, artworkAdapter)
+    val emitted = assertNotNull(source.source)
+
+    assertTrue(emitted.contains("HorizontalDivider("), emitted)
+    assertFalse(emitted.contains("thickness ="), emitted)
+  }
+
   private fun assertBlocked(bad: UiBuilderDocument, code: String) {
     val result = ComposeCodeExporter.export(bad, catalog)
     assertFalse(result.successful)
