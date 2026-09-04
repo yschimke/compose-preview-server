@@ -49,6 +49,28 @@ class ServeAgentGrantRoutingTest {
             "AScY42YAAAAASUVORK5CYII="
         )
     File(dir, "previews/example.png").writeBytes(pixel)
+    // A staged cmp-jvm raster for `example`, so this catalog has one lane that a bare
+    // `?rcPlayer=cmp-jvm` can be answered from without a renderer. Without it every player
+    // selection here would reach a subprocess and the "may replay" half of the gate would be
+    // untestable — the refusal and the admission would both read as 403.
+    File(dir, "rc-compare/cmp-jvm").mkdirs()
+    File(dir, "rc-compare/cmp-jvm/example.png").writeBytes(pixel)
+    File(dir, "rc-compare/index.json")
+      .writeText(
+        """
+        {
+          "schema": "compose-preview-rc-compare/v1",
+          "lanes": [{"id": "cmp-jvm", "label": "CMP JVM", "short": "JVM"}],
+          "rows": [
+            {
+              "previewId": "example",
+              "lanes": {"cmp-jvm": {"rendered": true, "render": "cmp-jvm/example.png"}}
+            }
+          ]
+        }
+        """
+          .trimIndent()
+      )
     registry.register("demo", host = ServeBundleHost(dir, label = "demo"), pinned = true)
     val other = Files.createTempDirectory("grants-other").toFile().also { it.deleteOnExit() }
     File(other, "index.html").writeText("<html></html>")
@@ -588,6 +610,33 @@ class ServeAgentGrantRoutingTest {
     assertEquals(403, get("/render/Anything.svg", token = preview).first)
     // The whole-catalog zip renders every preview, so it wants `live` too.
     assertEquals(403, get("/bundle.zip", token = preview).first)
+  }
+
+  @Test
+  fun `a preview grant replays a staged player capture but never commissions one`() {
+    val preview = grantedToken(scope = "preview")
+    // A **bare** player selection naming a lane this catalog staged is a replay of published bytes
+    // — the same class of thing as the bare PNG above — so it is answered rather than refused. It
+    // used to 403 at the door, which cost a `preview` grant every cell of the compare wall.
+    val staged = get("/render/example.png?rcPlayer=cmp-jvm", token = preview)
+    assertEquals(200, staged.first)
+
+    // The admission is the lane's, not the parameter's. `cmp-wasm` is staged by nothing here, so
+    // the same shape of request has no published bytes to replay and would have to make some.
+    assertEquals(403, get("/render/example.png?rcPlayer=cmp-wasm", token = preview).first)
+    // …and a preview with no row at all, on a lane that is staged for another preview.
+    assertEquals(403, get("/render/Anything.png?rcPlayer=cmp-jvm", token = preview).first)
+
+    // Still only *bare*. Anything alongside the player selection is a real override again, and
+    // `scroll` is a full-page capture made to order however published the player's lane is.
+    assertEquals(403, get("/render/example.png?rcPlayer=cmp-jvm&uiMode=dark", token = preview).first)
+    assertEquals(403, get("/render/example.png?rcPlayer=cmp-jvm&scroll=1", token = preview).first)
+
+    // A `live` grant reaches all of them, so the refusals above are the scope talking and not a
+    // route that is broken for everyone.
+    val live = grantedToken(scope = "live")
+    assertTrue(get("/render/example.png?rcPlayer=cmp-jvm", token = live).first != 403)
+    assertTrue(get("/render/example.png?rcPlayer=cmp-jvm&uiMode=dark", token = live).first != 403)
   }
 
   @Test

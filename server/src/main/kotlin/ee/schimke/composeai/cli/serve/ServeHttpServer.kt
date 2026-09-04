@@ -8951,8 +8951,18 @@ class ServeHttpServer(
     // host has no baked copy of is the catalog serving its own content, at the same cost any
     // anonymous visitor imposes on a public box; refusing that would break ordinary browsing every
     // time a session was not resident, which is not what anyone approved or withheld.
+    //
+    // A **bare** `?rcPlayer=` is the one override that is not a commission by itself, so it is not
+    // refused here. It names which already-published capture to replay — the rc-compare staging for
+    // cmp-jvm, or the baked PNG when the request names the player that baked it — and the compare
+    // wall points a cell at that lane for every preview it shows, so refusing it up front cost a
+    // `preview` grant the wall it was granted to read. It can still turn into a live render, and
+    // the two places where that happens refuse there instead, where the answer is known rather than
+    // guessed: [renderCmpJvmResponse]'s subprocess below, and a null `cached` in the chain under it.
+    // Nothing else moves — every other override, and every daemon-only product, is refused here as
+    // before.
     if (
-      (requestCarriesOverrides() || wantsDaemonOnlyRenderProduct()) &&
+      ((requestCarriesOverrides() && !bareRcPlayerRequest()) || wantsDaemonOnlyRenderProduct()) &&
         rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)
     )
       return
@@ -9188,6 +9198,10 @@ class ServeHttpServer(
           !wantAnnotations &&
           call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
       ) {
+        // Past the staged-raster shortcut above, so this really does spawn the desktop player
+        // (~4.3s of one-shot JVM). That is a commission, not a replay, whatever the query looked
+        // like — the first of the two places the up-front gate defers to.
+        if (rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)) return@withLeasedSession
         val format = if (wantSvg) RcJvmServerRenderer.Format.SVG else RcJvmServerRenderer.Format.PNG
         val webMode = wantSvg && call.request.queryParameters["mode"]?.lowercase() == "web"
         renderCmpJvmResponse(renderHost, previewId, format, webMode, sessionId)
@@ -9295,6 +9309,17 @@ class ServeHttpServer(
                 // every other backend, where baked really is someone else's pixels.
                 ?: publishedRcPlayerRender(renderHost, previewId, overrides)
                 ?: renderHost.bakedRender(previewId, overrides)
+          // The second place the up-front gate defers to, and the reason deferring is safe at all:
+          // every lane that answers from bytes this catalog already published lands in `cached`, so
+          // a null one is the single point where this route is about to *make* a render. A grant
+          // below `live` is refused here rather than at the door, which is what lets a bare
+          // `?rcPlayer=` replay a staged or baked capture while still never commissioning one.
+          //
+          // It has to be re-checked rather than assumed from the request: `cached` is resolved
+          // after the lease, so a host that suspended or republished between the two answers null
+          // here for a request that looked replayable at the door.
+          if (cached == null && rejectGrantBelowScope(AgentGrantScope.LIVE, api = true))
+            return@withLeasedSession
           // A "pure declared-theme render" — the classification the burst lease admits on. Read
           // from the request rather than the parsed overrides, because an expanded provider is no
           // longer in them: `themeSeeding.provider` is what the expansion consumed, and the request
