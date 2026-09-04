@@ -48,3 +48,46 @@ export function filterNav(
     });
     return { keep, shown, empty: shown === 0 };
 }
+
+/**
+ * One row of the drawer list in DOM order — a heading, or an item and whether [filterNav] kept it.
+ *
+ * The drawer lists a sectioned catalog under the same section and group headings its landing tree
+ * publishes (#252), as FLAT siblings of the rows rather than as nested lists, so the filter still
+ * decides one row at a time. What flat siblings cost is this: a heading has to be told when the
+ * rows it heads have all gone, or a filter that matches nothing under "Buttons" leaves the word
+ * "Buttons" standing over the next group's rows.
+ */
+export type NavListRow =
+    { kind: "section" | "group" } | { kind: "item"; kept: boolean };
+
+/**
+ * Per row, in the order given: whether it stays visible. Items as the filter decided; a heading
+ * only while a kept item still sits under it — up to the next heading of its own level, which is
+ * where its span ends.
+ */
+export function keepNavRows(rows: NavListRow[]): boolean[] {
+    const keep = rows.map((row) => row.kind === "item" && row.kept);
+    // Backwards, because a heading's span is what FOLLOWS it: one pass carries "something is still
+    // showing" up to the heading that owns it, and resets there.
+    let underGroup = false;
+    let underSection = false;
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i];
+        if (row.kind === "item") {
+            if (row.kept) {
+                underGroup = true;
+                underSection = true;
+            }
+        } else if (row.kind === "group") {
+            keep[i] = underGroup;
+            underGroup = false;
+        } else {
+            keep[i] = underSection;
+            underSection = false;
+            // A section heading ends the group above it too — its groups are all behind us.
+            underGroup = false;
+        }
+    }
+    return keep;
+}
