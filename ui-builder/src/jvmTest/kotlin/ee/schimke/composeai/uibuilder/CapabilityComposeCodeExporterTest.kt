@@ -520,6 +520,57 @@ class CapabilityComposeCodeExporterTest {
     assertFalse(emitted.contains("thickness ="), emitted)
   }
 
+  @Test
+  fun `a floating toolbar's own padding reaches the generated code`() {
+    // The catalog exposes four padding edges for this component and both projections hard-coded
+    // 6dp, so the edit was accepted, stored, and discarded.
+    val toolbar = document.nodes.values.first { it.componentId == "m3/horizontal-floating-toolbar" }
+    val padded =
+      document.copy(
+        nodes =
+          document.nodes +
+            mapOf(
+              toolbar.id to
+                toolbar.copy(
+                  properties =
+                    JsonObject(
+                      toolbar.properties +
+                        mapOf(
+                          "contentPadding" to
+                            JsonObject(
+                              mapOf(
+                                "type" to JsonPrimitive("padding"),
+                                "startDp" to JsonPrimitive(12),
+                                "topDp" to JsonPrimitive(4),
+                                "endDp" to JsonPrimitive(12),
+                                "bottomDp" to JsonPrimitive(4),
+                              )
+                            )
+                        )
+                    )
+                )
+            )
+      )
+
+    val source =
+      CapabilityComposeCodeExporter.export(padded, catalog, artworkAdapter).requireSource()
+
+    assertTrue(
+      source.contains(
+        "contentPadding = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp)"
+      ),
+      source,
+    )
+  }
+
+  @Test
+  fun `a floating toolbar with no declared padding keeps the six it always drew`() {
+    val source =
+      CapabilityComposeCodeExporter.export(document, catalog, artworkAdapter).requireSource()
+
+    assertTrue(source.contains("contentPadding = PaddingValues(6.dp)"), source)
+  }
+
   private fun assertBlocked(bad: UiBuilderDocument, code: String) {
     val result = ComposeCodeExporter.export(bad, catalog)
     assertFalse(result.successful)

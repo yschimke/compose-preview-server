@@ -132,18 +132,18 @@ data class ScreenEnvironmentSettings(
 
 fun UiBuilderDocument.screenEnvironmentSettings(): ScreenEnvironmentSettings =
   ScreenEnvironmentSettings(
-    widthDp = environment["widthDp"]?.jsonPrimitive?.content?.toIntOrNull() ?: 1280,
-    heightDp = environment["heightDp"]?.jsonPrimitive?.content?.toIntOrNull() ?: 800,
-    density = environment["density"]?.jsonPrimitive?.doubleOrNull ?: 1.0,
-    fontScale = environment["fontScale"]?.jsonPrimitive?.doubleOrNull ?: 1.0,
-    locale = environment["locale"]?.jsonPrimitive?.content.orEmpty().ifBlank { "en-US" },
+    widthDp = environment["widthDp"]?.primitiveOrNull()?.content?.toIntOrNull() ?: 1280,
+    heightDp = environment["heightDp"]?.primitiveOrNull()?.content?.toIntOrNull() ?: 800,
+    density = environment["density"]?.primitiveOrNull()?.doubleOrNull ?: 1.0,
+    fontScale = environment["fontScale"]?.primitiveOrNull()?.doubleOrNull ?: 1.0,
+    locale = environment["locale"]?.primitiveOrNull()?.content.orEmpty().ifBlank { "en-US" },
     theme =
       EditorScreenTheme.entries.firstOrNull {
-        it.wireValue == environment["theme"]?.jsonPrimitive?.content
+        it.wireValue == environment["theme"]?.primitiveOrNull()?.content
       } ?: EditorScreenTheme.System,
     layoutDirection =
       EditorLayoutDirection.entries.firstOrNull {
-        it.wireValue == environment["layoutDirection"]?.jsonPrimitive?.content
+        it.wireValue == environment["layoutDirection"]?.primitiveOrNull()?.content
       } ?: EditorLayoutDirection.Ltr,
   )
 
@@ -462,7 +462,7 @@ private enum class StateKind {
  * Kotlin type the exporter declares. `isString` settles it wherever `valueType` is absent.
  */
 private fun declaredStateKind(declaration: JsonObject?): StateKind {
-  when (declaration?.get("valueType")?.jsonPrimitive?.contentOrNull) {
+  when (declaration?.get("valueType")?.primitiveOrNull()?.contentOrNull) {
     "bool" -> return StateKind.BOOLEAN
     "int" -> return StateKind.INTEGER
     "float" -> return StateKind.DECIMAL
@@ -480,7 +480,7 @@ private fun declaredStateKind(declaration: JsonObject?): StateKind {
 
 /** A variable the document declares nullable, and so the only kind `selectOrClear` may clear. */
 private fun declaredNullable(declaration: JsonObject?): Boolean =
-  declaration?.get("nullable")?.jsonPrimitive?.booleanOrNull
+  declaration?.get("nullable")?.primitiveOrNull()?.booleanOrNull
     ?: (declaration?.get("initialValue") is JsonNull)
 
 /**
@@ -792,8 +792,15 @@ class UiBuilderEditorReducer(
 
   fun treeRows(document: UiBuilderDocument): List<EditorTreeRow> {
     val rows = mutableListOf<EditorTreeRow>()
+    val seen = mutableSetOf<String>()
     fun visit(nodeId: String, depth: Int, parent: ParentSlot?) {
-      val node = document.nodes.getValue(nodeId)
+      // A reference to a node that is not there, and a reference to one already on this path, are
+      // both things `validateDocumentForExport` reports — `UNKNOWN_ROOT`, `UNKNOWN_CHILD`,
+      // `GRAPH_CYCLE`. The navigator is built before the inspector, so `getValue` and an unbounded
+      // recursion took the whole editor down before the Issues panel could name any of them: the
+      // one document that most needs the panel was the one that could not show it.
+      val node = document.nodes[nodeId] ?: return
+      if (!seen.add(nodeId)) return
       val capability = catalog.componentsById[node.componentId]
       val componentLabel = capability?.displayName ?: node.componentId
       rows +=
@@ -939,9 +946,9 @@ class UiBuilderEditorReducer(
           nodes
             .map { other ->
               (other.properties[property.name] as? JsonObject)
-                ?.takeIf { it["type"]?.jsonPrimitive?.contentOrNull in STATE_VALUE_TYPES }
+                ?.takeIf { it["type"]?.primitiveOrNull()?.contentOrNull in STATE_VALUE_TYPES }
                 ?.get("variable")
-                ?.jsonPrimitive
+                ?.primitiveOrNull()
                 ?.contentOrNull
             }
             .distinct()
@@ -957,9 +964,9 @@ class UiBuilderEditorReducer(
             label = property.name.humanLabel(),
             required = property.required,
             control = control,
-            value = if (mixed) "" else value?.jsonPrimitive?.content ?: "",
+            value = if (mixed) "" else value?.primitiveOrNull()?.content ?: "",
             choices =
-              property.allowedValues.mapNotNull { it.jsonPrimitive.contentOrNull } +
+              property.allowedValues.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } +
                 property.editor?.suggestedValues.orEmpty(),
             numberBounds = numberBounds,
             error = state.propertyErrors[EditorPropertyLocation(node.id, property.name)],
@@ -990,9 +997,9 @@ class UiBuilderEditorReducer(
       nodes
         .map { other ->
           (other.properties[property.name] as? JsonObject)
-            ?.takeIf { it["type"]?.jsonPrimitive?.contentOrNull == kind }
+            ?.takeIf { it["type"]?.primitiveOrNull()?.contentOrNull == kind }
             ?.get(edge.field)
-            ?.jsonPrimitive
+            ?.primitiveOrNull()
             ?.contentOrNull
         }
         .distinct()
@@ -1234,7 +1241,7 @@ class UiBuilderEditorReducer(
       // Each node keeps its own encoded type. Two nodes can hold the same property as a literal and
       // as a token, and rewriting one to the other's shape would change more than was asked.
       val existingValue = target.properties[baseName] as? JsonObject
-      val existingType = existingValue?.get("type")?.jsonPrimitive?.contentOrNull
+      val existingType = existingValue?.get("type")?.primitiveOrNull()?.contentOrNull
       val encoded =
         if (edgeName == null) literal(existingType ?: field.defaultEncodedType(), value)
         else
@@ -1585,7 +1592,7 @@ class UiBuilderEditorReducer(
     val property =
       catalog.componentsById[node.componentId]?.propertiesByName?.get(propertyName) ?: return state
     val current =
-      (node.properties[propertyName] as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull
+      (node.properties[propertyName] as? JsonObject)?.get("type")?.primitiveOrNull()?.contentOrNull
     if (current !in STATE_VALUE_TYPES) return state
     // Deliberately not `defaultEncodedValue`: for some properties the catalog default *is* a state
     // binding — a text field's `value` defaults to one — so unbinding to the default would leave
@@ -2148,10 +2155,10 @@ private fun UiBuilderDocument.themeHost(): UiBuilderNode? =
   roots.asSequence().mapNotNull(nodes::get).firstOrNull { it.componentId == "m3/surface" }
 
 private fun UiBuilderNode.stringValue(name: String, fallback: String): String =
-  properties[name]?.jsonObject?.get("value")?.jsonPrimitive?.content ?: fallback
+  properties[name]?.jsonObject?.get("value")?.primitiveOrNull()?.content ?: fallback
 
 private fun UiBuilderNode.floatValue(name: String, fallback: Float): Float =
-  properties[name]?.jsonObject?.get("value")?.jsonPrimitive?.doubleOrNull?.toFloat() ?: fallback
+  properties[name]?.jsonObject?.get("value")?.primitiveOrNull()?.doubleOrNull?.toFloat() ?: fallback
 
 private fun String.isArgbColor(): Boolean =
   startsWith("#") &&
@@ -2384,7 +2391,7 @@ private fun UiBuilderNode.contentLabel(capability: ComponentCapability): String?
   fun valueOf(name: String) =
     (properties[name] as? JsonObject)
       ?.get("value")
-      ?.jsonPrimitive
+      ?.primitiveOrNull()
       ?.contentOrNull
       ?.trim()
       ?.takeIf(String::isNotEmpty)
@@ -2586,7 +2593,7 @@ private fun JsonObject.withFreshInstanceIdentity(copyNodeId: String): JsonObject
       present.associateWith { name ->
         val existing = this[name] as? JsonObject
         literal(
-          existing?.get("type")?.jsonPrimitive?.contentOrNull ?: "string",
+          existing?.get("type")?.primitiveOrNull()?.contentOrNull ?: "string",
           JsonPrimitive(copyNodeId),
         )
       }
@@ -2658,7 +2665,7 @@ private fun objectValueWithEdge(
 ): JsonObject? {
   val edges = EDITOR_OBJECT_VALUE_EDGES[kind] ?: return null
   if (edges.none { it.field == edgeName }) return null
-  val carried = existing?.takeIf { it["type"]?.jsonPrimitive?.contentOrNull == kind }
+  val carried = existing?.takeIf { it["type"]?.primitiveOrNull()?.contentOrNull == kind }
   return JsonObject(
     buildMap {
       put("type", JsonPrimitive(kind))
@@ -2755,6 +2762,16 @@ private fun UiBuilderDocument.location(nodeId: String): ParentSlot? {
   }
   return null
 }
+
+/**
+ * The primitive a wire value holds, or null where it holds an array or an object.
+ *
+ * `jsonPrimitive` throws on anything else, and everything read through these accessors came off the
+ * wire: a property encoded as `{"type": "string", "value": []}` is exactly what
+ * `INVALID_PROPERTY_TYPE` reports, so the inspector must be able to draw the document that holds
+ * one rather than take the editor down before the Issues panel can name it.
+ */
+private fun JsonElement?.primitiveOrNull(): JsonPrimitive? = this as? JsonPrimitive
 
 private fun UiBuilderDocument.children(parent: ParentSlot?): List<String> =
   if (parent == null) roots else nodes.getValue(parent.nodeId).slots[parent.slot].orEmpty()

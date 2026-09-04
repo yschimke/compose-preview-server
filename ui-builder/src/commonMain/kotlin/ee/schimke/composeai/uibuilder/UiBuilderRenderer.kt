@@ -1048,7 +1048,11 @@ private fun CompatibleFloatingToolbar(
     shadowElevation = 8.dp,
   ) {
     Row(
-      Modifier.padding(6.dp),
+      // The catalog exposes four padding edges for this component and nothing read them. Absent
+      // stays the 6dp this toolbar has always drawn rather than becoming zero.
+      Modifier.padding(
+        (node.properties["contentPadding"] as? JsonObject)?.paddingValues() ?: PaddingValues(6.dp)
+      ),
       horizontalArrangement = Arrangement.spacedBy(6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {

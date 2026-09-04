@@ -42,7 +42,6 @@ class EditorLayoutPropertyTest {
 
     assertEquals(EditorPropertyControl.Number, spacing.control)
     val bounds = assertNotNull(spacing.numberBounds)
-    assertEquals(0.0, bounds.minimum)
     assertTrue(bounds.maximum >= 1024.0)
   }
 
@@ -60,6 +59,26 @@ class EditorLayoutPropertyTest {
     // component-wide opt-out.
     val tonal = assertNotNull(field("search-bar", "tonalElevationDp"))
     assertEquals(EditorPropertyControl.Number, tonal.control)
+  }
+
+  @Test
+  fun `arrangement spacing may be negative, padding may not`() {
+    // Negative spacing is how children are made to overlap, and `Arrangement.spacedBy` and the
+    // exporter both take the signed value. One blanket floor of zero refused a value both
+    // projections round trip.
+    val spacing = assertNotNull(field("discover-grid", "verticalSpacingDp"))
+    assertTrue(assertNotNull(spacing.numberBounds).minimum < 0.0)
+
+    val overlapped =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = "discover-grid"),
+        UiBuilderEditorEvent.CommitProperty("discover-grid", "verticalSpacingDp", "-8"),
+      )
+    assertIs<CommandOutcome.Accepted>(overlapped.lastOutcome)
+
+    // A padding edge keeps its floor: there is no such thing as negative space around content.
+    val edge = assertNotNull(field("discover-grid", "contentPadding.topDp"))
+    assertEquals(0.0, assertNotNull(edge.numberBounds).minimum)
   }
 
   @Test
