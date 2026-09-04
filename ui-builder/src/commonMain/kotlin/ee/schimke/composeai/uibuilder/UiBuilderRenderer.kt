@@ -1262,15 +1262,40 @@ private fun UiBuilderNode.dispatch(
 ) {
   val actions = eventBindings[event] as? JsonArray ?: return
   actions.forEach { element ->
-    val action = element.jsonObject
-    val variable = action.optionalString("variable") ?: return@forEach
-    val value = action["value"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
-    when (action.optionalString("type")) {
-      "select",
-      "setText" -> onState(variable, value)
-      "selectOrClear" -> onState(variable, if (state[variable] == value) null else value)
-      else -> error("unsupported action '${action.optionalString("type")}' on $id")
+    uiBuilderStateWrite(element.jsonObject, state)?.let { (variable, next) ->
+      onState(variable, next)
     }
+  }
+}
+
+/**
+ * The state write one action performs, or null when it performs none.
+ *
+ * Extracted from the renderer so it can be tested without a composition: the transition is pure,
+ * and a rule about what a button does to a variable should not need a frame to verify.
+ */
+internal fun uiBuilderStateWrite(
+  action: JsonObject,
+  state: Map<String, String?>,
+): Pair<String, String?>? {
+  val variable = action.optionalString("variable") ?: return null
+  val value = action["value"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
+  return when (action.optionalString("type")) {
+    "select",
+    "setText",
+    // `set` is the protocol's own name for an assignment and behaves exactly as `select` does:
+    // write the value. It was unimplemented, so a document authored by any other client using it
+    // crashed this renderer rather than working.
+    "set" -> variable to value
+    "selectOrClear" -> variable to if (state[variable] == value) null else value
+    // Declared by the protocol and previously fatal here. A flag is stored in its string form,
+    // which is how `stateEquals` already compares it.
+    "toggle" -> variable to (state[variable]?.toBooleanStrictOrNull() != true).toString()
+    // Not an error. This renderer is fed wire data authored by other clients and by future
+    // versions of this one, and a preview that dies on a single unrecognised action loses the
+    // whole screen — including every part that does work. Losing one interaction is the smaller
+    // failure, and a visible one: the control does nothing when pressed.
+    else -> null
   }
 }
 
