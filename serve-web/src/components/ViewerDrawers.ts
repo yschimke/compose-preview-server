@@ -23,7 +23,12 @@ import {
     type DrawerClass,
     type Viewport,
 } from "../viewer/drawerState.js";
-import { filterNav, type NavRow } from "../viewer/navFilter.js";
+import {
+    filterNav,
+    keepNavRows,
+    type NavListRow,
+    type NavRow,
+} from "../viewer/navFilter.js";
 
 const PHONE_QUERY = "(max-width: 640px)";
 const WIDE_QUERY = "(min-width: 1100px)";
@@ -305,23 +310,35 @@ export class ViewerDrawers extends ControllerElement {
         ) as HTMLInputElement | null;
         if (!search) return;
         this.on(search, "input", () => {
-            const items = [
-                ...document.querySelectorAll<HTMLElement>(
-                    "#cp-nav-list .cp-nav-item",
-                ),
+            // Every child of the list, not only the links: a sectioned catalog's drawer carries the
+            // catalog's own section and group headings between its rows, and a heading has to go
+            // when the rows it heads do.
+            const lines = [
+                ...document.querySelectorAll<HTMLElement>("#cp-nav-list > li"),
             ];
-            const rows: NavRow[] = items.map((el) => ({
-                haystack: el.getAttribute("data-search") || "",
-                current: el.hasAttribute("aria-current"),
-            }));
+            const links = lines.map((li) =>
+                li.querySelector<HTMLElement>(".cp-nav-item"),
+            );
+            const rows: NavRow[] = links
+                .filter((el): el is HTMLElement => !!el)
+                .map((el) => ({
+                    haystack: el.getAttribute("data-search") || "",
+                    current: el.hasAttribute("aria-current"),
+                }));
             const { keep, empty } = filterNav(
                 rows,
                 search.value,
                 !!document.querySelector(".cp-nav-current"),
             );
-            items.forEach((el, i) => {
-                const row = el.parentNode as HTMLElement | null;
-                if (row) row.hidden = !keep[i];
+            let next = 0;
+            const listRows: NavListRow[] = lines.map((li, i) => {
+                if (links[i]) return { kind: "item", kept: keep[next++] };
+                return li.classList.contains("cp-nav-section-row")
+                    ? { kind: "section" }
+                    : { kind: "group" };
+            });
+            keepNavRows(listRows).forEach((visible, i) => {
+                lines[i].hidden = !visible;
             });
             const none = document.getElementById("cp-nav-empty");
             if (none) none.hidden = !empty;

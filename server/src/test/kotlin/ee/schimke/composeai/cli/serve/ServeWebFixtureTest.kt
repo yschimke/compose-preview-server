@@ -3265,6 +3265,20 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
         siblings = variantPreviews + statefulPreviews,
       )
+    // The same drawer over a catalog that HAS an outline: sections (Components / Screens) with
+    // named
+    // groups (Buttons / Cards / Navigation / Account) under them. The drawer publishes both levels
+    // as headings over its thumbnail rows, which is the catalog menu's structure on the page that
+    // has the pixels (#252) — captured so the visual-diff bot covers the headed list, and so the
+    // flat golden above still says what an outline-less catalog gets.
+    val viewerNavSections =
+      ServeWeb.viewerPage(
+        browserPreviews.first(),
+        token,
+        sessionId = "compose-m3",
+        trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
+        siblings = browserPreviews,
+      )
     // The document lane (`--accept-docs`): the upload surface, and the expiring permalink page for
     // each known format. The permalink pages mount a vendored browser player, so the harness
     // captures the chrome around it (title, expiry pill, facts, download row) rather than the
@@ -4039,6 +4053,7 @@ class ServeWebFixtureTest {
         "serve-component-browser-component.html" to componentBrowserViewer,
         "serve-component-browser-remote-compose.html" to componentBrowserRemoteCompose,
         "serve-viewer-nav-collapsed.html" to viewerNavCollapsed,
+        "serve-viewer-nav-sections.html" to viewerNavSections,
         "serve-notfound.html" to notFound,
         "serve-agent-access.html" to agentAccess,
         "serve-agent-access-capabilities.html" to agentAccessCapabilities,
@@ -5023,7 +5038,7 @@ class ServeWebFixtureTest {
       viewerVariants.substringAfter("class=\"cp-tree cp-axes-tree\"").substringBefore("</nav>")
     assertTrue(
       variantNav.contains("cp-tree-component cp-tree-link\" role=\"treeitem\"") &&
-        variantNav.contains("aria-current=\"page\">Button") &&
+        variantNav.contains("aria-current=\"page\"><span class=\"cp-tree-label\">Button") &&
         variantNav.contains("/p/button-filled__ideal__default__light__direction-rtl") &&
         variantNav.contains(">RTL</a>"),
       "the viewer subtree marks Default active and links the same-theme RTL variant",
@@ -5253,7 +5268,7 @@ class ServeWebFixtureTest {
     val statesNav =
       viewerStates.substringAfter("class=\"cp-tree cp-axes-tree\"").substringBefore("</nav>")
     assertTrue(
-      statesNav.contains("aria-current=\"page\">Checkbox") &&
+      statesNav.contains("aria-current=\"page\"><span class=\"cp-tree-label\">Checkbox") &&
         statesNav.contains("/p/checkbox__ideal__unchecked__light"),
       "the viewer subtree marks Default active and links the same-theme sibling",
     )

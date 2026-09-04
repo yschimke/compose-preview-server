@@ -1047,6 +1047,15 @@ html.cp-js .cp-tree-link[aria-expanded="false"] + .cp-tree-children { display: n
 .cp-card { scroll-margin-top: calc(var(--cp-sticky-tools, 64px) + 12px); }
 .cp-tree-components { margin: 2px 0 4px 12px;
   border-left: 1px solid var(--md-sys-color-outline-variant); }
+/* A component row carries the same thumbnail its card does, so the catalog menu reads as a list of
+   COMPONENTS rather than of names — which is what the viewer's component drawer always did, and
+   the reason that drawer looked like the better half of the same idea (#252). Small enough that a
+   40-row tree costs one cached thumbnail per row and no reflow: the box is reserved either way. */
+.cp-tree-thumb { flex: none; width: 22px; height: 22px; object-fit: contain;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  background: repeating-conic-gradient(var(--cp-surface-2) 0% 25%, var(--cp-surface) 0% 50%)
+    50% / 8px 8px; }
+.cp-tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-tree-component, .cp-tree-page { display: flex; align-items: center; gap: 6px; min-height: 30px;
   padding: 4px 10px; border-radius: 0 var(--md-sys-shape-corner-full)
     var(--md-sys-shape-corner-full) 0;
@@ -2303,6 +2312,22 @@ cp-history-menu { display: contents; }
   border-radius: var(--md-sys-shape-corner-extra-small);
   background: repeating-conic-gradient(var(--cp-surface-2) 0% 25%, var(--cp-surface) 0% 50%) 50% / 8px 8px; }
 .cp-nav-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The catalog's own section and group headings, standing over the rows they head (#252). Flat
+   siblings of the rows in one list, so they wear their level rather than an indent: a section is
+   the drawer's own title voice, a group the muted label under it. `.cp-tree-count` is the tree's
+   count style, reused deliberately — this IS the catalog menu's outline, in the drawer. */
+.cp-nav-head-row { display: flex; align-items: center; gap: 8px; padding: 6px 14px 2px;
+  color: var(--cp-fg-faint); }
+.cp-nav-head-row[hidden] { display: none; }
+.cp-nav-head-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-nav-section-row { margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  font-size: var(--md-sys-typescale-title-small-size);
+  letter-spacing: var(--md-sys-typescale-title-small-tracking); font-weight: 500;
+  color: var(--cp-fg-soft); }
+/* The first heading opens the list — nothing above it to be separated from. */
+.cp-nav-list > .cp-nav-section-row:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.cp-nav-group-row { font-size: var(--md-sys-typescale-label-medium-size); font-weight: 500; }
 .cp-nav-item:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
   color: var(--md-sys-color-on-surface); text-decoration: none; }
 .cp-nav-item[aria-current="page"] { background: var(--md-sys-color-secondary-container);
