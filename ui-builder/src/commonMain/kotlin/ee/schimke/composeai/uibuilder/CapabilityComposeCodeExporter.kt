@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -268,16 +269,16 @@ private class ComposeEmitter(
     return out.toString().trimEnd() + "\n"
   }
 
-  /** Declared as a boolean, so `emitState` gives them a Kotlin `Boolean`. */
-  private val booleanStateVariables: Set<String> by lazy {
-    document.stateVariables
-      .filterKeys { name -> stateDeclaration(name).kotlinType.removeSuffix("?") == "Boolean" }
-      .keys
-  }
-
-  /** Variables `emitState` declares nullable, and so the only ones `selectOrClear` may clear. */
-  private val nullableStateVariables: Set<String> by lazy {
-    document.stateVariables.filterKeys { name -> stateDeclaration(name).nullable }.keys
+  /**
+   * Every declared variable and the Kotlin type `emitState` writes for it.
+   *
+   * One map rather than a set per question — boolean, nullable, declared — because the questions
+   * are all the same question and three sets that must agree is how several of this branch's
+   * defects happened. A handler reads the type it is writing into, which is what lets it refuse a
+   * value that type cannot hold instead of emitting `expanded = "yes"`.
+   */
+  private val stateKotlinTypes: Map<String, String> by lazy {
+    document.stateVariables.keys.associateWith { name -> stateDeclaration(name).kotlinType }
   }
 
   private fun stateDeclaration(name: String): StateDeclaration =
@@ -529,12 +530,7 @@ private class ComposeEmitter(
     line(level + 1, "selected = ${node.boolExpression("selected")},")
     line(
       level + 1,
-      "onClick = { ${node.actionExpression(
-        "click",
-        booleanStateVariables,
-        nullableStateVariables,
-        document.stateVariables.keys,
-      )} },",
+      "onClick = { ${node.actionExpression("click", stateKotlinTypes)} },",
     )
     line(level + 1, "enabled = ${node.boolValue("enabled", true)},")
     line(
@@ -680,12 +676,7 @@ private class ComposeEmitter(
       }
     line(
       level,
-      "$symbol(onClick = { ${node.actionExpression(
-        "click",
-        booleanStateVariables,
-        nullableStateVariables,
-        document.stateVariables.keys,
-      )} }, $colors${node.modifierArgument()}) {",
+      "$symbol(onClick = { ${node.actionExpression("click", stateKotlinTypes)} }, $colors${node.modifierArgument()}) {",
     )
     if (node.string("style") == "fab") {
       line(level + 1, "Box(Modifier.padding(horizontal = 16.dp)) {")
@@ -818,17 +809,12 @@ private fun UiBuilderNode.boolExpression(name: String): String {
  * order and as a unit, which is how the renderer dispatches it. Emitting only the head exported a
  * handler that did less than the preview showed.
  *
- * [booleanState] and [nullableState] are what the document declares, which is what `emitState`
- * turns into a Kotlin type. A `toggle` is `!x` only for a boolean; a `selectOrClear` writes `null`
- * only into a nullable. Against anything else those would not compile, so each stays a refusal
- * rather than becoming broken source.
+ * [stateTypes] is what `emitState` writes for each variable, and every refusal here reads it. A
+ * `toggle` is `!x` only for a `Boolean`; a `selectOrClear` writes `null` only into a nullable; an
+ * assignment may only carry a value the declared type can hold. Against anything else those would
+ * not compile, so each stays a refusal rather than becoming broken source.
  */
-private fun UiBuilderNode.actionExpression(
-  event: String,
-  booleanState: Set<String>,
-  nullableState: Set<String>,
-  declaredState: Set<String>,
-): String {
+private fun UiBuilderNode.actionExpression(event: String, stateTypes: Map<String, String>): String {
   val actions = (eventBindings[event] as? JsonArray).orEmpty()
   if (actions.isEmpty()) return "Unit"
   return actions.joinToString("; ") { element ->
@@ -841,30 +827,44 @@ private fun UiBuilderNode.actionExpression(
     // Emitting every action means a later one naming an undeclared variable now reaches the
     // source, where `doesNotExist = true` compiles into nothing and reports success. Nothing else
     // checks this: export validation does not read `stateVariables`.
-    if (name != null && name !in declaredState) {
+    if (name != null && name !in stateTypes) {
       return@joinToString "TODO(\"Undeclared state variable ${name.escape()}\")"
     }
+    val declaredType = name?.let(stateTypes::get)
     val variable = name?.identifier()
     val value = action["value"].kotlinLiteral()
     when (action.optionalString("type")) {
       "select",
       // `set` is the protocol's own name for an assignment and behaves exactly as `select` does.
       "set",
-      "setText" -> if (variable == null) "Unit" else "$variable = $value"
+      "setText" ->
+        when {
+          variable == null -> "Unit"
+          // The editor refuses a value the declared type cannot hold, and the editor is not the
+          // only author: a document from another client could carry `set expanded "yes"` against
+          // a `Boolean`, and this emitted `expanded = "yes"` — source nobody can compile, with no
+          // diagnostic, because export validation does not read `stateVariables`.
+          !declaredType.holds(action["value"]) ->
+            "TODO(\"${name.orEmpty().escape()} is $declaredType and cannot hold $value\")"
+          else -> "$variable = $value"
+        }
       "selectOrClear" ->
         when {
           variable == null -> "Unit"
-          name !in nullableState -> "TODO(\"selectOrClear needs a nullable state variable\")"
+          declaredType?.endsWith("?") != true ->
+            "TODO(\"selectOrClear needs a nullable state variable\")"
+          !declaredType.holds(action["value"]) ->
+            "TODO(\"${name.orEmpty().escape()} is $declaredType and cannot hold $value\")"
           else -> "$variable = if ($variable == $value) null else $value"
         }
       "toggle" ->
         when {
-          variable == null || name !in booleanState ->
+          variable == null || declaredType?.removeSuffix("?") != "Boolean" ->
             "TODO(\"toggle needs a boolean state variable\")"
           // A nullable flag is declared `Boolean?`, and `!` does not apply to one. The renderer
           // reads a missing value as not-true and so toggles null to true; the export says the
           // same thing rather than either refusing a supported preview or emitting `!flag`.
-          name in nullableState -> "$variable = !($variable ?: false)"
+          declaredType.endsWith("?") -> "$variable = !($variable ?: false)"
           else -> "$variable = !$variable"
         }
       else -> "TODO(\"Unsupported action ${action.optionalString("type")?.escape()}\")"
@@ -1164,6 +1164,27 @@ private fun JsonElement?.literalAs(kotlinType: String): String {
     }
   }
   return kotlinLiteral()
+}
+
+/**
+ * Whether the Kotlin type this names can hold [value] as `kotlinLiteral` will write it.
+ *
+ * Quoting decides it, not content: `booleanOrNull` and `intOrNull` parse a `JsonPrimitive` whether
+ * or not it was a string, so `"true"` would pass for a `Boolean` and then emit `flag = "true"`.
+ * Finite, for `Double`, for the reason the editor refuses a non-finite: `NaN` is emitted verbatim
+ * and is not a literal the generated file declares.
+ */
+private fun String?.holds(value: JsonElement?): Boolean {
+  if (this == null) return false
+  if (value == null || value is JsonNull) return endsWith("?")
+  val primitive = value as? JsonPrimitive ?: return false
+  return when (removeSuffix("?")) {
+    "Boolean" -> !primitive.isString && primitive.booleanOrNull != null
+    "Int" -> !primitive.isString && primitive.intOrNull != null
+    "Double" -> !primitive.isString && primitive.doubleOrNull?.isFinite() == true
+    "String" -> primitive.isString
+    else -> false
+  }
 }
 
 private fun JsonElement?.kotlinLiteral(): String =
