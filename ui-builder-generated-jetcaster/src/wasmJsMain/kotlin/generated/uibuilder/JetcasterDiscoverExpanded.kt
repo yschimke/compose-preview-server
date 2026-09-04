@@ -1,4 +1,4 @@
-// Generator content SHA-256: 8034d60e9de2509fc4f2a6835fd5f0e88363e52e11b760a4d5193b25ba5a616e
+// Generator content SHA-256: f8cf1eb454ba4d8e4fb2a2f391977a1c9093de7bf7eb2d25eeb9f48a942cfda6
 @file:OptIn(ExperimentalMaterial3Api::class)
 
 package generated.uibuilder
@@ -615,6 +615,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                 BuilderHorizontalFloatingToolbar(
                   expanded = true,
                   containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                  contentPadding = PaddingValues(6.dp),
                   modifier =
                     Modifier.padding(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 16.dp)
                       .align(Alignment.BottomCenter),
@@ -1329,6 +1330,7 @@ private fun BuilderSnackbarHost(visible: Boolean) {
 private fun BuilderHorizontalFloatingToolbar(
   expanded: Boolean,
   containerColor: Color,
+  contentPadding: PaddingValues,
   modifier: Modifier = Modifier,
   content: @Composable RowScope.() -> Unit,
 ) {
@@ -1340,7 +1342,7 @@ private fun BuilderHorizontalFloatingToolbar(
     shadowElevation = 8.dp,
   ) {
     Row(
-      Modifier.padding(6.dp),
+      Modifier.padding(contentPadding),
       horizontalArrangement = Arrangement.spacedBy(6.dp),
       verticalAlignment = Alignment.CenterVertically,
       content = content,

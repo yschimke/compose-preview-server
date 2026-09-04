@@ -700,7 +700,7 @@ private class ComposeEmitter(
   private fun emitToolbar(node: UiBuilderNode, level: Int) {
     line(
       level,
-      "BuilderHorizontalFloatingToolbar(expanded = ${node.boolValue("expanded", true)}, containerColor = ${node.colorExpression("containerColor")}, ${node.modifierArgument()}) {",
+      "BuilderHorizontalFloatingToolbar(expanded = ${node.boolValue("expanded", true)}, containerColor = ${node.colorExpression("containerColor")}, contentPadding = ${node.toolbarContentPaddingExpression()}, ${node.modifierArgument()}) {",
     )
     node.slot("content").forEach { emitNode(it, level + 1) }
     line(level, "}")
@@ -733,7 +733,7 @@ private class ComposeEmitter(
       "@Composable private fun BuilderSnackbarHost(visible: Boolean) { if (visible) Snackbar { Text(\"Snackbar\") } }"
     )
     appendLine(
-      "@Composable private fun BuilderHorizontalFloatingToolbar(expanded: Boolean, containerColor: Color, modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) { Surface(modifier.semantics { stateDescription = if (expanded) \"expanded\" else \"collapsed\" }, shape = CircleShape, color = containerColor, tonalElevation = 6.dp, shadowElevation = 8.dp) { Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically, content = content) } }"
+      "@Composable private fun BuilderHorizontalFloatingToolbar(expanded: Boolean, containerColor: Color, contentPadding: PaddingValues, modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) { Surface(modifier.semantics { stateDescription = if (expanded) \"expanded\" else \"collapsed\" }, shape = CircleShape, color = containerColor, tonalElevation = 6.dp, shadowElevation = 8.dp) { Row(Modifier.padding(contentPadding), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically, content = content) } }"
     )
     appendLine(
       "@Composable private fun BuilderRadialGradient(modifier: Modifier, innerColor: Color, innerAlpha: Float, outerColor: Color, centerFraction: Offset) { Box(modifier.drawBehind { drawRect(Brush.radialGradient(listOf(innerColor.copy(alpha = innerAlpha), outerColor), center = Offset(size.width * centerFraction.x, size.height * centerFraction.y), radius = size.maxDimension * .82f)) }) }"
@@ -1208,6 +1208,16 @@ private fun UiBuilderNode.dimensionArgument(parameter: String, property: String)
   obj(property)["value"]?.jsonPrimitive?.floatOrNull?.let { "$parameter = ${it.dpLiteral()}, " }
     ?: ""
 
+/**
+ * A floating toolbar's own padding, or the 6dp both projections used to hard-code.
+ *
+ * The catalog exposes four padding edges for this component and nothing read them, so the edit was
+ * accepted, stored, and discarded. Absent stays 6dp rather than becoming zero: that is what the
+ * toolbar has always drawn, and a `contentPadding` nobody authored should not change it.
+ */
+private fun UiBuilderNode.toolbarContentPaddingExpression(): String =
+  (properties["contentPadding"] as? JsonObject)?.paddingValuesExpression() ?: "PaddingValues(6.dp)"
+
 private fun shapeDp(value: String?): Float =
   when (value) {
     "large" -> 16f
@@ -1419,7 +1429,10 @@ private val HANDLED_FIELDS =
       ),
     "m3/horizontal-divider" to HandledFields(setOf("color", "thicknessDp")),
     "m3/horizontal-floating-toolbar" to
-      HandledFields(setOf("alignment", "containerColor", "expanded"), setOf("content")),
+      HandledFields(
+        setOf("alignment", "containerColor", "contentPadding", "expanded"),
+        setOf("content"),
+      ),
     "m3/icon" to HandledFields(setOf("iconKey", "contentDescription", "color", "sizeDp")),
     "m3/icon-button" to
       HandledFields(
