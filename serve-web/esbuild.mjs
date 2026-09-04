@@ -105,6 +105,10 @@ const BUNDLES = [
     { entry: "src/keyboardNavigation.ts", out: "keyboard-navigation.js" },
     { entry: "src/reportCapture.ts", out: "report-capture.js" },
     { entry: "src/formatCompare.ts", out: "format-compare.js" },
+    // The comparison metric, for a worker thread. Its own entry because that is what a worker is:
+    // a second script, loaded by URL, with no DOM and none of the API surface beside it. Tiny —
+    // `scorePlanes` plus the tuning constants — and fetched only by a page that names it.
+    { entry: "src/scorer/scorerWorker.ts", out: "compare-scorer.js" },
     { entry: "src/knownDifferences.ts", out: "known-differences.js" },
     { entry: "src/viewer.ts", out: "viewer.js" },
     { entry: "src/spatial.ts", out: "spatial-view.js" },

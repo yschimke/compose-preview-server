@@ -23,6 +23,7 @@ class ServeWebAssetsTest {
         "remote-compose.js",
         "viewer.js",
         "format-compare.js",
+        "compare-scorer.js",
         "keyboard-navigation.js",
       )) {
       val asset = assertNotNull(ServeWebAssets.load(name), "$name should be loadable")
@@ -60,8 +61,15 @@ class ServeWebAssetsTest {
     )
     assertTrue(html.contains("<cp-backend-badge "), html)
     val svgHtml = ServeWeb.viewerPage(preview, token = "t", hasSvgExport = true)
+    // The scorer names its own worker half, on its own tag. That attribute is the ONLY thing that
+    // puts the comparison metric on a second thread — `scorer/offload.ts` reads it off the DOM and
+    // scores on the calling thread when it finds nothing — so a page that emits the API without it
+    // is a page whose scoring quietly went back to blocking the one thread it has.
     assertTrue(
-      svgHtml.contains("""<script src="${ServeWebAssets.href("format-compare.js")}"></script>"""),
+      svgHtml.contains(
+        """<script src="${ServeWebAssets.href("format-compare.js")}" """ +
+          """data-cp-scorer-worker="${ServeWebAssets.href("compare-scorer.js")}"></script>"""
+      ),
       svgHtml,
     )
     assertTrue(svgHtml.contains("id=\"cp-svg-match\""), svgHtml)
@@ -74,6 +82,10 @@ class ServeWebAssetsTest {
         "serve-chrome.js",
         "viewer.js",
         "format-compare.js",
+        // Syntax-checked like the rest, and it is the one asset nothing else would catch: no
+        // page emits a script tag for it, so a build that emitted something unparseable here
+        // would fail at `new Worker(...)` in a browser and nowhere before.
+        "compare-scorer.js",
         "keyboard-navigation.js",
       )) {
       // Read the bytes and hand `node` a temp copy, rather than pointing it at the resource's own

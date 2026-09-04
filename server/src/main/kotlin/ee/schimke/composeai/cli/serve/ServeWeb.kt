@@ -186,6 +186,24 @@ object ServeWeb {
 
   private fun scriptTag(name: String): String = "<script src=\"${assetHref(name)}\"></script>"
 
+  /**
+   * The scorer, and where its worker half lives.
+   *
+   * `format-compare.js` is the comparison API; `compare-scorer.js` is the metric inside it, built
+   * for a worker thread. The URL rides on the script tag rather than in a tag of its own because
+   * that is the one place it is certainly correct: `scorer/offload.ts` reads it off the DOM, both
+   * halves are versioned by content, and a page that emits the API without the worker would be
+   * naming an asset it does not carry.
+   *
+   * Every page that scores something calls this instead of `scriptTag("format-compare.js")`, so the
+   * two cannot drift apart. A consumer that loads the asset WITHOUT this tag — the publish-time
+   * score driver and the compare audit, which inject the file into a bare page — finds no attribute
+   * and scores on its own thread, which is what those two need and what they already did.
+   */
+  private fun compareScorerTag(): String =
+    "<script src=\"${assetHref("format-compare.js")}\" " +
+      "data-cp-scorer-worker=\"${WebEscaping.htmlEscape(assetHref("compare-scorer.js"))}\"></script>"
+
   /** One Vue runtime followed synchronously by the controls for this server surface. */
   private fun componentScriptTags(surface: String): String =
     scriptTag("vue-runtime.js") + "\n" + scriptTag("$surface-components.js")
@@ -10249,7 +10267,7 @@ ${captureControlsHtml().prependIndent("          ")}
              `window.ComposePreviewCompare` when it scores rather than when it upgrades, so no
              script order can silence it. -->
         ${componentScriptTags("compare")}
-        ${scriptTag("format-compare.js")}
+        ${compareScorerTag()}
         <cp-compare-wall></cp-compare-wall>
         """
           .trimIndent(),
@@ -11069,7 +11087,7 @@ ${scriptTag("known-differences.js")}
              handle when it scores rather than when it upgrades, so the two tags may be in either
              order. -->
         ${componentScriptTags("compare")}
-        ${scriptTag("format-compare.js")}
+        ${compareScorerTag()}
         <cp-reference-compare></cp-reference-compare>$acceptanceScript
         """
           .trimIndent(),
@@ -11904,7 +11922,7 @@ $cards
              `window.ComposePreviewCompare` when the diff lane is entered rather than when it
              upgrades, so it does not depend on following the script below. -->
         ${componentScriptTags("design")}
-        ${scriptTag("format-compare.js")}
+        ${compareScorerTag()}
         <cp-design-page></cp-design-page>
         """
           .trimIndent(),
@@ -12408,8 +12426,7 @@ ${scriptTag("known-differences.js")}
     // `window.ComposePreviewCompare` — so it loads for a catalog with published references, and
     // must be defined before the components bundle upgrades the tag.
     val parityScripts = buildString {
-      if (dashboard.comparisons.any { it.referenceId != null })
-        append(scriptTag("format-compare.js"))
+      if (dashboard.comparisons.any { it.referenceId != null }) append(compareScorerTag())
       if (dashboard.feed.isNotEmpty() || dashboard.comparisons.any { it.referenceId != null })
         append(componentScriptTags("parity"))
     }
@@ -14686,7 +14703,7 @@ ${scriptTag("known-differences.js")}
     // needed is preserved without a script tag of its own.
     val compareScriptTags =
       listOfNotNull(
-          scriptTag("format-compare.js").takeIf {
+          compareScorerTag().takeIf {
             spatialSceneUrl == null &&
               ((hasSvgExport && !componentBrowser) || specSurfaceUrl != null)
           }
