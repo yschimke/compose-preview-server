@@ -88,12 +88,12 @@ class EditorShortcutTableTest {
   fun `previewing leaves only the chord that ends it`() {
     // With the selection overlay gone there is nothing on screen to show what a Delete or an arrow
     // just did, so those chords would edit invisibly and surprise later.
-    val previewing = EditorChord(Key.P, command = true, shift = false)
+    val previewing = EditorChord(Key.Enter, command = true, shift = false)
     assertEquals(
       UiBuilderEditorEvent.TogglePreview,
       editorShortcutFor(previewing, previewing = true)?.event,
     )
-    listOf(Key.Delete, Key.Z, Key.C, Key.V, Key.D, Key.DirectionDown).forEach { key ->
+    listOf(Key.Delete, Key.Z, Key.C, Key.V, Key.D, Key.DirectionDown, Key.P).forEach { key ->
       assertNull(
         editorShortcutFor(
           EditorChord(
@@ -108,6 +108,8 @@ class EditorShortcutTableTest {
     }
     // And every one of them is live again the moment the canvas comes back.
     assertNotNull(editorShortcutFor(EditorChord(Key.Delete, command = false, shift = false)))
+    // Ctrl/⌘+P is the browser's print dialog and is deliberately not ours, previewing or not.
+    assertNull(editorShortcutFor(EditorChord(Key.P, command = true, shift = false)))
   }
 
   @Test

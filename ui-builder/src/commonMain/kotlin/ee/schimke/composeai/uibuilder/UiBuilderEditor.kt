@@ -797,7 +797,7 @@ private fun EditorToolbar(
       // than what it will do — a button reading "Preview" while you are previewing is a coin toss.
       EditorAction(
         label = if (state.previewMode) "Previewing · exit" else "Preview",
-        shortcut = "Ctrl/\u2318+P",
+        shortcut = "Ctrl/\u2318+Enter",
         enabled = true,
         onClick = { dispatch(UiBuilderEditorEvent.TogglePreview) },
       )
@@ -1001,11 +1001,16 @@ internal val EDITOR_SHORTCUTS: List<EditorShortcut> =
       keys = setOf(Key.Z),
       command = true,
     ),
+    // Enter rather than P. The builder ships in a browser, and Ctrl/\u2318+P is the print dialog:
+    // a chord whose worst case is a print preview over the design is not a chord worth having,
+    // and whether Compose consumes it before the browser sees it is not something to find out in
+    // production. Ctrl/\u2318+Enter is unclaimed, and "run it" is already what it means everywhere
+    // else.
     EditorShortcut(
-      chord = "Ctrl/\u2318+P",
+      chord = "Ctrl/\u2318+Enter",
       description = "Hand the canvas to the screen, and back",
       event = UiBuilderEditorEvent.TogglePreview,
-      keys = setOf(Key.P),
+      keys = setOf(Key.Enter, Key.NumPadEnter),
       command = true,
     ),
     EditorShortcut(
