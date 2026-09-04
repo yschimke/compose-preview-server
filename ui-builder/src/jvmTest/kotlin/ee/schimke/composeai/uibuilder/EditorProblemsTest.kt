@@ -7,6 +7,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -153,6 +154,115 @@ class EditorProblemsTest {
     )
 
     assertEquals(emptyList(), problems(document))
+  }
+
+  @Test
+  fun `a graph the panel exists to describe can still be drawn`() {
+    // The navigator is built before the inspector, so an unknown child reference or a cycle took
+    // the editor down — with `getValue` or an unbounded recursion — before the panel could name
+    // either. The one document that most needs the Issues panel was the one that could not show
+    // it.
+    val row = document.nodes.getValue("category-row")
+    val dangling =
+      document.copy(
+        nodes =
+          document.nodes +
+            mapOf(
+              row.id to
+                row.copy(slots = row.slots + mapOf("items" to row.slots.getValue("items") + "gone"))
+            )
+      )
+
+    val rows = reducer.treeRows(dangling)
+    assertTrue(rows.none { it.nodeId == "gone" }, "a node that is not there is not a row")
+    assertTrue(problems(dangling).any { it.code == "UNKNOWN_CHILD" }, "${problems(dangling)}")
+
+    val cyclic =
+      document.copy(
+        nodes =
+          document.nodes +
+            mapOf(
+              row.id to
+                row.copy(slots = row.slots + mapOf("items" to row.slots.getValue("items") + row.id))
+            )
+      )
+
+    assertTrue(reducer.treeRows(cyclic).isNotEmpty(), "a cycle terminates rather than recurses")
+    assertTrue(problems(cyclic).isNotEmpty(), "and is reported")
+  }
+
+  @Test
+  fun `a property encoded as the wrong shape is reported rather than thrown`() {
+    // `INVALID_PROPERTY_TYPE` is one of the things this panel reports, and building the inspector's
+    // fields for the same node went through `jsonPrimitive`, which throws on an array. Selecting
+    // the node — or merely loading the document — crashed instead of showing the diagnostic.
+    val placeholder = document.nodes.getValue("search-placeholder")
+    val malformed =
+      document.copy(
+        nodes =
+          document.nodes +
+            mapOf(
+              placeholder.id to
+                placeholder.copy(
+                  properties =
+                    JsonObject(
+                      placeholder.properties +
+                        mapOf(
+                          "text" to
+                            JsonObject(
+                              mapOf(
+                                "type" to JsonPrimitive("string"),
+                                "value" to JsonArray(listOf(JsonPrimitive("a"))),
+                              )
+                            )
+                        )
+                    )
+                )
+            )
+      )
+
+    val state = reducer.initial(malformed, selectedNodeId = placeholder.id)
+    assertTrue(reducer.propertyFields(state).isNotEmpty(), "the inspector still has fields")
+    assertTrue(reducer.treeRows(malformed).isNotEmpty())
+    assertTrue(
+      problems(malformed).any { it.code == "INVALID_PROPERTY_TYPE" },
+      "${problems(malformed)}",
+    )
+  }
+
+  @Test
+  fun `an asset key encoded as the wrong shape is reported rather than thrown`() {
+    // The editor asks for these diagnostics on every document now, so a throw in the export path's
+    // asset-key decode became a way to take the whole editor down.
+    val image = document.nodes.values.first { it.componentId == "asset/image" }
+    val malformed =
+      document.copy(
+        nodes =
+          document.nodes +
+            mapOf(
+              image.id to
+                image.copy(
+                  properties =
+                    JsonObject(
+                      image.properties +
+                        mapOf(
+                          "assetKey" to
+                            JsonObject(
+                              mapOf(
+                                "type" to JsonPrimitive("string"),
+                                "value" to JsonArray(emptyList()),
+                              )
+                            )
+                        )
+                    )
+                )
+            )
+      )
+
+    assertTrue(
+      problems(malformed).any { it.code == "INVALID_PROPERTY_TYPE" },
+      "${problems(malformed)}",
+    )
   }
 
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
