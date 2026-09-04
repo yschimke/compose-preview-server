@@ -142,6 +142,7 @@ fun UiBuilderEditor(
   initialCatalogQuery: String = "",
   initialLayerQuery: String = "",
   initialInspectorMode: EditorInspectorMode = EditorInspectorMode.Properties,
+  initialPreviewMode: Boolean = false,
   collaborators: List<UiBuilderCollaborator> = emptyList(),
   newDesignCatalogs: List<UiBuilderNewDesignCatalog> = emptyList(),
   onCreateDesign: ((catalogSystemId: String, designId: String, templateId: String) -> Unit)? = null,
@@ -165,6 +166,7 @@ fun UiBuilderEditor(
             catalogQuery = initialCatalogQuery,
             layerQuery = initialLayerQuery,
             inspectorMode = initialInspectorMode,
+            previewMode = initialPreviewMode,
           )
       )
     }
@@ -265,7 +267,7 @@ fun UiBuilderEditor(
         onCanvasBoundsChanged(it)
       },
       dropHovered = canvasDropHovered,
-      showSelectionOverlay = showSelectionOverlay,
+      showSelectionOverlay = showSelectionOverlay && !state.previewMode,
       collaborators = collaborators,
       onInspectionSnapshot = onInspectionSnapshot,
       onInspectionInvalidated = onInspectionInvalidated,
@@ -294,7 +296,12 @@ fun UiBuilderEditor(
           .focusRequester(editorFocusRequester)
           .focusable()
           .onPreviewKeyEvent { event ->
-            editorShortcut(event, enabled = !textInputFocused, dispatch = ::dispatch)
+            editorShortcut(
+              event,
+              enabled = !textInputFocused,
+              previewing = state.previewMode,
+              dispatch = ::dispatch,
+            )
           }
       ) {
         if (compact) {
@@ -776,6 +783,14 @@ private fun EditorToolbar(
         enabled = canDelete,
         onClick = { dispatch(UiBuilderEditorEvent.DeleteSelected) },
       )
+      // The one control that changes what the canvas is for, so it says which side it is on rather
+      // than what it will do — a button reading "Preview" while you are previewing is a coin toss.
+      EditorAction(
+        label = if (state.previewMode) "Previewing · exit" else "Preview",
+        shortcut = "Ctrl/\u2318+P",
+        enabled = true,
+        onClick = { dispatch(UiBuilderEditorEvent.TogglePreview) },
+      )
       EditorAction(
         label = "Shortcuts",
         shortcut = "",
@@ -886,6 +901,7 @@ private enum class LayerSelectionGesture {
 private fun editorShortcut(
   event: KeyEvent,
   enabled: Boolean,
+  previewing: Boolean,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ): Boolean {
   if (!enabled || event.type != KeyEventType.KeyDown) return false
@@ -895,10 +911,24 @@ private fun editorShortcut(
       command = event.isCtrlPressed || event.isMetaPressed,
       shift = event.isShiftPressed,
     )
-  val match = EDITOR_SHORTCUTS.firstOrNull { it.matches(chord) } ?: return false
+  val match = editorShortcutFor(chord, previewing) ?: return false
   dispatch(match.event)
   return true
 }
+
+/**
+ * The shortcut a chord resolves to, or null when none does.
+ *
+ * Pure, so the table's precedence and the preview suppression can be tested without synthesising a
+ * key event — which on this target is more machinery than the rule being tested.
+ *
+ * While the canvas belongs to the screen, only the chord that hands it back is live. With the
+ * selection overlay gone there is nothing on screen to show what a Delete or an arrow just did, so
+ * those chords would edit invisibly and surprise later.
+ */
+internal fun editorShortcutFor(chord: EditorChord, previewing: Boolean = false): EditorShortcut? =
+  EDITOR_SHORTCUTS.firstOrNull { it.matches(chord) }
+    ?.takeIf { !previewing || it.event == UiBuilderEditorEvent.TogglePreview }
 
 /** The part of a key press a shortcut is allowed to look at. */
 internal data class EditorChord(val key: Key, val command: Boolean, val shift: Boolean)
@@ -959,6 +989,13 @@ internal val EDITOR_SHORTCUTS: List<EditorShortcut> =
       description = "Undo",
       event = UiBuilderEditorEvent.Undo,
       keys = setOf(Key.Z),
+      command = true,
+    ),
+    EditorShortcut(
+      chord = "Ctrl/\u2318+P",
+      description = "Hand the canvas to the screen, and back",
+      event = UiBuilderEditorEvent.TogglePreview,
+      keys = setOf(Key.P),
       command = true,
     ),
     EditorShortcut(
