@@ -656,6 +656,7 @@ class UiBuilderEditorStateTest {
     val copied =
       reducer.reduce(reducer.initial(document, "discover-grid"), UiBuilderEditorEvent.CopySelected)
     val clipboard = assertIs<EditorClipboard>(copied.clipboard)
+    assertEquals(listOf("discover-grid"), clipboard.rootNodeIds)
     // The whole subtree, not just the root — children live in the document's flat `nodes` map and
     // copying the root alone would paste an empty container.
     assertTrue(clipboard.nodes.size > 1, clipboard.nodes.keys.toString())
@@ -986,5 +987,41 @@ class UiBuilderEditorStateTest {
       "partial delete: $survivors of ${all.size} survived",
     )
     if (!reducer.canDeleteSelected(everything)) assertEquals(all.size, survivors)
+  }
+
+  @Test
+  fun `copying a multi-node selection pastes all of it, in order`() {
+    val rows = reducer.treeRows(document)
+    val siblings =
+      rows.groupBy { it.parent }.values.first { it.size > 2 && it.first().parent != null }
+    val two = siblings.take(2).map { it.nodeId }
+    val selected =
+      reducer.reduce(reducer.initial(document, two[0]), UiBuilderEditorEvent.ToggleNode(two[1]))
+    val copied = reducer.reduce(selected, UiBuilderEditorEvent.CopySelected)
+
+    assertEquals(two, assertIs<EditorClipboard>(copied.clipboard).rootNodeIds)
+
+    val pasted = reducer.reduce(copied, UiBuilderEditorEvent.Paste)
+    // Both arrive, and the whole paste is selected so it can be moved as the unit it arrived as.
+    assertEquals(2, pasted.selection.size)
+    pasted.selection.forEach { assertTrue(it in pasted.document.nodes, it) }
+    // One operation for the batch, not one per root.
+    assertEquals(document.revision + 1, pasted.document.revision)
+  }
+
+  @Test
+  fun `copying an ancestor and its descendant does not put the subtree on the clipboard twice`() {
+    val rows = reducer.treeRows(document)
+    val parentRow = rows.first { row -> rows.any { it.parent?.nodeId == row.nodeId } }
+    val child = rows.first { it.parent?.nodeId == parentRow.nodeId }
+    val both =
+      reducer.reduce(
+        reducer.initial(document, parentRow.nodeId),
+        UiBuilderEditorEvent.ToggleNode(child.nodeId),
+      )
+    val copied = reducer.reduce(both, UiBuilderEditorEvent.CopySelected)
+
+    // The ancestor already carries the child; pasting both roots would duplicate it.
+    assertEquals(listOf(parentRow.nodeId), assertIs<EditorClipboard>(copied.clipboard).rootNodeIds)
   }
 }

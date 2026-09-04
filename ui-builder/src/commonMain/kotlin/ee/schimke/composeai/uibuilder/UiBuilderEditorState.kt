@@ -155,9 +155,13 @@ fun ScreenEnvironmentSettings.validationError(): String? =
  * cannot import a subtree from another origin — which also means copy between two designs works
  * only inside one editor.
  */
-data class EditorClipboard(val rootNodeId: String, val nodes: Map<String, UiBuilderNode>) {
-  val rootComponentId: String
-    get() = nodes.getValue(rootNodeId).componentId
+data class EditorClipboard(
+  /** The copied subtrees' roots, in tree order — a selection can hold more than one. */
+  val rootNodeIds: List<String>,
+  val nodes: Map<String, UiBuilderNode>,
+) {
+  val rootComponentIds: List<String>
+    get() = rootNodeIds.map { nodes.getValue(it).componentId }
 }
 
 data class UiBuilderEditorState(
@@ -352,7 +356,7 @@ class UiBuilderEditorReducer(
    * each slot loses.
    */
   fun canDeleteSelected(state: UiBuilderEditorState): Boolean {
-    val targets = state.deletionRoots()
+    val targets = state.selectionRoots()
     if (targets.isEmpty()) return false
     val document = state.document
     val rootsRemoved = targets.count { document.location(it) == null }
@@ -399,10 +403,32 @@ class UiBuilderEditorReducer(
    */
   fun canPaste(state: UiBuilderEditorState): Boolean = pasteDestination(state) != null
 
+  /**
+   * Where the clipboard would land, or null when it would not.
+   *
+   * Every root has to be accepted by one destination, not merely one of them: a paste that placed
+   * two of three copied nodes would leave the user reconstructing which one went missing. Room is
+   * checked against the whole batch for the same reason — a slot with one space left cannot take
+   * three.
+   */
   private fun pasteDestination(state: UiBuilderEditorState): ParentSlot? {
-    val clipboard = state.clipboard ?: return null
-    val capability = catalog.componentsById[clipboard.rootComponentId] ?: return null
-    return findDestination(state.document, state.selectedNodeId, capability)
+    val clipboard = state.clipboard?.takeIf { it.rootNodeIds.isNotEmpty() } ?: return null
+    val capabilities = clipboard.rootComponentIds.map { catalog.componentsById[it] ?: return null }
+    val destination =
+      capabilities.map { findDestination(state.document, state.selectedNodeId, it) }.distinct()
+    val single = destination.singleOrNull() ?: return null
+    return single?.takeIf { hasRoomForAll(state.document, it, clipboard.rootNodeIds.size) }
+  }
+
+  private fun hasRoomForAll(
+    document: UiBuilderDocument,
+    parent: ParentSlot,
+    count: Int,
+  ): Boolean {
+    val parentNode = document.nodes[parent.nodeId] ?: return false
+    val slot = catalog.componentsById[parentNode.componentId]?.slot(parent.slot) ?: return false
+    val maximum = slot.cardinality.max ?: return true
+    return parentNode.slots[parent.slot].orEmpty().size + count <= maximum
   }
 
   fun catalogItems(query: String): List<EditorCatalogItem> {
@@ -728,7 +754,7 @@ class UiBuilderEditorReducer(
 
   private fun deleteSelected(state: UiBuilderEditorState): UiBuilderEditorState {
     val sequence = state.operationSequence + 1
-    val targets = state.deletionRoots()
+    val targets = state.selectionRoots()
     if (targets.isEmpty()) return state
     if (!canDeleteSelected(state)) {
       return state.rejected(
@@ -843,34 +869,38 @@ class UiBuilderEditorReducer(
   }
 
   private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {
-    val nodeId = state.selectedNodeId?.takeIf(state.document.nodes::containsKey) ?: return state
+    val roots = state.selectionRoots()
+    if (roots.isEmpty()) return state
     // No operation and no sequence bump: copying changes the editor, not the document, so it must
     // not become an undo step. Undoing a copy would otherwise "undo" whatever real edit preceded
     // it, which is the kind of surprise that makes people stop trusting undo.
-    return state.copy(clipboard = state.document.clip(nodeId))
+    return state.copy(clipboard = state.document.clip(roots))
   }
 
   private fun cutSelected(state: UiBuilderEditorState): UiBuilderEditorState {
     val sequence = state.operationSequence + 1
-    val nodeId = state.selectedNodeId?.takeIf(state.document.nodes::containsKey) ?: return state
+    val roots = state.selectionRoots()
+    if (roots.isEmpty()) return state
     if (!canDeleteSelected(state)) {
       // The clipboard is deliberately left alone on a rejected cut. Taking the copy anyway would
       // leave the editor claiming it holds something the user can see is still in the document.
       return state.rejected(
         sequence,
         RejectionCode.INVALID_DOCUMENT,
-        "Cutting $nodeId would violate root or slot cardinality",
+        if (roots.size == 1) "Cutting ${roots.single()} would violate root or slot cardinality"
+        else "Cutting these ${roots.size} nodes would violate root or slot cardinality",
       )
     }
-    val clipboard = state.document.clip(nodeId)
-    val parent = state.document.location(nodeId)
-    val selectionAfter = parent?.nodeId ?: state.document.roots.firstOrNull { it != nodeId }
+    val clipboard = state.document.clip(roots)
+    val anchor = roots.last()
+    val selectionAfter =
+      state.document.location(anchor)?.nodeId ?: state.document.roots.firstOrNull { it !in roots }
     // One apply, so cut is one undo step rather than a copy the user cannot see followed by a
     // delete they can.
     return state
       .apply(
         sequence = sequence,
-        operations = listOf(DesignOperation.DeleteNode(nodeId)),
+        operations = roots.map(DesignOperation::DeleteNode),
         selectionAfter = selectionAfter,
       )
       .copy(clipboard = clipboard)
@@ -878,27 +908,40 @@ class UiBuilderEditorReducer(
 
   private fun paste(state: UiBuilderEditorState): UiBuilderEditorState {
     val sequence = state.operationSequence + 1
-    val clipboard = state.clipboard ?: return state
+    val clipboard = state.clipboard?.takeIf { it.rootNodeIds.isNotEmpty() } ?: return state
     val destination =
       pasteDestination(state)
         ?: return state.rejected(
           sequence,
           RejectionCode.INVALID_DOCUMENT,
-          "Nothing here accepts a ${clipboard.rootComponentId}; select a container with room for one",
+          "Nothing here accepts ${clipboard.rootComponentIds.distinct().joinToString(", ")}; " +
+            "select a container with room for ${clipboard.rootNodeIds.size}",
         )
     val operations = mutableListOf<DesignOperation>()
-    val pasteId = state.document.freshNodeId("${clipboard.rootNodeId}-paste", sequence)
-    // The clipboard's own nodes are the source, not the document's — the subtree it names may have
-    // been cut, or edited since, and a paste has to reproduce what was copied either way.
-    clipboard.nodes.appendDuplicateSubtree(
-      sourceNodeId = clipboard.rootNodeId,
-      copyNodeId = pasteId,
-      parent = destination,
-      afterNodeId =
-        state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull(),
-      operations = operations,
-    )
-    return state.apply(sequence, operations, selectionAfter = pasteId)
+    val pastedIds = mutableListOf<String>()
+    var after = state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
+    clipboard.rootNodeIds.forEachIndexed { index, rootId ->
+      // Numbered per root as well as per paste, so two roots in one batch cannot collide with each
+      // other the way two pastes of one root would collide without `freshNodeId`.
+      val pasteId = state.document.freshNodeId("$rootId-paste-$index", sequence)
+      // The clipboard's own nodes are the source, not the document's — the subtree it names may
+      // have been cut, or edited since, and a paste has to reproduce what was copied either way.
+      clipboard.nodes.appendDuplicateSubtree(
+        sourceNodeId = rootId,
+        copyNodeId = pasteId,
+        parent = destination,
+        afterNodeId = after,
+        operations = operations,
+      )
+      // Each lands after the previous, so a multi-node paste keeps the order it was copied in.
+      after = pasteId
+      pastedIds += pasteId
+    }
+    return state.apply(sequence, operations, selectionAfter = pastedIds.last()).let { pasted ->
+      // The whole paste is selected, so it can be moved or deleted as the unit it arrived as.
+      if (pasted.selection == listOf(pastedIds.last())) pasted.copy(selection = pastedIds)
+      else pasted
+    }
   }
 
   private fun undo(state: UiBuilderEditorState): UiBuilderEditorState {
@@ -1303,11 +1346,12 @@ private fun UiBuilderNode.contentLabel(capability: ComponentCapability): String?
 /**
  * The selected nodes that are not inside another selected node, in selection order.
  *
- * Deleting an ancestor takes its descendants with it, so a descendant selected alongside its
- * ancestor is not a separate deletion — emitting one for it would delete a node that no longer
- * exists, and counting it would over-count what its slot loses.
+ * An ancestor carries its descendants, whether it is being deleted or copied, so a descendant
+ * selected alongside its ancestor is not a separate target. Emitting one for a delete would target
+ * a node that no longer exists and would over-count what its slot loses; copying one would put the
+ * same subtree on the clipboard twice and paste it twice.
  */
-private fun UiBuilderEditorState.deletionRoots(): List<String> {
+private fun UiBuilderEditorState.selectionRoots(): List<String> {
   val present = selection.filter(document.nodes::containsKey)
   return present.filterNot { nodeId ->
     generateSequence(document.location(nodeId)?.nodeId) { document.location(it)?.nodeId }
@@ -1315,15 +1359,15 @@ private fun UiBuilderEditorState.deletionRoots(): List<String> {
   }
 }
 
-private fun UiBuilderDocument.clip(nodeId: String): EditorClipboard {
+private fun UiBuilderDocument.clip(nodeIds: List<String>): EditorClipboard {
   val collected = linkedMapOf<String, UiBuilderNode>()
   fun visit(id: String) {
     val node = nodes[id] ?: return
     if (collected.put(id, node) != null) return
     node.slots.values.flatten().forEach(::visit)
   }
-  visit(nodeId)
-  return EditorClipboard(rootNodeId = nodeId, nodes = collected)
+  nodeIds.forEach(::visit)
+  return EditorClipboard(rootNodeIds = nodeIds, nodes = collected)
 }
 
 /**
