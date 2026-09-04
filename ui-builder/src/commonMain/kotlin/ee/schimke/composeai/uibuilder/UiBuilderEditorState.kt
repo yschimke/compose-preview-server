@@ -855,13 +855,16 @@ class UiBuilderEditorReducer(
    * was the export refusing.
    *
    * A node id that no longer exists is dropped rather than offered as something to select.
+   *
+   * Takes the document rather than the state because it reads nothing else, which is what lets the
+   * caller cache it against the document alone.
    */
-  fun problems(state: UiBuilderEditorState): List<EditorProblem> =
-    validateDocumentForExport(state.document, catalog).map { issue ->
+  fun problems(document: UiBuilderDocument): List<EditorProblem> =
+    validateDocumentForExport(document, catalog).map { issue ->
       EditorProblem(
         code = issue.code,
         message = issue.message,
-        nodeId = issue.nodeId?.takeIf(state.document.nodes::containsKey),
+        nodeId = issue.nodeId?.takeIf(document.nodes::containsKey),
         componentId = issue.componentId,
       )
     }

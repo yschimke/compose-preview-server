@@ -216,12 +216,17 @@ fun UiBuilderEditor(
       draggedTarget?.let { "${it.nodeId}.${it.slot}" } ?: "No compatible slot",
     )
   }
+  // Cached for the same reason as the issues scan further down, at a smaller scale: the filter
+  // lowercases and scans four strings for every node in the document, and the panel recomposes far
+  // more often than either the document or the query changes.
+  val treeRows =
+    remember(reducer, state.document, state.layerQuery) { reducer.visibleTreeRows(state) }
   val navigator: @Composable (Modifier, Boolean) -> Unit = { modifier, closeAfterDrop ->
     EditorNavigator(
       state = state,
       catalogSystemId = catalog.benchmark.catalogSystemId,
       catalogItems = reducer.catalogItems(state.catalogQuery),
-      treeRows = reducer.visibleTreeRows(state),
+      treeRows = treeRows,
       collaborators = collaborators,
       dropTargetLabel = reducer.dropTargetLabel(state, draggedComponentId ?: "m3/text"),
       onCatalogDrag = { componentId, position ->
@@ -275,11 +280,16 @@ fun UiBuilderEditor(
       modifier = modifier,
     )
   }
+  // Cached against the document, because it is not cheap and depends on nothing else: it walks
+  // every node and every property against the catalog, traverses the graph and looks for cycles.
+  // Called inline it would run all of that on every recomposition of the inspector — which is
+  // every keystroke in a property field and every frame of a drag.
+  val problems = remember(reducer, state.document) { reducer.problems(state.document) }
   val inspector: @Composable (Modifier) -> Unit = { modifier ->
     PropertyInspector(
       state = state,
       fields = reducer.propertyFields(state),
-      problems = reducer.problems(state),
+      problems = problems,
       themeSettings = reducer.themeSettings(state),
       onTextInputFocusChanged = { textInputFocused = it },
       dispatch = ::dispatch,
