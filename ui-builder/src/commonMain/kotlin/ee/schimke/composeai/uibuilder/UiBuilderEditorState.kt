@@ -16,6 +16,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 enum class EditorPropertyControl {
   Text,
@@ -335,8 +336,25 @@ sealed interface EditorStateAction {
   data class SelectOrClear(override val variable: String, val value: String) : EditorStateAction
 }
 
-private fun EditorStateAction.encoded(): JsonObject =
-  when (this) {
+/**
+ * The wire form of one action, with its value typed against the variable it writes.
+ *
+ * The renderer keeps preview state as strings and compares them as strings, so a quoted `"true"`
+ * works there and hid this: the Compose exporter declares each variable from its `initialValue`, so
+ * a flag is a real Kotlin `Boolean` and assigning it a quoted string does not compile. The action
+ * carries the declaration's own kind rather than whatever the editor typed.
+ */
+private fun EditorStateAction.encoded(declaration: JsonObject?): JsonObject {
+  val initial = declaration?.get("initialValue")?.jsonPrimitive
+  fun typed(raw: String): JsonPrimitive =
+    when {
+      initial?.booleanOrNull != null -> JsonPrimitive(raw.toBooleanStrictOrNull() ?: false)
+      initial?.longOrNull != null -> JsonPrimitive(raw.toLongOrNull() ?: 0L)
+      initial?.doubleOrNull != null && initial.isString.not() ->
+        JsonPrimitive(raw.toDoubleOrNull() ?: 0.0)
+      else -> JsonPrimitive(raw)
+    }
+  return when (this) {
     is EditorStateAction.Toggle ->
       JsonObject(mapOf("type" to JsonPrimitive("toggle"), "variable" to JsonPrimitive(variable)))
     is EditorStateAction.Set ->
@@ -344,7 +362,7 @@ private fun EditorStateAction.encoded(): JsonObject =
         mapOf(
           "type" to JsonPrimitive("set"),
           "variable" to JsonPrimitive(variable),
-          "value" to JsonPrimitive(value),
+          "value" to typed(value),
         )
       )
     is EditorStateAction.SelectOrClear ->
@@ -352,10 +370,11 @@ private fun EditorStateAction.encoded(): JsonObject =
         mapOf(
           "type" to JsonPrimitive("selectOrClear"),
           "variable" to JsonPrimitive(variable),
-          "value" to JsonPrimitive(value),
+          "value" to typed(value),
         )
       )
   }
+}
 
 /** Pure editor interaction reducer. Every document mutation delegates to CollaborationReducer. */
 sealed interface EditorSubmission {
@@ -775,7 +794,8 @@ class UiBuilderEditorReducer(
       // renderer applies to any node — `actionModifier` makes anything carrying a click binding
       // clickable — while every other event name is implemented per component and the catalog
       // declares none of them, so offering one would be a guess.
-      val bindings = JsonObject(mapOf("click" to JsonArray(listOf(action.encoded()))))
+      val declaration = state.document.stateVariables[action.variable] as? JsonObject
+      val bindings = JsonObject(mapOf("click" to JsonArray(listOf(action.encoded(declaration)))))
       val index = operations.indexOfFirst { it is DesignOperation.InsertNode }
       val root = operations[index] as DesignOperation.InsertNode
       operations[index] = root.copy(node = root.node.copy(eventBindings = bindings))
@@ -1867,11 +1887,25 @@ private fun defaultChildFor(
  * Free-text means a lone `string` with no `allowedValues` — an enum is a setting, and a colour is
  * not something anyone recognises a layer by.
  */
+private val IDENTITY_PROPERTY_SUFFIXES = listOf("Key", "Id", "Base64")
+
 private fun UiBuilderNode.contentLabel(capability: ComponentCapability): String? {
   fun freeText(property: PropertyCapability) =
     property.allowedValues.isEmpty() &&
       property.typeNames() - "null" == setOf("string") &&
-      !property.name.endsWith("Color", ignoreCase = true)
+      !property.name.endsWith("Color", ignoreCase = true) &&
+      // `required` is necessary and not sufficient, which the first cut of this got wrong twice.
+      // A component can require a string it needs in order to work rather than one a person would
+      // recognise it by, and in this catalog five of the six do: `asset/image` requires `assetKey`,
+      // the three lazy containers require `scrollStateKey`, and `remote-compose/document` requires
+      // `documentBase64` — so the layers panel offered an asset key, a scroll key, and a base64
+      // blob as layer names. Only `m3/text.text` was content.
+      //
+      // The name carries the kind, the same way it does for a `…Dp` dimension: a key, an id or a
+      // payload is plumbing whatever its type. Excluding them by suffix leaves `text` and any
+      // future genuine content property alone, and an image falls through to its
+      // `contentDescription`, which is the thing that was always the better name for it.
+      IDENTITY_PROPERTY_SUFFIXES.none { property.name.endsWith(it, ignoreCase = true) }
 
   fun valueOf(name: String) =
     (properties[name] as? JsonObject)
