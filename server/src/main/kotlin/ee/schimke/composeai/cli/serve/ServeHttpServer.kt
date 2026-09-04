@@ -48,6 +48,7 @@ import io.ktor.server.routing.routing
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
+import io.ktor.util.AttributeKey
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
@@ -10632,12 +10633,36 @@ class ServeHttpServer(
       agentGrants?.grantForToken(value)?.allows(AgentGrantScope.PREVIEW) == true
 
   /**
-   * The live grant this call presents, or null. Reads the same two places the operator token is
-   * read from, plus `Authorization: Bearer` — an agent's HTTP client reaches for that header
-   * without being told to, and refusing it would be a papercut with no security value: the bearer
-   * is checked identically wherever it arrives.
+   * The live grant this call presents, or null — resolved **once per request** and remembered.
+   *
+   * Every gate asks this question independently: [rejectBadToken] to decide whether the caller may
+   * see the server at all, then whichever scope gate the route runs. Resolving separately each time
+   * meant a grant could be live for the first question and gone for the second, and the gates fail
+   * in *opposite* directions on that: the token gate refuses an absent grant, while a scope gate
+   * reads absent as "no grant presented, nothing to say" and waves the request through. So a grant
+   * expiring in the microseconds between two gates did not tighten the request, it **widened** it —
+   * past a scope check it had already been admitted through the door for. `handleRender` had that
+   * shape on `main`, and so does every other route pairing a token gate with a scope gate.
+   *
+   * Resolving once removes the window rather than narrowing it. The cost is that a grant revoked
+   * *during* a request stays honoured for the rest of that request, which is the ordinary
+   * authenticate-once-per-request contract and is what every gate already assumed it had. Nothing
+   * re-reads this expecting freshness: the one long-lived caller, the live-lane socket, resolves
+   * its grant once at connection setup ([socketGrant]) and never asks again.
+   *
+   * Reads the same two places the operator token is read from, plus `Authorization: Bearer` — an
+   * agent's HTTP client reaches for that header without being told to, and refusing it would be a
+   * papercut with no security value: the bearer is checked identically wherever it arrives.
    */
-  private fun agentGrantFor(call: ApplicationCall): ServeAgentGrantStore.Grant? {
+  private fun agentGrantFor(call: ApplicationCall): ServeAgentGrantStore.Grant? =
+    call.attributes
+      .computeIfAbsent(RESOLVED_AGENT_GRANT) { ResolvedAgentGrant(resolveAgentGrant(call)) }
+      .grant
+
+  /** Boxed so the memo can remember "resolved to nothing" as distinct from "not yet resolved". */
+  private class ResolvedAgentGrant(val grant: ServeAgentGrantStore.Grant?)
+
+  private fun resolveAgentGrant(call: ApplicationCall): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
     val bearer =
       call.request.headers[HttpHeaders.Authorization]
@@ -11478,6 +11503,12 @@ class ServeHttpServer(
   }
 
   companion object {
+    /**
+     * Per-call memo for [agentGrantFor]. Scoped to one `ApplicationCall`, so it lives and dies with
+     * the request and carries nothing between them.
+     */
+    private val RESOLVED_AGENT_GRANT = AttributeKey<ResolvedAgentGrant>("composeai.agentGrant")
+
     private const val MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
     private const val CATALOG_MCP_AGENT_ACCESS_HEADER = "X-Compose-Preview-Agent-Access"
     private const val MAX_CATALOG_MCP_BYTES = 1024L * 1024
