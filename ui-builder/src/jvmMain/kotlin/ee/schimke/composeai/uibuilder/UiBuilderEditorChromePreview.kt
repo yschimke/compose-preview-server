@@ -40,6 +40,25 @@ fun UiBuilderEditorChromePreview() {
  */
 private const val EDITOR_CHROME_PREVIEW_SELECTION = "search-placeholder"
 
+/**
+ * The inspector with a layout container selected.
+ *
+ * A second preview rather than a second selection on the first, because they answer different
+ * questions: that one is the editor's shape, this one is what the property panel will actually let
+ * a person change about a screen's layout. `discover-grid` is a `layout/lazy-grid`, which declares
+ * spacing, an adaptive column rule and a content padding — the three shapes the inspector used to
+ * refuse.
+ */
+@Preview(widthDp = 1600, heightDp = 900)
+@Composable
+fun UiBuilderLayoutInspectorPreview() {
+  UiBuilderEditor(
+    document = editorChromePreviewDocument,
+    catalog = editorChromePreviewCatalog,
+    initialSelectedNodeId = "discover-grid",
+  )
+}
+
 private val editorChromePreviewDocument: UiBuilderDocument by lazy {
   UiBuilderReducer.replay(
       Json.parseToJsonElement(previewResource("/jetcaster-discover-operations-v1.json")).jsonObject

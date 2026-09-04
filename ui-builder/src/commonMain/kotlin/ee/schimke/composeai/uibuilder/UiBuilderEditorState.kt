@@ -634,7 +634,17 @@ class UiBuilderEditorReducer(
     return component.properties
       .filterNot { it.name in THEME_PROPERTIES }
       .filter { nodes.size == 1 || it.name in shared }
-      .map { property ->
+      .flatMap { property ->
+        val objectEdges =
+          property.editor?.objectKind?.let { kind ->
+            EDITOR_OBJECT_VALUE_EDGES[kind]?.let { kind to it }
+          }
+        if (objectEdges != null) {
+          val (kind, edges) = objectEdges
+          return@flatMap edges.map { edge ->
+            objectEdgeField(state, nodes, node, property, kind, edge)
+          }
+        }
         val encoded = node.properties[property.name] as? JsonObject
         val value = encoded?.get("value")
         val typeNames = property.typeNames() - "null"
@@ -668,23 +678,68 @@ class UiBuilderEditorReducer(
           nodes.map { (it.properties[property.name] as? JsonObject)?.get("value") }.distinct()
         val mixed = encodedValues.size > 1
         EditorPropertyField(
-          nodeCount = nodes.size,
-          mixed = mixed,
-          boundVariable = boundVariables.singleOrNull(),
-          nodeId = node.id,
-          name = property.name,
-          label = property.name.humanLabel(),
-          required = property.required,
-          control = control,
-          value = if (mixed) "" else value?.jsonPrimitive?.content ?: "",
-          choices =
-            property.allowedValues.mapNotNull { it.jsonPrimitive.contentOrNull } +
-              property.editor?.suggestedValues.orEmpty(),
-          numberBounds = numberBounds,
-          error = state.propertyErrors[EditorPropertyLocation(node.id, property.name)],
-          notes = property.notes,
-        )
+            nodeCount = nodes.size,
+            mixed = mixed,
+            boundVariable = boundVariables.singleOrNull(),
+            nodeId = node.id,
+            name = property.name,
+            label = property.name.humanLabel(),
+            required = property.required,
+            control = control,
+            value = if (mixed) "" else value?.jsonPrimitive?.content ?: "",
+            choices =
+              property.allowedValues.mapNotNull { it.jsonPrimitive.contentOrNull } +
+                property.editor?.suggestedValues.orEmpty(),
+            numberBounds = numberBounds,
+            error = state.propertyErrors[EditorPropertyLocation(node.id, property.name)],
+            notes = property.notes,
+          )
+          .let(::listOf)
       }
+  }
+
+  /**
+   * One numeric edge of an object-valued property, as its own number field.
+   *
+   * Four fields rather than one composite control: the edges are independent numbers with their own
+   * bounds, and a padding edited edge by edge reuses the number control's parsing, its bounds
+   * message and its behaviour across a multi-selection instead of growing a second copy of all
+   * three. The field is addressed as `property.edge`, and [commitProperty] merges it back into the
+   * whole value, because the wire carries one `padding` and not four numbers.
+   */
+  private fun objectEdgeField(
+    state: UiBuilderEditorState,
+    nodes: List<UiBuilderNode>,
+    anchor: UiBuilderNode,
+    property: PropertyCapability,
+    kind: String,
+    edge: EditorObjectEdge,
+  ): EditorPropertyField {
+    val values =
+      nodes
+        .map { other ->
+          (other.properties[property.name] as? JsonObject)
+            ?.takeIf { it["type"]?.jsonPrimitive?.contentOrNull == kind }
+            ?.get(edge.field)
+            ?.jsonPrimitive
+            ?.contentOrNull
+        }
+        .distinct()
+    val mixed = values.size > 1
+    return EditorPropertyField(
+      nodeCount = nodes.size,
+      mixed = mixed,
+      nodeId = anchor.id,
+      name = "${property.name}.${edge.field}",
+      label = "${property.name.humanLabel()} · ${edge.label}",
+      // An edge is never required on its own: the value is required or absent as a whole.
+      required = false,
+      control = EditorPropertyControl.Number,
+      value = if (mixed) "" else values.singleOrNull() ?: edge.minimum.format(),
+      numberBounds = EditorNumberBounds(edge.minimum, edge.maximum, 1.0, integer = false),
+      error = state.propertyErrors[EditorPropertyLocation(anchor.id, property.name)],
+      notes = property.notes,
+    )
   }
 
   fun themeSettings(state: UiBuilderEditorState): EditorThemeSettings {
@@ -804,14 +859,18 @@ class UiBuilderEditorReducer(
   ): UiBuilderEditorState {
     val sequence = state.operationSequence + 1
     val node = state.document.nodes[nodeId] ?: return state
-    val property = catalog.componentsById[node.componentId]?.propertiesByName?.get(propertyName)
+    // `contentPadding.topDp` addresses one edge of an object-valued property; the wire still
+    // carries the whole value, so everything below works on the base name.
+    val baseName = propertyName.substringBefore('.')
+    val edgeName = propertyName.substringAfter('.', missingDelimiterValue = "").ifEmpty { null }
+    val property = catalog.componentsById[node.componentId]?.propertiesByName?.get(baseName)
     if (property == null) {
       return state.rejected(
         sequence,
         RejectionCode.INVALID_PROPERTY,
-        "Property $propertyName is not declared by ${node.componentId}",
+        "Property $baseName is not declared by ${node.componentId}",
         nodeId,
-        propertyName,
+        baseName,
       )
     }
     val field =
@@ -824,7 +883,7 @@ class UiBuilderEditorReducer(
         RejectionCode.INVALID_PROPERTY,
         parsed.message,
         nodeId,
-        propertyName,
+        baseName,
       )
     }
     val value = (parsed as PropertyDraft.Valid).value
@@ -834,30 +893,44 @@ class UiBuilderEditorReducer(
     val targets =
       (state.selection.filter { it != nodeId } + nodeId).mapNotNull { id ->
         state.document.nodes[id]?.takeIf {
-          catalog.componentsById[it.componentId]?.propertiesByName?.containsKey(propertyName) ==
-            true
+          catalog.componentsById[it.componentId]?.propertiesByName?.containsKey(baseName) == true
         }
       }
     val operations = mutableListOf<DesignOperation>()
     targets.forEach { target ->
       // Each node keeps its own encoded type. Two nodes can hold the same property as a literal and
       // as a token, and rewriting one to the other's shape would change more than was asked.
-      val existingType =
-        (target.properties[propertyName] as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull
-      val encoded = literal(existingType ?: field.defaultEncodedType(), value)
+      val existingValue = target.properties[baseName] as? JsonObject
+      val existingType = existingValue?.get("type")?.jsonPrimitive?.contentOrNull
+      val encoded =
+        if (edgeName == null) literal(existingType ?: field.defaultEncodedType(), value)
+        else
+          objectValueWithEdge(
+            kind = property.editor?.objectKind ?: existingType.orEmpty(),
+            existing = existingValue,
+            edgeName = edgeName,
+            edgeValue = value,
+          )
+            ?: return state.rejected(
+              sequence,
+              RejectionCode.INVALID_PROPERTY,
+              "${field.label} cannot be safely edited from its catalog metadata",
+              target.id,
+              baseName,
+            )
       // Validated per node rather than once for the anchor: the same value can be legal on one
       // component and not another, and a rejected edit must reject the whole batch rather than
       // apply to the nodes that happened to come first.
-      validator.validate(state.document, target.id, propertyName, encoded)?.let { issue ->
+      validator.validate(state.document, target.id, baseName, encoded)?.let { issue ->
         return state.rejected(
           sequence,
           RejectionCode.INVALID_PROPERTY,
           issue.message,
           target.id,
-          propertyName,
+          baseName,
         )
       }
-      operations += DesignOperation.SetProperty(target.id, propertyName, encoded)
+      operations += DesignOperation.SetProperty(target.id, baseName, encoded)
     }
     if (operations.isEmpty()) return state
     return state
@@ -1973,6 +2046,69 @@ private fun JsonElement.asLiteral(propertyName: String): JsonObject {
 
 private fun literal(type: String, value: JsonElement): JsonObject =
   JsonObject(mapOf("type" to JsonPrimitive(type), "value" to value))
+
+/** One numeric edge of an object-valued property the editor knows how to author. */
+internal data class EditorObjectEdge(
+  val field: String,
+  val label: String,
+  val minimum: Double,
+  val maximum: Double,
+)
+
+/**
+ * The object-valued shapes the inspector can author, and the numeric edges each is made of.
+ *
+ * Closed on purpose. A property the catalog declares as `"object"` and this map does not name stays
+ * unsupported, which is the safe answer: `itemSpans` is an arbitrary map of child id to span and
+ * there is no honest four-field control for it.
+ */
+internal val EDITOR_OBJECT_VALUE_EDGES: Map<String, List<EditorObjectEdge>> =
+  mapOf(
+    "padding" to
+      listOf(
+        EditorObjectEdge("startDp", "start", 0.0, MAXIMUM_AUTHORED_EDGE_DP),
+        EditorObjectEdge("topDp", "top", 0.0, MAXIMUM_AUTHORED_EDGE_DP),
+        EditorObjectEdge("endDp", "end", 0.0, MAXIMUM_AUTHORED_EDGE_DP),
+        EditorObjectEdge("bottomDp", "bottom", 0.0, MAXIMUM_AUTHORED_EDGE_DP),
+      ),
+    "adaptiveGrid" to
+      listOf(
+        EditorObjectEdge("minimumCellWidthDp", "minimum cell width", 1.0, MAXIMUM_AUTHORED_EDGE_DP)
+      ),
+  )
+
+private const val MAXIMUM_AUTHORED_EDGE_DP = 4096.0
+
+/**
+ * The whole object value with one edge replaced, or null when the shape is not one this editor
+ * authors.
+ *
+ * Every edge is written, not just the one that changed: the wire carries a `padding` as four
+ * numbers and a value missing one of them is a different value, so an edge absent from the document
+ * takes its own minimum rather than disappearing.
+ */
+private fun objectValueWithEdge(
+  kind: String,
+  existing: JsonObject?,
+  edgeName: String,
+  edgeValue: JsonElement,
+): JsonObject? {
+  val edges = EDITOR_OBJECT_VALUE_EDGES[kind] ?: return null
+  if (edges.none { it.field == edgeName }) return null
+  val carried = existing?.takeIf { it["type"]?.jsonPrimitive?.contentOrNull == kind }
+  return JsonObject(
+    buildMap {
+      put("type", JsonPrimitive(kind))
+      edges.forEach { edge ->
+        put(
+          edge.field,
+          if (edge.field == edgeName) edgeValue
+          else carried?.get(edge.field) ?: JsonPrimitive(edge.minimum),
+        )
+      }
+    }
+  )
+}
 
 private sealed interface PropertyDraft {
   data class Valid(val value: JsonElement) : PropertyDraft

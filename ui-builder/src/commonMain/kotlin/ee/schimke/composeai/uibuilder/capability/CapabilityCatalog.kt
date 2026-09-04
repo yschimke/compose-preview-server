@@ -89,6 +89,12 @@ data class PropertyCapability(
 @Serializable
 data class PropertyEditorCapability(
   val control: PropertyEditorControl? = null,
+  /**
+   * For a property the catalog declares only as `"object"`, which of the closed value shapes it
+   * holds — `padding`, `adaptiveGrid`. The catalog says `"object"` and stops, so without this the
+   * inspector cannot tell a four-edge padding from an arbitrary map and refuses to edit either.
+   */
+  val objectKind: String? = null,
   val minimum: Double? = null,
   val maximum: Double? = null,
   val step: Double? = null,
@@ -204,9 +210,32 @@ object CapabilityCatalogParser {
     return when ((property.jsonType as? JsonPrimitive)?.contentOrNull) {
       "string" -> PropertyEditorCapability(control = PropertyEditorControl.TEXT)
       "boolean" -> PropertyEditorCapability(control = PropertyEditorControl.BOOLEAN)
+      // A numeric property carries its unit in its name, and that is enough to give it a range.
+      //
+      // Without one it has no bounds, and a number with no bounds is `Unsupported` in the
+      // inspector — which is how every spacing, size, elevation and thickness in this catalog came
+      // to be uneditable while `m3/text` had six working number fields. Fourteen of the catalog's
+      // twenty-two numeric properties were in that state, including `verticalSpacingDp` on Column
+      // and `horizontalSpacingDp` on Row: the two controls a person reaches for first.
+      //
+      // A rule rather than fourteen more entries in [EDITOR_OVERRIDES], because the next component
+      // to declare a `…Dp` should arrive editable rather than waiting for someone to notice. An
+      // explicit override still wins: it is consulted above this.
+      "number",
+      "integer" ->
+        if (property.name.endsWith("Dp")) numberEditor(0.0, MAXIMUM_AUTHORED_DP, 1.0) else null
       else -> null
     }
   }
+
+  /**
+   * Wide enough for any dimension this renderer can lay out and narrow enough to stay a dimension.
+   *
+   * The bound is not a design opinion about how much padding is reasonable — it is the range the
+   * renderer and the Compose exporter both round trip, which is what a number editor's bounds mean
+   * everywhere else in this file.
+   */
+  private const val MAXIMUM_AUTHORED_DP = 4096.0
 
   private val MATERIAL_COLOR_TOKENS =
     listOf(
@@ -240,7 +269,17 @@ object CapabilityCatalogParser {
       ("m3/text" to "minLines") to numberEditor(1.0, 100.0, 1.0),
       ("m3/text" to "maxLines") to numberEditor(1.0, 100.0, 1.0),
       ("m3/text" to "weight") to numberEditor(0.1, 100.0, 0.1),
+      // Declared `"object"` and nothing else, so the shape has to be named here. Both are closed
+      // protocol value types the renderer already reads and the exporter already emits; only the
+      // inspector could not reach them.
+      ("layout/lazy-column" to "contentPadding") to objectEditor("padding"),
+      ("layout/lazy-grid" to "contentPadding") to objectEditor("padding"),
+      ("layout/lazy-row" to "contentPadding") to objectEditor("padding"),
+      ("m3/horizontal-floating-toolbar" to "contentPadding") to objectEditor("padding"),
+      ("layout/lazy-grid" to "columns") to objectEditor("adaptiveGrid"),
     )
+
+  private fun objectEditor(kind: String) = PropertyEditorCapability(objectKind = kind)
 
   private fun numberEditor(
     minimum: Double,
