@@ -1225,8 +1225,11 @@ class UiBuilderEditorReducer(
     }
     val operations = mutableListOf<DesignOperation>()
     val copies = mutableListOf<String>()
+    // Every id this batch allocates, so two copies in one duplicate cannot collide with each other
+    // or with anything the document already holds.
+    val taken = state.document.nodes.keys.toMutableSet()
     targets.forEach { nodeId ->
-      val copyId = state.document.freshNodeId("$nodeId-copy", sequence)
+      val copyId = freshCopyId(state.document.freshNodeId("$nodeId-copy", sequence), taken)
       state.document.nodes.appendDuplicateSubtree(
         sourceNodeId = nodeId,
         copyNodeId = copyId,
@@ -1235,6 +1238,7 @@ class UiBuilderEditorReducer(
         // from rather than piling up at the end of the slot.
         afterNodeId = nodeId,
         operations = operations,
+        taken = taken,
       )
       copies += copyId
     }
@@ -1661,10 +1665,11 @@ class UiBuilderEditorReducer(
     val operations = mutableListOf<DesignOperation>()
     val pastedIds = mutableListOf<String>()
     var after = state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
+    val taken = state.document.nodes.keys.toMutableSet()
     clipboard.rootNodeIds.forEachIndexed { index, rootId ->
       // Numbered per root as well as per paste, so two roots in one batch cannot collide with each
       // other the way two pastes of one root would collide without `freshNodeId`.
-      val pasteId = state.document.freshNodeId("$rootId-paste-$index", sequence)
+      val pasteId = freshCopyId(state.document.freshNodeId("$rootId-paste-$index", sequence), taken)
       // The clipboard's own nodes are the source, not the document's — the subtree it names may
       // have been cut, or edited since, and a paste has to reproduce what was copied either way.
       clipboard.nodes.appendDuplicateSubtree(
@@ -1673,6 +1678,7 @@ class UiBuilderEditorReducer(
         parent = destination,
         afterNodeId = after,
         operations = operations,
+        taken = taken,
       )
       // Each lands after the previous, so a multi-node paste keeps the order it was copied in.
       after = pasteId
@@ -2168,34 +2174,85 @@ private fun UiBuilderDocument.freshNodeId(preferred: String, sequence: Int): Str
   return "$numbered-$suffix"
 }
 
+/**
+ * The properties that identify an *instance* rather than name content.
+ *
+ * Taken from what the Compose exporter does with them: `stableKey`, falling back to
+ * `scrollStateKey`, becomes a lazy item's `key(…)`, and two siblings sharing one is a runtime
+ * failure in Compose rather than a cosmetic clash. `assetKey` and `iconKey` look similar and are
+ * the opposite — they name catalog content that every copy should keep — which is why this is the
+ * exporter's list and not a suffix rule.
+ */
+private val INSTANCE_IDENTITY_PROPERTIES = setOf("stableKey", "scrollStateKey")
+
+/** An id nothing in the document and nothing already allocated in this batch is using. */
+private fun freshCopyId(preferred: String, taken: MutableSet<String>): String {
+  var candidate = preferred
+  var suffix = 2
+  while (!taken.add(candidate)) {
+    candidate = "$preferred-$suffix"
+    suffix++
+  }
+  return candidate
+}
+
 private fun Map<String, UiBuilderNode>.appendDuplicateSubtree(
   sourceNodeId: String,
   copyNodeId: String,
   parent: ParentSlot?,
   afterNodeId: String?,
   operations: MutableList<DesignOperation>,
+  taken: MutableSet<String>,
 ) {
   val source = getValue(sourceNodeId)
   operations +=
     DesignOperation.InsertNode(
-      node = source.copy(id = copyNodeId, slots = source.slots.mapValues { emptyList() }),
+      node =
+        source.copy(
+          id = copyNodeId,
+          // A copy is a new instance, so it gets a new identity. Cloning `stableKey` put two
+          // children in one lazy slot under the same `key(…)`, which Compose refuses at runtime,
+          // and cloning `scrollStateKey` made two scroll containers share a position.
+          properties = source.properties.withFreshInstanceIdentity(copyNodeId),
+          slots = source.slots.mapValues { emptyList() },
+        ),
       parent = parent,
       afterNodeId = afterNodeId,
     )
   source.slots.forEach { (slot, children) ->
     var previousCopyId: String? = null
     children.forEach { childId ->
-      val childCopyId = "$copyNodeId-${childId.replace('/', '-')}"
+      // Allocated, not concatenated. A subtree holding a sibling `x-y` and a grandchild `y` under
+      // `x` produced one id twice, and a concatenation can land on an existing node even when the
+      // root it hangs from is fresh — either way the collaboration reducer rejects the whole paste
+      // as a duplicate.
+      val childCopyId = freshCopyId("$copyNodeId-${childId.replace('/', '-')}", taken)
       appendDuplicateSubtree(
         sourceNodeId = childId,
         copyNodeId = childCopyId,
         parent = ParentSlot(copyNodeId, slot),
         afterNodeId = previousCopyId,
         operations = operations,
+        taken = taken,
       )
       previousCopyId = childCopyId
     }
   }
+}
+
+private fun JsonObject.withFreshInstanceIdentity(copyNodeId: String): JsonObject {
+  val present = INSTANCE_IDENTITY_PROPERTIES.filter { it in this }
+  if (present.isEmpty()) return this
+  return JsonObject(
+    toMap() +
+      present.associateWith { name ->
+        val existing = this[name] as? JsonObject
+        literal(
+          existing?.get("type")?.jsonPrimitive?.contentOrNull ?: "string",
+          JsonPrimitive(copyNodeId),
+        )
+      }
+  )
 }
 
 private fun JsonElement.asLiteral(propertyName: String): JsonObject {
