@@ -8,6 +8,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -1397,5 +1398,41 @@ class UiBuilderEditorStateTest {
           )
         }
       }
+  }
+
+  @Test
+  fun `a from-scratch design can declare state and bind a property to it`() {
+    // The whole point of declaring at creation: without it a new design has no state, nothing can
+    // add one, and `BindPropertyToState` has nothing to offer. This is the end-to-end path.
+    val blank =
+      blankUiBuilderDocument(
+        "from-scratch",
+        document.catalogPin,
+        document.environment,
+        listOf(NewDesignState("expanded", NewDesignStateType.Flag, JsonPrimitive(false))),
+      )
+    val state = reducer.initial(blank, blank.roots.single())
+
+    assertEquals(listOf("expanded"), reducer.stateVariableNames(state))
+
+    // Put a chip in the screen, then bind its boolean `selected` to the declared flag.
+    val target = requireNotNull(reducer.dropTarget(state, "m3/filter-chip"))
+    val inserted =
+      reducer.reduce(state, UiBuilderEditorEvent.InsertComponent("m3/filter-chip", target))
+    val chipId = assertIs<String>(inserted.selectedNodeId)
+    val bound =
+      reducer.reduce(
+        inserted,
+        UiBuilderEditorEvent.BindPropertyToState(
+          chipId,
+          "selected",
+          "expanded",
+          equalsValue = "true",
+        ),
+      )
+
+    val encoded = bound.document.nodes.getValue(chipId).properties.getValue("selected").jsonObject
+    assertEquals("stateEquals", encoded["type"]?.jsonPrimitive?.content, encoded.toString())
+    assertEquals("expanded", encoded["variable"]?.jsonPrimitive?.content)
   }
 }
