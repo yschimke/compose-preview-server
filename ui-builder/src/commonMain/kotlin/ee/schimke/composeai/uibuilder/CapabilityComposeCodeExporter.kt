@@ -1099,7 +1099,12 @@ private data class StateDeclaration(
       val base =
         when (declaration?.optionalString("valueType")) {
           "bool" -> "Boolean"
-          "int" -> "Long"
+          // `Int`, not `Long`. Every integer this exporter writes — the initial value, and the
+          // operand of a `stateEquals` or `selectOrClear` — goes through `kotlinLiteral`, which
+          // emits the JSON number verbatim and so unsuffixed. Declaring `Long` made
+          // `mutableStateOf(0)` and `selectedDay == 1` both type-mismatch against it. The
+          // declaration follows the literals rather than the literals growing a suffix.
+          "int" -> "Int"
           "float" -> "Double"
           "string" -> "String"
           else ->
@@ -1107,7 +1112,7 @@ private data class StateDeclaration(
               primitive == null -> "String"
               primitive.isString -> "String"
               primitive.booleanOrNull != null -> "Boolean"
-              primitive.longOrNull != null -> "Long"
+              primitive.longOrNull != null -> "Int"
               primitive.doubleOrNull != null -> "Double"
               else -> "String"
             }

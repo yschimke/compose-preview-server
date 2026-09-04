@@ -6,6 +6,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /**
@@ -191,6 +193,75 @@ class EditorWrapOrderTest {
 
     assertEquals(2, style.nodeCount)
     assertTrue(style.choices.contains("bodyMedium"), style.choices.toString())
+  }
+
+  private fun withState(name: String, declaration: JsonObject): UiBuilderDocument =
+    document.copy(stateVariables = JsonObject(mapOf(name to declaration)))
+
+  private fun textState(name: String) =
+    withState(
+      name,
+      JsonObject(
+        mapOf(
+          "type" to JsonPrimitive("text"),
+          "valueType" to JsonPrimitive("string"),
+          "nullable" to JsonPrimitive(false),
+          "initialValue" to JsonPrimitive("a"),
+          "persistence" to JsonPrimitive("preview"),
+        )
+      ),
+    )
+
+  private fun insertWith(
+    documentWithState: UiBuilderDocument,
+    action: EditorStateAction,
+  ): UiBuilderEditorState {
+    val start = reducer.initial(documentWithState, selectedNodeId = "main-episode-footer")
+    val target = ParentSlot("main-episode-footer", "children")
+    return reducer.reduce(
+      start,
+      UiBuilderEditorEvent.InsertComponentWithAction("m3/button", target, action),
+    )
+  }
+
+  @Test
+  fun `toggling something that is not a flag is refused at insert time`() {
+    // The renderer coerces whatever it finds to a boolean string and carries on, so the preview
+    // looks like it works; the exporter refuses and emits a TODO that throws on the first press.
+    // A design should not be able to hold an action only one of its two consumers can perform.
+    val refused = insertWith(textState("caption"), EditorStateAction.Toggle("caption"))
+
+    val outcome = assertIs<CommandOutcome.Rejected>(refused.lastOutcome)
+    assertTrue(outcome.message.contains("not a flag"), outcome.message)
+  }
+
+  @Test
+  fun `clearing something that is not nullable is refused at insert time`() {
+    val refused = insertWith(textState("caption"), EditorStateAction.SelectOrClear("caption", "x"))
+
+    val outcome = assertIs<CommandOutcome.Rejected>(refused.lastOutcome)
+    assertTrue(outcome.message.contains("not nullable"), outcome.message)
+  }
+
+  @Test
+  fun `toggling a flag is accepted`() {
+    val flag =
+      withState(
+        "expanded",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("value"),
+            "valueType" to JsonPrimitive("bool"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(false),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+      )
+
+    val inserted = insertWith(flag, EditorStateAction.Toggle("expanded"))
+
+    assertIs<CommandOutcome.Accepted>(inserted.lastOutcome)
   }
 
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()

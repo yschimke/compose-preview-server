@@ -880,6 +880,19 @@ class UiBuilderEditorReducer(
           "State variable `${action.variable}` is not nullable, so it cannot be cleared",
         )
       }
+      // `toggle` is `!x`, which needs a boolean. The renderer coerces whatever it finds to a
+      // boolean string and carries on, so the preview looks like it works; the exporter refuses
+      // and emits a `TODO` that throws on the first press. Refusing here keeps the design from
+      // holding an action only one of its two consumers can perform.
+      if (
+        action is EditorStateAction.Toggle && declaredStateKind(declaration) != StateKind.BOOLEAN
+      ) {
+        return state.rejected(
+          sequence,
+          RejectionCode.INVALID_PROPERTY,
+          "State variable `${action.variable}` is not a flag, so it cannot be toggled",
+        )
+      }
       val bindings = JsonObject(mapOf("click" to JsonArray(listOf(action.encoded(declaration)))))
       val index = operations.indexOfFirst { it is DesignOperation.InsertNode }
       val root = operations[index] as DesignOperation.InsertNode

@@ -361,6 +361,40 @@ class ComposeExportActionTest {
   }
 
   @Test
+  fun `an integer state and the values compared against it are the same Kotlin type`() {
+    // `kotlinLiteral` emits a JSON number verbatim, so every integer this exporter writes is an
+    // unsuffixed `Int` literal. Declaring the variable `Long` made both the initial value and a
+    // comparison operand mismatch against it.
+    val document =
+      documentDeclaring(
+        "selectedDay",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("selection"),
+            "valueType" to JsonPrimitive("int"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(0),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+        listOf(
+          JsonObject(
+            mapOf(
+              "type" to JsonPrimitive("set"),
+              "variable" to JsonPrimitive("selectedDay"),
+              "value" to JsonPrimitive(1),
+            )
+          )
+        ),
+      )
+    val source = assertNotNull(CapabilityComposeCodeExporter.export(document, catalog).source)
+
+    assertTrue(source.contains("var selectedDay: Int by remember { mutableStateOf(0) }"), source)
+    assertTrue(source.contains("selectedDay = 1"), source)
+    assertFalse(source.contains("Long"), source)
+  }
+
+  @Test
   fun `only components whose click the exporter emits are offered for action insertion`() {
     // `click` is universal in the renderer, so this used to offer every component the destination
     // accepted. The exporter emits a handler only where the component's emitter takes an onClick;
