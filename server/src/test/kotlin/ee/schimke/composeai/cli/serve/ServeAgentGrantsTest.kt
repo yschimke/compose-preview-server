@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import kotlin.test.Test
@@ -72,9 +73,73 @@ class ServeAgentGrantsTest {
 
   @Test
   fun `an approver with repository access may pass playground on`() {
-    val approver = ServeAgentGrants.Approver.github("maintainer", true, AgentGrantScope.PLAYGROUND)
+    val approver =
+      ServeAgentGrants.Approver.github(
+        login = "maintainer",
+        repositoryAccess = true,
+        storeCeiling = AgentGrantScope.PLAYGROUND,
+      )
     assertEquals(AgentGrantScope.PLAYGROUND, approver.ceiling)
     assertEquals("@maintainer", approver.name)
+  }
+
+  @Test
+  fun `images follows the image repository, not the sign-in one`() {
+    // The box gates uploads somewhere the approver has no rights, so `images` is withheld even
+    // though every other capability rides in on their sign-in access.
+    val approver =
+      ServeAgentGrants.Approver.github(
+        login = "maintainer",
+        repositoryAccess = true,
+        imageRepositoryAccess = false,
+        storeCeiling = AgentGrantScope.PLAYGROUND,
+        storeCapabilities =
+          setOf(AgentGrantCapability.IMAGES, AgentGrantCapability.UI_BUILDER_READ),
+      )
+    assertEquals(setOf(AgentGrantCapability.UI_BUILDER_READ), approver.capabilityCeiling)
+  }
+
+  @Test
+  fun `images may be passed on by someone who holds only the image repository`() {
+    // The mirror image, and the reason this is not simply an extra `&&`: access to the upload repo
+    // is the whole of what the image lane asks of a caller, so it is the whole of what an approver
+    // needs to pass that one capability on.
+    val approver =
+      ServeAgentGrants.Approver.github(
+        login = "uploader",
+        repositoryAccess = false,
+        imageRepositoryAccess = true,
+        storeCeiling = AgentGrantScope.PLAYGROUND,
+        storeCapabilities =
+          setOf(AgentGrantCapability.IMAGES, AgentGrantCapability.UI_BUILDER_READ),
+      )
+    assertEquals(setOf(AgentGrantCapability.IMAGES), approver.capabilityCeiling)
+    // …and it buys nothing on the scope ladder, which is still the sign-in repository's question.
+    assertEquals(AgentGrantScope.LIVE, approver.ceiling)
+  }
+
+  @Test
+  fun `one repository for both lanes behaves exactly as before`() {
+    val approver =
+      ServeAgentGrants.Approver.github(
+        login = "maintainer",
+        repositoryAccess = true,
+        storeCeiling = AgentGrantScope.PLAYGROUND,
+        storeCapabilities = setOf(AgentGrantCapability.IMAGES),
+      )
+    assertEquals(setOf(AgentGrantCapability.IMAGES), approver.capabilityCeiling)
+  }
+
+  @Test
+  fun `a box that offers no capabilities grants none, whatever the approver holds`() {
+    val approver =
+      ServeAgentGrants.Approver.github(
+        login = "maintainer",
+        repositoryAccess = true,
+        imageRepositoryAccess = true,
+        storeCeiling = AgentGrantScope.PLAYGROUND,
+      )
+    assertEquals(emptySet(), approver.capabilityCeiling)
   }
 
   @Test

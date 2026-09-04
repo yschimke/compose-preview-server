@@ -1858,32 +1858,15 @@ public class ServeRunner(
       )
       throw IllegalArgumentException("--agent-grant-capabilities images needs the image lane")
     }
-    // **The approver must hold what they are passing on**, and on a GitHub-gated box that is
-    // checked against `--github-auth-repo` — the only repository a session's cached verdict speaks
-    // for. When the image lane gates on a DIFFERENT repository, that verdict says nothing about
-    // whether the approver could upload there themselves, so ticking `images` would let someone
-    // with access to the OAuth repo alone mint a grant that publishes to a repo they have no rights
-    // on. The session stores a login and a boolean, not the visitor's token, so there is nothing
-    // here to re-ask GitHub with; the honest answer is to refuse the combination at startup rather
-    // than to approximate the check.
-    val imageRepository = imageUploadRepository
-    if (
-      AgentGrantCapability.IMAGES in agentGrantCapabilities &&
-        githubAuth != null &&
-        !imageRepository.isNullOrBlank() &&
-        !imageRepository.equals(githubAuthRepo, ignoreCase = true)
-    ) {
-      System.err.println(
-        "serve: --agent-grant-capabilities images refused — the image lane gates on " +
-          "'$imageRepository' but sign-in gates on '${githubAuthRepo ?: "nothing"}', and a " +
-          "signed-in approver's access is only ever verified against the latter. Point " +
-          "--image-upload-repo at --github-auth-repo (or drop it, since it falls back), or drop " +
-          "the capability."
-      )
-      throw IllegalArgumentException(
-        "--agent-grant-capabilities images needs --image-upload-repo to match --github-auth-repo"
-      )
-    }
+    // **The approver must hold what they are passing on**, and for `images` that question is about
+    // the repository the image lane gates on — which need not be the sign-in one. This combination
+    // used to be refused at startup: the session carried a single access bit computed against
+    // `--github-auth-repo`, so on a box whose lanes gated on different repositories there was
+    // nothing to answer with, and approximating it would have let someone with access to the OAuth
+    // repo alone mint a grant publishing where they have no rights. The bit is now computed for
+    // BOTH repositories at sign-in, while the visitor's token is still in hand, and carried in the
+    // session — see [ServeGithubAuthConfig.imageRepository] and `Approver.github`. So the two may
+    // now differ, and the check that matters happens at approval time against the right repository.
     if (agentGrantCapabilities.isNotEmpty()) {
       System.err.println(
         "serve: agent grants may carry " +
@@ -4145,6 +4128,9 @@ public class ServeRunner(
         clientSecret = githubAuthClientSecret!!,
         cookieSecret = githubAuthCookieSecret!!,
         repository = githubAuthRepo!!,
+        // So a session can answer for the image lane too, when it gates somewhere else. Null/equal
+        // costs nothing: no second repository means no second GitHub call at sign-in.
+        imageRepository = imageUploadRepository,
         allowedUsers = githubAuthUsers,
         callbackBaseUrl = githubAuthCallbackBaseUrl,
         cookieDomain = githubAuthCookieDomain,

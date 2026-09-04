@@ -11523,6 +11523,7 @@ class ServeHttpServer(
       return ServeAgentGrants.Approver.github(
         login,
         auth.hasRepositoryAccess(call),
+        auth.hasImageRepositoryAccess(call),
         store.maxScope,
         store.maxCapabilities,
       )
