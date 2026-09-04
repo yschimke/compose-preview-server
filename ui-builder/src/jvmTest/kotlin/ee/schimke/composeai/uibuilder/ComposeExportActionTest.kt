@@ -465,6 +465,42 @@ class ComposeExportActionTest {
   }
 
   @Test
+  fun `a float variable keeps the value it was declared with`() {
+    // The literal used to be spelled through `toLong()`, which saturates: `1e20` came out as
+    // `9223372036854775807.0`, so the preview started from one value and the exported screen from
+    // another. Spelling it from the authored JSON text has neither that problem nor the one the
+    // `.0` exists to stop.
+    listOf(
+        JsonPrimitive(1e20) to "1.0E20",
+        JsonPrimitive(0.5) to "0.5",
+        JsonPrimitive(1) to "1.0",
+        JsonPrimitive(-7) to "-7.0",
+      )
+      .forEach { (initial, expected) ->
+        val document =
+          documentDeclaring(
+            "ratio",
+            JsonObject(
+              mapOf(
+                "type" to JsonPrimitive("value"),
+                "valueType" to JsonPrimitive("float"),
+                "nullable" to JsonPrimitive(false),
+                "initialValue" to initial,
+                "persistence" to JsonPrimitive("preview"),
+              )
+            ),
+            emptyList(),
+          )
+        val source = assertNotNull(CapabilityComposeCodeExporter.export(document, catalog).source)
+
+        assertTrue(
+          source.contains("var ratio: Double by remember { mutableStateOf($expected) }"),
+          "$initial should emit $expected: $source",
+        )
+      }
+  }
+
+  @Test
   fun `a malformed declaration is a diagnostic rather than an exception`() {
     // Export validation never reads `stateVariables`, so a document carrying `"nullable": {}` or
     // `"valueType": []` reached the declaration parser. An accessor that throws on a non-primitive
