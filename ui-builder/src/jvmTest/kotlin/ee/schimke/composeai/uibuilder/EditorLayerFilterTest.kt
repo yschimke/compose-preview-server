@@ -169,5 +169,26 @@ class EditorLayerFilterTest {
     assertEquals(visible[1], next.selectedNodeId)
   }
 
+  @Test
+  fun `an authoritative update does not clear the filter`() {
+    // `authoritativeGeneration` advances for every snapshot and verified delta — including the
+    // confirmation of the user's own saved edit — and reconciliation rebuilt the editor without
+    // carrying this. Typing a filter and then saving cleared what you were looking at.
+    val searching =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = "root-surface"),
+        UiBuilderEditorEvent.SearchLayers("chip"),
+      )
+    assertEquals("chip", searching.layerQuery)
+
+    val reconciled = reducer.reconciled(searching, searching.document.copy(revision = 99))
+
+    assertEquals("chip", reconciled.layerQuery)
+    assertEquals(
+      reducer.visibleTreeRows(searching).map { it.nodeId },
+      reducer.visibleTreeRows(reconciled).map { it.nodeId },
+    )
+  }
+
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
 }
