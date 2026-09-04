@@ -30,6 +30,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receiveStream
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
@@ -148,6 +149,38 @@ internal fun Route.installUiBuilderRoutes(
       ),
       ContentType.Application.Json,
       response.httpStatus(),
+    )
+  }
+
+  /**
+   * The device frames the builder's Screen inspector offers.
+   *
+   * A plain GET rather than a protocol request because the payload is derived from a compile-time
+   * catalog, is identical for every actor, and adding a request type would mean releasing
+   * `ui-builder-protocol`. Read-gated all the same, so the editor's frame menu lives behind the
+   * same door as everything else it fetches — the browser sends cookies on a same-origin GET, so
+   * the wasm host needs no transport of its own.
+   */
+  get(UI_BUILDER_DEVICE_PRESETS_PATH) {
+    when (authorization.authorize(call, UiBuilderRouteCapability.READ)) {
+      is UiBuilderAuthorizationDecision.Authorized -> Unit
+      UiBuilderAuthorizationDecision.Missing -> {
+        call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+        call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+        return@get
+      }
+      UiBuilderAuthorizationDecision.Forbidden -> {
+        call.respondText("UI-builder read access required", status = HttpStatusCode.Forbidden)
+        return@get
+      }
+    }
+    // The catalog cannot change without a redeploy, so the response is immutable for the life of
+    // the process; the editor fetches it once per page load and an ETag saves the second one.
+    call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=300")
+    call.respondText(
+      UI_BUILDER_JSON.encodeToString(UiBuilderDevicePresets.payload),
+      ContentType.Application.Json,
+      HttpStatusCode.OK,
     )
   }
 
@@ -277,5 +310,6 @@ private val UI_BUILDER_JSON = Json {
 
 internal const val UI_BUILDER_REQUEST_PATH = "/api/ui-builder/v1/requests"
 internal const val UI_BUILDER_UPDATES_PATH = "/api/ui-builder/v1/designs/{designId}/updates"
+internal const val UI_BUILDER_DEVICE_PRESETS_PATH = "/api/ui-builder/v1/device-presets"
 private const val INVALID_REQUEST_ID = "invalid"
 private const val MAX_UI_BUILDER_REQUEST_BYTES = 8 * 1024 * 1024
