@@ -621,15 +621,21 @@ class ServeAgentGrantRoutingTest {
     val staged = get("/render/example.png?rcPlayer=cmp-jvm", token = preview)
     assertEquals(200, staged.first)
 
-    // The admission is the lane's, not the parameter's. `cmp-wasm` is staged by nothing here, so
-    // the same shape of request has no published bytes to replay and would have to make some.
-    assertEquals(403, get("/render/example.png?rcPlayer=cmp-wasm", token = preview).first)
-    // …and a preview with no row at all, on a lane that is staged for another preview.
+    // The admission is the lane's, not the parameter's: a preview with no staged row reaches the
+    // subprocess instead, and is refused there.
     assertEquals(403, get("/render/Anything.png?rcPlayer=cmp-jvm", token = preview).first)
+
+    // A client-side backend is not a server-side render lane at all — `ServeOverrides.parse` calls
+    // it a bad parameter before any of this is reached, and that stays a 400 rather than becoming a
+    // scope refusal. Asserted so the two kinds of "no" do not get conflated later.
+    assertEquals(400, get("/render/example.png?rcPlayer=cmp-wasm", token = preview).first)
 
     // Still only *bare*. Anything alongside the player selection is a real override again, and
     // `scroll` is a full-page capture made to order however published the player's lane is.
-    assertEquals(403, get("/render/example.png?rcPlayer=cmp-jvm&uiMode=dark", token = preview).first)
+    assertEquals(
+      403,
+      get("/render/example.png?rcPlayer=cmp-jvm&uiMode=dark", token = preview).first,
+    )
     assertEquals(403, get("/render/example.png?rcPlayer=cmp-jvm&scroll=1", token = preview).first)
 
     // A `live` grant reaches all of them, so the refusals above are the scope talking and not a
@@ -637,6 +643,22 @@ class ServeAgentGrantRoutingTest {
     val live = grantedToken(scope = "live")
     assertTrue(get("/render/example.png?rcPlayer=cmp-jvm", token = live).first != 403)
     assertTrue(get("/render/example.png?rcPlayer=cmp-jvm&uiMode=dark", token = live).first != 403)
+  }
+
+  @Test
+  fun `an override-free browse is never refused for having no bytes in hand yet`() {
+    // The regression the deferred refusal invited. `bakedRender` is a local-only fast path — it
+    // must not trigger the delivery-branch fetch — so a catalog whose published image has not been
+    // pulled answers null from the `cached` chain and `render` serves it after fetching. Reading
+    // that null as "about to commission" would refuse ordinary browsing on a cold catalog, which
+    // this gate has always admitted and which no grant scope was ever asked about.
+    //
+    // Pinned on a preview this host declares but has no local PNG for, which is the shape that
+    // answers null. The point is only that it is not a 403.
+    val preview = grantedToken(scope = "preview")
+
+    assertTrue(get("/render/example.png", token = preview).first != 403)
+    assertTrue(get("/render/Anything.png", token = preview).first != 403)
   }
 
   @Test
