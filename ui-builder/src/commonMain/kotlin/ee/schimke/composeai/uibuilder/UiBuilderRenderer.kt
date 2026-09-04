@@ -461,7 +461,7 @@ private fun RenderNode(
   val measured =
     node.modifiers
       .fold(modifier.onGloballyPositioned { onBounds(node.id, it) }) { result, value ->
-        result.applyModifier(value.jsonObject, node.id, themeCornerRadius)
+        result.applyModifier(value.objectOrEmpty(), themeCornerRadius)
       }
       .then(node.actionModifier(activate, enabled))
   fun slot(name: String) = node.slots[name].orEmpty()
@@ -1206,32 +1206,90 @@ private fun UnsupportedComponentDiagnostic(componentId: String, modifier: Modifi
   }
 }
 
-private fun Modifier.applyModifier(
-  value: JsonObject,
-  nodeId: String,
-  themeCornerRadius: Float,
-): Modifier =
-  when (val type = value.optionalString("type")) {
-    "fillMaxSize" -> fillMaxSize()
-    "fillMaxWidth" -> fillMaxWidth()
-    "padding" -> padding(value.paddingValues())
+private fun Modifier.applyModifier(value: JsonObject, themeCornerRadius: Float): Modifier =
+  when (val plan = uiBuilderModifier(value)) {
+    UiBuilderModifierPlan.FillMaxSize -> fillMaxSize()
+    UiBuilderModifierPlan.FillMaxWidth -> fillMaxWidth()
+    // Applied by the owning BoxScope so it does not contribute to the parent's measurement.
+    UiBuilderModifierPlan.MatchParentSize -> this
+    is UiBuilderModifierPlan.Padding ->
+      padding(plan.startDp.dp, plan.topDp.dp, plan.endDp.dp, plan.bottomDp.dp)
+    is UiBuilderModifierPlan.Size ->
+      when {
+        plan.widthDp != null && plan.heightDp != null -> size(plan.widthDp.dp, plan.heightDp.dp)
+        plan.widthDp != null -> width(plan.widthDp.dp)
+        else -> plan.heightDp?.let { height(it.dp) } ?: this
+      }
+    is UiBuilderModifierPlan.Clip ->
+      clip(shapeFor(plan.shape, themeCornerRadius = themeCornerRadius))
+    // Not an error, for the reason `uiBuilderStateWrite` gives: one unusable modifier costs one
+    // node its layout, and throwing costs the whole screen.
+    null -> this
+  }
+
+/**
+ * What this renderer can make of one authored modifier, or null when it can make nothing of it.
+ *
+ * Extracted for the reason [uiBuilderStateWrite] was — the reading is pure, and it is the half
+ * worth testing — and separating it from application is what makes an unusable modifier skippable.
+ * Applying one used to throw on three inputs the wire can carry: a `type` this build does not know,
+ * a missing `type`, and a `size` naming neither dimension. Each took the whole preview down
+ * mid-composition, so a document authored by a newer client cost every working part of the screen
+ * rather than one node's layout.
+ */
+internal sealed interface UiBuilderModifierPlan {
+  data object FillMaxSize : UiBuilderModifierPlan
+
+  data object FillMaxWidth : UiBuilderModifierPlan
+
+  data object MatchParentSize : UiBuilderModifierPlan
+
+  data class Padding(
+    val startDp: Float,
+    val topDp: Float,
+    val endDp: Float,
+    val bottomDp: Float,
+  ) : UiBuilderModifierPlan
+
+  /** At least one dimension is usable; a `size` naming neither is not a size. */
+  data class Size(val widthDp: Float?, val heightDp: Float?) : UiBuilderModifierPlan
+
+  data class Clip(val shape: String?) : UiBuilderModifierPlan
+}
+
+internal fun uiBuilderModifier(value: JsonObject): UiBuilderModifierPlan? =
+  when (value.optionalString("type")) {
+    "fillMaxSize" -> UiBuilderModifierPlan.FillMaxSize
+    "fillMaxWidth" -> UiBuilderModifierPlan.FillMaxWidth
+    "matchParentSize" -> UiBuilderModifierPlan.MatchParentSize
+    "padding" ->
+      UiBuilderModifierPlan.Padding(
+        value.number("startDp"),
+        value.number("topDp"),
+        value.number("endDp"),
+        value.number("bottomDp"),
+      )
     "size" -> {
+      // The wire type requires both dimensions and neither is guaranteed to be a number: a JSON
+      // null or a string decodes into the document and reaches here. Reading that as "no size" is
+      // the only thing this can honestly do with it.
       val width = value.numberOrNull("widthDp")
       val height = value.numberOrNull("heightDp")
-      when {
-        width != null && height != null -> size(width.dp, height.dp)
-        width != null -> width(width.dp)
-        height != null -> height(height.dp)
-        else ->
-          throw IllegalArgumentException("size modifier on $nodeId requires widthDp or heightDp")
-      }
+      if (width == null && height == null) null else UiBuilderModifierPlan.Size(width, height)
     }
-    "clip" -> clip(shapeFor(value.optionalString("shape"), themeCornerRadius = themeCornerRadius))
-    // Applied by the owning BoxScope so it does not contribute to the parent's measurement.
-    "matchParentSize" -> this
-    null -> throw IllegalArgumentException("modifier on $nodeId requires a type")
-    else -> throw IllegalArgumentException("unsupported modifier '$type' on $nodeId")
+    // A spelling `shapeFor` cannot resolve is rejected here rather than there, so the application
+    // step has nothing left to fail on. `shape` is a free string on the wire.
+    "clip" ->
+      value.optionalString("shape").let { shape ->
+        if (isResolvableShape(shape)) UiBuilderModifierPlan.Clip(shape) else null
+      }
+    else -> null
   }
+
+private fun isResolvableShape(value: String?): Boolean =
+  value.isNullOrEmpty() || value in NAMED_SHAPES || value.toFloatOrNull() != null
+
+private val NAMED_SHAPES = setOf("large", "medium", "small")
 
 private fun UiBuilderNode.actionModifier(
   activate: () -> Unit,
