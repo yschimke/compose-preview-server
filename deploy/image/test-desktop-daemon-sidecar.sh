@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Guard: every live-render backend this image claims to serve must have its daemon sidecar baked in
-# AND pointed at, not one of the two.
+# Guard: every lane this image claims to serve must have its sidecar baked in AND pointed at, not
+# one of the two. Mostly live-render backends; the playground's compiler jars are here too, because
+# they are found by the same lookup and were missing in the same way.
 #
 # Why this needs a test rather than a comment. A missing sidecar does not fail the build, refuse the
 # catalog, or show up in the logs an operator reads: `ServeBundleDaemon.materialize` calls
@@ -42,6 +43,13 @@ sidecars=(
   # baked, carried into the runtime stage, named by the sysprop that locates it — different
   # consequence, which is why the message is per row rather than one line for all four.
   "cmp-jvm|lib-rcjvm|composeai.cli.libRcjvmDir|?rcPlayer=cmp-jvm answers 503 and the compare wall can never show that player"
+  # Not a render backend at all, and here because it fails by the identical mechanism: the
+  # PLAYGROUND's Kotlin Build Tools jars are located by the same `locateBundleSidecarJars` call,
+  # from the same CLI tarball, and were the one sidecar this image deliberately did not lift. The
+  # consequence is louder than a degraded lane — `openPlaygroundService` returns null and the
+  # server serves no playground — but it is just as invisible to a build: preview.coo.ee logged
+  # "playground admitted" and then "playground compiler unavailable" on the next line, for months.
+  "playground|lib-bta|composeai.cli.libBtaDir|/playground is admitted and then disabled, so the box serves no playground at all"
 )
 
 # The line that puts the directory into the RUNTIME stage. Anchored to `COPY --from=`, so a stage

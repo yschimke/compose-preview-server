@@ -32,6 +32,25 @@ data class ServeGithubAuthConfig(
   val clientSecret: String,
   val cookieSecret: String,
   val repository: String,
+  /**
+   * A **second** repository whose access this session should also record, for a lane gated on
+   * something other than [repository] — today the image lane's `--image-upload-repo`.
+   *
+   * The session cookie is the only thing an approval page has to reason with: the visitor's token
+   * is deliberately not retained, so a bit that was not computed at sign-in can never be recovered
+   * later. One boolean therefore speaks for exactly one repository, and a lane gated elsewhere used
+   * to have no honest answer available at all — which is why the combination was refused at
+   * startup. Computing the second bit here, from the same token and in the same round trip that
+   * computes the first, is what lets the two gates differ.
+   *
+   * Null, or equal to [repository], means there is no second bit to compute: the flag mirrors
+   * [GitHubOAuthUser.repositoryAccess] and no extra GitHub call is made.
+   *
+   * It also widens the consent asked for at sign-in when it needs to: the token has to be able to
+   * read BOTH repositories, so a private one here forces the wider scope even beside a public
+   * [repository]. See [ServeGithubAuth.requestedScope].
+   */
+  val imageRepository: String? = null,
   val allowedUsers: Set<String> = emptySet(),
   val callbackBaseUrl: String? = null,
   /**
@@ -199,7 +218,8 @@ class ServeGithubAuth(
     // This is the moment GitHub actually vouched for the visitor, so it anchors the absolute cap
     // that [refreshSession] may never slide a session past.
     val authenticatedAt = clock.millis()
-    val session = signedSession(user.login, user.repositoryAccess, authenticatedAt)
+    val session =
+      signedSession(user.login, user.repositoryAccess, user.imageRepositoryAccess, authenticatedAt)
     val secure = isSecure(call, config.callbackBaseUrl)
     call.response.cookies.append(authCookie(session, maxAge = SESSION_TTL_SECONDS, secure = secure))
     call.response.cookies.append(stateCookie("", maxAge = 0, secure = secure))
@@ -264,7 +284,13 @@ class ServeGithubAuth(
     if (expiresAt <= session.expiresAt) return
     call.response.cookies.append(
       authCookie(
-        signedSession(session.login, session.repositoryAccess, authenticatedAt, expiresAt),
+        signedSession(
+          session.login,
+          session.repositoryAccess,
+          session.imageRepositoryAccess,
+          authenticatedAt,
+          expiresAt,
+        ),
         // The cookie dies with the payload it carries, rather than outliving it as a cookie the
         // browser keeps sending and the server keeps rejecting.
         maxAge = (expiresAt - now) / 1000,
@@ -283,12 +309,55 @@ class ServeGithubAuth(
     return verifySession(cookie)?.repositoryAccess == true
   }
 
+  /**
+   * Access to the repository the **image lane** gates on, which is [accessRepository] unless the
+   * operator pointed `--image-upload-repo` somewhere else. This is what decides whether a signed-in
+   * approver may pass `images` on to an agent — the "never grant what you do not hold" rule, asked
+   * of the repository the grant would actually publish to rather than of the sign-in one.
+   */
+  fun hasImageRepositoryAccess(call: ApplicationCall): Boolean {
+    val cookie = call.request.cookieValue(AUTH_COOKIE) ?: return false
+    return hasImageRepositoryAccess(cookie)
+  }
+
+  /** [hasImageRepositoryAccess] on a raw cookie value, so the rule can be tested without a call. */
+  internal fun hasImageRepositoryAccess(cookie: String): Boolean {
+    val session = verifySession(cookie) ?: return false
+    // A cookie minted before this field existed carries no image bit, and [verifySession] reads
+    // that absence as `false` rather than as a copy of the sign-in bit — correctly, because it
+    // cannot know which repository the signing server asked about. THIS layer can: when the box
+    // gates both lanes on one repository, the sign-in bit was computed against exactly the
+    // repository being asked about, so reading it here is the same question answered, not the
+    // conflation the field exists to end. Without this, deploying the field would refuse every
+    // live session's uploads on a single-repo box until each visitor happened to sign in again.
+    return session.imageRepositoryAccess ||
+      (imageGatesOnSignInRepository && session.repositoryAccess)
+  }
+
+  /**
+   * Whether the image lane gates on the sign-in repository — either because no separate
+   * `--image-upload-repo` was given, or because it names the same repository.
+   */
+  private val imageGatesOnSignInRepository: Boolean
+    get() =
+      config.imageRepository.isNullOrBlank() ||
+        config.imageRepository.equals(config.repository, ignoreCase = true)
+
   fun loginPath(call: ApplicationCall): String {
     val current = call.uriWithQuery()
     return "$START_PATH?return=${urlEncode(current)}"
   }
 
   fun accessRepository(): String = config.repository
+
+  /**
+   * The repository [hasImageRepositoryAccess] speaks for: `--image-upload-repo` when the operator
+   * pointed the image lane somewhere else, else the sign-in repository it falls back to. A caller
+   * comparing a lane's gating repository against a session's verdict must compare against THIS, not
+   * against [accessRepository] — that is the whole difference between the two bits.
+   */
+  fun imageAccessRepository(): String =
+    config.imageRepository?.takeIf { it.isNotBlank() } ?: config.repository
 
   fun isRestrictedToAllowedUsers(): Boolean = config.allowedUsers.isNotEmpty()
 
@@ -323,10 +392,10 @@ class ServeGithubAuth(
    */
   internal fun requestedScope(): String =
     config.oauthScope?.trim()?.takeIf { it.isNotEmpty() }
-      ?: if (gatingRepoIsPublic.value) PUBLIC_REPO_SCOPE else PRIVATE_REPO_SCOPE
+      ?: if (gatingReposArePublic.value) PUBLIC_REPO_SCOPE else PRIVATE_REPO_SCOPE
 
   /**
-   * Whether the gating repo is publicly readable, probed **anonymously** and once.
+   * Whether **every** gating repo is publicly readable, probed **anonymously** and once.
    *
    * Anonymous on purpose: this runs before anyone has signed in, so there is no token to use, and a
    * 200 from an unauthenticated read is exactly the definition of "public". Anything else — 404, a
@@ -334,21 +403,36 @@ class ServeGithubAuth(
    * That is the safe direction here: over-requesting inconveniences the visitor, while
    * under-requesting would fail their sign-in outright.
    *
+   * Every repo, not just the sign-in one, because the scope has to cover every question the
+   * callback will ask this token — and since [ServeGithubAuthConfig.imageRepository] arrived that
+   * is two repositories, not one. A public sign-in repo beside a **private** image repo is the
+   * trap: `read:user` alone reads the first fine, cannot read the second, so
+   * [fetchRepositoryAccess] answers false for the image lane and nobody could ever be granted
+   * `images` — a feature that silently never works rather than one that visibly fails. So the
+   * narrow scope is asked for only when the anonymous probe succeeds on all of them.
+   *
    * Note this is the opposite default from the visibility check inside [fetchRepositoryAccess],
    * deliberately. That one decides whether `read` is good enough to run code, so its unknown case
    * has to fall to the stricter *access* rule; this one only decides what to ask consent for, so
    * its unknown case falls to the wider *scope*. Same principle, opposite directions.
    */
-  private val gatingRepoIsPublic: Lazy<Boolean> = lazy {
-    runCatching {
-        val request =
-          Request.Builder()
-            .url("https://api.github.com/repos/${config.repository}")
-            .header(HttpHeaders.Accept, "application/vnd.github+json")
-            .build()
-        anonymousClient.newCall(request).execute().use { it.isSuccessful }
-      }
-      .getOrDefault(false)
+  private val gatingReposArePublic: Lazy<Boolean> = lazy {
+    val repositories = buildList {
+      add(config.repository)
+      config.imageRepository?.takeIf { it.isNotBlank() }?.let(::add)
+    }
+      .distinctBy { it.lowercase() }
+    repositories.all { repository ->
+      runCatching {
+          val request =
+            Request.Builder()
+              .url("https://api.github.com/repos/$repository")
+              .header(HttpHeaders.Accept, "application/vnd.github+json")
+              .build()
+          anonymousClient.newCall(request).execute().use { it.isSuccessful }
+        }
+        .getOrDefault(false)
+    }
   }
 
   /**
@@ -441,14 +525,20 @@ class ServeGithubAuth(
     return StatePayload(nonce, safeReturnTo(rest.substring(secondPipe + 1)), originHost)
   }
 
+  /**
+   * The image flag is **appended**, never interleaved: every older cookie shape stays parseable by
+   * [verifySession] on its own terms, so a running box does not sign everybody out to gain a field.
+   */
   private fun signedSession(
     login: String,
     repositoryAccess: Boolean,
+    imageRepositoryAccess: Boolean,
     authenticatedAt: Long,
     expiresAt: Long = clock.millis() + SESSION_TTL_SECONDS * 1000,
   ): String {
     val repoFlag = if (repositoryAccess) "repo" else "no-repo"
-    return sign("${login.lowercase()}|$repoFlag|$expiresAt|$authenticatedAt")
+    val imageFlag = if (imageRepositoryAccess) "image-repo" else "no-image-repo"
+    return sign("${login.lowercase()}|$repoFlag|$expiresAt|$authenticatedAt|$imageFlag")
   }
 
   private fun verifySession(value: String): SessionPayload? {
@@ -459,15 +549,32 @@ class ServeGithubAuth(
         // Backwards compatible with cookies minted before playground repo-rights gating. They stay
         // authenticated for live preview, but do not satisfy the stricter playground gate.
         2 -> Triple(parts[0], false, parts[1].toLongOrNull())
-        3 -> Triple(parts[0], parts[1] == "repo", parts[2].toLongOrNull())
-        4 -> Triple(parts[0], parts[1] == "repo", parts[2].toLongOrNull())
+        // One branch for every shape from the 3-part form on: each later field was APPENDED, so
+        // the login, the repo flag and the expiry have never moved. The trailing fields the newer
+        // shapes carry are read below, by index, where absence has to mean something specific.
+        3,
+        4,
+        5 -> Triple(parts[0], parts[1] == "repo", parts[2].toLongOrNull())
         else -> return null
       }
     if (expiresAt == null || expiresAt <= clock.millis() || login.isBlank()) return null
     // Absent on the 2- and 3-part forms: those predate the sign-in stamp, so their session simply
     // can't be slid ([refreshSession]) and runs out at its own expiry.
     val authenticatedAt = parts.getOrNull(3)?.toLongOrNull()
-    return SessionPayload(login, repositoryAccess, expiresAt, authenticatedAt)
+    // Absent on every shape minted before the image lane could gate on a second repository. Read as
+    // FALSE rather than as a copy of [repositoryAccess]: an older cookie was signed by a server
+    // that never asked GitHub about the image repository, so treating its one bit as an answer
+    // about a repository it never named is exactly the conflation this field exists to end. The
+    // cost is that a visitor holding such a cookie cannot pass on `images` until it is refreshed
+    // through GitHub, which the absolute cap guarantees.
+    val imageRepositoryAccess = parts.getOrNull(4) == "image-repo"
+    return SessionPayload(
+      login,
+      repositoryAccess,
+      imageRepositoryAccess,
+      expiresAt,
+      authenticatedAt,
+    )
   }
 
   private fun sign(payload: String): String {
@@ -534,6 +641,10 @@ class ServeGithubAuth(
   private data class SessionPayload(
     val login: String,
     val repositoryAccess: Boolean,
+    /**
+     * Access to the image lane's gating repository; see [ServeGithubAuthConfig.imageRepository].
+     */
+    val imageRepositoryAccess: Boolean,
     val expiresAt: Long,
     /** When GitHub last vouched for this visitor; null on a cookie minted before the stamp. */
     val authenticatedAt: Long?,
@@ -607,7 +718,16 @@ class ServeGithubAuth(
   }
 }
 
-data class GitHubOAuthUser(val login: String, val repositoryAccess: Boolean)
+data class GitHubOAuthUser(
+  val login: String,
+  val repositoryAccess: Boolean,
+  /**
+   * Access to [ServeGithubAuthConfig.imageRepository], when the box gates a lane on a repository
+   * other than the sign-in one. Defaults to [repositoryAccess], which is the answer whenever the
+   * two repositories are the same — or when nobody asked about a second one.
+   */
+  val imageRepositoryAccess: Boolean = repositoryAccess,
+)
 
 class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   fun verify(
@@ -620,9 +740,17 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     if (config.allowedUsers.isNotEmpty() && login.lowercase() !in config.allowedUsers) {
       error("GitHub user $login is not allowed")
     }
+    val repositoryAccess = fetchRepositoryAccess(token, config.repository, login)
     GitHubOAuthUser(
       login,
-      repositoryAccess = fetchRepositoryAccess(token, config.repository, login),
+      repositoryAccess = repositoryAccess,
+      // Same token, same rule, one more round trip — and only when the operator actually gated a
+      // lane somewhere else. This is the only moment the visitor's token exists here, so a bit not
+      // taken now is a bit that cannot be taken at all.
+      imageRepositoryAccess =
+        config.imageRepository
+          ?.takeIf { !it.equals(config.repository, ignoreCase = true) }
+          ?.let { fetchRepositoryAccess(token, it, login) } ?: repositoryAccess,
     )
   }
 

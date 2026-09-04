@@ -656,12 +656,25 @@ fi
 # missing ones — an operator who points a flag at their own sidecar keeps it, which is the whole
 # reason this appends per-flag rather than re-appending the baked string wholesale.
 #
+# `libBtaDir` is in the list for the same mechanical reason and a different symptom: it is not a
+# render lane at all but the PLAYGROUND's compiler, and losing it disables that lane outright
+# ("playground compiler unavailable — no lib-bta/ in the CLI install") on a box that otherwise
+# admits it. Same silent shape — a configured feature that simply is not there.
+#
+# `libRcjvmDir` is the third symptom and the loudest, which is exactly why it was missed here: the
+# `cmp-jvm` render lane answers a visible 503 ("needs lib-rcjvm and lib-daemon-desktop on the CLI
+# install") rather than degrading quietly, so it reads as a broken player rather than as a lost
+# flag. The flag is baked and paired in the Dockerfile like every other, and was the one this
+# stanza never re-asserted.
+#
 # The directories are variables so the guard test can point them at fixtures; they default to the
 # paths the Dockerfile COPYs into.
 # >>> sidecar-restore
 : "${LIB_DAEMON_ANDROID_DIR:=/opt/lib-daemon-android}"
 : "${LIB_DAEMON_DESKTOP_DIR:=/opt/lib-daemon-desktop}"
 : "${LIB_RENDERER_DIR:=/opt/lib-renderer}"
+: "${LIB_BTA_DIR:=/opt/lib-bta}"
+: "${LIB_RCJVM_DIR:=/opt/lib-rcjvm}"
 sidecar_restored=()
 restore_sidecar_flag() {
   local prop="$1" dir="$2"
@@ -676,11 +689,14 @@ restore_sidecar_flag() {
 restore_sidecar_flag composeai.cli.libDaemonAndroidDir "${LIB_DAEMON_ANDROID_DIR}"
 restore_sidecar_flag composeai.cli.libDaemonDesktopDir "${LIB_DAEMON_DESKTOP_DIR}"
 restore_sidecar_flag composeai.cli.libRendererDir "${LIB_RENDERER_DIR}"
+restore_sidecar_flag composeai.cli.libBtaDir "${LIB_BTA_DIR}"
+restore_sidecar_flag composeai.cli.libRcjvmDir "${LIB_RCJVM_DIR}"
 if ((${#sidecar_restored[@]})); then
   echo "entrypoint: JAVA_TOOL_OPTIONS was missing ${sidecar_restored[*]} — restored from the" \
     "image. Something replaced the baked JAVA_TOOL_OPTIONS (setting it in the compose file or" \
     ".env does that); use SERVE_JAVA_OPTS to ADD options instead. Without this the live render" \
-    "lanes serve baked PNG snapshots only." >&2
+    "lanes serve baked PNG snapshots only, the cmp-jvm player answers 503, and the playground" \
+    "does not start at all." >&2
 fi
 # <<< sidecar-restore
 

@@ -155,8 +155,8 @@ object ServeAgentGrants {
      * [AgentGrantCapability.IMAGES] is the case that makes it concrete. The image lane admits a
      * caller who has **write access to the gating repository**, so a signed-in visitor without that
      * access cannot upload — and must not be able to hand an agent a token that does. It is the
-     * identical argument to the playground's, which is why the two are computed from the same
-     * `repositoryAccess` bit.
+     * identical argument to the playground's; what differs is only *which* repository the question
+     * is asked about, because a box may gate uploads on one repository and sign-in on another.
      */
     val capabilityCeiling: Set<AgentGrantCapability> = emptySet(),
   ) {
@@ -167,9 +167,21 @@ object ServeAgentGrants {
         storeCapabilities: Set<AgentGrantCapability> = emptySet(),
       ): Approver = Approver("operator (token)", storeCeiling, storeCapabilities)
 
+      /**
+       * @param repositoryAccess access to the sign-in repository (`--github-auth-repo`) — the bit
+       *   behind the scope ceiling and every capability except [AgentGrantCapability.IMAGES].
+       * @param imageRepositoryAccess access to the repository the image lane gates on
+       *   (`--image-upload-repo`, which falls back to the sign-in one). Asked separately because
+       *   the two may differ: a bit computed about one repository says nothing about another, and
+       *   answering for `images` out of [repositoryAccess] would let someone with access to the
+       *   OAuth repo alone mint a grant that publishes where they have no rights. When the box
+       *   gates both on the same repository the two are simply equal, and this reduces to what it
+       *   always was.
+       */
       fun github(
         login: String,
         repositoryAccess: Boolean,
+        imageRepositoryAccess: Boolean = repositoryAccess,
         storeCeiling: AgentGrantScope,
         storeCapabilities: Set<AgentGrantCapability> = emptySet(),
       ) =
@@ -177,7 +189,17 @@ object ServeAgentGrants {
           name = "@$login",
           ceiling =
             if (repositoryAccess) storeCeiling else minOf(storeCeiling, AgentGrantScope.LIVE),
-          capabilityCeiling = if (repositoryAccess) storeCapabilities else emptySet(),
+          capabilityCeiling =
+            buildSet {
+              if (repositoryAccess) addAll(storeCapabilities)
+              // Added and removed independently of the rest: `images` is the one capability whose
+              // question is about a different repository, so it neither rides in on the sign-in
+              // bit nor is withheld by it.
+              remove(AgentGrantCapability.IMAGES)
+              if (imageRepositoryAccess && AgentGrantCapability.IMAGES in storeCapabilities) {
+                add(AgentGrantCapability.IMAGES)
+              }
+            },
         )
     }
   }
