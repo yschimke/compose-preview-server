@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.20.1](https://github.com/yschimke/compose-preview-server/compare/v2.20.0...v2.20.1) (2026-09-04)
+
+
+### Performance Improvements
+
+* **serve:** give pages a validator, and a declared-theme render a lifetime ([#259](https://github.com/yschimke/compose-preview-server/issues/259)) ([17388a2](https://github.com/yschimke/compose-preview-server/commit/17388a204daacf927e1ff73340373225272c9c45))
+* **serve:** measure the compare wall viewport-first, and cache a bare player replay ([#261](https://github.com/yschimke/compose-preview-server/issues/261)) ([fab2cb7](https://github.com/yschimke/compose-preview-server/commit/fab2cb7caa88da0dd174366f5cbf1d79455f6ead))
+* **serve:** score comparisons on a worker thread ([#262](https://github.com/yschimke/compose-preview-server/issues/262)) ([ecc6e81](https://github.com/yschimke/compose-preview-server/commit/ecc6e812d036a4c42dff1fca6649bef1d17a22b3))
+
 ## [2.20.0](https://github.com/yschimke/compose-preview-server/compare/v2.19.1...v2.20.0) (2026-09-04)
 
 
