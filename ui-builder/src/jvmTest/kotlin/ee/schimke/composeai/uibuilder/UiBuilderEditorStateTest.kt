@@ -3,6 +3,7 @@ package ee.schimke.composeai.uibuilder
 import ee.schimke.composeai.uibuilder.capability.CapabilityCatalogParser
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -1428,6 +1429,47 @@ class UiBuilderEditorStateTest {
           )
         }
       }
+  }
+
+  @Test
+  fun `a state name that becomes a Kotlin keyword is refused at creation`() {
+    // `identifier()` does not escape, so this would emit `var when: Boolean`. The wire cannot
+    // rename a variable later, so creation is the only moment a design can be stopped from holding
+    // a name it can never generate.
+    val failure =
+      assertFailsWith<IllegalArgumentException> {
+        blankUiBuilderDocument(
+          "from-scratch",
+          document.catalogPin,
+          document.environment,
+          listOf(NewDesignState("when", NewDesignStateType.Flag, JsonPrimitive(false))),
+        )
+      }
+
+    assertTrue(failure.message.orEmpty().contains("keyword"), failure.message.orEmpty())
+  }
+
+  @Test
+  fun `two state names that export to one identifier are refused at creation`() {
+    // `identifier()` drops separators, so both of these become `fooBar` and declare the same
+    // variable twice. Distinct on the wire, identical in the generated Kotlin.
+    val failure =
+      assertFailsWith<IllegalArgumentException> {
+        blankUiBuilderDocument(
+          "from-scratch",
+          document.catalogPin,
+          document.environment,
+          listOf(
+            NewDesignState("foo-bar", NewDesignStateType.Text, JsonPrimitive("a")),
+            NewDesignState("foo_bar", NewDesignStateType.Text, JsonPrimitive("b")),
+          ),
+        )
+      }
+
+    assertTrue(
+      failure.message.orEmpty().contains("distinct once exported"),
+      failure.message.orEmpty(),
+    )
   }
 
   @Test
