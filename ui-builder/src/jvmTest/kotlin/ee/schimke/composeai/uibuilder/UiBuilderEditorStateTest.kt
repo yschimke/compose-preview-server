@@ -9,6 +9,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -1434,5 +1435,109 @@ class UiBuilderEditorStateTest {
     val encoded = bound.document.nodes.getValue(chipId).properties.getValue("selected").jsonObject
     assertEquals("stateEquals", encoded["type"]?.jsonPrimitive?.content, encoded.toString())
     assertEquals("expanded", encoded["variable"]?.jsonPrimitive?.content)
+  }
+
+  @Test
+  fun `a component can be inserted already wired to toggle a flag`() {
+    // Completes the from-scratch story: declare state, bind something to read it, insert a control
+    // that writes it. Insertion is the only moment the wire lets a client attach an event binding.
+    val blank =
+      blankUiBuilderDocument(
+        "from-scratch",
+        document.catalogPin,
+        document.environment,
+        listOf(NewDesignState("expanded", NewDesignStateType.Flag, JsonPrimitive(false))),
+      )
+    val state = reducer.initial(blank, blank.roots.single())
+    val target = requireNotNull(reducer.dropTarget(state, "m3/button"))
+
+    val inserted =
+      reducer.reduce(
+        state,
+        UiBuilderEditorEvent.InsertComponentWithAction(
+          "m3/button",
+          target,
+          EditorStateAction.Toggle("expanded"),
+        ),
+      )
+    val buttonId = assertIs<String>(inserted.selectedNodeId)
+    val bindings = inserted.document.nodes.getValue(buttonId).eventBindings
+
+    // `click`, and only click: it is the one event this renderer applies to any node.
+    assertEquals(setOf("click"), bindings.keys)
+    val action = bindings.getValue("click").jsonArray.single().jsonObject
+    assertEquals("toggle", action.getValue("type").jsonPrimitive.content)
+    assertEquals("expanded", action.getValue("variable").jsonPrimitive.content)
+  }
+
+  @Test
+  fun `the action the editor writes is one the renderer actually performs`() {
+    // The two halves have to agree, or the builder draws a button that does nothing when pressed.
+    val blank =
+      blankUiBuilderDocument(
+        "from-scratch",
+        document.catalogPin,
+        document.environment,
+        listOf(NewDesignState("expanded", NewDesignStateType.Flag, JsonPrimitive(false))),
+      )
+    val state = reducer.initial(blank, blank.roots.single())
+    val target = requireNotNull(reducer.dropTarget(state, "m3/button"))
+    val inserted =
+      reducer.reduce(
+        state,
+        UiBuilderEditorEvent.InsertComponentWithAction(
+          "m3/button",
+          target,
+          EditorStateAction.Toggle("expanded"),
+        ),
+      )
+    val buttonId = assertIs<String>(inserted.selectedNodeId)
+    val action =
+      inserted.document.nodes.getValue(buttonId).eventBindings.getValue("click").jsonArray.single()
+
+    assertEquals(
+      "expanded" to "true",
+      uiBuilderStateWrite(action.jsonObject, mapOf("expanded" to "false")),
+    )
+  }
+
+  @Test
+  fun `wiring a control to a variable the design does not declare is refused`() {
+    val blank = blankUiBuilderDocument("from-scratch", document.catalogPin, document.environment)
+    val state = reducer.initial(blank, blank.roots.single())
+    val target = requireNotNull(reducer.dropTarget(state, "m3/button"))
+
+    val attempted =
+      reducer.reduce(
+        state,
+        UiBuilderEditorEvent.InsertComponentWithAction(
+          "m3/button",
+          target,
+          EditorStateAction.Toggle("expanded"),
+        ),
+      )
+
+    assertIs<CommandOutcome.Rejected>(attempted.lastOutcome)
+    assertEquals(blank.nodes.keys, attempted.document.nodes.keys)
+  }
+
+  @Test
+  fun `wiring is offered only when the design has state to write`() {
+    val without = blankUiBuilderDocument("a", document.catalogPin, document.environment)
+    val with =
+      blankUiBuilderDocument(
+        "b",
+        document.catalogPin,
+        document.environment,
+        listOf(NewDesignState("expanded", NewDesignStateType.Flag, JsonPrimitive(false))),
+      )
+
+    assertEquals(
+      emptyList(),
+      reducer.actionInsertCandidates(reducer.initial(without, without.roots.single())),
+    )
+    assertTrue(
+      reducer.actionInsertCandidates(reducer.initial(with, with.roots.single())).isNotEmpty()
+    )
   }
 }

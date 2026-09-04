@@ -289,6 +289,20 @@ sealed interface UiBuilderEditorEvent {
   /** Lift the selected container's children out and delete it. */
   data object UnwrapSelection : UiBuilderEditorEvent
 
+  /**
+   * Insert a component already wired to write state when it is clicked.
+   *
+   * Insertion is the only moment a client can put an event binding on a node: the wire's mutation
+   * set reaches properties and never `eventBindings`, while `InsertNode` carries a whole node. The
+   * same shape of limit as declaring state at creation, and the same fix — `setEventBinding` on the
+   * wire — after which a handler can be added to a node that already exists.
+   */
+  data class InsertComponentWithAction(
+    val componentId: String,
+    val target: ParentSlot,
+    val action: EditorStateAction,
+  ) : UiBuilderEditorEvent
+
   data object CopySelected : UiBuilderEditorEvent
 
   data object CutSelected : UiBuilderEditorEvent
@@ -300,6 +314,48 @@ sealed interface UiBuilderEditorEvent {
 
   data object Redo : UiBuilderEditorEvent
 }
+
+/**
+ * A state write a click can perform, narrowed to what the renderer executes.
+ *
+ * The protocol declares `increment` and `navigatePage` as well; this renderer writes nothing for
+ * them, so offering them would author a control that does nothing when pressed. Narrower than the
+ * wire on purpose — a builder should not be able to draw a dead button.
+ */
+sealed interface EditorStateAction {
+  val variable: String
+
+  /** Flip a flag. */
+  data class Toggle(override val variable: String) : EditorStateAction
+
+  /** Write a value. */
+  data class Set(override val variable: String, val value: String) : EditorStateAction
+
+  /** Write a value, or clear it when it is already selected. */
+  data class SelectOrClear(override val variable: String, val value: String) : EditorStateAction
+}
+
+private fun EditorStateAction.encoded(): JsonObject =
+  when (this) {
+    is EditorStateAction.Toggle ->
+      JsonObject(mapOf("type" to JsonPrimitive("toggle"), "variable" to JsonPrimitive(variable)))
+    is EditorStateAction.Set ->
+      JsonObject(
+        mapOf(
+          "type" to JsonPrimitive("set"),
+          "variable" to JsonPrimitive(variable),
+          "value" to JsonPrimitive(value),
+        )
+      )
+    is EditorStateAction.SelectOrClear ->
+      JsonObject(
+        mapOf(
+          "type" to JsonPrimitive("selectOrClear"),
+          "variable" to JsonPrimitive(variable),
+          "value" to JsonPrimitive(value),
+        )
+      )
+  }
 
 /** Pure editor interaction reducer. Every document mutation delegates to CollaborationReducer. */
 sealed interface EditorSubmission {
@@ -350,6 +406,8 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.MoveSelected -> moveSelected(state, event.direction)
       is UiBuilderEditorEvent.WrapSelection -> wrapSelection(state, event.componentId)
       UiBuilderEditorEvent.UnwrapSelection -> unwrapSelection(state)
+      is UiBuilderEditorEvent.InsertComponentWithAction ->
+        insert(state, event.componentId, event.target, event.action)
       UiBuilderEditorEvent.CopySelected -> copySelected(state)
       UiBuilderEditorEvent.CutSelected -> cutSelected(state)
       UiBuilderEditorEvent.Paste -> paste(state)
@@ -674,6 +732,7 @@ class UiBuilderEditorReducer(
     state: UiBuilderEditorState,
     componentId: String,
     target: ParentSlot,
+    action: EditorStateAction? = null,
   ): UiBuilderEditorState {
     val component = catalog.componentsById[componentId] ?: return state
     val sequence = state.operationSequence + 1
@@ -698,6 +757,23 @@ class UiBuilderEditorReducer(
       )
     if (defaultError != null) {
       return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, defaultError)
+    }
+    if (action != null) {
+      if (action.variable !in state.document.stateVariables) {
+        return state.rejected(
+          sequence,
+          RejectionCode.INVALID_PROPERTY,
+          "This design declares no state variable `${action.variable}`",
+        )
+      }
+      // Bound to `click` on the inserted root, and `click` alone. It is the one event this
+      // renderer applies to any node — `actionModifier` makes anything carrying a click binding
+      // clickable — while every other event name is implemented per component and the catalog
+      // declares none of them, so offering one would be a guess.
+      val bindings = JsonObject(mapOf("click" to JsonArray(listOf(action.encoded()))))
+      val index = operations.indexOfFirst { it is DesignOperation.InsertNode }
+      val root = operations[index] as DesignOperation.InsertNode
+      operations[index] = root.copy(node = root.node.copy(eventBindings = bindings))
     }
     return state.apply(sequence, operations, selectionAfter = nodeId)
   }
@@ -1295,6 +1371,16 @@ class UiBuilderEditorReducer(
       else unwrapped
     }
   }
+
+  /**
+   * The components that can be inserted already wired to a click action.
+   *
+   * Any component the destination accepts: `click` is universal in this renderer, so the limit is
+   * where the node may go rather than what it is.
+   */
+  fun actionInsertCandidates(state: UiBuilderEditorState): List<EditorCatalogItem> =
+    if (state.document.stateVariables.isEmpty()) emptyList()
+    else catalogItems("").filter { dropTarget(state, it.componentId) != null }
 
   private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {
     val roots = state.selectionRoots()
