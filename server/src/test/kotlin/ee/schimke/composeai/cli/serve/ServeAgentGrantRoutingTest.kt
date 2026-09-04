@@ -53,8 +53,13 @@ class ServeAgentGrantRoutingTest {
     // `?rcPlayer=cmp-jvm` can be answered from without a renderer. Without it every player
     // selection here would reach a subprocess and the "may replay" half of the gate would be
     // untestable — the refusal and the admission would both read as 403.
+    //
+    // The staged name is `<lane>/<slot>.png` with a **numeric** slot, which
+    // `ServeRcCompare.isStagedImageName` enforces: a name whose slot is not all digits is refused
+    // before the file is ever read, so `cmp-jvm/example.png` would have staged nothing and this
+    // fixture would have quietly tested the refusal twice.
     File(dir, "rc-compare/cmp-jvm").mkdirs()
-    File(dir, "rc-compare/cmp-jvm/example.png").writeBytes(pixel)
+    File(dir, "rc-compare/cmp-jvm/0.png").writeBytes(pixel)
     File(dir, "rc-compare/index.json")
       .writeText(
         """
@@ -64,7 +69,7 @@ class ServeAgentGrantRoutingTest {
           "rows": [
             {
               "previewId": "example",
-              "lanes": {"cmp-jvm": {"rendered": true, "render": "cmp-jvm/example.png"}}
+              "lanes": {"cmp-jvm": {"rendered": true, "render": "cmp-jvm/0.png"}}
             }
           ]
         }
