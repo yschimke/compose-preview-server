@@ -267,6 +267,15 @@ private class ComposeEmitter(
     return out.toString().trimEnd() + "\n"
   }
 
+  /** Declared with a boolean initial value, so `emitState` gives them a Kotlin `Boolean`. */
+  private val booleanStateVariables: Set<String> by lazy {
+    document.stateVariables
+      .filterValues {
+        (it as? JsonObject)?.get("initialValue")?.jsonPrimitive?.booleanOrNull != null
+      }
+      .keys
+  }
+
   private fun emitState(level: Int) {
     document.stateVariables.entries
       .sortedBy { entry -> entry.key }
@@ -498,7 +507,7 @@ private class ComposeEmitter(
   private fun emitFilterChip(node: UiBuilderNode, level: Int) {
     line(level, "FilterChip(")
     line(level + 1, "selected = ${node.boolExpression("selected")},")
-    line(level + 1, "onClick = { ${node.actionExpression("click")} },")
+    line(level + 1, "onClick = { ${node.actionExpression("click", booleanStateVariables)} },")
     line(level + 1, "enabled = ${node.boolValue("enabled", true)},")
     line(
       level + 1,
@@ -643,7 +652,7 @@ private class ComposeEmitter(
       }
     line(
       level,
-      "$symbol(onClick = { ${node.actionExpression("click")} }, $colors${node.modifierArgument()}) {",
+      "$symbol(onClick = { ${node.actionExpression("click", booleanStateVariables)} }, $colors${node.modifierArgument()}) {",
     )
     if (node.string("style") == "fab") {
       line(level + 1, "Box(Modifier.padding(horizontal = 16.dp)) {")
@@ -769,15 +778,38 @@ private fun UiBuilderNode.boolExpression(name: String): String {
   }
 }
 
-private fun UiBuilderNode.actionExpression(event: String): String {
-  val action = (eventBindings[event] as? JsonArray)?.firstOrNull()?.jsonObject ?: return "Unit"
-  val variable = action.optionalString("variable")?.identifier() ?: return "Unit"
-  val value = action["value"].kotlinLiteral()
-  return when (action.optionalString("type")) {
-    "select",
-    "setText" -> "$variable = $value"
-    "selectOrClear" -> "$variable = if ($variable == $value) null else $value"
-    else -> "TODO(\"Unsupported action ${action.optionalString("type")?.escape()}\")"
+/**
+ * The body of one event handler.
+ *
+ * Every action, not the first: `eventBindings` is a list because a handler runs its actions in
+ * order and as a unit, which is how the renderer dispatches it. Emitting only the head exported a
+ * handler that did less than the preview showed.
+ *
+ * [booleanState] is the set of variables the document declares with a boolean initial value, which
+ * is what `emitState` turns into a Kotlin `Boolean`. A `toggle` is `!x` only for those; against a
+ * string-declared variable `!x` would not compile, so it stays a refusal rather than becoming
+ * broken source.
+ */
+private fun UiBuilderNode.actionExpression(event: String, booleanState: Set<String>): String {
+  val actions = (eventBindings[event] as? JsonArray).orEmpty()
+  if (actions.isEmpty()) return "Unit"
+  return actions.joinToString("; ") { element ->
+    val action = element.jsonObject
+    val name = action.optionalString("variable")
+    val variable = name?.identifier()
+    val value = action["value"].kotlinLiteral()
+    when (action.optionalString("type")) {
+      "select",
+      // `set` is the protocol's own name for an assignment and behaves exactly as `select` does.
+      "set",
+      "setText" -> if (variable == null) "Unit" else "$variable = $value"
+      "selectOrClear" ->
+        if (variable == null) "Unit" else "$variable = if ($variable == $value) null else $value"
+      "toggle" ->
+        if (variable != null && name in booleanState) "$variable = !$variable"
+        else "TODO(\"toggle needs a boolean state variable\")"
+      else -> "TODO(\"Unsupported action ${action.optionalString("type")?.escape()}\")"
+    }
   }
 }
 
@@ -1083,7 +1115,7 @@ private val EMITTER_IDS =
 private val SUPPORTED_MODIFIERS =
   setOf("clip", "fillMaxSize", "fillMaxWidth", "matchParentSize", "padding", "size")
 
-private val SUPPORTED_ACTIONS = setOf("select", "selectOrClear", "setText")
+private val SUPPORTED_ACTIONS = setOf("select", "selectOrClear", "setText", "set", "toggle")
 
 private val HANDLED_FIELDS =
   mapOf(
