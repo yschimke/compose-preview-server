@@ -1,4 +1,4 @@
-// Generator content SHA-256: b84b484c7e0a5e3fa9d60557f7ecd739fb212e16998c8fc811769677307fa613
+// Generator content SHA-256: 8034d60e9de2509fc4f2a6835fd5f0e88363e52e11b760a4d5193b25ba5a616e
 @file:OptIn(ExperimentalMaterial3Api::class)
 
 package generated.uibuilder
@@ -49,7 +49,12 @@ fun JetcasterDiscoverExpandedSupportingPane() {
   var selectedPodcast: String by remember { mutableStateOf("android-developers-backstage") }
   // node:root-surface component:m3/surface symbol:Surface
   // typed-properties:{"containerColor":{"type":"colorToken","value":"background"}}
-  Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+  Surface(
+    modifier = Modifier.fillMaxSize(),
+    shape = RoundedCornerShape(0.dp),
+    color = MaterialTheme.colorScheme.background,
+    tonalElevation = 0.dp,
+  ) {
     // node:pane-scaffold component:layout/supporting-pane-scaffold symbol:SupportingPaneScaffold
     // typed-properties:{"layoutMode":{"type":"enum","value":"expandedTwoPane"},"mainPanePreferredWidthDp":{"type":"float","value":744},"mainPaneVisible":{"type":"bool","value":true},"paneSpacingDp":{"type":"float","value":24},"supportingPanePreferredWidthDp":{"type":"float","value":512},"supportingPaneVisible":{"type":"bool","value":true}}
     BuilderSupportingPaneScaffold(
@@ -149,6 +154,8 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                     columns = GridCells.Adaptive(362.dp),
                     contentPadding =
                       PaddingValues(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 88.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(0.dp),
                     modifier = Modifier.fillMaxSize(),
                   ) {
                     item(key = "categories", span = { GridItemSpan(maxLineSpan) }) {
@@ -263,6 +270,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                                   Modifier.size(width = 128.dp, height = 128.dp)
                                     .clip(RoundedCornerShape(16.dp)),
                                 shape = RoundedCornerShape(16.dp),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                                 colors = builderCardColors(Color.Unspecified),
                               ) {
                                 Box(Modifier.fillMaxSize()) {
@@ -351,6 +359,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                                   Modifier.size(width = 128.dp, height = 128.dp)
                                     .clip(RoundedCornerShape(16.dp)),
                                 shape = RoundedCornerShape(16.dp),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                                 colors = builderCardColors(Color.Unspecified),
                               ) {
                                 Box(Modifier.fillMaxSize()) {
@@ -441,6 +450,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                             Modifier.fillMaxWidth()
                               .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp),
                           shape = RoundedCornerShape(16.dp),
+                          elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                           colors = builderCardColors(MaterialTheme.colorScheme.surfaceContainer),
                         ) {
                           Box(Modifier.fillMaxSize()) {
@@ -753,6 +763,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                       Card(
                         modifier = Modifier,
                         shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         colors = builderCardColors(MaterialTheme.colorScheme.surfaceContainerLow),
                       ) {
                         Box(Modifier.fillMaxSize()) {
@@ -921,6 +932,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                       Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         colors = builderCardColors(MaterialTheme.colorScheme.surfaceContainer),
                       ) {
                         Box(Modifier.fillMaxSize()) {
@@ -1063,6 +1075,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                       Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         colors = builderCardColors(MaterialTheme.colorScheme.surfaceContainer),
                       ) {
                         Box(Modifier.fillMaxSize()) {

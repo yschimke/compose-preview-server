@@ -1,5 +1,6 @@
 package ee.schimke.composeai.uibuilder.capability
 
+import ee.schimke.composeai.uibuilder.COMPOSE_EMITTED_DP_PROPERTIES
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -223,7 +224,17 @@ object CapabilityCatalogParser {
       // explicit override still wins: it is consulted above this.
       "number",
       "integer" ->
-        if (property.name.endsWith("Dp")) numberEditor(0.0, MAXIMUM_AUTHORED_DP, 1.0) else null
+        // …and only where a projection reads it. A dimension no emitter takes is a control whose
+        // every value is discarded — worse than no control, because the design then looks
+        // authored and renders and exports as if it were not. `COMPOSE_EMITTED_DP_PROPERTIES` is
+        // derived from the exporter's own field table, so adding a dimension to an emitter is
+        // what makes it editable, rather than someone remembering to.
+        if (
+          property.name.endsWith("Dp") &&
+            "$componentId.${property.name}" in COMPOSE_EMITTED_DP_PROPERTIES
+        )
+          numberEditor(0.0, MAXIMUM_AUTHORED_DP, 1.0)
+        else null
       else -> null
     }
   }
