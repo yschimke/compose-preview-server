@@ -38,6 +38,11 @@ const tracked = [
     "keyboard-navigation.js",
     "report-capture.js",
     "format-compare.js",
+    // The scorer's worker half. Tracked like every other bundle: it is the one asset whose
+    // staleness nothing else would catch, because no page emits a script tag for it — it is
+    // fetched by URL from `format-compare.js`'s own tag, so a drifted copy would score with
+    // yesterday's tuning constants and nothing would say so.
+    "compare-scorer.js",
     "known-differences.js",
     "viewer.js",
     "spatial-view.js",

@@ -23,7 +23,7 @@ import {
     type Frame,
     type Raster,
 } from "./frames.js";
-import { scorePlanes } from "./planes.js";
+import { scorePlanesOffloaded } from "./offload.js";
 import { translateOf } from "./svgTranslate.js";
 import {
     COMPARISON_GROUNDS,
@@ -91,7 +91,8 @@ async function scoreOnEveryGround(
 ): Promise<number> {
     // EVERY plane is rasterised before the first await, not one ground at a time.
     //
-    // `scorePlanes` yields to the event loop every eighth row, and a source is not always a still:
+    // The scan yields to the event loop every eighth row when it runs here, and a source is not
+    // always a still:
     // `scoreCanvas`'s candidate is a live canvas owned by the Remote Compose player, which schedules
     // its own animation frames. Scoring ground-by-ground would let it repaint between passes, so the
     // two grounds would measure two different frames and the minimum of those is neither — a
@@ -105,7 +106,7 @@ async function scoreOnEveryGround(
     for (const { reference, candidate } of groundsWorthScoring(planes)) {
         worst = Math.min(
             worst,
-            await scorePlanes(reference, candidate, width, height),
+            await scorePlanesOffloaded(reference, candidate, width, height),
         );
     }
     return worst;
@@ -294,7 +295,12 @@ export async function scoreImages(
     for (const plane of groundsWorthScoring(grounds)) {
         percent = Math.min(
             percent,
-            await scorePlanes(plane.reference, plane.candidate, width, height),
+            await scorePlanesOffloaded(
+                plane.reference,
+                plane.candidate,
+                width,
+                height,
+            ),
         );
     }
     return { percent, geometry: boxes.geometry };

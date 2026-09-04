@@ -50,6 +50,9 @@ internal object ServeWebAssets {
       "viewer.js" to "text/javascript; charset=utf-8",
       "spatial-view.js" to "text/javascript; charset=utf-8",
       "format-compare.js" to "text/javascript; charset=utf-8",
+      // The scorer's worker half, named by `format-compare.js`'s own tag rather than emitted as a
+      // script. Fetched only by a page that carries a comparison, and only once it scores one.
+      "compare-scorer.js" to "text/javascript; charset=utf-8",
       // The acceptance band and the engine behind it: the known-difference contract's whole
       // reference implementation, shared verbatim with `scripts/design-artifacts/` so the browser
       // and the offline driver cannot disagree about what an acceptance means. Its own bundle, and
