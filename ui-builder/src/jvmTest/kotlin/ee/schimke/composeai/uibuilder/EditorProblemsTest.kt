@@ -24,8 +24,7 @@ class EditorProblemsTest {
       )
       .document
 
-  private fun problems(document: UiBuilderDocument) =
-    reducer.problems(reducer.initial(document, selectedNodeId = document.roots.first()))
+  private fun problems(document: UiBuilderDocument) = reducer.problems(document)
 
   @Test
   fun `the checked-in fixture has nothing to report`() {
