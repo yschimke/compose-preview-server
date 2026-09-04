@@ -8951,11 +8951,41 @@ class ServeHttpServer(
     // host has no baked copy of is the catalog serving its own content, at the same cost any
     // anonymous visitor imposes on a public box; refusing that would break ordinary browsing every
     // time a session was not resident, which is not what anyone approved or withheld.
+    //
+    // A **bare** `?rcPlayer=` is the one override that is not a commission by itself, so it is not
+    // refused here. It names which already-published capture to replay — the rc-compare staging for
+    // cmp-jvm, or the baked PNG when the request names the player that baked it — and the compare
+    // wall points a cell at that lane for every preview it shows, so refusing it up front cost a
+    // `preview` grant the wall it was granted to read. It can still turn into a live render, and
+    // the two places where that happens refuse there instead, where the answer is known rather than
+    // guessed: [renderCmpJvmResponse]'s subprocess below, and a null `cached` in the chain under
+    // it.
+    // Nothing else moves — every other override, and every daemon-only product, is refused here as
+    // before.
     if (
-      (requestCarriesOverrides() || wantsDaemonOnlyRenderProduct()) &&
+      ((requestCarriesOverrides() && !bareRcPlayerRequest()) || wantsDaemonOnlyRenderProduct()) &&
         rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)
     )
       return
+    // The deferred half of that decision, settled HERE and carried down rather than re-asked.
+    //
+    // Non-null only for a request this gate just let through *because* it is a bare player
+    // selection — so an ordinary override-free browse never carries it, and the lanes below cannot
+    // refuse one. That is deliberate: `bakedRender` is a local-only fast path (it must not trigger
+    // the delivery-branch fetch that would make an image measurable), so a cold catalog answers
+    // null from the `cached` chain and serves the published bytes from `render` instead. Reading a
+    // null `cached` as "about to commission" would have refused exactly that — ordinary browsing on
+    // a catalog whose images have not been pulled yet, which is what this gate has always admitted.
+    //
+    // Settled here, too, rather than re-asked after the lease: `grantBelowScope` answers "no grant,
+    // nothing to say" once a grant expires, so re-asking would *admit* a request whose credential
+    // died while the session was being built.
+    val bareRcPlayerBelowLive =
+      if (requestCarriesOverrides() && bareRcPlayerRequest()) {
+        grantBelowScope(AgentGrantScope.LIVE)
+      } else {
+        null
+      }
     // A bare `/render/<id>.png` replays a baked file and IS what an unfurler probes for `og:image`,
     // so it must keep answering HEAD. Everything else on this route reaches a daemon or a bundle
     // host, and amplifying a bodyless probe into one is the same trade as `/bundle.zip` at smaller
@@ -9188,6 +9218,13 @@ class ServeHttpServer(
           !wantAnnotations &&
           call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
       ) {
+        // Past the staged-raster shortcut above, so this really does spawn the desktop player
+        // (~4.3s of one-shot JVM). That is a commission, not a replay, whatever the query looked
+        // like — the first of the two places the up-front gate defers to.
+        bareRcPlayerBelowLive?.let {
+          respondBelowScope(it, AgentGrantScope.LIVE, api = true)
+          return@withLeasedSession
+        }
         val format = if (wantSvg) RcJvmServerRenderer.Format.SVG else RcJvmServerRenderer.Format.PNG
         val webMode = wantSvg && call.request.queryParameters["mode"]?.lowercase() == "web"
         renderCmpJvmResponse(renderHost, previewId, format, webMode, sessionId)
@@ -9295,6 +9332,21 @@ class ServeHttpServer(
                 // every other backend, where baked really is someone else's pixels.
                 ?: publishedRcPlayerRender(renderHost, previewId, overrides)
                 ?: renderHost.bakedRender(previewId, overrides)
+          // The second place the up-front gate defers to. A null `cached` means no lane answered
+          // from bytes already in hand, so a bare player selection that got this far is asking for
+          // one to be made — refused, using the decision taken at the door.
+          //
+          // Only ever a bare player selection. A null `cached` is NOT by itself a commission:
+          // `bakedRender` deliberately reads only local files, so a catalog whose published image
+          // has not been pulled yet answers null here and `render` below serves it after the fetch.
+          // Refusing on `cached == null` alone would have broken override-free browsing on exactly
+          // those cold catalogs.
+          if (cached == null) {
+            bareRcPlayerBelowLive?.let {
+              respondBelowScope(it, AgentGrantScope.LIVE, api = true)
+              return@withLeasedSession
+            }
+          }
           // A "pure declared-theme render" — the classification the burst lease admits on. Read
           // from the request rather than the parsed overrides, because an expanded provider is no
           // longer in them: `themeSeeding.provider` is what the expansion consumed, and the request
@@ -11431,8 +11483,29 @@ class ServeHttpServer(
     required: AgentGrantScope,
     api: Boolean,
   ): Boolean {
-    val grant = agentGrantFor(call) ?: return false
-    if (grant.allows(required)) return false
+    val grant = grantBelowScope(required) ?: return false
+    respondBelowScope(grant, required, api)
+    return true
+  }
+
+  /**
+   * The presented grant, when there is one and it does **not** reach [required]; null when no grant
+   * was presented or the one presented is good enough.
+   *
+   * Split out of [rejectGrantBelowScope] so a caller can decide the question at one point and act
+   * on it at another. That matters wherever the refusal is deferred: re-asking later would answer
+   * "no grant, nothing to say" for a grant that expired in between, turning a refusal into an
+   * admission at exactly the moment the credential stopped being valid.
+   */
+  private fun RoutingContext.grantBelowScope(
+    required: AgentGrantScope
+  ): ServeAgentGrantStore.Grant? = agentGrantFor(call)?.takeIf { !it.allows(required) }
+
+  private suspend fun RoutingContext.respondBelowScope(
+    grant: ServeAgentGrantStore.Grant,
+    required: AgentGrantScope,
+    api: Boolean,
+  ) {
     val message =
       "This agent grant covers ${grant.scopes.joinToString(", ") { it.wire }}; " +
         "'${required.wire}' was not approved for it. Ask for a wider grant " +
@@ -11442,7 +11515,6 @@ class ServeHttpServer(
     } else {
       call.respondText(message, ContentType.Text.Plain, HttpStatusCode.Forbidden)
     }
-    return true
   }
 
   private suspend fun RoutingContext.rejectMissingGithubRepoAccess(api: Boolean = false): Boolean {
