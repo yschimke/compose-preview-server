@@ -81,6 +81,20 @@ fun blankUiBuilderDocument(
   require(state.map(NewDesignState::name).distinct().size == state.size) {
     "state variable names must be unique"
   }
+  // Unique *as the exporter will write them*, and legal there. `identifier()` drops separators, so
+  // `foo-bar` and `foo_bar` both become `fooBar` and declare the same variable twice; and it does
+  // not escape keywords, so `when` becomes `var when: Boolean`. Neither compiles, and neither is
+  // visible until somebody exports. Refusing at creation is the only moment this design can be
+  // stopped from holding a name it can never generate — the wire cannot rename a variable later.
+  state.forEach { declared ->
+    val identifier = exportedStateIdentifier(declared.name)
+    require(identifier !in KOTLIN_HARD_KEYWORDS) {
+      "state variable `${declared.name}` becomes the Kotlin keyword `$identifier` when exported"
+    }
+  }
+  require(state.map { exportedStateIdentifier(it.name) }.distinct().size == state.size) {
+    "state variable names must stay distinct once exported as Kotlin identifiers"
+  }
   val scaffoldId = "screen-scaffold"
   val contentId = "screen-content"
   return UiBuilderDocument(
