@@ -523,7 +523,7 @@ class UiBuilderEditorReducer(
     val destination =
       capabilities.map { findDestination(state.document, state.selectedNodeId, it) }.distinct()
     val single = destination.singleOrNull() ?: return null
-    return single?.takeIf { hasRoomForAll(state.document, it, clipboard.rootNodeIds.size) }
+    return single.takeIf { hasRoomForAll(state.document, it, clipboard.rootNodeIds.size) }
   }
 
   private fun hasRoomForAll(
