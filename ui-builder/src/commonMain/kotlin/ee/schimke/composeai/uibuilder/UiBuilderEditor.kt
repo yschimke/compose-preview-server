@@ -1716,7 +1716,8 @@ private fun PropertyControl(
         }
       }
       EditorPropertyControl.Enum ->
-        if (field.name == "iconKey") GoogleIconPropertyControl(field, commit)
+        if (field.name == "iconKey")
+          GoogleIconPropertyControl(field, onTextInputFocusChanged, commit)
         else EnumPropertyControl(field, commit)
       EditorPropertyControl.Number ->
         DraftPropertyControl(field, onTextInputFocusChanged, commit, showSteppers = true)
@@ -2065,7 +2066,11 @@ private fun EnumPropertyControl(field: EditorPropertyField, commit: (String) -> 
 }
 
 @Composable
-private fun GoogleIconPropertyControl(field: EditorPropertyField, commit: (String) -> Unit) {
+private fun GoogleIconPropertyControl(
+  field: EditorPropertyField,
+  onTextInputFocusChanged: (Boolean) -> Unit,
+  commit: (String) -> Unit,
+) {
   var expanded by remember(field.nodeId, field.name) { mutableStateOf(false) }
   var query by remember(field.nodeId, field.name) { mutableStateOf("") }
   val current = googleMaterialIcon(field.value)
@@ -2099,6 +2104,10 @@ private fun GoogleIconPropertyControl(field: EditorPropertyField, commit: (Strin
         Modifier.width(280.dp)
           .padding(10.dp)
           .semantics { contentDescription = "Google icon search" }
+          // The one text field in the editor that never reported focus. Every editor chord is
+          // gated on `textInputFocused`, so while someone typed an icon name here Backspace still
+          // meant delete-the-selection and Ctrl/⌘+V still meant paste-a-subtree.
+          .onFocusChanged { onTextInputFocusChanged(it.isFocused) }
           .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
           .padding(10.dp),
       singleLine = true,
