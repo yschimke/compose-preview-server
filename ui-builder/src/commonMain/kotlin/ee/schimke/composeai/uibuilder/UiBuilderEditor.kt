@@ -7,7 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -72,7 +75,6 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
@@ -83,6 +85,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -1190,23 +1194,37 @@ private fun LayerRow(
         .weight(1f)
         // Not `clickable`: it cannot see which modifier keys are down, and ctrl/⌘-click and
         // shift-click are how a selection is built up in every tool people arrive from.
+        //
+        // On the release, not the press. Every attempt to scroll this list on a touch screen
+        // begins with a press, and selecting there meant scrolling the layers panel changed the
+        // selection. `waitForUpOrCancellation` returns null once an ancestor claims the gesture,
+        // which is the cancellation `clickable` gave for free and this had to get back.
         .pointerInput(row.nodeId) {
-          awaitPointerEventScope {
-            while (true) {
-              val event = awaitPointerEvent()
-              if (event.type != PointerEventType.Press) continue
-              val modifiers = event.keyboardModifiers
-              onSelect(
-                when {
-                  modifiers.isShiftPressed -> LayerSelectionGesture.Range
-                  modifiers.isCtrlPressed || modifiers.isMetaPressed -> LayerSelectionGesture.Toggle
-                  else -> LayerSelectionGesture.Replace
-                }
-              )
-            }
+          awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            val modifiers = currentEvent.keyboardModifiers
+            if (waitForUpOrCancellation() == null) return@awaitEachGesture
+            onSelect(
+              when {
+                modifiers.isShiftPressed -> LayerSelectionGesture.Range
+                modifiers.isCtrlPressed || modifiers.isMetaPressed -> LayerSelectionGesture.Toggle
+                else -> LayerSelectionGesture.Replace
+              }
+            )
           }
         }
-        .semantics { contentDescription = "Select ${row.nodeId}" },
+        // Dropping `clickable` also dropped the activation action and the focusability it
+        // supplied, so a screen reader could find a layer and not select it and the keyboard could
+        // not reach one at all. The pointer path keeps the modifier keys; this restores the rest.
+        .focusable()
+        .semantics {
+          contentDescription = "Select ${row.nodeId}"
+          this.selected = selected
+          onClick(label = "Select") {
+            onSelect(LayerSelectionGesture.Replace)
+            true
+          }
+        },
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
