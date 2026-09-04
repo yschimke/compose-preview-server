@@ -378,12 +378,22 @@ class UiBuilderEditorReducer(
 
   fun canRedo(state: UiBuilderEditorState): Boolean = state.redoTargetUndoId(actorId) != null
 
+  /**
+   * Whether the whole selection can be duplicated.
+   *
+   * Cumulative for the same reason delete is: duplicating two siblings adds two to their slot, and
+   * a slot with one space left can take one of them. Checking each against the original document
+   * says yes twice and the second insert is rejected, leaving half a duplicate.
+   */
   fun canDuplicateSelected(state: UiBuilderEditorState): Boolean {
-    val nodeId = state.selectedNodeId?.takeIf(state.document.nodes::containsKey) ?: return false
-    val parent = state.document.location(nodeId) ?: return true
-    val parentNode = state.document.nodes.getValue(parent.nodeId)
-    val slot = catalog.componentsById[parentNode.componentId]?.slot(parent.slot) ?: return false
-    return slot.cardinality.max?.let { parentNode.slots[parent.slot].orEmpty().size < it } ?: true
+    val targets = state.selectionRoots()
+    if (targets.isEmpty()) return false
+    val document = state.document
+    return targets
+      .mapNotNull(document::location)
+      .groupingBy { it }
+      .eachCount()
+      .all { (parent, added) -> hasRoomForAll(document, parent, added) }
   }
 
   fun canCopySelected(state: UiBuilderEditorState): Boolean =
@@ -778,35 +788,38 @@ class UiBuilderEditorReducer(
 
   private fun duplicateSelected(state: UiBuilderEditorState): UiBuilderEditorState {
     val sequence = state.operationSequence + 1
-    val nodeId = state.selectedNodeId ?: return state
+    val targets = state.selectionRoots()
+    if (targets.isEmpty()) return state
     if (!canDuplicateSelected(state)) {
       return state.rejected(
         sequence,
         RejectionCode.INVALID_DOCUMENT,
-        "Duplicating $nodeId would exceed slot cardinality",
+        if (targets.size == 1) "Duplicating ${targets.single()} would exceed slot cardinality"
+        else "Duplicating these ${targets.size} nodes would exceed slot cardinality",
       )
     }
     val operations = mutableListOf<DesignOperation>()
-    val copyId = "$nodeId-copy-${sequence.toString().padStart(3, '0')}"
-    state.document.nodes.appendDuplicateSubtree(
-      sourceNodeId = nodeId,
-      copyNodeId = copyId,
-      parent = state.document.location(nodeId),
-      afterNodeId = nodeId,
-      operations = operations,
-    )
-    return state.apply(sequence, operations, selectionAfter = copyId)
+    val copies = mutableListOf<String>()
+    targets.forEach { nodeId ->
+      val copyId = state.document.freshNodeId("$nodeId-copy", sequence)
+      state.document.nodes.appendDuplicateSubtree(
+        sourceNodeId = nodeId,
+        copyNodeId = copyId,
+        parent = state.document.location(nodeId),
+        // Beside its own original, so a duplicated group stays interleaved with the group it came
+        // from rather than piling up at the end of the slot.
+        afterNodeId = nodeId,
+        operations = operations,
+      )
+      copies += copyId
+    }
+    return state.apply(sequence, operations, selectionAfter = copies.last()).let { duplicated ->
+      // The copies are what you want to move next, so they are what stays selected.
+      if (duplicated.selection == listOf(copies.last())) duplicated.copy(selection = copies)
+      else duplicated
+    }
   }
 
-  /**
-   * Keyboard selection.
-   *
-   * Pure selection, so like copy it records no operation and consumes no sequence number: walking
-   * the layers panel is not an edit and must not become an undo step.
-   *
-   * A step with nowhere to go returns the state unchanged rather than wrapping to the other end.
-   * Wrapping reads as a jump when you are holding a key down to walk a tree.
-   */
   private fun toggleNode(state: UiBuilderEditorState, nodeId: String): UiBuilderEditorState {
     if (nodeId !in state.document.nodes) return state
     // Re-adding moves it to the end so it becomes the anchor, which is what a click means even

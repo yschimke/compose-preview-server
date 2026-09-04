@@ -1024,4 +1024,21 @@ class UiBuilderEditorStateTest {
     // The ancestor already carries the child; pasting both roots would duplicate it.
     assertEquals(listOf(parentRow.nodeId), assertIs<EditorClipboard>(copied.clipboard).rootNodeIds)
   }
+
+  @Test
+  fun `duplicating a multi-node selection copies all of it, beside each original`() {
+    val rows = reducer.treeRows(document)
+    val siblings =
+      rows.groupBy { it.parent }.values.first { it.size > 2 && it.first().parent != null }
+    val two = siblings.take(2).map { it.nodeId }
+    val selected =
+      reducer.reduce(reducer.initial(document, two[0]), UiBuilderEditorEvent.ToggleNode(two[1]))
+    val duplicated = reducer.reduce(selected, UiBuilderEditorEvent.DuplicateSelected)
+
+    assertEquals(2, duplicated.selection.size)
+    duplicated.selection.forEach { assertTrue(it in duplicated.document.nodes, it) }
+    two.forEach { assertTrue(it in duplicated.document.nodes, "$it should survive") }
+    // One operation for the batch.
+    assertEquals(document.revision + 1, duplicated.document.revision)
+  }
 }
