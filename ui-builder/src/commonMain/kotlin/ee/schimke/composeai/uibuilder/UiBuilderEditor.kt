@@ -773,6 +773,19 @@ private fun editorShortcut(
       command && event.key == Key.Y -> UiBuilderEditorEvent.Redo
       command && event.key == Key.Z -> UiBuilderEditorEvent.Undo
       command && event.key == Key.D -> UiBuilderEditorEvent.DuplicateSelected
+      // Reorder before plain navigation, so the modified arrows are not eaten by selection.
+      command && event.key == Key.DirectionUp ->
+        UiBuilderEditorEvent.MoveSelected(EditorMoveDirection.Before)
+      command && event.key == Key.DirectionDown ->
+        UiBuilderEditorEvent.MoveSelected(EditorMoveDirection.After)
+      !command && event.key == Key.DirectionDown ->
+        UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Next)
+      !command && event.key == Key.DirectionUp ->
+        UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Previous)
+      !command && event.key == Key.DirectionLeft ->
+        UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Parent)
+      !command && event.key == Key.DirectionRight ->
+        UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.FirstChild)
       command && event.key == Key.C -> UiBuilderEditorEvent.CopySelected
       command && event.key == Key.X -> UiBuilderEditorEvent.CutSelected
       command && event.key == Key.V -> UiBuilderEditorEvent.Paste

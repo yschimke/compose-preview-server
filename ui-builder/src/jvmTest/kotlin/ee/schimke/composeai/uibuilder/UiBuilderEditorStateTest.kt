@@ -732,4 +732,105 @@ class UiBuilderEditorStateTest {
     // With nothing copied there is nowhere to paste, so the affordance is off rather than failing.
     assertFalse(reducer.canPaste(reducer.initial(document, "discover-grid")))
   }
+
+  @Test
+  fun `arrow selection walks the flattened tree, the way the layers panel reads`() {
+    val rows = reducer.treeRows(document)
+    val initial = reducer.initial(document, rows.first().nodeId)
+
+    val next =
+      reducer.reduce(initial, UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Next))
+    assertEquals(rows[1].nodeId, next.selectedNodeId)
+    // Down then up is where you started; nothing else would be usable while holding a key.
+    val back =
+      reducer.reduce(next, UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Previous))
+    assertEquals(rows.first().nodeId, back.selectedNodeId)
+  }
+
+  @Test
+  fun `selection steps that have nowhere to go stay put rather than wrapping`() {
+    val rows = reducer.treeRows(document)
+    val top = reducer.initial(document, rows.first().nodeId)
+    val bottom = reducer.initial(document, rows.last().nodeId)
+
+    assertEquals(
+      rows.first().nodeId,
+      reducer
+        .reduce(top, UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Previous))
+        .selectedNodeId,
+    )
+    assertEquals(
+      rows.last().nodeId,
+      reducer
+        .reduce(bottom, UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Next))
+        .selectedNodeId,
+    )
+  }
+
+  @Test
+  fun `into a container selects its first child, and out selects the parent`() {
+    val rows = reducer.treeRows(document)
+    val parentRow = rows.first { row -> rows.any { it.parent?.nodeId == row.nodeId } }
+    val firstChild = rows.first { it.parent?.nodeId == parentRow.nodeId }
+
+    val into =
+      reducer.reduce(
+        reducer.initial(document, parentRow.nodeId),
+        UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.FirstChild),
+      )
+    assertEquals(firstChild.nodeId, into.selectedNodeId)
+    assertEquals(
+      parentRow.nodeId,
+      reducer
+        .reduce(into, UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Parent))
+        .selectedNodeId,
+    )
+  }
+
+  @Test
+  fun `moving into a container never selects a sibling by mistake`() {
+    // A leaf's next row is its sibling or its uncle, and "go into this" must select neither.
+    val rows = reducer.treeRows(document)
+    val leaf = rows.last { row -> rows.none { it.parent?.nodeId == row.nodeId } }
+    val state = reducer.initial(document, leaf.nodeId)
+
+    assertEquals(
+      leaf.nodeId,
+      reducer
+        .reduce(state, UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.FirstChild))
+        .selectedNodeId,
+    )
+  }
+
+  @Test
+  fun `selection by keyboard is not an undo step`() {
+    val initial = reducer.initial(document, reducer.treeRows(document).first().nodeId)
+    val moved =
+      reducer.reduce(initial, UiBuilderEditorEvent.SelectRelative(EditorSelectionMove.Next))
+
+    assertEquals(initial.operationSequence, moved.operationSequence)
+    assertEquals(initial.document.revision, moved.document.revision)
+  }
+
+  @Test
+  fun `a node reorders among its siblings from the keyboard, as dragging it would`() {
+    val rows = reducer.treeRows(document)
+    fun siblingsOf(parent: ParentSlot?, in_: List<EditorTreeRow>) =
+      in_.filter { it.parent == parent }.map { it.nodeId }
+
+    val sibling = rows.first { row -> siblingsOf(row.parent, rows).size > 1 && row.parent != null }
+    val before = siblingsOf(sibling.parent, rows)
+    val moved =
+      reducer.reduce(
+        reducer.initial(document, sibling.nodeId),
+        UiBuilderEditorEvent.MoveSelected(EditorMoveDirection.After),
+      )
+    val after = siblingsOf(sibling.parent, reducer.treeRows(moved.document))
+
+    assertEquals(before.size, after.size)
+    assertEquals(before.toSet(), after.toSet(), "reorder must not add or drop a sibling")
+    assertTrue(before != after, after.toString())
+    // Still selected after moving — losing the selection mid-reorder would stop a run of presses.
+    assertEquals(sibling.nodeId, moved.selectedNodeId)
+  }
 }

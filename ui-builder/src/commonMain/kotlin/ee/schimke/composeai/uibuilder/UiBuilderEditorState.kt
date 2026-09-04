@@ -73,6 +73,20 @@ enum class EditorMoveDirection {
   After,
 }
 
+/**
+ * Where a keyboard selection step lands.
+ *
+ * [Next] and [Previous] walk the **flattened tree order** the layers panel shows, rather than the
+ * sibling list, so the selection moves the way the panel reads — down past a container's children
+ * instead of jumping over them.
+ */
+enum class EditorSelectionMove {
+  Next,
+  Previous,
+  Parent,
+  FirstChild,
+}
+
 enum class EditorScreenTheme(val wireValue: String, val label: String) {
   Light("light", "Light"),
   Dark("dark", "Dark"),
@@ -202,6 +216,12 @@ sealed interface UiBuilderEditorEvent {
 
   data object DuplicateSelected : UiBuilderEditorEvent
 
+  /** Move the selection without touching the document. */
+  data class SelectRelative(val move: EditorSelectionMove) : UiBuilderEditorEvent
+
+  /** Reorder the selected node among its siblings. */
+  data class MoveSelected(val direction: EditorMoveDirection) : UiBuilderEditorEvent
+
   data object CopySelected : UiBuilderEditorEvent
 
   data object CutSelected : UiBuilderEditorEvent
@@ -254,6 +274,8 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.ApplyTheme -> applyTheme(state, event.settings)
       UiBuilderEditorEvent.DeleteSelected -> deleteSelected(state)
       UiBuilderEditorEvent.DuplicateSelected -> duplicateSelected(state)
+      is UiBuilderEditorEvent.SelectRelative -> selectRelative(state, event.move)
+      is UiBuilderEditorEvent.MoveSelected -> moveSelected(state, event.direction)
       UiBuilderEditorEvent.CopySelected -> copySelected(state)
       UiBuilderEditorEvent.CutSelected -> cutSelected(state)
       UiBuilderEditorEvent.Paste -> paste(state)
@@ -689,6 +711,54 @@ class UiBuilderEditorReducer(
       operations = operations,
     )
     return state.apply(sequence, operations, selectionAfter = copyId)
+  }
+
+  /**
+   * Keyboard selection.
+   *
+   * Pure selection, so like copy it records no operation and consumes no sequence number: walking
+   * the layers panel is not an edit and must not become an undo step.
+   *
+   * A step with nowhere to go returns the state unchanged rather than wrapping to the other end.
+   * Wrapping reads as a jump when you are holding a key down to walk a tree.
+   */
+  private fun selectRelative(
+    state: UiBuilderEditorState,
+    move: EditorSelectionMove,
+  ): UiBuilderEditorState {
+    val rows = treeRows(state.document)
+    if (rows.isEmpty()) return state
+    val index = rows.indexOfFirst { it.nodeId == state.selectedNodeId }
+    // Nothing selected yet: any step starts at the top, which is what a first arrow press means.
+    if (index < 0) return state.copy(selectedNodeId = rows.first().nodeId)
+    val row = rows[index]
+    val target =
+      when (move) {
+        EditorSelectionMove.Next -> rows.getOrNull(index + 1)?.nodeId
+        EditorSelectionMove.Previous -> rows.getOrNull(index - 1)?.nodeId
+        EditorSelectionMove.Parent -> row.parent?.nodeId
+        // The next row is the first child exactly when it is one level deeper; a sibling or an
+        // uncle is not something "go into this container" should select.
+        EditorSelectionMove.FirstChild ->
+          rows.getOrNull(index + 1)?.takeIf { it.depth == row.depth + 1 }?.nodeId
+      }
+    return target?.let { state.copy(selectedNodeId = it) } ?: state
+  }
+
+  /**
+   * Reorder the selection among its siblings.
+   *
+   * Reordering was reachable only by dragging a layer row. That leaves anyone who cannot or would
+   * rather not drag — a trackpad, a screen reader, a keyboard — unable to change the one thing
+   * layout is mostly made of, so the same [moveTarget] the drag uses is now on the keyboard too.
+   */
+  private fun moveSelected(
+    state: UiBuilderEditorState,
+    direction: EditorMoveDirection,
+  ): UiBuilderEditorState {
+    val nodeId = state.selectedNodeId?.takeIf(state.document.nodes::containsKey) ?: return state
+    val move = moveTarget(state, nodeId, direction) ?: return state
+    return move(state, move)
   }
 
   private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {
