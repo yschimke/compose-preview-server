@@ -1,7 +1,12 @@
 // The component-nav filter's three exceptions, as a table.
 
 import assert from "node:assert/strict";
-import { filterNav, type NavRow } from "../src/viewer/navFilter.js";
+import {
+    filterNav,
+    keepNavRows,
+    type NavListRow,
+    type NavRow,
+} from "../src/viewer/navFilter.js";
 
 const ROWS: NavRow[] = [
     { haystack: "Button · Filled", current: true },
@@ -52,5 +57,65 @@ describe("filterNav", () => {
     it("reports the count including the pinned block", () => {
         assert.equal(filterNav(ROWS, "", true).shown, 4);
         assert.equal(filterNav(ROWS, "", false).shown, 3);
+    });
+});
+
+describe("keepNavRows", () => {
+    const rows = (...kept: (boolean | "S" | "G")[]): NavListRow[] =>
+        kept.map((k) =>
+            k === "S"
+                ? { kind: "section" as const }
+                : k === "G"
+                  ? { kind: "group" as const }
+                  : { kind: "item" as const, kept: k },
+        );
+
+    it("keeps a heading whose rows survived", () => {
+        assert.deepEqual(keepNavRows(rows("S", "G", true, false)), [
+            true,
+            true,
+            true,
+            false,
+        ]);
+    });
+
+    it("drops a group heading whose rows all went", () => {
+        // Otherwise "Buttons" is left standing over the next group's rows.
+        assert.deepEqual(keepNavRows(rows("G", false, false, "G", true)), [
+            false,
+            false,
+            false,
+            true,
+            true,
+        ]);
+    });
+
+    it("keeps a section heading while any group under it survives", () => {
+        assert.deepEqual(keepNavRows(rows("S", "G", false, "G", true)), [
+            true,
+            false,
+            false,
+            true,
+            true,
+        ]);
+    });
+
+    it("drops a section heading whose groups all went", () => {
+        assert.deepEqual(keepNavRows(rows("S", "G", false, "S", "G", true)), [
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+        ]);
+    });
+
+    it("leaves a flat list exactly as the filter decided", () => {
+        assert.deepEqual(keepNavRows(rows(true, false, true)), [
+            true,
+            false,
+            true,
+        ]);
     });
 });

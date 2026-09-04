@@ -116,7 +116,7 @@ class ServeWebTest {
     )
     // The current (default) state is marked active with a human label.
     assertTrue(
-      nav.contains("aria-current=\"page\">checkbox"),
+      nav.contains("aria-current=\"page\"><span class=\"cp-tree-label\">checkbox"),
       "the default render IS the component row, and it is marked active",
     )
   }
@@ -363,7 +363,10 @@ class ServeWebTest {
       ServeWeb.viewerPage(labelDefault, token = "t", basePath = "/compose-m3", siblings = all)
     val labelNav =
       labelHtml.substringAfter("class=\"cp-tree cp-axes-tree\"").substringBefore("</nav>")
-    assertTrue(labelNav.contains("aria-current=\"page\">Filled"), "current state active")
+    assertTrue(
+      labelNav.contains("aria-current=\"page\"><span class=\"cp-tree-label\">Filled"),
+      "current state active",
+    )
     assertTrue(
       labelNav.contains("/p/button-filled__ideal__pressed__light"),
       "links its own pressed state",
@@ -508,7 +511,10 @@ class ServeWebTest {
     // …and never the dark render (that would jump the visitor's theme).
     assertFalse(nav.contains("__dark__direction-rtl"), "switcher stays within the current theme")
     // The default is marked active, and the variants carry human labels.
-    assertTrue(nav.contains("aria-current=\"page\">Filled"), "the default is marked active")
+    assertTrue(
+      nav.contains("aria-current=\"page\"><span class=\"cp-tree-label\">Filled"),
+      "the default is marked active",
+    )
     assertTrue(
       nav.contains(">RTL</a>") && nav.contains(">Locale ar-XB</a>"),
       "props variants render human labels",
