@@ -437,6 +437,41 @@ class UiBuilderEditorReducer(
       selection = listOfNotNull(selectedNodeId?.takeIf(document.nodes::containsKey)),
     )
 
+  /**
+   * This editor's state carried onto a new authoritative document.
+   *
+   * Every accepted local edit and every remote delta arrives as a new document and rebuilds the
+   * editor from it, so anything not carried across is lost on the next keystroke anyone in the
+   * session makes. The multi-selection and the clipboard are editing intent rather than document
+   * content — a copy has to stay pasteable after a collaborator moves something — so they survive,
+   * minus whatever the new document no longer holds.
+   *
+   * Selection keeps its order, which is what keeps its anchor: the last entry is the node the
+   * inspector edits and the one a range extends from.
+   */
+  fun reconciled(
+    state: UiBuilderEditorState,
+    document: UiBuilderDocument,
+    fallbackSelectedNodeId: String? = null,
+  ): UiBuilderEditorState {
+    val rebuilt =
+      initial(
+        document,
+        selectedNodeId =
+          state.selectedNodeId?.takeIf(document.nodes::containsKey)
+            ?: fallbackSelectedNodeId?.takeIf(document.nodes::containsKey)
+            ?: document.roots.firstOrNull(),
+      )
+    val survivingSelection = state.selection.filter(document.nodes::containsKey)
+    return rebuilt.copy(
+      selection = survivingSelection.ifEmpty { rebuilt.selection },
+      clipboard = state.clipboard,
+      catalogQuery = state.catalogQuery,
+      operationSequence = state.operationSequence,
+      inspectorMode = state.inspectorMode,
+    )
+  }
+
   fun reduce(state: UiBuilderEditorState, event: UiBuilderEditorEvent): UiBuilderEditorState =
     when (event) {
       is UiBuilderEditorEvent.SearchCatalog -> state.copy(catalogQuery = event.query)

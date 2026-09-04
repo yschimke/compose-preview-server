@@ -130,5 +130,35 @@ class EditorWrapOrderTest {
     )
   }
 
+  @Test
+  fun `an authoritative document keeps the selection and the clipboard`() {
+    // Every accepted edit and every remote delta rebuilds the editor from a new document. The
+    // multi-selection and the clipboard used to be dropped there, so a collaborator typing in
+    // another panel silently emptied your clipboard and collapsed a range you had just built.
+    val copied = reducer.reduce(outOfOrderSelection(), UiBuilderEditorEvent.CopySelected)
+    assertEquals(3, copied.selection.size)
+    val clipboard = assertIs<EditorClipboard>(copied.clipboard)
+
+    val reconciled = reducer.reconciled(copied, copied.document.copy(revision = 99))
+
+    assertEquals(copied.selection, reconciled.selection)
+    assertEquals(clipboard, reconciled.clipboard)
+    assertEquals("chip-news", reconciled.selectedNodeId, "the anchor is still the last entry")
+  }
+
+  @Test
+  fun `a node the new document dropped leaves the selection rather than emptying it`() {
+    val copied = reducer.reduce(outOfOrderSelection(), UiBuilderEditorEvent.CopySelected)
+    val without =
+      copied.document.let { document ->
+        document.copy(revision = 100, nodes = document.nodes - "chip-news")
+      }
+
+    val reconciled = reducer.reconciled(copied, without)
+
+    assertEquals(listOf("chip-comedy", "chip-crime"), reconciled.selection)
+    assertEquals("chip-crime", reconciled.selectedNodeId)
+  }
+
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
 }

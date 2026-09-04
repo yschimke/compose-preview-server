@@ -168,20 +168,7 @@ fun UiBuilderEditor(
     }
   LaunchedEffect(document.revision, authoritativeGeneration) {
     if (state.document != document) {
-      state =
-        reducer
-          .initial(
-            document,
-            selectedNodeId =
-              state.selectedNodeId?.takeIf(document.nodes::containsKey)
-                ?: initialSelectedNodeId?.takeIf(document.nodes::containsKey)
-                ?: document.roots.firstOrNull(),
-          )
-          .copy(
-            catalogQuery = state.catalogQuery,
-            operationSequence = state.operationSequence,
-            inspectorMode = state.inspectorMode,
-          )
+      state = reducer.reconciled(state, document, initialSelectedNodeId)
     }
   }
   var catalogDragPosition by remember { mutableStateOf<Offset?>(null) }
