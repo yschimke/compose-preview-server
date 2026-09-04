@@ -214,12 +214,17 @@ fun UiBuilderEditor(
       draggedTarget?.let { "${it.nodeId}.${it.slot}" } ?: "No compatible slot",
     )
   }
+  // Cached for the same reason as the issues scan further down, at a smaller scale: the filter
+  // lowercases and scans four strings for every node in the document, and the panel recomposes far
+  // more often than either the document or the query changes.
+  val treeRows =
+    remember(reducer, state.document, state.layerQuery) { reducer.visibleTreeRows(state) }
   val navigator: @Composable (Modifier, Boolean) -> Unit = { modifier, closeAfterDrop ->
     EditorNavigator(
       state = state,
       catalogSystemId = catalog.benchmark.catalogSystemId,
       catalogItems = reducer.catalogItems(state.catalogQuery),
-      treeRows = reducer.visibleTreeRows(state),
+      treeRows = treeRows,
       collaborators = collaborators,
       dropTargetLabel = reducer.dropTargetLabel(state, draggedComponentId ?: "m3/text"),
       onCatalogDrag = { componentId, position ->
