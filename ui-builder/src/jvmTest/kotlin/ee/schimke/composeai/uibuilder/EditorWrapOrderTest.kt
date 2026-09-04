@@ -160,5 +160,38 @@ class EditorWrapOrderTest {
     assertEquals("chip-crime", reconciled.selectedNodeId)
   }
 
+  @Test
+  fun `a property two components spell differently is not offered across both`() {
+    // `m3/button.style` allows filled / filledTonal / text / fab; `m3/text.style` allows the
+    // typography scale. Sharing by name alone offered one `style` dropdown built from the anchor's
+    // declaration, so every choice in it was rejected for the other node — `commitProperty`
+    // validates per node and fails the whole batch, which is right, and left an editable-looking
+    // field that could not be used.
+    val button = reducer.initial(document, selectedNodeId = "toolbar-library")
+    assertTrue(
+      reducer.propertyFields(button).any { it.name == "style" },
+      "a button on its own still edits its style",
+    )
+
+    val both = reducer.reduce(button, UiBuilderEditorEvent.ToggleNode("main-episode-title"))
+    assertEquals(listOf("toolbar-library", "main-episode-title"), both.selection)
+
+    assertTrue(
+      reducer.propertyFields(both).none { it.name == "style" },
+      reducer.propertyFields(both).joinToString { it.name },
+    )
+  }
+
+  @Test
+  fun `a property two components spell identically is still offered across both`() {
+    val one = reducer.initial(document, selectedNodeId = "main-episode-title")
+    val two = reducer.reduce(one, UiBuilderEditorEvent.ToggleNode("main-episode-summary"))
+
+    val style = reducer.propertyFields(two).single { it.name == "style" }
+
+    assertEquals(2, style.nodeCount)
+    assertTrue(style.choices.contains("bodyMedium"), style.choices.toString())
+  }
+
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
 }

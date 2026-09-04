@@ -714,16 +714,20 @@ class UiBuilderEditorReducer(
     val nodes = state.selection.mapNotNull(state.document.nodes::get)
     val node = nodes.lastOrNull() ?: return emptyList()
     val component = catalog.componentsById[node.componentId] ?: return emptyList()
-    val shared =
-      nodes
-        .map { other ->
-          catalog.componentsById[other.componentId]?.propertiesByName?.keys.orEmpty()
-        }
-        .reduceOrNull { acc, names -> acc intersect names }
-        .orEmpty()
+    // The other selected components, for deciding what the selection genuinely shares. A name in
+    // common is not enough: two components can both declare `style` and allow disjoint values, and
+    // the field is built from the anchor's declaration alone. Offering it would put a dropdown in
+    // front of the user whose every choice `commitProperty` then rejects for the other nodes —
+    // that per-node validation is what keeps the document right, and an unusable control is
+    // exactly what this inspector exists to stop showing.
+    val others = nodes.dropLast(1).mapNotNull { catalog.componentsById[it.componentId] }
+    fun sharedByAll(property: PropertyCapability): Boolean = others.all { other ->
+      val theirs = other.propertiesByName[property.name] ?: return@all false
+      theirs.allowedValues == property.allowedValues && theirs.typeNames() == property.typeNames()
+    }
     return component.properties
       .filterNot { it.name in THEME_PROPERTIES }
-      .filter { nodes.size == 1 || it.name in shared }
+      .filter { nodes.size == 1 || sharedByAll(it) }
       .map { property ->
         val encoded = node.properties[property.name] as? JsonObject
         val value = encoded?.get("value")
