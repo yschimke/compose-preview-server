@@ -215,7 +215,24 @@ enum class EditorInspectorMode {
   Properties,
   Theme,
   Screen,
+  Issues,
 }
+
+/**
+ * One thing standing between the current document and an export.
+ *
+ * Read straight out of [validateDocumentForExport], which is the fail-closed gate the code and SVG
+ * projections already run. Surfacing that function rather than a second set of rules is the whole
+ * point: a panel with its own opinion would eventually disagree with the thing that actually
+ * refuses, and the disagreement would be discovered at export time — which is exactly the moment
+ * this exists to avoid.
+ */
+data class EditorProblem(
+  val code: String,
+  val message: String,
+  val nodeId: String? = null,
+  val componentId: String? = null,
+)
 
 data class EditorThemeSettings(
   val primaryColor: String = "#FFD0BCFF",
@@ -741,6 +758,27 @@ class UiBuilderEditorReducer(
       notes = property.notes,
     )
   }
+
+  /**
+   * Everything the export gate would refuse, against the document as it stands.
+   *
+   * The editor validates each write as it happens, so a rejected edit never lands — but nothing was
+   * checking the document as a whole. A node can become unreachable when its parent is deleted, a
+   * required property can be missing on a node nobody touched, and a catalog pin can drift; none of
+   * those is a rejected write, and all of them are a failed export. Until now the first anyone knew
+   * was the export refusing.
+   *
+   * A node id that no longer exists is dropped rather than offered as something to select.
+   */
+  fun problems(state: UiBuilderEditorState): List<EditorProblem> =
+    validateDocumentForExport(state.document, catalog).map { issue ->
+      EditorProblem(
+        code = issue.code,
+        message = issue.message,
+        nodeId = issue.nodeId?.takeIf(state.document.nodes::containsKey),
+        componentId = issue.componentId,
+      )
+    }
 
   fun themeSettings(state: UiBuilderEditorState): EditorThemeSettings {
     val host = state.document.themeHost() ?: return EditorThemeSettings()

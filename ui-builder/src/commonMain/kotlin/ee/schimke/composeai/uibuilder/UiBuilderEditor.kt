@@ -140,6 +140,7 @@ fun UiBuilderEditor(
   authoritativeGeneration: Int = 0,
   initialSelectedNodeId: String? = null,
   initialCatalogQuery: String = "",
+  initialInspectorMode: EditorInspectorMode = EditorInspectorMode.Properties,
   collaborators: List<UiBuilderCollaborator> = emptyList(),
   newDesignCatalogs: List<UiBuilderNewDesignCatalog> = emptyList(),
   onCreateDesign: ((catalogSystemId: String, designId: String, templateId: String) -> Unit)? = null,
@@ -159,7 +160,7 @@ fun UiBuilderEditor(
               initialSelectedNodeId?.takeIf(document.nodes::containsKey)
                 ?: document.roots.firstOrNull(),
           )
-          .copy(catalogQuery = initialCatalogQuery)
+          .copy(catalogQuery = initialCatalogQuery, inspectorMode = initialInspectorMode)
       )
     }
   LaunchedEffect(document.revision, authoritativeGeneration) {
@@ -271,6 +272,7 @@ fun UiBuilderEditor(
     PropertyInspector(
       state = state,
       fields = reducer.propertyFields(state),
+      problems = reducer.problems(state),
       themeSettings = reducer.themeSettings(state),
       onTextInputFocusChanged = { textInputFocused = it },
       dispatch = ::dispatch,
@@ -1449,17 +1451,22 @@ private fun String.toPresenceColor(): Color {
 private fun PropertyInspector(
   state: UiBuilderEditorState,
   fields: List<EditorPropertyField>,
+  problems: List<EditorProblem>,
   themeSettings: EditorThemeSettings,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
-  modifier: Modifier = Modifier.width(300.dp).fillMaxHeight(),
+  // Four tabs rather than three, and the widest of them has to stay legible.
+  modifier: Modifier = Modifier.width(360.dp).fillMaxHeight(),
 ) {
   val node = state.selectedNodeId?.let(state.document.nodes::get)
   Surface(modifier, color = MaterialTheme.colorScheme.surface) {
     Column(Modifier.padding(16.dp)) {
       Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // "Layer", not "Properties". It is the odd label out beside Theme, Screen and Issues, it
+        // is the one a fourth tab leaves no room for, and it is the word the panel beside it
+        // already uses for the same thing.
         InspectorModeButton(
-          "Properties",
+          "Layer",
           EditorInspectorMode.Properties,
           state,
           dispatch,
@@ -1479,8 +1486,19 @@ private fun PropertyInspector(
           dispatch,
           Modifier.weight(1f),
         )
+        InspectorModeButton(
+          if (problems.isEmpty()) "Issues" else "Issues ${problems.size}",
+          EditorInspectorMode.Issues,
+          state,
+          dispatch,
+          Modifier.weight(1f),
+        )
       }
       HorizontalDivider(Modifier.padding(vertical = 6.dp))
+      if (state.inspectorMode == EditorInspectorMode.Issues) {
+        ProblemsInspector(problems, dispatch)
+        return@Column
+      }
       if (state.inspectorMode == EditorInspectorMode.Theme) {
         ThemeBuilder(themeSettings, onTextInputFocusChanged, dispatch)
         return@Column
@@ -1711,6 +1729,61 @@ private fun DraftPropertyControl(
   }
 }
 
+/**
+ * What the export gate would refuse, listed where a person is already looking.
+ *
+ * Each row selects its node, because a message naming an id nobody can find is only half an answer.
+ * Rows without a node — a catalog pin mismatch, an environment field — are not selectable and say
+ * so by not reacting.
+ */
+@Composable
+private fun ProblemsInspector(
+  problems: List<EditorProblem>,
+  dispatch: (UiBuilderEditorEvent) -> Unit,
+) {
+  if (problems.isEmpty()) {
+    Text(
+      "Nothing is blocking an export of this design.",
+      Modifier.padding(top = 16.dp),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    return
+  }
+  Text(
+    "These are what the export gate refuses, checked against the whole document rather than the " +
+      "last edit.",
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    style = MaterialTheme.typography.labelSmall,
+  )
+  LazyColumn(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+    itemsIndexed(problems) { _, problem ->
+      Column(
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).let { base ->
+          problem.nodeId?.let { id ->
+            base.clickable { dispatch(UiBuilderEditorEvent.SelectNode(id)) }
+          } ?: base
+        }
+      ) {
+        Text(
+          problem.code,
+          color = MaterialTheme.colorScheme.error,
+          style = MaterialTheme.typography.labelMedium,
+        )
+        Text(problem.message, style = MaterialTheme.typography.bodySmall)
+        val where =
+          listOfNotNull(problem.nodeId, problem.componentId).joinToString(" · ").ifEmpty { null }
+        if (where != null) {
+          Text(
+            where,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+          )
+        }
+      }
+    }
+  }
+}
+
 @Composable
 private fun InspectorModeButton(
   label: String,
@@ -1733,12 +1806,15 @@ private fun InspectorModeButton(
   ) {
     Text(
       label,
-      Modifier.padding(vertical = 5.dp),
+      Modifier.padding(vertical = 6.dp),
       color =
         if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-      style = MaterialTheme.typography.labelLarge,
+      // A size down from labelLarge: four tabs share the width three used to, and a clipped tab
+      // label is worse than a smaller one.
+      style = MaterialTheme.typography.labelMedium,
       fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
       textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+      maxLines = 1,
     )
   }
 }
