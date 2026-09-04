@@ -3,8 +3,10 @@ package ee.schimke.composeai.uibuilder
 import ee.schimke.composeai.uibuilder.capability.CapabilityCatalogParser
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
@@ -46,9 +48,10 @@ class UiBuilderEditorStateTest {
         initial,
         UiBuilderEditorEvent.InsertComponent(componentId = "m3/text", target = target),
       )
-    val insertedId = "editor-m3-text-001"
-
     assertTrue(inserted.lastOutcome is CommandOutcome.Accepted, inserted.lastOutcome.toString())
+    // Taken from the reducer rather than spelled out: a generated id carries the operation prefix
+    // so two clients cannot propose the same one, and the exact shape is not what this asserts.
+    val insertedId = assertNotNull(inserted.selectedNodeId)
     assertEquals(109, inserted.document.revision)
     assertEquals(insertedId, inserted.selectedNodeId)
     assertEquals(
@@ -482,7 +485,7 @@ class UiBuilderEditorStateTest {
 
     assertTrue(inserted.lastOutcome is CommandOutcome.Accepted, inserted.lastOutcome.toString())
     assertEquals(110, inserted.document.nodes.size)
-    val searchBar = inserted.document.nodes.getValue("editor-m3-search-bar-001")
+    val searchBar = inserted.document.nodes.getValue(assertNotNull(inserted.selectedNodeId))
     val inputId = searchBar.slots.getValue("inputField").single()
     assertEquals("m3/search-input-field", inserted.document.nodes.getValue(inputId).componentId)
   }
@@ -536,9 +539,9 @@ class UiBuilderEditorStateTest {
     val initial = reducer.initial(document, selectedNodeId = "main-episode-card")
     val sourceIds = subtreeIds(document, "main-episode-card")
     val duplicated = reducer.reduce(initial, UiBuilderEditorEvent.DuplicateSelected)
-    val copyId = "main-episode-card-copy-001"
 
     assertIs<CommandOutcome.Accepted>(duplicated.lastOutcome)
+    val copyId = assertNotNull(duplicated.selectedNodeId)
     assertEquals(document.revision + 1, duplicated.document.revision)
     assertEquals(document.nodes.size + sourceIds.size, duplicated.document.nodes.size)
     assertEquals(copyId, duplicated.selectedNodeId)
@@ -663,7 +666,7 @@ class UiBuilderEditorStateTest {
     val undone = reducer.reduce(concurrent, UiBuilderEditorEvent.Undo)
 
     assertIs<CommandOutcome.Accepted>(undone.lastOutcome)
-    assertNull(undone.document.nodes["editor-m3-text-001"])
+    assertNull(undone.document.nodes[assertNotNull(inserted.selectedNodeId)])
     assertEquals(
       listOf("main-scaffold", "main-scrim"),
       undone.document.nodes.getValue("main-background").slots.getValue("children"),
@@ -1426,6 +1429,47 @@ class UiBuilderEditorStateTest {
           )
         }
       }
+  }
+
+  @Test
+  fun `a state name that becomes a Kotlin keyword is refused at creation`() {
+    // `identifier()` does not escape, so this would emit `var when: Boolean`. The wire cannot
+    // rename a variable later, so creation is the only moment a design can be stopped from holding
+    // a name it can never generate.
+    val failure =
+      assertFailsWith<IllegalArgumentException> {
+        blankUiBuilderDocument(
+          "from-scratch",
+          document.catalogPin,
+          document.environment,
+          listOf(NewDesignState("when", NewDesignStateType.Flag, JsonPrimitive(false))),
+        )
+      }
+
+    assertTrue(failure.message.orEmpty().contains("keyword"), failure.message.orEmpty())
+  }
+
+  @Test
+  fun `two state names that export to one identifier are refused at creation`() {
+    // `identifier()` drops separators, so both of these become `fooBar` and declare the same
+    // variable twice. Distinct on the wire, identical in the generated Kotlin.
+    val failure =
+      assertFailsWith<IllegalArgumentException> {
+        blankUiBuilderDocument(
+          "from-scratch",
+          document.catalogPin,
+          document.environment,
+          listOf(
+            NewDesignState("foo-bar", NewDesignStateType.Text, JsonPrimitive("a")),
+            NewDesignState("foo_bar", NewDesignStateType.Text, JsonPrimitive("b")),
+          ),
+        )
+      }
+
+    assertTrue(
+      failure.message.orEmpty().contains("distinct once exported"),
+      failure.message.orEmpty(),
+    )
   }
 
   @Test

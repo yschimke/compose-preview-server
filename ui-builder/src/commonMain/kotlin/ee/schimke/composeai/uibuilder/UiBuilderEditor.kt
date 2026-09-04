@@ -73,6 +73,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.isCtrlPressed
@@ -169,20 +170,7 @@ fun UiBuilderEditor(
     }
   LaunchedEffect(document.revision, authoritativeGeneration) {
     if (state.document != document) {
-      state =
-        reducer
-          .initial(
-            document,
-            selectedNodeId =
-              state.selectedNodeId?.takeIf(document.nodes::containsKey)
-                ?: initialSelectedNodeId?.takeIf(document.nodes::containsKey)
-                ?: document.roots.firstOrNull(),
-          )
-          .copy(
-            catalogQuery = state.catalogQuery,
-            operationSequence = state.operationSequence,
-            inspectorMode = state.inspectorMode,
-          )
+      state = reducer.reconciled(state, document, initialSelectedNodeId)
     }
   }
   var catalogDragPosition by remember { mutableStateOf<Offset?>(null) }
@@ -1421,9 +1409,26 @@ private fun LayerRow(
             )
           }
         }
-        // Dropping `clickable` also dropped the activation action and the focusability it
-        // supplied, so a screen reader could find a layer and not select it and the keyboard could
-        // not reach one at all. The pointer path keeps the modifier keys; this restores the rest.
+        // Dropping `clickable` also dropped the activation action, the focusability and the key
+        // handling it supplied, so a screen reader could find a layer and not select it, and the
+        // keyboard could neither reach one nor activate it. The pointer path keeps the modifier
+        // keys; these restore the rest. `focusable` and a semantics action are not enough on their
+        // own: they expose focus and an accessibility action, and leave Enter and Space inert.
+        .onKeyEvent { event ->
+          if (
+            event.type == KeyEventType.KeyUp &&
+              (event.key == Key.Enter || event.key == Key.NumPadEnter || event.key == Key.Spacebar)
+          ) {
+            onSelect(
+              when {
+                event.isShiftPressed -> LayerSelectionGesture.Range
+                event.isCtrlPressed || event.isMetaPressed -> LayerSelectionGesture.Toggle
+                else -> LayerSelectionGesture.Replace
+              }
+            )
+            true
+          } else false
+        }
         .focusable()
         .semantics {
           contentDescription = "Select ${row.nodeId}"
