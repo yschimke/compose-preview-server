@@ -38,6 +38,10 @@ data class EditorPropertyField(
   val nodeCount: Int = 1,
   /** True when the selected nodes do not agree on a value, so the control shows nothing. */
   val mixed: Boolean = false,
+  /**
+   * The state variable this property reads, when it is bound to one rather than holding a value.
+   */
+  val boundVariable: String? = null,
   val nodeId: String,
   val name: String,
   val label: String,
@@ -244,6 +248,25 @@ sealed interface UiBuilderEditorEvent {
   data class CommitProperty(val nodeId: String, val property: String, val draft: String) :
     UiBuilderEditorEvent
 
+  /** Make a property read a state variable instead of holding a literal. */
+  data class BindPropertyToState(
+    val nodeId: String,
+    val property: String,
+    val variable: String,
+    /**
+     * When set, bind as a comparison rather than a bare read.
+     *
+     * The catalog decides which shape a property accepts: a bare read yields the variable's value,
+     * so it suits a property typed like the variable, while `stateEquals` yields a boolean, which
+     * is what a `selected` or `visible` flag needs. Binding a boolean property to a bare read of a
+     * string variable is refused, correctly, by the catalog.
+     */
+    val equalsValue: String? = null,
+  ) : UiBuilderEditorEvent
+
+  /** Give a bound property a literal of its own again. */
+  data class UnbindProperty(val nodeId: String, val property: String) : UiBuilderEditorEvent
+
   data class UpdateEnvironment(val settings: ScreenEnvironmentSettings) : UiBuilderEditorEvent
 
   data class ShowInspector(val mode: EditorInspectorMode) : UiBuilderEditorEvent
@@ -307,6 +330,9 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.MoveNode -> move(state, event)
       is UiBuilderEditorEvent.CommitProperty ->
         commitProperty(state, event.nodeId, event.property, event.draft)
+      is UiBuilderEditorEvent.BindPropertyToState ->
+        bindPropertyToState(state, event.nodeId, event.property, event.variable, event.equalsValue)
+      is UiBuilderEditorEvent.UnbindProperty -> unbindProperty(state, event.nodeId, event.property)
       is UiBuilderEditorEvent.UpdateEnvironment -> updateEnvironment(state, event.settings)
       is UiBuilderEditorEvent.ShowInspector -> state.copy(inspectorMode = event.mode)
       is UiBuilderEditorEvent.ApplyTheme -> applyTheme(state, event.settings)
@@ -445,6 +471,34 @@ class UiBuilderEditorReducer(
     return parentNode.slots[parent.slot].orEmpty().size + count <= maximum
   }
 
+  /**
+   * The state variables this document declares, for a binding picker.
+   *
+   * Only declared ones. A property bound to a name nothing declares reads as null at render time
+   * and generates nothing at export, so offering free text here would let the builder produce a
+   * screen that silently shows blanks.
+   */
+  fun stateVariableNames(state: UiBuilderEditorState): List<String> =
+    state.document.stateVariables.keys.sorted()
+
+  /**
+   * Whether a binding on [propertyName] has to be a comparison rather than a bare read.
+   *
+   * A boolean property cannot take the value of a string variable, so the catalog refuses a bare
+   * read there and accepts `stateEquals`. Asking this up front lets the inspector offer the shape
+   * that will be accepted, instead of offering one and relaying the catalog's refusal.
+   */
+  fun bindingNeedsComparison(
+    state: UiBuilderEditorState,
+    nodeId: String,
+    propertyName: String,
+  ): Boolean {
+    val node = state.document.nodes[nodeId] ?: return false
+    val property =
+      catalog.componentsById[node.componentId]?.propertiesByName?.get(propertyName) ?: return false
+    return "boolean" in (property.typeNames() - "null")
+  }
+
   fun catalogItems(query: String): List<EditorCatalogItem> {
     val needle = query.trim().lowercase()
     return catalog.components
@@ -534,12 +588,23 @@ class UiBuilderEditorReducer(
             typeNames == setOf("string") -> EditorPropertyControl.Text
             else -> EditorPropertyControl.Unsupported
           }
+        val boundVariables =
+          nodes
+            .map { other ->
+              (other.properties[property.name] as? JsonObject)
+                ?.takeIf { it["type"]?.jsonPrimitive?.contentOrNull in STATE_VALUE_TYPES }
+                ?.get("variable")
+                ?.jsonPrimitive
+                ?.contentOrNull
+            }
+            .distinct()
         val encodedValues =
           nodes.map { (it.properties[property.name] as? JsonObject)?.get("value") }.distinct()
         val mixed = encodedValues.size > 1
         EditorPropertyField(
           nodeCount = nodes.size,
           mixed = mixed,
+          boundVariable = boundVariables.singleOrNull(),
           nodeId = node.id,
           name = property.name,
           label = property.name.humanLabel(),
@@ -932,6 +997,108 @@ class UiBuilderEditorReducer(
     return move(state, move)
   }
 
+  /**
+   * Point a property at a state variable.
+   *
+   * This rides `SetProperty` rather than needing an operation of its own: `StateValueV1` is a
+   * `UiValueV1`, so `{"type": "state", "variable": …}` is a property value the wire already
+   * carries, the server already validates, and the renderer already resolves. It is how the
+   * fixture's search field is wired.
+   */
+  private fun bindPropertyToState(
+    state: UiBuilderEditorState,
+    nodeId: String,
+    propertyName: String,
+    variable: String,
+    equalsValue: String?,
+  ): UiBuilderEditorState {
+    val sequence = state.operationSequence + 1
+    val node = state.document.nodes[nodeId] ?: return state
+    if (
+      catalog.componentsById[node.componentId]?.propertiesByName?.containsKey(propertyName) != true
+    ) {
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_PROPERTY,
+        "Property $propertyName is not declared by ${node.componentId}",
+        nodeId,
+        propertyName,
+      )
+    }
+    if (variable !in state.document.stateVariables) {
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_PROPERTY,
+        "This design declares no state variable `$variable`",
+        nodeId,
+        propertyName,
+      )
+    }
+    val encoded =
+      if (equalsValue == null)
+        JsonObject(mapOf("type" to JsonPrimitive("state"), "variable" to JsonPrimitive(variable)))
+      else
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("stateEquals"),
+            "variable" to JsonPrimitive(variable),
+            "value" to JsonPrimitive(equalsValue),
+          )
+        )
+    validator.validate(state.document, nodeId, propertyName, encoded)?.let { issue ->
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_PROPERTY,
+        issue.message,
+        nodeId,
+        propertyName,
+      )
+    }
+    return state.apply(
+      sequence,
+      listOf(DesignOperation.SetProperty(nodeId, propertyName, encoded)),
+      selectionAfter = nodeId,
+    )
+  }
+
+  /**
+   * Give a bound property a literal again.
+   *
+   * Needed because a bound property refuses a typed literal — `commitProperty` will not rewrite a
+   * state read into a value — so without this a binding is a one-way door.
+   */
+  private fun unbindProperty(
+    state: UiBuilderEditorState,
+    nodeId: String,
+    propertyName: String,
+  ): UiBuilderEditorState {
+    val sequence = state.operationSequence + 1
+    val node = state.document.nodes[nodeId] ?: return state
+    val property =
+      catalog.componentsById[node.componentId]?.propertiesByName?.get(propertyName) ?: return state
+    val current =
+      (node.properties[propertyName] as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull
+    if (current !in STATE_VALUE_TYPES) return state
+    // Deliberately not `defaultEncodedValue`: for some properties the catalog default *is* a state
+    // binding — a text field's `value` defaults to one — so unbinding to the default would leave
+    // the property bound, which is a no-op for exactly the properties most likely to be bound.
+    val encoded = property.literalDefault()
+    validator.validate(state.document, nodeId, propertyName, encoded)?.let { issue ->
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_PROPERTY,
+        issue.message,
+        nodeId,
+        propertyName,
+      )
+    }
+    return state.apply(
+      sequence,
+      listOf(DesignOperation.SetProperty(nodeId, propertyName, encoded)),
+      selectionAfter = nodeId,
+    )
+  }
+
   private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {
     val roots = state.selectionRoots()
     if (roots.isEmpty()) return state
@@ -1177,6 +1344,14 @@ internal const val THEME_SURFACE = "themeSurfaceColor"
 internal const val THEME_CONTENT = "themeContentColor"
 internal const val THEME_TYPE_SCALE = "themeTypeScale"
 internal const val THEME_CORNER_RADIUS = "themeCornerRadiusDp"
+/**
+ * The property-value shapes that read a state variable rather than holding a value.
+ *
+ * `stateEquals` is one too — the fixture's filter chips use it for `selected` — so treating only
+ * `state` as a binding would report a chip as unbound and refuse to unbind it.
+ */
+private val STATE_VALUE_TYPES = setOf("state", "stateEquals")
+
 private val THEME_PROPERTIES =
   setOf(
     THEME_PRIMARY,
@@ -1264,6 +1439,27 @@ private fun ComponentCapability.defaultNode(
     modifiers = JsonArray(emptyList()),
     slots = slots.associate { it.name to emptyList() },
   )
+
+/**
+ * A neutral literal for this property: the first allowed value, or an empty one of its own type.
+ *
+ * Typed rather than always the empty string, because `""` is not a boolean and a validator that
+ * refuses it would make unbinding a boolean impossible.
+ */
+private fun PropertyCapability.literalDefault(): JsonObject {
+  allowedValues.firstOrNull()?.let {
+    return it.asLiteral(name)
+  }
+  val types = typeNames() - "null"
+  // Membership, not equality. A property declared ["boolean", "string"] — which is how the catalog
+  // spells "a flag or the name of a state variable" — would otherwise unbind to `""`, and an empty
+  // string on such a property reads as a variable name rather than as off.
+  return when {
+    "boolean" in types -> literal("bool", JsonPrimitive(false))
+    "number" in types || "integer" in types -> literal("float", JsonPrimitive(0))
+    else -> JsonPrimitive("").asLiteral(name)
+  }
+}
 
 private fun PropertyCapability.defaultEncodedValue(
   nodeId: String,

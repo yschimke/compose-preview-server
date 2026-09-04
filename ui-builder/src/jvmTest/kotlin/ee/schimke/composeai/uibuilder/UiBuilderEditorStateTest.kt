@@ -1116,4 +1116,119 @@ class UiBuilderEditorStateTest {
       assertFalse(it.mixed)
     }
   }
+
+  @Test
+  fun `a state-bound property refuses a literal rather than corrupting the binding`() {
+    // `search-input.value` is bound to the `searchQuery` variable in the fixture:
+    // {"type": "state", "variable": "searchQuery"}. A commit that reused that encoded type would
+    // emit {"type": "state", "value": "..."} — a state read naming no variable. It refuses instead.
+    val bound = document.nodes.getValue("search-input").properties.getValue("value").jsonObject
+    assertEquals("state", bound["type"]?.jsonPrimitive?.content)
+
+    val edited =
+      reducer.reduce(
+        reducer.initial(document, "search-input"),
+        UiBuilderEditorEvent.CommitProperty("search-input", "value", "hello"),
+      )
+
+    assertIs<CommandOutcome.Rejected>(edited.lastOutcome)
+    assertEquals(bound, edited.document.nodes.getValue("search-input").properties["value"])
+  }
+
+  @Test
+  fun `a bound property can be unbound and bound again`() {
+    // `m3/filter-chip.selected` is declared ["boolean", "string"], so the catalog admits both a
+    // literal and a state read there. The fixture binds it with `stateEquals`.
+    val state = reducer.initial(document, "chip-crime")
+    val bound = document.nodes.getValue("chip-crime").properties.getValue("selected").jsonObject
+    val variable = bound.getValue("variable").jsonPrimitive.content
+
+    // The inspector reports the binding rather than showing an empty value with no explanation.
+    assertEquals(
+      variable,
+      reducer.propertyFields(state).first { it.name == "selected" }.boundVariable,
+    )
+
+    // A bound property refuses a typed literal, so without unbind a binding is a one-way door.
+    val unbound =
+      reducer.reduce(state, UiBuilderEditorEvent.UnbindProperty("chip-crime", "selected"))
+    val literal = unbound.document.nodes.getValue("chip-crime").properties.getValue("selected")
+    assertEquals("bool", literal.jsonObject["type"]?.jsonPrimitive?.content, literal.toString())
+    assertNull(reducer.propertyFields(unbound).first { it.name == "selected" }.boundVariable)
+
+    val rebound =
+      reducer.reduce(
+        unbound,
+        UiBuilderEditorEvent.BindPropertyToState(
+          "chip-crime",
+          "selected",
+          variable,
+          equalsValue = "Crime",
+        ),
+      )
+    val encoded = rebound.document.nodes.getValue("chip-crime").properties.getValue("selected")
+    // A boolean property needs the comparison shape, which the reducer can be asked about up front.
+    assertTrue(reducer.bindingNeedsComparison(unbound, "chip-crime", "selected"))
+    assertEquals("stateEquals", encoded.jsonObject["type"]?.jsonPrimitive?.content)
+    assertEquals(variable, encoded.jsonObject["variable"]?.jsonPrimitive?.content)
+  }
+
+  @Test
+  fun `a property whose catalog type has no room for a state read refuses the binding`() {
+    // `m3/text.text` is declared `string`, and a state read is not a string. The catalog decides
+    // where a binding is legal; this reducer only asks it.
+    val variable = reducer.stateVariableNames(reducer.initial(document, "chip-crime")).first()
+    val text = reducer.treeRows(document).first { it.componentId == "m3/text" }
+    val attempted =
+      reducer.reduce(
+        reducer.initial(document, text.nodeId),
+        UiBuilderEditorEvent.BindPropertyToState(text.nodeId, "text", variable),
+      )
+
+    assertIs<CommandOutcome.Rejected>(attempted.lastOutcome)
+    assertEquals(
+      document.nodes.getValue(text.nodeId).properties["text"],
+      attempted.document.nodes.getValue(text.nodeId).properties["text"],
+    )
+  }
+
+  @Test
+  fun `a property that must be a state read refuses to be unbound`() {
+    // `m3/search-input-field.value` is declared `object`: a literal is not valid there at all, so
+    // the binding is not something to undo. The refusal comes from the catalog, not from a rule
+    // this reducer invented.
+    val unbound =
+      reducer.reduce(
+        reducer.initial(document, "search-input"),
+        UiBuilderEditorEvent.UnbindProperty("search-input", "value"),
+      )
+
+    assertIs<CommandOutcome.Rejected>(unbound.lastOutcome)
+    assertEquals(
+      document.nodes.getValue("search-input").properties["value"],
+      unbound.document.nodes.getValue("search-input").properties["value"],
+    )
+  }
+
+  @Test
+  fun `binding to a variable the design does not declare is refused`() {
+    // A property bound to an undeclared name reads as null at render time and generates nothing at
+    // export, so the builder must not be able to produce one.
+    val attempted =
+      reducer.reduce(
+        reducer.initial(document, "chip-crime"),
+        UiBuilderEditorEvent.BindPropertyToState(
+          "chip-crime",
+          "selected",
+          "nothingDeclaresThis",
+          equalsValue = "Crime",
+        ),
+      )
+
+    assertIs<CommandOutcome.Rejected>(attempted.lastOutcome)
+    assertEquals(
+      document.nodes.getValue("chip-crime").properties["selected"],
+      attempted.document.nodes.getValue("chip-crime").properties["selected"],
+    )
+  }
 }
