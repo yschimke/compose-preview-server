@@ -706,19 +706,30 @@ class UiBuilderEditorReducer(
         nodeId.lowercase().contains(needle) ||
         componentId.lowercase().contains(needle)
     val matched = rows.map { it.matches() }
-    // A row is kept when it matched, or when any deeper row below it matched before the tree came
-    // back out to its own level — which is exactly "has a matching descendant" on a pre-order walk.
+    // A row is kept when it matched, or when it is an ancestor of one.
+    //
+    // Ancestors come from parent pointers built in one forward pass: on a pre-order walk the most
+    // recent row at depth d-1 is the parent of a row at depth d. The previous version scanned
+    // *backwards over every preceding row* for each match, which is quadratic — one root with
+    // 9,999 matching children walked some 50 million rows, synchronously in the Wasm UI, on every
+    // keystroke in the filter field. The service permits 10,000-node designs.
+    val parent = IntArray(rows.size) { -1 }
+    val deepest = rows.maxOfOrNull(EditorTreeRow::depth) ?: -1
+    val ancestorAtDepth = IntArray(deepest + 1) { -1 }
+    rows.forEachIndexed { index, row ->
+      parent[index] = if (row.depth == 0) -1 else ancestorAtDepth[row.depth - 1]
+      ancestorAtDepth[row.depth] = index
+    }
     val keep = BooleanArray(rows.size)
     rows.indices.forEach { index ->
       if (!matched[index]) return@forEach
       keep[index] = true
-      var depth = rows[index].depth
-      for (above in index - 1 downTo 0) {
-        if (rows[above].depth < depth) {
-          keep[above] = true
-          depth = rows[above].depth
-          if (depth == 0) break
-        }
+      // Stop at the first ancestor already kept: whatever marked it walked its own chain to the
+      // root, so everything above is kept too. That is what keeps the total linear.
+      var above = parent[index]
+      while (above >= 0 && !keep[above]) {
+        keep[above] = true
+        above = parent[above]
       }
     }
     return rows.indices
