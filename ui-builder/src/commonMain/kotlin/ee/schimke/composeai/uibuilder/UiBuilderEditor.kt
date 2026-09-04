@@ -1342,7 +1342,12 @@ private fun PropertyControl(
 ) {
   Column(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
     Text(
-      field.label + if (field.required) " *" else "",
+      field.label +
+        (if (field.required) " *" else "") +
+        // Say what an edit will hit. A control that silently spans six nodes is one people stop
+        // trusting the first time it changes something they were not looking at.
+        (if (field.nodeCount > 1) " · ${field.nodeCount} selected" else "") +
+        (if (field.mixed) " · mixed" else ""),
       style = MaterialTheme.typography.labelLarge,
     )
     when (field.control) {

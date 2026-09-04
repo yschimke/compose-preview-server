@@ -1041,4 +1041,79 @@ class UiBuilderEditorStateTest {
     // One operation for the batch.
     assertEquals(document.revision + 1, duplicated.document.revision)
   }
+
+  @Test
+  fun `editing one field changes every selected node that declares it`() {
+    val texts = reducer.treeRows(document).filter { it.componentId == "m3/text" }.take(2)
+    assertEquals(2, texts.size)
+    val selected =
+      reducer.reduce(
+        reducer.initial(document, texts[0].nodeId),
+        UiBuilderEditorEvent.ToggleNode(texts[1].nodeId),
+      )
+    val edited =
+      reducer.reduce(
+        selected,
+        UiBuilderEditorEvent.CommitProperty(texts[1].nodeId, "style", "titleLarge"),
+      )
+
+    texts.forEach { row ->
+      val style = edited.document.nodes.getValue(row.nodeId).properties["style"]
+      assertEquals(
+        "titleLarge",
+        style?.jsonObject?.get("value")?.jsonPrimitive?.content,
+        row.nodeId,
+      )
+    }
+    // One operation for the batch, and the selection survives so the next edit still spans it.
+    assertEquals(document.revision + 1, edited.document.revision)
+    assertEquals(2, edited.selection.size)
+  }
+
+  @Test
+  fun `a multi-selection offers only the properties every component declares`() {
+    val rows = reducer.treeRows(document)
+    val text = rows.first { it.componentId == "m3/text" }
+    val other = rows.first { it.componentId != "m3/text" && it.parent != null }
+    val mixedSelection =
+      reducer.reduce(
+        reducer.initial(document, text.nodeId),
+        UiBuilderEditorEvent.ToggleNode(other.nodeId),
+      )
+
+    val names = reducer.propertyFields(mixedSelection).map { it.name }.toSet()
+    val textOnly = reducer.propertyFields(reducer.initial(document, text.nodeId)).map { it.name }
+    val otherOnly = reducer.propertyFields(reducer.initial(document, other.nodeId)).map { it.name }
+    // Exactly the intersection: a property only one of them has would be shown as editing the
+    // selection while editing part of it.
+    assertEquals(textOnly.toSet() intersect otherOnly.toSet(), names)
+  }
+
+  @Test
+  fun `a field whose nodes disagree reads as mixed and shows no value`() {
+    val texts = reducer.treeRows(document).filter { it.componentId == "m3/text" }.take(2)
+    val selected =
+      reducer.reduce(
+        reducer.initial(document, texts[0].nodeId),
+        UiBuilderEditorEvent.ToggleNode(texts[1].nodeId),
+      )
+    // The fixture's texts carry different content, so `text` must not show one of them for both.
+    val field = reducer.propertyFields(selected).first { it.name == "text" }
+
+    assertTrue(field.mixed)
+    assertEquals("", field.value)
+    assertEquals(2, field.nodeCount)
+  }
+
+  @Test
+  fun `a single selection is unchanged by any of this`() {
+    val text = reducer.treeRows(document).first { it.componentId == "m3/text" }
+    val fields = reducer.propertyFields(reducer.initial(document, text.nodeId))
+
+    assertTrue(fields.isNotEmpty())
+    fields.forEach {
+      assertEquals(1, it.nodeCount)
+      assertFalse(it.mixed)
+    }
+  }
 }

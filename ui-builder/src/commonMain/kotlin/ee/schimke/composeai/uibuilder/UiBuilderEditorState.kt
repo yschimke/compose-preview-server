@@ -34,6 +34,10 @@ data class EditorNumberBounds(
 )
 
 data class EditorPropertyField(
+  /** How many selected nodes this field edits — more than one for a multi-selection. */
+  val nodeCount: Int = 1,
+  /** True when the selected nodes do not agree on a value, so the control shows nothing. */
+  val mixed: Boolean = false,
   val nodeId: String,
   val name: String,
   val label: String,
@@ -485,11 +489,31 @@ class UiBuilderEditorReducer(
     return rows
   }
 
+  /**
+   * The inspector's fields for the current selection.
+   *
+   * For more than one node it shows the properties **every** selected component declares, so
+   * editing six texts' style is one edit rather than six. A property only some of them have is left
+   * out rather than shown and silently applied to a subset — the inspector would otherwise claim to
+   * be editing the selection while editing part of it.
+   *
+   * Where the nodes disagree the field is [EditorPropertyField.mixed] and its value is blank, so
+   * the control shows nothing rather than one node's value standing in for all of them.
+   */
   fun propertyFields(state: UiBuilderEditorState): List<EditorPropertyField> {
-    val node = state.selectedNodeId?.let(state.document.nodes::get) ?: return emptyList()
+    val nodes = state.selection.mapNotNull(state.document.nodes::get)
+    val node = nodes.lastOrNull() ?: return emptyList()
     val component = catalog.componentsById[node.componentId] ?: return emptyList()
+    val shared =
+      nodes
+        .map { other ->
+          catalog.componentsById[other.componentId]?.propertiesByName?.keys.orEmpty()
+        }
+        .reduceOrNull { acc, names -> acc intersect names }
+        .orEmpty()
     return component.properties
       .filterNot { it.name in THEME_PROPERTIES }
+      .filter { nodes.size == 1 || it.name in shared }
       .map { property ->
         val encoded = node.properties[property.name] as? JsonObject
         val value = encoded?.get("value")
@@ -510,13 +534,18 @@ class UiBuilderEditorReducer(
             typeNames == setOf("string") -> EditorPropertyControl.Text
             else -> EditorPropertyControl.Unsupported
           }
+        val encodedValues =
+          nodes.map { (it.properties[property.name] as? JsonObject)?.get("value") }.distinct()
+        val mixed = encodedValues.size > 1
         EditorPropertyField(
+          nodeCount = nodes.size,
+          mixed = mixed,
           nodeId = node.id,
           name = property.name,
           label = property.name.humanLabel(),
           required = property.required,
           control = control,
-          value = value?.jsonPrimitive?.content ?: "",
+          value = if (mixed) "" else value?.jsonPrimitive?.content ?: "",
           choices =
             property.allowedValues.mapNotNull { it.jsonPrimitive.contentOrNull } +
               property.editor?.suggestedValues.orEmpty(),
@@ -650,23 +679,45 @@ class UiBuilderEditorReducer(
       )
     }
     val value = (parsed as PropertyDraft.Valid).value
-    val existingType =
-      (node.properties[propertyName] as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull
-    val encoded = literal(existingType ?: field.defaultEncodedType(), value)
-    validator.validate(state.document, nodeId, propertyName, encoded)?.let { issue ->
-      return state.rejected(
-        sequence,
-        RejectionCode.INVALID_PROPERTY,
-        issue.message,
-        nodeId,
-        propertyName,
-      )
+    // Every selected node that declares this property, so editing six texts' style is one edit.
+    // The edited node is always included even when it is not in the selection, which is what
+    // happens when the inspector is driven by something other than a click.
+    val targets =
+      (state.selection.filter { it != nodeId } + nodeId).mapNotNull { id ->
+        state.document.nodes[id]?.takeIf {
+          catalog.componentsById[it.componentId]?.propertiesByName?.containsKey(propertyName) ==
+            true
+        }
+      }
+    val operations = mutableListOf<DesignOperation>()
+    targets.forEach { target ->
+      // Each node keeps its own encoded type. Two nodes can hold the same property as a literal and
+      // as a token, and rewriting one to the other's shape would change more than was asked.
+      val existingType =
+        (target.properties[propertyName] as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull
+      val encoded = literal(existingType ?: field.defaultEncodedType(), value)
+      // Validated per node rather than once for the anchor: the same value can be legal on one
+      // component and not another, and a rejected edit must reject the whole batch rather than
+      // apply to the nodes that happened to come first.
+      validator.validate(state.document, target.id, propertyName, encoded)?.let { issue ->
+        return state.rejected(
+          sequence,
+          RejectionCode.INVALID_PROPERTY,
+          issue.message,
+          target.id,
+          propertyName,
+        )
+      }
+      operations += DesignOperation.SetProperty(target.id, propertyName, encoded)
     }
-    return state.apply(
-      sequence,
-      listOf(DesignOperation.SetProperty(nodeId, propertyName, encoded)),
-      selectionAfter = nodeId,
-    )
+    if (operations.isEmpty()) return state
+    return state
+      .apply(sequence, operations, selectionAfter = nodeId)
+      // One edit across a selection must not collapse that selection to the node whose field was
+      // typed in, or the next edit would silently apply to one node.
+      .let { edited ->
+        if (targets.size > 1) edited.copy(selection = targets.map(UiBuilderNode::id)) else edited
+      }
   }
 
   private fun updateEnvironment(
