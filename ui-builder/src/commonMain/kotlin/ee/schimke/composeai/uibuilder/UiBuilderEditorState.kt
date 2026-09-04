@@ -646,7 +646,12 @@ class UiBuilderEditorReducer(
             property.allowedValues.isNotEmpty() || declaredControl == PropertyEditorControl.ENUM ->
               EditorPropertyControl.Enum
             declaredControl == PropertyEditorControl.TEXT -> EditorPropertyControl.Text
-            declaredControl == PropertyEditorControl.BOOLEAN || typeNames == setOf("boolean") ->
+            // Membership, not equality, for the same reason `literalDefault` uses membership: a
+            // property declared ["boolean", "string"] is how the catalog spells "a flag or the name
+            // of a state variable". Under equality those fell through to `Unsupported`, so
+            // unbinding `m3/filter-chip.selected` wrote a real boolean the inspector then refused
+            // to edit — two rules in this file disagreeing about the same declaration.
+            declaredControl == PropertyEditorControl.BOOLEAN || "boolean" in typeNames ->
               EditorPropertyControl.Boolean
             (declaredControl == PropertyEditorControl.NUMBER ||
               typeNames == setOf("number") ||
