@@ -1167,9 +1167,10 @@ class UiBuilderEditorReducer(
     val copies = mutableListOf<String>()
     // Every id this batch allocates, so two copies in one duplicate cannot collide with each other
     // or with anything the document already holds.
-    val taken = state.document.nodes.keys.toMutableSet()
+    val taken = state.document.takenIdentities()
     targets.forEach { nodeId ->
-      val copyId = freshCopyId(state.document.freshNodeId("$nodeId-copy", sequence), taken)
+      val copyId =
+        freshCopyId(state.document.freshNodeId("$nodeId-copy", operationIdPrefix, sequence), taken)
       state.document.nodes.appendDuplicateSubtree(
         sourceNodeId = nodeId,
         copyNodeId = copyId,
@@ -1457,7 +1458,11 @@ class UiBuilderEditorReducer(
       )
     }
     val containerId =
-      state.document.freshNodeId("editor-${componentId.replace('/', '-')}", sequence)
+      state.document.freshNodeId(
+        "editor-${componentId.replace('/', '-')}",
+        operationIdPrefix,
+        sequence,
+      )
     val operations = mutableListOf<DesignOperation>()
     val defaultError =
       container.appendDefaultSubtree(
@@ -1640,11 +1645,15 @@ class UiBuilderEditorReducer(
     var after =
       if (destination == selectedLocation) state.selectedNodeId
       else state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
-    val taken = state.document.nodes.keys.toMutableSet()
+    val taken = state.document.takenIdentities()
     clipboard.rootNodeIds.forEachIndexed { index, rootId ->
       // Numbered per root as well as per paste, so two roots in one batch cannot collide with each
       // other the way two pastes of one root would collide without `freshNodeId`.
-      val pasteId = freshCopyId(state.document.freshNodeId("$rootId-paste-$index", sequence), taken)
+      val pasteId =
+        freshCopyId(
+          state.document.freshNodeId("$rootId-paste-$index", operationIdPrefix, sequence),
+          taken,
+        )
       // The clipboard's own nodes are the source, not the document's — the subtree it names may
       // have been cut, or edited since, and a paste has to reproduce what was copied either way.
       clipboard.nodes.appendDuplicateSubtree(
@@ -2155,9 +2164,26 @@ private fun UiBuilderDocument.treeIndex(): (String) -> Int {
  *
  * Pasting twice from one clipboard would otherwise produce the same id twice, and the second insert
  * would be rejected as a duplicate — so the paste that looks identical to the first silently fails.
+ *
+ * [client] because the sequence is *local*. Two people wrapping a selection in a Row as their own
+ * first operation both reach sequence 1 and both propose `editor-layout-row-001`, for different
+ * selections. Operation ids are already qualified; node ids were not, so the server accepted one
+ * and rejected the other as a duplicate insertion — losing that person's edit, in the one situation
+ * this editor exists to handle well.
+ *
+ * The qualifier is the **operation id prefix**, not `clientId`. `clientId` defaults to a constant
+ * and the live host reads it from configuration, so two browsers can carry the same one; the
+ * operation prefix is `clientId` plus a per-page nonce, which is precisely what already makes
+ * operation ids unique between clients. Long ids are the price, and they are generated names shown
+ * beside a human label rather than read on their own.
  */
-private fun UiBuilderDocument.freshNodeId(preferred: String, sequence: Int): String {
-  val numbered = "$preferred-${sequence.toString().padStart(3, '0')}"
+private fun UiBuilderDocument.freshNodeId(
+  preferred: String,
+  client: String,
+  sequence: Int,
+): String {
+  val qualifier = client.filter { it.isLetterOrDigit() || it == '-' }.ifEmpty { "c" }
+  val numbered = "$preferred-$qualifier-${sequence.toString().padStart(3, '0')}"
   if (numbered !in nodes) return numbered
   var suffix = 2
   while ("$numbered-$suffix" in nodes) suffix++
@@ -2174,6 +2200,27 @@ private fun UiBuilderDocument.freshNodeId(preferred: String, sequence: Int): Str
  * exporter's list and not a suffix rule.
  */
 private val INSTANCE_IDENTITY_PROPERTIES = setOf("stableKey", "scrollStateKey")
+
+/**
+ * Every string a copy's identity must not collide with: the node ids, and the identity keys already
+ * in use.
+ *
+ * The ids alone are not enough. A copy takes its own node id as its `stableKey`, and that key is an
+ * arbitrary string a sibling may already hold — duplicating `card` next to a node keyed
+ * `card-copy-001` produced two siblings under one key, which the exporter turns into two
+ * `key("card-copy-001")` groups and Compose rejects at runtime. The values are read with a safe
+ * cast because a document arriving over the wire may hold anything here.
+ */
+private fun UiBuilderDocument.takenIdentities(): MutableSet<String> =
+  (nodes.keys +
+      nodes.values.flatMap { node ->
+        INSTANCE_IDENTITY_PROPERTIES.mapNotNull { name ->
+          ((node.properties[name] as? JsonObject)?.get("value") as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.content
+        }
+      })
+    .toMutableSet()
 
 /** An id nothing in the document and nothing already allocated in this batch is using. */
 private fun freshCopyId(preferred: String, taken: MutableSet<String>): String {

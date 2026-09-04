@@ -347,6 +347,72 @@ class EditorWrapOrderTest {
   }
 
   @Test
+  fun `a generated node id carries the operation prefix so two clients cannot collide`() {
+    // The sequence is local, so two people wrapping a selection as their own first operation both
+    // reach 1. Operation ids were already qualified and node ids were not, so the server accepted
+    // one insertion and rejected the other as a duplicate — losing that person's edit.
+    fun wrapWith(prefix: String): String {
+      val client = UiBuilderEditorReducer(catalog, operationIdPrefix = prefix)
+      val wrapped =
+        client.reduce(
+          client.initial(document, selectedNodeId = "main-episode-title"),
+          UiBuilderEditorEvent.WrapSelection("layout/row"),
+        )
+      assertIs<CommandOutcome.Accepted>(wrapped.lastOutcome)
+      return assertIs<String>(wrapped.selectedNodeId)
+    }
+
+    val first = wrapWith("browser-editor-aaa")
+    val second = wrapWith("browser-editor-bbb")
+
+    assertTrue(first != second, "both clients generated $first")
+    assertTrue(first.contains("browser-editor-aaa"), first)
+  }
+
+  @Test
+  fun `a copy does not take an id a sibling already uses as its key`() {
+    // A copy takes its own node id as its `stableKey`, and that key is an arbitrary string a
+    // sibling may already hold. The exporter turns two siblings under one key into two
+    // `key(...)` groups, which Compose rejects at runtime.
+    val collidingKey = "main-episode-card-copy-interactive-canvas-001"
+    val poisoned =
+      document.copy(
+        nodes =
+          document.nodes.mapValues { (id, node) ->
+            if (id != "detail-episode-140") node
+            else
+              node.copy(
+                properties =
+                  JsonObject(
+                    node.properties +
+                      mapOf(
+                        "stableKey" to
+                          JsonObject(
+                            mapOf(
+                              "type" to JsonPrimitive("string"),
+                              "value" to JsonPrimitive(collidingKey),
+                            )
+                          )
+                      )
+                  )
+              )
+          }
+      )
+
+    val duplicated =
+      reducer.reduce(
+        reducer.initial(poisoned, selectedNodeId = "main-episode-card"),
+        UiBuilderEditorEvent.DuplicateSelected,
+      )
+    assertIs<CommandOutcome.Accepted>(duplicated.lastOutcome)
+
+    assertTrue(
+      assertIs<String>(duplicated.selectedNodeId) != collidingKey,
+      "the copy took an id already in use as a key",
+    )
+  }
+
+  @Test
   fun `toggling a flag is accepted`() {
     val flag =
       withState(
