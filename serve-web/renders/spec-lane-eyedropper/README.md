@@ -38,6 +38,19 @@ screen then described a pixel the pointer had already left: at one fixed screen 
 on entering the lane, while nothing is being read; the same measurement now reads identically
 before and after the readout appears.
 
+Every panel is a reading surface, the wipe canvas included — `drawWipe` sizes it to the pair and
+draws both sides at the origin, so a point on it names what the other three do. It has to be one,
+too: the Slider view hides all three panels, so without it the eyedropper is absent from a quarter
+of the lane. A press there is a *seek*, though, so it is the one surface a reading cannot be frozen
+from — freezing would hijack the slider's own gesture.
+
+The picker goes quiet from the moment a different pair is asked for until its frames arrive. A
+source switch re-labels the lane at once and re-normalises asynchronously, so in between the
+canvases still hold the previous source: a reading taken then is the old pixels under the new
+source's name. Measured mid-switch, with the paired catalog's raster held back 2.5s — before, the
+readout said `153,163 · M3 Wear OS Apps Design Kit #332e3c · …` over Figma's pixels; now it says
+nothing until the pair lands, then answers under the label it belongs to.
+
 Leaving the lane takes the reading away with it — text, announcement, frozen latch and both pixel
 readbacks. `cp-spec-lane` carries the source buttons, so it outlives the lane; a reading left in it
 would go on naming two colours beside a picture neither came from, and the latch would still be

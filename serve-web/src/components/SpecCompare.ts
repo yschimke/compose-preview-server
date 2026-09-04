@@ -203,6 +203,16 @@ export class SpecCompare extends ControllerElement {
     } | null = null;
     /** A frozen reading holds the panel still; pointer moves are ignored until it is released. */
     private pickFrozen = false;
+    /**
+     * Whether the frames on the stage are the pair currently being asked for.
+     *
+     * An in-lane source switch re-labels the lane at once and re-normalises asynchronously, so
+     * between the two the canvases still hold the PREVIOUS source. A reading taken then would be
+     * the old pixels under the new source's name — a confidently wrong attribution, which is worse
+     * than no reading. The picker goes quiet from the moment the requested pair changes until its
+     * frames arrive.
+     */
+    private pickSettled = false;
     private cleanups: Array<() => void> = [];
     private annotationKey = "";
     private annotationPromise: Promise<unknown> | null = null;
@@ -374,12 +384,21 @@ export class SpecCompare extends ControllerElement {
     // one of them, and hovering the diff is as meaningful as hovering either side: it says what the
     // magenta is made of.
 
-    /** The panels a reading can be taken from, each carrying the shared normalised space. */
+    /**
+     * The panels a reading can be taken from, each carrying the shared normalised space.
+     *
+     * The wipe canvas is one of them: `drawWipe` sizes it to the pair and draws both sides at the
+     * origin, so a point on it names the same feature the other three do. It also has to be here
+     * rather than merely allowed — the Slider view hides all three panels
+     * (`[data-view="slider"] .cp-spec-panel { display: none }`), so without it the eyedropper is
+     * simply absent from one of the four views.
+     */
     private pickPanels(): HTMLCanvasElement[] {
         return [
             this.canvas("cp-spec-reference"),
             this.canvas("cp-spec-diff"),
             this.canvas("cp-spec-actual"),
+            this.canvas("cp-spec-wipe-canvas"),
         ].filter((c): c is HTMLCanvasElement => c !== null);
     }
 
@@ -397,6 +416,15 @@ export class SpecCompare extends ControllerElement {
         // is rewritten on every pointermove, and a live region around that would queue a stream of
         // pixel values over everything else on the page.
         this.on(this.compare, "click", (event) => {
+            // On the wipe canvas a press is a SEEK — `bindDrag` moves the split on pointerdown —
+            // so freezing there would hijack the slider's own gesture. It stays readable on hover;
+            // it is the one surface a reading cannot be frozen from.
+            if (
+                this.canvas("cp-spec-wipe-canvas")?.contains(
+                    event.target as Node,
+                )
+            )
+                return;
             const reading = this.pickFrozen
                 ? ""
                 : this.pickAt(event as PointerEvent);
@@ -422,7 +450,7 @@ export class SpecCompare extends ControllerElement {
     /** Read both sides under the pointer; returns the line shown, or "" when there is nothing. */
     private pickAt(event: PointerEvent | MouseEvent): string {
         const pair = this.frames;
-        if (!pair) return "";
+        if (!pair || !this.pickSettled) return "";
         const panel = this.pickPanels().find((c) =>
             c.contains(event.target as Node),
         );
@@ -492,6 +520,7 @@ export class SpecCompare extends ControllerElement {
     private releasePick(): void {
         this.pickPixels = null;
         this.pickFrozen = false;
+        this.pickSettled = false;
         this.setPick("");
         this.announcePick("");
         document
@@ -676,10 +705,14 @@ export class SpecCompare extends ControllerElement {
             this.frames = null;
             this.framesKey = "";
             this.framesAnnotationUrl = "";
+            this.pickSettled = false;
             this.setScore(UNAVAILABLE);
             return;
         }
+        // Asking for a different pair than the one on the stage: quiet until it lands.
+        if (key !== this.framesKey) this.releasePick();
         if (key === this.framesKey && this.frames) {
+            this.pickSettled = true;
             this.drawWipe();
             // The readout still holds this pair's live numbers, so the chip has to come back to the
             // same ones. Without this an override-bearing page re-entering the lane showed the
@@ -698,8 +731,10 @@ export class SpecCompare extends ControllerElement {
             this.framesKey = key;
             // New pixels: whatever the eyedropper had read described the previous pair, and a
             // frozen reading over it would now be asserting the old comparison against the new
-            // picture.
+            // picture. Released BEFORE the pair is declared settled — `releasePick` drops that
+            // flag with everything else, so settling first would immediately unsettle again.
             this.releasePick();
+            this.pickSettled = true;
             // Keep inspection facts tied to the same candidate that produced these canvases. The
             // hidden render image can advance while a comparison remains open; reading its URL
             // later would put new bounds and typography over old pixels.

@@ -2443,7 +2443,14 @@ cp-history-menu { display: contents; }
    first reading a user saw was then taken from where the picture HAD been: at one screen point,
    `146,122 · Δ 22` before the shift and `146,94 · identical` after it. Reserving the row moves the
    stage once, on entering the lane, while nothing is being read. */
+/* `nowrap` keeps the reserved row and the filled one the same height — wrapping would put the
+   shift straight back, since a reading's length varies with the source's name. So the row scrolls
+   itself instead: `html { overflow-x: clip }` means an overflowing line is CLIPPED, not reachable
+   by scrolling the page, and on a phone `146,122 · M3 Wear OS Apps Design Kit #494451 · Render
+   #332e3c · Δ 22` is wider than the content column — the delta, which is the answer, is the part
+   that falls off the end. */
 .cp-spec-pick { flex-basis: 100%; line-height: 1.4; min-height: 1.4em; font-size: 0.72rem;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
   color: var(--cp-fg-muted); white-space: nowrap;
   font-family: var(--cp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-variant-numeric: tabular-nums; }
