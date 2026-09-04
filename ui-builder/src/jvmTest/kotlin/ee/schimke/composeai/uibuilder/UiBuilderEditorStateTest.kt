@@ -833,4 +833,37 @@ class UiBuilderEditorStateTest {
     // Still selected after moving — losing the selection mid-reorder would stop a run of presses.
     assertEquals(sibling.nodeId, moved.selectedNodeId)
   }
+
+  @Test
+  fun `a text layer is named by what it says, and still shows its type`() {
+    val rows = reducer.treeRows(document)
+    val texts = rows.filter { it.componentId == "m3/text" }
+    assertTrue(texts.isNotEmpty(), "fixture should contain text nodes")
+
+    // Every text node in the fixture carries a required `text`, so none should fall back to "Text".
+    texts.forEach { row ->
+      assertTrue(row.named, "${row.nodeId} should be named by its content, got ${row.label}")
+      assertEquals("Text", row.componentLabel)
+    }
+    // The point of the change: the panel stops repeating one word.
+    assertTrue(texts.map { it.label }.toSet().size > 1, texts.map { it.label }.toString())
+  }
+
+  @Test
+  fun `a component with nothing to say keeps its component name`() {
+    val rows = reducer.treeRows(document)
+    val containers = rows.filter {
+      it.componentId == "layout/column" || it.componentId == "m3/card"
+    }
+    containers.forEach { row ->
+      assertFalse(row.named, "${row.nodeId} has no free-text property to be named by")
+      assertEquals(row.componentLabel, row.label)
+    }
+  }
+
+  @Test
+  fun `a layer name is one line, however much text the node holds`() {
+    val texts = reducer.treeRows(document).filter { it.componentId == "m3/text" }
+    texts.forEach { assertTrue(it.label.length <= 40, "${it.nodeId}: ${it.label.length}") }
+  }
 }

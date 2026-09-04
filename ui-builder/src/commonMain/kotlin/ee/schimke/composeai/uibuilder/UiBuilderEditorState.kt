@@ -63,10 +63,17 @@ data class EditorCatalogItem(
 data class EditorTreeRow(
   val nodeId: String,
   val componentId: String,
+  /** What the node says, when it says anything; otherwise [componentLabel]. */
   val label: String,
+  /** The component's display name, always — so a content-named row still shows its type. */
+  val componentLabel: String,
   val depth: Int,
   val parent: ParentSlot?,
-)
+) {
+  /** Whether [label] came from the node's own content rather than from its component. */
+  val named: Boolean
+    get() = label != componentLabel
+}
 
 enum class EditorMoveDirection {
   Before,
@@ -379,11 +386,13 @@ class UiBuilderEditorReducer(
     fun visit(nodeId: String, depth: Int, parent: ParentSlot?) {
       val node = document.nodes.getValue(nodeId)
       val capability = catalog.componentsById[node.componentId]
+      val componentLabel = capability?.displayName ?: node.componentId
       rows +=
         EditorTreeRow(
           nodeId = nodeId,
           componentId = node.componentId,
-          label = capability?.displayName ?: node.componentId,
+          label = capability?.let(node::contentLabel) ?: componentLabel,
+          componentLabel = componentLabel,
           depth = depth,
           parent = parent,
         )
@@ -1174,6 +1183,49 @@ private fun defaultChildFor(
  * A map rather than a node, because a subtree's children live in the document's flat `nodes` and
  * would be lost by copying the root alone.
  */
+/**
+ * What this node says, for a layer row — or null when it says nothing.
+ *
+ * A panel of twelve rows all reading "Text" cannot be scanned, which is why every design tool names
+ * a text layer after its content. The property is found **through the catalog** rather than from a
+ * list of names this file guesses at.
+ *
+ * The signal is `required`. A component's required free-text property is the thing it exists to
+ * carry — `m3/text` requires `text` — while its optional ones are configuration and plumbing that
+ * happen to be strings: `m3/card` declares `shape` and `stableKey`, and a card named after its
+ * stable key is worse than one named "Card". That distinction is the catalog's own, which is why
+ * this reads it rather than keeping a list of blessed property names.
+ *
+ * `contentDescription` is the one name-by-name exception, and it earns it: it is defined as the
+ * node's human-readable name, so an image that has one is better named by it than by "Image".
+ *
+ * Free-text means a lone `string` with no `allowedValues` — an enum is a setting, and a colour is
+ * not something anyone recognises a layer by.
+ */
+private fun UiBuilderNode.contentLabel(capability: ComponentCapability): String? {
+  fun freeText(property: PropertyCapability) =
+    property.allowedValues.isEmpty() &&
+      property.typeNames() - "null" == setOf("string") &&
+      !property.name.endsWith("Color", ignoreCase = true)
+
+  fun valueOf(name: String) =
+    (properties[name] as? JsonObject)
+      ?.get("value")
+      ?.jsonPrimitive
+      ?.contentOrNull
+      ?.trim()
+      ?.takeIf(String::isNotEmpty)
+
+  val required = capability.properties.filter { it.required && freeText(it) }
+  return (required.firstNotNullOfOrNull { valueOf(it.name) }
+      ?: capability.properties
+        .firstOrNull { it.name == "contentDescription" && freeText(it) }
+        ?.let { valueOf(it.name) })
+    // One line in a layer row. A paragraph pasted into a Text would otherwise push the type column
+    // off the panel, so it is cut here rather than relying on the row to ellipsize it.
+    ?.let { if (it.length <= 40) it else it.take(39).trimEnd() + "…" }
+}
+
 private fun UiBuilderDocument.clip(nodeId: String): EditorClipboard {
   val collected = linkedMapOf<String, UiBuilderNode>()
   fun visit(id: String) {

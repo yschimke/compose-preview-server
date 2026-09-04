@@ -1148,8 +1148,10 @@ private fun LayerRow(
             .clearAndSetSemantics {}
         )
       }
+      // The type when the row is named after its content, the id otherwise. A content-named row
+      // would otherwise stop saying what it is, and an unnamed one already says that in `label`.
       Text(
-        row.nodeId,
+        if (row.named) row.componentLabel else row.nodeId,
         Modifier.width(92.dp),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.labelSmall,
