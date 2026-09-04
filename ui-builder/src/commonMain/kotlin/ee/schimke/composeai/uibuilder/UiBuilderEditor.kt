@@ -268,11 +268,16 @@ fun UiBuilderEditor(
       modifier = modifier,
     )
   }
+  // Cached against the document, because it is not cheap and depends on nothing else: it walks
+  // every node and every property against the catalog, traverses the graph and looks for cycles.
+  // Called inline it would run all of that on every recomposition of the inspector — which is
+  // every keystroke in a property field and every frame of a drag.
+  val problems = remember(reducer, state.document) { reducer.problems(state.document) }
   val inspector: @Composable (Modifier) -> Unit = { modifier ->
     PropertyInspector(
       state = state,
       fields = reducer.propertyFields(state),
-      problems = reducer.problems(state),
+      problems = problems,
       themeSettings = reducer.themeSettings(state),
       onTextInputFocusChanged = { textInputFocused = it },
       dispatch = ::dispatch,
