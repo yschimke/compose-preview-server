@@ -174,10 +174,25 @@ data class EditorClipboard(
   /** The copied subtrees' roots, in tree order — a selection can hold more than one. */
   val rootNodeIds: List<String>,
   val nodes: Map<String, UiBuilderNode>,
+  /** Where a *cut* took these from; null for a copy, which was never removed from anywhere. */
+  val origin: EditorClipboardOrigin? = null,
 ) {
   val rootComponentIds: List<String>
     get() = rootNodeIds.map { nodes.getValue(it).componentId }
 }
+
+/**
+ * The place a cut subtree came out of.
+ *
+ * Cut-then-paste is how a node is moved, and a move that lands somewhere else is not a move. Cut
+ * selects the parent, and a paste into a parent goes to the end of its slot — so cutting a card
+ * from the middle of a list and pasting it straight back sent it to the bottom.
+ *
+ * [afterNodeId] is the sibling the subtree sat behind, or null when it was first in the slot —
+ * which is the one position "paste at the end" can never reach, and so the reason this records a
+ * position rather than a neighbour to select.
+ */
+data class EditorClipboardOrigin(val parent: ParentSlot, val afterNodeId: String?)
 
 data class UiBuilderEditorState(
   val collaboration: CollaborationState,
@@ -397,16 +412,95 @@ sealed interface EditorStateAction {
  * a flag is a real Kotlin `Boolean` and assigning it a quoted string does not compile. The action
  * carries the declaration's own kind rather than whatever the editor typed.
  */
-private fun EditorStateAction.encoded(declaration: JsonObject?): JsonObject {
-  val initial = declaration?.get("initialValue")?.jsonPrimitive
-  fun typed(raw: String): JsonPrimitive =
-    when {
-      initial?.booleanOrNull != null -> JsonPrimitive(raw.toBooleanStrictOrNull() ?: false)
-      initial?.longOrNull != null -> JsonPrimitive(raw.toLongOrNull() ?: 0L)
-      initial?.doubleOrNull != null && initial.isString.not() ->
-        JsonPrimitive(raw.toDoubleOrNull() ?: 0.0)
-      else -> JsonPrimitive(raw)
+/**
+ * Why an action's value cannot be written to its variable, or null when it can.
+ *
+ * The encoder types a value against the declaration, and its fallbacks are `false`, `0` and `0.0` —
+ * so `Set("expanded", "yes")` inserted a control that wrote `false`. Storing a different value than
+ * the one asked for is worse than refusing: the design looks authored and does something else. The
+ * encoder keeps its fallbacks; nothing reaches it that needs them.
+ */
+private fun EditorStateAction.valueRefusal(declaration: JsonObject?): String? {
+  val raw =
+    when (this) {
+      is EditorStateAction.Toggle -> return null
+      is EditorStateAction.Set -> value
+      is EditorStateAction.SelectOrClear -> value
     }
+  val kind = declaredStateKind(declaration)
+  val parses =
+    when (kind) {
+      StateKind.BOOLEAN -> raw.toBooleanStrictOrNull() != null
+      // `toIntOrNull`, because the exporter declares an integer variable as `Int`. A value past
+      // that range parses as a Long and then emits a literal the generated Kotlin cannot hold.
+      StateKind.INTEGER -> raw.toIntOrNull() != null
+      // Finite, and for the same reason the integer case is bounded to `Int`: `kotlinLiteral`
+      // emits a JSON number verbatim, so `NaN` and `Infinity` — which `toDoubleOrNull` accepts —
+      // would export as bare identifiers the generated Kotlin never declares. The property editor
+      // already refuses them; the state editor was the way past it.
+      StateKind.DECIMAL -> raw.toDoubleOrNull()?.isFinite() == true
+      StateKind.STRING -> true
+    }
+  return if (parses) null
+  else "`$raw` is not a ${kind.name.lowercase()} value for state variable `$variable`"
+}
+
+/** What a state variable holds, as the document declares it. */
+private enum class StateKind {
+  BOOLEAN,
+  INTEGER,
+  DECIMAL,
+  STRING,
+}
+
+/**
+ * A variable's kind, from `valueType` where the declaration carries it.
+ *
+ * `initialValue` alone is not a safe classifier: `booleanOrNull` and `longOrNull` on a
+ * `JsonPrimitive` parse its content whether or not it was quoted, so a text variable initialised to
+ * `"true"` or `"1"` reads as a flag or a number and the value written back would not match the
+ * Kotlin type the exporter declares. `isString` settles it wherever `valueType` is absent.
+ */
+private fun declaredStateKind(declaration: JsonObject?): StateKind {
+  when (declaration?.get("valueType")?.jsonPrimitive?.contentOrNull) {
+    "bool" -> return StateKind.BOOLEAN
+    "int" -> return StateKind.INTEGER
+    "float" -> return StateKind.DECIMAL
+    "string" -> return StateKind.STRING
+  }
+  val initial = declaration?.get("initialValue") as? JsonPrimitive ?: return StateKind.STRING
+  return when {
+    initial.isString -> StateKind.STRING
+    initial.booleanOrNull != null -> StateKind.BOOLEAN
+    initial.longOrNull != null -> StateKind.INTEGER
+    initial.doubleOrNull != null -> StateKind.DECIMAL
+    else -> StateKind.STRING
+  }
+}
+
+/** A variable the document declares nullable, and so the only kind `selectOrClear` may clear. */
+private fun declaredNullable(declaration: JsonObject?): Boolean =
+  declaration?.get("nullable")?.jsonPrimitive?.booleanOrNull
+    ?: (declaration?.get("initialValue") is JsonNull)
+
+/**
+ * One authored value, typed against the variable it will be written to or compared with.
+ *
+ * `Int`, not `Long`, for a whole number: the exporter declares an integer variable as `Int`, so a
+ * value past that range would be authored here and then emitted as a literal the generated Kotlin
+ * cannot hold. Callers check with [EditorStateAction.valueRefusal] first, so the fallbacks are
+ * unreachable rather than load-bearing.
+ */
+private fun typedStateValue(raw: String, declaration: JsonObject?): JsonPrimitive =
+  when (declaredStateKind(declaration)) {
+    StateKind.BOOLEAN -> JsonPrimitive(raw.toBooleanStrictOrNull() ?: false)
+    StateKind.INTEGER -> JsonPrimitive(raw.toIntOrNull() ?: 0)
+    StateKind.DECIMAL -> JsonPrimitive(raw.toDoubleOrNull()?.takeIf(Double::isFinite) ?: 0.0)
+    StateKind.STRING -> JsonPrimitive(raw)
+  }
+
+private fun EditorStateAction.encoded(declaration: JsonObject?): JsonObject {
+  fun typed(raw: String): JsonPrimitive = typedStateValue(raw, declaration)
   return when (this) {
     is EditorStateAction.Toggle ->
       JsonObject(mapOf("type" to JsonPrimitive("toggle"), "variable" to JsonPrimitive(variable)))
@@ -453,6 +547,41 @@ class UiBuilderEditorReducer(
       collaboration = CollaborationState(document),
       selection = listOfNotNull(selectedNodeId?.takeIf(document.nodes::containsKey)),
     )
+
+  /**
+   * This editor's state carried onto a new authoritative document.
+   *
+   * Every accepted local edit and every remote delta arrives as a new document and rebuilds the
+   * editor from it, so anything not carried across is lost on the next keystroke anyone in the
+   * session makes. The multi-selection and the clipboard are editing intent rather than document
+   * content — a copy has to stay pasteable after a collaborator moves something — so they survive,
+   * minus whatever the new document no longer holds.
+   *
+   * Selection keeps its order, which is what keeps its anchor: the last entry is the node the
+   * inspector edits and the one a range extends from.
+   */
+  fun reconciled(
+    state: UiBuilderEditorState,
+    document: UiBuilderDocument,
+    fallbackSelectedNodeId: String? = null,
+  ): UiBuilderEditorState {
+    val rebuilt =
+      initial(
+        document,
+        selectedNodeId =
+          state.selectedNodeId?.takeIf(document.nodes::containsKey)
+            ?: fallbackSelectedNodeId?.takeIf(document.nodes::containsKey)
+            ?: document.roots.firstOrNull(),
+      )
+    val survivingSelection = state.selection.filter(document.nodes::containsKey)
+    return rebuilt.copy(
+      selection = survivingSelection.ifEmpty { rebuilt.selection },
+      clipboard = state.clipboard,
+      catalogQuery = state.catalogQuery,
+      operationSequence = state.operationSequence,
+      inspectorMode = state.inspectorMode,
+    )
+  }
 
   fun reduce(state: UiBuilderEditorState, event: UiBuilderEditorEvent): UiBuilderEditorState =
     when (event) {
@@ -757,16 +886,20 @@ class UiBuilderEditorReducer(
     val nodes = state.selection.mapNotNull(state.document.nodes::get)
     val node = nodes.lastOrNull() ?: return emptyList()
     val component = catalog.componentsById[node.componentId] ?: return emptyList()
-    val shared =
-      nodes
-        .map { other ->
-          catalog.componentsById[other.componentId]?.propertiesByName?.keys.orEmpty()
-        }
-        .reduceOrNull { acc, names -> acc intersect names }
-        .orEmpty()
+    // The other selected components, for deciding what the selection genuinely shares. A name in
+    // common is not enough: two components can both declare `style` and allow disjoint values, and
+    // the field is built from the anchor's declaration alone. Offering it would put a dropdown in
+    // front of the user whose every choice `commitProperty` then rejects for the other nodes —
+    // that per-node validation is what keeps the document right, and an unusable control is
+    // exactly what this inspector exists to stop showing.
+    val others = nodes.dropLast(1).mapNotNull { catalog.componentsById[it.componentId] }
+    fun sharedByAll(property: PropertyCapability): Boolean = others.all { other ->
+      val theirs = other.propertiesByName[property.name] ?: return@all false
+      theirs.allowedValues == property.allowedValues && theirs.typeNames() == property.typeNames()
+    }
     return component.properties
       .filterNot { it.name in THEME_PROPERTIES }
-      .filter { nodes.size == 1 || it.name in shared }
+      .filter { nodes.size == 1 || sharedByAll(it) }
       .flatMap { property ->
         val objectEdges =
           property.editor?.objectKind?.let { kind ->
@@ -988,6 +1121,32 @@ class UiBuilderEditorReducer(
       // clickable — while every other event name is implemented per component and the catalog
       // declares none of them, so offering one would be a guess.
       val declaration = state.document.stateVariables[action.variable] as? JsonObject
+      // `selectOrClear` writes null when the value is already selected, and the exporter declares
+      // each variable from its own `nullable`. Against a non-nullable one the generated assignment
+      // would not compile, so the design never gets to hold that action.
+      if (action is EditorStateAction.SelectOrClear && !declaredNullable(declaration)) {
+        return state.rejected(
+          sequence,
+          RejectionCode.INVALID_PROPERTY,
+          "State variable `${action.variable}` is not nullable, so it cannot be cleared",
+        )
+      }
+      // `toggle` is `!x`, which needs a boolean. The renderer coerces whatever it finds to a
+      // boolean string and carries on, so the preview looks like it works; the exporter refuses
+      // and emits a `TODO` that throws on the first press. Refusing here keeps the design from
+      // holding an action only one of its two consumers can perform.
+      if (
+        action is EditorStateAction.Toggle && declaredStateKind(declaration) != StateKind.BOOLEAN
+      ) {
+        return state.rejected(
+          sequence,
+          RejectionCode.INVALID_PROPERTY,
+          "State variable `${action.variable}` is not a flag, so it cannot be toggled",
+        )
+      }
+      action.valueRefusal(declaration)?.let { why ->
+        return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, why)
+      }
       val bindings = JsonObject(mapOf("click" to JsonArray(listOf(action.encoded(declaration)))))
       val index = operations.indexOfFirst { it is DesignOperation.InsertNode }
       val root = operations[index] as DesignOperation.InsertNode
@@ -1238,9 +1397,10 @@ class UiBuilderEditorReducer(
     val copies = mutableListOf<String>()
     // Every id this batch allocates, so two copies in one duplicate cannot collide with each other
     // or with anything the document already holds.
-    val taken = state.document.nodes.keys.toMutableSet()
+    val taken = state.document.takenIdentities()
     targets.forEach { nodeId ->
-      val copyId = freshCopyId(state.document.freshNodeId("$nodeId-copy", sequence), taken)
+      val copyId =
+        freshCopyId(state.document.freshNodeId("$nodeId-copy", operationIdPrefix, sequence), taken)
       state.document.nodes.appendDuplicateSubtree(
         sourceNodeId = nodeId,
         copyNodeId = copyId,
@@ -1360,6 +1520,17 @@ class UiBuilderEditorReducer(
         propertyName,
       )
     }
+    val declaration = state.document.stateVariables[variable] as? JsonObject
+    if (equalsValue != null) {
+      // The operand is compared against the variable in the exported Kotlin, so it has to be the
+      // same type the variable is declared as. Encoding it as a string regardless produced
+      // `expanded == "true"` against a `Boolean` and `selectedDay == "1"` against an `Int` —
+      // neither compiles. The fourth place in this file where a declaration and the literal
+      // written against it had to be made to agree.
+      EditorStateAction.Set(variable, equalsValue).valueRefusal(declaration)?.let { why ->
+        return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, why, nodeId, propertyName)
+      }
+    }
     val encoded =
       if (equalsValue == null)
         JsonObject(mapOf("type" to JsonPrimitive("state"), "variable" to JsonPrimitive(variable)))
@@ -1368,7 +1539,7 @@ class UiBuilderEditorReducer(
           mapOf(
             "type" to JsonPrimitive("stateEquals"),
             "variable" to JsonPrimitive(variable),
-            "value" to JsonPrimitive(equalsValue),
+            "value" to typedStateValue(equalsValue, declaration),
           )
         )
     validator.validate(state.document, nodeId, propertyName, encoded)?.let { issue ->
@@ -1438,6 +1609,7 @@ class UiBuilderEditorReducer(
     val targets = state.selectionRoots()
     if (targets.isEmpty()) return emptyList()
     val parent = wrappableParent(state, targets) ?: return emptyList()
+    if (!state.adjacentInParent(targets, parent)) return emptyList()
     val children =
       targets
         .mapNotNull { state.document.nodes[it]?.componentId }
@@ -1469,6 +1641,25 @@ class UiBuilderEditorReducer(
     state: UiBuilderEditorState,
     targets: List<String>,
   ): ParentSlot? = targets.map { state.document.location(it) }.distinct().singleOrNull()
+
+  /**
+   * Whether the selection is one unbroken run of siblings.
+   *
+   * Wrapping `A` and `C` out of `A, B, C` has no faithful answer. The container takes the place of
+   * the first node it swallows, so `B` — which nobody selected and nobody moved — comes out after
+   * the container rather than between the two nodes it was between. Silently reordering a screen
+   * around a node the user did not touch is worse than not offering the wrap, and the same reason
+   * [wrappableParent] refuses a selection spread across two parents.
+   */
+  private fun UiBuilderEditorState.adjacentInParent(
+    targets: List<String>,
+    parent: ParentSlot,
+  ): Boolean {
+    val siblings = document.children(parent)
+    val positions = targets.map(siblings::indexOf)
+    if (positions.any { it < 0 }) return false
+    return (positions.max() - positions.min()) == targets.size - 1
+  }
 
   /** The container slot that could take [children], given the container lands in [parent]. */
   private fun wrapSlotOf(
@@ -1506,6 +1697,13 @@ class UiBuilderEditorReducer(
         "These nodes are in different places, so there is nowhere to put one container",
       )
     }
+    if (!state.adjacentInParent(targets, parent)) {
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_LOCATION,
+        "These nodes are not next to each other, so wrapping them would move what sits between",
+      )
+    }
     val children =
       targets
         .mapNotNull { state.document.nodes[it]?.componentId }
@@ -1519,7 +1717,11 @@ class UiBuilderEditorReducer(
       )
     }
     val containerId =
-      state.document.freshNodeId("editor-${componentId.replace('/', '-')}", sequence)
+      state.document.freshNodeId(
+        "editor-${componentId.replace('/', '-')}",
+        operationIdPrefix,
+        sequence,
+      )
     val operations = mutableListOf<DesignOperation>()
     val defaultError =
       container.appendDefaultSubtree(
@@ -1628,12 +1830,20 @@ class UiBuilderEditorReducer(
   /**
    * The components that can be inserted already wired to a click action.
    *
-   * Any component the destination accepts: `click` is universal in this renderer, so the limit is
-   * where the node may go rather than what it is.
+   * Two limits, not one. Where the node may go, and whether the Compose export emits a handler for
+   * it: `click` is universal in the *renderer* — `actionModifier` makes anything carrying a click
+   * binding clickable — but the exporter emits one only for the components whose emitter takes an
+   * `onClick`, and reports `UNEMITTED_EVENT` for the rest. Offering the others built a control that
+   * worked in the preview and silently lost its interaction on export, which is the divergence this
+   * builder exists to not have.
    */
   fun actionInsertCandidates(state: UiBuilderEditorState): List<EditorCatalogItem> =
     if (state.document.stateVariables.isEmpty()) emptyList()
-    else catalogItems("").filter { dropTarget(state, it.componentId) != null }
+    else
+      catalogItems("").filter {
+        it.componentId in COMPOSE_EMITTED_CLICK_COMPONENTS &&
+          dropTarget(state, it.componentId) != null
+      }
 
   private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {
     val roots = state.selectionRoots()
@@ -1658,7 +1868,7 @@ class UiBuilderEditorReducer(
         else "Cutting these ${roots.size} nodes would violate root or slot cardinality",
       )
     }
-    val clipboard = state.document.clip(roots)
+    val clipboard = state.document.clip(roots).withOriginOf(state.document, roots)
     val anchor = roots.last()
     val selectionAfter =
       state.document.location(anchor)?.nodeId ?: state.document.roots.firstOrNull { it !in roots }
@@ -1686,12 +1896,35 @@ class UiBuilderEditorReducer(
         )
     val operations = mutableListOf<DesignOperation>()
     val pastedIds = mutableListOf<String>()
-    var after = state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
-    val taken = state.document.nodes.keys.toMutableSet()
+    // Beside the selection when the paste landed in the slot the selection already sits in, and at
+    // the end of the slot when it landed inside the selected container. `findDestination` falls
+    // back to the parent slot for a leaf — copying a card in a list and pasting sent the copy to
+    // the bottom of the list, which is never where you were looking.
+    val selectedLocation = state.selectedNodeId?.let(state.document::location)
+    // A cut pasted back into the slot it came from returns to its own position, because that is
+    // what makes cut-then-paste a move rather than a send-to-the-bottom. The anchor has to still
+    // be there — the document may have been edited between the two — and `null` is a position in
+    // its own right, meaning the subtree was first in the slot.
+    val origin =
+      clipboard.origin?.takeIf {
+        it.parent == destination &&
+          (it.afterNodeId == null || it.afterNodeId in state.document.children(destination))
+      }
+    var after =
+      when {
+        origin != null -> origin.afterNodeId
+        destination == selectedLocation -> state.selectedNodeId
+        else -> state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
+      }
+    val taken = state.document.takenIdentities()
     clipboard.rootNodeIds.forEachIndexed { index, rootId ->
       // Numbered per root as well as per paste, so two roots in one batch cannot collide with each
       // other the way two pastes of one root would collide without `freshNodeId`.
-      val pasteId = freshCopyId(state.document.freshNodeId("$rootId-paste-$index", sequence), taken)
+      val pasteId =
+        freshCopyId(
+          state.document.freshNodeId("$rootId-paste-$index", operationIdPrefix, sequence),
+          taken,
+        )
       // The clipboard's own nodes are the source, not the document's — the subtree it names may
       // have been cut, or edited since, and a paste has to reproduce what was copied either way.
       clipboard.nodes.appendDuplicateSubtree(
@@ -2186,6 +2419,25 @@ private fun UiBuilderDocument.clip(nodeIds: List<String>): EditorClipboard {
   return EditorClipboard(rootNodeIds = ordered, nodes = collected)
 }
 
+/**
+ * The same clipboard, told where the cut took its roots from.
+ *
+ * Read before the delete is applied, off the document the subtrees are still in. The run's first
+ * root in tree order carries the position, and the sibling behind it has to be one nothing is
+ * cutting — cutting `B, C` out of `A, B, C` puts the run back after `A`, not after the `B` that
+ * left with it.
+ */
+private fun EditorClipboard.withOriginOf(
+  document: UiBuilderDocument,
+  roots: List<String>,
+): EditorClipboard {
+  val first = rootNodeIds.firstOrNull() ?: return this
+  val parent = document.location(first) ?: return this
+  val siblings = document.children(parent)
+  val before = siblings.take(siblings.indexOf(first).coerceAtLeast(0))
+  return copy(origin = EditorClipboardOrigin(parent, before.lastOrNull { it !in roots }))
+}
+
 /** Position in the flattened tree, for the operations whose result is an order. */
 private fun UiBuilderDocument.treeIndex(): (String) -> Int {
   val order = mutableMapOf<String, Int>()
@@ -2202,9 +2454,26 @@ private fun UiBuilderDocument.treeIndex(): (String) -> Int {
  *
  * Pasting twice from one clipboard would otherwise produce the same id twice, and the second insert
  * would be rejected as a duplicate — so the paste that looks identical to the first silently fails.
+ *
+ * [client] because the sequence is *local*. Two people wrapping a selection in a Row as their own
+ * first operation both reach sequence 1 and both propose `editor-layout-row-001`, for different
+ * selections. Operation ids are already qualified; node ids were not, so the server accepted one
+ * and rejected the other as a duplicate insertion — losing that person's edit, in the one situation
+ * this editor exists to handle well.
+ *
+ * The qualifier is the **operation id prefix**, not `clientId`. `clientId` defaults to a constant
+ * and the live host reads it from configuration, so two browsers can carry the same one; the
+ * operation prefix is `clientId` plus a per-page nonce, which is precisely what already makes
+ * operation ids unique between clients. Long ids are the price, and they are generated names shown
+ * beside a human label rather than read on their own.
  */
-private fun UiBuilderDocument.freshNodeId(preferred: String, sequence: Int): String {
-  val numbered = "$preferred-${sequence.toString().padStart(3, '0')}"
+private fun UiBuilderDocument.freshNodeId(
+  preferred: String,
+  client: String,
+  sequence: Int,
+): String {
+  val qualifier = client.filter { it.isLetterOrDigit() || it == '-' }.ifEmpty { "c" }
+  val numbered = "$preferred-$qualifier-${sequence.toString().padStart(3, '0')}"
   if (numbered !in nodes) return numbered
   var suffix = 2
   while ("$numbered-$suffix" in nodes) suffix++
@@ -2221,6 +2490,27 @@ private fun UiBuilderDocument.freshNodeId(preferred: String, sequence: Int): Str
  * exporter's list and not a suffix rule.
  */
 private val INSTANCE_IDENTITY_PROPERTIES = setOf("stableKey", "scrollStateKey")
+
+/**
+ * Every string a copy's identity must not collide with: the node ids, and the identity keys already
+ * in use.
+ *
+ * The ids alone are not enough. A copy takes its own node id as its `stableKey`, and that key is an
+ * arbitrary string a sibling may already hold — duplicating `card` next to a node keyed
+ * `card-copy-001` produced two siblings under one key, which the exporter turns into two
+ * `key("card-copy-001")` groups and Compose rejects at runtime. The values are read with a safe
+ * cast because a document arriving over the wire may hold anything here.
+ */
+private fun UiBuilderDocument.takenIdentities(): MutableSet<String> =
+  (nodes.keys +
+      nodes.values.flatMap { node ->
+        INSTANCE_IDENTITY_PROPERTIES.mapNotNull { name ->
+          ((node.properties[name] as? JsonObject)?.get("value") as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.content
+        }
+      })
+    .toMutableSet()
 
 /** An id nothing in the document and nothing already allocated in this batch is using. */
 private fun freshCopyId(preferred: String, taken: MutableSet<String>): String {
