@@ -51,7 +51,9 @@ function text(element: Element | null): string {
 }
 
 function componentLabel(element: HTMLAnchorElement): string {
-    const named = element.querySelector(".cp-nav-name, .cp-label");
+    const named = element.querySelector(
+        ".cp-nav-name, .cp-tree-label, .cp-label",
+    );
     if (named) return text(named);
     const withoutCounts = element.cloneNode(true) as HTMLAnchorElement;
     withoutCounts

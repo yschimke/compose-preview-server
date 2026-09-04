@@ -3043,6 +3043,16 @@ ${captureControlsHtml().prependIndent("          ")}
     val anchorId: String,
     val variants: List<TreeVariant>,
     val href: String,
+    /**
+     * The row's prebaked thumbnail ([navThumbSrc]), or null for a tree that lists renders rather
+     * than components (the viewer's axes subtree) and for a catalog whose pixels are not baked
+     * locally yet.
+     *
+     * The catalog menu used to be a tree of NAMES beside a grid of pictures, while the viewer's
+     * component drawer — the same list, on the other page — showed a thumbnail per row. One of the
+     * two was right, and it was not the one on the page that has the pixels (#252).
+     */
+    val thumbSrc: String? = null,
   )
 
   /**
@@ -3093,6 +3103,7 @@ ${captureControlsHtml().prependIndent("          ")}
         defaultRowAttrs = "$tabAttr data-group=\"${c.anchorId}\"",
         variants = c.variants,
         variantsId = "cp-tree-of-${c.anchorId}",
+        thumbSrc = c.thumbSrc,
         indent = "        ",
       )
     }
@@ -3131,6 +3142,13 @@ ${captureControlsHtml().prependIndent("          ")}
     syntheticDefaultRow: Boolean = true,
     /** The row whose href matches is `aria-current="page"` — the render on screen. */
     currentHref: String? = null,
+    /**
+     * A small prebaked thumbnail drawn to the left of [label], on the same `?thumb=<hash>` lane the
+     * grid's cards and the viewer's component drawer use. Null leaves the row text-only — which is
+     * what the viewer's axes subtree wants, since its rows are renders of ONE component and
+     * forty-by-forty pixels cannot tell `Pressed` from `Disabled`.
+     */
+    thumbSrc: String? = null,
     indent: String = "        ",
   ) {
     fun current(target: String) = if (target == currentHref) " aria-current=\"page\"" else ""
@@ -3145,7 +3163,12 @@ ${captureControlsHtml().prependIndent("          ")}
     }
     append(current(href))
     append(">")
-    append(WebEscaping.htmlEscape(label))
+    // `alt=""`: the name beside it already names the component, so the image is decorative.
+    if (thumbSrc != null) {
+      append("<img class=\"cp-tree-thumb\" loading=\"lazy\" alt=\"\"")
+      append(" src=\"${WebEscaping.htmlEscape(thumbSrc)}\">")
+    }
+    append("<span class=\"cp-tree-label\">${WebEscaping.htmlEscape(label)}</span>")
     if (variants.isNotEmpty()) {
       // +1 for the default render either way: the landing lists it as the synthetic child row
       // below, the viewer folds it into this row.
@@ -9216,6 +9239,9 @@ ${captureControlsHtml().prependIndent("          ")}
         anchorId = cardAnchors.getValue(card.default.id),
         variants = primaryVariants(shown, previews, darkFirst) { viewerHref(it) },
         href = viewerHref(shown),
+        // The SAME url the card beside it uses, prebaked thumbnail lane and all, so the row costs
+        // one cache hit rather than a second decode of the same pixels.
+        thumbSrc = renderSrc(shown),
       )
     }
     // The design file's pages, listed at the foot of whichever tree this catalog has. A catalog
@@ -14857,6 +14883,65 @@ ${scriptTag("known-differences.js")}
   }
 
   /**
+   * The component drawer's list body: the [previews] under the catalog's own section and group
+   * headings, or a plain run of rows when there is no outline to show (#252).
+   *
+   * This is the catalog menu's structure in the drawer that lists the same components. Buckets keep
+   * the authored order ([ServePreview.catalogOrder]) the landing tree reads its sections and groups
+   * in, so the two surfaces name the catalog's parts in the same sequence.
+   *
+   * Both heading levels are dropped when they would say nothing: a section heading only when the
+   * list spans more than one section (with one, the drawer IS that section), and a group heading
+   * only for a group the catalog named. A catalog carrying neither therefore renders exactly the
+   * flat list this drawer has always been.
+   */
+  private fun navListHtml(
+    previews: List<ServePreview>,
+    itemHtml: (ServePreview) -> String,
+  ): String {
+    fun order(p: ServePreview) = p.catalogOrder ?: Int.MAX_VALUE
+    val sectionsInPlay = previews.mapNotNull { it.section }.distinct()
+    val showSections = sectionsInPlay.size > 1
+    val showGroups = previews.any { it.group != null }
+    if (!showSections && !showGroups) return previews.joinToString("\n") { itemHtml(it) }
+    // (section, group) buckets, each in authored order, ordered among themselves by the earliest
+    // card they hold — the same min-order rule [buildSections] sorts the landing's tabs by.
+    val buckets = LinkedHashMap<Pair<String?, String?>, MutableList<ServePreview>>()
+    previews
+      .sortedBy { order(it) }
+      .forEach { buckets.getOrPut(it.section to it.group) { mutableListOf() }.add(it) }
+    val ordered =
+      buckets.entries
+        .sortedBy { (_, cards) -> cards.minOf { order(it) } }
+        .map { it.key to it.value }
+    // One bucket is not an outline. A heading exists to say which of several parts a row belongs
+    // to, and over a list that is entirely one part it says only what the drawer already is —
+    // "Time · 1" over the single Time Text row, on a catalog whose drawer holds two components.
+    if (ordered.size < 2) return previews.joinToString("\n") { itemHtml(it) }
+    fun headRow(kind: String, label: String, count: Int): String =
+      "<li class=\"cp-nav-head-row cp-nav-$kind-row\">" +
+        "<span class=\"cp-nav-head-name\">${WebEscaping.htmlEscape(label)}</span>" +
+        "<span class=\"cp-tree-count\">$count</span></li>"
+    return buildString {
+      var section: String? = null
+      var firstBucket = true
+      ordered.forEach { (key, cards) ->
+        val (sectionName, groupName) = key
+        if (showSections && (firstBucket || sectionName != section)) {
+          val total = ordered.filter { it.first.first == sectionName }.sumOf { it.second.size }
+          append(headRow("section", sectionName ?: OTHER_SECTION, total)).append("\n")
+        }
+        section = sectionName
+        firstBucket = false
+        if (showGroups && groupName != null)
+          append(headRow("group", groupName, cards.size)).append("\n")
+        cards.forEach { append(itemHtml(it)).append("\n") }
+      }
+    }
+      .trimEnd()
+  }
+
+  /**
    * The left-hand component-nav drawer: a filterable list of the session's [siblings], each linking
    * to its own viewer page (same `$basePath/p/<id>$q` shape the landing cards use). The current
    * [preview] is marked `aria-current="page"`. Returns "" when there is nothing to navigate *to* —
@@ -14940,38 +15025,51 @@ ${scriptTag("known-differences.js")}
     val listRepresentatives =
       if (axesTree.isBlank()) representatives
       else representatives.filterNot { componentKey(it) == currentKey }
-    val items =
-      listRepresentatives.joinToString("\n") { p ->
-        val segItem = WebEscaping.urlEncodeSegment(p.id)
-        val labelItem = WebEscaping.htmlEscape(previewDisplayName(p))
-        val idItem = WebEscaping.htmlEscape(p.id)
-        // data-search folds label + id so the drawer filter matches either. aria-current pins the
-        // one we're viewing (styled as active, and it stays visible even under a filter miss so the
-        // list never looks empty-of-self).
-        val current = if (componentKey(p) == currentKey) " aria-current=\"page\"" else ""
-        // The row's tooltip is the component's caption when it has one, and its preview id
-        // otherwise. The id was the only thing here, which tells a reader who is already lost
-        // exactly what they already knew — the name in slug form. The caption is the sentence that
-        // answers "what IS this", which is the question a list of forty component names provokes.
-        val tip = p.caption?.takeIf { it.isNotBlank() } ?: p.id
-        // A small thumbnail render to the left of the name — the same prebaked thumbnail the
-        // landing cards use, on the same `?thumb=<hash>` lane, so the nav reads like a mini gallery
-        // without shipping a full-resolution render per row. `alt=""` since the name label beside
-        // it already names the component (decorative image).
-        //
-        // The lane matters here for the same reason it does on the grid, at the same scale: a
-        // viewer page lists every sibling component (57 rows on the m3 catalog), each drawn at
-        // ~40px. On the plain `/render` URL that was 849 KB of full-resolution PNGs at
-        // `max-age=300` with no validator, so the five-minute expiry could not even end in a 304;
-        // the
-        // thumbnail lane serves the same 57 in 357 KB, `immutable` and ETagged, straight out of
-        // memory with no trip through the render machinery.
-        val thumbSrc = navThumbSrc(basePath, p.id, q, thumbHash)
-        "<li><a class=\"cp-nav-item\" href=\"$basePath/p/$segItem$q\"$current " +
-          "title=\"${WebEscaping.htmlEscape(tip)}\" data-search=\"$labelItem $idItem\">" +
-          "<img class=\"cp-nav-thumb\" loading=\"lazy\" alt=\"\" src=\"$thumbSrc\">" +
-          "<span class=\"cp-nav-name\">$labelItem</span></a></li>"
-      }
+    fun itemHtml(p: ServePreview): String {
+      val segItem = WebEscaping.urlEncodeSegment(p.id)
+      val labelItem = WebEscaping.htmlEscape(previewDisplayName(p))
+      val idItem = WebEscaping.htmlEscape(p.id)
+      // data-search folds label + id so the drawer filter matches either. aria-current pins the
+      // one we're viewing (styled as active, and it stays visible even under a filter miss so the
+      // list never looks empty-of-self).
+      val current = if (componentKey(p) == currentKey) " aria-current=\"page\"" else ""
+      // The row's tooltip is the component's caption when it has one, and its preview id
+      // otherwise. The id was the only thing here, which tells a reader who is already lost
+      // exactly what they already knew — the name in slug form. The caption is the sentence that
+      // answers "what IS this", which is the question a list of forty component names provokes.
+      val tip = p.caption?.takeIf { it.isNotBlank() } ?: p.id
+      // A small thumbnail render to the left of the name — the same prebaked thumbnail the
+      // landing cards use, on the same `?thumb=<hash>` lane, so the nav reads like a mini gallery
+      // without shipping a full-resolution render per row. `alt=""` since the name label beside
+      // it already names the component (decorative image).
+      //
+      // The lane matters here for the same reason it does on the grid, at the same scale: a
+      // viewer page lists every sibling component (57 rows on the m3 catalog), each drawn at
+      // ~40px. On the plain `/render` URL that was 849 KB of full-resolution PNGs at
+      // `max-age=300` with no validator, so the five-minute expiry could not even end in a 304;
+      // the
+      // thumbnail lane serves the same 57 in 357 KB, `immutable` and ETagged, straight out of
+      // memory with no trip through the render machinery.
+      val thumbSrc = navThumbSrc(basePath, p.id, q, thumbHash)
+      return "<li><a class=\"cp-nav-item\" href=\"$basePath/p/$segItem$q\"$current " +
+        "title=\"${WebEscaping.htmlEscape(tip)}\" data-search=\"$labelItem $idItem\">" +
+        "<img class=\"cp-nav-thumb\" loading=\"lazy\" alt=\"\" src=\"$thumbSrc\">" +
+        "<span class=\"cp-nav-name\">$labelItem</span></a></li>"
+    }
+    // The catalog menu's OUTLINE, brought to the drawer that lists the same components (#252). The
+    // drawer was a flat run of rows — every component of a sectioned catalog in one 240px column,
+    // with the sections and groups the catalog authored (and the landing page's tree publishes)
+    // thrown away on the way in. The rows keep their thumbnails, which is what the drawer had that
+    // the catalog tree did not; what they gain is the heading above them saying which part of the
+    // catalog they are.
+    //
+    // Headings are FLAT SIBLINGS of the rows rather than a nesting, because the filter hides rows
+    // one by one and a heading whose rows have all gone is hidden by the same pass
+    // (`ViewerDrawers`). A nested list would have made every row's visibility two questions.
+    // Degenerate levels are dropped rather than drawn: a catalog with one section says its name
+    // nowhere (the drawer IS that section), and an unnamed group gets no heading — so an
+    // unsectioned catalog's drawer is exactly the flat list it always was.
+    val items = navListHtml(listRepresentatives, ::itemHtml)
     return """
       <aside class="cp-nav" id="cp-nav" aria-label="Components">
         <div class="cp-nav-head"><span>Components</span><button type="button" class="cp-nav-close" id="cp-nav-close" aria-label="Close component navigation">×</button></div>
