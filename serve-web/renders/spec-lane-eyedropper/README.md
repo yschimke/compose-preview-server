@@ -51,7 +51,14 @@ source's name. Measured mid-switch, with the paired catalog's raster held back 2
 readout said `153,163 · M3 Wear OS Apps Design Kit #332e3c · …` over Figma's pixels; now it says
 nothing until the pair lands, then answers under the label it belongs to.
 
-A view switch drops the reading too. The view decides which panels exist — the plain Spec view has
+Returning to a cached pair abandons whatever normalisation is still in flight. That was a
+pre-existing hole this picker made visible: with pair B cached, switching B → A → B before A landed
+let A's request still pass its own generation check, so A's pixels were painted over the stage while
+every label — source button, caption, and now the reading's own prefix — still said B. Measured by
+signature over the reference canvas: `876830` is Figma's, `929757` the paired catalog's, and after
+the race the stage carried `929757` under the Figma caption. It carries `876830` now.
+
+A view switch drops the reading too, whether it comes from the buttons or from Back/Forward. The view decides which panels exist — the plain Spec view has
 no canvases at all — so a reading carried across a switch describes a surface that may not be on
 screen, and a *frozen* one carried into Slider was a trap: pointer moves are latched, and the wipe
 canvas is the one surface whose click cannot release the latch, leaving Escape as the only way out.

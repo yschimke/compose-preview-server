@@ -247,7 +247,12 @@ export class SpecCompare extends ControllerElement {
             this.choice = prefer(this.choice, next);
         },
         hydrate: (next) => {
+            const before = this.choice.view;
             this.choice = hydrate(this.choice, next);
+            // Back and Forward change the view exactly as the buttons do, so a reading has to go
+            // the same way: it names a point on a panel the restored view may not show, and a
+            // frozen one restored into Slider is the same trap `setView` avoids.
+            if (this.choice.view !== before) this.releasePick();
             this.apply();
         },
         open: (url, source) => {
@@ -719,6 +724,12 @@ export class SpecCompare extends ControllerElement {
         // Asking for a different pair than the one on the stage: quiet until it lands.
         if (key !== this.framesKey) this.releasePick();
         if (key === this.framesKey && this.frames) {
+            // Returning cached frames is a decision that THIS pair is what the stage holds, so any
+            // normalisation still in flight has to be abandoned with it. Without this, B → A → B
+            // (with B cached) left A's request passing its own generation check when it resolved,
+            // and it painted A over the stage while every label still said B — measured: the
+            // reference canvas carried the paired catalog's pixels under the Figma caption.
+            this.generation++;
             this.pickSettled = true;
             this.drawWipe();
             // The readout still holds this pair's live numbers, so the chip has to come back to the

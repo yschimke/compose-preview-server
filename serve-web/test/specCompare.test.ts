@@ -174,6 +174,26 @@ describe("<cp-spec-compare>", () => {
         assert.equal(pickLive().textContent, "");
     });
 
+    it("lets a frozen reading go when Back changes the view", async () => {
+        // Back and Forward reach the view the buttons reach, by another door: `hydrate`. A reading
+        // restored alongside a view it was not taken in describes a panel that may not be there.
+        stubCompare();
+        await mount();
+        lane().open("/render/Button.png");
+        for (let i = 0; i < 5; i++) await flush();
+        pick().textContent =
+            "145,121 · Figma #332e3c · Render #332e3c · identical";
+        pick().hidden = false;
+        pick().classList.add("cp-spec-pick--frozen");
+        pickLive().textContent = "Frozen reading. 145,121 · …";
+
+        lane().hydrate("slider");
+        await flush();
+        assert.equal(pick().textContent, "");
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), false);
+        assert.equal(pickLive().textContent, "");
+    });
+
     it("takes a frozen reading away when the lane closes", async () => {
         // `cp-spec-lane` carries the source buttons, so it stays in the page off the lane. A
         // reading left in it goes on naming two colours beside a picture neither came from, and
