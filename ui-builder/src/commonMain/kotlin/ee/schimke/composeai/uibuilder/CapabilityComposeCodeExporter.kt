@@ -1160,7 +1160,20 @@ private fun JsonElement?.literalAs(kotlinType: String): String {
   val primitive = this as? kotlinx.serialization.json.JsonPrimitive
   if (bare == "Double" && primitive != null && !primitive.isString) {
     primitive.doubleOrNull?.let { value ->
-      return if (value % 1.0 == 0.0 && !value.isInfinite()) "${value.toLong()}.0" else "$value"
+      // Spelled from the authored text rather than from the parsed number. `toLong()` saturates,
+      // so a declared `1e20` came out as `9223372036854775807.0` — the preview starting from one
+      // value and the exported screen from another. And `Double.toString` is not the same on
+      // every target this exporter runs on: on JS `1.0` prints as `1`, which is an `Int` literal
+      // again, which is the bug the `.0` exists to stop. The JSON text has neither problem.
+      val authored = primitive.content
+      return when {
+        value.isNaN() -> "Double.NaN"
+        value == Double.POSITIVE_INFINITY -> "Double.POSITIVE_INFINITY"
+        value == Double.NEGATIVE_INFINITY -> "Double.NEGATIVE_INFINITY"
+        // Already a floating-point literal — a point or an exponent makes it one.
+        authored.any { it == '.' || it == 'e' || it == 'E' } -> authored
+        else -> "$authored.0"
+      }
     }
   }
   return kotlinLiteral()
