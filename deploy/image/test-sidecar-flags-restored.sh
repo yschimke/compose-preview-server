@@ -29,15 +29,18 @@ stanza="$(sed -n '/^# >>> sidecar-restore$/,/^# <<< sidecar-restore$/p' "${entry
 
 fixtures="$(mktemp -d)"
 trap 'rm -rf "${fixtures}"' EXIT
-mkdir -p "${fixtures}/lib-daemon-android" "${fixtures}/lib-daemon-desktop" "${fixtures}/lib-renderer"
+mkdir -p "${fixtures}/lib-daemon-android" "${fixtures}/lib-daemon-desktop" \
+  "${fixtures}/lib-renderer" "${fixtures}/lib-bta"
 
 # `present` lets a case declare a sidecar dir that does NOT exist, by pointing at a missing path.
 run_stanza() {
-  local incoming="$1" android="${2:-${fixtures}/lib-daemon-android}"
+  local incoming="$1" android="${2:-${fixtures}/lib-daemon-android}" \
+    bta="${3:-${fixtures}/lib-bta}"
   JAVA_TOOL_OPTIONS="${incoming}" \
   LIB_DAEMON_ANDROID_DIR="${android}" \
   LIB_DAEMON_DESKTOP_DIR="${fixtures}/lib-daemon-desktop" \
   LIB_RENDERER_DIR="${fixtures}/lib-renderer" \
+  LIB_BTA_DIR="${bta}" \
     bash -c "
       set -euo pipefail
       ${stanza}
@@ -48,7 +51,7 @@ run_stanza() {
 # 1. The reported failure: an inherited string carrying the Android flag and nothing else. The two
 #    desktop flags come back, and the operator's own content is untouched.
 result="$(run_stanza '-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android')"
-for want in libDaemonDesktopDir libRendererDir; do
+for want in libDaemonDesktopDir libRendererDir libBtaDir; do
   [[ "${result}" == *"${want}="* ]] || {
     echo "FAIL: ${want} was not restored: ${result}" >&2
     exit 1
@@ -89,7 +92,7 @@ echo "PASS: no flag is invented for a sidecar the image does not carry"
 
 # 4. The ordinary case — nothing replaced anything, every flag already present — must be a no-op,
 #    not a string that lists each flag twice.
-baked='-Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer'
+baked='-Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libBtaDir=/opt/lib-bta'
 result="$(run_stanza "${baked}")"
 [[ "${result}" == "${baked}" ]] || {
   echo "FAIL: an intact JAVA_TOOL_OPTIONS was modified: ${result}" >&2
@@ -97,7 +100,22 @@ result="$(run_stanza "${baked}")"
 }
 echo "PASS: an intact JAVA_TOOL_OPTIONS is left exactly as it was"
 
-# 5. Self-test: the checks above must be able to fail. A stanza that only ever echoes its input
+# 5. The playground's compiler jars are subject to the same two rules as a render sidecar, and are
+#    worth their own case because the symptom differs: losing this flag does not degrade a lane to
+#    snapshots, it removes `/playground` entirely on a box configured to serve it.
+result="$(run_stanza '-XX:MaxRAMPercentage=70')"
+[[ "${result}" == *"libBtaDir=${fixtures}/lib-bta"* ]] || {
+  echo "FAIL: libBtaDir was not restored: ${result}" >&2
+  exit 1
+}
+result="$(run_stanza '' "${fixtures}/lib-daemon-android" "${fixtures}/absent-bta")"
+[[ "${result}" != *"libBtaDir="* ]] || {
+  echo "FAIL: libBtaDir was invented for a directory the image does not carry: ${result}" >&2
+  exit 1
+}
+echo "PASS: the playground compiler flag is restored, and only when the image carries it"
+
+# 6. Self-test: the checks above must be able to fail. A stanza that only ever echoes its input
 #    would pass cases 2-4 on content it never touched, so prove case 1 catches it.
 bad_stanza='true'
 result="$(JAVA_TOOL_OPTIONS='-Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android' bash -c "

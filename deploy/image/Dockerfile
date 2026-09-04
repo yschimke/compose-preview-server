@@ -168,11 +168,22 @@ RUN set -eu; \
 # Before the repo split (#3824) the server ran out of the CLI install dir and inherited
 # both for free; nothing replaced that when it moved.
 #
-# Only the two sidecar directories are lifted out of the CLI tarball. The rest of it (the
-# `compose-preview` launcher, its own `lib/`, `lib-bta/`, `lib-usage-psi/`, the Wasm
-# players) is not this image's job — the server is the entrypoint, not the CLI — and the
-# ~310 MB download stays in this stage, so the runtime grows by the two sidecars (~165 MB)
-# rather than by the whole tarball.
+# Only the sidecar directories are lifted out of the CLI tarball. The rest of it (the
+# `compose-preview` launcher, its own `lib/`, `lib-usage-psi/`, the Wasm players) is not
+# this image's job — the server is the entrypoint, not the CLI — and the ~310 MB download
+# stays in this stage, so the runtime grows by the sidecars rather than by the whole
+# tarball.
+#
+# `lib-bta/` IS one of them, and was the exception that disabled a whole lane. It carries
+# `kotlin-build-tools-impl` + `kotlin-compiler-embeddable` + the Compose compiler plugin,
+# which is what `PlaygroundBtaCompiler.fromInstall` loads to compile a playground snippet:
+# the serve host has no Gradle plugin to supply them the way the editor daemon does. Absent
+# it, `openPlaygroundService` logged "playground compiler unavailable — no lib-bta/ in the
+# CLI install" and returned null, so preview.coo.ee admitted the lane on every other count
+# (public host, repo-access-gated, sandbox preflighted) and then served no playground at
+# all. Same lookup as its neighbours: `-Dcomposeai.cli.libBtaDir`, else `$APP_HOME/lib-bta`.
+# It is the largest of the sidecars, and it buys the lane that compiles a stranger's Kotlin;
+# a box that does not run `--playground` pays for it in image size and nothing else.
 #
 # `lib-renderer/` carries every platform's `skiko-awt-runtime-*` beside `skiko-awt`, so the
 # daemon links its bindings against a matching native and does not fall into the split-Skiko
@@ -185,6 +196,13 @@ COPY release-assets/ /tmp/release-assets/
 # Same local-first / public-fallback shape as the server and Android stages: an automatic
 # release stages the tag's tarball into the build context and can build before the draft
 # GitHub Release is public; a manual build falls back to the published asset.
+#
+# The `lib-bta/` assertions are two, not one, because `PlaygroundBtaCompiler.fromInstall`
+# splits that directory BY FILENAME: the Compose plugin jar rides the per-compile plugin
+# classpath and everything else loads into BTA's isolated classloader. A tarball carrying
+# only one of those halves satisfies a plain `ls *.jar` and still makes `fromInstall`
+# return null — the exact silent-disable this stage now exists to prevent — so each half is
+# asserted on its own.
 RUN set -eu; \
     local="/tmp/release-assets/compose-preview-${TOOLS_VERSION}.tar.gz"; \
     if [ -f "$local" ]; then \
@@ -194,14 +212,18 @@ RUN set -eu; \
         "https://github.com/yschimke/compose-ai-tools/releases/download/v${TOOLS_VERSION}/compose-preview-${TOOLS_VERSION}.tar.gz"; \
     fi; \
     tar -xzf /tmp/cli.tgz -C /opt --strip-components=1 --wildcards \
-      "*/lib-daemon-desktop" "*/lib-renderer" "*/lib-rcjvm"; \
+      "*/lib-daemon-desktop" "*/lib-renderer" "*/lib-rcjvm" "*/lib-bta"; \
     rm /tmp/cli.tgz; \
     test -d /opt/lib-daemon-desktop; \
     test -d /opt/lib-renderer; \
     test -d /opt/lib-rcjvm; \
+    test -d /opt/lib-bta; \
     ls /opt/lib-daemon-desktop/*.jar >/dev/null; \
     ls /opt/lib-renderer/*.jar >/dev/null; \
-    ls /opt/lib-rcjvm/*.jar >/dev/null
+    ls /opt/lib-rcjvm/*.jar >/dev/null; \
+    ls /opt/lib-bta/*.jar >/dev/null; \
+    ls /opt/lib-bta/kotlin-compose-compiler-plugin-embeddable*.jar >/dev/null; \
+    test "$(ls /opt/lib-bta/*.jar | grep -cv kotlin-compose-compiler-plugin-embeddable)" -gt 0
 
 # ---------------------------------------------------------------------------
 # Stage 1b: prewarm the downloadable-font cache.
@@ -257,6 +279,11 @@ COPY --from=desktop-daemon /opt/lib-renderer /opt/lib-renderer
 # with "needs lib-rcjvm and lib-daemon-desktop on the CLI install" — measured against
 # preview.coo.ee/remote-m3 — and the compare wall could never show that player.
 COPY --from=desktop-daemon /opt/lib-rcjvm /opt/lib-rcjvm
+# …and the Kotlin Build Tools API jars the PLAYGROUND compiles snippets with. Unlike the
+# sidecars above it backs no render lane: without it `--playground` is admitted and then
+# disabled at the last step, which is how preview.coo.ee ran with a playground nobody could
+# open. See the desktop-daemon stage for why it is lifted here.
+COPY --from=desktop-daemon /opt/lib-bta /opt/lib-bta
 # JAVA_TOOL_OPTIONS (inherited by the spawned daemon JVM too) points the CLI at the
 # unpacked Android AND desktop daemon sidecars, warms catalog daemons in the background so the
 # HTTP listener can come up before every live catalog finishes, and lifts BOTH cold-start budgets so a cold
@@ -296,7 +323,7 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     COMPOSE_PREVIEW_INIT_USE_MAVEN_LOCAL=1 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
-    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
+    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
 
 WORKDIR /project
 # Carry the release Maven tree so live bundles can resolve the plugin/runtime

@@ -19,6 +19,9 @@ bundles without a local Gradle project. Built once in CI and pushed to GHCR, so 
   re-fetches the regenerated bundle. See the linked service design below. This is what
   `preview.coo.ee` runs. The broader service design remains documented in
   [compose-ai-tools](https://github.com/yschimke/compose-ai-tools/blob/main/docs/public-preview-server.md).
+- **Playground:** the baked `lib-bta/` carries the Kotlin Build Tools compiler, so a
+  `SERVE_PLAYGROUND_BUNDLE` box compiles snippets server-side. See
+  [Playground on `preview.coo.ee`](#playground-on-previewcooee) — it is gated, not open.
 - **Bundle uploads:** disabled. **Auth:** public browsing, optional GitHub sign-in gate for
   live/playground surfaces, shared token for private boxes. **TLS:** via Caddy.
 
@@ -587,6 +590,21 @@ host the gate admits on either of two independent bases (issue #3210):
 | **contained** | `SERVE_PLAYGROUND_SANDBOX` set to a profile that both passes the startup containment probe *and* applies CPU/pid caps | A jail this image cannot currently provide (see below) |
 
 Anonymous **and** uncontained is refused outright, with a startup log line naming both remedies.
+
+Admission is not the last gate, and the one after it is easy to miss. The lane also needs a **Kotlin
+compiler** to build the snippet with, which the serve host has no Gradle plugin to supply: it loads
+`kotlin-build-tools-impl`, `kotlin-compiler-embeddable` and the Compose compiler plugin from
+`lib-bta/` in the CLI install (`-Dcomposeai.cli.libBtaDir`, baked here as `/opt/lib-bta`). Earlier
+images did not carry that directory at all, so a correctly configured box logged
+
+```
+serve: playground admitted — public host, repo-access-gated …
+serve: playground compiler unavailable — no lib-bta/ in the CLI install. Playground disabled.
+```
+
+— admitted on the line above, gone on the line below, with `/playground` simply absent. If you see
+the second line on a newer image, `JAVA_TOOL_OPTIONS` was replaced and took the flag with it; use
+`SERVE_JAVA_OPTS` to *add* options instead (the entrypoint restores the sidecar flags and says so).
 
 **Configure the repo-access-gated posture** — set the GitHub OAuth secrets from the section above,
 then name a catalog this box already serves:
