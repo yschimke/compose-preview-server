@@ -1081,6 +1081,7 @@ private fun EditorNavigator(
       )
       SearchField(
         state.catalogQuery,
+        placeholder = "Search components",
         onFocusChanged = onTextInputFocusChanged,
       ) {
         dispatch(UiBuilderEditorEvent.SearchCatalog(it))
@@ -1104,7 +1105,13 @@ private fun EditorNavigator(
         if (state.layerQuery.isBlank()) "Drag vertically to reorder"
         else "$matches of ${state.document.nodes.size} match",
       )
-      SearchField(state.layerQuery, onFocusChanged = onTextInputFocusChanged) {
+      SearchField(
+        state.layerQuery,
+        // Reusing the catalog's field meant reusing its placeholder, so an empty layers filter
+        // invited you to search components. Two fields, two things to look for.
+        placeholder = "Filter layers",
+        onFocusChanged = onTextInputFocusChanged,
+      ) {
         dispatch(UiBuilderEditorEvent.SearchLayers(it))
       }
       // The multi-node inspector is only as reachable as the selection is. Filtering to every text
@@ -1256,6 +1263,7 @@ private fun PanelHeading(title: String, supporting: String) {
 @Composable
 private fun SearchField(
   value: String,
+  placeholder: String,
   onFocusChanged: (Boolean) -> Unit,
   onValueChange: (String) -> Unit,
 ) {
@@ -1273,7 +1281,7 @@ private fun SearchField(
       Box(Modifier.weight(1f)) {
         if (value.isEmpty()) {
           Text(
-            "Search components",
+            placeholder,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
           )
