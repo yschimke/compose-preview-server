@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.20.0](https://github.com/yschimke/compose-preview-server/compare/v2.19.1...v2.20.0) (2026-09-04)
+
+
+### Features
+
+* **serve:** generate the Compose export from the discovered component record ([#236](https://github.com/yschimke/compose-preview-server/issues/236)) ([db56ba6](https://github.com/yschimke/compose-preview-server/commit/db56ba60e42cab169e1f021fe1d456e9566af5b1))
+* **spec:** pick a colour off both sides of the spec lane ([#247](https://github.com/yschimke/compose-preview-server/issues/247)) ([20ab165](https://github.com/yschimke/compose-preview-server/commit/20ab1657ba6263639bd838b8966d6b7a0381b2f2))
+* **ui-builder:** declare a screen's state when the design is created ([#245](https://github.com/yschimke/compose-preview-server/issues/245)) ([a605548](https://github.com/yschimke/compose-preview-server/commit/a6055489965a34e32a2a9584302b25562f27c8e0))
+* **ui-builder:** filter the layers panel, and take every match at once ([#242](https://github.com/yschimke/compose-preview-server/issues/242)) ([9304fd8](https://github.com/yschimke/compose-preview-server/commit/9304fd8a30d79aa19cc575dbddb72f54f5cce36b))
+* **ui-builder:** let the canvas run the screen you just wired up ([#243](https://github.com/yschimke/compose-preview-server/issues/243)) ([7d79d69](https://github.com/yschimke/compose-preview-server/commit/7d79d69ef6723b1397d7f2b6b83473f13bf89ddc))
+* **ui-builder:** let the inspector see a state binding ([#244](https://github.com/yschimke/compose-preview-server/issues/244)) ([5b98d50](https://github.com/yschimke/compose-preview-server/commit/5b98d5048bbb0ec3fed0001056c3e52f6a804db2))
+* **ui-builder:** make the builder usable for designing an interactive screen ([#238](https://github.com/yschimke/compose-preview-server/issues/238)) ([9f5cec2](https://github.com/yschimke/compose-preview-server/commit/9f5cec217e7107bc3e364347900aedff4771333b))
+* **ui-builder:** make the catalog's layout properties editable ([#240](https://github.com/yschimke/compose-preview-server/issues/240)) ([7a000ac](https://github.com/yschimke/compose-preview-server/commit/7a000aca9c2566fa283930431b839b1821b37e07))
+* **ui-builder:** make the editor's shortcuts findable, from one table ([#239](https://github.com/yschimke/compose-preview-server/issues/239)) ([92b67d0](https://github.com/yschimke/compose-preview-server/commit/92b67d0e0c6e6345e43660c63e26d5c84e66abee))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to v1.71.0 ([#258](https://github.com/yschimke/compose-preview-server/issues/258)) ([b802e4c](https://github.com/yschimke/compose-preview-server/commit/b802e4c134e09d5c6a1db0e1d06dd8680024f5c7))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.56.1 ([#253](https://github.com/yschimke/compose-preview-server/issues/253)) ([badfabe](https://github.com/yschimke/compose-preview-server/commit/badfabe8865c825a715247ec61a0c59a38a71f15))
+* **serve:** combine the preview menu and the catalog menu ([#256](https://github.com/yschimke/compose-preview-server/issues/256)) ([cd2c5b3](https://github.com/yschimke/compose-preview-server/commit/cd2c5b3a1c66901e6ddc487a146f89d1e01a0042))
+* **serve:** let a preview grant replay a published player capture ([#246](https://github.com/yschimke/compose-preview-server/issues/246)) ([fec95d5](https://github.com/yschimke/compose-preview-server/commit/fec95d549a1d3e768d60a19b744c0e623aa2d9e6))
+* **serve:** refresh the serve-web goldens for the spec lane's colour picker ([#250](https://github.com/yschimke/compose-preview-server/issues/250)) ([5725ff6](https://github.com/yschimke/compose-preview-server/commit/5725ff695673814f5168384fa406f0fcfd14ae0a))
+* **serve:** resolve a call's agent grant once, not per gate ([#249](https://github.com/yschimke/compose-preview-server/issues/249)) ([a6951a3](https://github.com/yschimke/compose-preview-server/commit/a6951a3d46016c809a7f7f3f4057d5ae4655abe4))
+
 ## [2.19.1](https://github.com/yschimke/compose-preview-server/compare/v2.19.0...v2.19.1) (2026-09-03)
 
 
