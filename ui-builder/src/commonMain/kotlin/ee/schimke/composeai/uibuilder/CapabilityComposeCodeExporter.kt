@@ -7,10 +7,11 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 enum class ComposeExportSeverity {
   WARNING,
@@ -267,22 +268,41 @@ private class ComposeEmitter(
     return out.toString().trimEnd() + "\n"
   }
 
-  /** Declared with a boolean initial value, so `emitState` gives them a Kotlin `Boolean`. */
+  /** Declared as a boolean, so `emitState` gives them a Kotlin `Boolean`. */
   private val booleanStateVariables: Set<String> by lazy {
     document.stateVariables
-      .filterValues {
-        (it as? JsonObject)?.get("initialValue")?.jsonPrimitive?.booleanOrNull != null
-      }
+      .filterKeys { name -> stateDeclaration(name).kotlinType.removeSuffix("?") == "Boolean" }
       .keys
   }
 
+  /** Variables `emitState` declares nullable, and so the only ones `selectOrClear` may clear. */
+  private val nullableStateVariables: Set<String> by lazy {
+    document.stateVariables.filterKeys { name -> stateDeclaration(name).nullable }.keys
+  }
+
+  private fun stateDeclaration(name: String): StateDeclaration =
+    StateDeclaration.of(document.stateVariables[name] as? JsonObject)
+
+  /**
+   * Every variable, typed from its own declaration.
+   *
+   * The Kotlin type is written out rather than left to inference. `initialValue` is not enough on
+   * its own: a nullable variable initialised to `null` infers `Nothing?` and rejects every later
+   * assignment, and a text variable initialised to `"true"` reads as a boolean to any classifier
+   * that asks `booleanOrNull` without checking `isString`. `valueType` and `nullable` are what the
+   * document actually declares, so they decide.
+   */
   private fun emitState(level: Int) {
     document.stateVariables.entries
       .sortedBy { entry -> entry.key }
       .forEach { (name, declarationElement) ->
-        val declaration = declarationElement as? JsonObject ?: JsonObject(emptyMap())
-        val initial = declaration["initialValue"].kotlinLiteral()
-        line(level, "var ${name.identifier()} by remember { mutableStateOf($initial) }")
+        val declaration = StateDeclaration.of(declarationElement as? JsonObject)
+        val initial = declaration.initialValue.literalAs(declaration.kotlinType)
+        line(
+          level,
+          "var ${name.identifier()}: ${declaration.kotlinType} by remember { " +
+            "mutableStateOf($initial) }",
+        )
       }
   }
 
@@ -507,7 +527,15 @@ private class ComposeEmitter(
   private fun emitFilterChip(node: UiBuilderNode, level: Int) {
     line(level, "FilterChip(")
     line(level + 1, "selected = ${node.boolExpression("selected")},")
-    line(level + 1, "onClick = { ${node.actionExpression("click", booleanStateVariables)} },")
+    line(
+      level + 1,
+      "onClick = { ${node.actionExpression(
+        "click",
+        booleanStateVariables,
+        nullableStateVariables,
+        document.stateVariables.keys,
+      )} },",
+    )
     line(level + 1, "enabled = ${node.boolValue("enabled", true)},")
     line(
       level + 1,
@@ -652,7 +680,12 @@ private class ComposeEmitter(
       }
     line(
       level,
-      "$symbol(onClick = { ${node.actionExpression("click", booleanStateVariables)} }, $colors${node.modifierArgument()}) {",
+      "$symbol(onClick = { ${node.actionExpression(
+        "click",
+        booleanStateVariables,
+        nullableStateVariables,
+        document.stateVariables.keys,
+      )} }, $colors${node.modifierArgument()}) {",
     )
     if (node.string("style") == "fab") {
       line(level + 1, "Box(Modifier.padding(horizontal = 16.dp)) {")
@@ -785,17 +818,32 @@ private fun UiBuilderNode.boolExpression(name: String): String {
  * order and as a unit, which is how the renderer dispatches it. Emitting only the head exported a
  * handler that did less than the preview showed.
  *
- * [booleanState] is the set of variables the document declares with a boolean initial value, which
- * is what `emitState` turns into a Kotlin `Boolean`. A `toggle` is `!x` only for those; against a
- * string-declared variable `!x` would not compile, so it stays a refusal rather than becoming
- * broken source.
+ * [booleanState] and [nullableState] are what the document declares, which is what `emitState`
+ * turns into a Kotlin type. A `toggle` is `!x` only for a boolean; a `selectOrClear` writes `null`
+ * only into a nullable. Against anything else those would not compile, so each stays a refusal
+ * rather than becoming broken source.
  */
-private fun UiBuilderNode.actionExpression(event: String, booleanState: Set<String>): String {
+private fun UiBuilderNode.actionExpression(
+  event: String,
+  booleanState: Set<String>,
+  nullableState: Set<String>,
+  declaredState: Set<String>,
+): String {
   val actions = (eventBindings[event] as? JsonArray).orEmpty()
   if (actions.isEmpty()) return "Unit"
   return actions.joinToString("; ") { element ->
-    val action = element.jsonObject
+    // A safe cast, because this now visits every entry rather than only the head. A malformed
+    // later entry — a bare primitive or a null — used to sit unread behind the first action and
+    // now reaches the emitter, where `jsonObject` would throw out of `export()` instead of
+    // producing the structured diagnostic `fieldCoverageDiagnostics` already reports for it.
+    val action = element as? JsonObject ?: return@joinToString "TODO(\"Malformed action\")"
     val name = action.optionalString("variable")
+    // Emitting every action means a later one naming an undeclared variable now reaches the
+    // source, where `doesNotExist = true` compiles into nothing and reports success. Nothing else
+    // checks this: export validation does not read `stateVariables`.
+    if (name != null && name !in declaredState) {
+      return@joinToString "TODO(\"Undeclared state variable ${name.escape()}\")"
+    }
     val variable = name?.identifier()
     val value = action["value"].kotlinLiteral()
     when (action.optionalString("type")) {
@@ -804,10 +852,21 @@ private fun UiBuilderNode.actionExpression(event: String, booleanState: Set<Stri
       "set",
       "setText" -> if (variable == null) "Unit" else "$variable = $value"
       "selectOrClear" ->
-        if (variable == null) "Unit" else "$variable = if ($variable == $value) null else $value"
+        when {
+          variable == null -> "Unit"
+          name !in nullableState -> "TODO(\"selectOrClear needs a nullable state variable\")"
+          else -> "$variable = if ($variable == $value) null else $value"
+        }
       "toggle" ->
-        if (variable != null && name in booleanState) "$variable = !$variable"
-        else "TODO(\"toggle needs a boolean state variable\")"
+        when {
+          variable == null || name !in booleanState ->
+            "TODO(\"toggle needs a boolean state variable\")"
+          // A nullable flag is declared `Boolean?`, and `!` does not apply to one. The renderer
+          // reads a missing value as not-true and so toggles null to true; the export says the
+          // same thing rather than either refusing a supported preview or emitting `!flag`.
+          name in nullableState -> "$variable = !($variable ?: false)"
+          else -> "$variable = !$variable"
+        }
       else -> "TODO(\"Unsupported action ${action.optionalString("type")?.escape()}\")"
     }
   }
@@ -1016,16 +1075,17 @@ private fun UiBuilderNode.fieldCoverageDiagnostics(): List<ComposeExportDiagnost
     if (actions == null || actions.isEmpty()) {
       diagnostics += warning("MALFORMED_EVENT", "event '$event' has no action array")
     } else {
-      if (actions.size > 1) {
-        diagnostics +=
-          warning("PARTIAL_EVENT", "event '$event' emits only its first of ${actions.size} actions")
-      }
-      val action = actions.firstOrNull() as? JsonObject
-      val type = action?.optionalString("type")
-      if (type !in SUPPORTED_ACTIONS) {
-        diagnostics +=
-          warning("UNSUPPORTED_EVENT_ACTION", "event '$event' action '$type' emits TODO")
-      }
+      // Every action, because the handler emits every action. Reporting only the head both
+      // claimed a partial export that no longer happens and let an unsupported later action
+      // reach the generated source as a bare TODO with nothing warning about it.
+      actions
+        .map { (it as? JsonObject)?.optionalString("type") }
+        .filter { it !in SUPPORTED_ACTIONS }
+        .distinct()
+        .forEach { type ->
+          diagnostics +=
+            warning("UNSUPPORTED_EVENT_ACTION", "event '$event' action '$type' emits TODO")
+        }
     }
   }
   return diagnostics
@@ -1033,6 +1093,78 @@ private fun UiBuilderNode.fieldCoverageDiagnostics(): List<ComposeExportDiagnost
 
 private fun JsonObject.floatValue(name: String): Float? =
   (this[name] as? kotlinx.serialization.json.JsonPrimitive)?.floatOrNull
+
+/**
+ * One state variable's declared shape.
+ *
+ * `valueType` and `nullable` are the document's own words for what a variable holds. `initialValue`
+ * is a fallback for a declaration that predates them, and it is read with `isString` respected —
+ * `booleanOrNull` on a `JsonPrimitive` parses its content whether or not it was quoted, so a text
+ * variable holding `"true"` otherwise reads as a flag.
+ */
+private data class StateDeclaration(
+  val kotlinType: String,
+  val nullable: Boolean,
+  val initialValue: JsonElement?,
+) {
+  companion object {
+    fun of(declaration: JsonObject?): StateDeclaration {
+      val initial = declaration?.get("initialValue")
+      val primitive = initial as? kotlinx.serialization.json.JsonPrimitive
+      // Read with safe casts, not `jsonPrimitive`/`optionalString`. A document arriving over the
+      // wire can carry `"nullable": {}` or `"valueType": []`, and export validation does not look
+      // at `stateVariables` at all, so an accessor that throws on a non-primitive turns malformed
+      // data into an exception out of `export()` instead of the diagnostic it should be.
+      val nullable =
+        (declaration?.get("nullable") as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull
+          ?: (initial is JsonNull)
+      val declaredType =
+        (declaration?.get("valueType") as? kotlinx.serialization.json.JsonPrimitive)
+          ?.takeIf { it.isString }
+          ?.contentOrNull
+      val base =
+        when (declaredType) {
+          "bool" -> "Boolean"
+          // `Int`, not `Long`. Every integer this exporter writes — the initial value, and the
+          // operand of a `stateEquals` or `selectOrClear` — goes through `kotlinLiteral`, which
+          // emits the JSON number verbatim and so unsuffixed. Declaring `Long` made
+          // `mutableStateOf(0)` and `selectedDay == 1` both type-mismatch against it. The
+          // declaration follows the literals rather than the literals growing a suffix.
+          "int" -> "Int"
+          "float" -> "Double"
+          "string" -> "String"
+          else ->
+            when {
+              primitive == null -> "String"
+              primitive.isString -> "String"
+              primitive.booleanOrNull != null -> "Boolean"
+              primitive.longOrNull != null -> "Int"
+              primitive.doubleOrNull != null -> "Double"
+              else -> "String"
+            }
+        }
+      return StateDeclaration(if (nullable) "$base?" else base, nullable, initial)
+    }
+  }
+}
+
+/**
+ * A literal written for the Kotlin type its variable is declared as.
+ *
+ * `kotlinLiteral` emits a JSON number verbatim, so a `float`-declared variable seeded with `1`
+ * produced `var x: Double by remember { mutableStateOf(1) }` — an `Int` delegate behind a `Double`
+ * property. The declaration is the authority; the literal is spelled to match it.
+ */
+private fun JsonElement?.literalAs(kotlinType: String): String {
+  val bare = kotlinType.removeSuffix("?")
+  val primitive = this as? kotlinx.serialization.json.JsonPrimitive
+  if (bare == "Double" && primitive != null && !primitive.isString) {
+    primitive.doubleOrNull?.let { value ->
+      return if (value % 1.0 == 0.0 && !value.isInfinite()) "${value.toLong()}.0" else "$value"
+    }
+  }
+  return kotlinLiteral()
+}
 
 private fun JsonElement?.kotlinLiteral(): String =
   when (this) {
@@ -1060,6 +1192,51 @@ private fun shapeDp(value: String?): Float =
     "small" -> 8f
     else -> value?.toFloatOrNull() ?: 0f
   }
+
+/**
+ * The Kotlin identifier this exporter will write for a state variable of this name.
+ *
+ * Exposed so the authoring side can refuse a name before it becomes a declaration nobody can
+ * compile, rather than discovering it at export. The normalisation is lossy on purpose — it drops
+ * separators — which is exactly why two distinct names can arrive at one identifier.
+ */
+internal fun exportedStateIdentifier(name: String): String = name.identifier()
+
+/**
+ * Kotlin's hard keywords: reserved wherever an identifier is expected, and not escapable by this
+ * generator, which writes `var $name` bare.
+ */
+internal val KOTLIN_HARD_KEYWORDS: Set<String> =
+  setOf(
+    "as",
+    "break",
+    "class",
+    "continue",
+    "do",
+    "else",
+    "false",
+    "for",
+    "fun",
+    "if",
+    "in",
+    "interface",
+    "is",
+    "null",
+    "object",
+    "package",
+    "return",
+    "super",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typealias",
+    "typeof",
+    "val",
+    "var",
+    "when",
+    "while",
+  )
 
 private fun String.identifier(): String {
   val words = split(Regex("[^A-Za-z0-9]+")).filter(String::isNotEmpty)
@@ -1116,6 +1293,18 @@ private val SUPPORTED_MODIFIERS =
   setOf("clip", "fillMaxSize", "fillMaxWidth", "matchParentSize", "padding", "size")
 
 private val SUPPORTED_ACTIONS = setOf("select", "selectOrClear", "setText", "set", "toggle")
+
+/**
+ * The components whose `click` binding the Compose export actually emits.
+ *
+ * Derived from `HANDLED_FIELDS` rather than listed again, so the editor cannot offer a wiring this
+ * exporter would drop. The renderer makes anything with a click binding clickable; the exporter
+ * emits a handler only where the component's own emitter takes one, and everything else reports
+ * `UNEMITTED_EVENT` and generates nothing.
+ */
+internal val COMPOSE_EMITTED_CLICK_COMPONENTS: Set<String> by lazy {
+  HANDLED_FIELDS.filterValues { "click" in it.events }.keys
+}
 
 private val HANDLED_FIELDS =
   mapOf(
