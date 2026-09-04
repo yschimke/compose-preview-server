@@ -60,6 +60,16 @@ import { whenParsed } from "../dom/whenParsed.js";
  */
 const MAP_MAX_SIDE = 440;
 
+/**
+ * How far ahead of the viewport a row is measured.
+ *
+ * Two screens, so a reader scrolling at a normal pace meets rows that have already been scored
+ * rather than a column of "comparing…" chasing them down the page. Wide enough to hide the latency,
+ * narrow enough that opening a catalog of several hundred rows still measures a handful rather than
+ * all of them.
+ */
+const MEASURE_MARGIN = "200% 0px";
+
 @customElement("cp-compare-wall")
 export class CompareWall extends ControllerElement {
     private installed = false;
@@ -99,6 +109,11 @@ export class CompareWall extends ControllerElement {
     private initial!: WallState;
     /** Bumped per run, so a slow lane cannot write its scores over a newer one's. */
     private sequence = 0;
+    /**
+     * What is watching for rows to come near the viewport, so they can be measured then rather than
+     * all at once. Null on a browser with no `IntersectionObserver` — see {@link measureAll}.
+     */
+    private viewport: IntersectionObserver | null = null;
     private cleanups: Array<() => void> = [];
 
     connectedCallback(): void {
@@ -109,6 +124,8 @@ export class CompareWall extends ControllerElement {
     disconnectedCallback(): void {
         for (const off of this.cleanups) off();
         this.cleanups = [];
+        this.viewport?.disconnect();
+        this.viewport = null;
         this.installed = false;
         this.sequence++;
         super.disconnectedCallback();
@@ -465,15 +482,44 @@ export class CompareWall extends ControllerElement {
             byWorstKnownFirst(this.bakedScore(a), this.bakedScore(b)),
         );
         for (const row of visible) this.body?.appendChild(row);
+        this.measureAll(visible, runId);
+    }
 
-        // Serial, not parallel: each row decodes two full frames and scores them, and a wall of
-        // thirty racing each other is what made this page unusable on a laptop.
-        let chain: Promise<unknown> = Promise.resolve();
-        for (const row of visible) {
-            chain = chain.then(() => this.scoreRow(row, runId));
-        }
-        void chain.then(() => {
+    /**
+     * Measure [visible], **viewport-first**.
+     *
+     * Every row of this wall used to join one chain the moment the run started, and the chain
+     * walked all of them: each row fetching two full-resolution frames, decoding both, and scoring
+     * them with a per-pixel pass on the main thread. On a catalog the size of `remote-m3` — several
+     * hundred comparable rows — that is minutes of work for a reader looking at the first screen of
+     * it, and the browser is busy for the whole of it. Worse on the lanes whose candidate frame is
+     * drawn to order: the `rc` lane fetches a document per row, and a wall carrying a live player
+     * column has the server render one per cell.
+     *
+     * So a row is measured when it comes within {@link MEASURE_MARGIN} of the viewport and not
+     * before. What that changes is *when* the work happens, never what it produces: a row scores
+     * exactly as it did, in the same serial chain (each one decodes two full frames, and a wall of
+     * thirty racing each other is what made this page unusable on a laptop), and the wall still
+     * re-sorts on the measured numbers once every visible row has been through it.
+     *
+     * A browser with no `IntersectionObserver` measures the lot up front, exactly as before. That
+     * is the honest fallback rather than a degraded one: without a viewport signal there is no
+     * better moment to pick, and the wall must not simply stop scoring.
+     */
+    private measureAll(visible: HTMLElement[], runId: number): void {
+        // The previous run's watch goes first. Its rows are these rows — a lane switch re-measures
+        // the same elements against a different pair — so leaving it connected would enqueue every
+        // row twice, once per lane, into a chain that has already been superseded.
+        this.viewport?.disconnect();
+        this.viewport = null;
+
+        let measured = 0;
+        const settle = (): void => {
             if (runId !== this.sequence) return;
+            // Only once the whole wall has been through the scorer. Re-sorting on a partial pass
+            // would move rows the reader is looking at, under numbers most of the wall has not been
+            // asked for yet.
+            if (++measured < visible.length) return;
             visible.sort((a, b) =>
                 byWorstFirst(
                     scoreOf(a.getAttribute("data-score")),
@@ -482,7 +528,39 @@ export class CompareWall extends ControllerElement {
             );
             for (const row of visible) this.body?.appendChild(row);
             this.applySearch();
-        });
+        };
+
+        let chain: Promise<unknown> = Promise.resolve();
+        const enqueue = (row: HTMLElement): void => {
+            chain = chain
+                .then(() => this.scoreRow(row, runId))
+                .then(settle, settle);
+        };
+
+        if (typeof IntersectionObserver === "undefined") {
+            for (const row of visible) enqueue(row);
+            return;
+        }
+
+        // `unobserve` on the way past, and a set besides: a row can be reported intersecting more
+        // than once before the callback that queued it has run, and measuring it twice would spend
+        // a second full comparison to write the same number over itself.
+        const queued = new Set<HTMLElement>();
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    const row = entry.target as HTMLElement;
+                    observer.unobserve(row);
+                    if (queued.has(row)) continue;
+                    queued.add(row);
+                    enqueue(row);
+                }
+            },
+            { rootMargin: MEASURE_MARGIN },
+        );
+        this.viewport = observer;
+        for (const row of visible) observer.observe(row);
     }
 
     /**
