@@ -115,6 +115,54 @@ class ComposeExportActionTest {
   }
 
   @Test
+  fun `an assignment a declared type cannot hold is refused rather than emitted`() {
+    // The editor refuses these, and the editor is not the only author: `eventBindings` arrives on
+    // the wire from other clients and future versions of this one. `expanded` is declared `bool`,
+    // and this used to emit `expanded = "yes"` — source nobody can compile, with no diagnostic,
+    // because export validation does not read `stateVariables`.
+    listOf(JsonPrimitive("yes"), JsonPrimitive(3), JsonNull).forEach { bad ->
+      val source =
+        exportOf(
+          listOf(
+            JsonObject(
+              mapOf(
+                "type" to JsonPrimitive("set"),
+                "variable" to JsonPrimitive("expanded"),
+                "value" to bad,
+              )
+            )
+          )
+        )
+
+      val handler = source.lineSequence().first { "onClick" in it }
+      assertTrue(handler.contains("TODO("), handler)
+      assertTrue(handler.contains("expanded is Boolean"), handler)
+      assertFalse(handler.contains("expanded = "), handler)
+    }
+  }
+
+  @Test
+  fun `a quoted flag is not a flag`() {
+    // `booleanOrNull` parses a `JsonPrimitive` whether or not it was quoted, so the check has to
+    // read the quoting rather than the content — otherwise `"true"` passes and emits
+    // `expanded = "true"`.
+    val source =
+      exportOf(
+        listOf(
+          JsonObject(
+            mapOf(
+              "type" to JsonPrimitive("set"),
+              "variable" to JsonPrimitive("expanded"),
+              "value" to JsonPrimitive("true"),
+            )
+          )
+        )
+      )
+
+    assertTrue(source.lineSequence().first { "onClick" in it }.contains("TODO("), source)
+  }
+
+  @Test
   fun `every action in a handler is emitted, not just the first`() {
     // `eventBindings` is a list because a handler runs its actions in order and as a unit, which
     // is how the renderer dispatches it. Exporting only the head shipped a button that did less
