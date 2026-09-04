@@ -31,6 +31,50 @@ class EditorLayerFilterTest {
     )
 
   @Test
+  fun `a match keeps exactly its own ancestors as context`() {
+    // Ancestors now come from parent pointers rather than a backward scan over every preceding
+    // row, so this is the property that had to survive the rewrite: the rows kept for a single
+    // match are that row plus its chain to the root, and nothing else.
+    val rows = filtered("chip-crime-label")
+    val all = reducer.treeRows(document)
+    assertEquals(
+      listOf("chip-crime-label"),
+      rows.filter { it.matched }.map { it.nodeId },
+      "the query must match exactly one row for this to be about ancestors",
+    )
+
+    val chain =
+      generateSequence(all.first { it.nodeId == "chip-crime-label" }) { row ->
+        row.parent?.nodeId?.let { parentId -> all.first { it.nodeId == parentId } }
+      }
+
+    assertEquals(
+      chain.map { it.nodeId }.toList().reversed(),
+      rows.map { it.nodeId },
+      "kept rows should be the match's own ancestor chain, root first",
+    )
+  }
+
+  @Test
+  fun `two matches under one parent keep that parent once`() {
+    // The early stop — walk up only until an ancestor is already kept — is what keeps the pass
+    // linear. It must not drop an ancestor the second match still needs.
+    val rows = filtered("chip-")
+    val ids = rows.map { it.nodeId }
+
+    assertEquals(ids.distinct(), ids, "no row appears twice")
+    assertTrue(ids.contains("chip-crime") && ids.contains("chip-news"), ids.toString())
+    rows
+      .filterNot { it.matched }
+      .forEach { context ->
+        assertTrue(
+          rows.any { it.parent?.nodeId == context.nodeId },
+          "context row ${context.nodeId} keeps nothing beneath it",
+        )
+      }
+  }
+
+  @Test
   fun `an empty query is the whole tree`() {
     assertEquals(
       reducer.treeRows(document).map { it.nodeId },
