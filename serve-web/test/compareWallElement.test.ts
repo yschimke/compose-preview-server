@@ -1255,4 +1255,142 @@ describe("<cp-compare-wall>", () => {
         await flush();
         assert.equal(document.querySelector(".cp-compare-row"), null);
     });
+
+    // Everything above runs on happy-dom, which has no `IntersectionObserver` — so it exercises the
+    // fallback the wall keeps for a browser without one, where the whole wall is measured up front.
+    // These pin the other half: what a browser that CAN say "this row is on screen" gets, which is
+    // the one that matters on a catalog of several hundred rows.
+    describe("with a viewport to measure against", () => {
+        let realObserver: typeof IntersectionObserver;
+        let observed: Set<Element>;
+        let notify: ((targets: Element[]) => void) | null;
+
+        class StubObserver {
+            constructor(callback: IntersectionObserverCallback) {
+                notify = (targets) =>
+                    callback(
+                        targets.map((target) => ({
+                            target,
+                            isIntersecting: true,
+                        })) as never,
+                        this as never,
+                    );
+            }
+            observe(target: Element): void {
+                observed.add(target);
+            }
+            unobserve(target: Element): void {
+                observed.delete(target);
+            }
+            disconnect(): void {
+                observed.clear();
+            }
+        }
+
+        const scroll = async (...names: string[]) => {
+            notify?.(
+                names.map((name) =>
+                    document.querySelector(`[data-label="${name}"]`)!,
+                ),
+            );
+            await settle();
+        };
+
+        const three = [
+            { name: "Button", have: ["png-light", "svg-light"] },
+            { name: "Card", have: ["png-light", "svg-light"] },
+            { name: "Chip", have: ["png-light", "svg-light"] },
+        ];
+
+        beforeEach(() => {
+            observed = new Set();
+            notify = null;
+            realObserver = globalThis.IntersectionObserver;
+            globalThis.IntersectionObserver = StubObserver as never;
+        });
+
+        afterEach(() => {
+            globalThis.IntersectionObserver = realObserver;
+        });
+
+        it("measures nothing until a row comes near the viewport", async () => {
+            const scorer = stubScorer({ "/a/Button-svg-light": 93.4 });
+            await mount({ rows: three });
+            await settle();
+            assert.deepEqual(
+                scorer.calls,
+                [],
+                "nothing on screen, nothing scored",
+            );
+            assert.equal(observed.size, 3, "every visible row is watched for");
+        });
+
+        it("measures a row when it arrives, and only that row", async () => {
+            const scorer = stubScorer({
+                "/a/Button-svg-light": 93.4,
+                "/a/Card-svg-light": 61,
+                "/a/Chip-svg-light": 12,
+            });
+            await mount({ rows: three });
+            await scroll("Card");
+            assert.deepEqual(scorer.calls, ["/a/Card-svg-light"]);
+            assert.equal(scoreTextOf("Card"), "61.0%");
+            // Left exactly as the server wrote it — no measurement, and none started.
+            assert.equal(
+                document
+                    .querySelector('[data-label="Button"]')
+                    ?.hasAttribute("data-score"),
+                false,
+            );
+        });
+
+        it("measures a row once however often it is reported on screen", async () => {
+            const scorer = stubScorer({ "/a/Card-svg-light": 61 });
+            await mount({ rows: three });
+            await scroll("Card");
+            await scroll("Card");
+            assert.deepEqual(
+                scorer.calls,
+                ["/a/Card-svg-light"],
+                "a second sighting is not a second comparison",
+            );
+        });
+
+        it("holds the served order until every row has been measured", async () => {
+            stubScorer({
+                "/a/Button-svg-light": 93.4,
+                "/a/Card-svg-light": 61,
+                "/a/Chip-svg-light": 12,
+            });
+            await mount({ rows: three });
+            await scroll("Button", "Card");
+            assert.deepEqual(
+                rowsOf().map((row) => row.getAttribute("data-label")),
+                ["Button", "Card", "Chip"],
+                "a partial pass must not move rows under the reader",
+            );
+            await scroll("Chip");
+            assert.deepEqual(
+                rowsOf().map((row) => row.getAttribute("data-label")),
+                ["Chip", "Card", "Button"],
+                "worst first, once the whole wall has a measured number",
+            );
+        });
+
+        it("stops watching the previous lane's rows when the lane changes", async () => {
+            stubScorer({ "/a/Button-svg-light": 93.4 });
+            await mount({ rows: three });
+            const first = notify;
+            document
+                .querySelector<HTMLElement>('[data-compare-format="svg"]')!
+                .click();
+            await settle();
+            assert.notEqual(notify, first, "a run installs its own watch");
+            assert.equal(
+                observed.size,
+                3,
+                "and the superseded one has let go of its rows",
+            );
+        });
+    });
 });

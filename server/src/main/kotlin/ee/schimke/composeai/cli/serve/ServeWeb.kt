@@ -9801,15 +9801,22 @@ ${captureControlsHtml().prependIndent("          ")}
     // first. `compare/columns.ts` owns the rule, and `<cp-compare-wall>` re-asserts it whenever the
     // visitor switches lane — this only has to be right for the format the page is SERVED on.
     val specLeadsColumns = defaultFormat == "reference" || defaultFormat == "parallel"
+    // `loading="lazy"` on both pictures, and it applies however late the `src` arrives: the wall
+    // assigns them from `<cp-compare-wall>` rather than serving them, and a catalog of several
+    // hundred rows was asking the browser for that many full-resolution pairs at once for a reader
+    // looking at the first screen. The element measures the pair through its own fetches, which the
+    // same element now defers to the viewport — so the pictures and the scorer wait for the same
+    // moment instead of one flooding ahead of the other.
     val renderCell =
       "<td class=\"cp-compare-render-cell\"><div class=\"cp-compare-shot\">" +
-        "<img class=\"cp-compare-png\" alt=\"\"></div></td>"
+        "<img loading=\"lazy\" class=\"cp-compare-png\" alt=\"\"></div></td>"
     // The Remote Compose canvas is CLASSED because a row now holds two of them — this one and the
     // delta map below — and `<cp-compare-wall>` has to tell the one it plays into from the one it
     // paints.
     val targetCell =
       "<td class=\"cp-compare-target-cell\"><div class=\"cp-compare-shot\">" +
-        "<img class=\"cp-compare-vector\" alt=\"\"><canvas class=\"cp-compare-rc\" hidden></canvas>" +
+        "<img loading=\"lazy\" class=\"cp-compare-vector\" alt=\"\">" +
+        "<canvas class=\"cp-compare-rc\" hidden></canvas>" +
         "</div></td>"
     // The delta map, and it belongs BETWEEN the pair wherever the pair ends up — the reference lane
     // leads with the spec, the vector lanes lead with the render, and either way the middle column

@@ -1155,6 +1155,55 @@ class ServeHttpRoutingTest {
   }
 
   /**
+   * The same replay on a **token-gated** box: cacheable, and `private`.
+   *
+   * It was `no-store`, on the reading that everything a non-`--public` server answers stays out of
+   * every cache. Half of that is right — these URLs carry `?token=`, so they must never reach a
+   * shared one — and half of it was costing a local `serve` the whole benefit above: the compare
+   * wall points a cell at this lane for every player a run did not stage, and `no-store` forbids
+   * even the browser's own memory cache, so each cell was re-fetched on every page view and every
+   * lazy scroll back into view. `private` is the distinction the header exists to draw.
+   *
+   * Only the bare replay moves. An ordinary browse of the same preview on the same box is still
+   * `no-store`, which is what keeps this a carve-out rather than a policy change.
+   */
+  @Test
+  fun `a bare player selection is privately cacheable on a token-gated box`() {
+    val gatedRegistry = ServeSessionRegistry(open = { null })
+    gatedRegistry.register("rc-published", host = rcPublishedHost, pinned = true)
+    val gated =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "t0ken",
+          sessions = gatedRegistry,
+          defaultSessionId = "rc-published",
+          isPublic = false,
+        )
+        .also { it.start() }
+    try {
+      fun cacheControl(query: String): String? {
+        val req =
+          Request.Builder()
+            .url("http://127.0.0.1:${gated.port}/rc-published/render/$previewId.png?$query")
+            .build()
+        return client.newCall(req).execute().use { r ->
+          assertEquals(200, r.code, query)
+          r.header("Cache-Control")
+        }
+      }
+      assertEquals(
+        "private, max-age=300, stale-while-revalidate=3600",
+        cacheControl("token=t0ken&rcPlayer=cmp-jvm"),
+      )
+      assertEquals("no-store", cacheControl("token=t0ken"), "an ordinary browse is unchanged")
+    } finally {
+      gated.stop()
+      gatedRegistry.close()
+    }
+  }
+
+  /**
    * A bare browse and `?rcPlayer=cmp-android` are the SAME request, and must answer with the same
    * bytes.
    *

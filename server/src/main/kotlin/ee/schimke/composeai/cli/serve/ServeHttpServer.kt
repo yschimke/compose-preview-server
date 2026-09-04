@@ -4975,7 +4975,41 @@ class ServeHttpServer(
       }
   }
 
-  private fun resolveParallel(host: ServeHost, preview: ServePreview): ResolvedParallel? {
+  /**
+   * The cross-catalog pairing for one preview, memoised for the length of this request.
+   *
+   * Three pages ask the same question about the same preview more than once — the viewer wants the
+   * kit reference ([pairedDesignSpecSource]), the sibling's render ([parallelSpecSource]) and
+   * whether a layer diff exists, and the compare wall wants the first two for **every** preview it
+   * shows. Each of those used to walk the sibling catalog's whole preview list and read a design
+   * reference per candidate, so a wall over a catalog the size of `remote-m3` paid that walk twice
+   * per row before a byte of HTML was written.
+   *
+   * Memoised twice over: the resolved pairing per preview, and the sibling's previews grouped by
+   * component id once per sibling, which is what turns the per-preview scan into a lookup. Scoped
+   * to one `ApplicationCall` exactly as [agentGrantFor] is, so a catalog that refreshes between
+   * requests is never answered from a previous request's index.
+   */
+  private fun RoutingContext.resolveParallel(
+    host: ServeHost,
+    preview: ServePreview,
+  ): ResolvedParallel? {
+    val memo = call.attributes.computeIfAbsent(RESOLVED_PARALLELS) { ParallelPairings() }
+    val key = ParallelPairingKey(host, preview.id)
+    // `containsKey`, not `?:` — "resolved to nothing" is the commonest answer here (every preview
+    // of a catalog with no sibling), and a plain null read would recompute it every time.
+    if (memo.pairings.containsKey(key)) return memo.pairings[key]
+    val resolved = computeParallel(memo, host, preview)
+    memo.pairings[key] = resolved
+    return resolved
+  }
+
+  /** [resolveParallel] without the memo — call that, not this. */
+  private fun computeParallel(
+    memo: ParallelPairings,
+    host: ServeHost,
+    preview: ServePreview,
+  ): ResolvedParallel? {
     val bundle = catalogBundleHost(host) ?: return null
     val siblingSystem = bundle.compareWithSystem?.takeIf { it.isNotBlank() } ?: return null
     val componentId = preview.componentId?.takeIf { it.isNotBlank() } ?: return null
@@ -4989,7 +5023,7 @@ class ServeHttpServer(
       ServeParallelPairing.pair(
         preview = preview,
         kitNodes = ServeParallelPairing.kitNodesOf(host.designReferencesFor(preview.id)),
-        candidates = siblingHost.previews.filter { it.componentId == parallelId },
+        candidates = memo.candidatesOf(siblingSystem, siblingHost)[parallelId].orEmpty(),
         kitNodesFor = { ServeParallelPairing.kitNodesOf(siblingHost.designReferencesFor(it.id)) },
       ) ?: return null
     val siblingBundle = catalogBundleHost(siblingHost)
@@ -9249,7 +9283,7 @@ class ServeHttpServer(
           // ~4.3s subprocess to redraw is the one the wall refetches on every view.
           markGeneration(
             RenderOutcome.Generation.RC_PUBLISHED.wire,
-            if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else DYNAMIC_RESOURCE_CACHE_CONTROL,
+            if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else PRIVATE_REPLAY_CACHE_CONTROL,
           )
           call.respondBytes(staged, ContentType.Image.PNG)
           return@withLeasedSession
@@ -9273,7 +9307,27 @@ class ServeHttpServer(
         }
         val format = if (wantSvg) RcJvmServerRenderer.Format.SVG else RcJvmServerRenderer.Format.PNG
         val webMode = wantSvg && call.request.queryParameters["mode"]?.lowercase() == "web"
-        renderCmpJvmResponse(renderHost, previewId, format, webMode, sessionId)
+        // A bare `?rcPlayer=cmp-jvm` raster is the same fixed answer to a fixed URL the staged
+        // shortcut above serves, drawn rather than read: `uiMode` and every `rc.<name>=` seed is an
+        // override param, so a query this predicate calls bare leaves the pixels determined by the
+        // document, the preview's own spec and the deployed player. The subprocess is what makes
+        // caching it matter — the compare wall points a cell at this lane for every row whose
+        // cmp-jvm column the parity run did not stage, and `no-store` redrew every one of them on
+        // each view and each lazy scroll back into view.
+        //
+        // `.svg` keeps `no-store`: the structural export is a different product, and `?mode=web`
+        // rewrites it further without being an override param.
+        val bareRaster = !wantSvg && bareRcPlayerRequest()
+        renderCmpJvmResponse(
+          renderHost,
+          previewId,
+          format,
+          webMode,
+          sessionId,
+          cacheControl =
+            if (!bareRaster) DYNAMIC_RESOURCE_CACHE_CONTROL
+            else if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else PRIVATE_REPLAY_CACHE_CONTROL,
+        )
         return@withLeasedSession
       }
       // Forward the fixed render axes plus any dynamic override params (`knob.<key>=…` knobs and
@@ -9551,7 +9605,14 @@ class ServeHttpServer(
                 val pureThemeRender = pureThemeProvider != null && !scroll
                 markGeneration(
                   outcome.generation.wire,
-                  if (!isPublic) DYNAMIC_RESOURCE_CACHE_CONTROL
+                  // A bare player replay is cacheable on a private box too, as
+                  // [PRIVATE_REPLAY_CACHE_CONTROL] sets out: `private` rather than `public`,
+                  // because the URL carries the operator's token. Everything else a token-gated
+                  // box answers stays `no-store`.
+                  if (!isPublic) {
+                    if (bareRcPlayer) PRIVATE_REPLAY_CACHE_CONTROL
+                    else DYNAMIC_RESOURCE_CACHE_CONTROL
+                  }
                   // A player selection stops at the short public lifetime and never takes the
                   // `immutable` one, even on a generation-scoped URL: what these bytes depend on is
                   // the *deployed player*, and a redeploy that swaps it need not move the catalog's
@@ -9925,6 +9986,8 @@ class ServeHttpServer(
     format: RcJvmServerRenderer.Format,
     webMode: Boolean,
     sessionId: String,
+    /** Lifetime for a successful render — see the call site for which requests earn one. */
+    cacheControl: String,
   ) {
     val doc = renderHost.remoteComposeDoc(previewId)
     val spec = renderHost.remoteComposeRenderSpec(previewId)
@@ -9982,7 +10045,7 @@ class ServeHttpServer(
         )
       }
       is RcJvmServerRenderer.RenderResult.Ok -> {
-        call.response.headers.append(HttpHeaders.CacheControl, DYNAMIC_RESOURCE_CACHE_CONTROL)
+        call.response.headers.append(HttpHeaders.CacheControl, cacheControl)
         val bytes =
           if (format == RcJvmServerRenderer.Format.SVG && webMode) {
             webModeSvg(result.bytes.toString(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
@@ -10785,6 +10848,27 @@ class ServeHttpServer(
 
   /** Boxed so the memo can remember "resolved to nothing" as distinct from "not yet resolved". */
   private class ResolvedAgentGrant(val grant: ServeAgentGrantStore.Grant?)
+
+  /**
+   * One request's cross-catalog pairings. See [resolveParallel].
+   *
+   * A host is keyed by identity rather than by its system slug: a request may hold more than one
+   * (the wall's own and its sibling's), and a slug is a name the registry resolves rather than a
+   * property of the object in hand.
+   */
+  private data class ParallelPairingKey(val host: ServeHost, val previewId: String)
+
+  private class ParallelPairings {
+    val pairings = HashMap<ParallelPairingKey, ResolvedParallel?>()
+
+    /** [host]'s previews by component id, built once per sibling catalog per request. */
+    fun candidatesOf(system: String, host: ServeHost): Map<String, List<ServePreview>> =
+      candidates.getOrPut(system) {
+        host.previews.groupBy { it.componentId.orEmpty() }.filterKeys { it.isNotEmpty() }
+      }
+
+    private val candidates = HashMap<String, Map<String, List<ServePreview>>>()
+  }
 
   private fun resolveAgentGrant(call: ApplicationCall): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
@@ -11653,6 +11737,9 @@ class ServeHttpServer(
      */
     private val RESOLVED_AGENT_GRANT = AttributeKey<ResolvedAgentGrant>("composeai.agentGrant")
 
+    /** Per-call memo for [resolveParallel], scoped like [RESOLVED_AGENT_GRANT]. */
+    private val RESOLVED_PARALLELS = AttributeKey<ParallelPairings>("composeai.parallelPairings")
+
     private const val MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
     private const val CATALOG_MCP_AGENT_ACCESS_HEADER = "X-Compose-Preview-Agent-Access"
     private const val MAX_CATALOG_MCP_BYTES = 1024L * 1024
@@ -11791,6 +11878,30 @@ class ServeHttpServer(
 
     /** Variant renders and all token-gated responses stay out of shared and browser caches. */
     private const val DYNAMIC_RESOURCE_CACHE_CONTROL = "no-store"
+
+    /**
+     * [STATIC_RESOURCE_CACHE_CONTROL]'s lifetime for a **bare player replay** on a box that is not
+     * `--public`.
+     *
+     * A bare `?rcPlayer=` is a fixed answer to a fixed URL wherever it is served: it replays a
+     * published `ir/<id>.rc` through a named player at the preview's own spec, and every axis that
+     * would make the pixels depend on the request is another override param the "bare" test
+     * excludes. That is as true of a private box as of a public one — what differs is *who* may
+     * hold the bytes. These URLs carry `?token=`, so `private` keeps them out of every shared cache
+     * while still letting the visitor's own browser answer the second request.
+     *
+     * The alternative is what this replaced: `no-store`, which forbids even the browser's memory
+     * cache. The compare wall points a cell at this lane for every player a run did not publish, so
+     * on a catalog the size of `remote-m3` that was a full re-render and a full PNG transfer for
+     * every cell, on every page view and every lazy scroll back into view — against a serial render
+     * lane, and for bytes the visitor had just been shown.
+     *
+     * Same staleness bound the public lane accepts: what these bytes depend on is the *deployed
+     * player*, and a redeploy that swaps it need not move the catalog's generation, so `max-age`
+     * bounds how stale a replay can get and nothing here ever takes `immutable`.
+     */
+    private const val PRIVATE_REPLAY_CACHE_CONTROL =
+      "private, max-age=300, stale-while-revalidate=3600"
 
     /**
      * Caching for HTML whose body depends on *who is asking* — every page on a server with
