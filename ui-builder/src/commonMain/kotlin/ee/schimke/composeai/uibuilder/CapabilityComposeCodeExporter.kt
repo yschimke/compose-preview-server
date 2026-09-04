@@ -340,7 +340,7 @@ private class ComposeEmitter(
       "m3/horizontal-divider" ->
         line(
           bodyLevel,
-          "HorizontalDivider(color = ${node.colorExpression("color")}, ${node.modifierArgument()})",
+          "HorizontalDivider(${node.dimensionArgument("thickness", "thicknessDp")}color = ${node.colorExpression("color")}, ${node.modifierArgument()})",
         )
       "m3/text" -> emitText(node, bodyLevel)
       "m3/icon" -> emitIcon(node, bodyLevel)
@@ -475,7 +475,7 @@ private class ComposeEmitter(
     val minimum = node.obj("columns").number("minimumCellWidthDp", 362f)
     line(
       level,
-      "LazyVerticalGrid(columns = GridCells.Adaptive(${minimum.dpLiteral()}), contentPadding = ${node.obj("contentPadding").paddingValuesExpression()}, ${node.modifierArgument()}) {",
+      "LazyVerticalGrid(columns = GridCells.Adaptive(${minimum.dpLiteral()}), contentPadding = ${node.obj("contentPadding").paddingValuesExpression()}, verticalArrangement = Arrangement.spacedBy(${node.number("verticalSpacingDp").dpLiteral()}), horizontalArrangement = Arrangement.spacedBy(${node.number("horizontalSpacingDp").dpLiteral()}), ${node.modifierArgument()}) {",
     )
     node.slot("items").forEach { id ->
       val full = document.nodes.getValue(id).string("span") == "full"
@@ -653,7 +653,7 @@ private class ComposeEmitter(
   private fun emitSurface(node: UiBuilderNode, level: Int) {
     line(
       level,
-      "Surface(${node.modifierArgument()}, color = ${node.colorExpression("containerColor")}) {",
+      "Surface(${node.modifierArgument()}, shape = ${node.shapeExpression()}, color = ${node.colorExpression("containerColor")}, tonalElevation = ${node.number("tonalElevationDp").dpLiteral()}) {",
     )
     node.slot("content").forEach { emitNode(it, level + 1) }
     line(level, "}")
@@ -662,7 +662,7 @@ private class ComposeEmitter(
   private fun emitCard(node: UiBuilderNode, level: Int) {
     line(
       level,
-      "Card(${node.modifierArgument()}, shape = RoundedCornerShape(${shapeDp(node.string("shape").ifEmpty { "large" }).dpLiteral()}), colors = builderCardColors(${node.colorExpression("containerColor")})) {",
+      "Card(${node.modifierArgument()}, shape = RoundedCornerShape(${shapeDp(node.string("shape").ifEmpty { "large" }).dpLiteral()}), elevation = CardDefaults.cardElevation(defaultElevation = ${node.number("elevationDp").dpLiteral()}), colors = builderCardColors(${node.colorExpression("containerColor")})) {",
     )
     line(level + 1, "Box(Modifier.fillMaxSize()) {")
     node.slot("content").forEach { emitNode(it, level + 2) }
@@ -1185,6 +1185,29 @@ private fun Float.dpLiteral(): String = if (this % 1f == 0f) "${toInt()}.dp" els
 
 private fun Float.floatLiteral(): String = if (this % 1f == 0f) "${toInt()}f" else "${this}f"
 
+/**
+ * The shape argument for a node, mirroring what the renderer draws for the same node.
+ *
+ * A `shape` token wins over `shapeDp`, exactly as `UiBuilderNode.shape` decides it in the renderer:
+ * they are two spellings of one value and a component that read only one of them disagreed with the
+ * preview about half the documents.
+ */
+private fun UiBuilderNode.shapeExpression(): String {
+  val token = string("shape")
+  val corner = if (token.isNotEmpty()) shapeDp(token) else number("shapeDp")
+  return "RoundedCornerShape(${corner.dpLiteral()})"
+}
+
+/**
+ * `parameter = <n>.dp, ` when the document carries the dimension, and nothing when it does not.
+ *
+ * Absent is not zero for every parameter: a divider with no declared thickness wants Material's
+ * hairline, and emitting `thickness = 0.dp` would generate a divider that draws nothing.
+ */
+private fun UiBuilderNode.dimensionArgument(parameter: String, property: String): String =
+  obj(property)["value"]?.jsonPrimitive?.floatOrNull?.let { "$parameter = ${it.dpLiteral()}, " }
+    ?: ""
+
 private fun shapeDp(value: String?): Float =
   when (value) {
     "large" -> 16f
@@ -1306,6 +1329,25 @@ internal val COMPOSE_EMITTED_CLICK_COMPONENTS: Set<String> by lazy {
   HANDLED_FIELDS.filterValues { "click" in it.events }.keys
 }
 
+/**
+ * The dimensions this exporter emits, as `componentId.property`.
+ *
+ * The catalog gives every `…Dp` a number editor from its name alone, which is the right default and
+ * was the wrong rule on its own: a dimension no emitter reads is a control whose every value is
+ * discarded, and `layout/lazy-grid.verticalSpacingDp` was exactly that — authored, stored, offered,
+ * and drawn as zero by both projections.
+ *
+ * Derived rather than listed for the same reason [COMPOSE_EMITTED_CLICK_COMPONENTS] is: adding a
+ * dimension to an emitter is what should make it editable, and two places holding one rule is how
+ * it came to disagree in the first place.
+ */
+internal val COMPOSE_EMITTED_DP_PROPERTIES: Set<String> by lazy {
+  HANDLED_FIELDS.flatMap { (componentId, fields) ->
+      fields.properties.filter { it.endsWith("Dp") }.map { "$componentId.$it" }
+    }
+    .toSet()
+}
+
 private val HANDLED_FIELDS =
   mapOf(
     "asset/image" to HandledFields(setOf("assetKey", "contentDescription", "contentScale")),
@@ -1326,7 +1368,16 @@ private val HANDLED_FIELDS =
     "layout/lazy-column" to
       HandledFields(setOf("contentPadding", "scrollStateKey", "verticalSpacingDp"), setOf("items")),
     "layout/lazy-grid" to
-      HandledFields(setOf("columns", "contentPadding", "scrollStateKey"), setOf("items")),
+      HandledFields(
+        setOf(
+          "columns",
+          "contentPadding",
+          "horizontalSpacingDp",
+          "scrollStateKey",
+          "verticalSpacingDp",
+        ),
+        setOf("items"),
+      ),
     "layout/lazy-row" to
       HandledFields(
         setOf("contentPadding", "horizontalSpacingDp", "span", "stableKey"),
@@ -1357,7 +1408,8 @@ private val HANDLED_FIELDS =
         setOf("content"),
         setOf("click"),
       ),
-    "m3/card" to HandledFields(setOf("containerColor", "shape", "stableKey"), setOf("content")),
+    "m3/card" to
+      HandledFields(setOf("containerColor", "elevationDp", "shape", "stableKey"), setOf("content")),
     "m3/center-aligned-top-app-bar" to HandledFields(slots = setOf("title")),
     "m3/filter-chip" to
       HandledFields(
@@ -1365,7 +1417,7 @@ private val HANDLED_FIELDS =
         setOf("label", "leadingIcon"),
         setOf("click"),
       ),
-    "m3/horizontal-divider" to HandledFields(setOf("color")),
+    "m3/horizontal-divider" to HandledFields(setOf("color", "thicknessDp")),
     "m3/horizontal-floating-toolbar" to
       HandledFields(setOf("alignment", "containerColor", "expanded"), setOf("content")),
     "m3/icon" to HandledFields(setOf("iconKey", "contentDescription", "color", "sizeDp")),
@@ -1385,7 +1437,11 @@ private val HANDLED_FIELDS =
         setOf("valueChange"),
       ),
     "m3/snackbar-host" to HandledFields(setOf("visible")),
-    "m3/surface" to HandledFields(setOf("containerColor"), setOf("content")),
+    "m3/surface" to
+      HandledFields(
+        setOf("containerColor", "shape", "shapeDp", "tonalElevationDp"),
+        setOf("content"),
+      ),
     "m3/tab" to HandledFields(setOf("selected"), setOf("text")),
     "m3/text" to
       HandledFields(
