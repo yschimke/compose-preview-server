@@ -47,6 +47,22 @@ class EditorLayoutPropertyTest {
   }
 
   @Test
+  fun `a dimension no emitter reads is not offered at all`() {
+    // `m3/search-bar.shapeDp` is declared by the catalog and read by nothing: the renderer pins a
+    // search bar to `CircleShape` and the exporter's emitter takes no shape. A number field for it
+    // is worse than none — every value it accepts is discarded, and the design then looks authored
+    // and draws as if it were not.
+    val shape = assertNotNull(field("search-bar", "shapeDp"))
+    assertEquals(EditorPropertyControl.Unsupported, shape.control)
+    assertNull(shape.numberBounds)
+
+    // Its sibling on the same component is emitted, so the rule is about coverage rather than a
+    // component-wide opt-out.
+    val tonal = assertNotNull(field("search-bar", "tonalElevationDp"))
+    assertEquals(EditorPropertyControl.Number, tonal.control)
+  }
+
+  @Test
   fun `an explicit override still beats the rule`() {
     // `m3/text.fontSizeSp` is registered at 1..512 and must not be widened by anything generic.
     val fontSize = assertNotNull(field("search-placeholder", "fontSizeSp"))
