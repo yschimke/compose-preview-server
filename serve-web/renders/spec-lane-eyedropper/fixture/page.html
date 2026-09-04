@@ -1,0 +1,699 @@
+    <!doctype html>
+    <html lang="en" data-cp-theme-key="cp-theme:remote-m3">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+                <meta property="og:type" content="website">
+                <meta property="og:site_name" content="compose-preview">
+                <meta property="og:title" content="App Card">
+                <meta property="og:description" content="Compose preview for App Card">
+                <meta property="og:url" content="https://preview.coo.ee/remote-m3/p/appcard__ideal__default__compact">
+                            <meta property="og:image" content="https://preview.coo.ee/remote-m3/render/appcard__ideal__default__compact.png?gen=ba98616dde48e6623e71fd16e8333064cba3b8a7">
+                    <meta property="og:image:type" content="image/png">
+                    <meta property="og:image:alt" content="App Card">
+        <meta property="og:image:width" content="454">
+        <meta property="og:image:height" content="400">
+                <meta name="twitter:card" content="summary">
+                <meta name="twitter:title" content="App Card">
+                <meta name="twitter:description" content="Compose preview for App Card">
+                <meta name="twitter:image" content="https://preview.coo.ee/remote-m3/render/appcard__ideal__default__compact.png?gen=ba98616dde48e6623e71fd16e8333064cba3b8a7">
+        <meta name="twitter:image:alt" content="App Card">
+        <title>App Card — compose-preview</title>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+        <link rel="icon" href="/favicon.ico" sizes="32x32">
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <link rel="stylesheet" href="/assets/serve/4c0dd-53cd05c97b46d40b/serve.css">
+        <link rel="alternate" type="application/rss+xml" title="Catalog changes" href="/remote-m3/feed.xml">
+        <link rel="stylesheet" href="/rc-fonts/fonts.css">
+        <script>try{var s=localStorage.getItem("cp-interface-mode");if(s){localStorage.removeItem("cp-interface-mode");if((s==="catalog"||s==="dev")&&document.cookie.indexOf("cp_chrome=")<0){document.cookie="cp_chrome="+s+"; path=/; max-age=31536000; samesite=lax"+(location.protocol==="https:"?"; secure":"");if(document.cookie.indexOf("cp_chrome="+s)>=0&&!/[?&]chrome=/.test(location.search))location.reload();}}}catch(e){}</script>
+        <!-- Apply the Transparent choice before first paint (no checkerboard flash).
+             A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
+        <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
+        <script>try{var p=new URLSearchParams(location.search),t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||(((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]||localStorage.getItem("cp-theme:remote-m3")));if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
+      </head>
+      <body>
+        <script src="/assets/serve/29ea-0282ef71de8a3551/serve-chrome.js"></script>
+        <header class="cp-site-header">
+  <div class="cp-site-lead">
+    <a class="cp-site-brand" href="/" aria-label="compose-preview home">
+      <span class="cp-site-mark" aria-hidden="true">◇</span>
+      <span class="cp-site-wordmark">compose-preview</span>
+    </a>
+    <span class="cp-site-catalog">Remote Compose Material 3</span>
+    <nav class="cp-breadcrumb" aria-label="Breadcrumb"><a href="/remote-m3/">Remote Compose Material 3</a><span class="cp-crumb-sep" aria-hidden="true">/</span><span class="cp-crumb-current">Component</span></nav>
+  </div>
+  <nav class="cp-site-nav" aria-label="Primary navigation">
+    <div class="cp-interface-mode" role="group" aria-label="Interface mode">
+      <button type="button" data-cp-interface-mode="catalog" aria-pressed="false">Catalog</button>
+      <button type="button" data-cp-interface-mode="dev" aria-pressed="true">Dev</button>
+    </div>
+    <details class="cp-site-menu" id="cp-site-menu">
+      <summary class="cp-site-menu-btn" title="Menu" aria-label="Menu"
+        aria-controls="cp-site-menu-panel"><span aria-hidden="true">⋮</span></summary>
+    </details>
+    <div class="cp-site-menu-panel" id="cp-site-menu-panel">
+      <a class="cp-site-status-link" id="cp-status-link" href="/status">Status<span
+        class="cp-daemon-status" id="cp-daemon-status" aria-hidden="true" hidden></span></a>
+      <details class="cp-settings">
+        <summary class="cp-settings-btn" title="Settings" aria-label="Settings">
+          <span aria-hidden="true">⚙</span><span class="cp-settings-btn-label">Settings</span>
+        </summary>
+        <div class="cp-settings-panel">
+          <fieldset class="cp-settings-group">
+                    <legend class="cp-settings-legend">Page theme</legend>
+                    <label class="cp-settings-option">
+                      <input type="radio" name="cp-page-theme" value="match" data-cp-page-theme checked>
+                      <span>Match the preview theme</span>
+                    </label>
+                    <label class="cp-settings-option">
+                      <input type="radio" name="cp-page-theme" value="system" data-cp-page-theme>
+                      <span>Follow my system</span>
+                    </label>
+                    <p class="cp-settings-hint">Selecting a Light or Dark preview theme paints this page to
+                      match. Choose Follow my system to keep the page on your operating system's setting.</p>
+                  </fieldset>
+          <fieldset class="cp-settings-group cp-settings-keyboard">
+            <legend class="cp-settings-legend">Keyboard</legend>
+            <label class="cp-settings-option">
+              <input type="checkbox" data-cp-keyboard-navigation>
+              <span>Power-user navigation</span>
+            </label>
+            <p class="cp-settings-hint">Jump between components, variants, modes, and overrides with
+              shortcuts and an on-screen command palette.</p>
+            <button type="button" class="cp-settings-tour" data-cp-keyboard-tour>
+              View keyboard tour
+            </button>
+          </fieldset>
+        </div>
+      </details>
+    </div>
+  </nav>
+</header>
+        <main class="cp-main">
+              <link rel="stylesheet" href="/assets/serve/2210-eb494ea972d2661e/codemirror.css">
+      <div class="cp-preview-head">
+        <h1 class="cp-head cp-preview-title">App Card</h1>
+        <code class="cp-preview-id" title="appcard__ideal__default__compact">appcard__ideal__default__compact</code>
+        <span class="cp-viewer-engage">117 views</span>
+        <div class="cp-head-toggles"><button type="button" class="cp-drawer-toggle" id="cp-nav-toggle" aria-expanded="false" aria-controls="cp-nav">☰ Components</button><details class="cp-theme-menu">
+  <summary class="cp-drawer-toggle cp-axis-toggle" id="cp-theme-toggle" aria-controls="cp-theme-bar">
+    <span class="cp-toggle-label">Theme</span>
+    <span class="cp-toggle-value" id="cp-theme-toggle-value">Dark</span>
+    <span class="cp-theme-caret" aria-hidden="true">▾</span>
+  </summary>
+  <div class="cp-theme-menu-panel"><span class="cp-theme cp-theme-bar" id="cp-theme-bar" role="group" aria-label="Preview theme">
+    <button type="button" class="cp-theme-btn" data-theme-choice="dark">Dark</button>
+  </span></div>
+</details><details class="cp-revisions">
+  <summary class="cp-revisions-btn">
+    <span class="cp-revision-tag">current</span>
+    <span class="cp-revisions-caret" aria-hidden="true">▾</span>
+  </summary>
+  <div class="cp-revisions-menu">
+    <cp-revision-runs data-runs-url="/remote-m3/api/render-runs/appcard__ideal__default__compact" data-render-url="/remote-m3/render/appcard__ideal__default__compact.png"></cp-revision-runs>
+
+    <nav class="cp-revision-list" aria-label="Published revisions">
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact" aria-current="true" data-revision="ba98616dde48e6623e71fd16e8333064cba3b8a7"><span class="cp-revision-date">2026-08-31 11:18 UTC</span><code class="cp-revision-sha">e00da10d</code><span class="cp-revision-tag">current</span></a>
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact?at=6bd9db113adb58e97ab2f4c03d65a4ee31daba2f" data-revision="6bd9db113adb58e97ab2f4c03d65a4ee31daba2f"><span class="cp-revision-date">2026-08-31 10:15 UTC</span><code class="cp-revision-sha">f75487df</code></a>
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact?at=dd8cc9ca36d7b4154873f2bb6fc9911b48559f6e" data-revision="dd8cc9ca36d7b4154873f2bb6fc9911b48559f6e"><span class="cp-revision-date">2026-08-30 21:27 UTC</span><code class="cp-revision-sha">f6a8a401</code></a>
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact?at=09bb1924cc561be2169ca8cd8a4bd23be1af0dfb" data-revision="09bb1924cc561be2169ca8cd8a4bd23be1af0dfb"><span class="cp-revision-date">2026-08-30 09:22 UTC</span><code class="cp-revision-sha">09bb1924</code></a>
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact?at=7df8194e53e190a4b4354cf75551d3bc19a50e70" data-revision="7df8194e53e190a4b4354cf75551d3bc19a50e70"><span class="cp-revision-date">2026-08-30 01:01 UTC</span><code class="cp-revision-sha">7df8194e</code></a>
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact?at=ab66c461d50f9ed29181cfe9b79abbdc51ad5601" data-revision="ab66c461d50f9ed29181cfe9b79abbdc51ad5601"><span class="cp-revision-date">2026-08-29 16:14 UTC</span><code class="cp-revision-sha">8a3a29ed</code></a>
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact?at=ff396e1ecdceb6fb8a06a4b1d2fd6036b30500e9" data-revision="ff396e1ecdceb6fb8a06a4b1d2fd6036b30500e9"><span class="cp-revision-date">2026-08-29 15:50 UTC</span><code class="cp-revision-sha">f16b24b0</code></a>
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact?at=b1642ba2d305821a28922a8b9de79137a12219a4" data-revision="b1642ba2d305821a28922a8b9de79137a12219a4"><span class="cp-revision-date">2026-08-29 15:19 UTC</span><code class="cp-revision-sha">b1642ba2</code></a>
+      <a class="cp-revision" rel="nofollow" href="/remote-m3/p/appcard__ideal__default__compact?at=8ce78ccdbd11c9ee802f29a8e4307945371c43ed" data-revision="8ce78ccdbd11c9ee802f29a8e4307945371c43ed"><span class="cp-revision-date">2026-08-29 14:42 UTC</span><code class="cp-revision-sha">8ce78ccd</code></a>
+    </nav>
+    <p class="cp-revision-note">Every publish of this design system is a commit on its
+    delivery branch. Opening one pins this page — and the pixels on it — to that publish for
+    good.</p>
+  </div>
+</details>
+<cp-history-menu></cp-history-menu><button type="button" class="cp-drawer-toggle" id="cp-controls-toggle" aria-expanded="false" aria-controls="cp-controls">⚙ Overrides</button></div>
+      </div>
+      <p class="cp-preview-caption">App card with app name, icon and content slots.</p>
+
+      <div class="cp-preview-primary" aria-label="Preview renderer">
+      <a id="cp-live-signin" class="cp-live-toggle cp-live-signin" href="/auth/github/start?return=%2Fremote-m3%2Fp%2Fappcard__ideal__default__compact" title="Sign in with GitHub to enable Live preview. Any GitHub account works.">
+            <span class="cp-live-dot" aria-hidden="true"></span>
+            <span>Live preview — sign in</span>
+          </a>
+<select id="cp-lane-select" class="cp-lane-select" aria-label="Switch renderer" title="Draw this preview with a different renderer" data-default="rc:cmp-android" data-rc-default="cmp-android"><option value="" selected>Switch renderer…</option><option value="rc:js">JS</option><option value="rc:cmp-wasm">CMP Wasm</option><option value="rc:java">Java</option><option value="rc:cmp-android">CMP Android</option><option value="rc:cmp-jvm" disabled>CMP JVM (unavailable)</option></select>
+<button type="button" id="cp-spec-chip" class="cp-spec-chip" aria-pressed="false" data-spec-chip-label="Figma" data-spec-chip-name="Figma" data-spec-chip-tip="Put the imported Figma spec on the stage instead of the render" title="Put the imported Figma spec on the stage instead of the render">Figma</button>
+<button type="button" id="cp-source-chip" class="cp-spec-chip cp-source-chip" aria-pressed="false" aria-controls="cp-source-panel" data-source-chip-tip="Show the plain Compose that produces this render" data-usage-src="/remote-m3/usage/appcard__ideal__default__compact" title="Show the plain Compose that produces this render">Source</button>
+<a class="cp-format-link cp-compare-players" href="/remote-m3/compare?format=rc&preview=appcard__ideal__default__compact" title="See every Remote Compose player's render of this screen side by side">compare players →</a>
+<span class="cp-spec-lane" id="cp-spec-lane" data-spec-src="/remote-m3/reference/appcard__ideal__default__compact.png?gen=ba98616dde48e6623e71fd16e8333064cba3b8a7" data-spec-label="Figma"><span class="cp-spec-sources" id="cp-spec-sources" role="group" aria-label="Compare against" hidden><button type="button" class="cp-spec-source" data-cp-spec-source="kit" data-spec-src="/remote-m3/reference/appcard__ideal__default__compact.png?gen=ba98616dde48e6623e71fd16e8333064cba3b8a7" data-spec-label="Figma" data-spec-provenance="" aria-pressed="true" title="Compare this render against Figma">Figma</button><button type="button" class="cp-spec-source" data-cp-spec-source="parallel" data-spec-src="/wear-m3-catalog/render/appcard__ideal__default.png" data-spec-label="M3 Wear OS Apps Design Kit" data-spec-provenance="M3 Wear OS Apps Design Kit&#39;s own render of AppCard, paired on the design-kit node both catalogs map this cell to, under that catalog&#39;s theme and knobs — not this page&#39;s." aria-pressed="false" title="Compare this render against M3 Wear OS Apps Design Kit">M3 Wear OS Apps Design Kit</button></span><span class="cp-spec-views" id="cp-spec-views" role="group" aria-label="Design comparison" hidden><button type="button" class="cp-spec-view" data-cp-spec-view="spec" aria-pressed="false" title="The imported design reference on its own">Spec</button><button type="button" class="cp-spec-view" data-cp-spec-view="diff" aria-pressed="false" title="Highlight every pixel where the render and the spec disagree">Diff</button><button type="button" class="cp-spec-view" data-cp-spec-view="triptych" aria-pressed="true" title="Spec, diff and render side by side">Triptych</button><button type="button" class="cp-spec-view" data-cp-spec-view="slider" aria-pressed="false" title="One frame, wiped between the spec and the render">Slider</button></span><span class="cp-spec-score" id="cp-spec-score" role="status" aria-live="polite" hidden></span><span class="cp-spec-pick" id="cp-spec-pick" hidden></span><span class="cp-spec-pick-live" id="cp-spec-pick-live" aria-live="polite"></span><a class="cp-format-link cp-spec-diff" href="/remote-m3/compare/appcard__ideal__default__compact?reference=appcard__ideal__default__compact" title="Compare this render against the imported design spec — AppCard — figma">spec diff →</a></span>
+<button type="button" id="cp-svg-toggle" class="cp-fmt-toggle" aria-pressed="false" title="Show the vector (SVG) render">SVG</button>
+<button type="button" id="cp-explode-toggle" class="cp-fmt-toggle" aria-pressed="false" title="Show how the visible drawing layers are composed">3D</button>
+<span id="cp-svg-match" class="cp-match" role="status" aria-live="polite" hidden></span><a id="cp-svg-diff" class="cp-format-link" href="/remote-m3/compare?format=svg&preview=appcard__ideal__default__compact" hidden>view diff →</a>
+<cp-bg-toggle label="Show the transparent checkerboard behind the preview"></cp-bg-toggle>
+<button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false" title="Show the preview at full width instead of fitting it to the screen">Fit width</button>
+        <span class="cp-mode-hint" id="cp-mode-hint"></span>
+        <span class="cp-modes-inputs" aria-hidden="true">
+      <input type="radio" name="cp-mode" value="png" id="cp-mode-png" tabindex="-1" checked>
+<input type="radio" name="cp-mode" value="live" id="cp-live" tabindex="-1" disabled>
+<input type="radio" name="cp-mode" value="rc" id="cp-rc-toggle" tabindex="-1">
+<input type="radio" name="cp-mode" value="rc-wasm" id="cp-rc-wasm-toggle" tabindex="-1">
+<input type="radio" name="cp-mode" value="spec" id="cp-spec-toggle" tabindex="-1">
+<input type="radio" name="cp-mode" value="source" id="cp-source-toggle" tabindex="-1">
+        </span>
+      </div>
+
+      <div class="cp-viewer" data-bg-theme="dark" data-always-dark="1" data-ir-replay="1" data-preview-id="appcard__ideal__default__compact" data-mode="snapshot" data-modes="snapshot" data-static-snapshot="true" data-can-render-overrides="true" data-snapshot-backend="Snapshot" data-live-backend="Live" data-render-density="2" data-fold-scope="remote-m3" data-has-rc-doc="1" data-history-url="https://raw.githubusercontent.com/yschimke/wear-m3-catalog/design-artifacts/remote-m3/history.json" data-history-repo="yschimke/wear-m3-catalog" data-generation="ba98616dde48e6623e71fd16e8333064cba3b8a7">
+              <aside class="cp-nav" id="cp-nav" aria-label="Components">
+        <div class="cp-nav-head"><span>Components</span><button type="button" class="cp-nav-close" id="cp-nav-close" aria-label="Close component navigation">×</button></div>
+        <input type="search" class="cp-nav-search" id="cp-nav-search" placeholder="Filter components" autocomplete="off" aria-label="Filter components">
+        <div class="cp-nav-current"><nav class="cp-tree cp-axes-tree" aria-label="Component renders">
+  <ul class="cp-tree-list" role="tree">
+    <li role="none"><a class="cp-tree-component cp-tree-link" role="treeitem" href="/remote-m3/p/appcard__ideal__default__compact" aria-expanded="true" aria-owns="cp-axes-tree-variants" aria-current="page">App Card<span class="cp-tree-count">5</span></a>
+      <ul class="cp-tree-children cp-tree-variants" id="cp-axes-tree-variants" role="group">
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/remote-m3/p/appcard__ideal__content-image__compact">Content image</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/remote-m3/p/appcard__ideal__gallery-1__compact">Gallery 1</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/remote-m3/p/appcard__ideal__gallery-2__compact">Gallery 2</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/remote-m3/p/appcard__ideal__icon__compact">Icon</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+        <ul class="cp-nav-list" id="cp-nav-list">
+        <li><a class="cp-nav-item" href="/remote-m3/p/button-child__ideal__default__compact" title="Lowest emphasis; no container at all, for a button inside another surface." data-search="Button Child button-child__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-child__ideal__default__compact.png"><span class="cp-nav-name">Button Child</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/button-compact__ideal__default__compact" title="Compact single-line button (RemoteCompactButton) with the kit&#39;s leading icon, and its icon-only and text-only cells." data-search="Button Compact button-compact__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-compact__ideal__default__compact.png"><span class="cp-nav-name">Button Compact</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/button-customshape__ideal__default__compact" title="Filled button with a RemoteRoundedCornerShape override." data-search="Button Custom Shape button-customshape__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-customshape__ideal__default__compact.png"><span class="cp-nav-name">Button Custom Shape</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/button-filled__ideal__default__compact" title="Remote Material 3 filled button — the primary action." data-search="Button Filled button-filled__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-filled__ideal__default__compact.png"><span class="cp-nav-name">Button Filled</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/button-filledvariant__ideal__default__compact" title="The kit&#39;s highlighted style — a filled button in the variant palette." data-search="Button Filled Variant button-filledvariant__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-filledvariant__ideal__default__compact.png"><span class="cp-nav-name">Button Filled Variant</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/button-imagebackground__ideal__default__compact" title="A button over an image, with the scrim that keeps its label legible." data-search="Button Image Background button-imagebackground__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-imagebackground__ideal__default__compact.png"><span class="cp-nav-name">Button Image Background</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/button-namedlabel__ideal__default__compact" title="Filled button whose label is bound to a Remote Compose named value — the connector flips it live (the default render shows the kit&#39;s own label)." data-search="Button Named Label button-namedlabel__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-namedlabel__ideal__default__compact.png"><span class="cp-nav-name">Button Named Label</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/button-outlined__ideal__default__compact" title="Remote Material 3 outlined-emphasis button (RemoteButton with an explicit border + border colour)." data-search="Button Outlined button-outlined__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-outlined__ideal__default__compact.png"><span class="cp-nav-name">Button Outlined</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/button-tonal__ideal__default__compact" title="Tonal button on the theme&#39;s surface-container emphasis." data-search="Button Tonal button-tonal__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/button-tonal__ideal__default__compact.png"><span class="cp-nav-name">Button Tonal</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/buttongroup__ideal__default__compact" title="Two buttons laid out edge-to-edge by RemoteButtonGroup." data-search="Button Group buttongroup__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/buttongroup__ideal__default__compact.png"><span class="cp-nav-name">Button Group</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/card-outlined__ideal__default__compact" title="Remote Material 3&#39;s plain outlined one-slot card." data-search="Card Outlined card-outlined__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/card-outlined__ideal__default__compact.png"><span class="cp-nav-name">Card Outlined</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/card__ideal__default__compact" title="Remote Material 3&#39;s plain one-slot card." data-search="Card card__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/card__ideal__default__compact.png"><span class="cp-nav-name">Card</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/circularprogressindicator__ideal__default__192dp" title="Determinate circular progress rail against the display edge, at a fixed 60%." data-search="Circular Progress Indicator circularprogressindicator__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/circularprogressindicator__ideal__default__192dp.png"><span class="cp-nav-name">Circular Progress Indicator</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/icon__ideal__default__compact" title="The standalone RemoteIcon primitive." data-search="Icon icon__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/icon__ideal__default__compact.png"><span class="cp-nav-name">Icon</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/iconbutton-filled__ideal__default__compact" title="RemoteIconButton with a filled primary container." data-search="Icon Button Filled iconbutton-filled__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/iconbutton-filled__ideal__default__compact.png"><span class="cp-nav-name">Icon Button Filled</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/iconbutton-filledvariant__ideal__default__compact" title="RemoteIconButton in the kit&#39;s highlighted palette." data-search="Icon Button Filled Variant iconbutton-filledvariant__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/iconbutton-filledvariant__ideal__default__compact.png"><span class="cp-nav-name">Icon Button Filled Variant</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/iconbutton-outlined__ideal__default__compact" title="RemoteIconButton with an explicit outline treatment." data-search="Icon Button Outlined iconbutton-outlined__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/iconbutton-outlined__ideal__default__compact.png"><span class="cp-nav-name">Icon Button Outlined</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/iconbutton-standard__ideal__default__compact" title="Round icon button (RemoteIconButton), with the kit&#39;s size axis folded in." data-search="Icon Button Standard iconbutton-standard__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/iconbutton-standard__ideal__default__compact.png"><span class="cp-nav-name">Icon Button Standard</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/iconbutton-tonal__ideal__default__compact" title="RemoteIconButton on the theme&#39;s surface-container emphasis." data-search="Icon Button Tonal iconbutton-tonal__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/iconbutton-tonal__ideal__default__compact.png"><span class="cp-nav-name">Icon Button Tonal</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/pageindicator-horizontal__ideal__default__192dp" title="Four-page horizontal indicator curved along the bottom edge, on the first page." data-search="Page Indicator Horizontal pageindicator-horizontal__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/pageindicator-horizontal__ideal__default__192dp.png"><span class="cp-nav-name">Page Indicator Horizontal</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/pageindicator-interactive__ideal__default__192dp" title="Interactive page indicator: tapping Next animates the worm between adjacent pages inside the RemoteDocument." data-search="Page Indicator Interactive pageindicator-interactive__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/pageindicator-interactive__ideal__default__192dp.png"><span class="cp-nav-name">Page Indicator Interactive</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/pageindicator-vertical__ideal__default__192dp" title="Four-page vertical indicator against the right bezel, on the first page." data-search="Page Indicator Vertical pageindicator-vertical__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/pageindicator-vertical__ideal__default__192dp.png"><span class="cp-nav-name">Page Indicator Vertical</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/scaffold__ideal__default__compact" title="Full-screen Remote Compose watch screen — a status clock, a list header and a stack of RemoteTitleCards on the theme&#39;s own background fill. The catalog&#39;s hero: a RemoteDocument driving a whole surface, not a single sticker." data-search="Scaffold scaffold__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/scaffold__ideal__default__compact.png"><span class="cp-nav-name">Scaffold</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/shader-lineargradient__ideal__default__compact" title="Document-level gradient shader fill; the middle stop is a named value the connector can recolour live. A remote-creation-compose primitive with no Wear Material 3 component peer." data-search="Shader Linear Gradient shader-lineargradient__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/shader-lineargradient__ideal__default__compact.png"><span class="cp-nav-name">Shader Linear Gradient</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/text-body__ideal__default__compact" title="The Remote Material 3 text primitive, with the kit&#39;s alignment axis folded in." data-search="Text Body text-body__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/text-body__ideal__default__compact.png"><span class="cp-nav-name">Text Body</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/text-branded__ideal__default__compact" title="Text in a named font family (RemoteFontFamily.Named(&quot;google:Orbitron&quot;)) rather than a generic typeface — the google: namespace marks it a Google Fonts family, which the browser lane fetches and the snapshot renderer resolves from its vendored copy." data-search="Text Branded text-branded__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/text-branded__ideal__default__compact.png"><span class="cp-nav-name">Text Branded</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/text-maxlines-truncated__ideal__default__compact" title="maxLines=2 + ellipsis on a narrow column." data-search="Text Max Lines Truncated text-maxlines-truncated__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/text-maxlines-truncated__ideal__default__compact.png"><span class="cp-nav-name">Text Max Lines Truncated</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/textbutton__ideal__default__compact" title="Low-emphasis round text button (RemoteTextButton), with the kit&#39;s style and size axes folded in." data-search="Text Button textbutton__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/textbutton__ideal__default__compact.png"><span class="cp-nav-name">Text Button</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-colorscheme__ideal__default__compact" title="Colour-scheme swatches read from RemoteMaterialTheme.colorScheme." data-search="Theme Color Scheme theme-colorscheme__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-colorscheme__ideal__default__compact.png"><span class="cp-nav-name">Theme Color Scheme</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-specimen-androidmakers__ideal__default__compact" title="AndroidMakers: Parisian ochre over Confetti&#39;s ship pairing." data-search="Theme Specimen Android Makers theme-specimen-androidmakers__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-specimen-androidmakers__ideal__default__compact.png"><span class="cp-nav-name">Theme Specimen Android Makers</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-specimen-confettidefault__ideal__default__compact" title="Confetti&#39;s stock theme: the unseeded Wear M3 palette over its ship pairing — Roboto Flex on title and numerals, Inter on body and label." data-search="Theme Specimen Confetti Default theme-specimen-confettidefault__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-specimen-confettidefault__ideal__default__compact.png"><span class="cp-nav-name">Theme Specimen Confetti Default</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-specimen-devfest__ideal__default__compact" title="DevFest: Google Blue with Google Sans Flex on every role — the one conference identity that swaps typography as well as colour." data-search="Theme Specimen Dev Fest theme-specimen-devfest__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-specimen-devfest__ideal__default__compact.png"><span class="cp-nav-name">Theme Specimen Dev Fest</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-specimen-droidcon__ideal__default__compact" title="Droidcon: the green at full saturation, over Confetti&#39;s ship pairing." data-search="Theme Specimen Droidcon theme-specimen-droidcon__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-specimen-droidcon__ideal__default__compact.png"><span class="cp-nav-name">Theme Specimen Droidcon</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-specimen-googlesansflex__ideal__default__compact" title="The stock Wear M3 palette with its ramp re-pointed at Google Sans Flex. Palette-identical to the Confetti baseline on purpose: this pair differs in typeface alone." data-search="Theme Specimen Google Sans Flex theme-specimen-googlesansflex__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-specimen-googlesansflex__ideal__default__compact.png"><span class="cp-nav-name">Theme Specimen Google Sans Flex</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-specimen-kotlinconf__ideal__default__compact" title="KotlinConf: JetBrains purple, with JetBrains Mono on title and numerals over an Inter body." data-search="Theme Specimen Kotlin Conf theme-specimen-kotlinconf__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-specimen-kotlinconf__ideal__default__compact.png"><span class="cp-nav-name">Theme Specimen Kotlin Conf</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-systemthemeswatches__ideal__default__compact" title="System-theme swatches — the catalog&#39;s only document carrying ColorTheme operations, where a light and a dark colour live in the document and the player selects between them." data-search="Theme System Theme Swatches theme-systemthemeswatches__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-systemthemeswatches__ideal__default__compact.png"><span class="cp-nav-name">Theme System Theme Swatches</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/theme-typography__ideal__default__compact" title="A type ramp read from RemoteMaterialTheme.typography." data-search="Theme Typography theme-typography__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/theme-typography__ideal__default__compact.png"><span class="cp-nav-name">Theme Typography</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/titlecard__ideal__default__compact" title="Card led by a title, with the kit&#39;s numbered layouts folded in as cells." data-search="Title Card titlecard__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/titlecard__ideal__default__compact.png"><span class="cp-nav-name">Title Card</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/typeface-specimen__ideal__default__compact" title="Four branded Google Fonts families, each drawing its own name — geometric, script, grotesk, monospace. A lane that cannot resolve a named family renders four identical-looking lines." data-search="Typeface Specimen typeface-specimen__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/typeface-specimen__ideal__default__compact.png"><span class="cp-nav-name">Typeface Specimen</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/typeface-variableweight__ideal__default__compact" title="One variable font (Roboto Flex) at wght 100/400/700/1000, written into the document as font-variation settings. A lane that resolves the family but drops the axes renders four lines in one weight." data-search="Typeface Variable Weight typeface-variableweight__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/typeface-variableweight__ideal__default__compact.png"><span class="cp-nav-name">Typeface Variable Weight</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/typeface-variablewidth__ideal__default__compact" title="The same variable font at wdth 25/100/151 — the axis nothing can fake, since no text API asks for a narrower face. Either the set widths differ or the axes were dropped." data-search="Typeface Variable Width typeface-variablewidth__ideal__default__compact"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/typeface-variablewidth__ideal__default__compact.png"><span class="cp-nav-name">Typeface Variable Width</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/widgetcontainer-gradientbackground__ideal__default__216dp" title="A Small container whose widget declares its own WearWidgetBrush background (vertical gradient) — the corner clipping over the brush is the point." data-search="Widget Container Gradient Background widgetcontainer-gradientbackground__ideal__default__216dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/widgetcontainer-gradientbackground__ideal__default__216dp.png"><span class="cp-nav-name">Widget Container Gradient Background</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/widgetcontainer-large__ideal__default__216dp" title="The Large (200×108dp) squircle widget container with the host&#39;s default background, carrying a title + supporting line." data-search="Widget Container Large widgetcontainer-large__ideal__default__216dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/widgetcontainer-large__ideal__default__216dp.png"><span class="cp-nav-name">Widget Container Large</span></a></li>
+<li><a class="cp-nav-item" href="/remote-m3/p/widgetcontainer-small__ideal__default__216dp" title="The Small (200×60dp) squircle widget container the Wear widget host draws around widget content — default surfaceContainerLow fill, 8dp padding, 26dp corners — rendered through the glance-wear WearWidgetPreview tooling wrapper." data-search="Widget Container Small widgetcontainer-small__ideal__default__216dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/remote-m3/render/widgetcontainer-small__ideal__default__216dp.png"><span class="cp-nav-name">Widget Container Small</span></a></li>
+        </ul>
+        <p class="cp-nav-empty" id="cp-nav-empty" hidden>No components match.</p>
+      </aside>
+        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="App Card"><canvas id="cp-canvas" hidden></canvas><canvas id="cp-rc-canvas" hidden></canvas><iframe id="cp-rc-wasm" hidden sandbox="allow-scripts allow-same-origin" title="App Card (Remote Compose CMP Wasm)"></iframe><img id="cp-spec-img" class="cp-spec-img" hidden alt="App Card — design spec"><div class="cp-source-panel" id="cp-source-panel" role="region" aria-label="Usage source" hidden></div><div class="cp-spec-compare" id="cp-spec-compare" hidden data-view="triptych" data-reference="/remote-m3/reference/appcard__ideal__default__compact.png?gen=ba98616dde48e6623e71fd16e8333064cba3b8a7"><figure class="cp-spec-panel" data-cp-spec-panel="reference"><canvas id="cp-spec-reference" aria-label="Imported design spec"></canvas><figcaption>Spec</figcaption></figure><figure class="cp-spec-panel" data-cp-spec-panel="diff"><canvas id="cp-spec-diff" aria-label="Pixels where the render and the spec disagree"></canvas><figcaption>Diff</figcaption></figure><figure class="cp-spec-panel" data-cp-spec-panel="actual"><canvas id="cp-spec-actual" aria-label="This preview&#39;s Compose render"></canvas><figcaption>Render</figcaption></figure><div class="cp-spec-wipe"><canvas id="cp-spec-wipe-canvas" aria-label="Spec on the left of the seam, Compose render on the right"></canvas><label class="cp-spec-wipe-control"><span>Spec</span><input id="cp-spec-wipe-range" class="cp-spec-wipe-range" type="range" min="0" max="100" value="50" aria-label="Wipe between the design spec and the Compose render"><span>Render</span></label></div></div><script type="application/json" id="cp-spec-annotations">{"reference":[{"kind":"layout","bounds":{"x":55,"y":78,"width":344,"height":244},"label":"pad 12px · gap 6px · r 26px","detail":{"padding.start":"12","padding.top":"12","padding.end":"12","padding.bottom":"12","gap":"6","cornerRadius":"26","unit":"px"}},{"kind":"layout","bounds":{"x":79,"y":102,"width":296,"height":36},"label":"gap 4px","role":"Section","detail":{"gap":"4","unit":"px"}},{"kind":"layout","bounds":{"x":79,"y":102,"width":36,"height":36},"label":"r 200px","role":"Avatar-AppEg","detail":{"cornerRadius":"200","unit":"px"}},{"kind":"layout","bounds":{"x":79,"y":102,"width":36,"height":36},"label":"r 12px","role":"ic_launcher","detail":{"cornerRadius":"12","unit":"px"}},{"kind":"layout","bounds":{"x":91,"y":116,"width":4,"height":4},"label":"r 1px","role":"Path","detail":{"cornerRadius":"1","unit":"px"}},{"kind":"layout","bounds":{"x":97,"y":114,"width":4,"height":4},"label":"r 1px","role":"Path","detail":{"cornerRadius":"1","unit":"px"}},{"kind":"layout","bounds":{"x":91,"y":114,"width":12,"height":6},"label":"≈gap 1px · r 1px","role":"Group 4497","detail":{"gap":"1","cornerRadius":"1","unit":"px","spacingSource":"derived"}},{"kind":"layout","bounds":{"x":91,"y":116,"width":4,"height":4},"label":"r 1px","role":"Path","detail":{"cornerRadius":"1","unit":"px"}},{"kind":"layout","bounds":{"x":97,"y":114,"width":4,"height":4},"label":"r 1px","role":"Path","detail":{"cornerRadius":"1","unit":"px"}},{"kind":"layout","bounds":{"x":91,"y":118,"width":12,"height":8},"label":"≈pad t 0px e 0px b 1px s 0px","role":"Subtract","detail":{"padding.start":"0","padding.top":"0","padding.end":"0","padding.bottom":"1","unit":"px","spacingSource":"derived"}},{"kind":"layout","bounds":{"x":91,"y":118,"width":12,"height":8},"label":"r 1px","role":"Ellipse 1281","detail":{"cornerRadius":"1","unit":"px"}},{"kind":"layout","bounds":{"x":95,"y":120,"width":4,"height":2},"label":"r 0.3px","role":"Intersect (Stroke)","detail":{"cornerRadius":"0.3","unit":"px"}},{"kind":"layout","bounds":{"x":123,"y":104,"width":182,"height":32},"label":"gap 8px","role":"Slot Label","detail":{"gap":"8","unit":"px"}},{"kind":"layout","bounds":{"x":313,"y":104,"width":62,"height":32},"label":"gap 8px","role":"Slot Time","detail":{"gap":"8","unit":"px"}},{"kind":"layout","bounds":{"x":79,"y":150,"width":296,"height":148},"label":"gap 2px","role":"Section","detail":{"gap":"2","unit":"px"}},{"kind":"layout","bounds":{"x":79,"y":150,"width":296,"height":72},"label":"gap 8px","role":"Slot Title","detail":{"gap":"8","unit":"px"}},{"kind":"layout","bounds":{"x":79,"y":226,"width":296,"height":72},"label":"gap 8px","role":"Slot Body","detail":{"gap":"8","unit":"px"}},{"kind":"typography","bounds":{"x":123,"y":104,"width":182,"height":32},"label":"title/sml 14px/16","role":"Label text","detail":{"token":"title/sml","unit":"px","fontSize":"14","lineHeight":"16","fontWeight":"550","fontFamily":"Roboto Flex"}},{"kind":"typography","bounds":{"x":313,"y":104,"width":62,"height":32},"label":"body/med 14px/16","role":"XXm","detail":{"token":"body/med","unit":"px","fontSize":"14","lineHeight":"16","fontWeight":"450","fontFamily":"Roboto Flex"}},{"kind":"typography","bounds":{"x":79,"y":150,"width":296,"height":72},"label":"title/med 16px/18","role":"Title card title text lorem ipsum dolor sit amet","detail":{"token":"title/med","unit":"px","fontSize":"16","lineHeight":"18","fontWeight":"550","fontFamily":"Roboto Flex"}},{"kind":"typography","bounds":{"x":79,"y":226,"width":296,"height":72},"label":"body/lrg 16px/18","role":"Content lorem ipsum dolor sit amet lorem ipsum dolor sit amet","detail":{"token":"body/lrg","unit":"px","fontSize":"16","lineHeight":"18","fontWeight":"450","fontFamily":"Roboto Flex"}}]}</script><cp-spec-compare></cp-spec-compare><div class="cp-inspect-layer" id="cp-inspect-layer"></div><div class="cp-error" id="cp-error" role="alert" hidden></div></div>
+        <div class="cp-inspect-legend" id="cp-inspect-legend" role="region" aria-label="Inspection legend" hidden></div><cp-inspect-layers></cp-inspect-layers>
+        <div class="cp-controls" id="cp-controls">
+          <!-- No "Appearance" group. Its only ever-visible control was a Background select
+               offering "(default) / Clear (crisp outline)" — which read as a duplicate of the
+               viewer bar's **Transparent** toggle: same word, same apparent job, two places, one
+               of them buried behind a drawer. With that gone the group held nothing but the
+               visually-hidden Theme state below, so an empty collapsible card would have sat at
+               the top of every viewer's panel; the group goes with the control.
+
+               Neither affordance is lost. Transparent still shows a preview's real alpha on the
+               bar, and stripping a preview's *authored* background is still `background=clear` on
+               /render (and the VS Code extension's own override) — the authoring lane, which is
+               where it belongs, rather than the reading one.
+
+               The Theme select stays in the panel, outside any group: it is `aria-hidden` and out
+               of the tab order, but it is the Theme axis's single state holder — viewer.js reads
+               it on every render and Back/Forward hydration writes to it — so it has to remain in
+               the DOM. The visible Theme control is the chip row on the viewer bar. -->
+          <span class="cp-modes-inputs" aria-hidden="true">
+  <select id="cp-theme" class="cp-knob-theme" data-theme-active="0" data-default-theme="dark" data-has-declared-themes="false" data-fixed-theme="false" tabindex="-1" disabled>
+    <option value="dark" selected>Dark (Default)</option>
+  </select>
+</span>
+          <details class="cp-group" data-cp-group="size">
+            <summary>Size</summary>
+            <div class="cp-group-body">
+              <div class="cp-size">
+                <label>Size mode
+                  <select id="cp-sizeMode">
+                    <option value="">(default)</option>
+                    <option value="fixed">Fixed size</option>
+                    <option value="max">Max</option>
+                    <option value="min">Min</option>
+                    <option value="within">Within (min–max)</option>
+                  </select>
+                </label>
+                <div class="cp-size-row" id="cp-size-fixed" hidden>
+                  <label>Width (dp)<input id="cp-fixedW" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                  <label>Height (dp)<input id="cp-fixedH" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                </div>
+                <div class="cp-size-row" id="cp-size-min" hidden>
+                  <label>Min width (dp)<input id="cp-minW" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                  <label>Min height (dp)<input id="cp-minH" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                </div>
+                <div class="cp-size-row" id="cp-size-max" hidden>
+                  <label>Max width (dp)<input id="cp-maxW" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                  <label>Max height (dp)<input id="cp-maxH" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                </div>
+              </div>
+            </div>
+          </details>
+          <details class="cp-group" data-cp-group="explode">
+  <summary>Exploded 3D</summary>
+  <div class="cp-group-body">
+    <label class="cp-explode-row" title="How far the layers lean away from you; 0 is face-on">Lean
+      <input id="cp-explode-tilt" class="cp-explode-knob" type="range" min="0" max="75"
+        step="1" value="28" data-cp-default="28" data-cp-unit="°" disabled>
+      <output id="cp-explode-tilt-value" class="cp-explode-value">28°</output>
+    </label>
+    <label class="cp-explode-row" title="How far the layers are turned in their own plane">Spin
+      <input id="cp-explode-spin" class="cp-explode-knob" type="range" min="-80" max="80"
+        step="1" value="-16" data-cp-default="-16" data-cp-unit="°" disabled>
+      <output id="cp-explode-spin-value" class="cp-explode-value">-16°</output>
+    </label>
+    <label class="cp-explode-row" title="Distance between layers; 0 derives one from the preview's size">Separation
+      <input id="cp-explode-gap" class="cp-explode-knob" type="range" min="0" max="600"
+        step="5" value="0" data-cp-default="0" data-cp-unit="" disabled>
+      <output id="cp-explode-gap-value" class="cp-explode-value">0</output>
+    </label>
+    <label class="cp-explode-row" title="Composables nested deeper than this fold into the last layer">Layers
+      <input id="cp-explode-depth" class="cp-explode-knob" type="range" min="1" max="16"
+        step="1" value="6" data-cp-default="6" data-cp-unit="" disabled>
+      <output id="cp-explode-depth-value" class="cp-explode-value">6</output>
+    </label>
+    <div class="cp-knobs-head">One sheet per visible drawing level. Structural-only
+      composables are kept in the next sheet's breadcrumb. Rides the SVG link and download.</div>
+  </div>
+</details>
+          <details class="cp-group" data-cp-group="locale">
+            <summary>Locale &amp; text</summary>
+            <div class="cp-group-body">
+              <label>Locale
+                <input id="cp-localeTag" type="text" list="cp-localeTag-list" placeholder="e.g. en-GB, zh-Hant-TW" autocomplete="off">
+                <!-- A datalist, not a fixed <select>: the presets (pseudolocales, RTL, common
+                     tags) drop down for quick picking, but any valid BCP-47 tag the server
+                     accepts can still be typed in — so this is the OPEN form of the same value
+                     set an author declares with `previewOverrideChoice`, rendered through the
+                     same helper rather than hand-written twice. -->
+                <datalist id="cp-localeTag-list">
+                  <option value="en-XA" label="Accented (pseudo)"></option>
+                  <option value="ar-XB" label="Bidi / RTL (pseudo)"></option>
+                  <option value="ar" label="Arabic (RTL)"></option>
+                  <option value="he" label="Hebrew (RTL)"></option>
+                  <option value="fa" label="Persian (RTL)"></option>
+                  <option value="en-US"></option>
+                  <option value="en-GB"></option>
+                  <option value="de-DE"></option>
+                  <option value="fr-FR"></option>
+                  <option value="es-ES"></option>
+                  <option value="pt-BR"></option>
+                  <option value="ru-RU"></option>
+                  <option value="ja-JP"></option>
+                  <option value="ko-KR"></option>
+                  <option value="zh-CN"></option>
+                  <option value="zh-Hant-TW"></option>
+                  <option value="hi-IN"></option>
+                  <option value="th-TH"></option>
+                </datalist>
+              </label>
+              <label>Font scale: <span id="cp-fontScale-val">default</span>
+                <input id="cp-fontScale" type="range" min="0.5" max="2.0" step="0.1" value="1.0">
+              </label>
+            </div>
+          </details>
+                  <details class="cp-group" data-cp-group="overlays">
+          <summary>Overlays</summary>
+          <div class="cp-group-body">
+            <div class="cp-overlays">
+  <div class="cp-overlays-head">Inspect</div>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-a11y" data-cp-inspect="a11y" type="checkbox"> Accessibility</label>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-typography" data-cp-inspect="typography" type="checkbox"> Typography</label>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-theme" data-cp-inspect="theme" type="checkbox"> Theme attributes</label>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-layout" data-cp-inspect="layout" type="checkbox"> Layout boxes</label>
+</div>
+            <div class="cp-overlays">
+  <div class="cp-overlays-head">Overlays (Live Compose)</div>
+  <label class="cp-live-row"><input class="cp-overlay" id="cp-touchOverlay" type="checkbox" disabled> Show touches</label>
+</div>
+          </div>
+        </details>
+
+                <details class="cp-group" data-cp-group="overrides">
+        <summary>Overrides</summary>
+        <div class="cp-group-body">
+          <div class="cp-knobs">
+            <div class="cp-knobs-head">Declared overrides — edit a value to re-render.</div>
+                      <label>style
+            <select class="cp-knob" data-knob-key="style" data-knob-kind="string" data-knob-initial="tonal" data-knob-default="tonal">
+          <option value="tonal" selected>tonal</option>
+<option value="outline">outline</option>
+            </select>
+          </label>
+          <label>appImage
+            <select class="cp-knob" data-knob-key="appImage" data-knob-kind="string" data-knob-initial="image" data-knob-default="image">
+          <option value="image" selected>image</option>
+<option value="icon">icon</option>
+<option value="none">none</option>
+            </select>
+          </label>
+          <label>content
+            <select class="cp-knob" data-knob-key="content" data-knob-kind="string" data-knob-initial="text" data-knob-default="text">
+          <option value="text" selected>text</option>
+<option value="image">image</option>
+<option value="gallery-1">gallery-1</option>
+<option value="gallery-2">gallery-2</option>
+            </select>
+          </label>
+          </div>
+        </div>
+      </details>
+
+          <div class="cp-status" id="cp-status"></div>
+        </div>
+      </div>
+      <!-- Export remains below the workspace; renderer selection is kept beside the preview
+           heading so it is visible before a tall stage. The export bar is a SIBLING of the note
+           column rather than a child: the note is prose and reads better at `.cp-below`'s measure,
+           while the bar has to run the full content width to stay on one line. -->
+      <div class="cp-below">
+
+      </div>
+      <div class="cp-preview-links">
+      <p class="cp-source"><a class="cp-source-link" href="https://github.com/yschimke/wear-m3-catalog/blob/main/remote-catalog/src/main/kotlin/ee/schimke/wearm3catalog/remote/CatalogPreviews.kt" title="src/main/kotlin/ee/schimke/wearm3catalog/remote/CatalogPreviews.kt"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> source</a></p>
+        <a href="/remote-m3/bundle/appcard__ideal__default__compact" download>download executable bundle</a>
+      <p class="cp-source"><a class="cp-source-link" href="/remote-m3/parallel/appcard__ideal__default__compact" title="What this catalog and its sibling each resolved for this cell — typography, layout and theme">⇄ cross-catalog layers</a></p>
+      <details class="cp-report" id="cp-report" data-cp-repo="yschimke/wear-m3-catalog" data-cp-subject="this preview"><summary class="cp-report-link" title="Something wrong with this preview — files against yschimke/wear-m3-catalog"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> report a catalog issue</summary>
+        <div class="cp-report-panel"><form class="cp-report-form" method="get" target="_blank" rel="noopener" action="https://github.com/yschimke/wear-m3-catalog/issues/new"><label class="cp-report-summary">Summary<input class="cp-report-summary-input" type="text" name="title" required autocomplete="off" placeholder="Briefly describe what is wrong"></label><cp-report-classification class="cp-report-class"><label class="cp-report-class-label">Where does it belong?<select class="cp-report-class-input" name="labels"><option value="parity:upstream" data-cp-sentence="Upstream: the framework or design system this catalog is built on, not the catalog itself.">Upstream — not this catalog</option><option value="parity:catalog" data-cp-sentence="A catalog bug: the code in this repository draws it wrongly.">A catalog bug — this repository</option><option value="parity:verification-needed" data-cp-sentence="Needs investigating: the reporter could not tell whether this is ours or upstream." selected>Needs investigating — not sure yet</option></select></label><span class="cp-report-class-note">Applied as a <code>parity:</code> label, so the catalog&rsquo;s issue index can tell a difference that is ours from one that is not. Leave it on <em>needs investigating</em> if you are not sure — that is what it is for.</span></cp-report-classification><input type="hidden" name="body" id="cp-report-body" value="### What&#39;s wrong
+
+&lt;!-- What did you expect to see, and what did you get? --&gt;
+
+
+**Where it belongs:** as labelled on this issue
+
+### Screenshot
+
+![appcard__ideal__default__compact](https://preview.coo.ee/remote-m3/render/appcard__ideal__default__compact.png?gen=ba98616dde48e6623e71fd16e8333064cba3b8a7)
+
+&lt;!-- That image is a LIVE render: it re-renders if the catalog changes, so it may stop showing what you saw. GitHub displays it through Camo, but Camo proxies the source URL; it does not make a versioned snapshot. For a copy that stays put, use Copy PNG in the viewer&#39;s &quot;Export &amp; direct links&quot; panel and paste it here — GitHub then hosts the pixels itself. --&gt;
+
+
+### Which preview
+
+| | |
+| --- | --- |
+| Design system | `remote-m3` |
+| Preview | `appcard__ideal__default__compact` |
+| Source | https://github.com/yschimke/wear-m3-catalog/blob/main/remote-catalog/src/main/kotlin/ee/schimke/wearm3catalog/remote/CatalogPreviews.kt |
+| Catalog | `yschimke/wear-m3-catalog@design-artifacts/remote-m3` |
+| Rendered by | compose-ai-tools 1.56.2 |
+
+[Open this preview](https://preview.coo.ee/remote-m3/p/appcard__ideal__default__compact)
+" data-report-template="### What&#39;s wrong
+
+&lt;!-- What did you expect to see, and what did you get? --&gt;
+
+
+**Where it belongs:** as labelled on this issue
+
+### Screenshot
+
+![appcard__ideal__default__compact]({{render}})
+
+&lt;!-- That image is a LIVE render: it re-renders if the catalog changes, so it may stop showing what you saw. GitHub displays it through Camo, but Camo proxies the source URL; it does not make a versioned snapshot. For a copy that stays put, use Copy PNG in the viewer&#39;s &quot;Export &amp; direct links&quot; panel and paste it here — GitHub then hosts the pixels itself. --&gt;
+
+
+### Which preview
+
+| | |
+| --- | --- |
+| Design system | `remote-m3` |
+| Preview | `appcard__ideal__default__compact` |
+| Source | https://github.com/yschimke/wear-m3-catalog/blob/main/remote-catalog/src/main/kotlin/ee/schimke/wearm3catalog/remote/CatalogPreviews.kt |
+| Catalog | `yschimke/wear-m3-catalog@design-artifacts/remote-m3` |
+| Rendered by | compose-ai-tools 1.56.2 |
+
+[Open this preview](https://preview.coo.ee/remote-m3/p/appcard__ideal__default__compact)
+"><button type="submit" class="cp-report-submit"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> Open a prefilled issue</button><span class="cp-report-note">Files against <code>yschimke/wear-m3-catalog</code> — the project whose code declares this preview, <em>not</em> the preview server. The rest of the report — what you were looking at, which build, the links — is filled in for you on GitHub.</span></form></div></details>
+      <p class="cp-figma"><a class="cp-figma-link" href="https://www.figma.com/design/B24oss2tTeXAFykyeyusz0?node-id=38437-5712" target="_blank" rel="noopener noreferrer" title="Open the Figma node this preview is specified by — AppCard — figma"><svg class="cp-gh cp-figma-mark" viewBox="0 0 38 57" aria-hidden="true" fill="currentColor"><path d="M19 28.5a9.5 9.5 0 1 1 19 0 9.5 9.5 0 0 1-19 0z"/><path d="M0 47.5A9.5 9.5 0 0 1 9.5 38H19v9.5a9.5 9.5 0 0 1-19 0z"/><path d="M19 0v19h9.5a9.5 9.5 0 1 0 0-19H19z"/><path d="M0 9.5A9.5 9.5 0 0 0 9.5 19H19V0H9.5A9.5 9.5 0 0 0 0 9.5z"/><path d="M0 28.5A9.5 9.5 0 0 0 9.5 38H19V19H9.5A9.5 9.5 0 0 0 0 28.5z"/></svg> figma spec</a></p>
+      </div>
+            <div class="cp-export" aria-label="Export the current view">
+        <span class="cp-export-head" id="cp-export-head">Export</span>
+        <span class="cp-link-group">
+  <span class="cp-link-kind">PNG</span>
+  <button type="button" class="cp-copyurl" data-copyurl-target="cp-url-png"
+    title="Copy the PNG URL of the current view (overrides applied)">Copy link</button>
+  <button type="button" class="cp-copyimg" data-copyimg-target="cp-url-png"
+    data-copyimg-ext=".png" title="Copy the PNG itself to the clipboard">Copy PNG</button>
+  <a id="cp-dl-png" class="cp-dl" download title="Save the PNG to a file">Download</a>
+  <input id="cp-url-png" class="cp-url" type="text" readonly tabindex="-1"
+    aria-label="PNG URL">
+</span>
+<span class="cp-link-group">
+  <span class="cp-link-kind">SVG</span>
+  <button type="button" class="cp-copyurl" data-copyurl-target="cp-url-svg"
+    title="Copy the SVG URL of the current view (overrides applied)">Copy link</button>
+  <button type="button" class="cp-copyimg" data-copyimg-target="cp-url-svg"
+    data-copyimg-ext=".svg" title="Copy the SVG itself to the clipboard">Copy SVG</button>
+  <a id="cp-dl-svg" class="cp-dl" download title="Save the SVG to a file">Download</a>
+  <input id="cp-url-svg" class="cp-url" type="text" readonly tabindex="-1"
+    aria-label="SVG URL">
+</span>
+      </div>
+      <!-- Backdrop shown behind an open drawer on mobile (drawers become bottom sheets there);
+           tapping it dismisses the sheet. Inert on desktop. -->
+      <div class="cp-scrim" id="cp-scrim" aria-hidden="true"></div>
+      <!-- Remembers which control drawers this visitor left open (`cp-grp.<id>` per
+           `details.cp-group[data-cp-group]`). Renders nothing; `serve.css` hides the tag. -->
+      <cp-group-memory></cp-group-memory>
+      <!-- Resolve a deep-linked or remembered theme and publish the design-score baseline before
+           the component bundle upgrades the comparison control. -->
+      <script>(function () {
+  var el = document.getElementById("cp-theme");
+  if (!el) return;
+  // Runs before viewer.js' initial render. A clean explicit __light/__dark URL is reproducible:
+  // remembered choices never override the path. An explicit query parameter still wins below.
+  var root = document.querySelector(".cp-viewer");
+  var pid = (root && root.getAttribute("data-preview-id")) || "";
+  var themed = pid.split("__").some(function (s) { return s === "light" || s === "dark"; });
+  // The page's own URL outranks the remembered choice: `?themeProvider=` / `?uiMode=` is there
+  // because someone picked it (or was handed the link), so a bookmarked viewer opens on the
+  // theme it was bookmarked in — including on an explicit __light/__dark preview.
+  var params = new URLSearchParams(location.search);
+  var provider = params.get("themeProvider");
+  var uiMode = params.get("uiMode");
+  var urlChoice = provider ? "theme:" + provider
+    : (uiMode === "light" || uiMode === "dark" ? uiMode : "");
+  var urlOption = null;
+  Array.prototype.forEach.call(el.options, function (o) { if (urlChoice && o.value === urlChoice) urlOption = o; });
+  // A choice that merely names the preview's baked theme is DISPLAYED but not marked active:
+  // it asks for nothing, so it must not read as a pinned override. `?uiMode=light` on a
+  // light-baked preview is the case that mattered — the light/dark toggle leaves the parameter
+  // behind on the way back to light, and treating it as a pin suppressed the Figma comparison
+  // for a visitor who had made no net choice. Mirrors `pinsTheme` in viewer/themeChoice.ts.
+  var bakedTheme = el.getAttribute("data-default-theme") || "";
+  function pinsTheme(choice) { return !!choice && choice !== bakedTheme; }
+  if (urlOption) {
+    el.value = urlChoice;
+    if (pinsTheme(urlChoice)) el.setAttribute("data-theme-active", "1");
+  }
+  try {
+    var stored = localStorage.getItem("cp-theme:remote-m3");
+    var declared = stored && stored.indexOf("theme:") === 0;
+    var option = null;
+    Array.prototype.forEach.call(el.options, function (o) { if (o.value === stored) option = o; });
+    if (!urlOption && !themed && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
+      el.value = stored;
+      if (pinsTheme(stored)) el.setAttribute("data-theme-active", "1");
+    }
+  } catch (e) {}
+  // Publish the design-score baseline before the component bundle upgrades the comparison
+  // control. A chosen theme changes the rendered side of the comparison, so the
+  // server-baked score is already stale on the first paint. viewer.js keeps this attribute in
+  // sync after controls change; this early write makes the element's initial read authoritative.
+  if (root) {
+    var atSpecBaseline = el.disabled || el.getAttribute("data-theme-active") !== "1";
+    root.setAttribute("data-spec-baseline", atSpecBaseline ? "1" : "0");
+  }
+  // Keep the stage backing colour in step with the CHOSEN theme, so a re-render in the opposite
+  // uiMode never lands a transparent sticker on a clashing surface. The server seeds
+  // data-bg-theme from the baked variant (or the dark-first default); a light/dark Theme choice
+  // overrides it, and clearing it reverts to that default.
+  var bgDefault = (root && root.getAttribute("data-bg-theme")) || "";
+  function syncBg() {
+    if (!root) return;
+    // Only let the Theme choice drive the stage backing when the control can actually re-render
+    // (daemon or Wasm). On a static bundle the select is disabled but the seeding above may still
+    // have copied a remembered localStorage value into el.value — honoring it would tint the
+    // stage while ServeBundleHost keeps returning the UNCHANGED baked PNG. Keep bgDefault there.
+    var selectedOption = el.options[el.selectedIndex];
+    var chosen = !el.disabled && selectedOption
+      ? selectedOption.getAttribute("data-theme-mode") ||
+        (el.value === "light" || el.value === "dark" ? el.value : "") : "";
+    var m = chosen || bgDefault;
+    if (m) root.setAttribute("data-bg-theme", m);
+    else root.removeAttribute("data-bg-theme");
+  }
+  // Round-trip every unified choice, including `theme:<provider>`, to the catalog page.
+  el.addEventListener("change", function () {
+    el.setAttribute("data-theme-active", "1");
+    try { localStorage.setItem("cp-theme:remote-m3", el.value); } catch (e) {}
+    syncBg();
+    // …and the page around the stage, when the Page theme setting says to follow the choice.
+    if (window.cpPageTheme) window.cpPageTheme.follow(el.value);
+  });
+  syncBg();
+})();</script>
+      <script src="/assets/serve/cc1b-2d6b517f015a4dc2/vue-runtime.js"></script>
+<script src="/assets/serve/e484-000d0168a14ef9cf/viewer-components.js"></script>
+      <!-- The viewer's drawers, the phone row order, the theme toggle's value and the component
+           filter. Renders nothing; `serve.css` hides the tag. -->
+      <cp-viewer-drawers></cp-viewer-drawers>
+
+      <script>(function () {
+
+        var presenceUrl = "/remote-m3/api/presence";
+        function ping() {
+          if (document.visibilityState !== "visible") return;
+          fetch(presenceUrl, { method: "POST", credentials: "same-origin", keepalive: true })
+            .catch(function () {});
+        }
+        setInterval(ping, 240 * 1000);
+        document.addEventListener("visibilitychange", ping);
+        // Fired on arrival, not only every interval. Catalogs are no longer warmed at boot (see
+        // ServeCatalogLiveHost.eagerWarmOnOpen), so this ping is what gets a daemon ready for the
+        // catalog the visitor actually opened — while they read the grid, rather than when they
+        // first click a theme and wait out a cold start.
+        ping();
+
+        // Render-server badge. Catalogs open their daemon on first real use, so whether one is up is
+        // now a genuine question with a visible answer — a theme switch is instant against a warm
+        // daemon and pays a cold start against none. Same URL family as the presence ping, and the
+        // endpoint reads through `peekHost`, so polling it never wakes what it is reporting on.
+        // The badge lives INSIDE the header's Status link (see ServeWeb.siteHeader) — the count and
+        // that link answer the same question, so they are one control: the number is the summary and
+        // the link is where the detail is. It is server-rendered and hidden, so filling it never
+        // moves the brand or the nav.
+        //
+        // That slot is also the feature switch. Catalog mode's header carries no nav, so it has
+        // neither the Status link nor the slot, and a catalog visitor has no `/status` page to read a
+        // count against — a number with nothing to link to is not a summary of anything. This used to
+        // create the span and append it to `<header>` when the slot was missing, which made it a third
+        // item in that two-column grid: it landed in an implicit second row, stretched across the
+        // `1fr` track, and painted the count as a full-width bar under the brand. So absence of the
+        // slot now disables the badge outright rather than inventing somewhere to put it — which also
+        // stops Catalog mode polling every 20s for an answer it does not display.
+        var daemonUrl = presenceUrl.replace("/api/presence", "/api/daemons");
+        // Read synchronously rather than on first paint: this script is emitted deep in the body, long
+        // after the header, so the slot either exists now or is not on this page at all.
+        var daemonBadge = document.getElementById("cp-daemon-status");
+        function paintDaemonStatus(state) {
+          var el = daemonBadge;
+          if (!el) return;
+          if (!state) { el.hidden = true; return; }
+          el.hidden = false;
+          // "not running" is a normal resting state, not a fault — a catalog nobody has rendered on
+          // simply has no process yet. Word it so it doesn't read as an error.
+          var count = state.instances || 0;
+          var catalogDetail = state.running
+            ? count + (count === 1 ? " instance" : " instances") +
+              ", " + (state.activeStreams || 0) + " live"
+            : "not running (starts on demand)";
+          if (state.poolCapacity > 0)
+            catalogDetail += ", pool " + state.pooled + "/" + state.poolCapacity;
+          var overallDetail = (state.overallRunning || 0) + " catalogs running, " +
+            (state.overallActiveStreams || 0) + " live streams";
+          if (state.liveSeatsTotal > 0)
+            overallDetail += ", " + (state.liveSeatsTotal - state.liveSeatsAvailable) + "/" +
+              state.liveSeatsTotal + " seats used";
+          el.innerHTML = '<span class="cp-daemon-dot" aria-hidden="true"></span>' + count;
+          el.setAttribute("data-cp-daemon-running", state.running ? "1" : "0");
+          // The badge itself is decoration on a link, so it says nothing to a screen reader: an
+          // `aria-label` here would be appended to the LINK's accessible name, renaming "Status" to
+          // a sentence about instance counts — and renaming it again on every poll. The name stays
+          // "Status"; the detail rides on the link's own title (and behind it, the page it opens),
+          // which is the same place a sighted visitor reads it from.
+          var host = el.closest("a") || el;
+          host.title = "Render servers — this catalog: " + catalogDetail +
+            "\nOverall server: " + overallDetail;
+        }
+        function pollDaemons() {
+          if (!daemonUrl || !daemonBadge || document.visibilityState !== "visible") return;
+          fetch(daemonUrl, { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(paintDaemonStatus)
+            .catch(function () {});
+        }
+        setInterval(pollDaemons, 20000);
+        document.addEventListener("visibilitychange", pollDaemons);
+        pollDaemons();
+        // A theme switch is exactly when the daemon comes up, so refresh the badge shortly after one.
+        document.addEventListener("click", function (e) {
+          if (e.target && e.target.closest && e.target.closest(".cp-theme-btn")) {
+            setTimeout(pollDaemons, 1500);
+          }
+        });
+      })();</script>
+      <script src="/assets/serve/23bb-43bb50fed86507b8/format-compare.js"></script>
+      <script src="/assets/serve/6b581-d6e9c9379c1c3b8b/codemirror.js"></script>
+      <script src="/assets/serve/dfd2-2ed494c48d8e8109/viewer.js"></script>
+        </main>
+        <footer class="cp-site-footer">
+          <div class="cp-site-footer-links">
+            <a href="/remote-m3/feed.xml" class="cp-changelog-link" title="What changed in this design system, newest first (RSS)"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><circle cx="3" cy="13" r="2"/><path d="M1 8.5a6.5 6.5 0 016.5 6.5h-2A4.5 4.5 0 001 10.5v-2z"/><path d="M1 3a12 12 0 0112 12h-2A10 10 0 001 5V3z"/></svg> Changelog</a> ·
+            <a href="https://github.com/yschimke/compose-ai-tools"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a> ·
+            <form class="cp-report-bug" method="get" action="/report-bug"><input type="hidden" name="from" value=""><input type="hidden" name="token" value=""><input type="hidden" name="scheme" value=""><button type="submit" class="cp-report-bug-link" title="Report a bug in the preview server itself — not in a preview"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> report a server bug</button></form> ·
+            <a href="/version">/version</a> · <span class="cp-about-ver" title="running preview-server build">server v2.3.4</span>
+          </div>
+        </footer>
+        <div class="cp-fab" data-cp-capture-src="/assets/serve/4b33-306bbcc76df3dafa/report-capture.js">
+          <details class="cp-fab-menu">
+            <summary class="cp-fab-btn" title="Report a problem" aria-label="Report a problem"
+              ><svg class="cp-fab-mark" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12.4a7.7 7.7 0 0 1-8.3 7.6c-.7 0-1.4-.1-2-.3L4 21l1.4-3.9a7.3 7.3 0 0 1-1.9-4.9 7.7 7.7 0 0 1 8.5-7.6 7.8 7.8 0 0 1 8.5 7.8z"/><path d="M12 8.4v4"/><path d="M12 15.4h.01"/></svg></summary>
+            <div class="cp-fab-panel">
+              <p class="cp-fab-head">Report a problem</p>
+              <p class="cp-fab-sub">Two trackers &mdash; pick whichever owns the thing that is
+                wrong.</p>
+              <a class="cp-fab-choice cp-fab-catalog" href="#cp-report" hidden>
+                <span class="cp-fab-what">Something is wrong with this <strong>preview</strong></span>
+                <span class="cp-fab-who">wrong colours, wrong spec, a state that is missing</span>
+              </a>
+              <form class="cp-report-bug" method="get" action="/report-bug"><input type="hidden" name="from" value=""><input type="hidden" name="token" value=""><input type="hidden" name="scheme" value=""><button type="submit" class="cp-fab-choice"><span class="cp-fab-what">Something is wrong with the <strong>preview server</strong></span><span class="cp-fab-who">the page, a control, a render that failed &mdash; goes to <code>yschimke/compose-ai-tools</code></span></button></form>
+              <div class="cp-shot" hidden>
+                <p class="cp-shot-head">Capture what you can see</p>
+                <p class="cp-fab-who">The report embeds the plain render. Anything the browser composes
+                  &mdash; the spec triptych, a wipe, an overlay, an error &mdash; only reaches the issue as a
+                  picture you take.</p>
+                <div class="cp-shot-modes">
+                  <button type="button" class="cp-shot-mode" data-cp-capture="view"
+                    title="The whole browser viewport, as it is now">Whole view</button>
+                  <button type="button" class="cp-shot-mode" data-cp-capture="region"
+                    title="Drag a box around the part that is wrong">Region</button>
+                  <button type="button" class="cp-shot-mode" data-cp-capture="element"
+                    title="Point at one element — a render, a table, a single cell">Element</button>
+                </div>
+                <p class="cp-shot-note" role="status"></p>
+                <ul class="cp-shot-list"></ul>
+              </div>
+            </div>
+          </details>
+        </div>
+        <script>(function(){var key="cp_chrome";document.querySelectorAll("[data-cp-interface-mode]").forEach(function(b){b.addEventListener("click",function(){var mode=b.getAttribute("data-cp-interface-mode");if(mode!=="catalog"&&mode!=="dev")return;try{document.cookie=key+"="+mode+"; path=/; max-age=31536000; samesite=lax"+(location.protocol==="https:"?"; secure":"");}catch(e){}var u=new URL(location.href);u.searchParams.delete("chrome");if(document.cookie.indexOf(key+"="+mode)<0)u.searchParams.set("chrome",mode);var q=u.searchParams.toString();location.assign(u.pathname+(q?"?"+q:"")+u.hash);});});})();</script>
+        <script src="/assets/serve/3e3a-1c69861c00b3e41d/keyboard-navigation.js"></script>
+      </body>
+    </html>

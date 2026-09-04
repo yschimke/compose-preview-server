@@ -2435,6 +2435,18 @@ cp-history-menu { display: contents; }
    control that produced it rather than buried under the stage. */
 .cp-spec-score { font-size: 0.72rem; color: var(--cp-fg-muted); white-space: nowrap; }
 .cp-spec-score[hidden] { display: none; }
+/* The eyedropper's reading. Tabular figures so the coordinates and channel numbers do not jitter
+   as the pointer moves, and a monospace face because every value in it is a literal. */
+.cp-spec-pick { font-size: 0.72rem; color: var(--cp-fg-muted); white-space: nowrap;
+  font-family: var(--cp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-variant-numeric: tabular-nums; }
+.cp-spec-pick[hidden] { display: none; }
+/* A frozen reading is held for reading and copying, so it stops looking like a live hover. */
+.cp-spec-pick--frozen { color: var(--cp-fg); }
+/* Announcements only: off-screen rather than display:none, which would take it out of the
+   accessibility tree and silence it. */
+.cp-spec-pick-live { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; }
 /* The motion lane's carrier — the per-capture picker and the caption readout — shown only while a
    recording is actually on the stage. `[hidden]` needs its own rule here because the `inline-flex`
    above would otherwise win over the attribute's UA `display: none`. */

@@ -22,6 +22,7 @@
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { whenParsed } from "../dom/whenParsed.js";
 import { compareApi, type NormalisedPair } from "../compare/api.js";
+import { readingAt, summarise } from "../spec/pick.js";
 import { urlState } from "../urlState.js";
 import { sameOrigin } from "../dom/sameOrigin.js";
 import {
@@ -189,6 +190,19 @@ export class SpecCompare extends ControllerElement {
     private scoreTip: string | null = null;
     /** Bumped to abandon a comparison in flight. */
     private generation = 0;
+    /**
+     * The two normalised sides as readable pixels, for the eyedropper.
+     *
+     * Read back once per pair rather than per hover: `getImageData` over a full frame is the
+     * expensive part, and the buffers are immutable for as long as the pair is. Cleared whenever
+     * [frames] is replaced, so a reading can never describe the previous comparison.
+     */
+    private pickPixels: {
+        reference: Uint8ClampedArray;
+        candidate: Uint8ClampedArray;
+    } | null = null;
+    /** A frozen reading holds the panel still; pointer moves are ignored until it is released. */
+    private pickFrozen = false;
     private cleanups: Array<() => void> = [];
     private annotationKey = "";
     private annotationPromise: Promise<unknown> | null = null;
@@ -319,6 +333,7 @@ export class SpecCompare extends ControllerElement {
         // is the shareable state; where the seam happened to stop is not.
         if (range) this.on(range, "input", () => this.drawWipe());
         this.bindDrag();
+        this.bindPick();
         this.on(window, "resize", () => this.placeTypography());
         this.on(
             window,
@@ -342,6 +357,126 @@ export class SpecCompare extends ControllerElement {
 
     private canvas(id: string): HTMLCanvasElement | null {
         return document.getElementById(id) as HTMLCanvasElement | null;
+    }
+
+    // ---- The eyedropper --------------------------------------------------------------------
+    //
+    // All three panels paint the SAME normalised space — that is what `normaliseImageUrls` returns
+    // and what makes the delta map arithmetic rather than guesswork — so one mapping serves every
+    // one of them, and hovering the diff is as meaningful as hovering either side: it says what the
+    // magenta is made of.
+
+    /** The panels a reading can be taken from, each carrying the shared normalised space. */
+    private pickPanels(): HTMLCanvasElement[] {
+        return [
+            this.canvas("cp-spec-reference"),
+            this.canvas("cp-spec-diff"),
+            this.canvas("cp-spec-actual"),
+        ].filter((c): c is HTMLCanvasElement => c !== null);
+    }
+
+    private bindPick(): void {
+        if (!this.compare) return;
+        this.on(this.compare, "pointermove", (event) => {
+            if (this.pickFrozen) return;
+            this.pickAt(event as PointerEvent);
+        });
+        this.on(this.compare, "pointerleave", () => {
+            if (!this.pickFrozen) this.setPick("");
+        });
+        // Click freezes the reading so it can be read and copied without the cursor holding still;
+        // clicking again, or Escape, releases it. Only a settled reading is announced — the panel
+        // is rewritten on every pointermove, and a live region around that would queue a stream of
+        // pixel values over everything else on the page.
+        this.on(this.compare, "click", (event) => {
+            const reading = this.pickFrozen
+                ? ""
+                : this.pickAt(event as PointerEvent);
+            if (!this.pickFrozen && !reading) return;
+            this.pickFrozen = !this.pickFrozen;
+            this.announcePick(this.pickFrozen ? reading : "");
+            document
+                .getElementById("cp-spec-pick")
+                ?.classList.toggle("cp-spec-pick--frozen", this.pickFrozen);
+        });
+        this.on(document, "keydown", (event) => {
+            if ((event as KeyboardEvent).key !== "Escape" || !this.pickFrozen)
+                return;
+            this.pickFrozen = false;
+            this.announcePick("");
+            document
+                .getElementById("cp-spec-pick")
+                ?.classList.remove("cp-spec-pick--frozen");
+            this.setPick("");
+        });
+    }
+
+    /** Read both sides under the pointer; returns the line shown, or "" when there is nothing. */
+    private pickAt(event: PointerEvent | MouseEvent): string {
+        const pair = this.frames;
+        if (!pair) return "";
+        const panel = this.pickPanels().find((c) =>
+            c.contains(event.target as Node),
+        );
+        if (!panel) {
+            this.setPick("");
+            return "";
+        }
+        const pixels = this.pickBuffers(pair);
+        if (!pixels) return "";
+        const rect = panel.getBoundingClientRect();
+        if (!(rect.width > 0 && rect.height > 0)) return "";
+        // The panel is the normalised space scaled to fit its box, so the mapping is that scale
+        // and nothing else — no per-side offset, because both sides already share this origin.
+        const x = ((event.clientX - rect.left) * pair.width) / rect.width;
+        const y = ((event.clientY - rect.top) * pair.height) / rect.height;
+        const line = summarise(
+            readingAt(
+                pixels.reference,
+                pixels.candidate,
+                pair.width,
+                pair.height,
+                x,
+                y,
+            ),
+            this.sourceLabel || "Spec",
+            "Render",
+        );
+        this.setPick(line);
+        return line;
+    }
+
+    /**
+     * The pair's pixels, read back once. A tainted canvas throws here exactly as it does for the
+     * score, and the answer is the same: no reading rather than a wrong one.
+     */
+    private pickBuffers(pair: NormalisedPair) {
+        if (this.pickPixels) return this.pickPixels;
+        try {
+            const read = (canvas: HTMLCanvasElement) =>
+                canvas
+                    .getContext("2d", { willReadFrequently: true })!
+                    .getImageData(0, 0, pair.width, pair.height).data;
+            this.pickPixels = {
+                reference: read(pair.reference),
+                candidate: read(pair.candidate),
+            };
+        } catch {
+            this.pickPixels = null;
+        }
+        return this.pickPixels;
+    }
+
+    private setPick(text: string): void {
+        const readout = document.getElementById("cp-spec-pick");
+        if (!readout) return;
+        readout.textContent = text;
+        readout.hidden = text === "";
+    }
+
+    private announcePick(text: string): void {
+        const live = document.getElementById("cp-spec-pick-live");
+        if (live) live.textContent = text ? "Frozen reading. " + text : "";
     }
 
     private range(): HTMLInputElement | null {
@@ -521,6 +656,13 @@ export class SpecCompare extends ControllerElement {
             if (generation !== this.generation) return;
             this.frames = next;
             this.framesKey = key;
+            // New pixels: whatever the eyedropper had read described the previous pair, and a
+            // frozen reading over it would now be asserting the old comparison against the new
+            // picture.
+            this.pickPixels = null;
+            this.pickFrozen = false;
+            this.setPick("");
+            this.announcePick("");
             // Keep inspection facts tied to the same candidate that produced these canvases. The
             // hidden render image can advance while a comparison remains open; reading its URL
             // later would put new bounds and typography over old pixels.
