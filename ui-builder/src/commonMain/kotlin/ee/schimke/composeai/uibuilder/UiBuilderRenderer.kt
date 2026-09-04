@@ -124,6 +124,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
@@ -1360,8 +1361,31 @@ internal fun uiBuilderStateWrite(
 private fun UiBuilderNode.resolvedBool(name: String, state: Map<String, String?>): Boolean {
   val value = obj(name)
   return if (value.optionalString("type") == "stateEquals") {
-    state[value.optionalString("variable")] == value.optionalString("value")
+    uiBuilderStateEquals(state[value.optionalString("variable")], value["value"])
   } else value["value"]?.jsonPrimitive?.booleanOrNull ?: false
+}
+
+/**
+ * Whether a `stateEquals` comparison holds — decided the way the Compose export decides it.
+ *
+ * This renderer keeps state in its string form, so comparing the strings makes `1` and `1.0` two
+ * different values. The generated Kotlin declares a `float` variable as `Double` and emits
+ * `variable == 1.0`, which calls them the same. The preview and the exported screen then disagree
+ * about whether a chip is selected, which is exactly the divergence this builder exists to not
+ * have.
+ *
+ * The operand's own JSON type settles which comparison is the faithful one, without needing the
+ * declaration here: an unquoted number exports as a numeric literal and so compares numerically; a
+ * quoted one exports as a string literal and so keeps comparing as text, where `1` and `1.0` are
+ * properly unequal.
+ */
+internal fun uiBuilderStateEquals(held: String?, operand: JsonElement?): Boolean {
+  val primitive = operand as? JsonPrimitive
+  val expected = primitive?.contentOrNull
+  if (held == expected) return true
+  if (held == null || expected == null || primitive.isString) return false
+  val number = held.toDoubleOrNull() ?: return false
+  return number == expected.toDoubleOrNull()
 }
 
 private fun UiBuilderNode.obj(name: String): JsonObject =

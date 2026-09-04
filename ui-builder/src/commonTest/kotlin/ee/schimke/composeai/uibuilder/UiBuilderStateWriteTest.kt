@@ -2,8 +2,12 @@ package ee.schimke.composeai.uibuilder
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /**
@@ -77,5 +81,31 @@ class UiBuilderStateWriteTest {
       uiBuilderStateWrite(action("""{"type":"navigatePage","pageKey":"next"}"""), emptyMap())
     )
     assertNull(uiBuilderStateWrite(action("""{"type":"select"}"""), emptyMap()))
+  }
+
+  @Test
+  fun `a numeric operand compares by value, the way the exported screen compares it`() {
+    // The renderer keeps state in its string form, so `1` and `1.0` used to be two different
+    // values here while the generated Kotlin — comparing two `Double`s — called them the same.
+    // The preview and the exported screen then disagreed about whether a control was selected.
+    assertTrue(uiBuilderStateEquals("1", JsonPrimitive(1.0)))
+    assertTrue(uiBuilderStateEquals("1.0", JsonPrimitive(1)))
+    assertTrue(uiBuilderStateEquals("2", JsonPrimitive(2)))
+    assertFalse(uiBuilderStateEquals("1.5", JsonPrimitive(1.0)))
+  }
+
+  @Test
+  fun `a quoted operand stays a string comparison`() {
+    // It exports as a string literal, where `1` and `1.0` are properly unequal. Comparing every
+    // pair numerically would make a text variable holding `1` match the label `1.0`.
+    assertTrue(uiBuilderStateEquals("Crime", JsonPrimitive("Crime")))
+    assertFalse(uiBuilderStateEquals("1", JsonPrimitive("1.0")))
+  }
+
+  @Test
+  fun `nothing equals an unset variable except an absent operand`() {
+    assertFalse(uiBuilderStateEquals(null, JsonPrimitive(1.0)))
+    assertFalse(uiBuilderStateEquals("1.0", null))
+    assertFalse(uiBuilderStateEquals("1.0", JsonNull))
   }
 }
