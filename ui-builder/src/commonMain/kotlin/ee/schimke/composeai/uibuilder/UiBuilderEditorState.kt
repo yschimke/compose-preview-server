@@ -162,7 +162,14 @@ data class EditorClipboard(val rootNodeId: String, val nodes: Map<String, UiBuil
 
 data class UiBuilderEditorState(
   val collaboration: CollaborationState,
-  val selectedNodeId: String? = null,
+  /**
+   * The selection, in the order it was built up.
+   *
+   * A list rather than a set because the **last entry is the anchor** — the node a range extends
+   * from, and the one whose properties the inspector shows. Order is what makes shift-click mean
+   * "from there to here" rather than "from some member of a set to here".
+   */
+  val selection: List<String> = emptyList(),
   val clipboard: EditorClipboard? = null,
   val catalogQuery: String = "",
   val operationSequence: Int = 0,
@@ -172,6 +179,16 @@ data class UiBuilderEditorState(
   val propertyErrors: Map<EditorPropertyLocation, String> = emptyMap(),
   val inspectorMode: EditorInspectorMode = EditorInspectorMode.Properties,
 ) {
+  /**
+   * The anchor: the most recently selected node.
+   *
+   * Every single-selection question in the editor — which node the inspector edits, where an insert
+   * lands — is asked of this rather than of the whole selection, so widening selection did not have
+   * to touch those call sites.
+   */
+  val selectedNodeId: String?
+    get() = selection.lastOrNull()
+
   val document: UiBuilderDocument
     get() = collaboration.document
 
@@ -201,6 +218,12 @@ sealed interface UiBuilderEditorEvent {
   data class SearchCatalog(val query: String) : UiBuilderEditorEvent
 
   data class SelectNode(val nodeId: String) : UiBuilderEditorEvent
+
+  /** Add or remove one node, leaving the rest of the selection alone (ctrl/⌘-click). */
+  data class ToggleNode(val nodeId: String) : UiBuilderEditorEvent
+
+  /** Select everything between the anchor and [nodeId] in tree order (shift-click). */
+  data class ExtendSelectionTo(val nodeId: String) : UiBuilderEditorEvent
 
   data class InsertComponent(val componentId: String, val target: ParentSlot) : UiBuilderEditorEvent
 
@@ -263,14 +286,14 @@ class UiBuilderEditorReducer(
   fun initial(document: UiBuilderDocument, selectedNodeId: String? = null): UiBuilderEditorState =
     UiBuilderEditorState(
       collaboration = CollaborationState(document),
-      selectedNodeId = selectedNodeId?.takeIf(document.nodes::containsKey),
+      selection = listOfNotNull(selectedNodeId?.takeIf(document.nodes::containsKey)),
     )
 
   fun reduce(state: UiBuilderEditorState, event: UiBuilderEditorEvent): UiBuilderEditorState =
     when (event) {
       is UiBuilderEditorEvent.SearchCatalog -> state.copy(catalogQuery = event.query)
       is UiBuilderEditorEvent.SelectNode ->
-        if (event.nodeId in state.document.nodes) state.copy(selectedNodeId = event.nodeId)
+        if (event.nodeId in state.document.nodes) state.copy(selection = listOf(event.nodeId))
         else state
       is UiBuilderEditorEvent.InsertComponent -> insert(state, event.componentId, event.target)
       is UiBuilderEditorEvent.MoveNode -> move(state, event)
@@ -281,6 +304,8 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.ApplyTheme -> applyTheme(state, event.settings)
       UiBuilderEditorEvent.DeleteSelected -> deleteSelected(state)
       UiBuilderEditorEvent.DuplicateSelected -> duplicateSelected(state)
+      is UiBuilderEditorEvent.ToggleNode -> toggleNode(state, event.nodeId)
+      is UiBuilderEditorEvent.ExtendSelectionTo -> extendSelection(state, event.nodeId)
       is UiBuilderEditorEvent.SelectRelative -> selectRelative(state, event.move)
       is UiBuilderEditorEvent.MoveSelected -> moveSelected(state, event.direction)
       UiBuilderEditorEvent.CopySelected -> copySelected(state)
@@ -314,15 +339,35 @@ class UiBuilderEditorReducer(
     return null
   }
 
+  /**
+   * Whether the whole selection can go.
+   *
+   * Checked **cumulatively**, not one node at a time against the original document. Three children
+   * of a slot with `min = 1` can lose two; asking of each separately says yes three times and the
+   * third delete is rejected halfway through — a partial delete the user did not ask for and cannot
+   * undo in one step.
+   *
+   * The selection is reduced to its top-most nodes first: a node selected alongside its own
+   * ancestor is deleted by the ancestor's removal, and counting it separately would over-count what
+   * each slot loses.
+   */
   fun canDeleteSelected(state: UiBuilderEditorState): Boolean {
-    val nodeId = state.selectedNodeId?.takeIf(state.document.nodes::containsKey) ?: return false
-    val parent = state.document.location(nodeId)
-    if (parent == null) return state.document.roots.size > 1
-    val parentNode = state.document.nodes.getValue(parent.nodeId)
-    val minimum =
-      catalog.componentsById[parentNode.componentId]?.slot(parent.slot)?.cardinality?.min
-        ?: return false
-    return parentNode.slots[parent.slot].orEmpty().size > minimum
+    val targets = state.deletionRoots()
+    if (targets.isEmpty()) return false
+    val document = state.document
+    val rootsRemoved = targets.count { document.location(it) == null }
+    if (rootsRemoved > 0 && document.roots.size - rootsRemoved < 1) return false
+    return targets
+      .mapNotNull(document::location)
+      .groupingBy { it }
+      .eachCount()
+      .all { (parent, removed) ->
+        val parentNode = document.nodes[parent.nodeId] ?: return@all false
+        val minimum =
+          catalog.componentsById[parentNode.componentId]?.slot(parent.slot)?.cardinality?.min
+            ?: return@all false
+        parentNode.slots[parent.slot].orEmpty().size - removed >= minimum
+      }
   }
 
   fun canUndo(state: UiBuilderEditorState): Boolean = state.undoTargetOperationId(actorId) != null
@@ -556,7 +601,7 @@ class UiBuilderEditorReducer(
       )
     }
     val field =
-      propertyFields(state.copy(selectedNodeId = nodeId)).firstOrNull { it.name == propertyName }
+      propertyFields(state.copy(selection = listOf(nodeId))).firstOrNull { it.name == propertyName }
         ?: return state
     val parsed = field.parseDraft(draft)
     if (parsed is PropertyDraft.Invalid) {
@@ -683,19 +728,24 @@ class UiBuilderEditorReducer(
 
   private fun deleteSelected(state: UiBuilderEditorState): UiBuilderEditorState {
     val sequence = state.operationSequence + 1
-    val nodeId = state.selectedNodeId ?: return state
+    val targets = state.deletionRoots()
+    if (targets.isEmpty()) return state
     if (!canDeleteSelected(state)) {
       return state.rejected(
         sequence,
         RejectionCode.INVALID_DOCUMENT,
-        "Deleting $nodeId would violate root or slot cardinality",
+        if (targets.size == 1) "Deleting ${targets.single()} would violate root or slot cardinality"
+        else "Deleting these ${targets.size} nodes would violate root or slot cardinality",
       )
     }
-    val parent = state.document.location(nodeId)
-    val selectionAfter = parent?.nodeId ?: state.document.roots.firstOrNull { it != nodeId }
+    val anchor = targets.last()
+    val selectionAfter =
+      state.document.location(anchor)?.nodeId ?: state.document.roots.firstOrNull { it !in targets }
+    // One apply for the whole selection, so a multi-node delete is one undo step rather than
+    // several the user has to unwind one at a time.
     return state.apply(
       sequence = sequence,
-      operations = listOf(DesignOperation.DeleteNode(nodeId)),
+      operations = targets.map(DesignOperation::DeleteNode),
       selectionAfter = selectionAfter,
     )
   }
@@ -731,6 +781,28 @@ class UiBuilderEditorReducer(
    * A step with nowhere to go returns the state unchanged rather than wrapping to the other end.
    * Wrapping reads as a jump when you are holding a key down to walk a tree.
    */
+  private fun toggleNode(state: UiBuilderEditorState, nodeId: String): UiBuilderEditorState {
+    if (nodeId !in state.document.nodes) return state
+    // Re-adding moves it to the end so it becomes the anchor, which is what a click means even
+    // when the node was already in the selection.
+    val selection =
+      if (nodeId in state.selection) state.selection - nodeId else state.selection + nodeId
+    return state.copy(selection = selection)
+  }
+
+  private fun extendSelection(state: UiBuilderEditorState, nodeId: String): UiBuilderEditorState {
+    if (nodeId !in state.document.nodes) return state
+    val anchor = state.selectedNodeId ?: return state.copy(selection = listOf(nodeId))
+    val order = treeRows(state.document).map(EditorTreeRow::nodeId)
+    val from = order.indexOf(anchor)
+    val to = order.indexOf(nodeId)
+    if (from < 0 || to < 0) return state.copy(selection = listOf(nodeId))
+    // Tree order, not document order: a range is what the user swept over in the panel.
+    val range = order.subList(minOf(from, to), maxOf(from, to) + 1)
+    // The clicked node ends up last so it becomes the anchor a further shift-click extends from.
+    return state.copy(selection = (range - nodeId) + nodeId)
+  }
+
   private fun selectRelative(
     state: UiBuilderEditorState,
     move: EditorSelectionMove,
@@ -739,7 +811,7 @@ class UiBuilderEditorReducer(
     if (rows.isEmpty()) return state
     val index = rows.indexOfFirst { it.nodeId == state.selectedNodeId }
     // Nothing selected yet: any step starts at the top, which is what a first arrow press means.
-    if (index < 0) return state.copy(selectedNodeId = rows.first().nodeId)
+    if (index < 0) return state.copy(selection = listOf(rows.first().nodeId))
     val row = rows[index]
     val target =
       when (move) {
@@ -751,7 +823,7 @@ class UiBuilderEditorReducer(
         EditorSelectionMove.FirstChild ->
           rows.getOrNull(index + 1)?.takeIf { it.depth == row.depth + 1 }?.nodeId
       }
-    return target?.let { state.copy(selectedNodeId = it) } ?: state
+    return target?.let { state.copy(selection = listOf(it)) } ?: state
   }
 
   /**
@@ -911,7 +983,9 @@ class UiBuilderEditorReducer(
     val accepted = application.outcome is CommandOutcome.Accepted
     return copy(
       collaboration = application.state,
-      selectedNodeId = if (accepted) selectionAfter else selectedNodeId,
+      selection =
+        if (accepted) listOfNotNull(selectionAfter)
+        else selection.filter(document.nodes::containsKey),
       operationSequence = sequence,
       lastOutcome = application.outcome,
       propertyErrors =
@@ -1224,6 +1298,21 @@ private fun UiBuilderNode.contentLabel(capability: ComponentCapability): String?
     // One line in a layer row. A paragraph pasted into a Text would otherwise push the type column
     // off the panel, so it is cut here rather than relying on the row to ellipsize it.
     ?.let { if (it.length <= 40) it else it.take(39).trimEnd() + "…" }
+}
+
+/**
+ * The selected nodes that are not inside another selected node, in selection order.
+ *
+ * Deleting an ancestor takes its descendants with it, so a descendant selected alongside its
+ * ancestor is not a separate deletion — emitting one for it would delete a node that no longer
+ * exists, and counting it would over-count what its slot loses.
+ */
+private fun UiBuilderEditorState.deletionRoots(): List<String> {
+  val present = selection.filter(document.nodes::containsKey)
+  return present.filterNot { nodeId ->
+    generateSequence(document.location(nodeId)?.nodeId) { document.location(it)?.nodeId }
+      .any { it in present }
+  }
 }
 
 private fun UiBuilderDocument.clip(nodeId: String): EditorClipboard {

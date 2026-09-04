@@ -72,6 +72,10 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -760,6 +764,13 @@ private fun EditorAction(
   }
 }
 
+/** How a click on a layer row changes the selection. */
+private enum class LayerSelectionGesture {
+  Replace,
+  Toggle,
+  Range,
+}
+
 private fun editorShortcut(
   event: KeyEvent,
   enabled: Boolean,
@@ -845,11 +856,19 @@ private fun EditorNavigator(
         itemsIndexed(treeRows, key = { _, row -> row.nodeId }) { _, row ->
           LayerRow(
             row = row,
-            selected = row.nodeId == state.selectedNodeId,
+            // Every selected node is highlighted, not just the anchor — a selection you cannot see
+            // is one you cannot trust before pressing Delete.
+            selected = row.nodeId in state.selection,
             collaborators = collaborators.filter { row.nodeId in it.selectedNodeIds },
-            onSelect = {
+            onSelect = { gesture ->
               onEditorInteraction()
-              dispatch(UiBuilderEditorEvent.SelectNode(row.nodeId))
+              dispatch(
+                when (gesture) {
+                  LayerSelectionGesture.Replace -> UiBuilderEditorEvent.SelectNode(row.nodeId)
+                  LayerSelectionGesture.Toggle -> UiBuilderEditorEvent.ToggleNode(row.nodeId)
+                  LayerSelectionGesture.Range -> UiBuilderEditorEvent.ExtendSelectionTo(row.nodeId)
+                }
+              )
             },
             onMove = { direction ->
               onEditorInteraction()
@@ -1092,7 +1111,7 @@ private fun LayerRow(
   row: EditorTreeRow,
   selected: Boolean,
   collaborators: List<UiBuilderCollaborator>,
-  onSelect: () -> Unit,
+  onSelect: (LayerSelectionGesture) -> Unit,
   onMove: (EditorMoveDirection) -> Unit,
 ) {
   var verticalDrag by remember { mutableFloatStateOf(0f) }
@@ -1128,9 +1147,27 @@ private fun LayerRow(
       tint = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Row(
-      Modifier.fillMaxHeight().weight(1f).clickable(onClick = onSelect).semantics {
-        contentDescription = "Select ${row.nodeId}"
-      },
+      Modifier.fillMaxHeight()
+        .weight(1f)
+        // Not `clickable`: it cannot see which modifier keys are down, and ctrl/⌘-click and
+        // shift-click are how a selection is built up in every tool people arrive from.
+        .pointerInput(row.nodeId) {
+          awaitPointerEventScope {
+            while (true) {
+              val event = awaitPointerEvent()
+              if (event.type != PointerEventType.Press) continue
+              val modifiers = event.keyboardModifiers
+              onSelect(
+                when {
+                  modifiers.isShiftPressed -> LayerSelectionGesture.Range
+                  modifiers.isCtrlPressed || modifiers.isMetaPressed -> LayerSelectionGesture.Toggle
+                  else -> LayerSelectionGesture.Replace
+                }
+              )
+            }
+          }
+        }
+        .semantics { contentDescription = "Select ${row.nodeId}" },
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(

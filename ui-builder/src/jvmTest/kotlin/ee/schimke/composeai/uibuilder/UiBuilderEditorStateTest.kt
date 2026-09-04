@@ -246,7 +246,7 @@ class UiBuilderEditorStateTest {
     val submission = assertIs<EditorSubmission.Batch>(reducer.acceptedSubmission(initial, themed))
     assertEquals(6, submission.command.operations.size)
     assertTrue(
-      reducer.propertyFields(themed.copy(selectedNodeId = "root-surface")).none {
+      reducer.propertyFields(themed.copy(selection = listOf("root-surface"))).none {
         it.name.startsWith("theme")
       }
     )
@@ -385,7 +385,7 @@ class UiBuilderEditorStateTest {
           "false",
         ),
       )
-    val selectedText = booleanEdited.copy(selectedNodeId = "detail-podcast-title")
+    val selectedText = booleanEdited.copy(selection = listOf("detail-podcast-title"))
     val colorEdited =
       reducer.reduce(
         selectedText,
@@ -865,5 +865,126 @@ class UiBuilderEditorStateTest {
   fun `a layer name is one line, however much text the node holds`() {
     val texts = reducer.treeRows(document).filter { it.componentId == "m3/text" }
     texts.forEach { assertTrue(it.label.length <= 40, "${it.nodeId}: ${it.label.length}") }
+  }
+
+  @Test
+  fun `toggling adds and removes without disturbing the rest of the selection`() {
+    val rows = reducer.treeRows(document)
+    val a = rows[0].nodeId
+    val b = rows[1].nodeId
+    val c = rows[2].nodeId
+
+    val three =
+      listOf(b, c).fold(reducer.initial(document, a)) { state, id ->
+        reducer.reduce(state, UiBuilderEditorEvent.ToggleNode(id))
+      }
+    assertEquals(listOf(a, b, c), three.selection)
+    // The last click is the anchor, which is what a range extends from next.
+    assertEquals(c, three.selectedNodeId)
+
+    val without = reducer.reduce(three, UiBuilderEditorEvent.ToggleNode(b))
+    assertEquals(listOf(a, c), without.selection)
+  }
+
+  @Test
+  fun `a plain select replaces the selection rather than growing it`() {
+    val rows = reducer.treeRows(document)
+    val two =
+      reducer.reduce(
+        reducer.initial(document, rows[0].nodeId),
+        UiBuilderEditorEvent.ToggleNode(rows[1].nodeId),
+      )
+    val replaced = reducer.reduce(two, UiBuilderEditorEvent.SelectNode(rows[2].nodeId))
+
+    assertEquals(listOf(rows[2].nodeId), replaced.selection)
+  }
+
+  @Test
+  fun `a range covers everything between the anchor and the click, in tree order`() {
+    val rows = reducer.treeRows(document)
+    val extended =
+      reducer.reduce(
+        reducer.initial(document, rows[0].nodeId),
+        UiBuilderEditorEvent.ExtendSelectionTo(rows[3].nodeId),
+      )
+
+    assertEquals(rows.take(4).map { it.nodeId }.toSet(), extended.selection.toSet())
+    // The clicked node anchors the next extension.
+    assertEquals(rows[3].nodeId, extended.selectedNodeId)
+  }
+
+  @Test
+  fun `a range extends backwards too`() {
+    val rows = reducer.treeRows(document)
+    val back =
+      reducer.reduce(
+        reducer.initial(document, rows[3].nodeId),
+        UiBuilderEditorEvent.ExtendSelectionTo(rows[1].nodeId),
+      )
+
+    assertEquals(rows.subList(1, 4).map { it.nodeId }.toSet(), back.selection.toSet())
+  }
+
+  @Test
+  fun `deleting several nodes is one undo step`() {
+    val rows = reducer.treeRows(document)
+    val siblings =
+      rows
+        .groupBy { it.parent }
+        .values
+        .first { group -> group.size > 2 && group.first().parent != null }
+    val two = siblings.take(2).map { it.nodeId }
+    val state =
+      reducer.reduce(reducer.initial(document, two[0]), UiBuilderEditorEvent.ToggleNode(two[1]))
+    val deleted = reducer.reduce(state, UiBuilderEditorEvent.DeleteSelected)
+
+    two.forEach { assertFalse(it in deleted.document.nodes, it) }
+    // One revision, not two: the whole selection goes in a single operation.
+    assertEquals(document.revision + 1, deleted.document.revision)
+  }
+
+  @Test
+  fun `a selected descendant is not deleted twice by its selected ancestor`() {
+    val rows = reducer.treeRows(document)
+    val parentRow = rows.first { row -> rows.any { it.parent?.nodeId == row.nodeId } }
+    val child = rows.first { it.parent?.nodeId == parentRow.nodeId }
+    val both =
+      reducer.reduce(
+        reducer.initial(document, parentRow.nodeId),
+        UiBuilderEditorEvent.ToggleNode(child.nodeId),
+      )
+
+    // Whether this is deletable at all depends on the fixture's cardinality; what must hold is
+    // that the child is never emitted as its own deletion, since the parent already removes it.
+    val deleted = reducer.reduce(both, UiBuilderEditorEvent.DeleteSelected)
+    if (parentRow.nodeId !in deleted.document.nodes) {
+      assertFalse(child.nodeId in deleted.document.nodes)
+      assertEquals(document.revision + 1, deleted.document.revision)
+    }
+  }
+
+  @Test
+  fun `a slot at its minimum refuses the whole delete rather than half of it`() {
+    // Cumulative, not one-at-a-time: asking of each node separately says yes twice and the second
+    // delete is rejected halfway through, leaving a partial delete nobody asked for.
+    val rows = reducer.treeRows(document)
+    val group =
+      rows.groupBy { it.parent }.values.firstOrNull { it.size > 1 && it.first().parent != null }
+        ?: return
+    val all = group.map { it.nodeId }
+    val everything =
+      all.drop(1).fold(reducer.initial(document, all.first())) { state, id ->
+        reducer.reduce(state, UiBuilderEditorEvent.ToggleNode(id))
+      }
+
+    // Emptying a slot entirely is only allowed when its minimum is zero, which the reducer knows;
+    // whichever way it answers, the delete must be all or nothing rather than partial.
+    val attempted = reducer.reduce(everything, UiBuilderEditorEvent.DeleteSelected)
+    val survivors = all.count { it in attempted.document.nodes }
+    assertTrue(
+      survivors == 0 || survivors == all.size,
+      "partial delete: $survivors of ${all.size} survived",
+    )
+    if (!reducer.canDeleteSelected(everything)) assertEquals(all.size, survivors)
   }
 }
