@@ -347,6 +347,129 @@ class EditorWrapOrderTest {
   }
 
   @Test
+  fun `a decimal that is not a finite number is refused`() {
+    // `toDoubleOrNull` accepts `NaN` and `Infinity`, and `kotlinLiteral` emits a JSON number
+    // verbatim — so this authored a screen whose generated source read `value = NaN`, a bare
+    // identifier the exported file never declares.
+    val ratio =
+      withState(
+        "ratio",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("value"),
+            "valueType" to JsonPrimitive("float"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(0.0),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+      )
+
+    listOf("NaN", "Infinity", "-Infinity").forEach { value ->
+      val outcome =
+        assertIs<CommandOutcome.Rejected>(
+          insertWith(ratio, EditorStateAction.Set("ratio", value)).lastOutcome
+        )
+      assertTrue(outcome.message.contains("not a decimal value"), outcome.message)
+    }
+
+    assertIs<CommandOutcome.Accepted>(
+      insertWith(ratio, EditorStateAction.Set("ratio", "0.5")).lastOutcome
+    )
+  }
+
+  @Test
+  fun `wrapping a selection with a gap in it is refused rather than reordering the screen`() {
+    // The container takes the place of the first node it swallows, so wrapping the first and last
+    // chip moved the middle one — which nobody selected — out from between them.
+    val row = document.nodes.getValue("category-row").slots.getValue("items")
+    assertEquals(listOf("chip-crime", "chip-news", "chip-comedy"), row)
+
+    val gapped =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = "chip-crime"),
+        UiBuilderEditorEvent.ToggleNode("chip-comedy"),
+      )
+    assertEquals(listOf("chip-crime", "chip-comedy"), gapped.selection)
+    assertTrue(reducer.wrapCandidates(gapped).isEmpty(), "nothing should be offered")
+
+    val refused = reducer.reduce(gapped, UiBuilderEditorEvent.WrapSelection("layout/row"))
+
+    val outcome = assertIs<CommandOutcome.Rejected>(refused.lastOutcome)
+    assertTrue(outcome.message.contains("not next to each other"), outcome.message)
+    assertEquals(row, refused.document.nodes.getValue("category-row").slots.getValue("items"))
+  }
+
+  @Test
+  fun `two neighbours are still wrappable`() {
+    val adjacent =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = "chip-crime"),
+        UiBuilderEditorEvent.ToggleNode("chip-news"),
+      )
+
+    assertTrue(reducer.wrapCandidates(adjacent).any { it.componentId == "layout/row" })
+    assertIs<CommandOutcome.Accepted>(
+      reducer.reduce(adjacent, UiBuilderEditorEvent.WrapSelection("layout/row")).lastOutcome
+    )
+  }
+
+  @Test
+  fun `a cut pasted back lands where it was cut from, not at the end of the slot`() {
+    // Cut-then-paste is how a node is moved. Cut selects the parent and a paste into a parent goes
+    // to the end of its slot, so cutting the middle chip and pasting it straight back sent it to
+    // the end of the row.
+    val cut =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = "chip-news"),
+        UiBuilderEditorEvent.CutSelected,
+      )
+    assertIs<CommandOutcome.Accepted>(cut.lastOutcome)
+    assertEquals(
+      listOf("chip-crime", "chip-comedy"),
+      cut.document.nodes.getValue("category-row").slots.getValue("items"),
+    )
+
+    val pasted = reducer.reduce(cut, UiBuilderEditorEvent.Paste)
+    assertIs<CommandOutcome.Accepted>(pasted.lastOutcome)
+
+    val items = pasted.document.nodes.getValue("category-row").slots.getValue("items")
+    assertEquals(1, items.indexOf(assertIs<String>(pasted.selectedNodeId)), "$items")
+  }
+
+  @Test
+  fun `a cut from the head of a slot goes back to the head`() {
+    // The one position "paste at the end" can never reach, and so the reason the origin records a
+    // position rather than a neighbour to select.
+    val cut =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = "chip-crime"),
+        UiBuilderEditorEvent.CutSelected,
+      )
+    val pasted = reducer.reduce(cut, UiBuilderEditorEvent.Paste)
+    assertIs<CommandOutcome.Accepted>(pasted.lastOutcome)
+
+    val items = pasted.document.nodes.getValue("category-row").slots.getValue("items")
+    assertEquals(0, items.indexOf(assertIs<String>(pasted.selectedNodeId)), "$items")
+  }
+
+  @Test
+  fun `a copy still lands beside the selection rather than where anything was cut`() {
+    // Only a cut carries an origin: a copy was never removed from anywhere, so there is no
+    // position to restore and the paste belongs next to what you have selected.
+    val copied =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = "chip-news"),
+        UiBuilderEditorEvent.CopySelected,
+      )
+    val pasted = reducer.reduce(copied, UiBuilderEditorEvent.Paste)
+    assertIs<CommandOutcome.Accepted>(pasted.lastOutcome)
+
+    val items = pasted.document.nodes.getValue("category-row").slots.getValue("items")
+    assertEquals(2, items.indexOf(assertIs<String>(pasted.selectedNodeId)), "$items")
+  }
+
+  @Test
   fun `a generated node id carries the operation prefix so two clients cannot collide`() {
     // The sequence is local, so two people wrapping a selection as their own first operation both
     // reach 1. Operation ids were already qualified and node ids were not, so the server accepted

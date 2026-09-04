@@ -168,10 +168,25 @@ data class EditorClipboard(
   /** The copied subtrees' roots, in tree order — a selection can hold more than one. */
   val rootNodeIds: List<String>,
   val nodes: Map<String, UiBuilderNode>,
+  /** Where a *cut* took these from; null for a copy, which was never removed from anywhere. */
+  val origin: EditorClipboardOrigin? = null,
 ) {
   val rootComponentIds: List<String>
     get() = rootNodeIds.map { nodes.getValue(it).componentId }
 }
+
+/**
+ * The place a cut subtree came out of.
+ *
+ * Cut-then-paste is how a node is moved, and a move that lands somewhere else is not a move. Cut
+ * selects the parent, and a paste into a parent goes to the end of its slot — so cutting a card
+ * from the middle of a list and pasting it straight back sent it to the bottom.
+ *
+ * [afterNodeId] is the sibling the subtree sat behind, or null when it was first in the slot —
+ * which is the one position "paste at the end" can never reach, and so the reason this records a
+ * position rather than a neighbour to select.
+ */
+data class EditorClipboardOrigin(val parent: ParentSlot, val afterNodeId: String?)
 
 data class UiBuilderEditorState(
   val collaboration: CollaborationState,
@@ -366,7 +381,11 @@ private fun EditorStateAction.valueRefusal(declaration: JsonObject?): String? {
       // `toIntOrNull`, because the exporter declares an integer variable as `Int`. A value past
       // that range parses as a Long and then emits a literal the generated Kotlin cannot hold.
       StateKind.INTEGER -> raw.toIntOrNull() != null
-      StateKind.DECIMAL -> raw.toDoubleOrNull() != null
+      // Finite, and for the same reason the integer case is bounded to `Int`: `kotlinLiteral`
+      // emits a JSON number verbatim, so `NaN` and `Infinity` — which `toDoubleOrNull` accepts —
+      // would export as bare identifiers the generated Kotlin never declares. The property editor
+      // already refuses them; the state editor was the way past it.
+      StateKind.DECIMAL -> raw.toDoubleOrNull()?.isFinite() == true
       StateKind.STRING -> true
     }
   return if (parses) null
@@ -423,7 +442,7 @@ private fun typedStateValue(raw: String, declaration: JsonObject?): JsonPrimitiv
   when (declaredStateKind(declaration)) {
     StateKind.BOOLEAN -> JsonPrimitive(raw.toBooleanStrictOrNull() ?: false)
     StateKind.INTEGER -> JsonPrimitive(raw.toIntOrNull() ?: 0)
-    StateKind.DECIMAL -> JsonPrimitive(raw.toDoubleOrNull() ?: 0.0)
+    StateKind.DECIMAL -> JsonPrimitive(raw.toDoubleOrNull()?.takeIf(Double::isFinite) ?: 0.0)
     StateKind.STRING -> JsonPrimitive(raw)
   }
 
@@ -1377,6 +1396,7 @@ class UiBuilderEditorReducer(
     val targets = state.selectionRoots()
     if (targets.isEmpty()) return emptyList()
     val parent = wrappableParent(state, targets) ?: return emptyList()
+    if (!state.adjacentInParent(targets, parent)) return emptyList()
     val children =
       targets
         .mapNotNull { state.document.nodes[it]?.componentId }
@@ -1408,6 +1428,25 @@ class UiBuilderEditorReducer(
     state: UiBuilderEditorState,
     targets: List<String>,
   ): ParentSlot? = targets.map { state.document.location(it) }.distinct().singleOrNull()
+
+  /**
+   * Whether the selection is one unbroken run of siblings.
+   *
+   * Wrapping `A` and `C` out of `A, B, C` has no faithful answer. The container takes the place of
+   * the first node it swallows, so `B` — which nobody selected and nobody moved — comes out after
+   * the container rather than between the two nodes it was between. Silently reordering a screen
+   * around a node the user did not touch is worse than not offering the wrap, and the same reason
+   * [wrappableParent] refuses a selection spread across two parents.
+   */
+  private fun UiBuilderEditorState.adjacentInParent(
+    targets: List<String>,
+    parent: ParentSlot,
+  ): Boolean {
+    val siblings = document.children(parent)
+    val positions = targets.map(siblings::indexOf)
+    if (positions.any { it < 0 }) return false
+    return (positions.max() - positions.min()) == targets.size - 1
+  }
 
   /** The container slot that could take [children], given the container lands in [parent]. */
   private fun wrapSlotOf(
@@ -1443,6 +1482,13 @@ class UiBuilderEditorReducer(
         sequence,
         RejectionCode.INVALID_LOCATION,
         "These nodes are in different places, so there is nowhere to put one container",
+      )
+    }
+    if (!state.adjacentInParent(targets, parent)) {
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_LOCATION,
+        "These nodes are not next to each other, so wrapping them would move what sits between",
       )
     }
     val children =
@@ -1609,7 +1655,7 @@ class UiBuilderEditorReducer(
         else "Cutting these ${roots.size} nodes would violate root or slot cardinality",
       )
     }
-    val clipboard = state.document.clip(roots)
+    val clipboard = state.document.clip(roots).withOriginOf(state.document, roots)
     val anchor = roots.last()
     val selectionAfter =
       state.document.location(anchor)?.nodeId ?: state.document.roots.firstOrNull { it !in roots }
@@ -1642,9 +1688,21 @@ class UiBuilderEditorReducer(
     // back to the parent slot for a leaf — copying a card in a list and pasting sent the copy to
     // the bottom of the list, which is never where you were looking.
     val selectedLocation = state.selectedNodeId?.let(state.document::location)
+    // A cut pasted back into the slot it came from returns to its own position, because that is
+    // what makes cut-then-paste a move rather than a send-to-the-bottom. The anchor has to still
+    // be there — the document may have been edited between the two — and `null` is a position in
+    // its own right, meaning the subtree was first in the slot.
+    val origin =
+      clipboard.origin?.takeIf {
+        it.parent == destination &&
+          (it.afterNodeId == null || it.afterNodeId in state.document.children(destination))
+      }
     var after =
-      if (destination == selectedLocation) state.selectedNodeId
-      else state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
+      when {
+        origin != null -> origin.afterNodeId
+        destination == selectedLocation -> state.selectedNodeId
+        else -> state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
+      }
     val taken = state.document.takenIdentities()
     clipboard.rootNodeIds.forEachIndexed { index, rootId ->
       // Numbered per root as well as per paste, so two roots in one batch cannot collide with each
@@ -2146,6 +2204,25 @@ private fun UiBuilderDocument.clip(nodeIds: List<String>): EditorClipboard {
   val ordered = nodeIds.sortedBy(treeIndex())
   ordered.forEach(::visit)
   return EditorClipboard(rootNodeIds = ordered, nodes = collected)
+}
+
+/**
+ * The same clipboard, told where the cut took its roots from.
+ *
+ * Read before the delete is applied, off the document the subtrees are still in. The run's first
+ * root in tree order carries the position, and the sibling behind it has to be one nothing is
+ * cutting — cutting `B, C` out of `A, B, C` puts the run back after `A`, not after the `B` that
+ * left with it.
+ */
+private fun EditorClipboard.withOriginOf(
+  document: UiBuilderDocument,
+  roots: List<String>,
+): EditorClipboard {
+  val first = rootNodeIds.firstOrNull() ?: return this
+  val parent = document.location(first) ?: return this
+  val siblings = document.children(parent)
+  val before = siblings.take(siblings.indexOf(first).coerceAtLeast(0))
+  return copy(origin = EditorClipboardOrigin(parent, before.lastOrNull { it !in roots }))
 }
 
 /** Position in the flattened tree, for the operations whose result is an order. */
