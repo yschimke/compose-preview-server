@@ -283,6 +283,9 @@ sealed interface UiBuilderEditorEvent {
   /** Reorder the selected node among its siblings. */
   data class MoveSelected(val direction: EditorMoveDirection) : UiBuilderEditorEvent
 
+  /** Put the selection inside a new container of [componentId], where it already sits. */
+  data class WrapSelection(val componentId: String) : UiBuilderEditorEvent
+
   data object CopySelected : UiBuilderEditorEvent
 
   data object CutSelected : UiBuilderEditorEvent
@@ -342,6 +345,7 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.ExtendSelectionTo -> extendSelection(state, event.nodeId)
       is UiBuilderEditorEvent.SelectRelative -> selectRelative(state, event.move)
       is UiBuilderEditorEvent.MoveSelected -> moveSelected(state, event.direction)
+      is UiBuilderEditorEvent.WrapSelection -> wrapSelection(state, event.componentId)
       UiBuilderEditorEvent.CopySelected -> copySelected(state)
       UiBuilderEditorEvent.CutSelected -> cutSelected(state)
       UiBuilderEditorEvent.Paste -> paste(state)
@@ -1097,6 +1101,133 @@ class UiBuilderEditorReducer(
       listOf(DesignOperation.SetProperty(nodeId, propertyName, encoded)),
       selectionAfter = nodeId,
     )
+  }
+
+  /**
+   * The containers that could hold the current selection where it stands.
+   *
+   * Offered rather than a single "Group", because this builder wraps in a **real component** from
+   * the catalog — a `Column`, a `Card`, a `Surface` — not in an inert frame. Which ones are legal
+   * depends on both ends: the parent slot has to accept the container, and the container needs a
+   * slot that accepts every selected node. Asking both here means the menu lists what will work
+   * instead of offering everything and refusing most of it.
+   */
+  fun wrapCandidates(state: UiBuilderEditorState): List<EditorCatalogItem> {
+    val targets = state.selectionRoots()
+    if (targets.isEmpty()) return emptyList()
+    val parent = wrappableParent(state, targets) ?: return emptyList()
+    val children =
+      targets
+        .mapNotNull { state.document.nodes[it]?.componentId }
+        .mapNotNull(catalog.componentsById::get)
+    if (children.size != targets.size) return emptyList()
+    return catalog.components
+      .filter { container -> wrapSlotOf(container, children, parent, state) != null }
+      .map {
+        EditorCatalogItem(
+          componentId = it.componentId,
+          displayName = it.displayName,
+          kind = it.editorKind(),
+        )
+      }
+      .sortedWith(compareBy(EditorCatalogItem::kind, EditorCatalogItem::displayName))
+  }
+
+  /**
+   * The one slot every selected node shares, or null when they do not share one.
+   *
+   * Wrapping a selection spread across two parents has no answer: the container can only live in
+   * one place, so the other nodes would have to move somewhere the document never put them. A
+   * refusal is better than picking a parent on the user's behalf.
+   *
+   * Roots are excluded for the same reason a root cannot be deleted freely — a screen body is not a
+   * slot, so there is nothing to insert the container into.
+   */
+  private fun wrappableParent(
+    state: UiBuilderEditorState,
+    targets: List<String>,
+  ): ParentSlot? = targets.map { state.document.location(it) }.distinct().singleOrNull()
+
+  /** The container slot that could take [children], given the container lands in [parent]. */
+  private fun wrapSlotOf(
+    container: ComponentCapability,
+    children: List<ComponentCapability>,
+    parent: ParentSlot,
+    state: UiBuilderEditorState,
+  ): SlotCapability? {
+    val parentNode = state.document.nodes[parent.nodeId] ?: return null
+    val parentSlot =
+      catalog.componentsById[parentNode.componentId]?.slot(parent.slot) ?: return null
+    // The container replaces the children it swallows, so the slot's occupancy is unchanged but
+    // for the one node it gains — checked against the max the same way an insert is.
+    if (!parentSlot.accepts(container)) return null
+    val occupancy = parentNode.slots[parent.slot].orEmpty().size - children.size + 1
+    if (parentSlot.cardinality.max?.let { occupancy > it } == true) return null
+    return container.slots.firstOrNull { slot ->
+      children.all { slot.accepts(it) } && slot.hasRoom(children.size - 1)
+    }
+  }
+
+  private fun wrapSelection(
+    state: UiBuilderEditorState,
+    componentId: String,
+  ): UiBuilderEditorState {
+    val sequence = state.operationSequence + 1
+    val targets = state.selectionRoots()
+    if (targets.isEmpty()) return state
+    val container = catalog.componentsById[componentId] ?: return state
+    val parent = wrappableParent(state, targets)
+    if (parent == null) {
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_LOCATION,
+        "These nodes are in different places, so there is nowhere to put one container",
+      )
+    }
+    val children =
+      targets
+        .mapNotNull { state.document.nodes[it]?.componentId }
+        .mapNotNull(catalog.componentsById::get)
+    val slot = wrapSlotOf(container, children, parent, state)
+    if (children.size != targets.size || slot == null) {
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_LOCATION,
+        "${container.displayName} has no slot that accepts this selection",
+      )
+    }
+    val containerId =
+      state.document.freshNodeId("editor-${componentId.replace('/', '-')}", sequence)
+    val operations = mutableListOf<DesignOperation>()
+    val defaultError =
+      container.appendDefaultSubtree(
+        catalog = catalog,
+        document = state.document,
+        nodeId = containerId,
+        parent = parent,
+        // Where the first wrapped node was, so the container takes the selection's place rather
+        // than appearing at the end of the slot and reordering the screen.
+        afterNodeId = state.document.children(parent).takeWhile { it !in targets }.lastOrNull(),
+        operations = operations,
+      )
+    if (defaultError != null) {
+      return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, defaultError)
+    }
+    // A container's default subtree may come with placeholder children; the wrapped nodes go after
+    // them in document order, which keeps the container valid at every step.
+    var after: String? = null
+    targets.forEach { nodeId ->
+      operations +=
+        DesignOperation.MoveNode(
+          nodeId = nodeId,
+          parent = ParentSlot(containerId, slot.name),
+          afterNodeId = after,
+        )
+      after = nodeId
+    }
+    // One apply: inserting a container and leaving the children outside it is not a state the
+    // document should be able to rest in, and undo should not have to be pressed twice.
+    return state.apply(sequence, operations, selectionAfter = containerId)
   }
 
   private fun copySelected(state: UiBuilderEditorState): UiBuilderEditorState {

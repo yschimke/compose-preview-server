@@ -1231,4 +1231,97 @@ class UiBuilderEditorStateTest {
       attempted.document.nodes.getValue("chip-crime").properties["selected"],
     )
   }
+
+  @Test
+  fun `wrapping puts the selection inside a new container, in one step`() {
+    val rows = reducer.treeRows(document)
+    val siblings =
+      rows.groupBy { it.parent }.values.first { it.size > 2 && it.first().parent != null }
+    val two = siblings.take(2).map { it.nodeId }
+    val selected =
+      reducer.reduce(reducer.initial(document, two[0]), UiBuilderEditorEvent.ToggleNode(two[1]))
+
+    val candidate = reducer.wrapCandidates(selected).firstOrNull() ?: return
+    val wrapped =
+      reducer.reduce(selected, UiBuilderEditorEvent.WrapSelection(candidate.componentId))
+    val containerId = assertIs<String>(wrapped.selectedNodeId)
+
+    // Both wrapped nodes now sit under the container rather than beside it.
+    two.forEach { nodeId ->
+      assertEquals(
+        containerId,
+        reducer.treeRows(wrapped.document).first { it.nodeId == nodeId }.parent?.nodeId,
+        nodeId,
+      )
+    }
+    // One undo step: a container inserted with its children still outside is not a state the
+    // document should rest in.
+    assertEquals(document.revision + 1, wrapped.document.revision)
+  }
+
+  @Test
+  fun `wrapping keeps the selection's place in its parent`() {
+    val rows = reducer.treeRows(document)
+    val siblings =
+      rows.groupBy { it.parent }.values.first { it.size > 2 && it.first().parent != null }
+    val parent = requireNotNull(siblings.first().parent)
+    // Wrap the *last* two so that appearing at the end would be indistinguishable from correct.
+    val two = siblings.takeLast(2).map { it.nodeId }
+    val before = siblings.map { it.nodeId }
+    val selected =
+      reducer.reduce(reducer.initial(document, two[0]), UiBuilderEditorEvent.ToggleNode(two[1]))
+    val candidate = reducer.wrapCandidates(selected).firstOrNull() ?: return
+    val wrapped =
+      reducer.reduce(selected, UiBuilderEditorEvent.WrapSelection(candidate.componentId))
+
+    val after = reducer.treeRows(wrapped.document).filter { it.parent == parent }.map { it.nodeId }
+    // The container stands where the wrapped nodes stood: the untouched leading siblings first.
+    assertEquals(before.dropLast(2), after.dropLast(1))
+  }
+
+  @Test
+  fun `a selection spread across two parents cannot be wrapped`() {
+    // The container can only live in one place, so the other nodes would have to move somewhere
+    // the document never put them. Refusing beats picking a parent for the user.
+    //
+    // Leaves, and from two different parents: a node selected alongside its own ancestor is
+    // reduced away by `selectionRoots`, which would leave one node with one parent and wrap fine.
+    val rows = reducer.treeRows(document)
+    val leaves = rows.filter { row ->
+      row.parent != null && rows.none { it.parent?.nodeId == row.nodeId }
+    }
+    val first = leaves.first()
+    val elsewhere = leaves.first { it.parent != first.parent }
+    val selected =
+      reducer.reduce(
+        reducer.initial(document, first.nodeId),
+        UiBuilderEditorEvent.ToggleNode(elsewhere.nodeId),
+      )
+    assertEquals(2, selected.selection.size, "both leaves should survive selectionRoots")
+
+    assertEquals(emptyList(), reducer.wrapCandidates(selected))
+    val attempted = reducer.reduce(selected, UiBuilderEditorEvent.WrapSelection("layout/column"))
+    assertIs<CommandOutcome.Rejected>(attempted.lastOutcome)
+    assertEquals(document.revision, attempted.document.revision)
+  }
+
+  @Test
+  fun `only containers whose slot accepts the whole selection are offered`() {
+    val rows = reducer.treeRows(document)
+    val text = rows.first { it.componentId == "m3/text" && it.parent != null }
+    val candidates = reducer.wrapCandidates(reducer.initial(document, text.nodeId))
+
+    // Every offer has to actually work — the menu is a promise, not a guess.
+    candidates.forEach { candidate ->
+      val wrapped =
+        reducer.reduce(
+          reducer.initial(document, text.nodeId),
+          UiBuilderEditorEvent.WrapSelection(candidate.componentId),
+        )
+      assertTrue(
+        wrapped.lastOutcome !is CommandOutcome.Rejected,
+        "${candidate.componentId}: ${wrapped.lastOutcome}",
+      )
+    }
+  }
 }

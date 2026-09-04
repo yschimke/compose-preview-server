@@ -298,6 +298,7 @@ fun UiBuilderEditor(
             canCopy = reducer.canCopySelected(state),
             canCut = reducer.canCutSelected(state),
             canPaste = reducer.canPaste(state),
+            wrapCandidates = reducer.wrapCandidates(state),
             canUndo = reducer.canUndo(state),
             canRedo = reducer.canRedo(state),
             onNewDesign =
@@ -316,6 +317,7 @@ fun UiBuilderEditor(
             canCopy = reducer.canCopySelected(state),
             canCut = reducer.canCutSelected(state),
             canPaste = reducer.canPaste(state),
+            wrapCandidates = reducer.wrapCandidates(state),
             canUndo = reducer.canUndo(state),
             canRedo = reducer.canRedo(state),
             sessionLabel = sessionLabel,
@@ -498,6 +500,7 @@ private fun MobileEditorToolbar(
   canCopy: Boolean,
   canCut: Boolean,
   canPaste: Boolean,
+  wrapCandidates: List<EditorCatalogItem>,
   canUndo: Boolean,
   canRedo: Boolean,
   onNewDesign: (() -> Unit)?,
@@ -638,6 +641,7 @@ private fun EditorToolbar(
   canCopy: Boolean,
   canCut: Boolean,
   canPaste: Boolean,
+  wrapCandidates: List<EditorCatalogItem>,
   canUndo: Boolean,
   canRedo: Boolean,
   sessionLabel: String,
@@ -697,6 +701,31 @@ private fun EditorToolbar(
         enabled = canDuplicate,
         onClick = { dispatch(UiBuilderEditorEvent.DuplicateSelected) },
       )
+      if (wrapCandidates.isNotEmpty()) {
+        var wrapOpen by remember { mutableStateOf(false) }
+        Box {
+          EditorAction(
+            label = "Wrap",
+            shortcut = "",
+            enabled = true,
+            onClick = { wrapOpen = true },
+          )
+          DropdownMenu(expanded = wrapOpen, onDismissRequest = { wrapOpen = false }) {
+            // Only what will work. The list is computed from both ends — the parent slot has to
+            // accept the container and the container needs a slot that accepts every selected
+            // node — so this menu is a promise rather than a guess.
+            wrapCandidates.forEach { candidate ->
+              DropdownMenuItem(
+                text = { Text(candidate.displayName) },
+                onClick = {
+                  wrapOpen = false
+                  dispatch(UiBuilderEditorEvent.WrapSelection(candidate.componentId))
+                },
+              )
+            }
+          }
+        }
+      }
       EditorAction(
         label = "Copy",
         shortcut = "Ctrl/⌘+C",
