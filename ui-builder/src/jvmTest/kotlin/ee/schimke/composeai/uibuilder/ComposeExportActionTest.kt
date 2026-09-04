@@ -7,6 +7,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -31,7 +32,7 @@ class ComposeExportActionTest {
   private fun literal(type: String, value: JsonPrimitive) =
     JsonObject(mapOf("type" to JsonPrimitive(type), "value" to value))
 
-  private fun documentWith(actions: List<JsonObject>): UiBuilderDocument {
+  private fun documentWith(actions: List<JsonElement>): UiBuilderDocument {
     val button =
       UiBuilderNode(
         id = "toggle-button",
@@ -303,6 +304,59 @@ class ComposeExportActionTest {
     assertFalse(
       result.diagnostics.any { it.code == "PARTIAL_EVENT" },
       "every action is emitted now, so nothing is partial",
+    )
+  }
+
+  @Test
+  fun `toggling a nullable flag matches what the preview does with null`() {
+    // The declared type is `Boolean?` and `!` does not apply to one. The renderer reads a missing
+    // value as not-true, so null toggles to true; the export says the same rather than emitting
+    // `!flag` against a nullable.
+    val document =
+      documentDeclaring(
+        "flag",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("value"),
+            "valueType" to JsonPrimitive("bool"),
+            "nullable" to JsonPrimitive(true),
+            "initialValue" to JsonNull,
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+        listOf(
+          JsonObject(mapOf("type" to JsonPrimitive("toggle"), "variable" to JsonPrimitive("flag")))
+        ),
+      )
+    val source = assertNotNull(CapabilityComposeCodeExporter.export(document, catalog).source)
+
+    assertTrue(source.contains("var flag: Boolean? by remember"), source)
+    assertTrue(source.contains("flag = !(flag ?: false)"), source)
+  }
+
+  @Test
+  fun `a malformed later action is a diagnostic rather than an exception`() {
+    // Emitting every action means a malformed entry behind a valid first one now reaches the
+    // emitter. It used to sit unread; an unchecked `jsonObject` on it would throw out of export()
+    // instead of producing the diagnostic that already covers it.
+    val result =
+      CapabilityComposeCodeExporter.export(
+        documentWith(
+          listOf(
+            JsonObject(
+              mapOf("type" to JsonPrimitive("toggle"), "variable" to JsonPrimitive("expanded"))
+            )
+          ) + JsonPrimitive("not an action")
+        ),
+        catalog,
+      )
+
+    val source = assertNotNull(result.source, result.diagnostics.joinToString { it.message })
+    assertTrue(source.contains("expanded = !expanded"), source)
+    assertTrue(source.contains("TODO(\"Malformed action\")"), source)
+    assertTrue(
+      result.diagnostics.any { it.code == "UNSUPPORTED_EVENT_ACTION" },
+      result.diagnostics.joinToString { "${it.code}: ${it.message}" },
     )
   }
 

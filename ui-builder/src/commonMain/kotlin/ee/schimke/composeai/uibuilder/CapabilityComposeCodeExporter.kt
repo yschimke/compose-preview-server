@@ -10,7 +10,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
@@ -822,7 +821,11 @@ private fun UiBuilderNode.actionExpression(
   val actions = (eventBindings[event] as? JsonArray).orEmpty()
   if (actions.isEmpty()) return "Unit"
   return actions.joinToString("; ") { element ->
-    val action = element.jsonObject
+    // A safe cast, because this now visits every entry rather than only the head. A malformed
+    // later entry — a bare primitive or a null — used to sit unread behind the first action and
+    // now reaches the emitter, where `jsonObject` would throw out of `export()` instead of
+    // producing the structured diagnostic `fieldCoverageDiagnostics` already reports for it.
+    val action = element as? JsonObject ?: return@joinToString "TODO(\"Malformed action\")"
     val name = action.optionalString("variable")
     val variable = name?.identifier()
     val value = action["value"].kotlinLiteral()
@@ -838,8 +841,15 @@ private fun UiBuilderNode.actionExpression(
           else -> "$variable = if ($variable == $value) null else $value"
         }
       "toggle" ->
-        if (variable != null && name in booleanState) "$variable = !$variable"
-        else "TODO(\"toggle needs a boolean state variable\")"
+        when {
+          variable == null || name !in booleanState ->
+            "TODO(\"toggle needs a boolean state variable\")"
+          // A nullable flag is declared `Boolean?`, and `!` does not apply to one. The renderer
+          // reads a missing value as not-true and so toggles null to true; the export says the
+          // same thing rather than either refusing a supported preview or emitting `!flag`.
+          name in nullableState -> "$variable = !($variable ?: false)"
+          else -> "$variable = !$variable"
+        }
       else -> "TODO(\"Unsupported action ${action.optionalString("type")?.escape()}\")"
     }
   }
