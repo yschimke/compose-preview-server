@@ -578,6 +578,8 @@ class UiBuilderEditorReducer(
       selection = survivingSelection.ifEmpty { rebuilt.selection },
       clipboard = state.clipboard,
       catalogQuery = state.catalogQuery,
+      layerQuery = state.layerQuery,
+      previewMode = state.previewMode,
       operationSequence = state.operationSequence,
       inspectorMode = state.inspectorMode,
     )
