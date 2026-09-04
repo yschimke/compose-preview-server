@@ -344,15 +344,51 @@ sealed interface EditorStateAction {
  * a flag is a real Kotlin `Boolean` and assigning it a quoted string does not compile. The action
  * carries the declaration's own kind rather than whatever the editor typed.
  */
+/** What a state variable holds, as the document declares it. */
+private enum class StateKind {
+  BOOLEAN,
+  INTEGER,
+  DECIMAL,
+  STRING,
+}
+
+/**
+ * A variable's kind, from `valueType` where the declaration carries it.
+ *
+ * `initialValue` alone is not a safe classifier: `booleanOrNull` and `longOrNull` on a
+ * `JsonPrimitive` parse its content whether or not it was quoted, so a text variable initialised to
+ * `"true"` or `"1"` reads as a flag or a number and the value written back would not match the
+ * Kotlin type the exporter declares. `isString` settles it wherever `valueType` is absent.
+ */
+private fun declaredStateKind(declaration: JsonObject?): StateKind {
+  when (declaration?.get("valueType")?.jsonPrimitive?.contentOrNull) {
+    "bool" -> return StateKind.BOOLEAN
+    "int" -> return StateKind.INTEGER
+    "float" -> return StateKind.DECIMAL
+    "string" -> return StateKind.STRING
+  }
+  val initial = declaration?.get("initialValue") as? JsonPrimitive ?: return StateKind.STRING
+  return when {
+    initial.isString -> StateKind.STRING
+    initial.booleanOrNull != null -> StateKind.BOOLEAN
+    initial.longOrNull != null -> StateKind.INTEGER
+    initial.doubleOrNull != null -> StateKind.DECIMAL
+    else -> StateKind.STRING
+  }
+}
+
+/** A variable the document declares nullable, and so the only kind `selectOrClear` may clear. */
+private fun declaredNullable(declaration: JsonObject?): Boolean =
+  declaration?.get("nullable")?.jsonPrimitive?.booleanOrNull
+    ?: (declaration?.get("initialValue") is JsonNull)
+
 private fun EditorStateAction.encoded(declaration: JsonObject?): JsonObject {
-  val initial = declaration?.get("initialValue")?.jsonPrimitive
   fun typed(raw: String): JsonPrimitive =
-    when {
-      initial?.booleanOrNull != null -> JsonPrimitive(raw.toBooleanStrictOrNull() ?: false)
-      initial?.longOrNull != null -> JsonPrimitive(raw.toLongOrNull() ?: 0L)
-      initial?.doubleOrNull != null && initial.isString.not() ->
-        JsonPrimitive(raw.toDoubleOrNull() ?: 0.0)
-      else -> JsonPrimitive(raw)
+    when (declaredStateKind(declaration)) {
+      StateKind.BOOLEAN -> JsonPrimitive(raw.toBooleanStrictOrNull() ?: false)
+      StateKind.INTEGER -> JsonPrimitive(raw.toLongOrNull() ?: 0L)
+      StateKind.DECIMAL -> JsonPrimitive(raw.toDoubleOrNull() ?: 0.0)
+      StateKind.STRING -> JsonPrimitive(raw)
     }
   return when (this) {
     is EditorStateAction.Toggle ->
@@ -795,6 +831,16 @@ class UiBuilderEditorReducer(
       // clickable — while every other event name is implemented per component and the catalog
       // declares none of them, so offering one would be a guess.
       val declaration = state.document.stateVariables[action.variable] as? JsonObject
+      // `selectOrClear` writes null when the value is already selected, and the exporter declares
+      // each variable from its own `nullable`. Against a non-nullable one the generated assignment
+      // would not compile, so the design never gets to hold that action.
+      if (action is EditorStateAction.SelectOrClear && !declaredNullable(declaration)) {
+        return state.rejected(
+          sequence,
+          RejectionCode.INVALID_PROPERTY,
+          "State variable `${action.variable}` is not nullable, so it cannot be cleared",
+        )
+      }
       val bindings = JsonObject(mapOf("click" to JsonArray(listOf(action.encoded(declaration)))))
       val index = operations.indexOfFirst { it is DesignOperation.InsertNode }
       val root = operations[index] as DesignOperation.InsertNode

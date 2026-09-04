@@ -7,6 +7,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -167,6 +168,142 @@ class ComposeExportActionTest {
 
     // `!caption` would not compile. A refusal is the honest output.
     assertTrue(source.contains("TODO(\"toggle needs a boolean state variable\")"), source)
+  }
+
+  private fun documentDeclaring(
+    variable: String,
+    declaration: JsonObject,
+    actions: List<JsonObject>,
+  ): UiBuilderDocument =
+    documentWith(actions).copy(stateVariables = JsonObject(mapOf(variable to declaration)))
+
+  @Test
+  fun `a text variable holding the word true is still a String`() {
+    // `booleanOrNull` on a `JsonPrimitive` parses the content whether or not it was quoted, so
+    // every classifier that asked it without checking `isString` read this as a flag: the export
+    // declared `var caption` as a Boolean and a `set` wrote an unquoted `true` into it.
+    val document =
+      documentDeclaring(
+        "caption",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("text"),
+            "valueType" to JsonPrimitive("string"),
+            "initialValue" to JsonPrimitive("true"),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+        listOf(
+          JsonObject(
+            mapOf(
+              "type" to JsonPrimitive("set"),
+              "variable" to JsonPrimitive("caption"),
+              "value" to JsonPrimitive("hello"),
+            )
+          )
+        ),
+      )
+    val source = assertNotNull(CapabilityComposeCodeExporter.export(document, catalog).source)
+
+    assertTrue(source.contains("var caption: String by remember"), source)
+    assertTrue(source.contains("caption = \"hello\""), source)
+    assertFalse(source.contains("!caption"), source)
+  }
+
+  @Test
+  fun `a nullable variable declares its type rather than inferring Nothing`() {
+    // `mutableStateOf(null)` infers `MutableState<Nothing?>`, which rejects every later
+    // assignment. The declaration says what the variable holds, so the export writes it out.
+    val document =
+      documentDeclaring(
+        "selectedTrack",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("selection"),
+            "valueType" to JsonPrimitive("string"),
+            "nullable" to JsonPrimitive(true),
+            "initialValue" to JsonNull,
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+        listOf(
+          JsonObject(
+            mapOf(
+              "type" to JsonPrimitive("selectOrClear"),
+              "variable" to JsonPrimitive("selectedTrack"),
+              "value" to JsonPrimitive("droidCon"),
+            )
+          )
+        ),
+      )
+    val source = assertNotNull(CapabilityComposeCodeExporter.export(document, catalog).source)
+
+    assertTrue(source.contains("var selectedTrack: String? by remember"), source)
+    assertTrue(
+      source.contains("selectedTrack = if (selectedTrack == \"droidCon\") null else \"droidCon\""),
+      source,
+    )
+  }
+
+  @Test
+  fun `clearing a variable the document declares non-nullable refuses`() {
+    val document =
+      documentDeclaring(
+        "selectedDay",
+        JsonObject(
+          mapOf(
+            "type" to JsonPrimitive("selection"),
+            "valueType" to JsonPrimitive("int"),
+            "nullable" to JsonPrimitive(false),
+            "initialValue" to JsonPrimitive(0),
+            "persistence" to JsonPrimitive("preview"),
+          )
+        ),
+        listOf(
+          JsonObject(
+            mapOf(
+              "type" to JsonPrimitive("selectOrClear"),
+              "variable" to JsonPrimitive("selectedDay"),
+              "value" to JsonPrimitive(1),
+            )
+          )
+        ),
+      )
+    val source = assertNotNull(CapabilityComposeCodeExporter.export(document, catalog).source)
+
+    // Assigning null to a non-nullable `Long` does not compile; a refusal is the honest output.
+    assertTrue(source.contains("TODO(\"selectOrClear needs a nullable state variable\")"), source)
+    assertFalse(source.contains("else null"), source)
+  }
+
+  @Test
+  fun `an unsupported action is reported wherever it sits in the handler`() {
+    // The diagnostic used to read only the first action, so an unsupported second one reached the
+    // generated source as a bare TODO with nothing warning about it — and every multi-action
+    // handler drew a PARTIAL_EVENT saying only the head was emitted, which stopped being true.
+    val result =
+      CapabilityComposeCodeExporter.export(
+        documentWith(
+          listOf(
+            JsonObject(
+              mapOf("type" to JsonPrimitive("toggle"), "variable" to JsonPrimitive("expanded"))
+            ),
+            JsonObject(
+              mapOf("type" to JsonPrimitive("navigate"), "variable" to JsonPrimitive("expanded"))
+            ),
+          )
+        ),
+        catalog,
+      )
+
+    assertTrue(
+      result.diagnostics.any { it.code == "UNSUPPORTED_EVENT_ACTION" && "navigate" in it.message },
+      result.diagnostics.joinToString { "${it.code}: ${it.message}" },
+    )
+    assertFalse(
+      result.diagnostics.any { it.code == "PARTIAL_EVENT" },
+      "every action is emitted now, so nothing is partial",
+    )
   }
 
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()

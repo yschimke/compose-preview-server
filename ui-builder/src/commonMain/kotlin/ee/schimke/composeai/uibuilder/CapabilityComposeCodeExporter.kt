@@ -7,10 +7,12 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 enum class ComposeExportSeverity {
   WARNING,
@@ -267,22 +269,41 @@ private class ComposeEmitter(
     return out.toString().trimEnd() + "\n"
   }
 
-  /** Declared with a boolean initial value, so `emitState` gives them a Kotlin `Boolean`. */
+  /** Declared as a boolean, so `emitState` gives them a Kotlin `Boolean`. */
   private val booleanStateVariables: Set<String> by lazy {
     document.stateVariables
-      .filterValues {
-        (it as? JsonObject)?.get("initialValue")?.jsonPrimitive?.booleanOrNull != null
-      }
+      .filterKeys { name -> stateDeclaration(name).kotlinType.removeSuffix("?") == "Boolean" }
       .keys
   }
 
+  /** Variables `emitState` declares nullable, and so the only ones `selectOrClear` may clear. */
+  private val nullableStateVariables: Set<String> by lazy {
+    document.stateVariables.filterKeys { name -> stateDeclaration(name).nullable }.keys
+  }
+
+  private fun stateDeclaration(name: String): StateDeclaration =
+    StateDeclaration.of(document.stateVariables[name] as? JsonObject)
+
+  /**
+   * Every variable, typed from its own declaration.
+   *
+   * The Kotlin type is written out rather than left to inference. `initialValue` is not enough on
+   * its own: a nullable variable initialised to `null` infers `Nothing?` and rejects every later
+   * assignment, and a text variable initialised to `"true"` reads as a boolean to any classifier
+   * that asks `booleanOrNull` without checking `isString`. `valueType` and `nullable` are what the
+   * document actually declares, so they decide.
+   */
   private fun emitState(level: Int) {
     document.stateVariables.entries
       .sortedBy { entry -> entry.key }
       .forEach { (name, declarationElement) ->
-        val declaration = declarationElement as? JsonObject ?: JsonObject(emptyMap())
-        val initial = declaration["initialValue"].kotlinLiteral()
-        line(level, "var ${name.identifier()} by remember { mutableStateOf($initial) }")
+        val declaration = StateDeclaration.of(declarationElement as? JsonObject)
+        val initial = declaration.initialValue.kotlinLiteral()
+        line(
+          level,
+          "var ${name.identifier()}: ${declaration.kotlinType} by remember { " +
+            "mutableStateOf($initial) }",
+        )
       }
   }
 
@@ -507,7 +528,10 @@ private class ComposeEmitter(
   private fun emitFilterChip(node: UiBuilderNode, level: Int) {
     line(level, "FilterChip(")
     line(level + 1, "selected = ${node.boolExpression("selected")},")
-    line(level + 1, "onClick = { ${node.actionExpression("click", booleanStateVariables)} },")
+    line(
+      level + 1,
+      "onClick = { ${node.actionExpression("click", booleanStateVariables, nullableStateVariables)} },",
+    )
     line(level + 1, "enabled = ${node.boolValue("enabled", true)},")
     line(
       level + 1,
@@ -652,7 +676,7 @@ private class ComposeEmitter(
       }
     line(
       level,
-      "$symbol(onClick = { ${node.actionExpression("click", booleanStateVariables)} }, $colors${node.modifierArgument()}) {",
+      "$symbol(onClick = { ${node.actionExpression("click", booleanStateVariables, nullableStateVariables)} }, $colors${node.modifierArgument()}) {",
     )
     if (node.string("style") == "fab") {
       line(level + 1, "Box(Modifier.padding(horizontal = 16.dp)) {")
@@ -785,12 +809,16 @@ private fun UiBuilderNode.boolExpression(name: String): String {
  * order and as a unit, which is how the renderer dispatches it. Emitting only the head exported a
  * handler that did less than the preview showed.
  *
- * [booleanState] is the set of variables the document declares with a boolean initial value, which
- * is what `emitState` turns into a Kotlin `Boolean`. A `toggle` is `!x` only for those; against a
- * string-declared variable `!x` would not compile, so it stays a refusal rather than becoming
- * broken source.
+ * [booleanState] and [nullableState] are what the document declares, which is what `emitState`
+ * turns into a Kotlin type. A `toggle` is `!x` only for a boolean; a `selectOrClear` writes `null`
+ * only into a nullable. Against anything else those would not compile, so each stays a refusal
+ * rather than becoming broken source.
  */
-private fun UiBuilderNode.actionExpression(event: String, booleanState: Set<String>): String {
+private fun UiBuilderNode.actionExpression(
+  event: String,
+  booleanState: Set<String>,
+  nullableState: Set<String>,
+): String {
   val actions = (eventBindings[event] as? JsonArray).orEmpty()
   if (actions.isEmpty()) return "Unit"
   return actions.joinToString("; ") { element ->
@@ -804,7 +832,11 @@ private fun UiBuilderNode.actionExpression(event: String, booleanState: Set<Stri
       "set",
       "setText" -> if (variable == null) "Unit" else "$variable = $value"
       "selectOrClear" ->
-        if (variable == null) "Unit" else "$variable = if ($variable == $value) null else $value"
+        when {
+          variable == null -> "Unit"
+          name !in nullableState -> "TODO(\"selectOrClear needs a nullable state variable\")"
+          else -> "$variable = if ($variable == $value) null else $value"
+        }
       "toggle" ->
         if (variable != null && name in booleanState) "$variable = !$variable"
         else "TODO(\"toggle needs a boolean state variable\")"
@@ -1016,16 +1048,17 @@ private fun UiBuilderNode.fieldCoverageDiagnostics(): List<ComposeExportDiagnost
     if (actions == null || actions.isEmpty()) {
       diagnostics += warning("MALFORMED_EVENT", "event '$event' has no action array")
     } else {
-      if (actions.size > 1) {
-        diagnostics +=
-          warning("PARTIAL_EVENT", "event '$event' emits only its first of ${actions.size} actions")
-      }
-      val action = actions.firstOrNull() as? JsonObject
-      val type = action?.optionalString("type")
-      if (type !in SUPPORTED_ACTIONS) {
-        diagnostics +=
-          warning("UNSUPPORTED_EVENT_ACTION", "event '$event' action '$type' emits TODO")
-      }
+      // Every action, because the handler emits every action. Reporting only the head both
+      // claimed a partial export that no longer happens and let an unsupported later action
+      // reach the generated source as a bare TODO with nothing warning about it.
+      actions
+        .map { (it as? JsonObject)?.optionalString("type") }
+        .filter { it !in SUPPORTED_ACTIONS }
+        .distinct()
+        .forEach { type ->
+          diagnostics +=
+            warning("UNSUPPORTED_EVENT_ACTION", "event '$event' action '$type' emits TODO")
+        }
     }
   }
   return diagnostics
@@ -1033,6 +1066,46 @@ private fun UiBuilderNode.fieldCoverageDiagnostics(): List<ComposeExportDiagnost
 
 private fun JsonObject.floatValue(name: String): Float? =
   (this[name] as? kotlinx.serialization.json.JsonPrimitive)?.floatOrNull
+
+/**
+ * One state variable's declared shape.
+ *
+ * `valueType` and `nullable` are the document's own words for what a variable holds. `initialValue`
+ * is a fallback for a declaration that predates them, and it is read with `isString` respected —
+ * `booleanOrNull` on a `JsonPrimitive` parses its content whether or not it was quoted, so a text
+ * variable holding `"true"` otherwise reads as a flag.
+ */
+private data class StateDeclaration(
+  val kotlinType: String,
+  val nullable: Boolean,
+  val initialValue: JsonElement?,
+) {
+  companion object {
+    fun of(declaration: JsonObject?): StateDeclaration {
+      val initial = declaration?.get("initialValue")
+      val primitive = initial as? kotlinx.serialization.json.JsonPrimitive
+      val nullable =
+        declaration?.get("nullable")?.jsonPrimitive?.booleanOrNull ?: (initial is JsonNull)
+      val base =
+        when (declaration?.optionalString("valueType")) {
+          "bool" -> "Boolean"
+          "int" -> "Long"
+          "float" -> "Double"
+          "string" -> "String"
+          else ->
+            when {
+              primitive == null -> "String"
+              primitive.isString -> "String"
+              primitive.booleanOrNull != null -> "Boolean"
+              primitive.longOrNull != null -> "Long"
+              primitive.doubleOrNull != null -> "Double"
+              else -> "String"
+            }
+        }
+      return StateDeclaration(if (nullable) "$base?" else base, nullable, initial)
+    }
+  }
+}
 
 private fun JsonElement?.kotlinLiteral(): String =
   when (this) {
