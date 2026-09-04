@@ -1978,7 +1978,11 @@ class ServeHttpRoutingTest {
     // also carries no ?token — the route needs none.
     assertTrue(landing.contains("href=\"/compose-m3/p/$previewId\""), "path card link: $landing")
     assertTrue(!landing.contains("token="), "public path landing links are token-free: $landing")
-    assertTrue(landing.contains("1 preview · 1 view"), "catalog visit counted: $landing")
+    // The tally is wrapped in the marker that keeps it out of the page's ETag (#217).
+    assertTrue(
+      landing.contains("1 preview · <span ${ServeWeb.VOLATILE_ATTR}>1 view</span>"),
+      "catalog visit counted: $landing",
+    )
 
     val (viewerCode, viewer) = get("/compose-m3/p/$previewId")
     assertEquals(200, viewerCode)
@@ -3000,7 +3004,8 @@ class ServeHttpRoutingTest {
 
   /** The viewer's rendered view tally, or 0 when the page shows none. */
   private fun viewCount(html: String): Int =
-    Regex("""cp-viewer-engage[^>]*>([\d,]+)""")
+    // …through the marker element the tally is wrapped in (`ServeWeb.VOLATILE_ATTR`).
+    Regex("""cp-viewer-engage[^>]*>(?:<[^>]*>)?([\d,]+)""")
       .find(html)
       ?.groupValues
       ?.get(1)

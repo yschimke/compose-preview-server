@@ -6637,7 +6637,12 @@ class ServeWebFixtureTest {
     val head = view.substringAfter("<div class=\"cp-preview-head\">").substringBefore("</div>")
     assertTrue(head.contains("<h1 class=\"cp-head cp-preview-title\">"), head)
     assertTrue(head.contains("<code class=\"cp-preview-id\""), head)
-    assertTrue(head.contains("<span class=\"cp-viewer-engage\">1 view</span>"), head)
+    assertTrue(
+      head.contains(
+        "<span class=\"cp-viewer-engage\"><span ${ServeWeb.VOLATILE_ATTR}>1 view</span></span>"
+      ),
+      head,
+    )
 
     // 3. The provenance links are hand-off affordances, so they sit with the other hand-off
     //    affordances (the PNG / SVG export links) below the stage — not between the title and the
