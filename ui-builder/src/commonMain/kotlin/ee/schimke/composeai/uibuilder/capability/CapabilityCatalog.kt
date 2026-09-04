@@ -233,7 +233,14 @@ object CapabilityCatalogParser {
           property.name.endsWith("Dp") &&
             "$componentId.${property.name}" in COMPOSE_EMITTED_DP_PROPERTIES
         )
-          numberEditor(0.0, MAXIMUM_AUTHORED_DP, 1.0)
+          // Arrangement spacing may be negative — that is how children are made to overlap, and
+          // `Arrangement.spacedBy` and the exporter both take the signed value. A padding or a
+          // size may not, so the floor is per property rather than one blanket zero.
+          numberEditor(
+            if (property.name.endsWith("SpacingDp")) -MAXIMUM_AUTHORED_DP else 0.0,
+            MAXIMUM_AUTHORED_DP,
+            1.0,
+          )
         else null
       else -> null
     }
