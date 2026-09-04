@@ -1436,10 +1436,20 @@ class UiBuilderEditorReducer(
     if (defaultError != null) {
       return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, defaultError)
     }
-    // A container's default subtree may come with placeholder children; the wrapped nodes go after
-    // them in document order, which keeps the container valid at every step.
+    // A container with a required slot arrives holding a placeholder child — wrapping one text in
+    // a Card produced a Card containing `New text` *and* the text, which unwrap could not undo.
+    // The placeholders are removed once the real children are in, never before: the slot has a
+    // minimum, and emptying it first would make the batch invalid halfway through.
+    val placeholders =
+      operations.filterIsInstance<DesignOperation.InsertNode>().filter {
+        it.parent == ParentSlot(containerId, slot.name)
+      }
+    // Tree order, not click order. `selectionRoots` preserves the order nodes were selected in —
+    // shift-clicking D then B stores C, D, B — and moving them in that order writes it into the
+    // container, silently reordering the screen the selection came from.
+    val ordered = targets.sortedBy(state.document.treeIndex())
     var after: String? = null
-    targets.forEach { nodeId ->
+    ordered.forEach { nodeId ->
       operations +=
         DesignOperation.MoveNode(
           nodeId = nodeId,
@@ -1448,6 +1458,7 @@ class UiBuilderEditorReducer(
         )
       after = nodeId
     }
+    placeholders.forEach { operations += DesignOperation.DeleteNode(it.node.id) }
     // One apply: inserting a container and leaving the children outside it is not a state the
     // document should be able to rest in, and undo should not have to be pressed twice.
     return state.apply(sequence, operations, selectionAfter = containerId)
@@ -2068,8 +2079,23 @@ private fun UiBuilderDocument.clip(nodeIds: List<String>): EditorClipboard {
     if (collected.put(id, node) != null) return
     node.slots.values.flatten().forEach(::visit)
   }
-  nodeIds.forEach(::visit)
-  return EditorClipboard(rootNodeIds = nodeIds, nodes = collected)
+  // Tree order, not the order they were clicked. `paste` walks `rootNodeIds` and lays them down
+  // in sequence, so a selection built by shift-clicking D and then B would arrive as C, D, B and
+  // silently reorder what was copied.
+  val ordered = nodeIds.sortedBy(treeIndex())
+  ordered.forEach(::visit)
+  return EditorClipboard(rootNodeIds = ordered, nodes = collected)
+}
+
+/** Position in the flattened tree, for the operations whose result is an order. */
+private fun UiBuilderDocument.treeIndex(): (String) -> Int {
+  val order = mutableMapOf<String, Int>()
+  fun visit(nodeId: String) {
+    order[nodeId] = order.size
+    nodes[nodeId]?.slots?.values?.flatten()?.forEach(::visit)
+  }
+  roots.forEach(::visit)
+  return { order[it] ?: Int.MAX_VALUE }
 }
 
 /**
