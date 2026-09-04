@@ -101,5 +101,34 @@ class EditorWrapOrderTest {
     assertTrue(labels.last().contains("Comedy"), labels.toString())
   }
 
+  @Test
+  fun `a paste beside a leaf lands next to it, not at the end of its list`() {
+    // `findDestination` falls back to the selection's own parent slot when the selection cannot
+    // hold the clipboard itself. The paste still anchored to the slot's last child, so copying a
+    // chip and pasting sent the copy past every sibling to the bottom of the row.
+    val (rowId, rowSlot) =
+      document.nodes.values.firstNotNullOf { node ->
+        node.slots.entries.firstOrNull { "chip-crime" in it.value }?.let { node.id to it.key }
+      }
+    val siblingsBefore = document.nodes.getValue(rowId).slots.getValue(rowSlot)
+    assertTrue(siblingsBefore.indexOf("chip-crime") < siblingsBefore.lastIndex, "$siblingsBefore")
+
+    val copied =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = "chip-crime"),
+        UiBuilderEditorEvent.CopySelected,
+      )
+    val pasted = reducer.reduce(copied, UiBuilderEditorEvent.Paste)
+    assertIs<CommandOutcome.Accepted>(pasted.lastOutcome)
+
+    val siblings = pasted.document.nodes.getValue(rowId).slots.getValue(rowSlot)
+    val copy = assertIs<String>(pasted.selectedNodeId)
+    assertEquals(
+      siblings.indexOf("chip-crime") + 1,
+      siblings.indexOf(copy),
+      "the copy belongs beside what was copied: $siblings",
+    )
+  }
+
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
 }

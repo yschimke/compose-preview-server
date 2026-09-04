@@ -1519,7 +1519,14 @@ class UiBuilderEditorReducer(
         )
     val operations = mutableListOf<DesignOperation>()
     val pastedIds = mutableListOf<String>()
-    var after = state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
+    // Beside the selection when the paste landed in the slot the selection already sits in, and at
+    // the end of the slot when it landed inside the selected container. `findDestination` falls
+    // back to the parent slot for a leaf — copying a card in a list and pasting sent the copy to
+    // the bottom of the list, which is never where you were looking.
+    val selectedLocation = state.selectedNodeId?.let(state.document::location)
+    var after =
+      if (destination == selectedLocation) state.selectedNodeId
+      else state.document.nodes[destination.nodeId]?.slots?.get(destination.slot)?.lastOrNull()
     val taken = state.document.nodes.keys.toMutableSet()
     clipboard.rootNodeIds.forEachIndexed { index, rootId ->
       // Numbered per root as well as per paste, so two roots in one batch cannot collide with each
