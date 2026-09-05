@@ -44,8 +44,16 @@ object ServeUrls {
   fun origin(host: String, port: Int): String = "http://$host:$port"
 
   /** Landing-page URL (preview list) carrying the token. */
-  fun landingUrl(origin: String, token: String): String =
-    "$origin/?token=${WebEscaping.urlEncodeSegment(token)}"
+  fun landingUrl(origin: String, token: String): String = pathUrl(origin, "/", token)
+
+  /**
+   * Any absolute path on this server, carrying the token as a query.
+   *
+   * [path] is trusted to be an absolute path with no query of its own — `--open-path` rejects
+   * anything else at parse time, and every other caller passes a literal.
+   */
+  fun pathUrl(origin: String, path: String, token: String): String =
+    "$origin$path?token=${WebEscaping.urlEncodeSegment(token)}"
 
   /** Viewer-page URL for one preview, id percent-encoded as a path segment, token in the query. */
   fun viewerUrl(origin: String, previewId: String, token: String): String =

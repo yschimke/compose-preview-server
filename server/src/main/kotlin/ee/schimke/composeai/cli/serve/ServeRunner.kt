@@ -46,6 +46,18 @@ import okio.Path.Companion.toPath
 public class ServeRunner(
   private val options: ServeOptions,
   private val build: ServeBuildHost,
+  /**
+   * Called once with the discovery this run is serving, before anything is hosted from it.
+   *
+   * The seam the `ui` command needs and nothing else uses: `--ui-builder-components` names a
+   * component-record path when the options are parsed, which is before any Gradle has run and so
+   * before the module — and its build directory — is known. This is where that path gets filled in.
+   * Defaulted to a no-op, because a server that is merely hosting has nothing to do here.
+   *
+   * Deliberately not a general event hook. It fires on the discovery path only, exactly once, and a
+   * throwing callback fails the run: it is configuration the caller supplied, not an observer.
+   */
+  private val onDiscovered: (ServeDiscovery) -> Unit = {},
 ) : ServeOptions by options, ServeBuildHost by build {
 
   private val catalogBlobPool: CatalogBlobPool by lazy {
@@ -794,6 +806,7 @@ public class ServeRunner(
       System.err.println("serve: no previews discovered.")
       exitProcess(3)
     }
+    onDiscovered(outcome)
     // Expand each module's `@PreviewParameter` fan-out BEFORE deciding how many modules are in play
     // (issue #3786 review follow-up). Module selection has to keep a parameterized preview whose
     // rows *might* match — the row ids don't exist until the render above wrote the fan-out — so
@@ -2791,9 +2804,9 @@ public class ServeRunner(
   private fun openBrowser(port: Int, token: String) {
     val localHost =
       if (ServeUrls.isExposed(host) || host == ServeUrls.LOOPBACK) ServeUrls.LOOPBACK else host
+    val origin = ServeUrls.origin(localHost, port)
     val url =
-      if (public) "${ServeUrls.origin(localHost, port)}/"
-      else ServeUrls.landingUrl(ServeUrls.origin(localHost, port), token)
+      if (public) "$origin$openBrowserPath" else ServeUrls.pathUrl(origin, openBrowserPath, token)
     val opened = runCatching {
       if (!Desktop.isDesktopSupported()) return@runCatching false
       val desktop = Desktop.getDesktop()
