@@ -9,6 +9,7 @@
         "harness:compare": "playwright test -c playwright.config.mjs format-compare-scorer.spec.mjs",
         "harness:ui-builder": "playwright test -c ui-builder.config.mjs",
         "harness:ui-builder-editor": "playwright test -c ui-builder-editor.config.mjs",
+        "harness:ui-builder-evidence": "playwright test -c capture-evidence.config.mjs",
         "harness:ui-builder-renderer": "playwright test -c ui-builder-renderer.config.mjs",
         "harness:ui-builder-gate2": "playwright test -c ui-builder-gate2.config.mjs",
         "harness:ui-builder-visual-replay": "playwright test -c ui-builder-gate2.config.mjs --grep \"checked-in Jetcaster\"",
