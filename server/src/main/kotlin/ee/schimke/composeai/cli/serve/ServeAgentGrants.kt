@@ -129,6 +129,15 @@ object ServeAgentGrants {
     val label: String? = null,
     /** SHA-256 prefix, so a caller can match its grant to a `/status` row without disclosing it. */
     val fingerprint: String? = null,
+    /**
+     * Why this is not a live grant ([ServeAgentGrantStore.TokenState] wire name), absent when
+     * [active]. An inactive answer used to carry no fields at all, which left an agent unable to
+     * choose between retrying, re-running the approval flow, and stopping because a human revoked
+     * it — three very different responses to one indistinguishable reply.
+     */
+    val reason: String? = null,
+    /** Human-readable expansion of [reason], safe to print. Never contains a token. */
+    val message: String? = null,
   )
 
   @Serializable data class RevokeResponse(val revoked: Boolean, val message: String? = null)

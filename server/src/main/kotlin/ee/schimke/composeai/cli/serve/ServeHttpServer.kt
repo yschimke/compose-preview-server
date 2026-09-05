@@ -11271,8 +11271,14 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handleAgentGrantWhoami(store: ServeAgentGrantStore) {
     val grant = agentGrantFor(call)
     val response =
-      if (grant == null) ServeAgentGrants.WhoamiResponse(active = false)
-      else
+      if (grant == null) {
+        val state = presentedTokenState(store)
+        ServeAgentGrants.WhoamiResponse(
+          active = false,
+          reason = state.wire,
+          message = whoamiReasonMessage(state),
+        )
+      } else
         ServeAgentGrants.WhoamiResponse(
           active = true,
           scopes = grant.scopes.map { it.wire },
@@ -11287,6 +11293,53 @@ class ServeHttpServer(
       ContentType.Application.Json,
     )
   }
+
+  /**
+   * The best classification available for whatever credential this request carried, reading the
+   * same three sources [resolveAgentGrant] does. "Best" rather than "first" because those sources
+   * are independent: a request may carry an unrelated bearer beside a real grant, so the most
+   * informative state across them is the honest answer.
+   */
+  private fun RoutingContext.presentedTokenState(
+    store: ServeAgentGrantStore
+  ): ServeAgentGrantStore.TokenState {
+    val bearer =
+      call.request.headers[HttpHeaders.Authorization]
+        ?.takeIf { it.startsWith(BEARER_PREFIX, ignoreCase = true) }
+        ?.substring(BEARER_PREFIX.length)
+        ?.trim()
+    val states =
+      sequenceOf(
+          call.request.headers[TOKEN_HEADER],
+          bearer,
+          call.request.queryParameters["token"],
+        )
+        .map(store::describeToken)
+        .toList()
+    // Ordered by how much it tells the caller: a recognised-but-dead token outranks silence.
+    return listOf(
+        ServeAgentGrantStore.TokenState.LIVE,
+        ServeAgentGrantStore.TokenState.EXPIRED,
+        ServeAgentGrantStore.TokenState.UNKNOWN,
+        ServeAgentGrantStore.TokenState.MALFORMED,
+      )
+      .firstOrNull { it in states } ?: ServeAgentGrantStore.TokenState.ABSENT
+  }
+
+  private fun whoamiReasonMessage(state: ServeAgentGrantStore.TokenState): String =
+    when (state) {
+      ServeAgentGrantStore.TokenState.LIVE -> "this grant is live"
+      ServeAgentGrantStore.TokenState.ABSENT ->
+        "no credential was presented; request one at ${ServeAgentGrants.REQUEST_PATH}"
+      ServeAgentGrantStore.TokenState.MALFORMED ->
+        "the presented credential is not shaped like a grant token"
+      ServeAgentGrantStore.TokenState.EXPIRED ->
+        "this grant has expired; request a new one at ${ServeAgentGrants.REQUEST_PATH}"
+      ServeAgentGrantStore.TokenState.UNKNOWN ->
+        "this server does not know that token: it was revoked, or it was issued by a previous " +
+          "run of this server — grants are held in memory and do not survive a restart. " +
+          "Request a new one at ${ServeAgentGrants.REQUEST_PATH}"
+    }
 
   /** `POST /agent-access/revoke` — an agent hands its own access back early. */
   private suspend fun RoutingContext.handleAgentGrantRevoke(store: ServeAgentGrantStore) {

@@ -79,6 +79,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
 | `list_projects`, `list_previews` | `preview` | Discover catalogs and preview metadata |
 | `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
+| `render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
 | `list_data_products` | `preview` | Discover structured products exposed by previews |
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
@@ -87,11 +88,43 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 `observe=svg` returns the vector as SVG **source** in a `text` content block, not as a base64
 `image` block with `mimeType: image/svg+xml`. The symmetry with `png` is tempting, but almost no MCP
 client renders SVG from an image block, and a vector consumer — a Figma round-trip, a diff, a
-DOM-capture tool — wants the markup. It is available only where the host advertises it
+DOM-capture tool — wants the markup. `list_previews` reports it per preview as `svgAvailable`, so the lane is discoverable without
+asking for it and reading the refusal. It is available only where the host advertises it
 (`ServeHost.hasSvgExportFor`): a static bundle carrying `figma/<slug>.svg` vectors, or a
 daemon-backed session that can export `compose/figma-svg`. A catalog with neither is refused by
 name rather than reported as a missing preview. The lane shares the render semaphore with the PNG
 lane, so it is metered identically and cannot become a second unmetered renderer.
+
+### Knowing whether an override landed
+
+Every render observation carries `generation` — the [`RenderOutcome.Generation`] wire name saying
+what produced the bytes. When the call also supplied `overrides`, it carries `requestedOverrides`
+and `overridesApplied` beside it, and a `baked` generation sets `overridesApplied: false` with an
+`overridesIgnoredReason`: the published bundle has no renderer, so those overrides are *not*
+reflected in the returned bytes. Without this a caller cannot distinguish an override that applied
+and moved nothing from one that was never honoured — two overrides producing byte-identical PNGs is
+the normal case, not the pathological one.
+
+`observe=png` keeps its bare single-image reply for an override-free browse and gains a second
+`text` block carrying the same provenance once `overrides` is non-empty, so the diagnostic rides
+along with the pixels rather than costing a second render.
+
+Unknown override **keys are refused** here, unlike on `GET /render` where they are ignored so a URL
+may carry a cache-buster or an analytics tag beside the axes. An MCP `overrides` object has no such
+passengers: every key was typed on purpose, so an unrecognised one is a caller error, and the error
+lists the supported keys.
+
+### Rendering a matrix
+
+`render_matrix` takes an `axes` object mapping an override key to the values to sweep, renders the
+cross-product, and reports one cell per combination with its overrides, `sha256`, dimensions and
+`generation` (`observe=png` adds base64 pixels per cell). The base `overrides`, if given, are the
+floor each cell starts from; an axis value with the same key wins for that cell.
+
+`distinctRenders` counts the distinct hashes over the whole matrix — the single number that answers
+"do these axes move the pixels at all". Cells are capped at 24 per call and the cap is enforced
+before any rendering, since it exists to bound machine time. Each cell takes the shared render
+permit individually, so a matrix competes with browser traffic rather than reserving the renderer.
 
 Resource URIs use `compose-preview://catalog/<catalog>/<preview-id>`. Storybook-compatible ids are
 qualified as `<catalog>::<preview-id>` so identical preview ids in different catalogs cannot

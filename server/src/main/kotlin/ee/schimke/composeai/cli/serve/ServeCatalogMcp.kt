@@ -20,6 +20,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
@@ -146,6 +147,17 @@ class ServeCatalogMcp(
     )
     add(
       tool(
+        "render_matrix",
+        "Render one preview across the cross-product of the given override axes in a single " +
+          "call, returning a hash/size observation per cell (observe=png adds the pixels). " +
+          "Prefer this over a render_preview per combination: the cells share one catalog lease " +
+          "and are reported together, so comparing axes costs one round trip instead of N. " +
+          "Capped at $MAX_MATRIX_CELLS cells. Requires live grant scope.",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"axes":{"type":"object","additionalProperties":{"type":"array","items":{"type":["string","number","boolean"]},"minItems":1}}},"required":["axes"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+      )
+    )
+    add(
+      tool(
         "list_data_products",
         "List structured data-product kinds across catalogs, optionally filtered by target.",
         """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}}}""",
@@ -199,7 +211,7 @@ class ServeCatalogMcp(
         val target = storyTarget(requested)
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
-          textResult(storyDocumentationJson(target.catalog, preview).toString())
+          textResult(storyDocumentationJson(target.catalog, preview, host).toString())
         }
       }
       "render_preview" -> {
@@ -207,14 +219,24 @@ class ServeCatalogMcp(
         val target = args.previewTarget()
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
-          val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
+          val rawOverrides = args["overrides"] as? JsonObject
+          val overrides = parseOverrides(preview, rawOverrides)
           renderResult(
             host,
             preview.id,
             resourceUri(target.catalog, preview.id),
             overrides,
             args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics",
+            rawOverrides?.keys.orEmpty().toList(),
           )
+        }
+      }
+      "render_matrix" -> {
+        requireLive(liveAuthorization)
+        val target = args.previewTarget()
+        withCatalog(target.catalog) { host ->
+          val preview = resolvePreview(host, target.previewId)
+          matrixResult(host, preview, target.catalog, args)
         }
       }
       "preview-stories" -> {
@@ -233,13 +255,15 @@ class ServeCatalogMcp(
             val target = storyTarget(storyId)
             withCatalog(target.catalog) { host ->
               val preview = resolvePreview(host, target.previewId)
-              val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
+              val rawOverrides = args["overrides"] as? JsonObject
+              val overrides = parseOverrides(preview, rawOverrides)
               renderContent(
                   host,
                   preview.id,
                   resourceUri(target.catalog, preview.id),
                   overrides,
                   observe,
+                  rawOverrides?.keys.orEmpty().toList(),
                 )
                 .forEach(::add)
             }
@@ -285,7 +309,7 @@ class ServeCatalogMcp(
     val target = targetFromUri(uri)
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
-      val png = renderPng(host, preview.id, PreviewOverrides(), preferPublished = true)
+      val png = renderPng(host, preview.id, PreviewOverrides(), preferPublished = true).png
       buildJsonObject {
         put(
           "contents",
@@ -303,14 +327,121 @@ class ServeCatalogMcp(
     }
   }
 
+  /**
+   * The cross-product of [axes] over one preview, rendered cell by cell.
+   *
+   * Exists because comparing axes is the common agent task and the per-cell alternative is a round
+   * trip each: probing eight axes over this endpoint took twenty sequential `render_preview` calls,
+   * every one of them a fresh catalog lease and a fresh permit acquisition. Here the cells share
+   * the lease, and each still takes the render permit individually so the matrix competes with
+   * browser traffic on equal terms rather than reserving the renderer for itself.
+   *
+   * The base `overrides` (if any) are the floor every cell starts from; an axis value with the same
+   * key wins for that cell, so a caller can pin `uiMode=dark` once and vary `fontScale` over it.
+   */
+  private suspend fun matrixResult(
+    host: ServeHost,
+    preview: ServePreview,
+    catalog: String,
+    args: JsonObject,
+  ): JsonObject {
+    val observe = args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "hash"
+    if (observe !in MATRIX_OBSERVATION_MODES) {
+      throw McpRequestException("render_matrix 'observe' must be one of png or hash")
+    }
+    val rawAxes =
+      args["axes"] as? JsonObject
+        ?: throw McpRequestException("render_matrix requires an 'axes' object")
+    if (rawAxes.isEmpty()) throw McpRequestException("render_matrix requires at least one axis")
+    val base =
+      (args["overrides"] as? JsonObject)?.mapValues { (_, v) -> v.asOverrideString() }.orEmpty()
+
+    val axes = rawAxes.map { (key, value) ->
+      val values =
+        (value as? JsonArray) ?: throw McpRequestException("axis '$key' must be an array of values")
+      if (values.isEmpty()) throw McpRequestException("axis '$key' must list at least one value")
+      key to values.map { it.asOverrideString() }
+    }
+
+    // Refused before any rendering: the cap exists to bound machine time, so discovering it after
+    // spending most of that time would defeat it.
+    val cells = axes.fold(1) { acc, (_, values) -> acc * values.size }
+    if (cells > MAX_MATRIX_CELLS) {
+      throw McpRequestException(
+        "render_matrix would produce $cells cells; the cap is $MAX_MATRIX_CELLS. " +
+          "Narrow an axis or split the call."
+      )
+    }
+
+    val combinations =
+      axes.fold(listOf(base)) { acc, (key, values) ->
+        acc.flatMap { partial -> values.map { partial + (key to it) } }
+      }
+
+    val knobKinds = ServeOverrides.declaredKnobKinds(preview)
+    val rendered = buildJsonArray {
+      combinations.forEach { params ->
+        val unknown = params.keys.filterNot(ServeOverrides::isOverrideParam).sorted()
+        if (unknown.isNotEmpty()) {
+          throw McpRequestException("unknown override ${unknown.joinToString()} in render_matrix")
+        }
+        val overrides =
+          when (val parsed = ServeOverrides.parse(params, knobKinds)) {
+            is OverrideParse.Ok -> parsed.overrides
+            is OverrideParse.Invalid -> throw McpRequestException(parsed.message)
+          }
+        val cell = renderPng(host, preview.id, overrides)
+        add(
+          buildJsonObject {
+            put(
+              "overrides",
+              JsonObject(params.mapValues { (_, v) -> JsonPrimitive(v) }),
+            )
+            put("sha256", sha256Hex(cell.png))
+            put("sizeBytes", cell.png.size)
+            pngDimensions(cell.png)?.let { (width, height) ->
+              put("widthPx", width)
+              put("heightPx", height)
+            }
+            put("generation", cell.generation.wire)
+            if (observe == "png") put("png", Base64.getEncoder().encodeToString(cell.png))
+          }
+        )
+      }
+    }
+
+    // Distinct hashes over the whole matrix: the one number that says whether these axes actually
+    // move the pixels. All-identical means the axes are inert for this preview, which is the
+    // question the twenty-call version was being used to answer.
+    val distinct =
+      rendered.mapNotNull { it.jsonObject["sha256"]?.jsonPrimitive?.contentOrNull }.toSet().size
+    return textResult(
+      buildJsonObject {
+        put("schema", "compose-preview/catalog-mcp-matrix/v1")
+        put("catalog", catalog)
+        put("previewId", preview.id)
+        put("uri", resourceUri(catalog, preview.id))
+        put("observe", observe)
+        put("cellCount", rendered.size)
+        put("distinctRenders", distinct)
+        put("cells", rendered)
+      }
+        .toString()
+    )
+  }
+
   private suspend fun renderResult(
     host: ServeHost,
     previewId: String,
     uri: String,
     overrides: PreviewOverrides,
     observe: String,
+    requestedKeys: List<String> = emptyList(),
   ): JsonObject = buildJsonObject {
-    put("content", JsonArray(renderContent(host, previewId, uri, overrides, observe)))
+    put(
+      "content",
+      JsonArray(renderContent(host, previewId, uri, overrides, observe, requestedKeys)),
+    )
   }
 
   private suspend fun renderContent(
@@ -319,6 +450,7 @@ class ServeCatalogMcp(
     uri: String,
     overrides: PreviewOverrides,
     observe: String,
+    requestedKeys: List<String> = emptyList(),
   ): List<JsonObject> {
     if (observe !in OBSERVATION_MODES) {
       throw McpRequestException("'observe' must be one of png, svg, semantics, or hash")
@@ -326,8 +458,21 @@ class ServeCatalogMcp(
     // Answered before the raster below, deliberately: the vector lane has its own export and would
     // otherwise pay for a PNG whose bytes are then discarded.
     if (observe == "svg") return listOf(textContent(renderSvg(host, previewId, overrides)))
-    val png = renderPng(host, previewId, overrides)
-    if (observe == "png") return listOf(imageContent(png))
+    val rendered = renderPng(host, previewId, overrides)
+    val png = rendered.png
+    if (observe == "png") {
+      // An override-free browse keeps the bare image it has always returned. An override-bearing
+      // one gets the provenance block beside the pixels, because pixels alone cannot answer the
+      // question that actually matters to the caller: did my override reach the renderer? Two
+      // different overrides can produce byte-identical output either because both applied and
+      // neither moved anything, or because a baked lane answered and ignored them both.
+      return if (requestedKeys.isEmpty()) listOf(imageContent(png))
+      else
+        listOf(
+          imageContent(png),
+          textContent(JsonObject(provenance(rendered, requestedKeys)).toString()),
+        )
+    }
 
     val observation = buildJsonObject {
       put("observe", observe)
@@ -338,6 +483,7 @@ class ServeCatalogMcp(
         put("widthPx", width)
         put("heightPx", height)
       }
+      provenance(rendered, requestedKeys).forEach { (key, value) -> put(key, value) }
       if (observe == "semantics") {
         val semantics = withRenderPermit {
           when (val outcome = host.renderAnnotations(previewId, overrides)) {
@@ -389,21 +535,58 @@ class ServeCatalogMcp(
     return textResult(bytes.decodeToString())
   }
 
+  /**
+   * What answered this request, and whether the overrides asked for reached it.
+   *
+   * [RenderOutcome.Generation] is already threaded through the host for exactly this purpose — a
+   * `baked` generation means no renderer ran and the request's overrides are NOT reflected in the
+   * bytes — but the MCP lane used to drop it on the floor, leaving a caller unable to tell an
+   * override that applied and changed nothing from one that was never honoured.
+   */
+  private fun provenance(
+    rendered: Rendered,
+    requestedKeys: List<String>,
+  ): Map<String, JsonElement> = buildMap {
+    put("generation", JsonPrimitive(rendered.generation.wire))
+    if (requestedKeys.isEmpty()) return@buildMap
+    put("requestedOverrides", JsonArray(requestedKeys.sorted().map(::JsonPrimitive)))
+    if (rendered.generation == RenderOutcome.Generation.BAKED) {
+      put(
+        "overridesApplied",
+        JsonPrimitive(false),
+      )
+      put(
+        "overridesIgnoredReason",
+        JsonPrimitive(
+          "answered from the published bundle, which carries no renderer; these overrides are " +
+            "not reflected in the returned bytes"
+        ),
+      )
+    } else {
+      put("overridesApplied", JsonPrimitive(true))
+    }
+  }
+
+  /** A render plus how it was produced — [RenderOutcome.Generation] is the diagnosis, see below. */
+  private data class Rendered(val png: ByteArray, val generation: RenderOutcome.Generation)
+
   private suspend fun renderPng(
     host: ServeHost,
     previewId: String,
     overrides: PreviewOverrides,
     preferPublished: Boolean = false,
-  ): ByteArray {
+  ): Rendered {
     if (preferPublished) {
-      return host.bakedRender(previewId, overrides)?.png
-        ?: throw McpRequestException(
-          "published preview '$previewId' is unavailable; use render_preview with live scope"
-        )
+      val baked =
+        host.bakedRender(previewId, overrides)
+          ?: throw McpRequestException(
+            "published preview '$previewId' is unavailable; use render_preview with live scope"
+          )
+      return Rendered(baked.png, RenderOutcome.Generation.BAKED)
     }
     return withRenderPermit {
       when (val outcome = host.render(previewId, overrides)) {
-        is RenderOutcome.Ok -> outcome.png
+        is RenderOutcome.Ok -> Rendered(outcome.png, outcome.generation)
         RenderOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
         RenderOutcome.Busy -> throw McpRequestException("render busy; retry shortly")
         is RenderOutcome.Failed -> throw McpRequestException(outcome.reason)
@@ -455,6 +638,20 @@ class ServeCatalogMcp(
   private fun parseOverrides(preview: ServePreview, raw: JsonObject?): PreviewOverrides {
     if (raw == null || raw.isEmpty()) return PreviewOverrides()
     val params = raw.mapValues { (_, value) -> value.asOverrideString() }
+    // Unknown keys are REFUSED here, unlike on `GET /render` where they are ignored so a URL may
+    // carry a cache-buster or an analytics tag beside the axes. An MCP `overrides` object has no
+    // such passengers: every key in it was typed on purpose, so a key this server does not consume
+    // is a caller error, and silently dropping it produces a render that answers a different
+    // question than the one asked — indistinguishable, from the outside, from an override that
+    // applied and changed nothing.
+    val unknown = params.keys.filterNot(ServeOverrides::isOverrideParam).sorted()
+    if (unknown.isNotEmpty()) {
+      throw McpRequestException(
+        "unknown override ${if (unknown.size == 1) "key" else "keys"} ${unknown.joinToString()}; " +
+          "supported: ${ServeOverrides.SUPPORTED_KEYS.sorted().joinToString()}, " +
+          "plus ${ServeOverrides.KNOB_PREFIX}<knob> and ${ServeOverrides.RC_NAMED_PREFIX}<name>"
+      )
+    }
     val knobKinds = ServeOverrides.declaredKnobKinds(preview)
     return when (val parsed = ServeOverrides.parse(params, knobKinds)) {
       is OverrideParse.Ok -> parsed.overrides
@@ -551,7 +748,7 @@ class ServeCatalogMcp(
               buildJsonObject {
                 put("catalog", catalog)
                 put("label", host.label)
-                put("previews", JsonArray(host.previews.map { previewJson(catalog, it) }))
+                put("previews", JsonArray(host.previews.map { previewJson(catalog, it, host) }))
               }
             )
           }
@@ -582,9 +779,13 @@ class ServeCatalogMcp(
     put("uri", resourceUri(catalog, preview.id))
   }
 
-  private fun storyDocumentationJson(catalog: String, preview: ServePreview): JsonObject =
+  private fun storyDocumentationJson(
+    catalog: String,
+    preview: ServePreview,
+    host: ServeHost,
+  ): JsonObject =
     JsonObject(
-      previewJson(catalog, preview) +
+      previewJson(catalog, preview, host) +
         storyJson(catalog, preview) +
         mapOf(
           "schema" to JsonPrimitive("compose-preview-mcp-storybook/v1"),
@@ -600,13 +801,21 @@ class ServeCatalogMcp(
   private fun hostTitle(preview: ServePreview): String =
     preview.id.substringBeforeLast('.', missingDelimiterValue = preview.label)
 
-  private fun previewJson(catalog: String, preview: ServePreview): JsonObject = buildJsonObject {
+  private fun previewJson(
+    catalog: String,
+    preview: ServePreview,
+    host: ServeHost,
+  ): JsonObject = buildJsonObject {
     put("id", preview.id)
     put("label", preview.label)
     put("catalog", catalog)
     put("uri", resourceUri(catalog, preview.id))
     put("modes", JsonArray(preview.modes.map { JsonPrimitive(it.wire) }))
     put("dataProductKinds", JsonArray(preview.dataProductKinds.sorted().map(::JsonPrimitive)))
+    // Advertised beside `dataProductKinds` for the same reason that is: `observe=svg` exists per
+    // preview, not per catalog, so without this an agent can only discover the vector lane by
+    // asking for it and reading the refusal.
+    put("svgAvailable", host.hasSvgExportFor(preview.id))
     preview.state?.let { put("state", it) }
     preview.theme?.let { put("theme", it) }
   }
@@ -791,6 +1000,13 @@ class ServeCatalogMcp(
     private const val INVALID_PARAMS = -32602
     private const val INTERNAL_ERROR = -32603
     private const val MAX_STORIES_PER_CALL = 16
+    /**
+     * Cells one `render_matrix` call may commission. Each is a full render under the shared permit,
+     * so this bounds what a single MCP message can cost the box — the same reason
+     * [MAX_STORIES_PER_CALL] exists, applied to a product rather than a list.
+     */
+    private const val MAX_MATRIX_CELLS = 24
+    private val MATRIX_OBSERVATION_MODES = setOf("png", "hash")
     private const val RESOURCE_URI_PREFIX = "compose-preview://catalog/"
     private const val STORY_ID_SEPARATOR = "::"
     private val OBSERVATION_MODES = setOf("png", "svg", "semantics", "hash")
