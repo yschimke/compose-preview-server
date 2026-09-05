@@ -3960,8 +3960,17 @@ private val MENU_MODIFIERS: List<MenuModifier> =
     MenuModifier("fillMaxWidth", "Fill the width") {
       buildJsonObject { put("type", "fillMaxWidth") }
     },
+    MenuModifier("fillMaxHeight", "Fill the height") {
+      buildJsonObject { put("type", "fillMaxHeight") }
+    },
     MenuModifier("matchParentSize", "Match the parent's size") {
       buildJsonObject { put("type", "matchParentSize") }
+    },
+    MenuModifier("verticalScroll", "Scroll vertically") {
+      buildJsonObject { put("type", "verticalScroll") }
+    },
+    MenuModifier("horizontalScroll", "Scroll horizontally") {
+      buildJsonObject { put("type", "horizontalScroll") }
     },
     MenuModifier("padding", "Pad by 16") {
       buildJsonObject {

@@ -29,7 +29,15 @@ class EditorModifierMenuTest {
   fun `only the modifiers the component declares are offered`() {
     val box = reducer.modifierToggles(reducer.initial(document, selectedNodeId = "main-background"))
     assertEquals(
-      listOf("fillMaxSize", "fillMaxWidth", "matchParentSize", "padding"),
+      listOf(
+        "fillMaxSize",
+        "fillMaxWidth",
+        "fillMaxHeight",
+        "matchParentSize",
+        "verticalScroll",
+        "horizontalScroll",
+        "padding",
+      ),
       box.map { it.type },
     )
 
