@@ -30,6 +30,7 @@ class PlaygroundCompileServiceTest {
       emptyList()
     },
     discover: (Path, List<Path>) -> List<String> = { _, _ -> listOf("com.example.SnippetPreview") },
+    discovererOverride: PlaygroundCompileService.PreviewDiscoverer? = null,
     render: (PlaygroundTokenStore.PlaygroundSnippet) -> ByteArray? = { null },
     capture: (PlaygroundTokenStore.PlaygroundSnippet) -> ByteArray? = { null },
     publish: (String, ByteArray, Boolean) -> String? = { _, _, _ -> null },
@@ -42,7 +43,7 @@ class PlaygroundCompileServiceTest {
     PlaygroundCompileService(
       catalogClasspath = { mode, _ -> classpathFor(mode) },
       compiler = compilerOverride ?: PlaygroundCompileService.Compiler(compile),
-      discoverer = PlaygroundCompileService.PreviewDiscoverer(discover),
+      discoverer = discovererOverride ?: PlaygroundCompileService.PreviewDiscoverer(discover),
       tokenStore = tokenStore,
       newWorkDir = { "/work/run${++workDirs}".toPath() },
       fileSystem = fs,
@@ -307,6 +308,41 @@ class PlaygroundCompileServiceTest {
     assertNull(resp.previewToken)
     assertTrue(assertNotNull(resp.exception).contains("@Preview"))
     assertFalse(fs.exists("/work/run1".toPath()))
+  }
+
+  @Test
+  fun `no @Preview names the imports this host accepts`() {
+    val svc = service(discover = { _, _ -> emptyList() })
+
+    val message = assertNotNull(svc.run(request(), isSecurityChecked = true).exception)
+
+    for (fqn in PlaygroundPreviewDiscoverer.DEFAULT_PREVIEW_ANNOTATION_FQNS) {
+      assertTrue(message.contains(fqn), "the message names $fqn so the author can fix the import")
+    }
+  }
+
+  @Test
+  fun `a preview-shaped annotation this host does not read is named back`() {
+    val discoverer =
+      object : PlaygroundCompileService.PreviewDiscoverer {
+        override fun discover(classesDir: Path, classpath: List<Path>) = emptyList<String>()
+
+        override fun unrecognisedPreviewAnnotations(classesDir: Path) =
+          listOf("androidx.wear.tiles.tooling.preview.Preview")
+      }
+    val svc = service(discovererOverride = discoverer)
+
+    val message = assertNotNull(svc.run(request(), isSecurityChecked = true).exception)
+
+    assertTrue(
+      message.contains("@androidx.wear.tiles.tooling.preview.Preview"),
+      "the annotation the snippet actually declared is named: $message",
+    )
+    assertTrue(
+      message.contains("androidx.compose.ui.tooling.preview.Preview"),
+      "alongside one it could have used instead: $message",
+    )
+    assertFalse(fs.exists("/work/run1".toPath()), "the work dir is still cleaned up")
   }
 
   @Test

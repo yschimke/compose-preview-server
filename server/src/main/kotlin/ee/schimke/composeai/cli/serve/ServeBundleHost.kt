@@ -967,6 +967,26 @@ class ServeBundleHost(
     )
 
   /**
+   * [previewId]'s render at [commit], addressed by the path **the generated history records for
+   * it** rather than by today's catalog layout.
+   *
+   * [pinnedRender] resolves the path from the pinned manifest or the branch tip, which is right for
+   * a permalink to a page. A timeline entry is a stronger statement: the publisher recorded that
+   * exactly this path carried those bytes at that commit, so using it removes a layout lookup that
+   * can miss — a preview whose render path moved between publishes resolves through its own history
+   * instead of through a tip that no longer names it.
+   *
+   * The path is never caller-supplied; it comes from the manifest this server fetched. Falls back
+   * to [pinnedRender] where no timeline names the preview.
+   */
+  fun pinnedIndexedRender(commit: String, previewId: String): PinnedOutcome {
+    val path =
+      indexedPreviewHistory?.previews?.get(previewId)?.path
+        ?: return pinnedRender(commit, previewId)
+    return pinnedAsset(commit, path)
+  }
+
+  /**
    * A preview this catalog published at [commit] but does **not** list today, as a record the
    * viewer can page.
    *
@@ -1017,6 +1037,19 @@ class ServeBundleHost(
     if (normalized in indexedPreviewRevisions(previewId).asSequence().map { it.commit }) return true
     return revisionPreviewIds?.let { it[normalized]?.contains(previewId) ?: false }
   }
+
+  /**
+   * The publisher's timeline for [previewId], or null when this catalog carries no generated
+   * history (an older publisher, or a plain uploaded bundle).
+   *
+   * Already in memory and already pinned: [indexedPreviewHistory] is fetched from the same
+   * immutable tree as `catalog.json`, so it describes exactly the catalog being served rather than
+   * whatever the delivery branch has since moved on to. Exposed because a remote consumer that only
+   * has the manifest's *URL* must fetch the whole document to read one preview out of it — measured
+   * at 1 MB for a 497-byte answer on `m3-catalog`.
+   */
+  fun indexedTimeline(previewId: String): PreviewHistoryManifest.PreviewTimeline? =
+    indexedPreviewHistory?.previews?.get(previewId)
 
   /** Distinct image versions the generated history can recover beyond the branch feed's window. */
   fun indexedPreviewRevisions(previewId: String): List<ServeCatalogRevision.Revision> =

@@ -33,14 +33,16 @@ repository boundary.
   `compose-preview-contracts`; it does not link a Gradle driver
   ([#9](https://github.com/yschimke/compose-preview-server/issues/9),
   [#180](https://github.com/yschimke/compose-preview-server/issues/180)).
-- Three published Kotlin modules. `:server` depends on `:render-host` and `:ui-builder-runtime`,
-  never back; the latter two do not depend on each other. `:render-host`
-  holds what renders and reads history — the render host, the bundle daemon, the git-backed preview
-  history — and must stay free of a web server; `:server` holds the HTTP layer, the runner, the
-  catalog store and the web surfaces. `:ui-builder-runtime` holds persistent design state, catalog
-  validation and renderer-neutral export orchestration. All three publish in lockstep: `:server`'s
-  POM names both libraries at the same version. `checkRenderHostIsServerFree`,
-  `checkUiBuilderRuntimeBoundary` and `checkServeModuleBoundary` enforce the graph.
+- Two published Kotlin modules. `:server` depends on `:ui-builder-runtime`, never back; `:server`
+  holds the HTTP layer, the runner, the catalog store and the web surfaces, and
+  `:ui-builder-runtime` holds persistent design state, catalog validation and renderer-neutral
+  export orchestration. Both publish in lockstep: `:server`'s POM names the runtime at the same
+  version. `checkUiBuilderRuntimeBoundary` and `checkServeModuleBoundary` enforce the graph.
+- `:render-host` was a third, until #180 moved it to compose-ai-tools, where it publishes as
+  `ee.schimke.composeai:render-host`. It is offline behaviour that opens no socket, which the layer
+  rule places in that repository, and it had zero project dependencies inside this build. `:server`
+  still depends on it; the edge points the same way, it just crosses a repository boundary the
+  correct direction now. `checkRenderHostIsServerFree` went with it.
 - Keep `checkServeModuleBoundary` a resolved-classpath positive allowlist, including transitives.
 - The source package stays `ee.schimke.composeai.cli.serve` until a separately reviewed rename.
 - UI-affecting PRs include viewable before/after evidence and update the visual harness when needed.

@@ -1,5 +1,33 @@
 # Changelog
 
+## [3.0.0](https://github.com/yschimke/compose-preview-server/compare/v2.23.0...v3.0.0) (2026-09-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **render-host:** consume the render host from compose-ai-tools ([#289](https://github.com/yschimke/compose-preview-server/issues/289))
+
+### Features
+
+* **mcp:** answer history from the manifest the catalog load already holds ([#288](https://github.com/yschimke/compose-preview-server/issues/288)) ([3af5251](https://github.com/yschimke/compose-preview-server/commit/3af5251a3662fa963eaa6455589e88b55f913306))
+* **mcp:** serve one preview's render timeline over catalog MCP ([#285](https://github.com/yschimke/compose-preview-server/issues/285)) ([7f21336](https://github.com/yschimke/compose-preview-server/commit/7f213366f7612d6dbf6e24a2a73d57c3d215ff03))
+* **render-host:** consume the render host from compose-ai-tools ([#289](https://github.com/yschimke/compose-preview-server/issues/289)) ([dc4d440](https://github.com/yschimke/compose-preview-server/commit/dc4d4403dbf90c1a0718ac82da49821d0adc3b4c))
+* **serve:** let a grant poll wait for the decision instead of being asked again ([#283](https://github.com/yschimke/compose-preview-server/issues/283)) ([9cab3c7](https://github.com/yschimke/compose-preview-server/commit/9cab3c7d2a69577666e4e4803057b09d3552617e))
+* **ui-builder:** author the component record the Compose export needs ([#286](https://github.com/yschimke/compose-preview-server/issues/286)) ([d1570ad](https://github.com/yschimke/compose-preview-server/commit/d1570ad1fce745e3379416ed0a1a9ba410babcd8))
+
+
+### Bug Fixes
+
+* **playground:** render a desktop @Preview, and say which imports are read ([#287](https://github.com/yschimke/compose-preview-server/issues/287)) ([eb7c8b4](https://github.com/yschimke/compose-preview-server/commit/eb7c8b483eee223ea0a245b28a49e5ec9f3bb29d))
+
+## [2.23.0](https://github.com/yschimke/compose-preview-server/compare/v2.22.0...v2.23.0) (2026-09-05)
+
+
+### Features
+
+* **mcp:** let a client with no credential discover the endpoint and ask for one ([#277](https://github.com/yschimke/compose-preview-server/issues/277)) ([37a8fbf](https://github.com/yschimke/compose-preview-server/commit/37a8fbf6ba5a0470078ba5ec48e4c2d55fbabcf2))
+* **mcp:** tell a catalog MCP caller what its render actually did ([#276](https://github.com/yschimke/compose-preview-server/issues/276)) ([f217879](https://github.com/yschimke/compose-preview-server/commit/f2178791e4e50da7323b9565eea229b87319acec))
+
 ## [2.22.0](https://github.com/yschimke/compose-preview-server/compare/v2.21.0...v2.22.0) (2026-09-05)
 
 

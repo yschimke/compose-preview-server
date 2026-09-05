@@ -141,7 +141,10 @@ class ServeCatalogMcpSvgTest {
     val body = call(VectorHost(), "pdf")
 
     assertTrue(body.isError())
-    assertEquals("'observe' must be one of png, svg, semantics, or hash", body.text())
+    assertEquals(
+      "'observe' must be one of png, svg, scroll-png, scroll-svg, semantics, or hash",
+      body.text(),
+    )
   }
 
   @Test
@@ -167,6 +170,6 @@ class ServeCatalogMcpSvgTest {
         .jsonObject["enum"]!!
         .jsonArray
         .map { it.jsonPrimitive.content }
-    assertEquals(listOf("png", "svg", "semantics", "hash"), enum)
+    assertEquals(listOf("png", "svg", "scroll-png", "scroll-svg", "semantics", "hash"), enum)
   }
 }

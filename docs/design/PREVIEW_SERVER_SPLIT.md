@@ -12,7 +12,8 @@ The production UI builder introduced a third published, lockstep JVM module:
 state, exact catalog validation and revision-pinned export orchestration. It intentionally does not
 own Ktor routes, authentication, MCP tooling, Compose UI, daemon launch or render-host execution.
 
-The dependency graph is `:server -> :ui-builder-runtime` and `:server -> :render-host`; there is no
+The dependency graph is `:server -> :ui-builder-runtime` and `:server -> ee.schimke.composeai:render-host`
+(published from compose-ai-tools since #180, and this repository's own module before that); there is no
 edge between the libraries. The runtime emits a contracts-shaped `UiBuilderRenderRequest`, and the
 server adapts it to `ServeRenderHost`. This removes `ui-builder-protocol` and UI-builder service
 types from the offline render/history artifact. The generic packaged preview bundle is a build-time

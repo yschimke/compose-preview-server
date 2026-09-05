@@ -77,8 +77,11 @@ transport does not need the other:
    `approveUrl`, `userCode` and the `deviceSecret` to keep.
 2. The client shows the **link and the code** to its human, who opens the page and checks the code
    matches before approving.
-3. `tools/call poll_access` with `requestId` + `deviceSecret` answers `pending` until someone
-   decides, then `approved` with the bearer.
+3. `tools/call poll_access` with `requestId` + `deviceSecret` answers `approved` with the bearer.
+   It **waits** for the decision rather than answering `pending` straight away, because every poll
+   here is a tool call through a model. `waitSeconds` defaults to 8 — inside a conservative
+   client's read timeout — and may be raised to 30 by a client that tolerates longer calls; a wait
+   that times out answers `pending` and you simply call again.
 
 **`initialize`, `ping`, `tools/list` and these two tools need no credential**; everything that reads
 a catalog still does. The gate is per message, not per endpoint, because a client that cannot finish
@@ -107,6 +110,11 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `list_projects`, `list_previews` | `preview` | Discover catalogs and preview metadata |
 | `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
 | `render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
+| `list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
+| `history_list` | `preview` | One preview's render timeline |
+| `history_diff` | `preview` | Compare two of its recorded renders |
+| `history_read` | `preview` | One historical render's pixels, by commit or blob |
+| `diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
 | `list_data_products` | `preview` | Discover structured products exposed by previews |
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
@@ -121,6 +129,97 @@ asking for it and reading the refusal. It is available only where the host adver
 daemon-backed session that can export `compose/figma-svg`. A catalog with neither is refused by
 name rather than reported as a missing preview. The lane shares the render semaphore with the PNG
 lane, so it is metered identically and cannot become a second unmetered renderer.
+
+### History
+
+`history_list` answers in one of three `mode`s, and the field is load-bearing: the three are not
+interchangeable, and an agent that could not tell them apart would read "no versions" as "this
+preview has never changed".
+
+| `mode` | When | What comes back |
+|---|---|---|
+| `published` | the catalog was fetched from a delivery branch | `manifestUrl`, `repo`, `branch`, and `renderUrlTemplate` |
+| `local` | project mode — `serve` against a checkout | the timeline inline, each version carrying a `renderUrl` |
+| `none` | an uploaded bundle with neither | a `reason`, not an empty list |
+
+**`published` answers from the copy the load already holds.** `ServeCatalogStore` fetches
+`history.json` from the same immutable tree as `catalog.json` — the load is pinned to one commit by
+construction — and parses it into the bundle host. So the timeline is in memory, describes exactly
+the catalog being served, and is reported with the `pinnedCommit` it belongs to. There is no
+independent staleness to manage: history is as fresh as the catalog it describes.
+
+Answering inline rather than by URL is not a convenience. `m3-catalog`'s manifest is **1,008,000
+bytes** across 1336 previews; the slice describing one preview is **497 bytes**. Sending a caller to
+fetch the whole document to read one row is a 2000:1 overfetch, and it assumes the caller can reach
+`raw.githubusercontent.com` at all — which an agent behind an allowlist often cannot, even while the
+MCP endpoint is reachable. `manifestUrl` is still returned for a caller that wants the whole
+catalog's timeline, and each version carries the `renderUrl` serving those exact bytes.
+
+A publisher that ships no `history.json` keeps the URL-only answer as the degraded path.
+
+In `local` mode the timeline comes from [`ServeProjectHistory`], derived from the checkout's own
+delivery-branch commits and memoised per refresh window because one `git log --raw` over the branch
+is ~1.6s. Each version links to this server's content-addressed `/history/render/<blob>.png` lane,
+which only ever serves blobs the timeline already names.
+
+Delivery provenance wins over a local checkout where a deployment somehow has both: a catalog
+fetched from a delivery branch has already published what it rendered, and that is the truth about
+it rather than whatever the serving box's clone happens to contain.
+
+A timeline is not a commit list. Adjacent commits whose render bytes are identical collapse into one
+version, and a preview that keeps returning to a render it had already moved away from is reported
+`unstable` with a `flapCount` rather than as a preview with hundreds of changes — on the measured
+branch, five such previews accounted for a 40% reduction in entries.
+
+### Comparing and reading historical renders
+
+`history_diff` compares two of a preview's recorded renders, defaulting to the two newest — *did the
+last publish move this preview?* It is a **metadata** comparison: the timeline's versions are
+already collapsed distinct renders, so whether the bytes changed is answered by their content ids
+without fetching either image on either side.
+
+It reports `unstable` alongside, and says so explicitly when set. That is the point of having it:
+on a preview that re-renders differently on publishes that did not change it, a byte difference is
+not evidence of a real change — the same question `flake-triage` otherwise settles with a
+repeat-render oracle, answered here from precomputed data.
+
+`history_read` returns one historical render's pixels through this server, addressed by `commit` or
+`blob` (a prefix is enough). `preview` scope rather than `live`, matching the HTTP permalink lane:
+it replays already-published bytes and commissions no render. It is still bounded — the published
+lane goes through the bundle host's pinned-fetch permit and its miss cache, and the project-mode
+lane only ever serves blobs the timeline already names. A timeline that names a version the branch
+will not hand over is reported as such, distinctly from a version that does not exist.
+
+### The full-page scroll lanes
+
+`observe=scroll-png` and `observe=scroll-svg` return `render/scroll/long` and
+`compose/figma-svg-long` — the whole scrollable screen (a virtualised `LazyColumn` re-rendered at an
+expanded viewport so every row composes) rather than the viewport crop. Both are gated on
+`ServeHost.hasScrollExportFor` and refused by name where absent, because the tall re-render needs a
+daemon and a static bundle has no scroll producer. `list_previews` reports `scrollAvailable` per
+preview beside `svgAvailable`. A non-scrolling preview yields its ordinary viewport output.
+
+### Devices
+
+`list_devices` publishes the `device` override's accepted vocabulary from `DeviceDimensions`, the
+same catalog the render path resolves against — no geometry is authored in the MCP layer. The tool
+exists because an unrecognised `device` value is **not** an error on the render path: it falls
+through to the default frame, which from the caller's side is indistinguishable from a device that
+happens to render identically to the default.
+
+### Comparing two previews
+
+`diff_semantics` compares two previews' semantics and reports tags present on only one side, tags
+whose bounds moved, and tags whose occupancy `count` changed.
+
+Identity is the authored `testTag`, deliberately, and not a `SemanticsRefs` ref. A ref indexes
+siblings sharing an anchor — `r/role:Button[0]` means "the first Button under this parent" — so
+inserting a Button ahead of it silently retargets the same string at different pixels, and a diff
+built on refs would report "unchanged" for exactly the edit a reader most needs to see. A `testTag`
+either survives an edit or stops resolving, and both are reported. A `count` change is reported
+separately from a move: a tag carried by two nodes is no longer an identity anything can resolve,
+which is a different event from the same node shifting. Two previews carrying no tags at all get an
+explicit note rather than an `identical` verdict they did not earn.
 
 ### Knowing whether an override landed
 

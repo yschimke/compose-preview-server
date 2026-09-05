@@ -12,7 +12,7 @@ that of the live `remote-m3` wall). The page now names them.
 
 The wall is [`ServeWeb.rcLanesSection`](../../server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeWeb.kt);
 the lane vocabulary it subtracts the published lanes from is
-[`ServeRcCompare.LANES`](../../render-host/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeRcCompare.kt).
+[`ServeRcCompare.LANES`](https://github.com/yschimke/compose-ai-tools/blob/main/render-host/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeRcCompare.kt).
 
 | file | what it is |
 | --- | --- |
@@ -31,7 +31,7 @@ stripped, which is the only rendered difference.
 The live wall is the answer to the question the absent note only *names*: a player is missing from
 the offline run, but the recorded `ir/<id>.rc` document plus a host that can play it is enough to
 fill the column anyway. `ServeWeb.rcLanesSection` adds a column for every backend
-[`ServeHost.enabledRcPlayersFor`](../../render-host/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeHost.kt)
+[`ServeHost.enabledRcPlayersFor`](https://github.com/yschimke/compose-ai-tools/blob/main/render-host/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeHost.kt)
 reports that the run has none for, pointing it at `/render/<id>.png?rcPlayer=<wire>`.
 
 Not every drawable player, though, and the capture shows which: `cmp-android` is deliberately left
