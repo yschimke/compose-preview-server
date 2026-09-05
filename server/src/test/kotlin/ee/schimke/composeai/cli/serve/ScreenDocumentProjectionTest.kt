@@ -4,6 +4,7 @@ import ee.schimke.composeai.discovery.ChainLink
 import ee.schimke.composeai.discovery.ScreenValue
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.protocol.AccessibilityV1
+import ee.schimke.composeai.uibuilder.protocol.AdaptiveGridValueV1
 import ee.schimke.composeai.uibuilder.protocol.ClipModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
@@ -720,5 +721,133 @@ class ScreenDocumentProjectionTest {
       assertIs<ScreenDocumentProjection.Outcome.Refused>(ScreenDocumentProjection.project(document))
         .reasons
     assertTrue(reasons.any { it.contains("`#6750A4`") }, reasons.toString())
+  }
+
+  private fun lazyList(
+    componentId: String,
+    vararg properties: Pair<String, UiValueV1>,
+    children: List<String> = listOf("text"),
+  ) =
+    DesignNodeV1(
+      id = "list",
+      componentId = componentId,
+      properties = properties.toMap(),
+      slots = mapOf("items" to children),
+    )
+
+  @Test
+  fun `a lazy list wraps each child in its scope's item, and keeps the slot's own arguments`() {
+    // The whole point of #394: a lazy container is a component record now, and its children are
+    // declared through `LazyListScope` rather than composed into the lambda. `ScreenGenerator`
+    // checks the scope named here against the record's `scopeDslReceiver`, so a wrong table entry
+    // refuses rather than emitting Kotlin that does not compile.
+    val projected =
+      projected(
+        document(
+          lazyList(
+            "layout/lazy-column",
+            "verticalSpacingDp" to DecimalValueV1(16.0),
+            "contentPadding" to
+              PaddingValueV1(startDp = JsonPrimitive(24), bottomDp = JsonPrimitive(24)),
+          ),
+          text(),
+          roots = listOf("list"),
+        )
+      )
+
+    val root = projected.root
+    // The catalog id passes through: only a variant spends it for a canonical one, and
+    // `ScreenNode.componentId` takes either.
+    assertEquals("layout/lazy-column", root.componentId)
+    // The catalog calls the slot `items` and `LazyColumn` calls it `content`.
+    assertEquals(setOf("content"), root.slots.keys)
+    val item = root.slotItems.getValue("content")
+    assertEquals("item", item.callable)
+    assertEquals("androidx.compose.foundation.lazy.LazyListScope", item.receiverScopeFqn)
+    // Spacing becomes the arrangement the non-lazy column already used, and padding is a
+    // parameter under its own name.
+    assertTrue("verticalArrangement" in root.arguments, root.arguments.keys.toString())
+    assertTrue("contentPadding" in root.arguments, root.arguments.keys.toString())
+  }
+
+  @Test
+  fun `a grid's columns become GridCells Adaptive rather than refusing as a layout`() {
+    val root =
+      projected(
+          document(
+            lazyList(
+              "layout/lazy-grid",
+              "columns" to AdaptiveGridValueV1(minimumCellWidthDp = JsonPrimitive(362)),
+            ),
+            text(),
+            roots = listOf("list"),
+          )
+        )
+        .root
+
+    val columns = assertIs<ScreenValue.Construct>(root.arguments.getValue("columns"))
+    assertEquals("androidx.compose.foundation.lazy.grid.GridCells.Adaptive", columns.callableFqn)
+    assertEquals("androidx.compose.foundation.lazy.grid.GridCells", columns.typeFqn)
+    assertEquals(
+      "androidx.compose.foundation.lazy.grid.LazyGridScope",
+      root.slotItems.getValue("content").receiverScopeFqn,
+    )
+  }
+
+  @Test
+  fun `a scroll state key is spent rather than handed to a component with no such parameter`() {
+    // Required on `layout/lazy-column` in the catalog, so every real lazy container carries one.
+    // It names the scroll position the builder's canvas restores, which is not in the design —
+    // the one thing this projection drops on purpose, and `IDENTITY_PROPERTIES` says why.
+    val root =
+      projected(
+          document(
+            lazyList("layout/lazy-column", "scrollStateKey" to StringValueV1("detail-scroll")),
+            text(),
+            roots = listOf("list"),
+          )
+        )
+        .root
+
+    assertFalse("scrollStateKey" in root.arguments, root.arguments.keys.toString())
+  }
+
+  @Test
+  fun `a grid span is refused, because dropping it would export a full-width row as one cell`() {
+    // The counter-example to the one above. `span` reads like more bookkeeping and is a layout
+    // instruction: the old exporter wrote it as `item(span = { GridItemSpan(maxLineSpan) })`, an
+    // argument to the wrapper computed by a lambda, and this vocabulary has neither.
+    assertEquals(
+      listOf(
+        "node `list`.`span` is the span this node takes in its parent grid, which is " +
+          "`item(span = { GridItemSpan(…) })` on the wrapper around it — an argument to another " +
+          "node, computed by a lambda, and this vocabulary has neither"
+      ),
+      refusal(
+        document(
+          lazyList("layout/lazy-row", "span" to EnumValueV1("full")),
+          text(),
+          roots = listOf("list"),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `a weight inside a lazy list refuses, because an item body has no receiver`() {
+    // A child of a lazy list sits inside `item { }`, whose receiver nothing in the record attests,
+    // so `SLOT_SCOPES` is silent and a scoped modifier refuses the way one at the root does.
+    // Stated here because the alternative — claiming `LazyListScope` for the children — would emit
+    // a `Modifier.weight` that resolves nowhere.
+    assertTrue(
+      refusal(
+          document(
+            lazyList("layout/lazy-column"),
+            text("weight" to DecimalValueV1(1.0)),
+            roots = listOf("list"),
+          )
+        )
+        .any { "which `Modifier.weight` supplies from a row's or column's scope" in it }
+    )
   }
 }

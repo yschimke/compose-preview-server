@@ -21,6 +21,14 @@ import kotlinx.serialization.json.Json
  * `children`. The record keys by the **parameter** name the signature declares — `content`. The
  * mapping between them is `SLOT_PARAMETERS`, a third authored table, so this walks all three and
  * compares the resolved result in both directions at once.
+ *
+ * ## A DSL slot is the same claim, one table over
+ *
+ * A lazy container's slot has a receiver too, and its **children do not get it**: they sit inside
+ * `item { }`, so `SLOT_SCOPES` is deliberately silent about them and the record's `slots` entry
+ * carries no `receiverScope` — saying otherwise would advertise a `Modifier.weight` that resolves
+ * nowhere. The scope those slots do have is on the parameter, as `scopeDslReceiver`, and what the
+ * projection claims against it is `SLOT_ITEMS`. Same split claim, same drift risk, same check.
  */
 class M3CatalogSlotScopeTest {
 
@@ -47,6 +55,37 @@ class M3CatalogSlotScopeTest {
         }
       }
       .toMap()
+
+  /** Every scope DSL the shipped record attests, by capability id and parameter name. */
+  private fun attestedDsl(): Map<Pair<String, String>, String> =
+    record.components
+      .flatMap { component ->
+        component.componentIds.flatMap { id ->
+          component.parameters.mapNotNull { parameter ->
+            parameter.scopeDslReceiver?.let { (id to parameter.name) to it }
+          }
+        }
+      }
+      .toMap()
+
+  /** Every scope the projection's slot items claim, through the same slot alias. */
+  private fun claimedDsl(): Map<Pair<String, String>, String> =
+    ScreenDocumentProjection.SLOT_ITEMS.flatMap { (id, slots) ->
+        slots.map { (slot, item) ->
+          (id to ScreenDocumentProjection.parameterForSlotName(id, slot)) to item.receiverScopeFqn
+        }
+      }
+      .toMap()
+
+  @Test
+  fun `the projection wraps children in exactly the scopes the record declares as DSLs`() {
+    // The generator refuses a slot item whose scope is not the parameter's own, so a disagreement
+    // here is every lazy list in every design refusing at once. The other direction matters just
+    // as much and fails differently: a record that declares a scope DSL the projection has no
+    // wrapper for is a component that stays refused as "a parameter, not a @Composable slot",
+    // which reads like the record was never grown at all.
+    assertEquals(attestedDsl(), claimedDsl())
+  }
 
   @Test
   fun `the projection claims exactly the receiver scopes the record attests`() {
