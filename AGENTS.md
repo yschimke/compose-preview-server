@@ -22,9 +22,17 @@ repository boundary.
 
 - The build resolves released coordinates from Maven Central. Do not add `mavenLocal()`, a composite
   include of `compose-ai-tools`, project substitution, or a shared catalog outside this repository.
-- Wire shapes belong in `compose-preview-contracts`; server behavior and browser/offline scoring
-  implementation belong here. Moving implementation into the contracts repository does not reduce
-  traffic coupling.
+- Which repository a module belongs in is decided by the layer rule, written once in
+  [`docs/design/REPOSITORY_LAYERS.md`](https://github.com/yschimke/compose-ai-tools/blob/main/docs/design/REPOSITORY_LAYERS.md):
+  contracts is shape, compose-ai-tools is offline behaviour, this repository is HTTP and the
+  surfaces reachable over it, and a dependency may only point down. Wire shapes therefore belong in
+  `compose-preview-contracts`; server behavior and browser/offline scoring implementation belong
+  here. Moving implementation into the contracts repository does not reduce traffic coupling.
+- The Gradle Tooling API stays off this repository's floor. A server that needs a local Gradle build
+  asks compose-ai-tools for one across a process boundary, over a contract in
+  `compose-preview-contracts`; it does not link a Gradle driver
+  ([#9](https://github.com/yschimke/compose-preview-server/issues/9),
+  [#180](https://github.com/yschimke/compose-preview-server/issues/180)).
 - Three published Kotlin modules. `:server` depends on `:render-host` and `:ui-builder-runtime`,
   never back; the latter two do not depend on each other. `:render-host`
   holds what renders and reads history — the render host, the bundle daemon, the git-backed preview
