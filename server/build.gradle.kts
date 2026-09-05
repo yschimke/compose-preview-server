@@ -259,11 +259,13 @@ tasks.named<Tar>("distTar") {
 // makes a POM that points at something nobody can resolve.
 //
 // Deliberately WITHOUT `explicitApi()`, unlike the contract modules (`:common-io`,
-// `:bundle-format`, `:common-image-crop`). Turning it on here reports 1,719 declarations needing an
-// explicit modifier — this is the server, not a contract, and marking all 1,719 `public` would
-// freeze an ABI nobody designed, which is the exact failure `explicitApi()` exists to prevent. The
-// surface worth designing is the 16 symbols `:cli` actually uses; narrowing to that, and only then
-// turning the gate on, is its own change.
+// `:bundle-format`, `:common-image-crop`) and unlike `:ui-builder-runtime`, which took the gate and
+// a committed ABI dump because its surface is five files of designed service port. Turning it on
+// here reports 1,199 declarations needing an explicit modifier (1,719 before `:render-host` moved
+// out) — this is the server, not a contract, and marking all of them `public` would freeze an ABI
+// nobody designed, which is the exact failure `explicitApi()` exists to prevent. The surface worth
+// designing is the 16 symbols `:cli` actually uses; narrowing to that, and only then turning the
+// gate on, is its own change.
 
 dependencies {
   add(
