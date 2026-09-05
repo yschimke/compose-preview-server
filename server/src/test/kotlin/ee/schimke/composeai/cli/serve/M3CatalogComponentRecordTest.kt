@@ -55,6 +55,17 @@ import kotlinx.serialization.json.jsonPrimitive
  * [uncovered] is therefore a checked-in list rather than an absence, so growing the record is a
  * deliberate edit here and a shrinking list, not something that drifts.
  *
+ * ## Three records for one catalog id
+ *
+ * `ElevatedCard` and `OutlinedCard` carry an **empty** `componentIds`, which is not an oversight.
+ * The catalog spells all three cards as `m3/card` and picks between them with a `variant` property
+ * — its `code.imports` lists all three while its `code.symbol` names one — so there is no catalog
+ * id for either to answer to. `ScreenDocumentProjection` selects them by canonical id, which
+ * `ScreenNode.componentId` accepts precisely so a record can be reached without one.
+ *
+ * That is why the two coverage tests below still balance: coverage is counted in catalog ids, and
+ * these claim none.
+ *
  * ## `m3/icon`, and the one thing this record authors that discovery could not print
  *
  * `m3/icon` was on that list — "`iconKey` resolves to an `ImageVector` the record cannot name" —
