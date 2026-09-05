@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.23.0](https://github.com/yschimke/compose-preview-server/compare/v2.22.0...v2.23.0) (2026-09-05)
+
+
+### Features
+
+* **mcp:** let a client with no credential discover the endpoint and ask for one ([#277](https://github.com/yschimke/compose-preview-server/issues/277)) ([37a8fbf](https://github.com/yschimke/compose-preview-server/commit/37a8fbf6ba5a0470078ba5ec48e4c2d55fbabcf2))
+* **mcp:** tell a catalog MCP caller what its render actually did ([#276](https://github.com/yschimke/compose-preview-server/issues/276)) ([f217879](https://github.com/yschimke/compose-preview-server/commit/f2178791e4e50da7323b9565eea229b87319acec))
+
 ## [2.22.0](https://github.com/yschimke/compose-preview-server/compare/v2.21.0...v2.22.0) (2026-09-05)
 
 
