@@ -1,5 +1,51 @@
 # Changelog
 
+## [3.4.0](https://github.com/yschimke/compose-preview-server/compare/v3.3.0...v3.4.0) (2026-09-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ui-builder:** borrow only foundation into the wear catalog ([#389](https://github.com/yschimke/compose-preview-server/issues/389))
+
+### Features
+
+* **deploy:** serve the Wear M3 authoring adapter by default ([#373](https://github.com/yschimke/compose-preview-server/issues/373)) ([47833a0](https://github.com/yschimke/compose-preview-server/commit/47833a004472f988a272df2e0652117fa76787d8))
+* **dist:** state the distribution's Java floor for a launcher to preflight ([#369](https://github.com/yschimke/compose-preview-server/issues/369)) ([193768b](https://github.com/yschimke/compose-preview-server/commit/193768b8b4f15ca0808fbaed5a62c17c75514a7a))
+* **ui-builder-runtime:** apply a modifier chain the browser writes ([#382](https://github.com/yschimke/compose-preview-server/issues/382)) ([d0e068b](https://github.com/yschimke/compose-preview-server/commit/d0e068b5aa214e5704cda30bf9411075947e91d2))
+* **ui-builder:** add a dialog and date and time pickers to the catalog ([#375](https://github.com/yschimke/compose-preview-server/issues/375)) ([c9600cf](https://github.com/yschimke/compose-preview-server/commit/c9600cf6e24739aafe7482d75cb4ba01225f8873))
+* **ui-builder:** add a slider and a progress indicator to the catalog ([#386](https://github.com/yschimke/compose-preview-server/issues/386)) ([1f20131](https://github.com/yschimke/compose-preview-server/commit/1f20131b8e72565e907cf89797f814a2486ec1e2))
+* **ui-builder:** add a text field and a radio button to the catalog ([#384](https://github.com/yschimke/compose-preview-server/issues/384)) ([1f5acf2](https://github.com/yschimke/compose-preview-server/commit/1f5acf2abd001f513d52c9a682f0eef965e162c1))
+* **ui-builder:** add checkbox and switch to the catalog ([#383](https://github.com/yschimke/compose-preview-server/issues/383)) ([98e1217](https://github.com/yschimke/compose-preview-server/commit/98e1217dbc8627c8221403399d7d8863e9112da5))
+* **ui-builder:** advertise five components the catalog already renders ([#380](https://github.com/yschimke/compose-preview-server/issues/380)) ([181763d](https://github.com/yschimke/compose-preview-server/commit/181763dbac63a19d9cd3fe82905f0ee5a2083ffc))
+* **ui-builder:** author a Wear screen, and prove what it generates ([#360](https://github.com/yschimke/compose-preview-server/issues/360)) ([5b339a3](https://github.com/yschimke/compose-preview-server/commit/5b339a31a80d54e7da12628179b0dd62f3837a9b))
+* **ui-builder:** author align and weight as modifiers, not properties ([#396](https://github.com/yschimke/compose-preview-server/issues/396)) ([6b4d105](https://github.com/yschimke/compose-preview-server/commit/6b4d10571e22a03a6caa67b145490ea35e048adf))
+* **ui-builder:** export a layout weight, and matchParentSize in a box ([#385](https://github.com/yschimke/compose-preview-server/issues/385)) ([49913a0](https://github.com/yschimke/compose-preview-server/commit/49913a0b165eb95b4584b4186d0fcaf55fbbc9ef))
+* **ui-builder:** export Remote Compose source for remote-m3 designs ([#364](https://github.com/yschimke/compose-preview-server/issues/364)) ([52275cd](https://github.com/yschimke/compose-preview-server/commit/52275cdfd0db52869bf372fa67f8b5eb05fee108))
+* **ui-builder:** frame the design, zoom it, and cut the inspector down to the code ([#372](https://github.com/yschimke/compose-preview-server/issues/372)) ([2494f02](https://github.com/yschimke/compose-preview-server/commit/2494f02547841fe6a0ef044715d808a585f683c1))
+* **ui-builder:** implement the state variable and event binding mutations ([#398](https://github.com/yschimke/compose-preview-server/issues/398)) ([fca7217](https://github.com/yschimke/compose-preview-server/commit/fca7217448801d910f349f2945b4b193026a952b))
+* **ui-builder:** let a button's style and an icon button's variant select components ([#392](https://github.com/yschimke/compose-preview-server/issues/392)) ([35fa2e6](https://github.com/yschimke/compose-preview-server/commit/35fa2e6e5599c5f292a514f5de3bbb1c78daceec))
+* **ui-builder:** let a card's variant select the component it names ([#388](https://github.com/yschimke/compose-preview-server/issues/388)) ([a2c395c](https://github.com/yschimke/compose-preview-server/commit/a2c395ca4def3a2c3d1e616ac88677f82d462407))
+* **ui-builder:** let a client write a node's modifier chain, and lay a node out from its menu ([#378](https://github.com/yschimke/compose-preview-server/issues/378)) ([5ec4d2d](https://github.com/yschimke/compose-preview-server/commit/5ec4d2da96d4fc602caa2cd5aefd76f00fcb3f41))
+* **ui-builder:** let an agent wait for a design to change, rather than ask again ([#356](https://github.com/yschimke/compose-preview-server/issues/356)) ([1c595f7](https://github.com/yschimke/compose-preview-server/commit/1c595f7b7600fb9e6d935dc0bf9f9371b94f49a9))
+* **ui-builder:** let the chrome's text be selected and copied ([#367](https://github.com/yschimke/compose-preview-server/issues/367)) ([8d81c06](https://github.com/yschimke/compose-preview-server/commit/8d81c0610759bbbb4a1316dac88cb8779b1e281a))
+* **ui-builder:** render the modifier vocabulary, and edit a node where it is drawn ([#390](https://github.com/yschimke/compose-preview-server/issues/390)) ([e34c47e](https://github.com/yschimke/compose-preview-server/commit/e34c47e640dd63b09f59b2ecad9c266c1629a54c))
+* **ui-builder:** seed inserted containers with typical default content ([#368](https://github.com/yschimke/compose-preview-server/issues/368)) ([0763b39](https://github.com/yschimke/compose-preview-server/commit/0763b3978b2480152b760fee01f161aba3a82830))
+* **ui-builder:** set a theme typeface on a design, resolved by the host ([#381](https://github.com/yschimke/compose-preview-server/issues/381)) ([ff0401e](https://github.com/yschimke/compose-preview-server/commit/ff0401e4935ff397a83059f2ea1b7e32957a5779))
+* **viewer:** show each history version as a thumbnail ([#359](https://github.com/yschimke/compose-preview-server/issues/359)) ([3200bea](https://github.com/yschimke/compose-preview-server/commit/3200beac6d87f7c4bb21609ee2c20c81d6e74b85))
+
+
+### Bug Fixes
+
+* **rc-fonts:** vendor Inter, so the four conference theme specimens render ([#387](https://github.com/yschimke/compose-preview-server/issues/387)) ([517653b](https://github.com/yschimke/compose-preview-server/commit/517653b37edc5ab2df347569e2d0fec7fdb0516a))
+* **ui-builder:** answer a zero-second design wait from the catch-up, not the clock ([#362](https://github.com/yschimke/compose-preview-server/issues/362)) ([36445ae](https://github.com/yschimke/compose-preview-server/commit/36445aee3b544be9ecc4b76a97651eb7bc5c3ee6))
+* **ui-builder:** export icons, card containers and one canonical enum wrapper ([#363](https://github.com/yschimke/compose-preview-server/issues/363)) ([255cf80](https://github.com/yschimke/compose-preview-server/commit/255cf80129ef1bf67eb6ff498f9e39530db8e51d))
+* **ui-builder:** send the page's token with every request, and build catalog paths that interpolate ([#377](https://github.com/yschimke/compose-preview-server/issues/377)) ([b6e6d6b](https://github.com/yschimke/compose-preview-server/commit/b6e6d6b908abaed1fbbe0123e673d6ec509abf45))
+
+
+### Code Refactoring
+
+* **ui-builder:** borrow only foundation into the wear catalog ([#389](https://github.com/yschimke/compose-preview-server/issues/389)) ([58158af](https://github.com/yschimke/compose-preview-server/commit/58158af688531a5648a971d818aee774f9c784f3))
+
 ## [3.3.0](https://github.com/yschimke/compose-preview-server/compare/v3.2.0...v3.3.0) (2026-09-05)
 
 
