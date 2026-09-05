@@ -1186,8 +1186,10 @@ public class ServeCommandOptions(
         --ui-builder-components <catalog>=<components.json>[,<catalog>=<file>…]
                           Discovered component records the Compose export generates from — the
                           components.json a preview bundle carries, one per catalog. A catalog with
-                          no record refuses a Compose export naming it; a host missing a record for
-                          any enabled catalog reports composeCode = false and offers no export.
+                          no record refuses a Compose export naming it, and reports
+                          composeCode = false so the export is not offered. remote-m3 and wear-m3
+                          need no record: their designs are written by their own emitters, and both
+                          export without one.
         --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]
                           Retained immutable native renderer bundles. Each directory must contain
                           runtime-manifest.json. Runtime ids are exact pins; there is no latest
