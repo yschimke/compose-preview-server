@@ -14,6 +14,7 @@ import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
 import ee.schimke.composeai.render.session.RenderSessionException
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
+import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
@@ -2360,7 +2361,14 @@ public class ServeRunner(
     // record disables the export for every catalog — and a message saying "no catalog has a
     // record" then sends an operator who configured `m3-catalog` looking for the record that is
     // already there. What they need is the name of the one that is not.
-    val catalogsWithoutRecords = uiBuilderCatalogs.filterNot { it in uiBuilderComponents.keys }
+    // A catalog whose designs generate without a component record — `remote-m3`, `wear-m3` — is
+    // not missing anything, so it is neither reported below nor gated on a record it will never
+    // read. Before this it was counted as unconfigured, which made the renderer-failure message
+    // name `remote-m3` as the reason this host offered no export while its designs generated
+    // source perfectly well through `WearWidgetCodeExporter`.
+    val catalogsWithoutRecords = uiBuilderCatalogs.filterNot {
+      it in uiBuilderComponents.keys || it in RecordFreeExport.CATALOG_SYSTEM_IDS
+    }
     val composeExportConfigured = catalogsWithoutRecords.isEmpty()
     val renderer = runCatching {
       ServeUiBuilderRenderPort.open(directory.resolve("renderer").toPath())
@@ -2418,7 +2426,21 @@ public class ServeRunner(
                 png = false,
               ))
             .copy(composeCode = composeExportConfigured),
-        composeExportFor = { systemId -> systemId in uiBuilderComponents.keys },
+        // A record, **or** a catalog whose designs are written by an emitter that needs none. The
+        // second half is what makes the Compose-export action appear for a Wear widget design: the
+        // source has existed since `WearWidgetCodeExporter` landed, and only the editor's Code pane
+        // could read it.
+        //
+        // The flag it sets is still `composeCode`, which now means "this catalog exports Kotlin
+        // source" rather than "…exports Jetpack Compose Material 3". Reused rather than given a
+        // format of its own because `ExportFormatV1` is published from compose-preview-contracts:
+        // a new member is a wire change across two repositories, and it is not one this repository
+        // can make. The artifact says what it is — a widget export declares `@RemoteComposable` and
+        // imports `androidx.compose.remote.creation.compose` in its first ten lines — and the MCP
+        // tool description says so too.
+        composeExportFor = { systemId ->
+          systemId in uiBuilderComponents.keys || systemId in RecordFreeExport.CATALOG_SYSTEM_IDS
+        },
       )
     val service =
       PersistentUiBuilderService(

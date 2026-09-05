@@ -265,15 +265,22 @@ class ServeUiBuilderMcp(
     val update =
       try {
         // The subscription's catch-up update is delivered before `subscribe` returns, so a design
-        // that has already moved past the cursor answers without waiting at all.
-        try {
-          withTimeout(waitSeconds * 1000) { waiter.await() }
-        } catch (_: TimeoutCancellationException) {
-          return UI_BUILDER_JSON.encodeToString(
-            DesignWaitTimeoutV1.serializer(),
-            DesignWaitTimeoutV1(designId = designId, afterSequence = afterSequence),
-          )
-        }
+        // that has already moved past the cursor is answered from here without entering the wait.
+        //
+        // Checked rather than left to `withTimeout`, because `withTimeout(0)` throws without ever
+        // running its body: a caller asking `waitSeconds: 0` — the non-blocking "has anything
+        // changed since my cursor", and the shape a polling loop wants — would be told nothing
+        // happened while the edit it asked about sat completed in this deferred.
+        if (waiter.isCompleted) waiter.await()
+        else
+          try {
+            withTimeout(waitSeconds * 1000) { waiter.await() }
+          } catch (_: TimeoutCancellationException) {
+            return UI_BUILDER_JSON.encodeToString(
+              DesignWaitTimeoutV1.serializer(),
+              DesignWaitTimeoutV1(designId = designId, afterSequence = afterSequence),
+            )
+          }
       } finally {
         subscription.close()
       }
@@ -569,10 +576,13 @@ class ServeUiBuilderMcp(
             "asking again whether they have. Returns the moment a designer in the browser or " +
             "another agent commits an edit, as the same update frame the browser's own live " +
             "socket receives; returns a `timedOut` reply if nothing happens within `waitSeconds`, " +
-            "which you answer by calling again with the same cursor. Quote the `lastSequence` you " +
-            "last saw as `afterSequence`; a cursor the server no longer retains is answered with " +
-            "a whole snapshot instead of the operations you missed. Somebody merely looking at " +
-            "the design does not wake you — only a committed change does.",
+            "which you answer by calling again with the same cursor. Quote as `afterSequence` the " +
+            "`throughSequence` of the delta you last received, or the `lastSequence` of the last " +
+            "snapshot; a cursor the server no longer retains is answered with a whole snapshot " +
+            "instead of the operations you missed. `waitSeconds: 0` checks without blocking. " +
+            "Nothing is lost between calls — the cursor is replayed when you call again — so " +
+            "somebody merely looking at the design does not wake you, and only a committed " +
+            "change does.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},

@@ -627,6 +627,10 @@ public interface ServeOptions {
    * ([ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD]) rather than emitting
    * almost-Kotlin, and a host with no records at all reports `composeCode = false` so the builder
    * does not offer an export action that can only fail.
+   *
+   * `remote-m3` and `wear-m3` are exempt from all of that, and deliberately have no record: their
+   * designs are written by the emitters in `RecordFreeExport` rather than from recovered
+   * signatures, so they export with nothing configured here and are never named as missing one.
    */
   public val uiBuilderComponents: Map<String, File>
     get() = emptyMap()

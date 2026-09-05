@@ -1,4 +1,6 @@
 import java.io.File
+import java.io.InputStream
+import java.util.zip.ZipFile
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedArtifactResult
@@ -50,7 +52,7 @@ group = "ee.schimke.composeai"
 // is `:server`, so anything Gradle derives from the project name gets `server`, not this.
 val publishedArtifactId = "compose-preview-serve"
 
-kotlin { jvmToolchain(17) }
+kotlin { jvmToolchain(libs.versions.java.server.get().toInt()) }
 
 ktfmt { googleStyle() }
 
@@ -756,6 +758,116 @@ tasks.register("checkTestFixturesCapabilities") {
 tasks.named("check") { dependsOn("checkTestFixturesCapabilities") }
 
 tasks.named("check") { dependsOn("checkServeModuleBoundary") }
+
+/**
+ * The line between this repository's two JVM floors, as a check rather than a comment.
+ *
+ * `checkServeModuleBoundary` above asks *which* artifacts reach the distribution. This asks a
+ * different question about the same set: what Java version can load them. It matters because the
+ * answer is not ours to choose. `compose-ai-tools` pins every JVM module to a 17 toolchain and its
+ * `:cli` compiles its tests against published `compose-preview-serve`, so one class file 65
+ * anywhere in this graph fails a build in another repository with `class file has wrong version
+ * 65.0, should be 61.0` — a failure nobody reading this build would connect to a change made here.
+ *
+ * It is a real risk and not a theoretical one, in both directions. `:ui-builder` now compiles at
+ * `java-ui-builder` (21) and sits one `implementation(project(...))` away from this classpath;
+ * `dev.snipme:highlights` 1.1.0, which the catalog holds back, is 65 in a third-party jar. A
+ * positive allowlist of *artifacts* sees neither: both are allowed coordinates carrying disallowed
+ * bytes.
+ *
+ * Scanned over the resolved `runtimeClasspath`, which is what the distribution ships and what a
+ * consumer's POM resolves, rather than over this module's own output — the output is the half that
+ * was never in doubt.
+ */
+abstract class CheckJvmClassFileFloor : DefaultTask() {
+  // `@Classpath`, not `@InputFiles`: what this reads is the bytes of each class, so a jar
+  // rebuilt with the same content — a timestamp, a reordered manifest — must not re-run it.
+  @get:Classpath abstract val classpath: ConfigurableFileCollection
+
+  /** The Java feature version every class on [classpath] must be loadable by. */
+  @get:Input abstract val floor: Property<Int>
+
+  @TaskAction
+  fun check() {
+    val floor = floor.get()
+    // JVMS 4.1: Java 1.0.2 is 45, and the major version has gone up by one per release since.
+    val maxMajor = floor + 44
+    val offenders = mutableListOf<String>()
+    classpath.files
+      .filter { it.exists() }
+      .sorted()
+      .forEach { entry ->
+        if (entry.isDirectory) {
+          entry
+            .walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".class") }
+            .forEach { classFile ->
+              classFile.inputStream().use { stream ->
+                majorVersion(stream)?.let { major ->
+                  if (major > maxMajor) offenders += "${entry.name}!${classFile.name} is $major"
+                }
+              }
+            }
+        } else if (entry.name.endsWith(".jar")) {
+          ZipFile(entry).use { jar ->
+            jar
+              .entries()
+              .asSequence()
+              .filter { it.name.endsWith(".class") && !it.isDirectory }
+              // A multi-release jar's versioned tree is *why* it is loadable below its own floor: a
+              // 17 JVM never opens `META-INF/versions/21`. `module-info` is skipped for the same
+              // reason — a modular jar carries one at the version it was compiled for and a
+              // classpath JVM does not read it at all.
+              .filterNot {
+                it.name.startsWith("META-INF/versions/") || it.name.endsWith("module-info.class")
+              }
+              .forEach { zipEntry ->
+                jar.getInputStream(zipEntry).use { stream ->
+                  majorVersion(stream)?.let { major ->
+                    if (major > maxMajor) offenders += "${entry.name}!${zipEntry.name} is $major"
+                  }
+                }
+              }
+          }
+        }
+      }
+    check(offenders.isEmpty()) {
+      "The server distribution must load on Java $floor (class file $maxMajor or lower), because " +
+        "compose-ai-tools' `:cli` compiles against it on a $floor toolchain. Found " +
+        "${offenders.size} class file(s) above that floor: " +
+        offenders.sorted().take(10).joinToString(", ") +
+        if (offenders.size > 10) ", …" else ""
+    }
+  }
+
+  /** The `major_version` at offset 6 of a `.class`, or null when the entry is not one. */
+  private fun majorVersion(stream: InputStream): Int? {
+    val header = ByteArray(8)
+    var read = 0
+    while (read < header.size) {
+      val next = stream.read(header, read, header.size - read)
+      if (next < 0) return null
+      read += next
+    }
+    val magic =
+      ((header[0].toInt() and 0xff) shl 24) or
+        ((header[1].toInt() and 0xff) shl 16) or
+        ((header[2].toInt() and 0xff) shl 8) or
+        (header[3].toInt() and 0xff)
+    if (magic != -0x35014542) return null
+    return ((header[6].toInt() and 0xff) shl 8) or (header[7].toInt() and 0xff)
+  }
+}
+
+val checkServerJvmFloor =
+  tasks.register<CheckJvmClassFileFloor>("checkServerJvmFloor") {
+    description = "Fails when anything on the server's runtime classpath needs a newer Java."
+    group = "verification"
+    floor.set(libs.versions.java.server.get().toInt())
+    classpath.from(configurations.named("runtimeClasspath"))
+  }
+
+tasks.named("check") { dependsOn(checkServerJvmFloor) }
 
 // The version the server reports, as its own resource.
 //

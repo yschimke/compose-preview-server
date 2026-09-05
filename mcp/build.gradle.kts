@@ -44,7 +44,7 @@ group = "ee.schimke.composeai"
 // the project name would get `mcp`.
 val publishedArtifactId = "compose-preview-mcp"
 
-kotlin { jvmToolchain(17) }
+kotlin { jvmToolchain(libs.versions.java.server.get().toInt()) }
 
 ktfmt { googleStyle() }
 

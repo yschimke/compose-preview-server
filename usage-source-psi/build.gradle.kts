@@ -23,7 +23,7 @@ plugins {
   alias(libs.plugins.ktfmt)
 }
 
-kotlin { jvmToolchain(17) }
+kotlin { jvmToolchain(libs.versions.java.server.get().toInt()) }
 
 ktfmt { googleStyle() }
 
