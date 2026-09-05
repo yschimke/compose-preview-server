@@ -2317,6 +2317,14 @@ public class ServeRunner(
      */
     val references: ServeUiBuilderReferenceStore?,
     /**
+     * Comment threads, in their own directory beside the design state and the references.
+     *
+     * Its own directory for the reason the references have one: a reply is a few hundred bytes
+     * written when somebody types, and the state file is a blob rewritten on every accepted
+     * operation. Neither should be able to rewrite the other.
+     */
+    val comments: ServeUiBuilderCommentStore?,
+    /**
      * The Compose half of the export, kept so the native render lane can ask it the same question
      * with node tagging on. Not reached through [service]: the service's exporter may be the
      * production wrapper around several formats, and the native lane wants exactly this one.
@@ -2440,6 +2448,15 @@ public class ServeRunner(
             System.err.println(
               "serve: UI-builder reference overlays unavailable (${it.message}); " +
                 "the builder works, and a reference cannot be attached"
+            )
+          }
+          .getOrNull(),
+      comments =
+        runCatching { ServeUiBuilderCommentStore(directory.resolve("comments").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder comments unavailable (${it.message}); " +
+                "the builder works, and a design cannot be discussed on it"
             )
           }
           .getOrNull(),
@@ -2752,6 +2769,7 @@ public class ServeRunner(
         machineAuthorization = machineAuthorization,
         uiBuilderService = uiBuilderLane?.service,
         uiBuilderReferenceStore = uiBuilderLane?.references,
+        uiBuilderCommentStore = uiBuilderLane?.comments,
         uiBuilderAuthorization =
           uiBuilderLane?.let {
             ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)

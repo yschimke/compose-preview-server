@@ -429,6 +429,11 @@ class ServeHttpServer(
    */
   private val uiBuilderReferenceStore: ServeUiBuilderReferenceStore? = null,
   /**
+   * Per-design comment threads. Null leaves the comment routes unregistered, for the same reason
+   * the reference store does: a discussion that cannot outlive the session is not the feature.
+   */
+  private val uiBuilderCommentStore: ServeUiBuilderCommentStore? = null,
+  /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
    * has resolved. Null when the lane isn't wired at all. See [PlaygroundHealth].
@@ -611,7 +616,10 @@ class ServeHttpServer(
         sessions,
         renderSemaphore,
         projectHistory = projectHistory,
-        uiBuilder = uiBuilderService?.let { ServeUiBuilderMcp(it, uiBuilderNativePreview) },
+        uiBuilder =
+          uiBuilderService?.let {
+            ServeUiBuilderMcp(it, uiBuilderNativePreview, uiBuilderCommentStore)
+          },
         uiBuilderNative = uiBuilderNativePreview != null,
       )
     else null
@@ -890,6 +898,13 @@ class ServeHttpServer(
               uiBuilderService,
               uiBuilderAuthorization,
               uiBuilderReferenceStore,
+            )
+          }
+          if (uiBuilderCommentStore != null) {
+            installUiBuilderCommentRoutes(
+              uiBuilderService,
+              uiBuilderAuthorization,
+              uiBuilderCommentStore,
             )
           }
         }

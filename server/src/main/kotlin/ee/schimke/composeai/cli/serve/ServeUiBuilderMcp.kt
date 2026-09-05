@@ -22,7 +22,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
@@ -59,7 +61,24 @@ class ServeUiBuilderMcp(
    * than present and failing, exactly as the whole surface is on a box with no builder.
    */
   private val nativePreview: UiBuilderNativePreviewLane? = null,
+  /**
+   * The design's discussion, on a host that keeps one.
+   *
+   * Null on a host with no durable UI-builder state, where the comment routes are absent too — the
+   * tools then do not appear in `tools/list` rather than appearing and failing, which is the rule
+   * the whole surface follows.
+   *
+   * This is what makes an agent a participant rather than a tool: it can read what a designer
+   * asked, answer in the same thread, and — through [AWAIT_COMMENTS] — *wait* for the next reply
+   * instead of polling. The browser panel and this share one feed, so a person watching the page
+   * and an agent waiting on a tool call learn about a comment at the same moment.
+   */
+  private val comments: ServeUiBuilderCommentStore? = null,
 ) {
+
+  /** Whether this host keeps design discussions, and so whether the comment tools exist. */
+  val supportsComments: Boolean
+    get() = comments != null
 
   /** What a tool needs from the caller before it may run. Null when the name is not ours. */
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
@@ -67,6 +86,10 @@ class ServeUiBuilderMcp(
       LIST_CATALOGS,
       LIST_DESIGNS,
       GET_DESIGN -> UiBuilderRouteCapability.READ
+      LIST_COMMENTS,
+      AWAIT_COMMENTS -> if (comments == null) null else UiBuilderRouteCapability.READ
+      POST_COMMENT,
+      RESOLVE_COMMENT_THREAD -> if (comments == null) null else UiBuilderRouteCapability.WRITE
       CREATE_DESIGN,
       APPLY -> UiBuilderRouteCapability.WRITE
       EXPORT -> UiBuilderRouteCapability.EXPORT
@@ -111,6 +134,10 @@ class ServeUiBuilderMcp(
             format = args.exportFormat(),
           )
         RENDER_NATIVE -> return renderNative(args, actor)
+        LIST_COMMENTS,
+        AWAIT_COMMENTS,
+        POST_COMMENT,
+        RESOLVE_COMMENT_THREAD -> return commentTool(tool, args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor))
@@ -167,6 +194,92 @@ class ServeUiBuilderMcp(
         )
     }
   }
+
+  /**
+   * The discussion around a design: read it, join it, close a thread, or wait for the next reply.
+   *
+   * Not an [McpResponseEnvelopeV1], for the same reason a native render is not: the released
+   * contract defines no request type for a comment, and inventing an envelope shape for a request
+   * the contract does not define would be worse than being plainly outside it.
+   *
+   * The design is read through the service as this actor before anything is read or written, so the
+   * design's own access control decides whether there is a discussion here to join — the identical
+   * check the HTTP comment routes make, for the identical reason.
+   */
+  private suspend fun commentTool(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val store = comments ?: throw McpRequestException("this host keeps no design discussions")
+    val designId = args.requiredText("designId")
+    if (
+      execute(GetSnapshotRequestV1(designId = designId, revision = null), actor)
+        !is UiBuilderServiceResponse.Snapshot
+    ) {
+      throw McpRequestException("no design `$designId` this actor can read")
+    }
+    val board =
+      when (tool) {
+        LIST_COMMENTS -> store.readOrEmpty(designId)
+        AWAIT_COMMENTS -> {
+          val after = args.number("afterSequence") ?: 0
+          val wait =
+            (args.number("waitSeconds") ?: DEFAULT_COMMENT_WAIT_SECONDS).coerceIn(
+              0,
+              MAX_COMMENT_WAIT_SECONDS,
+            )
+          // Null is a timeout rather than a failure: the caller asked whether anything was said
+          // and the answer is "not yet", which it acts on by asking again with the same cursor.
+          store.awaitBoardAfter(designId, after, wait * 1000)
+            ?: return UI_BUILDER_JSON.encodeToString(
+              CommentWaitTimeoutV1.serializer(),
+              CommentWaitTimeoutV1(designId = designId, afterSequence = after),
+            )
+        }
+        POST_COMMENT ->
+          store
+            .post(
+              designId,
+              actor.actorId,
+              CommentPostRequest(
+                threadId = args.text("threadId"),
+                anchor =
+                  StoredCommentAnchor(
+                      markId = args.text("markId"),
+                      nodeId = args.text("nodeId"),
+                      x = args.decimal("x"),
+                      y = args.decimal("y"),
+                    )
+                    .takeIf { !it.isEmpty },
+                body = args.requiredText("body"),
+                displayName = args.text("displayName") ?: actor.actorId,
+                // Declared rather than inferred, but defaulted to `agent` here: everything
+                // reaching this class arrived over MCP. A tool that wanted to post as a person
+                // would be posting somebody else's words under their own grant.
+                authorKind = StoredComment.AUTHOR_KIND_AGENT,
+              ),
+            )
+            .orThrow()
+        RESOLVE_COMMENT_THREAD ->
+          store
+            .resolve(
+              designId,
+              actor.actorId,
+              args.requiredText("threadId"),
+              args["resolved"]?.jsonPrimitive?.booleanOrNull ?: true,
+            )
+            .orThrow()
+        else -> throw McpRequestException("unknown UI-builder comment tool '$tool'")
+      }
+    return UI_BUILDER_JSON.encodeToString(StoredCommentBoard.serializer(), board)
+  }
+
+  private fun CommentWriteResult.orThrow(): StoredCommentBoard =
+    when (this) {
+      is CommentWriteResult.Stored -> board
+      is CommentWriteResult.Refused -> throw McpRequestException(reason)
+    }
 
   /**
    * A new design, either from a document the caller wrote or copied from one this box already has.
@@ -278,6 +391,9 @@ class ServeUiBuilderMcp(
 
   private fun JsonObject.number(name: String): Long? = this[name]?.jsonPrimitive?.longOrNull
 
+  /** A frame fraction; `0.5` never survives [number], and an anchor is written in fractions. */
+  private fun JsonObject.decimal(name: String): Float? = this[name]?.jsonPrimitive?.floatOrNull
+
   private fun JsonObject.exportFormat(): ExportFormatV1 {
     val requested = text("format") ?: return ExportFormatV1.COMPOSE
     return ExportFormatV1.entries.firstOrNull { it.name.equals(requested, ignoreCase = true) }
@@ -295,12 +411,20 @@ class ServeUiBuilderMcp(
     const val APPLY = "ui_builder_apply"
     const val EXPORT = "ui_builder_export"
     const val RENDER_NATIVE = "ui_builder_render_native"
+    const val LIST_COMMENTS = "ui_builder_list_comments"
+    const val POST_COMMENT = "ui_builder_post_comment"
+    const val RESOLVE_COMMENT_THREAD = "ui_builder_resolve_comment_thread"
+    const val AWAIT_COMMENTS = "ui_builder_await_comments"
 
     /** Every tool this class answers to, in the order a session naturally uses them. */
     val TOOL_NAMES = listOf(LIST_CATALOGS, LIST_DESIGNS, GET_DESIGN, CREATE_DESIGN, APPLY, EXPORT)
 
     /** Separate because it exists only where the host can compile. */
     val NATIVE_TOOL_NAMES = listOf(RENDER_NATIVE)
+
+    /** Separate because they exist only where the host keeps a discussion. */
+    val COMMENT_TOOL_NAMES =
+      listOf(LIST_COMMENTS, POST_COMMENT, RESOLVE_COMMENT_THREAD, AWAIT_COMMENTS)
 
     private const val DEFAULT_DESIGN_PAGE = 50
     private const val MCP_CLIENT_ID = "mcp"
@@ -312,6 +436,7 @@ class ServeUiBuilderMcp(
     fun declarations(
       tool: (String, String, String) -> JsonObject,
       native: Boolean = false,
+      comments: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -387,6 +512,74 @@ class ServeUiBuilderMcp(
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
+        if (!comments) null
+        else
+          tool(
+            LIST_COMMENTS,
+            "Read the discussion on a design: every thread, where each is pinned — a markup " +
+              "stroke, a design node, or a point on the frame — whether it is resolved, and every " +
+              "reply under it. `sequence` rises on each change and is the cursor to quote to " +
+              "$AWAIT_COMMENTS. Comments are kept beside the design and are never part of it: no " +
+              "node holds them and no export sees them.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
+        if (!comments) null
+        else
+          tool(
+            POST_COMMENT,
+            "Say something on a design — a reply into `threadId`, or a new thread when it is " +
+              "omitted. Pin a new thread with `markId` (a stroke on the reference overlay), " +
+              "`nodeId` (a node in the design), or `x`/`y` in frame fractions, so the person " +
+              "reading it can see what you meant. The comment is attributed to your own grant; " +
+              "you cannot post as somebody else.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "threadId":{"type":"string","description":"Reply into this thread. Omit to start one."},
+              "body":{"type":"string"},
+              "displayName":{"type":"string","description":"The name to show beside your actor id."},
+              "markId":{"type":"string","description":"Pin to a markup stroke on the reference."},
+              "nodeId":{"type":"string","description":"Pin to a design node."},
+              "x":{"type":"number","description":"Pin to a point on the frame, 0..1 across."},
+              "y":{"type":"number","description":"Pin to a point on the frame, 0..1 down."}
+            },"required":["designId","body"],"additionalProperties":false}
+            """,
+          ),
+        if (!comments) null
+        else
+          tool(
+            RESOLVE_COMMENT_THREAD,
+            "Close a comment thread once it is answered, or reopen one by passing " +
+              "`resolved: false`. The resolution is attributed to you and is reversible.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "threadId":{"type":"string"},
+              "resolved":{"type":"boolean","description":"Defaults to true."}
+            },"required":["designId","threadId"],"additionalProperties":false}
+            """,
+          ),
+        if (!comments) null
+        else
+          tool(
+            AWAIT_COMMENTS,
+            "Wait for the discussion to move past `afterSequence` and return it, rather than " +
+              "polling for it. Returns as soon as anybody — a designer in the browser or another " +
+              "agent — posts, resolves or deletes; returns a `timedOut` reply if nothing happens " +
+              "within `waitSeconds`, which you answer by calling again with the same cursor. This " +
+              "is how you hold a conversation about a design: post, wait, read, act.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "afterSequence":{"type":"integer","description":"The `sequence` you last saw. 0 for anything at all."},
+              "waitSeconds":{"type":"integer","description":"Up to $MAX_COMMENT_WAIT_SECONDS. Defaults to $DEFAULT_COMMENT_WAIT_SECONDS."}
+            },"required":["designId","afterSequence"],"additionalProperties":false}
+            """,
+          ),
         if (!native) null
         else
           tool(
@@ -408,3 +601,18 @@ class ServeUiBuilderMcp(
       )
   }
 }
+
+/**
+ * Nothing was said within the wait.
+ *
+ * Its own shape rather than an empty board, so a caller cannot read "no news" as "the discussion
+ * was emptied" — the same distinction the HTTP watch route draws with a 204.
+ */
+@kotlinx.serialization.Serializable
+internal data class CommentWaitTimeoutV1(
+  val schema: String = "compose-preview/ui-builder-comment-wait/v1",
+  val designId: String,
+  val timedOut: Boolean = true,
+  /** Echoed back, so a caller that loops can pass the same cursor without tracking it itself. */
+  val afterSequence: Long,
+)
