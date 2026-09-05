@@ -55,6 +55,17 @@ import kotlinx.serialization.json.jsonPrimitive
  * [uncovered] is therefore a checked-in list rather than an absence, so growing the record is a
  * deliberate edit here and a shrinking list, not something that drifts.
  *
+ * ## Three records for one catalog id
+ *
+ * `ElevatedCard` and `OutlinedCard` carry an **empty** `componentIds`, which is not an oversight.
+ * The catalog spells all three cards as `m3/card` and picks between them with a `variant` property
+ * — its `code.imports` lists all three while its `code.symbol` names one — so there is no catalog
+ * id for either to answer to. `ScreenDocumentProjection` selects them by canonical id, which
+ * `ScreenNode.componentId` accepts precisely so a record can be reached without one.
+ *
+ * That is why the two coverage tests below still balance: coverage is counted in catalog ids, and
+ * these claim none.
+ *
  * ## `m3/icon`, and the one thing this record authors that discovery could not print
  *
  * `m3/icon` was on that list — "`iconKey` resolves to an `ImageVector` the record cannot name" —
@@ -101,10 +112,14 @@ class M3CatalogComponentRecordTest {
       "m3/horizontal-floating-toolbar" to "experimental; content is a FlowRow-shaped scope",
       "m3/list-item" to "startAccentColor is a drawBehind, not a parameter of ListItem",
       "m3/primary-tab-row" to "tabs is a TabRow scope, and the row's own indicator takes a lambda",
+      "m3/progress-indicator" to
+        "variant picks between the linear and circular indicators, and the indeterminate form is a second overload",
       "m3/search-bar" to "inputField is a typed lambda, not a plain composable slot",
       "m3/text-field" to
         "variant picks between TextField and OutlinedTextField, which is a second callable one record cannot name",
       "m3/search-input-field" to "SearchBarDefaults.InputField is a member of an object",
+      "m3/slider" to
+        "onValueChange takes the new value, which the document's action vocabulary does not carry",
       "m3/snackbar-host" to "takes a SnackbarHostState, which no ScreenValue expresses",
       "m3/tab" to
         "onClick is required and a design's tab selection is not an action it can express",
