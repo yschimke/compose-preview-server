@@ -12,6 +12,10 @@ repository boundary.
 - Commit subjects and PR titles use Conventional Commits.
 - Run `./gradlew ktfmtFormat` before committing Kotlin changes and
   `npm --prefix serve-web run format` before committing serve-web changes.
+- `:ui-builder-runtime` compiles under `explicitApi()` and its public API is pinned by the committed
+  dump `ui-builder-runtime/api/ui-builder-runtime.api`, which `checkKotlinAbi` verifies as part of
+  `check`. When that module's API changes, run `./gradlew :ui-builder-runtime:updateKotlinAbi` and
+  commit the dump with the change. `:server` stays off the gate on purpose; its build file says why.
 - Regenerate the committed goldens with `scripts/regenerate-goldens.sh`, and read the diff. On a
   Renovate branch the `Regenerate goldens` workflow does it for you when CI goes red; on any pull
   request `/regenerate-goldens` asks for the same thing.
