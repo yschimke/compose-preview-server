@@ -22,17 +22,23 @@ catalog splits `Progress Linear` and `Progress Circular` into two components und
 property is `linear` or `circular`. So the builder's tree is the same shape one level shallower —
 what the catalog spends a group level on, this spends a variant level on.
 
-Not here, and knowingly: **thumbnails**. The catalog's rows carry one because that page has the
-pixels; the builder bakes none per component, and a row with a missing image is worse than a row
-without one.
+**Thumbnails**, which the first pass knowingly left out, are here now — and they are not baked. The
+catalog's rows carry a prebaked PNG because that page has the pixels on disk; the builder has
+something better, the renderer that is about to draw the thing for real. Each row draws the
+component inserted into an empty frame by the same `InsertComponent` its Add dispatches, so a
+thumbnail cannot disagree with what pressing Add does, nothing has to be regenerated when a default
+changes, no PNGs are committed, and a catalog nobody has baked artwork for still gets pictures. The
+picture is also the grip: you drag the thing you are placing.
 
 | file | what it is |
 | --- | --- |
 | `menu.before.png` | the panel grouped by role, as it shipped |
 | `menu.after.png` | the same panel as the catalog's tree: All pill, shelves, accent bar, indent rules |
 | `menu.variants.after.png` | the panel filtered to `filled` — a variant name, not any component's |
+| `menu.thumbnails.before.png` | the shelves with a drag handle per row |
+| `menu.thumbnails.after.png` | the same rows, each drawing the component its Add would insert |
 
-All three are `composePreviewRender` output for previews in
+All five are `composePreviewRender` output for previews in
 [`UiBuilderEditorChromePreview.kt`](../../ui-builder/src/jvmMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderEditorChromePreview.kt)
 (`UiBuilderEditorChromePreview` and `UiBuilderComponentVariantsPreview`), so the next change to the
 panel moves the evidence with it rather than leaving it stale.
