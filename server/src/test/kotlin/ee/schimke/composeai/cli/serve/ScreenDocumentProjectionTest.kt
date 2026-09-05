@@ -127,17 +127,6 @@ class ScreenDocumentProjectionTest {
   }
 
   @Test
-  fun `a scoped modifier is refused rather than emitted out of scope`() {
-    assertEquals(
-      listOf(
-        "node `text` uses `matchParentSize`, which is declared on `BoxScope` and cannot be " +
-          "proven in scope here"
-      ),
-      refusal(document(text().copy(modifiers = listOf(MatchParentSizeModifierV1)))),
-    )
-  }
-
-  @Test
   fun `a pixel dimension is refused because it needs the composition's density`() {
     assertEquals(
       listOf(
@@ -262,6 +251,84 @@ class ScreenDocumentProjectionTest {
       icon.links,
     )
     assertEquals("androidx.compose.ui.graphics.vector.ImageVector", icon.typeFqn)
+  }
+
+  @Test
+  fun `a weight in a column becomes a scoped Modifier weight`() {
+    // Both halves of what made this inexpressible: the link is scoped to the slot the node sits in
+    // (`ColumnScope`, claimed and checked rather than assumed), and its argument is a `Float`,
+    // because a nested `Fractional` renders as a `Double` and `weight(1.0)` does not compile.
+    val column =
+      projected(
+        document(
+          DesignNodeV1(
+            id = "column",
+            componentId = "layout/column",
+            slots = mapOf("children" to listOf("text")),
+          ),
+          text("weight" to DecimalValueV1(1.0)),
+          roots = listOf("column"),
+        )
+      )
+    val child = column.root.slots.getValue("content").single()
+    assertFalse("weight" in child.arguments)
+    assertEquals(
+      listOf(
+        ChainLink(
+          "androidx.compose.foundation.layout.ColumnScope.weight",
+          positional = listOf(ScreenValue.Fractional32(1f)),
+          receiverScopeFqn = "androidx.compose.foundation.layout.ColumnScope",
+        )
+      ),
+      (child.arguments.getValue("modifier") as ScreenValue.Chain).links,
+    )
+  }
+
+  @Test
+  fun `a weight outside a row or column is refused, and says where the node is`() {
+    // `m3/surface`'s content slot has no receiver, so there is no `weight` to call. The refusal
+    // names the placement rather than the property, because the property is fine and the placement
+    // is the thing a designer can change.
+    assertEquals(
+      listOf(
+        "node `text`.`weight` is a layout weight, which `Modifier.weight` supplies from a row's " +
+          "or column's scope; this node sits at the root, which has no receiver"
+      ),
+      refusal(document(text("weight" to DecimalValueV1(1.0)))),
+    )
+  }
+
+  @Test
+  fun `matchParentSize resolves inside a box and is refused outside one`() {
+    val box =
+      projected(
+        document(
+          DesignNodeV1(
+            id = "box",
+            componentId = "layout/box",
+            slots = mapOf("children" to listOf("text")),
+          ),
+          text().copy(modifiers = listOf(MatchParentSizeModifierV1)),
+          roots = listOf("box"),
+        )
+      )
+    val child = box.root.slots.getValue("content").single()
+    assertEquals(
+      listOf(
+        ChainLink(
+          "androidx.compose.foundation.layout.BoxScope.matchParentSize",
+          receiverScopeFqn = "androidx.compose.foundation.layout.BoxScope",
+        )
+      ),
+      (child.arguments.getValue("modifier") as ScreenValue.Chain).links,
+    )
+    assertEquals(
+      listOf(
+        "node `text` uses `matchParentSize`, which is declared on `BoxScope` and is in scope only " +
+          "inside a `layout/box` slot; this node sits at the root, which has no receiver"
+      ),
+      refusal(document(text().copy(modifiers = listOf(MatchParentSizeModifierV1)))),
+    )
   }
 
   @Test
