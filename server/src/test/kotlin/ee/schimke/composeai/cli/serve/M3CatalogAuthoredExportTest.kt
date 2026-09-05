@@ -1,17 +1,26 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.protocol.AlignVerticalModifierV1
+import ee.schimke.composeai.uibuilder.protocol.AlphaModifierV1
+import ee.schimke.composeai.uibuilder.protocol.BackgroundModifierV1
+import ee.schimke.composeai.uibuilder.protocol.BorderModifierV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
+import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
 import ee.schimke.composeai.uibuilder.protocol.DecimalValueV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.EnumValueV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
+import ee.schimke.composeai.uibuilder.protocol.ShadowModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ShapeTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
+import ee.schimke.composeai.uibuilder.protocol.VerticalAlignmentV1
+import ee.schimke.composeai.uibuilder.protocol.WidthInModifierV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
 import java.io.File
@@ -19,6 +28,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -188,24 +198,26 @@ class M3CatalogAuthoredExportTest {
     assertEquals(emptyList(), undeclared, "properties m3-catalog does not declare")
   }
 
+  private fun export(document: DesignDocumentV1) =
+    ScreenGeneratorComposeExportExecutor(
+        { ComponentRecordSource.Lookup.Found(record) },
+        ScreenGeneratorScreenFixture.PACKAGE_NAME,
+      )
+      .export(
+        RevisionPinnedUiBuilderExport(
+          actor = AuthenticatedUiBuilderActor("tester"),
+          designId = document.id,
+          revision = document.revision,
+          documentHash = "hash",
+          document = document,
+          catalog = catalog,
+          format = ExportFormatV1.COMPOSE,
+        )
+      )
+
   @Test
   fun `a builder-authored m3-catalog screen exports as Kotlin`() {
-    val artifact =
-      ScreenGeneratorComposeExportExecutor(
-          { ComponentRecordSource.Lookup.Found(record) },
-          ScreenGeneratorScreenFixture.PACKAGE_NAME,
-        )
-        .export(
-          RevisionPinnedUiBuilderExport(
-            actor = AuthenticatedUiBuilderActor("tester"),
-            designId = document.id,
-            revision = document.revision,
-            documentHash = "hash",
-            document = document,
-            catalog = catalog,
-            format = ExportFormatV1.COMPOSE,
-          )
-        )
+    val artifact = export(document)
     val source = artifact.content
     assertTrue(
       artifact.diagnostics.none { it.severity == DiagnosticSeverityV1.ERROR },
@@ -265,6 +277,117 @@ class M3CatalogAuthoredExportTest {
       source,
     )
   }
+
+  @Test
+  fun `the modifiers the catalog offers reach the source as the calls Compose declares`() {
+    // The same screen with an authored **modifier list** on three of its nodes, which is the half
+    // the test above does not reach: it covers properties, and a modifier is admitted onto a
+    // component by type rather than by name, so nothing here was proven by that one passing.
+    //
+    // Every modifier used is one `m3-catalog-capabilities-v1.json` declares for the component it
+    // sits on — asserted below rather than assumed, because a modifier the catalog does not offer
+    // is not evidence about anything a person can author.
+    val served = servedModifiers()
+    for ((component, capability) in
+      listOf(
+        "layout/row" to "background",
+        "layout/row" to "border",
+        "m3/card" to "shadow",
+        "m3/card" to "widthIn",
+        "m3/text" to "alignVertical",
+        "m3/text" to "alpha",
+      )) {
+      assertTrue(capability in served.getValue(component), "$component does not offer $capability")
+    }
+    val modified =
+      nodes
+        .map { node ->
+          when (node.id) {
+            "row" ->
+              node.copy(
+                modifiers =
+                  listOf(
+                    BackgroundModifierV1(ColorTokenValueV1("surfaceVariant"), shape = "medium"),
+                    BorderModifierV1(JsonPrimitive(1), ColorValueV1("#6750A4")),
+                  )
+              )
+            "card" ->
+              node.copy(
+                modifiers =
+                  listOf(
+                    ShadowModifierV1(JsonPrimitive(4), shape = "medium"),
+                    WidthInModifierV1(null, JsonPrimitive(320)),
+                  )
+              )
+            // In the `Row`, so the vertical align is the one that resolves — and it lands on the
+            // same chain as the `weight` this node already carried as a property.
+            "caption" ->
+              node.copy(
+                modifiers =
+                  listOf(
+                    AlignVerticalModifierV1(VerticalAlignmentV1.BOTTOM),
+                    AlphaModifierV1(JsonPrimitive(0.6)),
+                  )
+              )
+            else -> node
+          }
+        }
+        .associateBy(DesignNodeV1::id)
+    val artifact = export(document.copy(nodes = modified))
+    val source = artifact.content
+    assertTrue(
+      artifact.diagnostics.none { it.severity == DiagnosticSeverityV1.ERROR },
+      "refused: ${artifact.diagnostics.map { it.message }}\n$source",
+    )
+    // A colour and a theme shape on one call, and a border whose shape is left to Compose's own
+    // default rather than to one this projection invented.
+    assertTrue(
+      source.contains(
+        "Modifier.background(color = MaterialTheme.colorScheme.surfaceVariant, " +
+          "shape = MaterialTheme.shapes.medium).border(width = 1.dp, color = Color(4284960932L))"
+      ),
+      source,
+    )
+    // One bound of two: an omitted `min` is unconstrained, which is what the document said.
+    assertTrue(
+      source.contains(
+        "Modifier.shadow(elevation = 4.dp, shape = MaterialTheme.shapes.medium).widthIn(max = 320.dp)"
+      ),
+      source,
+    )
+    // The scoped `align`, by simple name and imported nowhere, beside a `Float` the API takes as
+    // one — and the `weight` the property already produced, on the same chain.
+    assertTrue(
+      source.contains("modifier = Modifier.align(Alignment.Bottom).alpha(0.6f).weight(1.0f)"),
+      source,
+    )
+    assertTrue(!source.contains("import androidx.compose.foundation.layout.RowScope"), source)
+    for (import in
+      listOf(
+        "import androidx.compose.foundation.background",
+        "import androidx.compose.foundation.border",
+        "import androidx.compose.ui.draw.shadow",
+        "import androidx.compose.foundation.layout.widthIn",
+        "import androidx.compose.ui.draw.alpha",
+        "import androidx.compose.ui.Alignment",
+      )) {
+      assertTrue(source.contains(import), "$import missing from\n$source")
+    }
+  }
+
+  private fun servedModifiers(): Map<String, Set<String>> =
+    json
+      .parseToJsonElement(File(CAPABILITIES).readText())
+      .jsonObject
+      .getValue("components")
+      .jsonArray
+      .associate { component ->
+        val declared = component.jsonObject
+        declared.getValue("componentId").jsonPrimitive.content to
+          (declared["modifierCapabilities"]?.jsonArray ?: emptyList()).mapTo(mutableSetOf()) {
+            it.jsonPrimitive.content
+          }
+      }
 
   private companion object {
     const val RECORD = "../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"
