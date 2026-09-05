@@ -51,6 +51,8 @@ class ServeCatalogMcp(
    * this server can actually do.
    */
   private val uiBuilder: ServeUiBuilderMcp? = null,
+  /** Whether this box can also compile a design natively; see [ServeUiBuilderMcp.RENDER_NATIVE]. */
+  private val uiBuilderNative: Boolean = false,
 ) {
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
@@ -289,7 +291,7 @@ class ServeCatalogMcp(
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"commit":{"type":"string"},"blob":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
-    uiBuilder?.let { addAll(ServeUiBuilderMcp.declarations(::tool)) }
+    uiBuilder?.let { addAll(ServeUiBuilderMcp.declarations(::tool, uiBuilderNative)) }
     add(
       tool(
         "list_data_products",

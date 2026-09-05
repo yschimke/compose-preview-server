@@ -155,6 +155,22 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `the native render tool appears only where the host can compile`() {
+    // Two absences, not one: a box with no builder has no UI-builder tools at all, and a box with
+    // a builder but no compiler has the six that need no compiler and not the seventh. A client
+    // reads which of the three it is talking to off `tools/list` rather than off a failed call.
+    val withoutCompiler = tools(start())
+    assertTrue(
+      ServeUiBuilderMcp.TOOL_NAMES.all { it in withoutCompiler },
+      withoutCompiler.toString(),
+    )
+    assertTrue(
+      ServeUiBuilderMcp.NATIVE_TOOL_NAMES.none { it in withoutCompiler },
+      withoutCompiler.toString(),
+    )
+  }
+
+  @Test
   fun `a caller without the capability is refused by name rather than served`() {
     // The service is configured; the authorization is not. The refusal has to say which grant is
     // missing, because "unauthorized" on a surface with three capabilities is not actionable.
