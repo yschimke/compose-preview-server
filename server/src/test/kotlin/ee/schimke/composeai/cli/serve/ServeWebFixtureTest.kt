@@ -1000,6 +1000,9 @@ class ServeWebFixtureTest {
         githubAuth =
           ServeWeb.GitHubAuthStatus(
             loginHref = "/auth/github/start?return=%2F",
+            // Signed in, so the header carries both exits — the harness captures the sign-out form
+            // and the switch-account link on every future change to the bar.
+            logoutHref = "/auth/github/logout?return=%2F",
             login = "yschimke",
           ),
       )
@@ -7306,6 +7309,76 @@ class ServeWebFixtureTest {
       signed.substring(0, aboutEnd).contains("server v") ||
         signed.substring(0, aboutEnd).contains("href=\"/version\""),
       "the home about disclosure no longer contains build metadata",
+    )
+  }
+
+  /**
+   * The two exits offered to a signed-in visitor, in the Settings menu beside the page's other
+   * standing per-visitor choices. Before they existed the only way out of a GitHub-gated box was
+   * DevTools, and re-authenticating — the actual remedy for a session whose cached access bits went
+   * stale — was the folklore of visiting `/auth/github/start` by hand.
+   */
+  @Test
+  fun `the settings menu offers a sign-out and a way to switch account`() {
+    val signed =
+      ServeWeb.homeIndexPage(
+        emptyList(),
+        token,
+        isPublic = true,
+        githubAuth =
+          ServeWeb.GitHubAuthStatus(
+            loginHref = "/auth/github/start?return=%2F",
+            logoutHref = "/auth/github/logout?return=%2F",
+            login = "yschimke",
+          ),
+      )
+    // A form, not a link: a sign-out a prefetcher can fire by looking at a URL is not one.
+    assertTrue(
+      signed.contains("method=\"post\" action=\"/auth/github/logout?return=%2F\""),
+      signed,
+    )
+    assertTrue(signed.contains(">Sign out</button>"), signed)
+    // …and the re-authenticate path is named, because a sign-out alone is the longer road to it.
+    assertTrue(
+      signed.contains("href=\"/auth/github/start?return=%2F\">Switch account</a>"),
+      signed,
+    )
+    // Inside the Settings menu, not the bar: the header keeps the identity and nothing else.
+    val settingsAt = signed.indexOf("<details class=\"cp-settings\">")
+    assertTrue(settingsAt in 0 until signed.indexOf(">Sign out</button>"), signed)
+    assertTrue(signed.indexOf("Signed in as yschimke") < settingsAt, signed)
+    assertFalse(
+      signed.substring(signed.indexOf("Signed in as yschimke"), settingsAt).contains("ign out"),
+      "the header bar carries the identity, not the exits",
+    )
+
+    // A page built without a logout target — every caller that predates it — renders exactly what
+    // it always did rather than a form posting nowhere.
+    val noLogout =
+      ServeWeb.homeIndexPage(
+        emptyList(),
+        token,
+        isPublic = true,
+        githubAuth =
+          ServeWeb.GitHubAuthStatus(
+            loginHref = "/auth/github/start?return=%2F",
+            login = "yschimke",
+          ),
+      )
+    assertFalse(noLogout.contains("cp-settings-session"), noLogout)
+    assertFalse(
+      ServeWeb.homeIndexPage(
+          emptyList(),
+          token,
+          isPublic = true,
+          githubAuth =
+            ServeWeb.GitHubAuthStatus(
+              loginHref = "/auth/github/start?return=%2F",
+              logoutHref = "/auth/github/logout?return=%2F",
+            ),
+        )
+        .contains("cp-settings-session"),
+      "a signed-out visitor is offered a sign-in, not a sign-out",
     )
   }
 

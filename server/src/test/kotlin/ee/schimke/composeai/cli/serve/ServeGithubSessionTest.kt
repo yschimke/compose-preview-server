@@ -13,6 +13,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Path.Companion.toPath
@@ -254,4 +255,99 @@ class ServeGithubSessionTest {
       )
       .execute()
       .use { resp -> resp.code == 200 }
+
+  /** `POST /auth/github/logout`, returning the response's `cp_gh_auth` line and its `Location`. */
+  private fun logout(cookie: String, query: String = ""): Pair<String?, String?> =
+    noRedirect
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}${ServeGithubAuth.LOGOUT_PATH}$query")
+          .header("Cookie", cookie.substringBefore(";"))
+          .post(EMPTY_FORM)
+          .build()
+      )
+      .execute()
+      .use { resp ->
+        assertEquals(302, resp.code)
+        resp.headers("Set-Cookie").firstOrNull { it.startsWith("cp_gh_auth=") } to
+          resp.header("Location")
+      }
+
+  /**
+   * The eject button. Before it existed the only way to end a session was DevTools: the cookie is
+   * self-renewing for a week of idle and capped at a fortnight, so a visitor on a borrowed machine
+   * had to clear site data.
+   */
+  @Test
+  fun `signing out ends the session`() {
+    val cookie = signIn()
+    assertTrue(signedIn(cookie), "precondition: the fresh session opens the playground")
+    val (cleared, location) = logout(cookie)
+    assertTrue(cleared != null, "signing out must write a cp_gh_auth cookie of its own")
+    // Both halves of the deletion, because either alone is a way for this to silently not work: an
+    // attribute set the browser does not match leaves the old cookie in place, and a browser that
+    // keeps an expired cookie anyway still has to be told the value means nothing.
+    assertEquals(0L, maxAge(cleared))
+    assertEquals("", cleared.substringAfter("cp_gh_auth=").substringBefore(";"))
+    assertEquals("/", location)
+    assertFalse(signedIn(cleared), "the cleared cookie must not authenticate")
+  }
+
+  /**
+   * `POST` only, for the reason the approval flow is: a sign-out a prefetcher, a link-unfurler or
+   * somebody else's `<img src>` can fire by *looking at a URL* is not one. No `GET` is registered,
+   * so following the path leaves the session exactly where it was.
+   */
+  @Test
+  fun `following the logout URL does not sign anyone out`() {
+    val cookie = signIn()
+    val response =
+      noRedirect
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}${ServeGithubAuth.LOGOUT_PATH}")
+            .header("Cookie", cookie.substringBefore(";"))
+            .build()
+        )
+        .execute()
+        .use { resp ->
+          resp.code to resp.headers("Set-Cookie").firstOrNull { it.startsWith("cp_gh_auth=") }
+        }
+    assertNull(response.second, "a GET must not clear the session cookie")
+    assertTrue(signedIn(cookie), "the session survives a GET of the logout path")
+  }
+
+  /**
+   * Signing out of `/playground` lands back on `/playground` rather than at the index — the same
+   * `return` parameter [ServeGithubAuth.loginPath] already round-trips, and the same safety rule:
+   * only a same-origin relative path survives, so the control can never become an open redirect.
+   */
+  @Test
+  fun `signing out returns to the page it was invoked from`() {
+    val cookie = signIn()
+    assertEquals("/playground", logout(cookie, "?return=%2Fplayground").second)
+    assertEquals("/", logout(cookie, "?return=https%3A%2F%2Fevil.example%2Fx").second)
+    assertEquals("/", logout(cookie, "?return=%2F%2Fevil.example%2Fx").second)
+  }
+
+  /**
+   * The sign-out response carries the expired cookie and nothing else. `refreshSession` skips
+   * everything under `/auth/github/`, so an ageing session cannot have a freshly-minted cookie
+   * appended beside its own deletion — two `Set-Cookie` lines for one name being a coin flip
+   * between them.
+   */
+  @Test
+  fun `signing out past the half-life is not re-minted`() {
+    val cookie = signIn()
+    now = now.plusSeconds(ServeGithubAuth.SESSION_REFRESH_AFTER_SECONDS + 60)
+    val cleared = logout(cookie).first
+    assertTrue(cleared != null, "the deletion is still written")
+    assertEquals("", cleared.substringAfter("cp_gh_auth=").substringBefore(";"))
+    assertFalse(signedIn(cleared), "an aged session that signs out stays signed out")
+  }
+
+  private companion object {
+    /** Ktor's CIO engine wants a body on a POST; the logout form carries no fields. */
+    private val EMPTY_FORM = "".toRequestBody("application/x-www-form-urlencoded".toMediaType())
+  }
 }
