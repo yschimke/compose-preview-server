@@ -14,7 +14,7 @@ implementation("ee.schimke.composeai:compose-preview-serve:<version>")
 // Just the render host, the bundle daemon and the git-backed preview history — no web server.
 // What an OFFLINE caller (`compose-preview bundle render`, `compose-preview history manifest`)
 // needs. `compose-preview-serve` depends on this, so depending on the server still gets you both.
-implementation("ee.schimke.composeai:compose-preview-render-host:<version>")
+implementation("ee.schimke.composeai:render-host:<version>")
 
 // Persistent collaborative design service, catalog validation and export orchestration. It has no
 // Ktor server, daemon/render-host implementation, MCP SDK or Compose UI dependency.
@@ -25,14 +25,20 @@ implementation("ee.schimke.composeai:compose-preview-ui-builder-runtime:<version
 // ee.schimke.composeai:compose-preview-ui-builder-web:<version>
 ```
 
-`:render-host` exists because rendering a packed bundle and reading a preview timeline out of git
+`render-host` exists because rendering a packed bundle and reading a preview timeline out of git
 open no sockets, and a caller doing only that should not link `ktor-server-*`, `jmdns` and
-`kotlin-reflect` to do it. `render-host/build.gradle.kts` records the measured before/after and the
-transitives it deliberately cannot drop; `checkRenderHostIsServerFree` keeps the claim honest.
+`kotlin-reflect` to do it. It is **published from
+[compose-ai-tools](https://github.com/yschimke/compose-ai-tools)**, not from here: that is where
+everything it depends on lives, and offline behaviour belongs in that layer
+([#180](https://github.com/yschimke/compose-preview-server/issues/180)). It used to be this
+repository's `:render-host` module, publishing as `compose-preview-render-host`; that coordinate
+stays resolvable at its final 2.x for anyone pinned to it, and the new one is on compose-ai-tools'
+version line. The measured before/after and the transitives it deliberately cannot drop are recorded
+in its build file there, and `checkRenderHostIsServerFree` moved with it.
 
 `:ui-builder-runtime` owns authoritative persistent design state, exact catalog validation and
 revision-pinned export orchestration. `:server` supplies HTTP/authentication and adapts its narrow
-render request onto `:render-host`. The runtime therefore has no Ktor, daemon/render-host, MCP or
+render request onto the render host. The runtime therefore has no Ktor, daemon/render-host, MCP or
 Compose UI dependency, while the offline render host has no UI-builder protocol or service edge.
 
 The build is intentionally repository-independent. Compose Preview implementation artifacts resolve

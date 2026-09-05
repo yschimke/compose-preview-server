@@ -278,8 +278,14 @@ dependencies {
   // `RenderOutcome` is the return type of the render lane the HTTP routes call.
   //
   // The sources kept their `ee.schimke.composeai.cli.serve` package, so nothing in this module
-  // changed at the call sites; only the module that compiles them did.
-  api(project(":render-host"))
+  // changed at the call sites; only the module that compiles them did — and now, only the
+  // repository that publishes it. `:render-host` moved to compose-ai-tools in
+  // yschimke/compose-preview-server#180: it is offline behaviour with no web server, it had zero
+  // project dependencies inside this build, and every coordinate it needs is compose-ai-tools' or
+  // contracts'. Depending on the artifact rather than a local module is the same edge pointing the
+  // same way; what changed is that the module now lives beside the source tree it is compiled
+  // against, instead of against whichever compose-ai-tools release this repository had pinned.
+  api(libs.composeai.render.host)
   // Authoritative persistence, validation, collaboration and export orchestration. The server
   // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
   api(project(":ui-builder-runtime"))
@@ -343,7 +349,7 @@ dependencies {
   // it fakes.
   // `FakeRenderSession` moved to `:render-host` with `ServeRenderHost`, which is the thing it
   // fakes. This module's live-host, session-registry and stream tests still drive it.
-  testImplementation(testFixtures(project(":render-host")))
+  testImplementation(testFixtures(libs.composeai.render.host))
 
   // Re-exported so this module's PUBLISHED test-fixtures variant keeps carrying `FakeRenderSession`
   // for consumers that already ask for it by the `compose-preview-serve` spelling —
@@ -356,7 +362,7 @@ dependencies {
   //
   // This source set now holds no sources of its own. It stays declared for exactly this
   // compatibility hop, and can go once `:cli` asks `:render-host` for the fixture directly.
-  testFixturesApi(testFixtures(project(":render-host")))
+  testFixturesApi(testFixtures(libs.composeai.render.host))
 
   // In-memory FileSystem for the playground and store tests, which assert on-disk output without
   // touching the real FS. Okio itself is on the compile classpath via `:common-io`; the fake ships
@@ -573,7 +579,7 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
 
   // The render host and UI-builder runtime are the two deliberately published libraries beneath
   // the server. Everything else in this build reaching its classpath is still a failure.
-  allowedProjects.set(listOf(":render-host", ":ui-builder-runtime"))
+  allowedProjects.set(listOf(":ui-builder-runtime"))
 
   // The same implementations named twice, because they can arrive by two different routes and the
   // identity differs between them.
@@ -618,6 +624,10 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:data-theme-core",
       "ee.schimke.composeai:parity-issues-protocol",
       "ee.schimke.composeai:preview-data-api",
+      // The render host, published from compose-ai-tools since #180. It arrives as a coordinate
+      // now rather than as a project, so the positive allowlist has to name it — which is the
+      // allowlist working as intended: the move had to be declared here to happen at all.
+      "ee.schimke.composeai:render-host",
       "ee.schimke.composeai:preview-discovery",
       "ee.schimke.composeai:render-session-api",
       "ee.schimke.composeai:render-session-subprocess",
