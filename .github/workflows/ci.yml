@@ -169,6 +169,15 @@ jobs:
           --no-parallel
           --max-workers=1
           -Pkotlin.daemon.jvmargs=-Xmx6g
+      # The harness boots the built distribution, and the start script resolves `java` from
+      # JAVA_HOME. The UI builder's renderer is `java-ui-builder` (21) — its previews are compiled
+      # for 21 and unpacked into a daemon that runs on the server's own JVM — so on the 17 this job
+      # builds with, `ServeUiBuilderRenderPort`'s preflight withdraws PNG/SVG export and the gate
+      # fails with "catalog does not support PNG export". Gradle stays on 17 above, which is the
+      # floor the distribution ships for; only the servers the harness starts move up, exactly as
+      # `deploy/image/Dockerfile` already does by running on Temurin 21.
+      - name: Run harness servers on the UI builder's JDK
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
       - run: npm run harness:ui-builder
         working-directory: preview-harness
       - run: npm run harness:ui-builder-jetcaster
