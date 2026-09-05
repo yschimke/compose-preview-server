@@ -50,7 +50,7 @@ import kotlinx.serialization.Serializable
  *
  * No refresh tokens: a grant is short-lived by design and re-authorization is a human decision, so
  * a silent renewal would launder exactly the property the grants doc is built around. No client
- * secrets: every MCP client here is a public client, so [RFC 7591] registration returns an id only
+ * secrets: every MCP client here is a public client, so RFC 7591 registration returns an id only
  * and the token endpoint is `none`-authenticated with PKCE carrying the proof — `S256` only, never
  * `plain`.
  */
