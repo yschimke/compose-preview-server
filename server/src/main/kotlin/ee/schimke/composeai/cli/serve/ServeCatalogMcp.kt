@@ -138,9 +138,10 @@ class ServeCatalogMcp(
       tool(
         "render_preview",
         "Render one preview. Like local compose-ai-tools, the default semantics observation is " +
-          "token-frugal; request observe=png for pixels. This made-to-order lane requires live " +
-          "grant scope. Use resources/read for the published snapshot lane.",
-        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+          "token-frugal; request observe=png for pixels, or observe=svg for the " +
+          "compose/figma-svg vector export as SVG source. This made-to-order lane requires " +
+          "live grant scope. Use resources/read for the published snapshot lane.",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
     add(
@@ -176,7 +177,7 @@ class ServeCatalogMcp(
       tool(
         "preview-stories",
         "Storybook-MCP-compatible rendering of one or more story ids. Requires live scope.",
-        """{"type":"object","properties":{"storyIds":{"type":"array","items":{"type":"string"}},"storyId":{"type":"string"},"ids":{"type":"array","items":{"type":"string"}},"id":{"type":"string"},"observe":{"type":"string","enum":["png","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["storyIds"]},{"required":["storyId"]},{"required":["ids"]},{"required":["id"]}]}""",
+        """{"type":"object","properties":{"storyIds":{"type":"array","items":{"type":"string"}},"storyId":{"type":"string"},"ids":{"type":"array","items":{"type":"string"}},"id":{"type":"string"},"observe":{"type":"string","enum":["png","svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["storyIds"]},{"required":["storyId"]},{"required":["ids"]},{"required":["id"]}]}""",
       )
     )
   }
@@ -320,8 +321,11 @@ class ServeCatalogMcp(
     observe: String,
   ): List<JsonObject> {
     if (observe !in OBSERVATION_MODES) {
-      throw McpRequestException("'observe' must be one of png, semantics, or hash")
+      throw McpRequestException("'observe' must be one of png, svg, semantics, or hash")
     }
+    // Answered before the raster below, deliberately: the vector lane has its own export and would
+    // otherwise pay for a PNG whose bytes are then discarded.
+    if (observe == "svg") return listOf(textContent(renderSvg(host, previewId, overrides)))
     val png = renderPng(host, previewId, overrides)
     if (observe == "png") return listOf(imageContent(png))
 
@@ -403,6 +407,35 @@ class ServeCatalogMcp(
         RenderOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
         RenderOutcome.Busy -> throw McpRequestException("render busy; retry shortly")
         is RenderOutcome.Failed -> throw McpRequestException(outcome.reason)
+      }
+    }
+  }
+
+  /**
+   * The `compose/figma-svg` counterpart of [renderPng], returned as SVG source rather than a base64
+   * `image` block: the bytes are XML, and an `image/svg+xml` image block is symmetric with PNG but
+   * renders in almost no MCP client, while the source is what a vector consumer wants.
+   *
+   * Shares [withRenderPermit] with the raster lane so SVG cannot become a second, unmetered render
+   * path — the same reason the PNG lane holds the HTTP server's semaphore.
+   */
+  private suspend fun renderSvg(
+    host: ServeHost,
+    previewId: String,
+    overrides: PreviewOverrides,
+  ): String {
+    // Distinguishes "this catalog has no vectors" from "you typed the id wrong", which a bare
+    // NotFound below cannot: both arrive as the same outcome.
+    if (!host.hasSvgExportFor(previewId)) {
+      throw McpRequestException(
+        "preview '$previewId' has no compose/figma-svg export; this catalog serves raster only"
+      )
+    }
+    return withRenderPermit {
+      when (val outcome = host.renderSvg(previewId, overrides)) {
+        is SvgOutcome.Ok -> outcome.svg.decodeToString()
+        SvgOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
+        is SvgOutcome.Failed -> throw McpRequestException(outcome.reason)
       }
     }
   }
@@ -687,6 +720,11 @@ class ServeCatalogMcp(
     put("isError", true)
   }
 
+  private fun textContent(text: String): JsonObject = buildJsonObject {
+    put("type", "text")
+    put("text", text)
+  }
+
   private fun imageContent(png: ByteArray): JsonObject = buildJsonObject {
     put("type", "image")
     put("data", Base64.getEncoder().encodeToString(png))
@@ -755,7 +793,7 @@ class ServeCatalogMcp(
     private const val MAX_STORIES_PER_CALL = 16
     private const val RESOURCE_URI_PREFIX = "compose-preview://catalog/"
     private const val STORY_ID_SEPARATOR = "::"
-    private val OBSERVATION_MODES = setOf("png", "semantics", "hash")
+    private val OBSERVATION_MODES = setOf("png", "svg", "semantics", "hash")
     private const val CATALOG_FILTER_SCHEMA =
       """{"type":"object","properties":{"catalog":{"type":"string"}}}"""
     private val ANNOTATION_KINDS =

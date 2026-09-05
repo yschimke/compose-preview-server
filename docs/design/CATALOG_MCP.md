@@ -78,11 +78,20 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `status` | `preview` | Report readiness and the aggregate catalog set |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
 | `list_projects`, `list_previews` | `preview` | Discover catalogs and preview metadata |
-| `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels |
+| `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
 | `list_data_products` | `preview` | Discover structured products exposed by previews |
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
+
+`observe=svg` returns the vector as SVG **source** in a `text` content block, not as a base64
+`image` block with `mimeType: image/svg+xml`. The symmetry with `png` is tempting, but almost no MCP
+client renders SVG from an image block, and a vector consumer — a Figma round-trip, a diff, a
+DOM-capture tool — wants the markup. It is available only where the host advertises it
+(`ServeHost.hasSvgExportFor`): a static bundle carrying `figma/<slug>.svg` vectors, or a
+daemon-backed session that can export `compose/figma-svg`. A catalog with neither is refused by
+name rather than reported as a missing preview. The lane shares the render semaphore with the PNG
+lane, so it is metered identically and cannot become a second unmetered renderer.
 
 Resource URIs use `compose-preview://catalog/<catalog>/<preview-id>`. Storybook-compatible ids are
 qualified as `<catalog>::<preview-id>` so identical preview ids in different catalogs cannot
