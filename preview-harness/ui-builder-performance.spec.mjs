@@ -408,6 +408,27 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const observer = await context.newPage();
     const writer = await context.newPage();
+    // The editor must never be refused by its own server. Its API calls were split across three
+    // `fetch` helpers and only one carried the page's `?token=`, so `identity`, `device-presets`
+    // and the reference overlay answered 401 on every load of a `--token` deployment — silently,
+    // because each caller treats its own failure as an empty result: a guessed actor, no device
+    // menu, no overlay.
+    //
+    // 401/403 only, deliberately, and not every status >= 400: a 404 here is routinely the truth
+    // ("no overlay saved yet", "this box serves no such published catalog") and asserting on it
+    // would pin the fixture's shape rather than the editor's behaviour. Being unauthenticated
+    // against the server that served the page never is.
+    const refusedRequests = [];
+    for (const page of [observer, writer]) {
+        page.on("response", (response) => {
+            if (response.status() === 401 || response.status() === 403) {
+                const request = response.request();
+                refusedRequests.push(
+                    `${response.status()} ${request.method()} ${response.url()}`,
+                );
+            }
+        });
+    }
     try {
         // The seeded document is revision 1, not 0: the writer derives `baseRevision` from the
         // revision it is asked to produce, so every edit below counts from what the seed left.
@@ -558,6 +579,7 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
         ).toBe(true);
         expect(propertyDeltaPaths).toEqual({ accepted: propagationSamples, fallback: 0 });
         expect(reopenMeasurements.every((item) => item.completedAtMs > 0)).toBe(true);
+        expect(refusedRequests, refusedRequests.join("\n")).toEqual([]);
         if (perfMode) {
             expect(propagation.p95).toBeLessThan(250);
             expect(canvasApply.p95).toBeLessThan(frameBudgetMs);
