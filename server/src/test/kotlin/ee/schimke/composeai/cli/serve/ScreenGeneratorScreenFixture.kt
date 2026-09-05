@@ -36,10 +36,14 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * The screen is deliberately small and deliberately awkward: every value kind the projection can
  * express appears exactly once, and the nesting puts children inside two different slot shapes — a
- * `Surface` slot with no receiver, where a component is imported and called by its simple name, and
- * a `Column`/`Card` slot with a `ColumnScope` receiver, where it must be called fully qualified
- * instead. Those two produce different output from the same node, which is what makes the golden
- * worth having.
+ * `Surface` slot with no receiver and a `Column`/`Card` slot with a `ColumnScope` receiver.
+ *
+ * Those two used to produce different output from the same node, and that difference is what this
+ * fixture was built around: the generator qualified a component inside a receiver-scoped slot,
+ * believing an import could not reach in there. It can — an imported top-level composable resolves
+ * inside a receiver-scoped lambda, which compose-ai-tools #5123 established by compiling it — so
+ * every component is imported and called by its simple name now, whichever slot it sits in. The
+ * nesting is kept: a slot with a receiver is still the case a future regression would break first.
  */
 object ScreenGeneratorScreenFixture {
 

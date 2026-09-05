@@ -97,10 +97,9 @@ class ServeUiBuilderScreenExportIntegrationTest {
       )
       assertTrue(lines[3].length > "// Document SHA-256: ".length, artifact.content)
 
-      // `Text` is imported and called by its simple name here, where the golden in
-      // `ScreenGeneratorComposeExportExecutorTest` calls the same component fully qualified. Both
-      // are right: a node in a slot with a receiver scope cannot rely on an import, and this
-      // document's only node is the root.
+      // `Text` is imported and called by its simple name, as every component is now — including
+      // the ones inside receiver-scoped slots, which the generator used to qualify on the belief
+      // that an import could not reach into one.
       assertEquals(
         """
         package generated.uibuilder
