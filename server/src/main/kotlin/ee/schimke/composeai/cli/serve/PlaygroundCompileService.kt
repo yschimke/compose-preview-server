@@ -276,6 +276,20 @@ class PlaygroundCompileService(
    */
   fun interface PreviewDiscoverer {
     fun discover(classesDir: Path, classpath: List<Path>): List<String>
+
+    /**
+     * The `@Preview` FQNs [discover] accepts, so the empty-result message can name them rather than
+     * leaving the author to guess which import this host reads.
+     */
+    val recognisedAnnotationFqns: Set<String>
+      get() = PlaygroundPreviewDiscoverer.DEFAULT_PREVIEW_ANNOTATION_FQNS
+
+    /**
+     * Preview-shaped annotations present in [classesDir] that [discover] did not accept — the
+     * difference between "you declared nothing" and "you declared one this host cannot render".
+     * Consulted only when [discover] came back empty.
+     */
+    fun unrecognisedPreviewAnnotations(classesDir: Path): List<String> = emptyList()
   }
 
   /**
@@ -684,6 +698,31 @@ class PlaygroundCompileService(
     )
   }
 
+  /**
+   * Why nothing rendered, in the snippet author's terms. The snippet compiled, so "declare a
+   *
+   * @Preview" alone is a dead end — it is read by someone looking straight at one. Name the imports
+   *   this host accepts, and, when the scan did find a preview-shaped annotation it does not read,
+   *   say which one that was: an unaccepted *import* is the usual cause, not a missing annotation.
+   */
+  private fun noPreviewFoundMessage(classesDir: Path): String {
+    val accepted = discoverer.recognisedAnnotationFqns.joinToString(", ")
+    val found =
+      try {
+        discoverer.unrecognisedPreviewAnnotations(classesDir)
+      } catch (t: Throwable) {
+        emptyList()
+      }
+    return if (found.isEmpty()) {
+      "no @Preview found — a playground snippet must declare one @Preview composable, " +
+        "imported from one of: $accepted"
+    } else {
+      "no renderable @Preview found — the snippet declares " +
+        found.joinToString(", ") { "@$it" } +
+        ", which this host does not render; import @Preview from one of: $accepted"
+    }
+  }
+
   private fun publishCompiled(
     mode: PlaygroundMode,
     classpath: Classpath,
@@ -699,11 +738,12 @@ class PlaygroundCompileService(
     // which of them it drew.
     val previews = discoverer.discover(classesDir, renderClasspath).sorted()
     if (previews.isEmpty()) {
+      val message = noPreviewFoundMessage(classesDir)
       cleanup(workDir)
       return PlaygroundRunResponse(
         diagnostics = diagnostics,
         errors = PlaygroundErrorsWire.project(diagnostics),
-        exception = "no @Preview found — a playground snippet must declare one @Preview composable",
+        exception = message,
       )
     }
 
