@@ -37,11 +37,19 @@ repository boundary.
   `compose-preview-contracts`; it does not link a Gradle driver
   ([#9](https://github.com/yschimke/compose-preview-server/issues/9),
   [#180](https://github.com/yschimke/compose-preview-server/issues/180)).
-- Two published Kotlin modules. `:server` depends on `:ui-builder-runtime`, never back; `:server`
+- Three published Kotlin modules. `:server` depends on `:ui-builder-runtime`, never back; `:server`
   holds the HTTP layer, the runner, the catalog store and the web surfaces, and
   `:ui-builder-runtime` holds persistent design state, catalog validation and renderer-neutral
   export orchestration. Both publish in lockstep: `:server`'s POM names the runtime at the same
   version. `checkUiBuilderRuntimeBoundary` and `checkServeModuleBoundary` enforce the graph.
+- `:mcp` is the third, and it depends on neither of the other two. It is the Model Context Protocol
+  server — `compose-preview mcp serve` — moved here from compose-ai-tools because the layer rule
+  places a module that needs an HTTP server in this repository (compose-ai-tools#5176), and it
+  reaches what it needs from layer 1 (`daemon-core`, `daemon-client`, `render-session-api`,
+  `render-matrix`) as published coordinates. It publishes as `compose-preview-mcp` and ships a
+  standalone tarball on the GitHub release, which is what the CLI's `mcp` command launches. Keep
+  `checkMcpToolingApiBoundary` passing: driving a Gradle build is layer-1 behaviour and stays off
+  this repository's floor, MCP included.
 - `:render-host` was a third, until #180 moved it to compose-ai-tools, where it publishes as
   `ee.schimke.composeai:render-host`. It is offline behaviour that opens no socket, which the layer
   rule places in that repository, and it had zero project dependencies inside this build. `:server`

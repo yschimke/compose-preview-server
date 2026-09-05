@@ -95,15 +95,27 @@ jobs:
         # the matching frontend archive. Build/verify the complete graph before this release job so a
         # missing frontend artifact is caught before publication. The render host is no longer among
         # them — it is published from compose-ai-tools since yschimke/compose-preview-server#180.
+        #
+        # `:mcp` is the fourth, since the MCP server moved here from compose-ai-tools
+        # (compose-ai-tools#5176). It publishes as `compose-preview-mcp` and also ships a standalone
+        # tarball, uploaded below: `compose-preview mcp serve` in the CLI fetches and runs THAT
+        # archive, the same way `serve` fetches the server distribution, so a release that published
+        # the jar but not the tarball would leave the CLI command with nothing to launch.
         run: >-
-          ./gradlew :server:distTar
+          ./gradlew :server:distTar :mcp:distTar
           :ui-builder-runtime:publishAndReleaseToMavenCentral
           :ui-builder-web:publishAndReleaseToMavenCentral
           :server:publishAndReleaseToMavenCentral
+          :mcp:publishAndReleaseToMavenCentral
       - name: Upload standalone server distribution
         run: >-
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
           "server/build/distributions/compose-preview-server-${PLUGIN_VERSION}.tar.gz"
+          --clobber
+      - name: Upload standalone MCP server distribution
+        run: >-
+          gh release upload "${{ needs.release-please.outputs.tag_name }}"
+          "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
           --clobber
       - name: Publish the draft GitHub release
         run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false --latest
