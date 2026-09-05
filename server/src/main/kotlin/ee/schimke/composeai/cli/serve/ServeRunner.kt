@@ -2257,6 +2257,14 @@ public class ServeRunner(
     val service: PersistentUiBuilderService,
     val renderer: AutoCloseable?,
     /**
+     * Reference overlays, in their own directory beside the design state.
+     *
+     * Beside rather than inside: the state file is one blob rewritten on every accepted operation,
+     * and a design's reference is megabytes that change when a person picks a new mock. Folding
+     * them together would rewrite every reference on this host on every keystroke.
+     */
+    val references: ServeUiBuilderReferenceStore?,
+    /**
      * The Compose half of the export, kept so the native render lane can ask it the same question
      * with node tagging on. Not reached through [service]: the service's exporter may be the
      * production wrapper around several formats, and the native lane wants exactly this one.
@@ -2374,6 +2382,15 @@ public class ServeRunner(
     return UiBuilderLane(
       service = service,
       renderer = renderer,
+      references =
+        runCatching { ServeUiBuilderReferenceStore(directory.resolve("references").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder reference overlays unavailable (${it.message}); " +
+                "the builder works, and a reference cannot be attached"
+            )
+          }
+          .getOrNull(),
       compose = compose,
     )
   }
@@ -2682,6 +2699,7 @@ public class ServeRunner(
         catalogMcpEnabled = catalogMcp,
         machineAuthorization = machineAuthorization,
         uiBuilderService = uiBuilderLane?.service,
+        uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderAuthorization =
           uiBuilderLane?.let {
             ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)
