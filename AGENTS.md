@@ -9,7 +9,8 @@ repository boundary.
 - Git history attributes work only to the human committer. Never add an AI `Co-authored-by:` trailer
   or use an agent identity as author/committer. Scrub PR titles and bodies too.
 - Branch names use `agent/...`.
-- Commit subjects and PR titles use Conventional Commits.
+- Commit subjects and PR titles use Conventional Commits. A `!` in one does **not** bump the major:
+  every release here is a minor, and why is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
 - Run `./gradlew ktfmtFormat` before committing Kotlin changes and
   `npm --prefix serve-web run format` before committing serve-web changes.
 - `:ui-builder-runtime` compiles under `explicitApi()` and its public API is pinned by the committed
