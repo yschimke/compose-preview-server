@@ -138,6 +138,25 @@ export class HistoryMenu extends VueElement {
 
     /** One version, as a link out — the stage is never touched, so nothing can disagree with it. */
     private item(row: HistoryRow): VNode {
+        // The picture of that version, on the row that links to it. Lazy and async because the
+        // panel is closed until someone asks for it, so none of these fetches is on the path to a
+        // first render of the page.
+        const thumb = h("img", {
+            class: "cp-history-thumb",
+            src: row.thumb,
+            loading: "lazy",
+            decoding: "async",
+            alt: "",
+            // A version whose PNG will not load — a delivery branch rewritten under us, an offline
+            // viewer — says nothing useful as a broken-image glyph. Drop the source and keep the
+            // box: the row's date and sha still answer, and the dates stay in one column instead
+            // of jumping left on whichever rows happened to fail.
+            onError: (event: Event) => {
+                const img = event.currentTarget as HTMLImageElement;
+                img.removeAttribute("src");
+                img.setAttribute("data-failed", "1");
+            },
+        });
         const span = row.span
             ? h(
                   "span",
@@ -156,6 +175,7 @@ export class HistoryMenu extends VueElement {
                 "data-current": row.current ? "1" : undefined,
             },
             [
+                thumb,
                 h("span", { class: "cp-history-date" }, row.date),
                 h("span", { class: "cp-history-meta" }, row.meta),
                 span,

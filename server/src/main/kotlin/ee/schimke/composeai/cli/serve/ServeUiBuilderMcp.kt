@@ -5,6 +5,7 @@ import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommandV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
+import ee.schimke.composeai.uibuilder.protocol.DesignUpdateEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
@@ -18,7 +19,13 @@ import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
+import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionRejectedException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -86,6 +93,7 @@ class ServeUiBuilderMcp(
       LIST_CATALOGS,
       LIST_DESIGNS,
       GET_DESIGN -> UiBuilderRouteCapability.READ
+      AWAIT_DESIGN -> UiBuilderRouteCapability.READ
       LIST_COMMENTS,
       AWAIT_COMMENTS -> if (comments == null) null else UiBuilderRouteCapability.READ
       POST_COMMENT,
@@ -134,6 +142,7 @@ class ServeUiBuilderMcp(
             format = args.exportFormat(),
           )
         RENDER_NATIVE -> return renderNative(args, actor)
+        AWAIT_DESIGN -> return awaitDesign(args, actor)
         LIST_COMMENTS,
         AWAIT_COMMENTS,
         POST_COMMENT,
@@ -193,6 +202,85 @@ class ServeUiBuilderMcp(
           ),
         )
     }
+  }
+
+  /**
+   * Wait for somebody to change a design, rather than asking again whether they have.
+   *
+   * ## Why a tool and not an MCP notification
+   *
+   * MCP does have server-to-client notifications, and this surface deliberately cannot send one:
+   * `/mcp` is a stateless JSON-RPC endpoint, `GET /mcp` — the Streamable-HTTP listening stream a
+   * notification would travel on — answers 405, and `initialize` says as much by advertising
+   * `resources: {"subscribe": false}`. Honouring `resources/subscribe` would mean session ids, a
+   * per-session SSE stream, resumability and server-held subscription state: a stateful transport,
+   * which is the property this endpoint is built not to have. A call that blocks needs none of
+   * that, and it is the shape the grant flow's `poll_access` and [AWAIT_COMMENTS] already use here.
+   *
+   * ## What it is
+   *
+   * The same [UiBuilderServicePort.subscribe] the browser's `/updates` socket is built on, held for
+   * one call. The reply is the released [DesignUpdateEnvelopeV1] — the identical frame that socket
+   * delivers — so an agent and a designer are told the same thing in the same words, and neither
+   * can learn about an edit the other does not.
+   *
+   * The cursor follows the service's own rule rather than a second one invented here: a
+   * `afterSequence` inside the retained window is answered with the operations after it, and one
+   * that is null, too far behind, or ahead of the design is answered with a whole snapshot.
+   */
+  private suspend fun awaitDesign(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val designId = args.requiredText("designId")
+    val afterSequence =
+      args.number("afterSequence")
+        ?: throw McpRequestException(
+          "`afterSequence` is required: it is the `lastSequence` you last saw"
+        )
+    if (afterSequence < 0) throw McpRequestException("`afterSequence` must not be negative")
+    val waitSeconds =
+      (args.number("waitSeconds") ?: DEFAULT_DESIGN_WAIT_SECONDS).coerceIn(
+        0,
+        MAX_DESIGN_WAIT_SECONDS,
+      )
+
+    val waiter = CompletableDeferred<UiBuilderServiceUpdate>()
+    val subscription =
+      try {
+        service.subscribe(
+          UiBuilderSubscriptionCall(
+            actor = actor,
+            designId = designId,
+            afterSequence = afterSequence,
+          )
+        ) { update ->
+          // Presence is chrome — who is looking and what they have selected — and is excluded from
+          // the document, the revision and the sequence. Waking an agent for it would turn a
+          // colleague moving their cursor into a tool call that returns nothing to act on.
+          if (update.movesTheDocument(afterSequence)) waiter.complete(update)
+        }
+      } catch (rejected: UiBuilderSubscriptionRejectedException) {
+        // The service's own refusal, verbatim: no such design, no read access, or too many
+        // subscribers. Inventing a sentence here would describe a decision made elsewhere.
+        throw McpRequestException(rejected.error.message)
+      }
+    val update =
+      try {
+        // The subscription's catch-up update is delivered before `subscribe` returns, so a design
+        // that has already moved past the cursor answers without waiting at all.
+        try {
+          withTimeout(waitSeconds * 1000) { waiter.await() }
+        } catch (_: TimeoutCancellationException) {
+          return UI_BUILDER_JSON.encodeToString(
+            DesignWaitTimeoutV1.serializer(),
+            DesignWaitTimeoutV1(designId = designId, afterSequence = afterSequence),
+          )
+        }
+      } finally {
+        subscription.close()
+      }
+    return UI_BUILDER_JSON.encodeToString(
+      DesignUpdateEnvelopeV1.serializer(),
+      UiBuilderProtocolMapper.toProtocolUpdate(designId, update),
+    )
   }
 
   /**
@@ -415,9 +503,11 @@ class ServeUiBuilderMcp(
     const val POST_COMMENT = "ui_builder_post_comment"
     const val RESOLVE_COMMENT_THREAD = "ui_builder_resolve_comment_thread"
     const val AWAIT_COMMENTS = "ui_builder_await_comments"
+    const val AWAIT_DESIGN = "ui_builder_await_design"
 
     /** Every tool this class answers to, in the order a session naturally uses them. */
-    val TOOL_NAMES = listOf(LIST_CATALOGS, LIST_DESIGNS, GET_DESIGN, CREATE_DESIGN, APPLY, EXPORT)
+    val TOOL_NAMES =
+      listOf(LIST_CATALOGS, LIST_DESIGNS, GET_DESIGN, AWAIT_DESIGN, CREATE_DESIGN, APPLY, EXPORT)
 
     /** Separate because it exists only where the host can compile. */
     val NATIVE_TOOL_NAMES = listOf(RENDER_NATIVE)
@@ -427,6 +517,11 @@ class ServeUiBuilderMcp(
       listOf(LIST_COMMENTS, POST_COMMENT, RESOLVE_COMMENT_THREAD, AWAIT_COMMENTS)
 
     private const val DEFAULT_DESIGN_PAGE = 50
+
+    /** How long a design watcher waits by default, and the most it may ask for. */
+    private const val DEFAULT_DESIGN_WAIT_SECONDS = 25L
+
+    private const val MAX_DESIGN_WAIT_SECONDS = 120L
     private const val MCP_CLIENT_ID = "mcp"
 
     /**
@@ -466,6 +561,24 @@ class ServeUiBuilderMcp(
             "designId":{"type":"string"},
             "revision":{"type":"integer","description":"A past revision. Omit for the current one."}
           },"required":["designId"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          AWAIT_DESIGN,
+          "Wait for somebody else to change a design and return what they changed, rather than " +
+            "asking again whether they have. Returns the moment a designer in the browser or " +
+            "another agent commits an edit, as the same update frame the browser's own live " +
+            "socket receives; returns a `timedOut` reply if nothing happens within `waitSeconds`, " +
+            "which you answer by calling again with the same cursor. Quote the `lastSequence` you " +
+            "last saw as `afterSequence`; a cursor the server no longer retains is answered with " +
+            "a whole snapshot instead of the operations you missed. Somebody merely looking at " +
+            "the design does not wake you — only a committed change does.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "afterSequence":{"type":"integer","description":"The `lastSequence` you last saw, from $GET_DESIGN or a previous wait."},
+            "waitSeconds":{"type":"integer","description":"Up to $MAX_DESIGN_WAIT_SECONDS. Defaults to $DEFAULT_DESIGN_WAIT_SECONDS."}
+          },"required":["designId","afterSequence"],"additionalProperties":false}
           """,
         ),
         tool(
@@ -611,6 +724,43 @@ class ServeUiBuilderMcp(
 @kotlinx.serialization.Serializable
 internal data class CommentWaitTimeoutV1(
   val schema: String = "compose-preview/ui-builder-comment-wait/v1",
+  val designId: String,
+  val timedOut: Boolean = true,
+  /** Echoed back, so a caller that loops can pass the same cursor without tracking it itself. */
+  val afterSequence: Long,
+)
+
+/**
+ * Whether this update is a change to the design, past the cursor the caller quoted.
+ *
+ * A snapshot always is: the service sends one when the cursor cannot be served from the retained
+ * window, and the caller has to resync whether or not it names an edit they care about. A delta is
+ * one only when it carries something they have not seen — subscribing at the design's current
+ * sequence produces an empty catch-up delta, which is "nothing has happened", not news.
+ *
+ * Presence never is. It is ephemeral chrome, excluded by design from the document, the revision and
+ * the durable sequence, and waking an agent because a colleague moved their cursor would spend a
+ * tool call on something with nothing to act on. An outcome is an acknowledgement addressed to
+ * whoever submitted it, and the edit it acknowledges arrives as its own delta.
+ */
+private fun UiBuilderServiceUpdate.movesTheDocument(afterSequence: Long): Boolean =
+  when (this) {
+    is UiBuilderServiceUpdate.Snapshot -> true
+    is UiBuilderServiceUpdate.Delta -> delta.throughSequence > afterSequence
+    is UiBuilderServiceUpdate.Presence,
+    is UiBuilderServiceUpdate.Outcome -> false
+  }
+
+/**
+ * Nobody changed the design within the wait.
+ *
+ * Its own shape rather than an empty delta, so a caller cannot read "no news" as "the design was
+ * emptied" — the same distinction [CommentWaitTimeoutV1] draws, and the HTTP comment watch draws
+ * with a 204.
+ */
+@kotlinx.serialization.Serializable
+internal data class DesignWaitTimeoutV1(
+  val schema: String = "compose-preview/ui-builder-design-wait/v1",
   val designId: String,
   val timedOut: Boolean = true,
   /** Echoed back, so a caller that loops can pass the same cursor without tracking it itself. */

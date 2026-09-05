@@ -178,11 +178,46 @@ class ScreenDocumentProjectionTest {
   }
 
   @Test
-  fun `an enum value outside the table is refused with the values that are in it`() {
-    // Not "nothing maps enum values", which is what this said while the table did not exist and
-    // which sent a reader to write the table that is already there. The wire spelling is
-    // lower-camel and Kotlin's is not, so the useful half of the refusal is the list: `center` is
-    // spelled `center` here and `centerVertically` one component over.
+  fun `a mapped enum value becomes the Kotlin member the table names`() {
+    // The wire spelling is lower-camel and the member is not, which is why appending the document's
+    // value to the parameter's recorded type never compiled and why `ENUM_MEMBERS` exists.
+    val align =
+      projected(document(text("textAlign" to EnumValueV1("center"))))
+        .root
+        .arguments
+        .getValue("textAlign") as ScreenValue.Reference
+    assertEquals("androidx.compose.ui.text.style.TextAlign", align.rootFqn)
+    assertEquals(listOf("Center"), align.members)
+    assertEquals("androidx.compose.ui.text.style.TextAlign", align.typeFqn)
+  }
+
+  @Test
+  fun `a variant property is refused as a call-site decision, not as a missing member`() {
+    // `m3/button`.`style` is not a value at all: the catalog spells three Compose components as one
+    // id, so there is no member to name. Its own sentence, because "no mapping" would send somebody
+    // to add a table entry that cannot exist.
+    assertEquals(
+      listOf(
+        "node `button`.`style` is `outlined`, which names a component variant rather than a " +
+          "value: the catalog spells three Compose components as one id, and choosing between " +
+          "them is a call-site decision this projection cannot make from a parameter"
+      ),
+      refusal(
+        document(
+          DesignNodeV1(
+            id = "button",
+            componentId = "m3/button",
+            properties = mapOf("style" to EnumValueV1("outlined")),
+          )
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `an enum value the table does not carry is refused, and names the ones it does`() {
+    // The half worth keeping from the behaviour before the table: a value with no member behind it
+    // is refused by name rather than emitting a reference that does not exist.
     assertEquals(
       listOf(
         "node `text`.`textAlign` is the enum value `middle`, which is not one of " +
