@@ -310,6 +310,11 @@ services:
       # `m3-catalog` and the entrypoint installs it by default, so this is an override for a box
       # carrying its own discovery output — an empty value keeps the packaged record.
       SERVE_UI_BUILDER_COMPONENTS: "${SERVE_UI_BUILDER_COMPONENTS:-}"
+      # Which served bundle compiles each builder catalog's designs for the native preview lane.
+      # `wear-m3` maps to the Wear catalog because Wear Material 3 is an Android AAR the browser
+      # canvas cannot link, so the compiled Android render is that catalog's only faithful surface.
+      # An empty value keeps the entrypoint's default.
+      SERVE_UI_BUILDER_NATIVE_CATALOGS: "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-}"
       # Naming this turns the image lane on (see SERVE_ACCEPT_IMAGES above): the repository an
       # uploader's GitHub token must have access to. Write access on a public repo, any grant on a
       # private one.

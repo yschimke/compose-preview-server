@@ -128,21 +128,56 @@ internal class ScreenGeneratorComposeExportExecutor(
     document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
     tagNodes: Boolean = false,
   ): Generated {
-    // Refused here rather than emitted, and that asymmetry with `export` is the point. This lane
-    // hands its source to a Kotlin compile against the design's catalog bundle, and a record-free
-    // design's source is Remote Compose or Wear Compose — neither is on that classpath. Without
-    // this the refusal came back as `NO_COMPONENT_RECORD`, telling a designer previewing a widget
-    // to go and configure a `--ui-builder-components` record that would not have helped.
+    // A record-free design never reaches `ScreenGenerator` below — `remote-m3` and `wear-m3` have
+    // no component record and the record-driven generator can only refuse them — so the emitter
+    // answers first, exactly as it does in `export`. What differs is that this lane then *compiles*
+    // the source, so the two record-free emitters part company here.
+    //
+    // A **Wear screen** is ordinary Wear Compose: `ScreenScaffold`, `TitleCard`, `Text`. Given a
+    // catalog bundle carrying `androidx.wear.compose:compose-material3` it compiles and renders on
+    // the Android/Robolectric daemon, and that render is not a nicety — the browser's Wasm canvas
+    // cannot link an Android AAR, so it is the *only* honest picture a Wear design has
+    // (`docs/design/UI_BUILDER_WEAR_SCREEN.md`). This lane used to refuse it along with the widget,
+    // which left the one catalog that most needs a native render as the one catalog that could not
+    // ask for one.
+    //
+    // A **Wear widget** still refuses. Its source declares a `WearWidgetDocument` of Remote
+    // Compose — played by a player, not composed — so there is no `@Preview` for this lane to
+    // discover and no frame at the end of compiling it.
     if (RecordFreeExport.applies(document)) {
-      return Generated.Refused(
-        RECORD_FREE_DESIGN,
-        listOf(
-          "this design generates its own source rather than Jetpack Compose — a Wear widget is " +
-            "Remote Compose, a Wear screen is Wear Compose — and the native preview lane compiles " +
-            "against the catalog bundle, which carries neither; export it instead, and preview it " +
-            "on the canvas"
-        ),
-      )
+      if (!RecordFreeExport.composeCompilable(document)) {
+        return Generated.Refused(
+          RECORD_FREE_DESIGN,
+          listOf(
+            "this design generates a Remote Compose document rather than Jetpack Compose, so " +
+              "there is no `@Preview` for the native preview lane to compile and render; export " +
+              "it instead, and preview it on the canvas"
+          ),
+        )
+      }
+      return when (val recordFree = RecordFreeExport.generate(document, packageName, tagNodes)) {
+        // Unreachable: `applies` was true, so the emitter owns this document. Reported as a
+        // refusal rather than asserted, because a null here would otherwise fall through to the
+        // record-driven generator and come back as `NO_COMPONENT_RECORD` — advice about a
+        // `--ui-builder-components` flag that would not have helped.
+        null ->
+          Generated.Refused(
+            RECORD_FREE_DESIGN,
+            listOf("no record-free emitter claimed this design"),
+          )
+        is RecordFreeExport.Generated.Refused ->
+          Generated.Refused(UNEXPRESSIBLE_DOCUMENT, recordFree.reasons)
+        is RecordFreeExport.Generated.Emitted ->
+          Generated.Emitted(
+            recordFree.source,
+            // Not defaulted. `composeCompilable` is exactly the emitters that declare a composable,
+            // so a null here is that pair having drifted apart, and inventing a name would be a
+            // compile failure attributed to the design.
+            requireNotNull(recordFree.composableName) {
+              "a compose-compilable record-free design must name its composable"
+            },
+          )
+      }
     }
     val catalogSystemId = document.catalogPin.systemId
     val record =

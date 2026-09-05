@@ -737,6 +737,41 @@ public class ServeCommandOptions(
       }
       ?.toMap() ?: emptyMap()
 
+  /**
+   * Which served catalog compiles each UI-builder catalog's designs for the native preview lane.
+   *
+   * Same `<key>=<value>` shape as `--ui-builder-components` and for the same reason: a host serving
+   * several builder catalogs has several answers and no way to say which is which otherwise. Both
+   * halves are catalog ids, so both are checked against [UI_BUILDER_CATALOG_ID] — the served side
+   * reaches a branch name (`design-artifacts/<system>`) and must not carry a path separator.
+   */
+  override val uiBuilderNativeCatalogs: Map<String, String> =
+    args
+      .flagValue("--ui-builder-native-catalog")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.map { entry ->
+        val builder = entry.substringBefore('=', missingDelimiterValue = "").trim()
+        val served = entry.substringAfter('=', missingDelimiterValue = "").trim()
+        require(builder.isNotEmpty() && served.isNotEmpty()) {
+          "--ui-builder-native-catalog entries must be <builder catalog>=<served catalog>, got `$entry`"
+        }
+        require(UI_BUILDER_CATALOG_ID.matches(builder)) {
+          "--ui-builder-native-catalog names an invalid builder catalog id `$builder`"
+        }
+        require(UI_BUILDER_CATALOG_ID.matches(served)) {
+          "--ui-builder-native-catalog names an invalid served catalog id `$served`"
+        }
+        builder to served
+      }
+      ?.also { pairs ->
+        require(pairs.map { it.first }.distinct().size == pairs.size) {
+          "--ui-builder-native-catalog names a catalog twice"
+        }
+      }
+      ?.toMap() ?: emptyMap()
+
   /** Exact, retained renderer bundles; unlike the builder shell these paths are immutable pins. */
   override val uiBuilderRuntimeDirs: Map<String, File> =
     args

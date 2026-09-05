@@ -252,6 +252,17 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   if [[ -f "${UI_BUILDER_RECORD}" ]]; then
     args+=(--ui-builder-components "m3-catalog=${UI_BUILDER_RECORD}")
   fi
+  # Which served bundle each builder catalog's designs are COMPILED against for the native preview.
+  #
+  # `wear-m3` is the reason this exists. Its canvas is a stand-in by construction — Wear Material 3
+  # is an Android AAR and the browser renderer is Compose Multiplatform for Wasm — so the only
+  # honest picture of a Wear design comes from compiling its generated Kotlin against real Wear
+  # Compose, which lives in a different repository's catalog. That bundle is an Android one, so
+  # mapping it here also sends the compile to the Robolectric daemon rather than to Skiko.
+  #
+  # A catalog absent from the map compiles against a served catalog of its own name, which is what
+  # `m3-catalog` has always done and why it is not listed.
+  args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
 fi
 # Explicit per-catalog apps remain additive and take precedence over the packaged fallback.
 [[ -n "${SERVE_WASM_DIR:-}" ]] && args+=(--wasm-dir "${SERVE_WASM_DIR}")
