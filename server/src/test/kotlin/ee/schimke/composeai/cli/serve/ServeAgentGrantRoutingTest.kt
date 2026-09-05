@@ -184,7 +184,8 @@ class ServeAgentGrantRoutingTest {
 
   @Test
   fun `catalog MCP is streamable HTTP and advertises the grant flow`() {
-    val unauthenticated = post("/mcp", initializeRequest(1))
+    // Reading a catalog is what needs the grant, and the refusal still says where to get one.
+    val unauthenticated = post("/mcp", """{"jsonrpc":"2.0","id":1,"method":"resources/list"}""")
     assertEquals(401, unauthenticated.first)
     assertEquals("authorization_required", str(unauthenticated.second, "error"))
     assertTrue(
@@ -197,6 +198,124 @@ class ServeAgentGrantRoutingTest {
       assertEquals("POST", response.header("Allow"))
     }
   }
+
+  /**
+   * Discovery is open, and it is open for one reason: a client that cannot finish `initialize`
+   * cannot reach the tool that asks a human for a credential either, so an agent holding nothing
+   * had nowhere to start but an out-of-band `curl`.
+   */
+  @Test
+  fun `an agent with no credential can initialize and list tools`() {
+    val initialized = mcpAnonymous(initializeRequest(1))
+    assertEquals(200, initialized.first)
+    val result = json(initialized.second)["result"]!!.jsonObject
+    assertEquals(
+      ServeCatalogMcp.MCP_PROTOCOL_VERSION,
+      result["protocolVersion"]!!.jsonPrimitive.content,
+    )
+    // The instructions have to say how to get in, or an open handshake just moves the dead end.
+    assertTrue(result["instructions"]!!.jsonPrimitive.content.contains("request_access"))
+
+    val listed = mcpAnonymous("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""")
+    assertEquals(200, listed.first)
+    val names =
+      json(listed.second)["result"]!!.jsonObject["tools"]!!.jsonArray.map {
+        it.jsonObject["name"]!!.jsonPrimitive.content
+      }
+    assertTrue(names.containsAll(listOf("request_access", "poll_access")), names.toString())
+    // …and the catalog tools are still advertised, so the model knows what the grant is FOR.
+    assertTrue(names.contains("render_preview"))
+
+    assertEquals(200, mcpAnonymous("""{"jsonrpc":"2.0","id":3,"method":"ping"}""").first)
+  }
+
+  /** Opening the handshake must not open anything that reads a catalog. */
+  @Test
+  fun `discovery being open does not open the catalog`() {
+    for (body in
+      listOf(
+        """{"jsonrpc":"2.0","id":1,"method":"resources/list"}""",
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}""",
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{}}}""",
+        // An unrecognised tool is gated too: unknown names are not a category to open by default.
+        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"whatever","arguments":{}}}""",
+      )) {
+      assertEquals(401, mcpAnonymous(body).first, body)
+    }
+  }
+
+  /**
+   * The whole point: an agent holding nothing bootstraps itself without leaving the protocol.
+   * request_access → a human approves in a browser → poll_access → the token opens the gate that
+   * was answering 401 a moment earlier.
+   */
+  @Test
+  fun `an agent bootstraps a grant through MCP alone`() {
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live","label":"from mcp"}}}"""
+      )
+    assertEquals(200, opened.first)
+    val payload = json(toolText(opened.second))
+    val requestId = payload["requestId"]!!.jsonPrimitive.content
+    val secret = payload["deviceSecret"]!!.jsonPrimitive.content
+    assertTrue(payload["approveUrl"]!!.jsonPrimitive.content.contains("/agent-access/"))
+    assertTrue(payload["userCode"]!!.jsonPrimitive.content.isNotEmpty())
+    // Same shape the HTTP route answers with — the two surfaces describe one flow.
+    assertEquals("live", payload["requestedScope"]!!.jsonPrimitive.content)
+
+    val pending =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret"}}}"""
+      )
+    assertEquals("pending", json(toolText(pending.second))["status"]!!.jsonPrimitive.content)
+
+    val (_, page) = get("/agent-access/$requestId?token=$operatorToken")
+    post(
+      "/agent-access/$requestId?token=$operatorToken",
+      "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800",
+      contentType = "application/x-www-form-urlencoded",
+    )
+
+    val approved =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret"}}}"""
+      )
+    val outcome = json(toolText(approved.second))
+    assertEquals("approved", outcome["status"]!!.jsonPrimitive.content)
+    val token = outcome["token"]!!.jsonPrimitive.content
+    assertEquals(ServeHttpServer.TOKEN_HEADER, outcome["tokenHeader"]!!.jsonPrimitive.content)
+
+    // The credential it just obtained opens the door that refused it.
+    val listed = mcp(token, """{"jsonrpc":"2.0","id":4,"method":"resources/list","params":{}}""")
+    assertEquals(200, listed.first)
+    assertTrue(json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray.isNotEmpty())
+  }
+
+  /** A wrong device secret is not a way to collect somebody else's token. */
+  @Test
+  fun `poll_access refuses a request it cannot prove it opened`() {
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+      )
+    val requestId = json(toolText(opened.second))["requestId"]!!.jsonPrimitive.content
+    val stolen =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"not-the-secret"}}}"""
+      )
+    // The same answer an unknown id gets, deliberately: one must not distinguish the other.
+    assertEquals("unknown", json(toolText(stolen.second))["status"]!!.jsonPrimitive.content)
+  }
+
+  /** The text content of a tool result. */
+  private fun toolText(body: String): String =
+    json(body)["result"]!!
+      .jsonObject["content"]!!
+      .jsonArray[0]
+      .jsonObject["text"]!!
+      .jsonPrimitive
+      .content
 
   @Test
   fun `preview grant initializes and reads a catalog resource`() {
@@ -303,6 +422,20 @@ class ServeAgentGrantRoutingTest {
 
   private fun initializeRequest(id: Int): String =
     """{"jsonrpc":"2.0","id":$id,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"""
+
+  /** The same call with no credential at all — what a client that has never been granted sends. */
+  private fun mcpAnonymous(body: String): Pair<Int, String> {
+    val request =
+      Request.Builder()
+        .url(url("/mcp"))
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", ServeCatalogMcp.MCP_PROTOCOL_VERSION)
+        .post(body.toRequestBody("application/json".toMediaType()))
+        .build()
+    client.newCall(request).execute().use {
+      return it.code to it.body.string()
+    }
+  }
 
   private fun mcp(
     token: String,

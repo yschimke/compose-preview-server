@@ -7878,21 +7878,6 @@ class ServeHttpServer(
     val authorization = machineAuthorization ?: return call.respond(HttpStatusCode.NotFound)
     if (rejectCatalogMcpOrigin()) return
 
-    when (val decision = authorization.authorizeScope(call, AgentGrantScope.PREVIEW)) {
-      is ServeMachineAuthorization.Decision.Authorized -> Unit
-      ServeMachineAuthorization.Decision.Missing -> {
-        respondCatalogMcpAuthorization(
-          HttpStatusCode.Unauthorized,
-          "A short-lived preview grant is required.",
-        )
-        return
-      }
-      is ServeMachineAuthorization.Decision.Forbidden -> {
-        respondCatalogMcpAuthorization(HttpStatusCode.Forbidden, decision.message)
-        return
-      }
-    }
-
     val requestContentType =
       call.request.headers[HttpHeaders.ContentType]?.substringBefore(';')?.trim()
     if (!requestContentType.equals(ContentType.Application.Json.toString(), ignoreCase = true)) {
@@ -7930,7 +7915,33 @@ class ServeHttpServer(
         return
       }
 
-    val reply = mcp.handle(request) { authorization.authorizeScope(call, AgentGrantScope.LIVE) }
+    // The gate moved BELOW the parse so it can be asked about this particular message. It used to
+    // stand in front of the whole endpoint, which meant a client with no credential could not
+    // complete `initialize` — and therefore could not reach the tool that asks a human for one
+    // either. Discovery and the two access tools are open ([ServeCatalogMcp.requiresGrant] owns
+    // the list, beside the tools themselves); everything that reads a catalog is gated exactly as
+    // before, and an unrecognised method is gated by default.
+    if (ServeCatalogMcp.requiresGrant(request)) {
+      when (val decision = authorization.authorizeScope(call, AgentGrantScope.PREVIEW)) {
+        is ServeMachineAuthorization.Decision.Authorized -> Unit
+        ServeMachineAuthorization.Decision.Missing -> {
+          respondCatalogMcpAuthorization(
+            HttpStatusCode.Unauthorized,
+            "A short-lived preview grant is required.",
+          )
+          return
+        }
+        is ServeMachineAuthorization.Decision.Forbidden -> {
+          respondCatalogMcpAuthorization(HttpStatusCode.Forbidden, decision.message)
+          return
+        }
+      }
+    }
+
+    val reply =
+      mcp.handle(request, agentGrants?.let { catalogMcpAgentAccess(it) }) {
+        authorization.authorizeScope(call, AgentGrantScope.LIVE)
+      }
     if (reply.accepted) {
       call.respond(HttpStatusCode.Accepted)
     } else {
@@ -11133,29 +11144,8 @@ class ServeHttpServer(
             call.respondText("invalid request: ${e.message}", status = HttpStatusCode.BadRequest)
             return
           }
-      val scope = AgentGrantScope.parse(parsed.scope) ?: AgentGrantScope.DEFAULT_REQUEST
-      // Unknown names are dropped rather than refused — see [OpenRequest.capabilities]. The store
-      // narrows what survives to this box's ceiling, so asking for `images` on a box that offers
-      // none is not an error, it simply is not in the request that comes back.
-      val capabilities = parsed.capabilities.mapNotNull { AgentGrantCapability.parse(it) }.toSet()
-      val ttl =
-        parsed.ttlSeconds.takeIf { it > 0 } ?: ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS
-      val request =
-        store.openRequest(
-          label = parsed.label,
-          // The address, not a name the caller chose: the approval page's "who is asking" must be
-          // something the asker cannot write. The label right above it is theirs to write, and is
-          // presented as such.
-          // The SAME trusted-forwarding policy the rate limiter uses, not the raw socket peer.
-          // Behind a reverse proxy the peer is the proxy, so "Asked from" showed Caddy's address
-          // for every request on the one deployment where the line matters — a signal the approver
-          // is meant to weigh, reading identically for the agent that asked and for anyone else.
-          client = clientAddress(),
-          requestedScope = scope,
-          requestedTtlSeconds = ttl,
-          requestedCapabilities = capabilities,
-        )
-      if (request == null) {
+      val response = openAgentGrantRequest(store, parsed)
+      if (response == null) {
         call.response.headers.append(HttpHeaders.RetryAfter, "60")
         call.respondText(
           "too many pending access requests on this server; try again shortly",
@@ -11163,31 +11153,63 @@ class ServeHttpServer(
         )
         return
       }
-      val origin = externalOrigin()
       call.respondText(
-        JSON.encodeToString(
-          ServeAgentGrants.OpenResponse.serializer(),
-          ServeAgentGrants.OpenResponse(
-            requestId = request.id,
-            deviceSecret = request.deviceSecret,
-            userCode = request.userCode,
-            approveUrl = origin + ServeAgentGrants.approvalPath(request.id),
-            pollUrl = origin + ServeAgentGrants.POLL_PATH,
-            expiresInSeconds = request.secondsUntilExpiry(System.currentTimeMillis()),
-            pollIntervalSeconds = ServeAgentGrantStore.POLL_INTERVAL_SECONDS,
-            requestedScope = request.requestedScope.wire,
-            requestedTtlSeconds = request.requestedTtlSeconds,
-            maxScope = store.maxScope.wire,
-            maxTtlSeconds = store.maxGrantTtlSeconds,
-            requestedCapabilities = AgentGrantCapability.wireNames(request.requestedCapabilities),
-            maxCapabilities = AgentGrantCapability.wireNames(store.maxCapabilities),
-          ),
-        ),
+        JSON.encodeToString(ServeAgentGrants.OpenResponse.serializer(), response),
         ContentType.Application.Json,
       )
     } finally {
       permit.release()
     }
+  }
+
+  /**
+   * Open one access request and describe it, for whichever surface asked — the `/agent-access`
+   * route or the catalog MCP's `request_access` tool. Shared so the two cannot answer the same
+   * question with different fields; the caller owns rate limiting and how a refusal is reported.
+   *
+   * Null when the store is at its pending-request ceiling.
+   */
+  private fun RoutingContext.openAgentGrantRequest(
+    store: ServeAgentGrantStore,
+    parsed: ServeAgentGrants.OpenRequest,
+  ): ServeAgentGrants.OpenResponse? {
+    val scope = AgentGrantScope.parse(parsed.scope) ?: AgentGrantScope.DEFAULT_REQUEST
+    // Unknown names are dropped rather than refused — see [OpenRequest.capabilities]. The store
+    // narrows what survives to this box's ceiling, so asking for `images` on a box that offers
+    // none is not an error, it simply is not in the request that comes back.
+    val capabilities = parsed.capabilities.mapNotNull { AgentGrantCapability.parse(it) }.toSet()
+    val ttl = parsed.ttlSeconds.takeIf { it > 0 } ?: ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS
+    val request =
+      store.openRequest(
+        label = parsed.label,
+        // The address, not a name the caller chose: the approval page's "who is asking" must be
+        // something the asker cannot write. The label right above it is theirs to write, and is
+        // presented as such.
+        // The SAME trusted-forwarding policy the rate limiter uses, not the raw socket peer.
+        // Behind a reverse proxy the peer is the proxy, so "Asked from" showed Caddy's address
+        // for every request on the one deployment where the line matters — a signal the approver
+        // is meant to weigh, reading identically for the agent that asked and for anyone else.
+        client = clientAddress(),
+        requestedScope = scope,
+        requestedTtlSeconds = ttl,
+        requestedCapabilities = capabilities,
+      ) ?: return null
+    val origin = externalOrigin()
+    return ServeAgentGrants.OpenResponse(
+      requestId = request.id,
+      deviceSecret = request.deviceSecret,
+      userCode = request.userCode,
+      approveUrl = origin + ServeAgentGrants.approvalPath(request.id),
+      pollUrl = origin + ServeAgentGrants.POLL_PATH,
+      expiresInSeconds = request.secondsUntilExpiry(System.currentTimeMillis()),
+      pollIntervalSeconds = ServeAgentGrantStore.POLL_INTERVAL_SECONDS,
+      requestedScope = request.requestedScope.wire,
+      requestedTtlSeconds = request.requestedTtlSeconds,
+      maxScope = store.maxScope.wire,
+      maxTtlSeconds = store.maxGrantTtlSeconds,
+      requestedCapabilities = AgentGrantCapability.wireNames(request.requestedCapabilities),
+      maxCapabilities = AgentGrantCapability.wireNames(store.maxCapabilities),
+    )
   }
 
   /**
@@ -11215,43 +11237,7 @@ class ServeHttpServer(
           call.respondText("invalid poll: ${e.message}", status = HttpStatusCode.BadRequest)
           return
         }
-      val response =
-        when (val outcome = store.poll(parsed.requestId, parsed.deviceSecret)) {
-          is ServeAgentGrantStore.Poll.Pending ->
-            ServeAgentGrants.PollResponse(
-              status = ServeAgentGrants.PollResponse.PENDING,
-              retryAfterSeconds = ServeAgentGrantStore.POLL_INTERVAL_SECONDS,
-              expiresInSeconds = outcome.secondsUntilExpiry,
-              message = "waiting for a human to approve this request",
-            )
-          is ServeAgentGrantStore.Poll.Approved ->
-            ServeAgentGrants.PollResponse(
-              status = ServeAgentGrants.PollResponse.APPROVED,
-              token = outcome.grant.token,
-              tokenHeader = TOKEN_HEADER,
-              scopes = outcome.grant.scopes.map { it.wire },
-              capabilities = AgentGrantCapability.wireNames(outcome.grant.capabilities),
-              expiresInSeconds = outcome.grant.secondsUntilExpiry(System.currentTimeMillis()),
-              approvedBy = outcome.grant.approvedBy,
-              message = "approved by ${outcome.grant.approvedBy}",
-            )
-          is ServeAgentGrantStore.Poll.Denied ->
-            ServeAgentGrants.PollResponse(
-              status = ServeAgentGrants.PollResponse.DENIED,
-              approvedBy = outcome.by,
-              message = "the request was declined",
-            )
-          ServeAgentGrantStore.Poll.Expired ->
-            ServeAgentGrants.PollResponse(
-              status = ServeAgentGrants.PollResponse.EXPIRED,
-              message = "the request expired before it was approved",
-            )
-          ServeAgentGrantStore.Poll.Unknown ->
-            ServeAgentGrants.PollResponse(
-              status = ServeAgentGrants.PollResponse.UNKNOWN,
-              message = "no such access request",
-            )
-        }
+      val response = pollAgentGrant(store, parsed.requestId, parsed.deviceSecret)
       call.respondText(
         JSON.encodeToString(ServeAgentGrants.PollResponse.serializer(), response),
         ContentType.Application.Json,
@@ -11260,6 +11246,102 @@ class ServeHttpServer(
       permit.release()
     }
   }
+
+  /**
+   * One poll outcome, described the same way for the `/agent-access/poll` route and the catalog
+   * MCP's `poll_access` tool. Shared for the reason [openAgentGrantRequest] is: a client that
+   * bootstraps through MCP and one that curls the route must not have to learn two vocabularies for
+   * "not yet".
+   */
+  private fun pollAgentGrant(
+    store: ServeAgentGrantStore,
+    requestId: String,
+    deviceSecret: String,
+  ): ServeAgentGrants.PollResponse =
+    when (val outcome = store.poll(requestId, deviceSecret)) {
+      is ServeAgentGrantStore.Poll.Pending ->
+        ServeAgentGrants.PollResponse(
+          status = ServeAgentGrants.PollResponse.PENDING,
+          retryAfterSeconds = ServeAgentGrantStore.POLL_INTERVAL_SECONDS,
+          expiresInSeconds = outcome.secondsUntilExpiry,
+          message = "waiting for a human to approve this request",
+        )
+      is ServeAgentGrantStore.Poll.Approved ->
+        ServeAgentGrants.PollResponse(
+          status = ServeAgentGrants.PollResponse.APPROVED,
+          token = outcome.grant.token,
+          tokenHeader = TOKEN_HEADER,
+          scopes = outcome.grant.scopes.map { it.wire },
+          capabilities = AgentGrantCapability.wireNames(outcome.grant.capabilities),
+          expiresInSeconds = outcome.grant.secondsUntilExpiry(System.currentTimeMillis()),
+          approvedBy = outcome.grant.approvedBy,
+          message = "approved by ${outcome.grant.approvedBy}",
+        )
+      is ServeAgentGrantStore.Poll.Denied ->
+        ServeAgentGrants.PollResponse(
+          status = ServeAgentGrants.PollResponse.DENIED,
+          approvedBy = outcome.by,
+          message = "the request was declined",
+        )
+      ServeAgentGrantStore.Poll.Expired ->
+        ServeAgentGrants.PollResponse(
+          status = ServeAgentGrants.PollResponse.EXPIRED,
+          message = "the request expired before it was approved",
+        )
+      ServeAgentGrantStore.Poll.Unknown ->
+        ServeAgentGrants.PollResponse(
+          status = ServeAgentGrants.PollResponse.UNKNOWN,
+          message = "no such access request",
+        )
+    }
+
+  /**
+   * The grant flow as the catalog MCP's two access tools see it.
+   *
+   * Both legs are charged to the SAME per-address budget the `/agent-access/…` routes use, so
+   * bootstrapping through MCP is not a way around the limiter — it is the same door. A throttled
+   * call answers null, which the MCP layer turns into a tool error rather than a dead session.
+   */
+  private fun RoutingContext.catalogMcpAgentAccess(
+    store: ServeAgentGrantStore
+  ): ServeCatalogMcp.AgentAccess =
+    object : ServeCatalogMcp.AgentAccess {
+      override suspend fun open(
+        label: String,
+        scope: String,
+        ttlSeconds: Long,
+        capabilities: List<String>,
+      ): String? {
+        val permit = tryAgentGrantPermit() ?: return null
+        try {
+          val response =
+            openAgentGrantRequest(
+              store,
+              ServeAgentGrants.OpenRequest(
+                label = label,
+                scope = scope,
+                ttlSeconds = ttlSeconds,
+                capabilities = capabilities,
+              ),
+            ) ?: return null
+          return JSON.encodeToString(ServeAgentGrants.OpenResponse.serializer(), response)
+        } finally {
+          permit.release()
+        }
+      }
+
+      override suspend fun poll(requestId: String, deviceSecret: String): String? {
+        val permit = tryAgentGrantPermit() ?: return null
+        try {
+          return JSON.encodeToString(
+            ServeAgentGrants.PollResponse.serializer(),
+            pollAgentGrant(store, requestId, deviceSecret),
+          )
+        } finally {
+          permit.release()
+        }
+      }
+    }
 
   /**
    * `GET /agent-access/whoami` — what the presented bearer is, without echoing it.
@@ -11602,6 +11684,15 @@ class ServeHttpServer(
    * Charge an ungated grant route against its caller's address budget. Address, not identity: these
    * are the two routes reached *before* the caller has one.
    */
+  /**
+   * The same budget [acquireAgentGrantPermit] charges, without answering the call itself — for the
+   * MCP tools, where "too fast" is a tool error inside a 200 rather than an HTTP 429.
+   */
+  private fun RoutingContext.tryAgentGrantPermit(): ServeRateLimiter.Decision.Admitted? {
+    val limiter = agentGrantLimiter ?: return ServeRateLimiter.Decision.Admitted {}
+    return limiter.tryAcquire(clientAddressKey()) as? ServeRateLimiter.Decision.Admitted
+  }
+
   private suspend fun RoutingContext.acquireAgentGrantPermit():
     ServeRateLimiter.Decision.Admitted? {
     val limiter = agentGrantLimiter ?: return ServeRateLimiter.Decision.Admitted {}

@@ -215,6 +215,26 @@ internet mint itself credentials.
 - **Not admin.** `--admin-token` routes are outside every scope. Nothing an agent can be granted
   reconfigures the box.
 
+## Asking through MCP
+
+The catalog MCP endpoint (`/mcp`) carries the same two legs as tools, `request_access` and
+`poll_access`, so a client whose only transport is MCP can bootstrap itself. They are thin wrappers:
+the same request and poll bodies documented above, produced by the same code, charged to the same
+per-address budget. Nothing about the design changes — the link is still a handle, the token still
+rides the poll leg to whoever holds the device secret, and a human still approves in a browser.
+
+What did change is the gate. MCP used to authorize the whole endpoint before parsing, so a client
+holding nothing could not complete `initialize` and therefore could not reach a tool that asks for a
+credential; the flow existed and was unreachable from the transport that needed it most. The gate is
+now asked per message: the handshake, `tools/list` and these two tools are open, everything that
+reads a catalog is not, and an unrecognised method or tool name is gated by default. See
+[the catalog MCP guide](CATALOG_MCP.md#or-ask-from-inside-the-protocol).
+
+It is also how a client recovers from a restart. Nothing here is persisted — deliberately, see
+above — so a redeployed host invalidates every live bearer at once, and an agent mid-task meets a
+401 with plenty of TTL left on a token that no longer exists. Asking again is the whole remedy, and
+now it costs no out-of-band tooling.
+
 ## Client side
 
 `compose-preview auth` drives the agent's half:
