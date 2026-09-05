@@ -107,7 +107,11 @@ kotlin {
       // The real `ScreenGenerator`, compiled for wasmJs as well as the JVM. Before this the editor
       // had no way to ask the question the server's export answers, so it kept its own emitter.
       implementation(libs.composeai.screen.model)
-      implementation(project(":ui-builder-export"))
+      // `api`, not `implementation`: `UiBuilderDocument` moved into `:ui-builder-export` and is
+      // part of this module's own public surface — `UiBuilderSurface(document = …)` names it — so a
+      // consumer that calls it needs the type on its compile classpath. `:ui-builder-renderer`
+      // does exactly that, and `implementation` left it unable to see the parameter type.
+      api(project(":ui-builder-export"))
       implementation(libs.composeai.rc.player.compose)
       implementation(libs.kotlinx.serialization.json)
       implementation(project(":ui-builder-artwork"))
