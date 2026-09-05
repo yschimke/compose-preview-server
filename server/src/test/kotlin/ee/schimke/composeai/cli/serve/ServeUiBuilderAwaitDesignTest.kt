@@ -193,6 +193,26 @@ class ServeUiBuilderAwaitDesignTest {
   }
 
   @Test
+  fun `a zero wait is a non-blocking check, not a report that nothing happened`() {
+    val server = start()
+    createDesign(server)
+    insertSubtitle(server, baseRevision = 0)
+
+    // `waitSeconds: 0` is the honest way to ask "has anything changed since my cursor" without
+    // holding a subscriber slot. The edit is already committed and the subscription's catch-up
+    // hands it over before the wait even begins, so answering `timedOut` here would be a lie a
+    // polling caller acts on — and the caller that most wants a zero wait is the one polling.
+    val checked =
+      envelope(
+        server,
+        ServeUiBuilderMcp.AWAIT_DESIGN,
+        """{"designId":"$DESIGN_ID","afterSequence":0,"waitSeconds":0}""",
+      )
+    assertTrue(checked.contains("Two sessions today"), checked)
+    assertTrue(!checked.contains("\"timedOut\":true"), checked)
+  }
+
+  @Test
   fun `a design this actor cannot read is refused by the service, not by this door`() {
     val server = start()
     val result =
