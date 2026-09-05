@@ -90,9 +90,14 @@ jobs:
           cache-provider: basic
           cache-read-only: true
       - name: Build distribution and publish Maven artifacts
-        # The UI-builder runtime and the immutable builder frontend publish too: `:server`'s POM
-        # names the runtime at the same version, while its standalone distribution is assembled from
-        # the matching frontend archive. Build/verify the complete graph before this release job so a
+        # The UI-builder runtime, the export projection and the immutable builder frontend publish
+        # too: `:server`'s POM names the runtime AND the export module at the same version, while
+        # its standalone distribution is assembled from the matching frontend archive. The export
+        # module is on this list because 3.1.0 shipped without it — `:server` gained a dependency on
+        # an unpublished project, so the POM recorded
+        # `compose-preview-server:ui-builder-export-jvm:unspecified` and `compose-preview-serve`
+        # became unresolvable for every consumer. Anything `:server` depends on at runtime belongs
+        # here. Build/verify the complete graph before this release job so a
         # missing frontend artifact is caught before publication. The render host is no longer among
         # them — it is published from compose-ai-tools since yschimke/compose-preview-server#180.
         #
@@ -104,6 +109,7 @@ jobs:
         run: >-
           ./gradlew :server:distTar :mcp:distTar
           :ui-builder-runtime:publishAndReleaseToMavenCentral
+          :ui-builder-export:publishAndReleaseToMavenCentral
           :ui-builder-web:publishAndReleaseToMavenCentral
           :server:publishAndReleaseToMavenCentral
           :mcp:publishAndReleaseToMavenCentral
