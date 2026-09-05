@@ -1,6 +1,7 @@
 # Agent access grants
 
-**Status:** implemented (`compose-preview serve --agent-grants`, `compose-preview auth …`)
+**Status:** implemented (`compose-preview serve --agent-grants`, `compose-preview auth …`), with the
+OAuth 2.1 façade an MCP client discovers on its own (`ServeMcpOAuth`)
 
 ## The problem
 
@@ -281,6 +282,55 @@ It is also how a client recovers from a restart. Nothing here is persisted — d
 above — so a redeployed host invalidates every live bearer at once, and an agent mid-task meets a
 401 with plenty of TTL left on a token that no longer exists. Asking again is the whole remedy, and
 now it costs no out-of-band tooling.
+
+## Asking without being told to ask
+
+The two legs above are reachable from MCP, but only by a client that knows they exist. A general
+MCP client does not: meeting a `401` it runs one fixed script, and there is no step in that script
+where it reads prose. It looks for `resource_metadata` on the `WWW-Authenticate` header, fetches
+[RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728) protected-resource metadata, fetches
+[RFC 8414](https://datatracker.ietf.org/doc/html/rfc8414) authorization-server metadata, registers
+itself with [RFC 7591](https://datatracker.ietf.org/doc/html/rfc7591), and runs an authorization
+code exchange with PKCE.
+
+Before this, every one of those `404`d. The visible symptom was the last step failing —
+`Dynamic Client Registration rejected (HTTP 404)` — which named the one part of the sequence that
+was working as designed, and said nothing about discovery, which was the part that was missing.
+A healthy server with a working grant flow read as broken, and the only way through was a human
+relaying `approveUrl` and pasting a token back, or an agent dropping to `curl`.
+
+So `ServeMcpOAuth` puts the standard surface in front of the flow that already exists. It is an
+**adapter, not a second authorization system**:
+
+| Endpoint | What it actually does |
+| --- | --- |
+| `/.well-known/oauth-protected-resource[/mcp]` | Names `/mcp` and points at this server. |
+| `/.well-known/oauth-authorization-server[/mcp]`, `/.well-known/openid-configuration` | Names the three endpoints below and `S256`. |
+| `POST /oauth/register` | Mints a `client_id`. Public client, no secret. |
+| `GET /oauth/authorize` | Opens an ordinary grant request and **redirects to the approval page that already exists**. |
+| `POST /oauth/token` | Returns **the grant's own `cpat_…` token**, which every gate already accepts as `Authorization: Bearer`. |
+
+The load-bearing property is that nothing new is granted. There is one page on this server where
+access is born, with one scope ladder, one set of approver ceilings and one audit line; all the
+OAuth leg adds is a note that this particular request has somewhere to return to when it resolves.
+An `access_denied` goes back to the client's redirect URI rather than stranding it on a page it
+will never see.
+
+**No refresh tokens, and that is the point.** A grant is short-lived because re-authorization is a
+human decision, and a silent renewal would launder exactly the property the rest of this document
+is built around. When a token expires or a restart drops it, the client meets a `401`, reads the
+`resource_metadata` on it, and walks the flow again — a person approves, once, in a browser. That
+costs a click per rotation and buys the guarantee that no credential outlives a decision someone
+actually made.
+
+**Nothing is configured client-side.** Registration is dynamic and the token is discovered, so a
+session never edits an `mcp.json`, never holds a pasted secret, and never needs to be talked into
+using the flow. A token that rotates mid-session is the ordinary `401` path, not a reconfiguration.
+
+Two security choices are worth naming because getting either wrong is silent. A bad `redirect_uri`
+is **rendered, never redirected to** — bouncing an error to an unvalidated URI is an open
+redirector (RFC 6749 §4.1.2.1). And PKCE is mandatory with `S256` only: `plain` proves nothing, so
+a stolen code without its verifier is inert.
 
 ## Client side
 

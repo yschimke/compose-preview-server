@@ -971,6 +971,34 @@ class ServeHttpServer(
           post("${ServeAgentGrants.BASE_PATH}/{grantId}/revoke") {
             handleAgentGrantRevokeFromStatus(store)
           }
+
+          // The OAuth 2.1 façade over the same flow, for clients that cannot be told about it in
+          // prose. An MCP client meeting a 401 follows exactly one script — resource metadata,
+          // authorization-server metadata, dynamic registration, authorization code + PKCE — and
+          // these are the five documents and two endpoints that script asks for. Nothing here
+          // mints anything: `/oauth/authorize` opens an ordinary grant request and sends the human
+          // to the approval page above, and `/oauth/token` hands back the grant that page created.
+          // See [ServeMcpOAuth].
+          //
+          // The metadata documents are unauthenticated by necessity: they are what a caller reads
+          // *because* it has no credential, and they describe endpoints rather than disclosing
+          // anything about this box's contents.
+          get(ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_PATH) {
+            respondProtectedResourceMetadata(store)
+          }
+          get(ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_MCP_PATH) {
+            respondProtectedResourceMetadata(store)
+          }
+          get(ServeMcpOAuth.AUTHORIZATION_SERVER_METADATA_PATH) {
+            respondAuthorizationServerMetadata(store)
+          }
+          get(ServeMcpOAuth.AUTHORIZATION_SERVER_METADATA_MCP_PATH) {
+            respondAuthorizationServerMetadata(store)
+          }
+          get(ServeMcpOAuth.OPENID_CONFIGURATION_PATH) { respondAuthorizationServerMetadata(store) }
+          post(ServeMcpOAuth.REGISTER_PATH) { handleOAuthRegister() }
+          get(ServeMcpOAuth.AUTHORIZE_PATH) { handleOAuthAuthorize(store) }
+          post(ServeMcpOAuth.TOKEN_PATH) { handleOAuthToken(store) }
         }
 
         // Stateless aggregate Streamable HTTP MCP. One stable endpoint discovers every registered
@@ -8079,9 +8107,13 @@ class ServeHttpServer(
     status: HttpStatusCode,
     message: String,
   ) {
+    // `resource_metadata` is what makes this recoverable without a human in the loop: it is the
+    // only place an MCP client is told where discovery starts. Omitting it left the client to
+    // guess, and the guess it makes is an unprompted registration POST — which is why a perfectly
+    // healthy server reported itself as "Dynamic Client Registration rejected (HTTP 404)".
     call.response.headers.append(
       HttpHeaders.WWWAuthenticate,
-      "Bearer realm=\"compose-preview-catalog-mcp\"",
+      ServeMcpOAuth.challenge(externalOrigin()),
     )
     call.response.headers.append(
       CATALOG_MCP_AGENT_ACCESS_HEADER,
@@ -11552,6 +11584,13 @@ class ServeHttpServer(
    */
   private val agentGrantCsrf = ServeAgentGrants.Csrf()
 
+  /**
+   * The OAuth façade's own state: registered clients and authorizations waiting on a human. Same
+   * lifetime as [agentGrantCsrf] and for the same reason — a restart drops every grant, so an
+   * authorization that survived one would redeem to a token that no longer exists.
+   */
+  private val mcpOAuth = ServeMcpOAuth.Store()
+
   private suspend fun RoutingContext.handleAgentGrantRequest(store: ServeAgentGrantStore) {
     val permit = acquireAgentGrantPermit() ?: return
     try {
@@ -12039,6 +12078,19 @@ class ServeHttpServer(
       // first this denial does nothing. Saying "nothing was granted" there would hand the second
       // operator an explicit assurance that is false while the bearer is live.
       if (store.deny(requestId, approver.name)) {
+        // An OAuth client is owed the refusal on its own redirect URI — RFC 6749 §4.1.2.1 — rather
+        // than being left to time out while the human reads a page it will never see.
+        mcpOAuth.forRequest(requestId)?.let { authorization ->
+          call.respondRedirect(
+            ServeMcpOAuth.redirectWithError(
+              authorization.redirectUri,
+              "access_denied",
+              "The request was declined.",
+              authorization.state,
+            )
+          )
+          return
+        }
         respondAgentGrantNotice(
           heading = "Access declined",
           message = "Nothing was granted. The agent has been told its request was declined.",
@@ -12086,6 +12138,19 @@ class ServeHttpServer(
       )
       return
     }
+    // The OAuth return leg. The grant is already minted and the page below would be a perfectly
+    // good end to the device flow; what an OAuth client needs instead is the browser it opened to
+    // come back with the code, so it can redeem the same grant without a human relaying anything.
+    mcpOAuth.forRequest(requestId)?.let { authorization ->
+      call.respondRedirect(
+        ServeMcpOAuth.redirectWithCode(
+          authorization.redirectUri,
+          authorization.code,
+          authorization.state,
+        )
+      )
+      return
+    }
     respondAgentGrantNotice(
       heading = "Access granted",
       message =
@@ -12101,6 +12166,342 @@ class ServeHttpServer(
           }
           append(" · grant ${grant.fingerprint}")
         },
+    )
+  }
+
+  // ---------------------------------------------------------- OAuth façade
+  //
+  // Seven routes that add no authority of their own. See [ServeMcpOAuth] for why they exist at
+  // all: an MCP client that meets a 401 follows one fixed script, and before these it fell off
+  // that script at the first step and reported a registration failure it could not explain.
+
+  /** RFC 9728: what protects `/mcp`, and which server issues tokens for it. */
+  private suspend fun RoutingContext.respondProtectedResourceMetadata(store: ServeAgentGrantStore) {
+    val origin = externalOrigin()
+    markGeneration("static-page", "no-store")
+    call.respondText(
+      JSON.encodeToString(
+        ServeMcpOAuth.ProtectedResourceMetadata.serializer(),
+        ServeMcpOAuth.ProtectedResourceMetadata(
+          resource = origin + ServeMcpOAuth.MCP_RESOURCE_PATH,
+          authorizationServers = listOf(origin),
+          scopesSupported = ServeMcpOAuth.scopesSupported(store.maxScope, store.maxCapabilities),
+          resourceDocumentation = origin + ServeAgentGrants.BASE_PATH,
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /** RFC 8414: where to register, where to send the human, where to redeem the code. */
+  private suspend fun RoutingContext.respondAuthorizationServerMetadata(
+    store: ServeAgentGrantStore
+  ) {
+    val origin = externalOrigin()
+    markGeneration("static-page", "no-store")
+    call.respondText(
+      JSON.encodeToString(
+        ServeMcpOAuth.AuthorizationServerMetadata.serializer(),
+        ServeMcpOAuth.AuthorizationServerMetadata(
+          issuer = origin,
+          authorizationEndpoint = origin + ServeMcpOAuth.AUTHORIZE_PATH,
+          tokenEndpoint = origin + ServeMcpOAuth.TOKEN_PATH,
+          registrationEndpoint = origin + ServeMcpOAuth.REGISTER_PATH,
+          scopesSupported = ServeMcpOAuth.scopesSupported(store.maxScope, store.maxCapabilities),
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /**
+   * RFC 7591 dynamic client registration.
+   *
+   * Ungated and rate limited, exactly like `POST /agent-access/request` and for the same reason:
+   * the caller has no credential yet, and this confers none. A `client_id` here is a handle for
+   * correlating an authorization with the redirect URIs it may use — a human still has to approve
+   * before anything exists to bear.
+   */
+  private suspend fun RoutingContext.handleOAuthRegister() {
+    val permit = acquireAgentGrantPermit() ?: return
+    try {
+      val body =
+        withContext(Dispatchers.IO) {
+          call.receiveStream().use { readCapped(it, MAX_AGENT_GRANT_BYTES) }
+        }
+      if (body == null) {
+        respondOAuthError(
+          HttpStatusCode.PayloadTooLarge,
+          "invalid_client_metadata",
+          "Registration body too large.",
+        )
+        return
+      }
+      val parsed =
+        try {
+          JSON.decodeFromString(
+            ServeMcpOAuth.ClientRegistrationRequest.serializer(),
+            body.decodeToString().trim().ifEmpty { "{}" },
+          )
+        } catch (e: Exception) {
+          respondOAuthError(
+            HttpStatusCode.BadRequest,
+            "invalid_client_metadata",
+            "Could not parse registration body: ${e.message}",
+          )
+          return
+        }
+      // A public client with no redirect URI has nowhere to receive a code, so there is no
+      // authorization it could ever complete. Refusing here names the problem; accepting would
+      // defer it to a later `invalid_request` the client cannot connect to its registration.
+      if (parsed.redirectUris.isEmpty()) {
+        respondOAuthError(
+          HttpStatusCode.BadRequest,
+          "invalid_redirect_uri",
+          "At least one redirect_uri is required.",
+        )
+        return
+      }
+      if (parsed.redirectUris.any { runCatching { URI(it) }.getOrNull()?.scheme == null }) {
+        respondOAuthError(
+          HttpStatusCode.BadRequest,
+          "invalid_redirect_uri",
+          "Every redirect_uri must be an absolute URI.",
+        )
+        return
+      }
+      val client = mcpOAuth.register(parsed.clientName, parsed.redirectUris)
+      if (client == null) {
+        call.response.headers.append(HttpHeaders.RetryAfter, "60")
+        respondOAuthError(
+          HttpStatusCode.TooManyRequests,
+          "invalid_client_metadata",
+          "Too many registered clients on this server; try again shortly.",
+        )
+        return
+      }
+      call.respondText(
+        JSON.encodeToString(
+          ServeMcpOAuth.ClientRegistrationResponse.serializer(),
+          ServeMcpOAuth.ClientRegistrationResponse(
+            clientId = client.clientId,
+            clientIdIssuedAt = client.issuedAtMillis / 1000,
+            redirectUris = client.redirectUris,
+            clientName = client.clientName,
+          ),
+        ),
+        ContentType.Application.Json,
+        HttpStatusCode.Created,
+      )
+    } finally {
+      permit.release()
+    }
+  }
+
+  /**
+   * `GET /oauth/authorize` — the human's leg.
+   *
+   * This does not render an approval page of its own. It opens an ordinary grant request and
+   * **redirects to the one that already exists**, so there is exactly one page on this server where
+   * access is granted, with one set of approver ceilings and one audit line. The only thing the
+   * OAuth exchange adds is a note that this request has somewhere to return to when it resolves.
+   */
+  private suspend fun RoutingContext.handleOAuthAuthorize(store: ServeAgentGrantStore) {
+    val query = call.request.queryParameters
+    val clientId = query["client_id"]
+    val redirectUri = query["redirect_uri"]
+    val state = query["state"].orEmpty()
+    val client = mcpOAuth.client(clientId)
+    when (
+      val rejection =
+        ServeMcpOAuth.validateAuthorize(
+          client = client,
+          redirectUri = redirectUri,
+          responseType = query["response_type"],
+          codeChallenge = query["code_challenge"],
+          codeChallengeMethod = query["code_challenge_method"],
+        )
+    ) {
+      // Never redirected: the target is exactly what could not be trusted, and bouncing an error
+      // to an unvalidated URI is an open redirector (RFC 6749 §4.1.2.1).
+      is ServeMcpOAuth.AuthorizeRejection.Unredirectable -> {
+        respondAgentGrantNotice(
+          heading = "That authorization request cannot be completed",
+          message = rejection.description,
+          status = HttpStatusCode.BadRequest,
+        )
+        return
+      }
+      is ServeMcpOAuth.AuthorizeRejection.Redirectable -> {
+        call.respondRedirect(
+          ServeMcpOAuth.redirectWithError(
+            redirectUri!!,
+            rejection.error,
+            rejection.description,
+            state,
+          )
+        )
+        return
+      }
+      null -> Unit
+    }
+    val wanted = ServeMcpOAuth.parseScope(query["scope"])
+    val request =
+      store.openRequest(
+        // The client's registered name, which it wrote, presented as the label the approval page
+        // already treats as the asker's own words. "Who is asking" stays the address.
+        label = client!!.clientName.ifBlank { "MCP client" },
+        client = clientAddress(),
+        requestedScope = wanted.scope,
+        requestedTtlSeconds = ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS,
+        requestedCapabilities = wanted.capabilities,
+      )
+    if (request == null) {
+      call.respondRedirect(
+        ServeMcpOAuth.redirectWithError(
+          redirectUri!!,
+          "temporarily_unavailable",
+          "Too many pending access requests on this server; try again shortly.",
+          state,
+        )
+      )
+      return
+    }
+    val authorization =
+      mcpOAuth.open(
+        requestId = request.id,
+        clientId = client.clientId,
+        redirectUri = redirectUri!!,
+        codeChallenge = query["code_challenge"]!!,
+        state = state,
+        resource = query["resource"].orEmpty(),
+      )
+    if (authorization == null) {
+      call.respondRedirect(
+        ServeMcpOAuth.redirectWithError(
+          redirectUri,
+          "temporarily_unavailable",
+          "Too many authorizations in flight on this server; try again shortly.",
+          state,
+        )
+      )
+      return
+    }
+    // The approval page carries the operator token forward the same way every other link to it
+    // does, so a private box does not bounce the human to a sign-in they cannot satisfy from here.
+    call.respondRedirect(ServeAgentGrants.approvalPath(request.id) + agentGrantTokenQuery())
+  }
+
+  /**
+   * `POST /oauth/token` — the client's leg.
+   *
+   * Ungated in the OAuth sense (these are public clients, `token_endpoint_auth_method=none`), and
+   * the proof is the PKCE verifier: without it a stolen code is inert. What comes back is the
+   * grant's own token, not a new credential — same string the device poll returns, same expiry,
+   * same revocation from the status page.
+   */
+  private suspend fun RoutingContext.handleOAuthToken(store: ServeAgentGrantStore) {
+    val permit = acquireAgentGrantPermit() ?: return
+    try {
+      val form = call.receiveFormParameters()
+      if (form["grant_type"]?.firstOrNull() != "authorization_code") {
+        respondOAuthError(
+          HttpStatusCode.BadRequest,
+          "unsupported_grant_type",
+          "Only grant_type=authorization_code is supported; this server issues no refresh tokens " +
+            "because re-authorization is a human decision.",
+        )
+        return
+      }
+      // Redeemed before anything is checked, so a replay cannot find the entry twice even while
+      // the first attempt is in flight (RFC 6749 §10.5).
+      val authorization = mcpOAuth.redeem(form["code"]?.firstOrNull())
+      if (authorization == null) {
+        respondOAuthError(
+          HttpStatusCode.BadRequest,
+          "invalid_grant",
+          "Unknown, expired, or already-redeemed authorization code.",
+        )
+        return
+      }
+      if (form["client_id"]?.firstOrNull() != authorization.clientId) {
+        respondOAuthError(
+          HttpStatusCode.BadRequest,
+          "invalid_grant",
+          "This code was issued to a different client.",
+        )
+        return
+      }
+      // RFC 6749 §4.1.3: when the authorization carried a redirect_uri, the token request must
+      // repeat it identically.
+      val presentedRedirect = form["redirect_uri"]?.firstOrNull()
+      if (presentedRedirect != null && presentedRedirect != authorization.redirectUri) {
+        respondOAuthError(
+          HttpStatusCode.BadRequest,
+          "invalid_grant",
+          "redirect_uri does not match the one this code was issued for.",
+        )
+        return
+      }
+      if (
+        !ServeMcpOAuth.verifyPkce(
+          authorization.codeChallenge,
+          form["code_verifier"]?.firstOrNull(),
+        )
+      ) {
+        respondOAuthError(
+          HttpStatusCode.BadRequest,
+          "invalid_grant",
+          "code_verifier does not match the code_challenge this authorization was opened with.",
+        )
+        return
+      }
+      // The decision itself. A pending request means the human has not acted yet — which is not an
+      // error the client can fix by retrying this code, since redeeming consumed it, so it is told
+      // to start over rather than left polling something that will never change.
+      val request = store.request(authorization.requestId)
+      val grant =
+        when (request?.state) {
+          ServeAgentGrantStore.Request.State.APPROVED -> store.grant(request.grantId)
+          else -> null
+        }
+      if (grant == null) {
+        respondOAuthError(
+          HttpStatusCode.BadRequest,
+          "invalid_grant",
+          "That authorization was declined, expired, or has not been approved. Start a new " +
+            "authorization request.",
+        )
+        return
+      }
+      call.respondText(
+        JSON.encodeToString(
+          ServeMcpOAuth.TokenResponse.serializer(),
+          ServeMcpOAuth.TokenResponse(
+            accessToken = grant.token,
+            expiresIn = grant.secondsUntilExpiry(System.currentTimeMillis()),
+            scope = ServeMcpOAuth.formatScope(grant),
+          ),
+        ),
+        ContentType.Application.Json,
+      )
+    } finally {
+      permit.release()
+    }
+  }
+
+  private suspend fun RoutingContext.respondOAuthError(
+    status: HttpStatusCode,
+    error: String,
+    description: String,
+  ) {
+    call.respondText(
+      JSON.encodeToString(
+        ServeMcpOAuth.ErrorResponse.serializer(),
+        ServeMcpOAuth.ErrorResponse(error, description),
+      ),
+      ContentType.Application.Json,
+      status,
     )
   }
 

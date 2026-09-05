@@ -246,6 +246,15 @@ data class ServeSites(private val byHost: Map<String, String>) {
         // most, because the route a *human* opens is the approval page, and a site that had
         // claimed the prefix would 404 the link an agent just told someone to click.
         "agent-access",
+        // `/oauth/…` and `/.well-known/…` — the OAuth façade an MCP client discovers and walks
+        // (`ServeMcpOAuth`). Reserved unconditionally, like `agent-access` above and for a sharper
+        // version of the same reason: `/oauth/authorize` is a route a *human's browser* lands on,
+        // and every one of the `.well-known` documents is read by a client that has no credential
+        // and no other way to find out where authorization starts. A site host that claimed either
+        // prefix would answer its styled 404 to the one request that bootstraps the whole exchange,
+        // and the client would report it as a registration failure with no hint of the real cause.
+        "oauth",
+        ".well-known",
         // `POST /mcp` — the aggregate catalog MCP endpoint. Reserved unconditionally so a site
         // host cannot intercept this stable machine route with its styled 404.
         "mcp",

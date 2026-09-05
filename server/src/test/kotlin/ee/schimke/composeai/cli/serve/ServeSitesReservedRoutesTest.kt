@@ -50,6 +50,18 @@ class ServeSitesReservedRoutesTest {
       "ServeAgentGrants.POLL_PATH" to ServeAgentGrants.POLL_PATH,
       "ServeAgentGrants.REVOKE_PATH" to ServeAgentGrants.REVOKE_PATH,
       "ServeAgentGrants.WHOAMI_PATH" to ServeAgentGrants.WHOAMI_PATH,
+      "ServeMcpOAuth.AUTHORIZE_PATH" to ServeMcpOAuth.AUTHORIZE_PATH,
+      "ServeMcpOAuth.TOKEN_PATH" to ServeMcpOAuth.TOKEN_PATH,
+      "ServeMcpOAuth.REGISTER_PATH" to ServeMcpOAuth.REGISTER_PATH,
+      "ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_PATH" to
+        ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_PATH,
+      "ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_MCP_PATH" to
+        ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_MCP_PATH,
+      "ServeMcpOAuth.AUTHORIZATION_SERVER_METADATA_PATH" to
+        ServeMcpOAuth.AUTHORIZATION_SERVER_METADATA_PATH,
+      "ServeMcpOAuth.AUTHORIZATION_SERVER_METADATA_MCP_PATH" to
+        ServeMcpOAuth.AUTHORIZATION_SERVER_METADATA_MCP_PATH,
+      "ServeMcpOAuth.OPENID_CONFIGURATION_PATH" to ServeMcpOAuth.OPENID_CONFIGURATION_PATH,
     )
 
   private val source: String
