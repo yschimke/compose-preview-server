@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.22.0](https://github.com/yschimke/compose-preview-server/compare/v2.21.0...v2.22.0) (2026-09-05)
+
+
+### Features
+
+* **image:** offer the images grant capability where the upload lane runs ([#272](https://github.com/yschimke/compose-preview-server/issues/272)) ([d1f075c](https://github.com/yschimke/compose-preview-server/commit/d1f075c0b30b21c6ef5285484359890d85fdad0e))
+* **mcp:** serve the figma-svg vector export over catalog MCP ([#274](https://github.com/yschimke/compose-preview-server/issues/274)) ([c8ae68e](https://github.com/yschimke/compose-preview-server/commit/c8ae68ee92dbaae35c7f20f3b890af3ebf9b8ed0))
+* **serve:** fire a one-handed gesture from the viewer ([#269](https://github.com/yschimke/compose-preview-server/issues/269)) ([2bf42dd](https://github.com/yschimke/compose-preview-server/commit/2bf42dd2703691273b49e47f68ab0c12e1d69a6f))
+
+
+### Bug Fixes
+
+* **ui-builder:** let the browser editor learn its authenticated actor ([#275](https://github.com/yschimke/compose-preview-server/issues/275)) ([98e30d5](https://github.com/yschimke/compose-preview-server/commit/98e30d585bdedca65fe445f12ba0803b77ce76d2))
+
 ## [2.21.0](https://github.com/yschimke/compose-preview-server/compare/v2.20.1...v2.21.0) (2026-09-04)
 
 
