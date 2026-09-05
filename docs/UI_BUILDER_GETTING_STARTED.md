@@ -32,8 +32,9 @@ A design has one URL, and it names the catalog and the design:
 Open it and the design opens; open it for a design that does not exist yet and it is created. Add
 `?template=wear-widget-small` to choose what a missing design is seeded from — that is the direct
 creation URL for automation and bookmarks. Creation never overwrites an existing design, and
-`?create=0` refuses to create one at all. The seeding query is dropped from the address bar as soon
-as the design is open, so the URL you copy out of the browser is always the plain one above.
+`?create=0` refuses to create one at all. Once the design has been created the browser forwards to
+the permalink above and the creation URL is gone, including from Back, so the URL you copy out of
+the browser is always the plain one.
 
 The older query form (`/ui-builder/remote-m3/?session=live&create=1&designId=my-remote-screen`)
 still works and redirects itself to the canonical path. The `blank`
@@ -136,6 +137,87 @@ These are the builder's own renderer drawing the templates, not screenshots. The
 of the sample: the builder draws with Compose Material 3 while the widget runs Remote Compose on a
 watch, so a template reproduces the sample's *design* and the pixel-fidelity question belongs to the
 parity lanes.
+
+## The code a widget generates
+
+**Code** on a widget design does not show a Compose export, and could not: `remote-m3` has no
+component record, and a widget ships as a `WearWidgetDocument` of Remote Compose rather than as a
+screen someone calls. It shows what the design actually becomes —
+
+```kotlin
+// Generated from a Compose UI builder design. Do not edit by hand.
+@file:Suppress("RestrictedApi")
+
+import android.content.Context
+import androidx.compose.remote.creation.compose.layout.RemoteAlignment
+import androidx.compose.remote.creation.compose.layout.RemoteBox
+import androidx.compose.remote.creation.compose.layout.RemoteComposable
+import androidx.compose.remote.creation.compose.modifier.RemoteModifier
+import androidx.compose.remote.creation.compose.modifier.fillMaxSize
+import androidx.compose.remote.creation.compose.state.rs
+import androidx.compose.remote.creation.compose.state.rsp
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.glance.wear.GlanceWearWidget
+import androidx.glance.wear.WearWidgetBrush
+import androidx.glance.wear.WearWidgetData
+import androidx.glance.wear.WearWidgetDocument
+import androidx.glance.wear.color
+import androidx.glance.wear.core.WearWidgetParams
+import androidx.glance.wear.tooling.preview.SquircleSmallWidgetPreviewParams
+import androidx.glance.wear.tooling.preview.WearWidgetPreview
+import androidx.wear.compose.remote.material3.RemoteColorScheme
+import androidx.wear.compose.remote.material3.RemoteMaterialTheme
+import androidx.wear.compose.remote.material3.RemoteText
+
+@RemoteComposable
+@Composable
+fun HelloWidgetContent() {
+    RemoteMaterialTheme {
+        RemoteBox(modifier = RemoteModifier.fillMaxSize(), contentAlignment = RemoteAlignment.Center) {
+            RemoteText(
+                text = "Hello, World!".rs,
+                color = RemoteMaterialTheme.colorScheme.onPrimary,
+                fontSize = 20.rsp,
+            )
+        }
+    }
+}
+
+class HelloWidget : GlanceWearWidget() {
+    override suspend fun provideWidgetData(
+        context: Context,
+        params: WearWidgetParams,
+    ): WearWidgetData {
+        val colorScheme = RemoteColorScheme()
+        return WearWidgetDocument(background = WearWidgetBrush.color(colorScheme.primary)) {
+            HelloWidgetContent()
+        }
+    }
+}
+
+@Preview(name = "Squircle Preview", device = "spec:width=1000dp,height=1000dp,dpi=320")
+@Composable
+fun HelloWidgetSquirclePreview(
+    @PreviewParameter(SquircleSmallWidgetPreviewParams::class) params: WearWidgetParams
+) = WearWidgetPreview(HelloWidget(), params)
+```
+
+Read what is *not* there: the host container. `remote-m3/widget-container-*` is this builder's
+stand-in for `WearWidgetContainer`, and on-device the launcher draws that around widget content from
+`WearWidgetParams`. So the scaffold's background becomes the `WearWidgetBrush` handed to
+`WearWidgetDocument`, its size picks the preview-params provider, and its padding and radius are
+checked against the shipped spec rather than emitted — a widget cannot choose them, and a design
+that moved them is refused by name rather than generating a preview that draws a frame it does not
+have.
+
+![The Code pane showing a widget's generated Kotlin](design/evidence/ui-builder-remote-compose/widget-code-pane.png)
+
+Refusals work the way the Compose exporter's do: a node with no Remote Compose counterpart is named
+rather than approximated. An image background is the one to expect — `WearWidgetBrush.image` takes a
+`RemoteImageBitmap`, which generated source cannot name from an asset key, so the refusal says to
+supply the bitmap in `provideWidgetData` and add the call by hand.
 
 ## Adding a published Remote Compose component
 

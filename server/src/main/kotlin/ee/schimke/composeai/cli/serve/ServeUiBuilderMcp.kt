@@ -162,7 +162,7 @@ class ServeUiBuilderMcp(
                   height = box.height,
                 )
               },
-            compileError = outcome.response.exception,
+            compileError = outcome.failure,
           ),
         )
     }
