@@ -50,6 +50,16 @@ object ServeWeb {
   /** Front-door GitHub auth state, shown when the public server protects code-running surfaces. */
   data class GitHubAuthStatus(
     val loginHref: String,
+    /**
+     * `POST` target of the "Sign out" control shown beside a signed-in login
+     * ([ServeGithubAuth.logoutPath]), carrying the current page as its `return`.
+     *
+     * Null means no sign-out is offered — the state a page built before this existed, and a
+     * signed-out visitor, are both served correctly by that. A `POST` rather than a link because a
+     * sign-out a prefetcher can fire by looking at a URL is not one; the control is therefore a
+     * one-button form rather than an anchor.
+     */
+    val logoutHref: String? = null,
     val login: String? = null,
     val restrictedToAllowedUsers: Boolean = false,
     /**
@@ -715,9 +725,50 @@ object ServeWeb {
       "<a class=\"cp-gh-auth\" href=\"${WebEscaping.htmlEscape(status.loginHref)}\"" +
         "$tooltipAttr>$GITHUB_ICON Sign in with GitHub</a>"
     } else {
+      // Identity only. What to *do* about it — end the session, or re-run the round trip as
+      // somebody else — lives in the Settings menu ([githubSessionSettings]), beside the page's
+      // other standing per-visitor choices, rather than as two more chips in a bar that already
+      // carries five.
       "<span class=\"cp-gh-auth cp-gh-auth--signed\"$tooltipAttr>$GITHUB_ICON " +
         "Signed in as ${WebEscaping.htmlEscape(login)}</span>"
     }
+  }
+
+  /**
+   * The **Session** group in the Settings menu: who is signed in, and the two ways out.
+   *
+   * Both exits are here rather than in the header bar because they are standing per-visitor state,
+   * which is what that menu is for, and because a bar that already carries a mode switch, Status,
+   * an identity and Settings does not need two more chips to say what a visitor does roughly once.
+   *
+   * They fix different things, which is why there are two. **Sign out** ends the session — the
+   * affordance that was missing entirely, leaving DevTools as the only way off a shared machine.
+   * **Switch account** re-runs the OAuth round trip, which is the only thing that recomputes the
+   * access bits the cookie cached at sign-in; a sign-out reaches the same place, but through an
+   * anonymous page and a second sign-in.
+   *
+   * Empty for a signed-out visitor (the header's sign-in link is the whole affordance there) and
+   * for a page whose status carries no [GitHubAuthStatus.logoutHref].
+   */
+  private fun githubSessionSettings(status: GitHubAuthStatus?): String {
+    val login = status?.login?.takeIf { it.isNotBlank() } ?: return ""
+    val logoutHref = status.logoutHref?.takeIf { it.isNotBlank() } ?: return ""
+    return """
+      <fieldset class="cp-settings-group cp-settings-session">
+        <legend class="cp-settings-legend">Session</legend>
+        <p class="cp-settings-hint">Signed in to GitHub as ${WebEscaping.htmlEscape(login)}.</p>
+        <div class="cp-settings-session-actions">
+          <form method="post" action="${WebEscaping.htmlEscape(logoutHref)}">
+            <button type="submit" class="cp-settings-tour">Sign out</button>
+          </form>
+          <a class="cp-settings-session-switch"
+            href="${WebEscaping.htmlEscape(status.loginHref)}">Switch account</a>
+        </div>
+        <p class="cp-settings-hint">Switching account signs in again through GitHub, which is what
+          refreshes what this session is allowed to do. Signing out forgets it in this browser.</p>
+      </fieldset>
+      """
+      .trimIndent()
   }
 
   /**
@@ -975,6 +1026,8 @@ ${captureControlsHtml().prependIndent("          ")}
     componentBrowser: Boolean = false,
     showInterfaceMode: Boolean = false,
     showPreviewThemeSetting: Boolean = false,
+    /** [githubSessionSettings]' output, rendered inside the Settings menu. Empty on most pages. */
+    sessionSettings: String = "",
   ): String {
     val actionHtml = action.takeIf { it.isNotBlank() }?.let { "\n          $it" } ?: ""
     val crumb = breadcrumb.takeIf { it.isNotBlank() }?.let { "\n          $it" } ?: ""
@@ -1022,7 +1075,7 @@ ${captureControlsHtml().prependIndent("          ")}
           <div class="cp-site-menu-panel" id="cp-site-menu-panel">
             <a class="cp-site-status-link" id="cp-status-link" href="/status$navSuffix">Status<span
               class="cp-daemon-status" id="cp-daemon-status" aria-hidden="true" hidden></span></a>$actionHtml
-            ${settingsMenuHtml(showPreviewThemeSetting).prependIndent("            ").trimStart()}
+            ${settingsMenuHtml(showPreviewThemeSetting, sessionSettings).prependIndent("            ").trimStart()}
           </div>
         </nav>
       </header>
@@ -1042,7 +1095,12 @@ ${captureControlsHtml().prependIndent("          ")}
    * the scripts only reflect stored values and enhance the menu. It sits in the nav so it is in the
    * same place on every page, and last so it never displaces the links.
    */
-  private fun settingsMenuHtml(showPreviewThemeSetting: Boolean): String =
+  /**
+   * [session] is [githubSessionSettings]' output — empty on a page with no GitHub session to act
+   * on. It sorts **last**, after the display and keyboard preferences: it is the only group whose
+   * controls leave the page, and the destructive one of the two does so irreversibly.
+   */
+  private fun settingsMenuHtml(showPreviewThemeSetting: Boolean, session: String = ""): String =
     """
     <details class="cp-settings">
       <summary class="cp-settings-btn" title="Settings" aria-label="Settings">
@@ -1072,7 +1130,7 @@ ${captureControlsHtml().prependIndent("          ")}
           <button type="button" class="cp-settings-tour" data-cp-keyboard-tour>
             View keyboard tour
           </button>
-        </fieldset>
+        </fieldset>${if (session.isEmpty()) "" else "\n" + session.prependIndent("        ")}
       </div>
     </details>
     """
@@ -5761,6 +5819,7 @@ ${captureControlsHtml().prependIndent("          ")}
     componentBrowser: Boolean = false,
   ): String {
     val headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth)
+    val headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth)
     // Public routes are open — no token param on the cards; a token-gated box keeps it.
     val tokenParam = if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token)
     val suffix = querySuffix(tokenParam)
@@ -5988,6 +6047,7 @@ ${captureControlsHtml().prependIndent("          ")}
       unfurl = unfurl,
       navSuffix = suffix,
       headerAction = headerAction,
+      headerSessionSettings = headerSessionSettings,
       version = version,
       body = body + if (globalComponents.isEmpty()) "" else "\n$globalComponents",
       componentBrowser = componentBrowser,
@@ -6224,6 +6284,7 @@ ${captureControlsHtml().prependIndent("          ")}
       componentBrowser = componentBrowser,
       interfaceModeControl = true,
       headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth),
+      headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth),
       body =
         """
         <h1 class="cp-head">Not found</h1>
@@ -8258,6 +8319,7 @@ ${captureControlsHtml().prependIndent("          ")}
       componentBrowser = componentBrowser,
       interfaceModeControl = true,
       headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth),
+      headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth),
     )
   }
 
@@ -9617,6 +9679,7 @@ ${captureControlsHtml().prependIndent("          ")}
       themeStorageKey = themeStorageKey(sessionId, basePath),
       declaredThemes = declaredThemeChips,
       headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth),
+      headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth),
       body =
         """
         $titleRow$reportRow
@@ -15327,6 +15390,12 @@ ${scriptTag("known-differences.js")}
     navSuffix: String = "",
     headerAction: String = "",
     /**
+     * The **Session** group for the header's Settings menu ([githubSessionSettings]). Separate from
+     * [headerAction] because the two halves of the sign-in state land in different places: the
+     * identity in the bar, what to do about it inside the menu.
+     */
+    headerSessionSettings: String = "",
+    /**
      * The page's breadcrumb / back link, rendered in the header's brand slot by [siteHeader] rather
      * than as the body's first line — see that function for why. Empty (the front door, which is
      * already home) renders nothing.
@@ -15553,7 +15622,7 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
       </head>
       <body${bodyClassAttr}>
         ${scriptTag("serve-chrome.js")}
-        ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl)}
+        ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl, headerSessionSettings)}
         <main class="cp-main">
         $body
         </main>$footerBlock$launcherBlock$interfaceModeControls

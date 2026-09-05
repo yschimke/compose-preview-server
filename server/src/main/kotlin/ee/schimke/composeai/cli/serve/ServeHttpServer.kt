@@ -730,6 +730,7 @@ class ServeHttpServer(
                   githubAuth?.let { auth ->
                     ServeWeb.GitHubAuthStatus(
                       loginHref = auth.loginPath(current),
+                      logoutHref = auth.logoutPath(current),
                       login = auth.currentLogin(current),
                       restrictedToAllowedUsers = auth.isRestrictedToAllowedUsers(),
                     )
@@ -873,6 +874,10 @@ class ServeHttpServer(
           // to the auth object, so the site config keeps one home.
           get(ServeGithubAuth.START_PATH) { with(auth) { handleStart(sites.hosts) } }
           get(ServeGithubAuth.CALLBACK_PATH) { with(auth) { handleCallback(sites.hosts) } }
+          // POST only, on purpose: see [ServeGithubAuth.handleLogout]. No GET is registered, so a
+          // prefetcher or an unfurler that follows the URL gets a 405 rather than signing the
+          // visitor out.
+          post(ServeGithubAuth.LOGOUT_PATH) { with(auth) { handleLogout() } }
         }
 
         // The agent-grant lane (`--agent-grants`): an agent with no credential asks for one, a
@@ -2030,6 +2035,7 @@ class ServeHttpServer(
       ?.let { auth ->
         ServeWeb.GitHubAuthStatus(
           loginHref = auth.loginPath(call),
+          logoutHref = auth.logoutPath(call),
           login = auth.currentLogin(call),
           restrictedToAllowedUsers = auth.isRestrictedToAllowedUsers(),
           lane = lane,

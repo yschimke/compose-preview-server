@@ -230,6 +230,39 @@ class ServeGithubAuth(
   }
 
   /**
+   * `POST /auth/github/logout` — the eject button. Overwrites `cp_gh_auth` with an empty,
+   * already-expired cookie and sends the visitor back to [ServeGithubAuth.safeReturnTo] of the
+   * `return` query parameter.
+   *
+   * **`POST`, never `GET`.** A sign-out reachable by following a URL is one a prefetcher, a
+   * link-unfurler or an `<img src>` on somebody else's page can fire — annoying rather than
+   * dangerous, but the approval flow is a POST for the same reason and there is no cause to be
+   * looser here. The return target rides in the query string rather than the body so this stays a
+   * two-line handler with nothing to parse: the form's `action` carries it, and only a
+   * same-origin-relative path survives [safeReturnTo].
+   *
+   * The cookie is cleared **twice over**, deliberately. `maxAge = 0` asks the browser to drop it,
+   * and it is written through the same [sessionCookie] builder the session itself uses — same
+   * `path`, same `domain`, same `secure` — because a deletion whose attributes do not match the
+   * cookie's is a second cookie the browser stores beside the first rather than a deletion. The
+   * empty **value** is the belt to that braces: whatever the browser makes of the attributes, an
+   * empty string carries no signature, so [verifySession] rejects it and this server treats the
+   * visitor as signed out from the next request onward.
+   *
+   * What this cannot do is revoke: the cookie is stateless and self-signed, so a copy taken off the
+   * wire is unaffected. This ends *a browser's* session, which is the affordance that was missing;
+   * server-side revocation is a different design
+   * ([#280](https://github.com/yschimke/compose-preview-server/issues/280)).
+   */
+  suspend fun RoutingContext.handleLogout() {
+    val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
+    call.response.cookies.append(
+      authCookie("", maxAge = 0, secure = isSecure(call, config.callbackBaseUrl))
+    )
+    call.respondRedirect(returnTo)
+  }
+
+  /**
    * Whether a sign-in started on [rawHost] can actually come back to it.
    *
    * True when the callback isn't pinned (it is derived from the request, so it never leaves the
@@ -346,6 +379,16 @@ class ServeGithubAuth(
   fun loginPath(call: ApplicationCall): String {
     val current = call.uriWithQuery()
     return "$START_PATH?return=${urlEncode(current)}"
+  }
+
+  /**
+   * Where a "Sign out" form posts to, returning the visitor to the page they were on. Mirrors
+   * [loginPath] exactly — same `return` parameter, same encoding — so signing out of `/playground`
+   * lands back on `/playground` (anonymously) rather than at the index.
+   */
+  fun logoutPath(call: ApplicationCall): String {
+    val current = call.uriWithQuery()
+    return "$LOGOUT_PATH?return=${urlEncode(current)}"
   }
 
   fun accessRepository(): String = config.repository
@@ -653,6 +696,12 @@ class ServeGithubAuth(
   companion object {
     const val START_PATH = "/auth/github/start"
     const val CALLBACK_PATH = "/auth/github/callback"
+
+    /**
+     * `POST`-only, and under [AUTH_PATH_PREFIX] so [refreshSession] leaves it alone — otherwise a
+     * sign-out response would carry a freshly-minted session cookie beside the expired one.
+     */
+    const val LOGOUT_PATH = "/auth/github/logout"
 
     private const val AUTH_COOKIE = "cp_gh_auth"
     private const val STATE_COOKIE = "cp_gh_state"

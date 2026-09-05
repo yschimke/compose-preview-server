@@ -333,6 +333,26 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
   color: var(--md-sys-color-primary); font: inherit;
   font-size: var(--md-sys-typescale-label-medium-size); cursor: pointer; }
 .cp-settings-tour:hover { text-decoration: underline; }
+/* The Session group (ServeWeb.githubSessionSettings): who is signed in, and the two ways out.
+   Sorted last in the panel and separated like the Keyboard group above it, because its controls
+   are the only ones here that leave the page. "Sign out" is a submit button in a one-field POST
+   form — a sign-out a prefetcher can fire by looking at a URL is not one — and it is styled as the
+   same quiet text action as "View keyboard tour" rather than as a filled button: it is the exit,
+   not the thing the menu is for. `display: contents` keeps the form out of the flex row's layout. */
+.cp-settings-session { margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid var(--md-sys-color-outline-variant); }
+.cp-settings-session-actions { display: flex; align-items: center; gap: 16px; }
+.cp-settings-session-actions form { display: contents; }
+/* Specificity, not preference: the Settings menu lives inside `.cp-site-nav`, whose `a` rule
+   (0,1,1) would otherwise paint this link as one more nav destination — pill padding, hover
+   surface and the muted nav colour — and outrank a bare class. Matched at the same depth so the
+   link reads as the sibling of the "Sign out" button it sits beside. */
+.cp-site-nav .cp-settings-session-switch { margin: 0 0 8px; padding: 4px 0; border-radius: 0;
+  color: var(--md-sys-color-primary);
+  font-size: var(--md-sys-typescale-label-medium-size); }
+.cp-site-nav .cp-settings-session-switch:hover { background: none; text-decoration: underline;
+  color: var(--md-sys-color-primary); }
+.cp-settings-session .cp-settings-tour { margin-right: 0; }
 
 /* Opt-in keyboard layer: a quiet persistent hint rail, command palette and first-run tour. */
 .cp-keyboard-modal-open { overflow: hidden; }

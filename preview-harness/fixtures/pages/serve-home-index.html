@@ -53,6 +53,19 @@
               View keyboard tour
             </button>
           </fieldset>
+          <fieldset class="cp-settings-group cp-settings-session">
+            <legend class="cp-settings-legend">Session</legend>
+            <p class="cp-settings-hint">Signed in to GitHub as yschimke.</p>
+            <div class="cp-settings-session-actions">
+              <form method="post" action="/auth/github/logout?return=%2F">
+                <button type="submit" class="cp-settings-tour">Sign out</button>
+              </form>
+              <a class="cp-settings-session-switch"
+                href="/auth/github/start?return=%2F">Switch account</a>
+            </div>
+            <p class="cp-settings-hint">Switching account signs in again through GitHub, which is what
+              refreshes what this session is allowed to do. Signing out forgets it in this browser.</p>
+          </fieldset>
         </div>
       </details>
     </div>
