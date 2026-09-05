@@ -570,7 +570,12 @@ class ServeHttpServer(
   private val renderSemaphore = Semaphore(renderSlots)
   private val catalogMcp =
     if (catalogMcpEnabled && machineAuthorization != null)
-      ServeCatalogMcp(sessions, renderSemaphore, projectHistory = projectHistory)
+      ServeCatalogMcp(
+        sessions,
+        renderSemaphore,
+        projectHistory = projectHistory,
+        uiBuilder = uiBuilderService?.let(::ServeUiBuilderMcp),
+      )
     else null
   private val unleasedThemeSemaphore = Semaphore(1)
   private val themeRenderLeases = ThemeRenderLeaseManager(renderSlots)
@@ -7951,7 +7956,16 @@ class ServeHttpServer(
     }
 
     val reply =
-      mcp.handle(request, agentGrants?.let { catalogMcpAgentAccess(it) }) {
+      mcp.handle(
+        request,
+        agentGrants?.let { catalogMcpAgentAccess(it) },
+        // Asked per capability, off the same call the credential arrived on, so an MCP client
+        // reaches the builder through exactly the door the browser does.
+        { capability ->
+          uiBuilderAuthorization?.authorize(call, capability)
+            ?: UiBuilderAuthorizationDecision.Missing
+        },
+      ) {
         authorization.authorizeScope(call, AgentGrantScope.LIVE)
       }
     if (reply.accepted) {

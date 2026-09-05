@@ -368,7 +368,7 @@ internal fun Route.installUiBuilderRoutes(
   }
 }
 
-private fun ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1.requiredCapability():
+internal fun ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1.requiredCapability():
   UiBuilderRouteCapability =
   when (this) {
     ListCatalogsRequestV1,
@@ -423,7 +423,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondProtocolEr
 @kotlinx.serialization.Serializable
 internal data class UiBuilderIdentityV1(val schemaVersion: Int = 1, val actorId: String)
 
-private val UI_BUILDER_JSON = Json {
+internal val UI_BUILDER_JSON = Json {
   encodeDefaults = true
   explicitNulls = false
   ignoreUnknownKeys = false
