@@ -14379,11 +14379,44 @@ ${scriptTag("known-differences.js")}
           "<label class=\"cp-live-row\"><input class=\"cp-feature\" id=\"cp-focus\" " +
             "type=\"checkbox\"$featureDaemonDis> Keyboard focus</label>\n"
         )
-      if (showGestureRow)
+      if (showGestureRow) {
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-feature\" id=\"cp-gestures\" " +
             "type=\"checkbox\"$featureDaemonDis> Show gesture hints</label>\n"
         )
+        // Firing the gesture, not just hinting at it (issue #5102). The hint animation plays and
+        // then the gesture cannot be taken up: a double pinch and a wrist turn are sensor events,
+        // no pointer stands in for them, and off a watch there is no gesture source at all. The
+        // daemon has been able to invoke a registered handler all along
+        // (`renderNow.overrides.gestures.invoke`); nothing in the viewer reached it.
+        //
+        // Labelled as the WEARER's gesture rather than the API's word for it — "Double pinch", not
+        // "Primary" — because someone reading a Wear catalog is looking up what a double pinch
+        // does. Two buttons, which is every gesture a wearer has; a preview that registered only
+        // one simply has nothing to run for the other, and the render comes back unchanged.
+        //
+        // Buttons rather than checkboxes because an invocation is an EVENT: it happens once, and
+        // the next render must not repeat it. `viewer.ts` reads the hidden input once per render
+        // and clears it.
+        append(
+          // Indented to land level with the row above once interpolated. `featureRows` is
+          // spliced into a `trimIndent()` block, so this line's own indentation is part of the
+          // minimum that gets stripped: too little and the whole group shifts, churning the
+          // committed golden for a reason that has nothing to do with this control.
+          "              <div class=\"cp-live-row\"><span class=\"cp-feature-label\">Fire a " +
+            "gesture" +
+            "</span> " +
+            // `cp-bg-btn` is the viewer's outlined chip — the same style the "Fit width" and
+            // theme chips use, including a disabled state, so these read as controls of this panel
+            // rather than as raw browser buttons and no new CSS is invented for two buttons.
+            "<button type=\"button\" class=\"cp-bg-btn cp-gesture-invoke\" " +
+            "data-gesture=\"primary\"$featureDaemonDis>Double pinch</button> " +
+            "<button type=\"button\" class=\"cp-bg-btn cp-gesture-invoke\" " +
+            "data-gesture=\"dismiss\"$featureDaemonDis>Wrist turn</button>" +
+            "<input type=\"hidden\" id=\"cp-gesture-invoke\" value=\"\">" +
+            "</div>\n"
+        )
+      }
     }
     val featureControlsHtml =
       if (componentBrowser || featureRows.isEmpty()) ""

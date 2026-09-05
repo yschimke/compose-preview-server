@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.protocol.FocusOverride
+import ee.schimke.composeai.daemon.protocol.GestureKindOverride
 import ee.schimke.composeai.daemon.protocol.GestureOverride
 import ee.schimke.composeai.daemon.protocol.Orientation
 import ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
@@ -87,6 +88,13 @@ object ServeOverrides {
       // `@GestureHintPreview`-detected preview on an Android-backed session (the desktop daemon
       // ignores it).
       "gestures",
+      // Detected-feature: FIRE a one-handed gesture (`GestureOverride(invoke=…)`, issue #5102). The
+      // double pinch and the wrist turn are sensor events — no pointer stands in for them, and off
+      // a watch there is no gesture source at all — so a gesture-aware preview could play its hint
+      // and then never be taken up. `gestureInvoke=primary|dismiss|scroll|page` names the gesture
+      // to fire; the daemon runs the matching handler once composition has settled. Same audience
+      // and same lane as `gestures`: an Android-backed daemon session.
+      "gestureInvoke",
       // "crisp outline" toggle. Friendly `background=clear` (aliases below) or the raw
       // `clearBackground=true`; both map to `PreviewOverrides.clearBackground`.
       "background",
@@ -495,18 +503,47 @@ object ServeOverrides {
 
     // Detected-feature: one-handed gesture hints. `gestures=true` (or `1`) force-shows the gesture
     // hint affordance; `false`/`0` clears it. A malformed value is a hard Invalid.
-    val gestures: GestureOverride? =
+    val showGestureHints: Boolean? =
       params["gestures"]
         ?.takeIf { it.isNotBlank() }
         ?.let {
           when (it.lowercase()) {
             "true",
-            "1" -> GestureOverride(showHints = true)
+            "1" -> true
             "false",
-            "0" -> GestureOverride(showHints = false)
+            "0" -> false
             else -> return OverrideParse.Invalid("gestures must be a boolean, got '$it'")
           }
         }
+
+    // Detected-feature: fire a gesture (issue #5102). `gestureInvoke=<kind>` names which of the
+    // wearer's gestures to run — `primary` is the double pinch, `dismiss` the wrist turn — and the
+    // daemon invokes the matching registered handler once composition has settled. Spelled as the
+    // wire kind rather than as a label, because the label is authored per handler and a viewer
+    // offering "Double pinch" must not have to know what this preview called it.
+    val invokeGesture: GestureKindOverride? =
+      params["gestureInvoke"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+          when (it.lowercase()) {
+            "primary" -> GestureKindOverride.PRIMARY
+            "dismiss" -> GestureKindOverride.DISMISS
+            "scroll" -> GestureKindOverride.SCROLL
+            "page" -> GestureKindOverride.PAGE
+            else ->
+              return OverrideParse.Invalid(
+                "gestureInvoke must be primary, dismiss, scroll or page, got '$it'"
+              )
+          }
+        }
+
+    // One override carries both halves, so hints and an invocation compose: a viewer can show the
+    // hint and fire the gesture in the same render, which is what "play the hint, then take it up"
+    // looks like. Absent from both ⇒ null, i.e. no gesture override at all rather than an empty
+    // one.
+    val gestures: GestureOverride? =
+      if (showGestureHints == null && invokeGesture == null) null
+      else GestureOverride(showHints = showGestureHints, invoke = invokeGesture)
 
     // Cleared background ("crisp outline"). Two spellings: the friendly `background=clear`
     // (aliases `transparent` / `none` / `off`; `default` / `show` mean "keep the preview's

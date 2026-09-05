@@ -646,6 +646,10 @@ function liveOverrides() {
     // (gestures=true). Android-daemon-only, so skipped when disabled.
     var gc = may<HTMLInputElement>("cp-gestures");
     if (gc && !gc.disabled && gc.checked) o["gestures"] = "true";
+    // Detected-feature: FIRE a one-handed gesture (gestureInvoke=<kind>). Read once and cleared —
+    // an invocation is an event, so the render after it must not repeat the gesture.
+    var gi = takeGestureInvoke();
+    if (gi) o["gestureInvoke"] = gi;
     // setOverrides REPLACES the stream's entire override map. Keep an explicit server-side player
     // in that replacement, especially when CMP Android/JVM is the page default; otherwise the
     // connect URL selects it and the first onopen replay immediately clears it back to Java.
@@ -739,6 +743,10 @@ function renderOverrides(): Overrides {
     // knob; omitted when unchecked so the URL stays on the baked snapshot.
     var gc = may<HTMLInputElement>("cp-gestures");
     if (gc && !gc.disabled && gc.checked) o.gestures = "true";
+    // Detected-feature: fire a one-handed gesture (gestureInvoke=<kind>), read once — see
+    // `takeGestureInvoke`.
+    var gi = takeGestureInvoke();
+    if (gi) o.gestureInvoke = gi;
     // Remote Compose render backend: a server-side player selection rides the render as
     // rcPlayer=<wire>. Emitted for a visitor pick or a non-Java server-side default, and only
     // for a server-side lane — java / cmp-android render through the daemon, cmp-jvm through its
@@ -4561,6 +4569,32 @@ if (themeChoice)
 controls(".cp-feature").forEach(function (el) {
     el.addEventListener("change", onKnobChanged);
 });
+// The gesture a click asked to fire, consumed by whichever override builder runs for this render.
+//
+// Read-once on purpose (issue #5102). A gesture invocation is an EVENT — the daemon runs the
+// preview's handler once composition settles — so leaving it set would re-fire it on the next
+// theme change, knob edit or reload, and a "dismiss" that keeps happening is not a preview anyone
+// can read. Clearing here rather than after `onKnobChanged()` returns keeps the read and the clear
+// in one place, so an async render path cannot lose the value between them.
+function takeGestureInvoke(): string {
+    var holder = may<HTMLInputElement>("cp-gesture-invoke");
+    if (!holder) return "";
+    var value = holder.value;
+    holder.value = "";
+    return value;
+}
+// Fire a gesture: stash the kind and re-render through the same daemon routing the feature toggles
+// use. Disabled with them — a session that cannot apply overrides cannot invoke a handler either.
+document
+    .querySelectorAll<HTMLButtonElement>(".cp-gesture-invoke")
+    .forEach(function (el) {
+        el.addEventListener("click", function () {
+            var holder = may<HTMLInputElement>("cp-gesture-invoke");
+            if (!holder || el.disabled) return;
+            holder.value = el.getAttribute("data-gesture") || "";
+            onKnobChanged();
+        });
+    });
 // Remote Compose knobs apply in-browser in both RC lanes: repaint for JS, isolated reload for
 // CMP/Wasm. Otherwise they route through the server daemon like theme/feature controls.
 function onRcKnobChanged() {
