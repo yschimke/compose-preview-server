@@ -4,6 +4,8 @@ import ee.schimke.composeai.discovery.COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA
 import ee.schimke.composeai.discovery.COMPONENT_RECORD_SCHEMA_VERSION
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
+import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
+import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
@@ -52,7 +54,7 @@ internal class ScreenGeneratorComposeExportExecutor(
    * compile on its own and fail the moment a production artifact was handed to that lane, and the
    * golden test would not have caught it — it passes a package explicitly.
    */
-  private val packageName: String = "generated.uibuilder",
+  private val packageName: String = ScreenExportGate.PACKAGE_NAME,
 ) : UiBuilderExportExecutor {
 
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
@@ -225,7 +227,14 @@ internal class ScreenGeneratorComposeExportExecutor(
      * is widening what a document can make this server execute, so it is a decision rather than a
      * list to keep topped up.
      */
-    private val EXPRESSION_PACKAGES = setOf("androidx.compose")
+    /**
+     * The generator's security guard, taken from the shared gate rather than declared here.
+     *
+     * The browser editor's problems panel judges a design against the same set. A copy on either
+     * side is a copy that can be widened without the other's review, and widening this one lets a
+     * document name a package nobody vetted.
+     */
+    private val EXPRESSION_PACKAGES = ScreenExportGate.EXPRESSION_PACKAGES
 
     /**
      * Whether [record] is a schema `ScreenGenerator` will actually generate from.

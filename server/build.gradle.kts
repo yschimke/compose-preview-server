@@ -289,6 +289,9 @@ dependencies {
   // Authoritative persistence, validation, collaboration and export orchestration. The server
   // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
   api(project(":ui-builder-runtime"))
+  // The saved-document projection and the generator behind it. Multiplatform, so the
+  // browser editor reaches the same code rather than keeping an emitter of its own.
+  implementation(project(":ui-builder-export"))
 
   api(libs.composeai.common.web.escaping)
   // Published wire-format DTOs and the bundle format. `api` because they appear in this module's
@@ -577,9 +580,9 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     }
   )
 
-  // The render host and UI-builder runtime are the two deliberately published libraries beneath
+  // The UI-builder runtime and its export module are the deliberately published libraries beneath
   // the server. Everything else in this build reaching its classpath is still a failure.
-  allowedProjects.set(listOf(":ui-builder-runtime"))
+  allowedProjects.set(listOf(":ui-builder-runtime", ":ui-builder-export"))
 
   // The same implementations named twice, because they can arrive by two different routes and the
   // identity differs between them.
@@ -631,6 +634,11 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:preview-discovery",
       "ee.schimke.composeai:render-session-api",
       "ee.schimke.composeai:render-session-subprocess",
+      // The offline screen model and generator, reached through `:ui-builder-export`. The server
+      // does not call it directly; it arrives because the export module is built on it, which is
+      // the point — the generator that writes the Kotlin is a published artefact, not a copy.
+      "ee.schimke.composeai:screen-model",
+      "ee.schimke.composeai:screen-model-jvm",
       "ee.schimke.composeai:ui-builder-protocol",
       "ee.schimke.composeai:ui-builder-protocol-jvm",
     )
