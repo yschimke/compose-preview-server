@@ -636,6 +636,25 @@ public interface ServeOptions {
     get() = emptyMap()
 
   /**
+   * Which served catalog each UI-builder catalog's designs are **compiled** against for the native
+   * preview lane (`--ui-builder-native-catalog <builder catalog>=<served catalog>`).
+   *
+   * The native lane takes a design, generates its Kotlin and hands it to the playground's compile
+   * and render lane, which needs a real classpath — a served catalog's bundle. While `m3-catalog`
+   * was the only catalog with that lane the two ids were the same string and nothing had to say so.
+   * `wear-m3` breaks it in both halves: its bundle is a different repository's catalog (typically
+   * served as `wear-m3-catalog`), and because `androidx.wear.compose:compose-material3` is an
+   * Android AAR that bundle is a Robolectric one — so mapping it also selects the daemon.
+   *
+   * A catalog absent from this map is compiled against a served catalog of its own name, which is
+   * what every host did before this existed. A `wear-m3` design on a host with neither is refused
+   * with [ServeUiBuilderNativePreview.NO_NATIVE_CATALOG] naming this flag, rather than compiled
+   * against a desktop classpath that has no Wear Compose on it.
+   */
+  public val uiBuilderNativeCatalogs: Map<String, String>
+    get() = emptyMap()
+
+  /**
    * Retained native renderer bundles (`runtimeId` to directory). Each directory contains a verified
    * `runtime-manifest.json`; ids are exact pins and never aliases for a latest runtime.
    */
