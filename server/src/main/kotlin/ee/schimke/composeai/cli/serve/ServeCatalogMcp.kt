@@ -256,6 +256,26 @@ class ServeCatalogMcp(
     )
     add(
       tool(
+        "history_diff",
+        "Compare two of a preview's recorded renders. Defaults to the two newest — did the last " +
+          "publish move this preview? A metadata comparison: the timeline's versions are already " +
+          "collapsed distinct renders, so whether the bytes changed is answered without fetching " +
+          "either image. Reports `unstable` so a difference on a nondeterministic preview is not " +
+          "mistaken for a real change.",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+      )
+    )
+    add(
+      tool(
+        "history_read",
+        "Fetch one historical render's pixels through this server, by `commit` or `blob` (a " +
+          "prefix is enough). Use when an agent cannot reach the delivery branch itself, or wants " +
+          "the bytes rather than the timeline.",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"commit":{"type":"string"},"blob":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+      )
+    )
+    add(
+      tool(
         "list_data_products",
         "List structured data-product kinds across catalogs, optionally filtered by target.",
         """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}}}""",
@@ -357,6 +377,8 @@ class ServeCatalogMcp(
         }
       }
       "list_devices" -> textResult(devicesJson().toString())
+      "history_diff" -> diffHistoryResult(args)
+      "history_read" -> readHistoryResult(args)
       "history_list" -> {
         val target = args.previewTarget()
         withCatalog(target.catalog) { host ->
@@ -609,6 +631,12 @@ class ServeCatalogMcp(
 
     if (provenance != null) {
       val manifestUrl = ServeUrls.historyManifestUrl(provenance.repo, provenance.branch)
+      val bundle = bundleHost(host)
+      // The catalog load already fetched and parsed `history.json` from the same immutable tree as
+      // `catalog.json`, so the timeline is in memory and pinned to the catalog being served. Where
+      // it is, answer with the preview's own slice rather than sending the caller to fetch a
+      // whole-catalog document for one row: measured at 1 MB to read 497 bytes on `m3-catalog`.
+      val timeline = bundle?.indexedTimeline(previewId)
       return JsonObject(
         base +
           buildJsonObject {
@@ -616,24 +644,30 @@ class ServeCatalogMcp(
             put("repo", provenance.repo)
             put("branch", provenance.branch)
             provenance.commit?.let { put("commit", it) }
-            if (manifestUrl == null) {
+            manifestUrl?.let { put("manifestUrl", it) }
+            put(
+              "renderUrlTemplate",
+              "https://raw.githubusercontent.com/${provenance.repo}/{commit}/{path}",
+            )
+            if (timeline == null) {
               put(
                 "reason",
-                "this catalog names a delivery branch but not one a manifest URL can be built " +
-                  "from, so its timeline is not addressable",
+                if (manifestUrl == null)
+                  "this catalog names a delivery branch but not one a manifest URL can be built " +
+                    "from, so its timeline is not addressable"
+                else
+                  "this catalog's publisher ships no history.json, or none naming this preview; " +
+                    "manifestUrl is where one would be if the branch grows one",
               )
             } else {
-              put("manifestUrl", manifestUrl)
-              put(
-                "note",
-                "the timeline is published on the delivery branch, not held by this server. " +
-                  "Fetch manifestUrl and read previews['$previewId']; each version's `commit` " +
-                  "and `path` address that render through renderUrlTemplate.",
-              )
-              put(
-                "renderUrlTemplate",
-                "https://raw.githubusercontent.com/${provenance.repo}/{commit}/{path}",
-              )
+              // Pinned to the catalog, not to the branch tip: an agent comparing this against a
+              // later answer needs to know which catalog state it described.
+              provenance.commit?.let { put("pinnedCommit", it) }
+              put("path", timeline.path)
+              put("observations", timeline.observations)
+              put("unstable", timeline.unstable)
+              put("flapCount", timeline.flapCount)
+              put("versions", versionsJson(timeline, provenance.repo))
             }
           }
       )
@@ -700,6 +734,234 @@ class ServeCatalogMcp(
           )
         }
     )
+  }
+
+  /**
+   * The manifest's versions, each with the absolute URL that serves those exact bytes.
+   *
+   * `raw.githubusercontent.com/<repo>/<commit>/<path>` is what makes a timeline viewable at all:
+   * the delivery branch carries only the *current* bytes at its tip, while the raw host serves any
+   * commit. Built here so a caller never has to join `commit` to `path` itself.
+   */
+  private fun versionsJson(
+    timeline: PreviewHistoryManifest.PreviewTimeline,
+    repo: String,
+  ): JsonArray = buildJsonArray {
+    timeline.versions.forEach { version ->
+      add(
+        buildJsonObject {
+          put("commit", version.commit)
+          put("date", version.date)
+          put("blob", version.blob)
+          put("commits", version.commits)
+          version.sourceSha?.let { put("sourceSha", it) }
+          version.occurrences?.let { put("occurrences", it) }
+          put(
+            "renderUrl",
+            "https://raw.githubusercontent.com/$repo/${version.commit}/${timeline.path}",
+          )
+        }
+      )
+    }
+  }
+
+  /**
+   * One version of a preview's render, in whichever mode produced it. `blob` is the content id
+   * project mode addresses by; `commit` is what the published lane addresses by; both are present
+   * in the manifest, so a caller can key on either.
+   */
+  private data class HistoryVersion(
+    val commit: String,
+    val blob: String,
+    val date: String,
+    val path: String?,
+  )
+
+  private data class HistoryView(
+    val mode: String,
+    val versions: List<HistoryVersion>,
+    val unstable: Boolean,
+    val repo: String?,
+  )
+
+  /**
+   * The timeline behind [previewId], flattened for the diff and read lanes.
+   *
+   * Same precedence as [historyJson]: a catalog fetched from a delivery branch has already
+   * published what it rendered, so its manifest wins over whatever a local checkout holds.
+   */
+  private suspend fun historyView(host: ServeHost, previewId: String): HistoryView? {
+    val bundle = bundleHost(host)
+    val provenance = bundle?.provenance
+    if (provenance != null) {
+      val timeline = bundle.indexedTimeline(previewId) ?: return null
+      return HistoryView(
+        mode = "published",
+        versions =
+          timeline.versions.map { HistoryVersion(it.commit, it.blob, it.date, timeline.path) },
+        unstable = timeline.unstable,
+        repo = provenance.repo,
+      )
+    }
+    val history = projectHistory ?: return null
+    val json = withContext(Dispatchers.IO) { history.timelineJsonFor(previewId) } ?: return null
+    val entry =
+      runCatching { JSON.parseToJsonElement(json).jsonObject }
+        .getOrNull()
+        ?.get("previews")
+        ?.jsonObject
+        ?.get(previewId)
+        ?.jsonObject ?: return null
+    return HistoryView(
+      mode = "local",
+      versions =
+        entry["versions"]?.jsonArray.orEmpty().mapNotNull { element ->
+          val v = element.jsonObject
+          val commit = v["commit"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+          val blob = v["blob"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+          HistoryVersion(
+            commit,
+            blob,
+            v["date"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            entry["path"]?.jsonPrimitive?.contentOrNull,
+          )
+        },
+      unstable = entry["unstable"]?.jsonPrimitive?.contentOrNull == "true",
+      repo = null,
+    )
+  }
+
+  /**
+   * Compare two of a preview's renders.
+   *
+   * A **metadata** diff, deliberately: the manifest's versions are already collapsed distinct
+   * renders, so "did the bytes change" is answered by the blob ids alone and needs no image fetch
+   * on either side. `history_read` is there for the pixels when a caller actually wants them.
+   *
+   * With no `from`/`to` this compares the two newest versions, which is the question that gets
+   * asked: did the last publish move this preview?
+   */
+  private suspend fun diffHistoryResult(args: JsonObject): JsonObject {
+    val target = args.previewTarget()
+    return withCatalog(target.catalog) { host ->
+      val preview = resolvePreview(host, target.previewId)
+      val view =
+        historyView(host, preview.id)
+          ?: throw McpRequestException(
+            "no timeline for '${preview.id}'; call history_list to see why this catalog has none"
+          )
+      if (view.versions.size < 2) {
+        throw McpRequestException(
+          "'${preview.id}' has ${view.versions.size} recorded render(s); a diff needs two"
+        )
+      }
+      val requestedTo = args.optionalString("to")
+      val requestedFrom = args.optionalString("from")
+      // Newest first, as the manifest orders them.
+      val toIndex =
+        requestedTo?.let { wanted -> view.versions.indexOfFirst { it.commit.startsWith(wanted) } }
+          ?: 0
+      val fromIndex =
+        requestedFrom?.let { wanted -> view.versions.indexOfFirst { it.commit.startsWith(wanted) } }
+          ?: 1
+      if (toIndex < 0) throw McpRequestException("no recorded render at commit '$requestedTo'")
+      if (fromIndex < 0) throw McpRequestException("no recorded render at commit '$requestedFrom'")
+      val to = view.versions[toIndex]
+      val from = view.versions[fromIndex]
+
+      textResult(
+        buildJsonObject {
+          put("schema", "compose-preview/catalog-mcp-history-diff/v1")
+          put("mode", view.mode)
+          put("catalog", target.catalog)
+          put("previewId", preview.id)
+          put("from", versionRef(from, view))
+          put("to", versionRef(to, view))
+          put("changed", from.blob != to.blob)
+          // Strictly between, in either direction — the caller may name them either way round.
+          put("versionsBetween", (kotlin.math.abs(toIndex - fromIndex) - 1).coerceAtLeast(0))
+          put("unstable", view.unstable)
+          if (view.unstable) {
+            put(
+              "note",
+              "this preview is marked unstable: it re-renders differently on publishes that " +
+                "did not change it, so a difference here is not evidence of a real change",
+            )
+          }
+        }
+          .toString()
+      )
+    }
+  }
+
+  private fun versionRef(version: HistoryVersion, view: HistoryView): JsonObject = buildJsonObject {
+    put("commit", version.commit)
+    put("blob", version.blob)
+    if (version.date.isNotEmpty()) put("date", version.date)
+    val path = version.path
+    if (view.repo != null && path != null) {
+      put("renderUrl", "https://raw.githubusercontent.com/${view.repo}/${version.commit}/$path")
+    } else {
+      put("renderUrl", "/history/render/${version.blob}.png")
+    }
+  }
+
+  /**
+   * One historical render's bytes, through this server.
+   *
+   * `preview` scope rather than `live`, matching the HTTP permalink lane: this replays bytes that
+   * were already published, and commissions no render. It is still bounded — the published lane
+   * goes through [ServeBundleHost]'s pinned-fetch permit and its miss cache, and the local lane
+   * only ever serves blobs the timeline already names.
+   */
+  private suspend fun readHistoryResult(args: JsonObject): JsonObject {
+    val target = args.previewTarget()
+    val wanted =
+      args.optionalString("commit")
+        ?: args.optionalString("blob")
+        ?: throw McpRequestException("history_read requires 'commit' or 'blob'")
+    return withCatalog(target.catalog) { host ->
+      val preview = resolvePreview(host, target.previewId)
+      val view =
+        historyView(host, preview.id)
+          ?: throw McpRequestException(
+            "no timeline for '${preview.id}'; call history_list to see why this catalog has none"
+          )
+      val version =
+        view.versions.firstOrNull { it.commit.startsWith(wanted) || it.blob.startsWith(wanted) }
+          ?: throw McpRequestException(
+            "'$wanted' names no recorded render of '${preview.id}'; history_list lists the ones " +
+              "this catalog can serve"
+          )
+      val bytes =
+        if (view.mode == "published") {
+          val bundle =
+            bundleHost(host) ?: throw McpRequestException("this catalog has no pinned-asset lane")
+          when (val outcome = bundle.pinnedIndexedRender(version.commit, preview.id)) {
+            is ServeBundleHost.PinnedOutcome.Ok -> outcome.bytes
+            ServeBundleHost.PinnedOutcome.Busy ->
+              throw McpRequestException("branch fetch queue saturated; retry shortly")
+            ServeBundleHost.PinnedOutcome.Missing ->
+              throw McpRequestException(
+                "the delivery branch has no render for '${preview.id}' at ${version.commit}"
+              )
+          }
+        } else {
+          withContext(Dispatchers.IO) { projectHistory?.renderBytes(version.blob) }
+            ?: throw McpRequestException(
+              "the local repository has no object ${version.blob} for '${preview.id}'"
+            )
+        }
+      buildJsonObject {
+        put(
+          "content",
+          buildJsonArray {
+            add(imageContent(bytes))
+            add(textContent(versionRef(version, view).toString()))
+          },
+        )
+      }
+    }
   }
 
   /** The baked bundle behind [host], which is where delivery-branch provenance lives. */

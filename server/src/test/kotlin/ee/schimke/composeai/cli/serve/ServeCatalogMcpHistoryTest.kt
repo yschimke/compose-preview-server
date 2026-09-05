@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import java.io.File
 import java.nio.file.Files
+import java.util.Base64
 import java.util.concurrent.Semaphore
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -95,14 +96,19 @@ class ServeCatalogMcpHistoryTest {
     return ServeBundleHost(dir, label = "m3", provenance = provenance)
   }
 
-  private fun call(host: ServeHost, projectHistory: ServeProjectHistory? = null): JsonObject {
+  private fun call(
+    host: ServeHost,
+    projectHistory: ServeProjectHistory? = null,
+    tool: String = "history_list",
+    extraArgs: String = "",
+  ): JsonObject {
     val registry = ServeSessionRegistry(open = { null })
     registry.register("m3", host = host)
     val mcp = ServeCatalogMcp(registry, Semaphore(1), projectHistory = projectHistory)
     val request =
       Json.parseToJsonElement(
-          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"history_list",
-              "arguments":{"catalog":"m3","previewId":"$previewId"}}}"""
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$tool",
+              "arguments":{"catalog":"m3","previewId":"$previewId"$extraArgs}}}"""
         )
         .jsonObject
     return requireNotNull(
@@ -112,6 +118,12 @@ class ServeCatalogMcpHistoryTest {
         .body
     )
   }
+
+  private fun JsonObject.isError(): Boolean =
+    this["result"]?.jsonObject?.get("isError")?.jsonPrimitive?.content == "true"
+
+  private fun JsonObject.errorText(): String =
+    this["result"]!!.jsonObject["content"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content
 
   private fun JsonObject.payload(): JsonObject {
     val text =
@@ -198,5 +210,212 @@ class ServeCatalogMcpHistoryTest {
     assertEquals("local", body["mode"]!!.jsonPrimitive.content)
     assertEquals(0, body["versions"]!!.jsonArray.size)
     assertTrue(body["reason"]!!.jsonPrimitive.content.contains("fewer than two"))
+  }
+
+  // ---- published mode carrying the publisher's manifest -----------------------------------------
+
+  private val newest =
+    PreviewHistoryManifest.ManifestVersion(
+      blob = blobA,
+      commit = "1".repeat(40),
+      date = "2026-08-27T10:58:22Z",
+      sourceSha = "2ef7b877",
+      commits = 1,
+    )
+
+  private val older =
+    PreviewHistoryManifest.ManifestVersion(
+      blob = blobB,
+      commit = "2".repeat(40),
+      date = "2026-08-27T07:18:15Z",
+      commits = 1,
+    )
+
+  private fun manifest(
+    versions: List<PreviewHistoryManifest.ManifestVersion> = listOf(newest, older),
+    unstable: Boolean = false,
+  ) =
+    PreviewHistoryManifest.Manifest(
+      generatedFrom = "3".repeat(40),
+      previews =
+        mapOf(
+          previewId to
+            PreviewHistoryManifest.PreviewTimeline(
+              path = "images/profile/ideal__default__dark.png",
+              versions = versions,
+              observations = versions.size,
+              unstable = unstable,
+              flapCount = if (unstable) 3 else 0,
+            )
+        ),
+    )
+
+  private fun publishedHost(
+    indexed: PreviewHistoryManifest.Manifest? = manifest(),
+    pinnedRenders: Map<String, ByteArray> = mapOf(newest.commit to png(7)),
+  ): ServeBundleHost {
+    val dir = Files.createTempDirectory("history-published").toFile().also { it.deleteOnExit() }
+    File(dir, "previews").mkdirs()
+    File(dir, "previews/$previewId.png").writeBytes(png(1))
+    File(dir, "previews.json")
+      .writeText(
+        """{"module":":m","variant":"debug","previews":[
+             {"id":"$previewId","functionName":"$previewId","className":"ProfileKt"}]}"""
+      )
+    return ServeBundleHost(
+      dir,
+      label = "m3",
+      provenance =
+        ServeWeb.CatalogProvenance(
+          repo = "yschimke/design",
+          branch = "design/m3",
+          commit = "4".repeat(40),
+        ),
+      indexedPreviewHistory = indexed,
+      fetchPinnedAsset = { commit, _ -> pinnedRenders[commit] },
+    )
+  }
+
+  @Test
+  fun `a published catalog answers with the slice it already holds`() {
+    // The whole point of step 2: the load already fetched history.json from the same immutable tree
+    // as catalog.json, so sending the caller to re-fetch a 1 MB whole-catalog document to read one
+    // 497-byte row was pure overfetch.
+    val body = call(publishedHost()).payload()
+
+    assertEquals("published", body["mode"]!!.jsonPrimitive.content)
+    assertEquals("4".repeat(40), body["pinnedCommit"]!!.jsonPrimitive.content)
+    val versions = body["versions"]!!.jsonArray
+    assertEquals(2, versions.size)
+    assertEquals(
+      "https://raw.githubusercontent.com/yschimke/design/${newest.commit}/images/profile/ideal__default__dark.png",
+      versions[0].jsonObject["renderUrl"]!!.jsonPrimitive.content,
+      "each version carries the URL serving those exact bytes; the caller never joins commit to path",
+    )
+    assertEquals(false, body["unstable"]!!.jsonPrimitive.content.toBoolean())
+    // The pointer stays, for a caller that wants the whole catalog's timeline.
+    assertTrue(body["manifestUrl"] != null)
+  }
+
+  @Test
+  fun `a publisher shipping no manifest still gets the URL it had before`() {
+    val body = call(publishedHost(indexed = null)).payload()
+
+    assertEquals("published", body["mode"]!!.jsonPrimitive.content)
+    assertTrue(body["versions"] == null)
+    assertTrue(body["reason"]!!.jsonPrimitive.content.contains("no history.json"))
+    assertTrue(body["manifestUrl"] != null, "the degraded path is the old behaviour, not an error")
+  }
+
+  // ---- history_diff -----------------------------------------------------------------------------
+
+  @Test
+  fun `diff defaults to the two newest versions`() {
+    val body = call(publishedHost(), tool = "history_diff").payload()
+
+    assertEquals(newest.commit, body["to"]!!.jsonObject["commit"]!!.jsonPrimitive.content)
+    assertEquals(older.commit, body["from"]!!.jsonObject["commit"]!!.jsonPrimitive.content)
+    assertEquals(true, body["changed"]!!.jsonPrimitive.content.toBoolean())
+    assertEquals(0, body["versionsBetween"]!!.jsonPrimitive.content.toInt())
+  }
+
+  @Test
+  fun `diff of a version against itself reports no change`() {
+    val body =
+      call(
+          publishedHost(),
+          tool = "history_diff",
+          extraArgs = ""","from":"${newest.commit}","to":"${newest.commit}"""",
+        )
+        .payload()
+
+    assertEquals(false, body["changed"]!!.jsonPrimitive.content.toBoolean())
+  }
+
+  @Test
+  fun `diff warns when the preview is unstable`() {
+    // The signal that makes this worth having: on a nondeterministic preview a byte difference is
+    // not evidence of a real change, which is exactly what flake triage has to establish.
+    val body =
+      call(publishedHost(indexed = manifest(unstable = true)), tool = "history_diff").payload()
+
+    assertEquals(true, body["unstable"]!!.jsonPrimitive.content.toBoolean())
+    assertTrue(body["note"]!!.jsonPrimitive.content.contains("not evidence of a real change"))
+  }
+
+  @Test
+  fun `diff refuses a preview with a single recorded render`() {
+    val body =
+      call(publishedHost(indexed = manifest(versions = listOf(newest))), tool = "history_diff")
+
+    assertTrue(body.isError())
+    assertTrue(body.errorText().contains("a diff needs two"), body.errorText())
+  }
+
+  @Test
+  fun `diff refuses a commit the timeline does not name`() {
+    val body = call(publishedHost(), tool = "history_diff", extraArgs = ""","to":"deadbeef"""")
+
+    assertTrue(body.isError())
+    assertTrue(body.errorText().contains("no recorded render at commit"), body.errorText())
+  }
+
+  // ---- history_read -----------------------------------------------------------------------------
+
+  @Test
+  fun `read returns the pixels published at a commit`() {
+    val body =
+      call(publishedHost(), tool = "history_read", extraArgs = ""","commit":"${newest.commit}"""")
+    val content = body["result"]!!.jsonObject["content"]!!.jsonArray
+
+    assertEquals("image", content[0].jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals(
+      Base64.getEncoder().encodeToString(png(7)),
+      content[0].jsonObject["data"]!!.jsonPrimitive.content,
+      "the bytes served are the ones the branch published at that commit, not today's render",
+    )
+  }
+
+  @Test
+  fun `read accepts a commit prefix`() {
+    val body =
+      call(
+        publishedHost(),
+        tool = "history_read",
+        extraArgs = ""","commit":"${newest.commit.take(8)}"""",
+      )
+
+    assertTrue(!body.isError(), "a commit prefix must resolve to the version it uniquely names")
+    assertEquals(
+      "image",
+      body["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray[0]
+        .jsonObject["type"]!!
+        .jsonPrimitive
+        .content,
+    )
+  }
+
+  @Test
+  fun `read refuses a version the timeline does not name`() {
+    val body = call(publishedHost(), tool = "history_read", extraArgs = ""","commit":"beefbeef"""")
+
+    assertTrue(body.isError())
+    assertTrue(body.errorText().contains("names no recorded render"), body.errorText())
+  }
+
+  @Test
+  fun `read reports a branch that cannot serve those bytes`() {
+    // Distinct from "no such version": the timeline names it, the branch would not hand it over.
+    val body =
+      call(
+        publishedHost(pinnedRenders = emptyMap()),
+        tool = "history_read",
+        extraArgs = ""","commit":"${newest.commit}"""",
+      )
+
+    assertTrue(body.isError())
+    assertTrue(body.errorText().contains("no render for"), body.errorText())
   }
 }
