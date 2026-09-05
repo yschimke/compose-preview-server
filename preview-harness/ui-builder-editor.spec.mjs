@@ -228,6 +228,57 @@ test("mobile editor defaults to the design and exposes collapsible dock panels",
     });
 });
 
+test("the canvas frames the design and the zoom controls pin a scale", async ({ page }) => {
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+
+    // The canvas opens framed: whatever scale puts the whole 1280 x 800 design in the workspace,
+    // which is the readout the control shows and the factor the drop hit-test divides by.
+    const framed = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas.scale);
+    expect(framed).toBeGreaterThan(0);
+    await expect(page.getByText(`Fit · ${Math.round(framed * 100)}%`)).toBeVisible();
+
+    await clickCompose(page, page.getByRole("button", { name: "Zoom to 100%" }));
+    await settle(page);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditorCanvas.scale)).toBeCloseTo(1, 3);
+
+    await clickCompose(page, page.getByRole("button", { name: "Zoom in ()" }));
+    await settle(page);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditorCanvas.scale)).toBeCloseTo(
+        1.25,
+        3,
+    );
+
+    await clickCompose(page, page.getByRole("button", { name: "Fit to window ()" }));
+    await settle(page);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditorCanvas.scale)).toBeCloseTo(
+        framed,
+        3,
+    );
+});
+
+test("a right-click on a layer opens the verbs that act on it", async ({ page }) => {
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+    await openDock(page, "layers");
+
+    const row = await page.getByRole("button", { name: /Select main-scrim/ }).boundingBox();
+    expect(row).not.toBeNull();
+    await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2, { button: "right" });
+    await settle(page);
+    await expect(page.getByText(/^Duplicate/)).toBeVisible();
+
+    // The row carries its chord beside it, so the menu item reads "Delete Delete" to a locator.
+    await clickCompose(page, page.getByText(/^Delete/));
+    await waitForEditor(page, 109);
+    // The layer and the one child it carried: deleting a node deletes its subtree.
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        nodeCount: 107,
+        operationSequence: 1,
+        outcome: "accepted",
+    });
+});
+
 test("the property inspector selects Google icons from a searchable catalog", async ({
     page,
 }, testInfo) => {
@@ -672,6 +723,15 @@ test("capability inspector validates and commits typed scaffold and Text propert
     await clickCompose(page, page.getByRole("button", { name: "Apply text" }));
     await waitForEditor(page, 111);
 
+    // The inspector opens on what the node actually carries — this text has no colour yet — so the
+    // property is searched for and added before it can be typed into.
+    await fillCompose(
+        page,
+        page.getByRole("textbox", { name: "Property search" }),
+        "color",
+    );
+    await clickCompose(page, page.getByRole("button", { name: "Add Color property" }));
+    await settle(page);
     const color = page.getByRole("textbox", { name: "Color property" });
     await color.scrollIntoViewIfNeeded();
     await fillCompose(page, color, "onSurfaceVariant");
