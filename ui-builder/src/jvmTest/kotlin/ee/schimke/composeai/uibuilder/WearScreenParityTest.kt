@@ -71,8 +71,7 @@ class WearScreenParityTest {
    */
   @Test
   fun `every label carries a measured Wear type size`() {
-    listOf("row-0-title" to "14", "row-0-subtitle" to "13", "list-header" to "14.5").forEach {
-      (nodeId, expected) ->
+    listOf("row-0-title" to "14", "row-0-subtitle" to "13").forEach { (nodeId, expected) ->
       assertEquals(
         expected,
         document.nodes.getValue(nodeId).property("fontSizeSp").trimZero(),
@@ -94,17 +93,22 @@ class WearScreenParityTest {
     }
   }
 
-  /** 64dp rows and a 48dp header: the reference's, made up by the design's own padding. */
+  /**
+   * 64dp rows, made up by the design's own padding, because a borrowed card has none of Wear's.
+   *
+   * The header is not here any more, and that is the fix rather than an omission: it used to be a
+   * padded `m3/text` faking `ListHeader`'s 48dp, which made the canvas right and the generated
+   * screen 31.5dp short. It is `wear-m3/list-header` now, which carries the height on both sides.
+   */
   @Test
-  fun `the row and header padding are the measured ones`() {
+  fun `the row padding is the measured one, and the header needs none`() {
     assertEquals(
       listOf("12.2", "9.7", "12.2", "14.7"),
       document.nodes.getValue("row-0-lines").paddingEdges(),
     )
-    assertEquals(
-      listOf("0", "16", "0", "12"),
-      document.nodes.getValue("list-header").paddingEdges(),
-    )
+    val header = document.nodes.getValue("list-header")
+    assertEquals("wear-m3/list-header", header.componentId)
+    assertTrue(header.modifiers.isEmpty(), header.modifiers.toString())
   }
 
   private fun UiBuilderNode.property(name: String): String =

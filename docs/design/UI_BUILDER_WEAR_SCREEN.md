@@ -95,11 +95,54 @@ screen size** (a constant, not a fraction), the 26dp card corner, and Wear's dar
 `#000000` behind, `#332E3C` on the card, `#F6EDFF` for a title and the warm `#FFDCC2` for a
 subtitle, which is the one nobody guesses.
 
-### The first screenful is still marked
+### The round trip closes
 
-A stroked circle over the top cap, and a line where it ends. The extent is the right thing to author
-in - a keyhole shows one screenful and hides the list being built - but "how much of this is above
-the fold" is the question it makes harder, so the canvas answers it.
+The canvas matching a hand-written reference is half the claim. The other half is that the Kotlin
+the builder *generates* renders the same way, and that is now checked end to end:
+`samples/design-catalog-wear-m3` in compose-ai-tools carries the generator's own output for the
+`wear-list` template, unedited, and renders it with real Wear Compose.
+
+The three, left to right — wear-m3-catalog's hand-written component, the builder's Wasm canvas, and
+the generated screen compiled and captured on Android:
+
+![The reference, the canvas, and the generated screen rendered for real](evidence/ui-builder-wear-screen/wear-screen-round-trip.png)
+
+| At 192dp | Canvas | Generated, rendered |
+| --- | --- | --- |
+| Frame | 192 x 496dp | 192 x 496dp |
+| First row | 72.0 to 136.0dp | 72.0 to 136.0dp |
+| Row height / gap | 64.0dp / 4.0dp | 64.0dp / 4.0dp |
+| Row span | 10.0 to 182.0dp | 10.0 to 182.0dp |
+| Last row ends / bottom padding | 476.0dp / 20.0dp | 476.0dp / 20.0dp |
+
+Two things had to be true for that, and neither was until the round trip was actually run.
+
+**The generated screen suppresses its scroll indicator while the platform is capturing.** A stitched
+long screenshot composites many frames, and an indicator drawn at a different offset and opacity in
+each of them lands as a column of disconnected dashes down the edge — which is what the reference
+published before this. `LocalScrollCaptureInProgress` is the platform's own signal, set by Android's
+system long-screenshot and by the renderer for a `ScrollMode.LONG` capture, and the emitted
+`ScreenScaffold` reads it. That is app behaviour rather than a preview concession: a real long
+screenshot of a real app wants the same thing.
+
+**`wear-m3/list-header` is a component now, and it is the first one that is Wear's rather than
+borrowed.** The template used to fake `ListHeader`'s 48dp with a padded `m3/text`. The canvas
+matched the reference and the generated screen came out **31.5dp shorter**, because a padded Text is
+not a `ListHeader` and the generator was right not to pretend it was. Every other row already agreed
+to the dp; the header was the whole discrepancy, and there was no way to close it from the borrowed
+side.
+
+### Nothing is drawn over the design
+
+An earlier version outlined the first screenful — a circle over the top cap, a line where it ends —
+to answer "how much of this is above the fold". It reads as an artifact, because it is one: the
+canvas paints the design, and a guide painted into it is editor chrome in the one layer that has to
+stay comparable, pixel for pixel, with a render that has no such thing. If the fold is worth marking
+it belongs in the editor overlay, the way the reference overlay already does.
+
+The scroll indicator is gone from the canvas for a related reason. It is a real property of the
+design and it reaches the generated code; what it has no meaning on is the *extent*, which has no
+viewport for an indicator to show a position within.
 
 ### What is still not the watch
 
@@ -108,9 +151,6 @@ row by where it sits against the bezel, and a row near the curve is inset and sh
 reference nor the canvas shows that, and neither claims to: `LONG` turns it off in order to stitch,
 and the canvas has no Wear Compose to turn on. A single-frame render - `ScrollMode.TOP` or `END` in
 that repository, or the builder's own native lane - is what answers *that* question.
-
-The scroll indicator is the one thing drawn rather than reproduced: the reference's is the real
-bezel indicator caught mid-stitch, and the canvas draws a plain bar in its place.
 
 The content components are still Material 3's, borrowed. The type sizes and the card shape are set
 by the template to Wear's measured values, which is what makes this design match; another design
@@ -137,15 +177,17 @@ it as, so the generator names the node and stops rather than emitting Kotlin tha
 
 ## Not done here
 
-- **No Compose export from a component record.** `wear-m3` has `code = null` on both containers.
+- **No Compose export from a component record.** `wear-m3` has `code = null` on its own components.
   `ScreenScaffold` takes a scroll state that has to agree with the list inside its content lambda,
   which `ScreenGenerator`'s call-site emitter cannot write from a record, so the whole-screen
-  generator writes it instead. Pointing `--ui-builder-components wear-m3=<components.json>` at the
-  sample's own discovery output would give the *borrowed* components a record; the two Wear
-  containers still need this generator.
-- **No native render evidence.** The lane exists and a `wear-m3`-pinned design would compile against
-  that catalog's bundle, but standing an Android/Robolectric compile lane up is its own change.
-- **No `wear-m3` templates in the New design chooser.** `wearScreenUiBuilderDocument` is the
-  template; wiring it to a `?template=` id is the next step.
-- **No round-viewport slider.** The extent marks the first screenful and nothing else; dragging a
-  viewport down the extent is the obvious follow-up and is not here.
+  generator writes it instead.
+- **Most content is still borrowed.** `wear-m3/list-header` is the only content id that is Wear's;
+  the rest are `m3-catalog`'s, and the template makes up the difference with type sizes and padding
+  measured off the reference. Another design built from the same components starts from the mobile
+  defaults again. Real Wear ids for the card, the button and the text are the change that fixes it,
+  and the round trip is what will say when each one is needed.
+- **`EdgeButton` is placed, not shaped.** The slot generates a real `EdgeButton`; the canvas draws
+  the borrowed flat button at the bottom cap, because the shape comes from the screen. The parity
+  template carries none for that reason.
+- **No native-render evidence.** The builder's own native lane would answer the single-frame
+  question without leaving the server; standing an Android compile lane up is its own change.

@@ -32,9 +32,6 @@ fun WearScreenSamplePreview() {
         designId = "wear-screen-preview",
         catalogPin = wearScreenSampleCatalogPin,
         environment = wearScreenSampleEnvironment(SMALL_ROUND_DP),
-        // No edge button: this render is compared pixel for pixel against wear-m3-catalog's
-        // stitched `ScrollMode.LONG` capture of the same list, which has none.
-        edgeButtonLabel = null,
       ),
     editorOverlay = false,
   )
@@ -68,7 +65,6 @@ fun WearScreenBreakpointsPreview() {
               designId = "wear-screen-$widthDp",
               catalogPin = wearScreenSampleCatalogPin,
               environment = wearScreenSampleEnvironment(widthDp),
-              edgeButtonLabel = null,
             ),
           editorOverlay = false,
         )

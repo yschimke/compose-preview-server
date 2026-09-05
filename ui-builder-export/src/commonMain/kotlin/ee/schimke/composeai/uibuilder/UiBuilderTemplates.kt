@@ -487,6 +487,97 @@ private fun NewDesignState.declaration(): JsonObject =
   )
 
 /**
+ * An empty Wear screen: the scaffold, its clock and scroll indicator, and a list with nothing in
+ * it.
+ *
+ * The list is part of the template rather than something to add afterwards, because a Wear screen
+ * without one is not a starting point anybody wants — `ScreenScaffold` exists to hold a
+ * `TransformingLazyColumn`, its `contentPadding` only means anything once something reads it, and
+ * the generator refuses a scaffold whose content slot holds anything else at the top level. Opening
+ * on the pair is opening on the shape of the thing.
+ */
+fun blankWearScreenUiBuilderDocument(
+  designId: String,
+  catalogPin: JsonObject,
+  environment: JsonObject,
+): UiBuilderDocument {
+  require(designId.isNotBlank()) { "wear screen design id must not be blank" }
+  return UiBuilderDocument(
+    schema = "compose-ui-builder-document/v1-candidate",
+    id = designId,
+    title = "Untitled Wear screen",
+    revision = 0,
+    catalogPin = catalogPin,
+    environment = environment,
+    stateVariables = JsonObject(emptyMap()),
+    roots = listOf("wear-screen"),
+    nodes =
+      mapOf(
+        "wear-screen" to
+          UiBuilderNode(
+            id = "wear-screen",
+            componentId = "wear-m3/screen-scaffold",
+            properties =
+              JsonObject(
+                mapOf(
+                  "timeText" to literal("string", JsonPrimitive(WEAR_FROZEN_CLOCK)),
+                  "scrollIndicator" to literal("bool", JsonPrimitive(true)),
+                )
+              ),
+            modifiers = JsonArray(emptyList()),
+            slots = mapOf("content" to listOf("wear-list"), "edgeButton" to emptyList()),
+          ),
+        "wear-list" to
+          UiBuilderNode(
+            id = "wear-list",
+            componentId = "wear-m3/transforming-lazy-column",
+            properties =
+              JsonObject(
+                mapOf("verticalSpacingDp" to literal("float", JsonPrimitive(WEAR_LIST_SPACING_DP)))
+              ),
+            modifiers = JsonArray(emptyList()),
+            slots = mapOf("items" to emptyList()),
+          ),
+      ),
+  )
+}
+
+/**
+ * The frame a Wear design is created on: the small round watch, at its own density, dark.
+ *
+ * Not the fixture's phone frame. The scaffold reads its diameter from the document, so a Wear
+ * design seeded on a 411dp handset would fall back to the smallest watch to draw itself while the
+ * Screen inspector said "Pixel" — a disagreement between the picture and the frame menu that nobody
+ * could act on. `wearos_small_round`'s own numbers, so the menu opens on the right entry.
+ */
+fun wearScreenEnvironment(environment: JsonObject): JsonObject =
+  JsonObject(
+    environment.toMutableMap().also {
+      it["widthDp"] = JsonPrimitive(WEAR_SMALL_ROUND_DP)
+      it["heightDp"] = JsonPrimitive(WEAR_SMALL_ROUND_DP)
+      it["density"] = JsonPrimitive(WEAR_SMALL_ROUND_DENSITY)
+      it["theme"] = JsonPrimitive("dark")
+    }
+  )
+
+/** `wearos_small_round` from `DeviceDimensions`, which is what the frame menu will match. */
+private const val WEAR_SMALL_ROUND_DP = 192
+
+private const val WEAR_SMALL_ROUND_DENSITY = 2.0
+
+/** `TransformingLazyColumn`'s own default spacing, and the reference render's. */
+private const val WEAR_LIST_SPACING_DP = 4f
+
+/**
+ * `10:10`, frozen, exactly as wear-m3-catalog freezes its own.
+ *
+ * A status strip that moved would churn every render diff; dropping it instead would under-report
+ * the top margin the content lays out around, because the list's top content padding is what makes
+ * room for it.
+ */
+private const val WEAR_FROZEN_CLOCK = "10:10"
+
+/**
  * The rows the Wear screen template opens on.
  *
  * Character for character the rows of wear-m3-catalog's own `TransformingLazyColumn` component, so
@@ -514,7 +605,15 @@ fun wearScreenUiBuilderDocument(
   catalogPin: JsonObject,
   environment: JsonObject,
   title: String = "Activity",
-  edgeButtonLabel: String? = "Done",
+  /**
+   * Absent by default, so the template *is* wear-m3-catalog's list rather than that plus a control.
+   *
+   * The slot stays available to an author; what it must not do is sit in the design the parity
+   * check compares, because `EdgeButton` hugs the bottom curve on a watch and the canvas draws the
+   * borrowed flat button at the bottom cap. A difference nobody is testing for is a difference that
+   * makes the ones you are testing for harder to see.
+   */
+  edgeButtonLabel: String? = null,
 ): UiBuilderDocument {
   require(designId.isNotBlank()) { "wear screen design id must not be blank" }
   val rowNodes = WEAR_SCREEN_ROWS.flatMapIndexed { index, (rowTitle, subtitle) ->
@@ -594,7 +693,7 @@ fun wearScreenUiBuilderDocument(
         properties =
           JsonObject(
             mapOf(
-              "timeText" to literal("string", JsonPrimitive("10:10")),
+              "timeText" to literal("string", JsonPrimitive(WEAR_FROZEN_CLOCK)),
               "scrollIndicator" to literal("bool", JsonPrimitive(true)),
             )
           ),
@@ -608,26 +707,23 @@ fun wearScreenUiBuilderDocument(
       UiBuilderNode(
         id = "wear-list",
         componentId = "wear-m3/transforming-lazy-column",
-        properties = JsonObject(mapOf("verticalSpacingDp" to literal("float", JsonPrimitive(4)))),
+        properties =
+          JsonObject(
+            mapOf("verticalSpacingDp" to literal("float", JsonPrimitive(WEAR_LIST_SPACING_DP)))
+          ),
         modifiers = JsonArray(emptyList()),
         slots =
           mapOf("items" to listOf("list-header") + WEAR_SCREEN_ROWS.indices.map { "row-$it" }),
       ),
-      // White, and 48dp tall: `ListHeader` on the reference draws `onSurface` on the screen's own
-      // background rather than the variant a caption takes, and its item is 48dp at every size.
-      wearScreenText(
-        "list-header",
-        title,
-        "titleSmall",
-        "onSurface",
-        fontSizeSp = WEAR_LIST_HEADER_SP,
-        modifiers =
-          JsonArray(
-            listOf(
-              modifier("fillMaxWidth"),
-              padding(0f, WEAR_LIST_HEADER_TOP_DP, WEAR_LIST_HEADER_BOTTOM_DP),
-            )
-          ),
+      // The real `ListHeader` id, which carries its own 48dp. It used to be a padded `m3/text`:
+      // the canvas matched the reference, and the *generated* screen came out 31.5dp shorter,
+      // because a padded Text is not a ListHeader and the generator was right not to pretend.
+      UiBuilderNode(
+        id = "list-header",
+        componentId = "wear-m3/list-header",
+        properties = JsonObject(mapOf("text" to literal("string", JsonPrimitive(title)))),
+        modifiers = JsonArray(emptyList()),
+        slots = emptyMap(),
       ),
     ) + rowNodes + edgeButtonNodes
   return UiBuilderDocument(

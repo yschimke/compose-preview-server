@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -103,8 +102,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -127,6 +128,7 @@ import ee.schimke.composeai.uibuilder.artwork.ANDROID_DEVELOPERS_BACKSTAGE_ARTWO
 import ee.schimke.composeai.uibuilder.artwork.GOOGLE_DEVELOPERS_PODCAST_ARTWORK_KEY
 import ee.schimke.composeai.uibuilder.artwork.ProjectOwnedJetcasterArtwork
 import kotlin.io.encoding.Base64
+import kotlin.math.PI
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -557,6 +559,22 @@ private fun RenderNode(
     // exists off Android — approximating the curve with a hand-rolled scale would draw a
     // *different*
     // wrong picture and imply it was the right one. The running order is what this shows.
+    // 48dp, and the height is the point. `ListHeader` is what a Wear list puts at the top, the
+    // generator emits one, and a design that faked it with a padded Text made the canvas agree
+    // with itself while disagreeing with the screen it generates — which the round trip found.
+    "wear-m3/list-header" ->
+      Box(
+        measured.fillMaxWidth().height(WEAR_LIST_HEADER_HEIGHT_DP.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Text(
+          node.string("text"),
+          Modifier,
+          color = WEAR_SCREEN_ON_SURFACE,
+          fontSize = WEAR_LIST_HEADER_SP.sp,
+          maxLines = node.integer("maxLines", Int.MAX_VALUE),
+        )
+      }
     "wear-m3/transforming-lazy-column" ->
       Column(
         modifier = measured.fillMaxWidth(),
@@ -937,7 +955,6 @@ private fun UiBuilderDocument.wearScreenWidthDp(): Int {
  * This draws the same shape because the shape is not a metaphor — it is the Wear long-screenshot
  * form, and the extent is what an author is building. A 192dp keyhole shows one screenful and hides
  * the rest of the list behind a scroll position they have to keep re-finding.
- * [WEAR_VIEWPORT_OUTLINE] marks the first screenful over the top cap.
  *
  * ## Every number here was measured, not chosen
  *
@@ -972,7 +989,6 @@ private fun WearScreenScaffold(
   // background comments: reading the theme made the watch go white in a light editor.
   val background = node.color("background", WEAR_SCREEN_BACKGROUND)
   val timeText = node.string("timeText")
-  val scrollIndicator = node.bool("scrollIndicator", true)
   Box(
     modifier =
       modifier
@@ -981,36 +997,18 @@ private fun WearScreenScaffold(
         .heightIn(min = width)
         .clip(RoundedCornerShape(percent = 50))
         .background(background)
-        .drawBehind {
-          // The first screenful, marked on the extent: the round viewport, and the line where it
-          // ends. Stroked rather than filled so it reads as a guide and not as chrome the design
-          // owns — but visible, because "how much of this is above the fold" is the one question
-          // the extent makes harder than a keyhole canvas does.
-          drawCircle(
-            color = WEAR_VIEWPORT_OUTLINE,
-            radius = size.width / 2f,
-            center = Offset(size.width / 2f, size.width / 2f),
-            style = Stroke(1.dp.toPx()),
-          )
-          if (size.height > size.width) {
-            drawLine(
-              color = WEAR_VIEWPORT_OUTLINE,
-              start = Offset(0f, size.width),
-              end = Offset(size.width, size.width),
-              strokeWidth = 1.dp.toPx(),
-            )
-          }
-          if (scrollIndicator) {
-            val trackHeight = size.width * 0.42f
-            val trackTop = (size.width - trackHeight) / 2f
-            drawRoundRect(
-              color = WEAR_SCREEN_TIME_TEXT.copy(alpha = 0.35f),
-              topLeft = Offset(size.width - 6.dp.toPx(), trackTop),
-              size = Size(3.dp.toPx(), trackHeight),
-              cornerRadius = CornerRadius(1.5f.dp.toPx(), 1.5f.dp.toPx()),
-            )
-          }
-        }
+    // Nothing drawn over the design. An earlier version outlined the first screenful — a
+    // circle over the top cap and a line where it ends — to answer "how much of this is above
+    // the fold". It reads as an artifact, because it is one: the canvas paints the *design*,
+    // and a guide painted into it is editor chrome in the one layer that has to stay
+    // comparable, pixel for pixel, with a render that has no such thing. The editor overlay is
+    // where that belongs, the way the reference overlay already works.
+    //
+    // No scroll indicator either. It is a real property of the design and it reaches the
+    // generated code; what it has no meaning on is this picture. An indicator shows where a
+    // viewport sits within the content, and the extent has no viewport. The real long
+    // screenshot agrees: `ScrollMode.LONG` sets `LocalScrollCaptureInProgress`, the emitted
+    // scaffold reads it and draws none, and the stitched capture comes back clean.
   ) {
     Column(Modifier.fillMaxWidth().padding(padding)) { content(Modifier.fillMaxWidth()) }
     // Overlaid, not a band above the content. `TimeText` belongs to `AppScaffold` and is drawn
@@ -1018,13 +1016,7 @@ private fun WearScreenScaffold(
     // already applied above. Drawing it as a row that displaced the content — which this did —
     // pushed every row down by the height of a clock the real screen draws on top of nothing.
     if (timeText.isNotEmpty()) {
-      Text(
-        text = timeText,
-        color = WEAR_SCREEN_TIME_TEXT,
-        fontSize = WEAR_TIME_TEXT_SP.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.align(Alignment.TopCenter).offset(y = WEAR_TIME_TEXT_OFFSET_DP.dp),
-      )
+      WearCurvedTimeText(timeText, Modifier.matchParentSize())
     }
     if (hasEdgeButton) {
       // The edge button hugs the bottom curve, which on the extent is the bottom cap. Placed
@@ -1072,6 +1064,61 @@ private fun List<Triple<Float, Float, Float>>.interpolate(
   val high = this[upper]
   val t = (width - low.first) / (high.first - low.first)
   return select(low) + t * (select(high) - select(low))
+}
+
+/**
+ * The clock, drawn along the top of the round viewport the way `TimeText` draws it.
+ *
+ * ## Why bother curving it
+ *
+ * Because it is curved, and a straight `10:10` was the one piece of chrome on the canvas that was a
+ * different *shape* from the thing it stands for. Everything else here is measured against a real
+ * render; this was measured against one too, and then drawn flat, which put the glyphs in the right
+ * band and the wrong arc.
+ *
+ * ## How, without curved-text support
+ *
+ * Compose Multiplatform has no `drawTextOnPath`. It does not need one for this: each character is
+ * measured on its own, placed at the top of the viewport circle, and the whole glyph rotated about
+ * the circle's centre by the angle its position along the arc implies. Advance is the character's
+ * own measured width over the radius, so the spacing follows the face rather than a guess, and the
+ * string is centred by starting half its total angular width anticlockwise of the top.
+ *
+ * The circle is the *viewport's*, not the extent's — centre at `(width / 2, width / 2)` — which is
+ * the circle a watch actually has, whatever the extent below it is doing.
+ */
+@Composable
+private fun WearCurvedTimeText(text: String, modifier: Modifier) {
+  val measurer = rememberTextMeasurer()
+  val style =
+    LocalTextStyle.current.copy(
+      color = WEAR_SCREEN_TIME_TEXT,
+      fontSize = WEAR_TIME_TEXT_SP.sp,
+      fontWeight = FontWeight.Medium,
+    )
+  val glyphs = remember(text, style) { text.map { measurer.measure(it.toString(), style) } }
+  Canvas(modifier) {
+    val centre = Offset(size.width / 2f, size.width / 2f)
+    // The arc the glyph *centres* ride on: the viewport radius less the measured distance from the
+    // top of the screen to the middle of the reference's digits.
+    val radius = size.width / 2f - WEAR_TIME_TEXT_CENTRE_DP.dp.toPx()
+    if (radius <= 0f) return@Canvas
+    val total = glyphs.sumOf { it.size.width.toDouble() }.toFloat()
+    var travelled = -total / 2f
+    glyphs.forEach { glyph ->
+      val width = glyph.size.width.toFloat()
+      val height = glyph.size.height.toFloat()
+      // Radians along the arc to this glyph's centre, then degrees for the rotation.
+      val degrees = ((travelled + width / 2f) / radius) * 180f / PI.toFloat()
+      withTransform({ rotate(degrees = degrees, pivot = centre) }) {
+        drawText(
+          textLayoutResult = glyph,
+          topLeft = Offset(centre.x - width / 2f, centre.y - radius - height / 2f),
+        )
+      }
+      travelled += width
+    }
+  }
 }
 
 /** `wearos_small_round` and `wearos_xl_round` from `DeviceDimensions`, as the accepted range. */
@@ -1123,22 +1170,24 @@ private val WearDarkColorScheme =
     onSurfaceVariant = WEAR_SCREEN_ON_SURFACE_VARIANT,
   )
 
-/** The first screenful's outline over the extent, faint enough to read as a guide. */
-private val WEAR_VIEWPORT_OUTLINE = Color(0x59FFFFFF)
-
 /**
- * Where the clock's text box goes so its digits land where the reference's do.
+ * How far below the top of the screen the clock's glyph centres ride, measured.
  *
- * The measured target is the glyph box, not the layout box: on the reference the digits occupy
- * 75.5..117dp across and 5.5..18dp down, at 192, 225 and 240dp alike — a constant, which is the
- * sort of thing only measuring tells you. A 14.5sp text box carries ~6.5dp of ascent above the
- * digits, so the box itself starts a hair above the screen and the digits land at 5.5dp. Both
- * numbers are checked by `WearScreenParityTest`.
+ * On the reference the digits occupy 5.5..18dp down — at 192, 225 and 240dp alike, a constant,
+ * which is the sort of thing only measuring tells you — so their centres sit 11.75dp in. The arc is
+ * the viewport radius less a dp under that: a glyph rotated about the circle rides slightly lower
+ * than its flat twin, and this is the value that lands the curved box where the reference's is.
  */
-private const val WEAR_TIME_TEXT_OFFSET_DP = -1f
+private const val WEAR_TIME_TEXT_CENTRE_DP = 10.75f
 
 /** Sized so "10:10" measures the reference's 41.5dp; Wear's clock is bigger than it looks. */
 private const val WEAR_TIME_TEXT_SP = 14.5f
+
+/** `ListHeader`'s item height, measured at 192, 225 and 240dp alike. */
+private const val WEAR_LIST_HEADER_HEIGHT_DP = 48f
+
+/** Sized so the label measures the reference header's 53.5dp of glyphs. */
+private const val WEAR_LIST_HEADER_SP = 14.5f
 
 /** How far the edge button floats off the bottom cap, as a fraction of the diameter. */
 private const val WEAR_EDGE_BUTTON_INSET = 0.04f
