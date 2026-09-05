@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.2.0](https://github.com/yschimke/compose-preview-server/compare/v3.1.0...v3.2.0) (2026-09-05)
+
+
+### Features
+
+* **ui-builder:** author with the catalog's published Remote Compose documents ([#317](https://github.com/yschimke/compose-preview-server/issues/317)) ([b4daa4f](https://github.com/yschimke/compose-preview-server/commit/b4daa4f18044a1f403d3d52bb8aa8538f6002ab9))
+* **ui-builder:** build against a reference picture, and mark it up ([#318](https://github.com/yschimke/compose-preview-server/issues/318)) ([2bd0324](https://github.com/yschimke/compose-preview-server/commit/2bd03247a5f3bbe4bd093a351994c4007534a9f6))
+* **ui-builder:** pick a renderer instead of always showing two ([#315](https://github.com/yschimke/compose-preview-server/issues/315)) ([0b18cdc](https://github.com/yschimke/compose-preview-server/commit/0b18cdc9993bdb496847434adfbd449bcc5d3d86))
+* **ui-builder:** selectable overlays on the native render ([#319](https://github.com/yschimke/compose-preview-server/issues/319)) ([0a7e121](https://github.com/yschimke/compose-preview-server/commit/0a7e121f190419b50c6c5e98332971cb842f08e5))
+
+
+### Bug Fixes
+
+* **serve-web:** coalesce a slider drag into one render, and retry a busy one ([#320](https://github.com/yschimke/compose-preview-server/issues/320)) ([b740578](https://github.com/yschimke/compose-preview-server/commit/b7405784d03285dc28f5eda5019230bbe8b4e339))
+* **ui-builder-export:** publish it, so compose-preview-serve resolves ([#316](https://github.com/yschimke/compose-preview-server/issues/316)) ([65ca48a](https://github.com/yschimke/compose-preview-server/commit/65ca48a1aef43d266216da0e5f3515e7eb6dd67d))
+
 ## [3.1.0](https://github.com/yschimke/compose-preview-server/compare/v3.0.0...v3.1.0) (2026-09-05)
 
 
