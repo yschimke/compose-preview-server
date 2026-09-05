@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.5.0](https://github.com/yschimke/compose-preview-server/compare/v3.4.0...v3.5.0) (2026-09-05)
+
+
+### Features
+
+* **serve:** let an MCP client discover and complete authorization on its own ([#413](https://github.com/yschimke/compose-preview-server/issues/413)) ([598fe0c](https://github.com/yschimke/compose-preview-server/commit/598fe0cd178fbf53ab8a6b6c06d5eda75a1f9c6d))
+* **ui-builder:** draw each palette row as the component it inserts ([#410](https://github.com/yschimke/compose-preview-server/issues/410)) ([0840796](https://github.com/yschimke/compose-preview-server/commit/08407967025891be8c543ac520f31c1639689788))
+* **ui-builder:** export a lazy list, row and grid instead of refusing them ([#414](https://github.com/yschimke/compose-preview-server/issues/414)) ([be5c84c](https://github.com/yschimke/compose-preview-server/commit/be5c84c99984cc66cf4924b3f0846a74b02a7123))
+* **ui-builder:** export a text field and a progress indicator ([#399](https://github.com/yschimke/compose-preview-server/issues/399)) ([3a118f0](https://github.com/yschimke/compose-preview-server/commit/3a118f0c399695ee5018f2437d2343a643928c6f))
+* **ui-builder:** express every authored modifier, or refuse it by name ([#403](https://github.com/yschimke/compose-preview-server/issues/403)) ([2ea7430](https://github.com/yschimke/compose-preview-server/commit/2ea743070a9a08407969812601d4c4989c78cbc6))
+* **ui-builder:** group the component menu by catalog family and offer variants ([#405](https://github.com/yschimke/compose-preview-server/issues/405)) ([328afd8](https://github.com/yschimke/compose-preview-server/commit/328afd81ff63e8912d68d219b93493604b22409b))
+* **ui-builder:** render Wear designs on Android, and complete the Wear catalog ([#407](https://github.com/yschimke/compose-preview-server/issues/407)) ([bca67af](https://github.com/yschimke/compose-preview-server/commit/bca67afe4719d71afa36b785f68da9700b4ea0b9))
+
+
+### Bug Fixes
+
+* **ui-builder-runtime:** checksum the persistence payload as stored ([#411](https://github.com/yschimke/compose-preview-server/issues/411)) ([15ae9dd](https://github.com/yschimke/compose-preview-server/commit/15ae9ddab4a3f67951447e6a3f716854d9a98630))
+* **ui-builder:** let the Confetti design validate and export again ([#401](https://github.com/yschimke/compose-preview-server/issues/401)) ([9009220](https://github.com/yschimke/compose-preview-server/commit/9009220664c59d5aa4145a0f9f88ec82e213ac36))
+* **ui-builder:** say what is actually wrong with the two variant properties left ([#408](https://github.com/yschimke/compose-preview-server/issues/408)) ([e5e8a9a](https://github.com/yschimke/compose-preview-server/commit/e5e8a9ad0fae456aeb7afe8df41242177aca425d))
+* **ui-builder:** stop a burst of edits from dropping most of itself ([#409](https://github.com/yschimke/compose-preview-server/issues/409)) ([dee9a16](https://github.com/yschimke/compose-preview-server/commit/dee9a16b88a23411338a48c0c832ba085816809b))
+
 ## [3.4.0](https://github.com/yschimke/compose-preview-server/compare/v3.3.0...v3.4.0) (2026-09-05)
 
 
