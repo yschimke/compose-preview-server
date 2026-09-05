@@ -387,6 +387,11 @@ class ServeHttpServer(
   /** Independent human/operator/agent authorization for [uiBuilderService]. */
   private val uiBuilderAuthorization: ServeUiBuilderAuthorization? = null,
   /**
+   * Compiles and renders a design with real Compose on this host. Non-null only where the builder
+   * and the playground compile lane are both configured, because a native render needs both.
+   */
+  private val uiBuilderNativePreview: UiBuilderNativePreviewLane? = null,
+  /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
    * has resolved. Null when the lane isn't wired at all. See [PlaygroundHealth].
@@ -565,7 +570,13 @@ class ServeHttpServer(
   private val renderSemaphore = Semaphore(renderSlots)
   private val catalogMcp =
     if (catalogMcpEnabled && machineAuthorization != null)
-      ServeCatalogMcp(sessions, renderSemaphore, projectHistory = projectHistory)
+      ServeCatalogMcp(
+        sessions,
+        renderSemaphore,
+        projectHistory = projectHistory,
+        uiBuilder = uiBuilderService?.let { ServeUiBuilderMcp(it, uiBuilderNativePreview) },
+        uiBuilderNative = uiBuilderNativePreview != null,
+      )
     else null
   private val unleasedThemeSemaphore = Semaphore(1)
   private val themeRenderLeases = ThemeRenderLeaseManager(renderSlots)
@@ -836,7 +847,7 @@ class ServeHttpServer(
       }
       routing {
         if (uiBuilderService != null && uiBuilderAuthorization != null) {
-          installUiBuilderRoutes(uiBuilderService, uiBuilderAuthorization)
+          installUiBuilderRoutes(uiBuilderService, uiBuilderAuthorization, uiBuilderNativePreview)
         }
         // `/healthz` — ungated liveness: "ok" the moment the listener is up. Leaks nothing, and
         // proves nothing beyond "the process is answering HTTP". The rolling-update gate is
@@ -7946,7 +7957,16 @@ class ServeHttpServer(
     }
 
     val reply =
-      mcp.handle(request, agentGrants?.let { catalogMcpAgentAccess(it) }) {
+      mcp.handle(
+        request,
+        agentGrants?.let { catalogMcpAgentAccess(it) },
+        // Asked per capability, off the same call the credential arrived on, so an MCP client
+        // reaches the builder through exactly the door the browser does.
+        { capability ->
+          uiBuilderAuthorization?.authorize(call, capability)
+            ?: UiBuilderAuthorizationDecision.Missing
+        },
+      ) {
         authorization.authorizeScope(call, AgentGrantScope.LIVE)
       }
     if (reply.accepted) {

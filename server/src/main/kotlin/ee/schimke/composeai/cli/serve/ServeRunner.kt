@@ -46,6 +46,18 @@ import okio.Path.Companion.toPath
 public class ServeRunner(
   private val options: ServeOptions,
   private val build: ServeBuildHost,
+  /**
+   * Called once with the discovery this run is serving, before anything is hosted from it.
+   *
+   * The seam the `ui` command needs and nothing else uses: `--ui-builder-components` names a
+   * component-record path when the options are parsed, which is before any Gradle has run and so
+   * before the module — and its build directory — is known. This is where that path gets filled in.
+   * Defaulted to a no-op, because a server that is merely hosting has nothing to do here.
+   *
+   * Deliberately not a general event hook. It fires on the discovery path only, exactly once, and a
+   * throwing callback fails the run: it is configuration the caller supplied, not an observer.
+   */
+  private val onDiscovered: (ServeDiscovery) -> Unit = {},
 ) : ServeOptions by options, ServeBuildHost by build {
 
   private val catalogBlobPool: CatalogBlobPool by lazy {
@@ -794,6 +806,7 @@ public class ServeRunner(
       System.err.println("serve: no previews discovered.")
       exitProcess(3)
     }
+    onDiscovered(outcome)
     // Expand each module's `@PreviewParameter` fan-out BEFORE deciding how many modules are in play
     // (issue #3786 review follow-up). Module selection has to keep a parameterized preview whose
     // rows *might* match — the row ids don't exist until the render above wrote the fan-out — so
@@ -2243,6 +2256,12 @@ public class ServeRunner(
   private data class UiBuilderLane(
     val service: PersistentUiBuilderService,
     val renderer: AutoCloseable?,
+    /**
+     * The Compose half of the export, kept so the native render lane can ask it the same question
+     * with node tagging on. Not reached through [service]: the service's exporter may be the
+     * production wrapper around several formats, and the native lane wants exactly this one.
+     */
+    val compose: ScreenGeneratorComposeExportExecutor,
   ) : AutoCloseable {
     override fun close() {
       renderer?.close()
@@ -2311,9 +2330,12 @@ public class ServeRunner(
         // defeat `ComponentRecordSource`'s hot reload outright — the source would re-read a file
         // the service has already refused to ask it about.
         //
-        // So the question is whether every enabled catalog has a record **configured**, which is
-        // fixed for the process. The packaged image passes none, so it advertises nothing and the
-        // builder offers no action that can only fail — the point of gating this at all.
+        // So the question is whether a catalog has a record **configured**, which is fixed for the
+        // process. It is asked per catalog: `exportCapabilities` is a field of each
+        // `CatalogCapabilityV1`, and collapsing it to one boolean meant a deployment serving
+        // `m3-catalog` beside `remote-m3` — which deliberately has no record, Remote Compose being
+        // outside the Compose exporter — advertised no export anywhere, withdrawing the action
+        // from the catalog that could have used it.
         //
         // The cost, stated: a configured record that is missing, malformed, or on a schema this
         // generator will not read is still advertised, and every export of it refuses. That is the
@@ -2328,6 +2350,7 @@ public class ServeRunner(
                 png = false,
               ))
             .copy(composeCode = composeExportConfigured),
+        composeExportFor = { systemId -> systemId in uiBuilderComponents.keys },
       )
     val service =
       PersistentUiBuilderService(
@@ -2351,6 +2374,7 @@ public class ServeRunner(
     return UiBuilderLane(
       service = service,
       renderer = renderer,
+      compose = compose,
     )
   }
 
@@ -2662,6 +2686,22 @@ public class ServeRunner(
           uiBuilderLane?.let {
             ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)
           },
+        // Both halves or nothing: a native render needs the generator (to write the Kotlin) and
+        // the playground lane (to compile and run it). A host with a builder and no compiler
+        // simply has no such route, which is what a client discovers rather than being told after
+        // a failed call.
+        uiBuilderNativePreview =
+          uiBuilderLane?.let { lane ->
+            playgroundLane?.compile?.let { playground ->
+              val adapter = UiBuilderGeneratedPreviewAdapter(playground)
+              ServeUiBuilderNativePreview(lane.compose) { generated ->
+                // `true` here, and only here: this call site is downstream of the route's
+                // `ui-builder-export` capability check, and the source it submits came from
+                // `ScreenGenerator` against the component record rather than from the caller.
+                adapter.compile(generated, isSecurityChecked = true)
+              }
+            }
+          },
         playgroundRateLimiter = playgroundLane?.let { buildPlaygroundRateLimiter() },
         // Reads a served preview's Kotlin, for two consumers with different requirements:
         // `/playground?from=<system>/<previewId>` (needs a playground to open it in) and the
@@ -2768,9 +2808,9 @@ public class ServeRunner(
   private fun openBrowser(port: Int, token: String) {
     val localHost =
       if (ServeUrls.isExposed(host) || host == ServeUrls.LOOPBACK) ServeUrls.LOOPBACK else host
+    val origin = ServeUrls.origin(localHost, port)
     val url =
-      if (public) "${ServeUrls.origin(localHost, port)}/"
-      else ServeUrls.landingUrl(ServeUrls.origin(localHost, port), token)
+      if (public) "$origin$openBrowserPath" else ServeUrls.pathUrl(origin, openBrowserPath, token)
     val opened = runCatching {
       if (!Desktop.isDesktopSupported()) return@runCatching false
       val desktop = Desktop.getDesktop()

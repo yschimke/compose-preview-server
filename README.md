@@ -100,7 +100,29 @@ Build and run the standalone distribution with:
 ```shell
 ./gradlew :server:distTar
 tar -xzf server/build/distributions/compose-preview-server-*.tar.gz
-./compose-preview-server-*/bin/compose-preview-server --help
+./compose-preview-server-*/bin/compose-preview-server help
+```
+
+The binary has four commands, and `help` lists them:
+
+| Command | What it does |
+| --- | --- |
+| `serve` | Host previews — fetched bundles, published catalogs, or a local module's `@Preview` functions with `--module` / `--discover`. |
+| `ui` | Build this project's previews and open the Compose UI builder against them. |
+| `playground` | `serve` with the snippet compile lane admitted. |
+| `help [command]` | The command list, or one command's options. |
+
+Flags may still be passed with no command in front of them: `compose-preview-server --module app`
+is exactly `compose-preview-server serve --module app`, and stays supported.
+
+`ui` needs a build host — the `compose-preview` binary — because discovering and building a local
+Gradle project is work this server asks for over a pipe rather than doing itself. The builder's
+palette is a packaged design-system catalog; what `ui` adds is the project, by pointing
+`--ui-builder-components` at the module's discovered `components.json` so the Compose export
+generates call sites for your composables. From a checkout with the CLI installed:
+
+```shell
+compose-preview-server ui --module app
 ```
 
 Releases publish that distribution beside the Maven library, then build the production

@@ -191,6 +191,16 @@ distributions {
   main {
     contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
     contents { from(unpackUiBuilderWeb) { into("ui-builder") } }
+    // The component record the Compose export reads. Without it a packaged host advertises no
+    // Compose export at all — `--ui-builder-components` was read by `ComponentRecordSource` and
+    // written by nothing that shipped, so the builder's export action was withdrawn on every
+    // deployed box while the record sat in this repository unused.
+    contents {
+      from(rootProject.layout.projectDirectory.dir("docs/design/fixtures/ui-builder")) {
+        include("m3-catalog-components-v1.json")
+        into("ui-builder-components")
+      }
+    }
     contents {
       into("lib-renderer") { from(stageRendererLibs) }
       into("lib-daemon-desktop") { from(stageDaemonDesktopLibs) }
@@ -259,11 +269,13 @@ tasks.named<Tar>("distTar") {
 // makes a POM that points at something nobody can resolve.
 //
 // Deliberately WITHOUT `explicitApi()`, unlike the contract modules (`:common-io`,
-// `:bundle-format`, `:common-image-crop`). Turning it on here reports 1,719 declarations needing an
-// explicit modifier — this is the server, not a contract, and marking all 1,719 `public` would
-// freeze an ABI nobody designed, which is the exact failure `explicitApi()` exists to prevent. The
-// surface worth designing is the 16 symbols `:cli` actually uses; narrowing to that, and only then
-// turning the gate on, is its own change.
+// `:bundle-format`, `:common-image-crop`) and unlike `:ui-builder-runtime`, which took the gate and
+// a committed ABI dump because its surface is five files of designed service port. Turning it on
+// here reports 1,199 declarations needing an explicit modifier (1,719 before `:render-host` moved
+// out) — this is the server, not a contract, and marking all of them `public` would freeze an ABI
+// nobody designed, which is the exact failure `explicitApi()` exists to prevent. The surface worth
+// designing is the 16 symbols `:cli` actually uses; narrowing to that, and only then turning the
+// gate on, is its own change.
 
 dependencies {
   add(

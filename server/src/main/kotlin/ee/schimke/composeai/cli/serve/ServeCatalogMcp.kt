@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.web.WebEscaping
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -44,6 +45,14 @@ class ServeCatalogMcp(
    * the truth about what a catalog has rendered. See [historyJson].
    */
   private val projectHistory: ServeProjectHistory? = null,
+  /**
+   * The UI-builder door, when this box serves one. Null leaves the surface exactly as it was: the
+   * tools are absent from `tools/list` rather than present and failing, so a client discovers what
+   * this server can actually do.
+   */
+  private val uiBuilder: ServeUiBuilderMcp? = null,
+  /** Whether this box can also compile a design natively; see [ServeUiBuilderMcp.RENDER_NATIVE]. */
+  private val uiBuilderNative: Boolean = false,
 ) {
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
@@ -76,6 +85,14 @@ class ServeCatalogMcp(
   suspend fun handle(
     request: JsonObject,
     access: AgentAccess? = null,
+    /**
+     * The UI-builder capability check for this particular request, asked of the transport because
+     * only it holds the call the credential arrived on. Defaults to refusing, so a caller that
+     * forgets to pass one cannot accidentally open the builder to an unauthenticated agent.
+     */
+    uiBuilderAuthorization: (UiBuilderRouteCapability) -> UiBuilderAuthorizationDecision = {
+      UiBuilderAuthorizationDecision.Missing
+    },
     liveAuthorization: () -> ServeMachineAuthorization.Decision,
   ): Reply {
     val id = request["id"]
@@ -96,7 +113,7 @@ class ServeCatalogMcp(
           "tools/list" -> buildJsonObject { put("tools", tools(access != null)) }
           "tools/call" ->
             try {
-              callTool(params, liveAuthorization, access)
+              callTool(params, liveAuthorization, access, uiBuilderAuthorization)
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
             }
@@ -274,6 +291,7 @@ class ServeCatalogMcp(
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"commit":{"type":"string"},"blob":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
+    uiBuilder?.let { addAll(ServeUiBuilderMcp.declarations(::tool, uiBuilderNative)) }
     add(
       tool(
         "list_data_products",
@@ -316,9 +334,13 @@ class ServeCatalogMcp(
     params: JsonObject,
     liveAuthorization: () -> ServeMachineAuthorization.Decision,
     access: AgentAccess?,
+    uiBuilderAuthorization: (UiBuilderRouteCapability) -> UiBuilderAuthorizationDecision,
   ): JsonObject {
     val name = params.requiredString("name")
     val args = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+    uiBuilderTool(name, args, uiBuilderAuthorization)?.let {
+      return it
+    }
     return when (name) {
       "request_access" -> {
         val broker = access ?: return toolError(ACCESS_DISABLED)
@@ -1641,6 +1663,37 @@ class ServeCatalogMcp(
     }
   }
 
+  /**
+   * One UI-builder tool, or null when the name belongs to the catalog surface.
+   *
+   * The capability check happens here rather than inside [ServeUiBuilderMcp] because the credential
+   * lives on the transport's call, not in the JSON-RPC message — the same reason the HTTP routes
+   * authorize before they map. A missing grant is a tool error rather than a transport status: the
+   * agent asked a question this surface understands and is being told it may not.
+   */
+  private suspend fun uiBuilderTool(
+    name: String,
+    args: JsonObject,
+    authorize: (UiBuilderRouteCapability) -> UiBuilderAuthorizationDecision,
+  ): JsonObject? {
+    val builder = uiBuilder ?: return null
+    val capability = builder.capabilityFor(name) ?: return null
+    val actor =
+      when (val decision = authorize(capability)) {
+        is UiBuilderAuthorizationDecision.Authorized ->
+          AuthenticatedUiBuilderActor(decision.actorId)
+        UiBuilderAuthorizationDecision.Missing ->
+          return toolError(
+            "this tool needs a UI-builder ${capability.name.lowercase()} grant; none was presented"
+          )
+        UiBuilderAuthorizationDecision.Forbidden ->
+          return toolError(
+            "the presented identity lacks the UI-builder ${capability.name.lowercase()} capability"
+          )
+      }
+    return textResult(builder.call(name, args, actor, callId = name))
+  }
+
   private fun tool(name: String, description: String, schema: String): JsonObject =
     buildJsonObject {
       put("name", name)
@@ -1735,8 +1788,6 @@ class ServeCatalogMcp(
       "%02x".format(it)
     }
 
-  private class McpRequestException(message: String) : RuntimeException(message)
-
   companion object {
     const val MCP_PROTOCOL_VERSION = "2025-06-18"
     const val MCP_PROTOCOL_VERSION_2025_03 = "2025-03-26"
@@ -1815,3 +1866,8 @@ class ServeCatalogMcp(
     }
   }
 }
+
+/**
+ * A tool call this surface understood and refused. Carried as a tool error, not a transport one.
+ */
+internal class McpRequestException(message: String) : RuntimeException(message)

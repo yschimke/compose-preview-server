@@ -12,6 +12,10 @@ repository boundary.
 - Commit subjects and PR titles use Conventional Commits.
 - Run `./gradlew ktfmtFormat` before committing Kotlin changes and
   `npm --prefix serve-web run format` before committing serve-web changes.
+- `:ui-builder-runtime` compiles under `explicitApi()` and its public API is pinned by the committed
+  dump `ui-builder-runtime/api/ui-builder-runtime.api`, which `checkKotlinAbi` verifies as part of
+  `check`. When that module's API changes, run `./gradlew :ui-builder-runtime:updateKotlinAbi` and
+  commit the dump with the change. `:server` stays off the gate on purpose; its build file says why.
 - Regenerate the committed goldens with `scripts/regenerate-goldens.sh`, and read the diff. On a
   Renovate branch the `Regenerate goldens` workflow does it for you when CI goes red; on any pull
   request `/regenerate-goldens` asks for the same thing.
@@ -52,5 +56,10 @@ repository boundary.
   still depends on it; the edge points the same way, it just crosses a repository boundary the
   correct direction now. `checkRenderHostIsServerFree` went with it.
 - Keep `checkServeModuleBoundary` a resolved-classpath positive allowlist, including transitives.
+- The preview-selector rule (`previewIdMatchesStandaloneRequest`) is stated in this repository and
+  again in compose-ai-tools, because `serve` is a launcher and the CLI no longer passes its own rule
+  in. `docs/serve/preview-selector-fixtures.json` is the shared golden table that pins them; it is
+  owned upstream, vendored by `scripts/sync-preview-selector-fixtures.sh`, and run by
+  `PreviewSelectorFixturesTest`. Change the rule, change the table upstream in the same change.
 - The source package stays `ee.schimke.composeai.cli.serve` until a separately reviewed rename.
 - UI-affecting PRs include viewable before/after evidence and update the visual harness when needed.
