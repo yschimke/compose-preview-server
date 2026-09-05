@@ -1,4 +1,4 @@
-package ee.schimke.composeai.cli.serve
+package ee.schimke.composeai.uibuilder.export
 
 import ee.schimke.composeai.discovery.ChainLink
 import ee.schimke.composeai.discovery.ScreenDocument
@@ -117,7 +117,7 @@ import kotlinx.serialization.json.doubleOrNull
  * `layout/scaffold`'s `topBar`, `snackbarHost` and `content` already match `Scaffold`'s, and so do
  * `m3/filter-chip`'s `label` and `leadingIcon`.
  */
-private val SLOT_PARAMETERS: Map<String, Map<String, String>> =
+internal val SLOT_PARAMETERS: Map<String, Map<String, String>> =
   mapOf(
     "layout/box" to mapOf("children" to "content"),
     "layout/column" to mapOf("children" to "content"),
@@ -127,7 +127,7 @@ private val SLOT_PARAMETERS: Map<String, Map<String, String>> =
 private fun parameterForSlot(componentId: String, slot: String): String =
   SLOT_PARAMETERS[componentId]?.get(slot) ?: slot
 
-internal object ScreenDocumentProjection {
+object ScreenDocumentProjection {
 
   sealed interface Outcome {
     data class Projected(val document: ScreenDocument) : Outcome

@@ -283,6 +283,9 @@ dependencies {
   // Authoritative persistence, validation, collaboration and export orchestration. The server
   // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
   api(project(":ui-builder-runtime"))
+  // The saved-document projection and the generator behind it. Multiplatform, so the
+  // browser editor reaches the same code rather than keeping an emitter of its own.
+  implementation(project(":ui-builder-export"))
 
   api(libs.composeai.common.web.escaping)
   // Published wire-format DTOs and the bundle format. `api` because they appear in this module's
@@ -573,7 +576,7 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
 
   // The render host and UI-builder runtime are the two deliberately published libraries beneath
   // the server. Everything else in this build reaching its classpath is still a failure.
-  allowedProjects.set(listOf(":render-host", ":ui-builder-runtime"))
+  allowedProjects.set(listOf(":render-host", ":ui-builder-runtime", ":ui-builder-export"))
 
   // The same implementations named twice, because they can arrive by two different routes and the
   // identity differs between them.
