@@ -161,22 +161,59 @@ class UiBuilderEnumExportTest {
   }
 
   @Test
+  fun `a button style and an icon-button variant select their components`() {
+    fun sourceFor(componentId: String, property: String, value: String) =
+      (ScreenExportGate.export(
+          document(
+            roots = listOf("button"),
+            nodes =
+              linkedMapOf(
+                "button" to
+                  DesignNodeV1(
+                    id = "button",
+                    componentId = componentId,
+                    properties = mapOf(property to EnumValueV1(value)),
+                    slots = mapOf("content" to listOf("label")),
+                  ),
+                "label" to
+                  DesignNodeV1(
+                    id = "label",
+                    componentId = "m3/text",
+                    properties = mapOf("text" to StringValueV1("Go")),
+                  ),
+              ),
+          ),
+          record,
+        ) as ScreenExportGate.Outcome.Emitted)
+        .source
+
+    // Twelve values, twelve components. `fab` is the one that is not a rename — see
+    // `ScreenDocumentProjectionTest` for the slot scope that follows from it.
+    assertTrue("FilledTonalButton(" in sourceFor("m3/button", "style", "filledTonal"))
+    assertTrue("TextButton(" in sourceFor("m3/button", "style", "text"))
+    assertTrue("FloatingActionButton(" in sourceFor("m3/button", "style", "fab"))
+    assertTrue("FilledIconButton(" in sourceFor("m3/icon-button", "variant", "filled"))
+    assertTrue("FilledTonalIconButton(" in sourceFor("m3/icon-button", "variant", "tonal"))
+    assertTrue("OutlinedIconButton(" in sourceFor("m3/icon-button", "variant", "outlined"))
+    assertTrue("IconButton(" in sourceFor("m3/icon-button", "variant", "standard"))
+  }
+
+  @Test
   fun `a variant nothing selects still refuses as a variant, not as a missing entry`() {
-    // `m3/button`.`style` includes `fab`, which is a different component with a different
-    // signature rather than another spelling of `Button`, so nothing selects it yet. The refusal
-    // must keep reading as a call-site decision rather than as a table entry somebody could add.
+    // `layout/supporting-pane-scaffold` is an adaptive API whose panes are not plain composable
+    // slots, so nothing selects its `layoutMode`. The refusal must keep reading as a call-site
+    // decision rather than as a table entry somebody could add.
     val refusals =
       ScreenExportGate.refusals(
         document(
-          roots = listOf("button"),
+          roots = listOf("panes"),
           nodes =
             linkedMapOf(
-              "button" to
+              "panes" to
                 DesignNodeV1(
-                  id = "button",
-                  componentId = "m3/button",
-                  properties = mapOf("style" to EnumValueV1("filledTonal")),
-                  slots = mapOf("content" to emptyList()),
+                  id = "panes",
+                  componentId = "layout/supporting-pane-scaffold",
+                  properties = mapOf("layoutMode" to EnumValueV1("expandedTwoPane")),
                 )
             ),
         ),
