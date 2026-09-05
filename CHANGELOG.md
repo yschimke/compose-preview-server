@@ -1,5 +1,34 @@
 # Changelog
 
+## [3.3.0](https://github.com/yschimke/compose-preview-server/compare/v3.2.0...v3.3.0) (2026-09-05)
+
+
+### Features
+
+* **ui-builder:** author every WearWidgetBrush background on the widget container ([#328](https://github.com/yschimke/compose-preview-server/issues/328)) ([d7f4b7b](https://github.com/yschimke/compose-preview-server/commit/d7f4b7b15b4f5948c4666f3f02a6ae93a71f90b4))
+* **ui-builder:** author Wear screens with a stadium ScreenScaffold stand-in ([#354](https://github.com/yschimke/compose-preview-server/issues/354)) ([38e2db6](https://github.com/yschimke/compose-preview-server/commit/38e2db6348cf7e6d16fe52bbe8c6a6822a2f2f86))
+* **ui-builder:** canvas-forward editor chrome on collapsible docks ([#340](https://github.com/yschimke/compose-preview-server/issues/340)) ([149a8c8](https://github.com/yschimke/compose-preview-server/commit/149a8c8904834c13efb847df73e955e5c00462c7))
+* **ui-builder:** capture a component onto the reference, and build it back ([#322](https://github.com/yschimke/compose-preview-server/issues/322)) ([66c3c88](https://github.com/yschimke/compose-preview-server/commit/66c3c88fbbea73805405f504953760a5a426279b))
+* **ui-builder:** create a design with POST or PUT, never a GET ([#342](https://github.com/yschimke/compose-preview-server/issues/342)) ([bec4952](https://github.com/yschimke/compose-preview-server/commit/bec49528827dde989b8046713bcbe0a51252e010))
+* **ui-builder:** discuss a design where it is built, and watch the discussion ([#351](https://github.com/yschimke/compose-preview-server/issues/351)) ([04ccf86](https://github.com/yschimke/compose-preview-server/commit/04ccf8648bbc863188f4fedd1f782d228a4c8cf8))
+* **ui-builder:** forward to the permalink once a design is created ([#329](https://github.com/yschimke/compose-preview-server/issues/329)) ([21d6fac](https://github.com/yschimke/compose-preview-server/commit/21d6facf59062d98469d70cf57c656765c0d5515))
+* **ui-builder:** generate a Wear widget's own Kotlin, not the fake container's ([#331](https://github.com/yschimke/compose-preview-server/issues/331)) ([7027196](https://github.com/yschimke/compose-preview-server/commit/7027196255b478fc46cd2cde1b7ee0c4c835fbb9))
+* **ui-builder:** name a design in the path, not the query ([#327](https://github.com/yschimke/compose-preview-server/issues/327)) ([75bc3cb](https://github.com/yschimke/compose-preview-server/commit/75bc3cbeedb1d2dbba966b25121178cceef36cb7))
+* **ui-builder:** resolve catalog enum values and property names for Compose export ([#349](https://github.com/yschimke/compose-preview-server/issues/349)) ([4ed6d45](https://github.com/yschimke/compose-preview-server/commit/4ed6d45040e672d789757799ece6ee925e3c207d))
+* **ui-builder:** serve the bundle under a content prefix, cached immutably ([#326](https://github.com/yschimke/compose-preview-server/issues/326)) ([ab0f6ed](https://github.com/yschimke/compose-preview-server/commit/ab0f6edddf7e1cd06e4b9583bad061fd83a0b525))
+* **ui-builder:** syntax-highlight the Code pane ([#335](https://github.com/yschimke/compose-preview-server/issues/335)) ([db046dc](https://github.com/yschimke/compose-preview-server/commit/db046dc52365a21e73d4c27cec446a9c377d3c60))
+* **ui-builder:** the Hello and Weather Wear widgets as worked templates ([#323](https://github.com/yschimke/compose-preview-server/issues/323)) ([a25d7db](https://github.com/yschimke/compose-preview-server/commit/a25d7db67d3f5e8446df49787e6b7a4a67692b5d))
+
+
+### Bug Fixes
+
+* **ui-builder:** export the document type its own API is written in ([#348](https://github.com/yschimke/compose-preview-server/issues/348)) ([d58973b](https://github.com/yschimke/compose-preview-server/commit/d58973b08c424a9ac945f4dd54328e9ffacbe5d3))
+* **ui-builder:** honour the arrangement and alignment the catalog declares ([#343](https://github.com/yschimke/compose-preview-server/issues/343)) ([344985b](https://github.com/yschimke/compose-preview-server/commit/344985be1f58e9ff0e3ab4d96357b2f7126faf58))
+* **ui-builder:** model the Wear widget scaffold on WearWidgetContainer ([#325](https://github.com/yschimke/compose-preview-server/issues/325)) ([d439b94](https://github.com/yschimke/compose-preview-server/commit/d439b9434d5bc87bad7eb3e572f728fa283f5d8c))
+* **ui-builder:** name each slot in the layers panel, and land the layer drag ([#334](https://github.com/yschimke/compose-preview-server/issues/334)) ([1b25d98](https://github.com/yschimke/compose-preview-server/commit/1b25d9829c903e0ed4638073891aa2fe284e25ed))
+* **ui-builder:** point EditorLayerDragTest at the renamed capability fixture ([#347](https://github.com/yschimke/compose-preview-server/issues/347)) ([deb60f3](https://github.com/yschimke/compose-preview-server/commit/deb60f32d6a025f713f0a8ac324356d15412c677))
+* **ui-builder:** report why a native render came back without a frame ([#330](https://github.com/yschimke/compose-preview-server/issues/330)) ([787a7be](https://github.com/yschimke/compose-preview-server/commit/787a7bef3a97f30a5594da028307eead7596cc99))
+
 ## [3.2.0](https://github.com/yschimke/compose-preview-server/compare/v3.1.0...v3.2.0) (2026-09-05)
 
 
