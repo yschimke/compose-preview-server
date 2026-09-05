@@ -565,7 +565,7 @@ class ServeHttpServer(
   private val renderSemaphore = Semaphore(renderSlots)
   private val catalogMcp =
     if (catalogMcpEnabled && machineAuthorization != null)
-      ServeCatalogMcp(sessions, renderSemaphore)
+      ServeCatalogMcp(sessions, renderSemaphore, projectHistory = projectHistory)
     else null
   private val unleasedThemeSemaphore = Semaphore(1)
   private val themeRenderLeases = ThemeRenderLeaseManager(renderSlots)
