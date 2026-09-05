@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.protocol.BooleanValueV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
@@ -188,7 +189,7 @@ class M3CatalogComponentRecordTest {
                 DesignNodeV1(
                   id = "column",
                   componentId = "layout/column",
-                  slots = mapOf("children" to listOf("heading", "divider")),
+                  slots = mapOf("children" to listOf("heading", "divider", "agree")),
                 ),
               "heading" to
                 DesignNodeV1(
@@ -201,6 +202,16 @@ class M3CatalogComponentRecordTest {
                     ),
                 ),
               "divider" to DesignNodeV1(id = "divider", componentId = "m3/horizontal-divider"),
+              // A selection control, which is the shape the record could not carry until now: its
+              // required `onCheckedChange` is nullable, so a call site can write `null` for it, and
+              // `checked` is an ordinary boolean the document supplies. Included here because a
+              // record nothing generates against is a table nobody has checked.
+              "agree" to
+                DesignNodeV1(
+                  id = "agree",
+                  componentId = "m3/checkbox",
+                  properties = mapOf("checked" to BooleanValueV1(true)),
+                ),
             ),
         )
 
@@ -231,6 +242,8 @@ class M3CatalogComponentRecordTest {
     assertTrue(source.contains("Column(content = {"), source)
     assertTrue(source.contains("""Text(text = "Discover""""), source)
     assertTrue(source.contains("HorizontalDivider("), source)
+    assertTrue(source.contains("Checkbox("), source)
+    assertTrue(source.contains("checked = true"), source)
     assertTrue(!source.contains("children ="), source)
   }
 
