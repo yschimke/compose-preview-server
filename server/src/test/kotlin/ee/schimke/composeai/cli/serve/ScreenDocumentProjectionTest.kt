@@ -188,16 +188,19 @@ class ScreenDocumentProjectionTest {
   }
 
   @Test
-  fun `a variant nothing selects is refused as a call-site decision, not as a missing member`() {
-    // A variant property is not a value at all: it names a component. Where `COMPONENT_VARIANTS`
-    // says which one, the projection selects it; where nothing does — `layout/supporting-pane
-    // -scaffold` is an adaptive API with no record — this is the sentence, and it has to keep
-    // reading as a call-site decision rather than as a table entry somebody could add.
+  fun `a variant nothing selects is refused for its own reason, not a card's`() {
+    // A variant property is not a value at all. Where `COMPONENT_VARIANTS` says which component it
+    // names, the projection selects it; where nothing does, this is the sentence — and it has to
+    // describe **this** property. It used to say "the catalog spells three Compose components as
+    // one id", which was true of `m3/card` and has never been true of `layoutMode`: `adaptive`,
+    // `expandedTwoPane`, `singlePane` and `twoPane` are modes of one adaptive component. The
+    // reason is authored per entry now, which is what keeps that from happening again.
     assertEquals(
       listOf(
-        "node `panes`.`layoutMode` is `expandedTwoPane`, which names a component variant rather " +
-          "than a value: the catalog spells three Compose components as one id, and choosing " +
-          "between them is a call-site decision this projection cannot make from a parameter"
+        "node `panes`.`layoutMode` is `expandedTwoPane`, which names a layout mode of one " +
+          "adaptive component rather than a value: `SupportingPaneScaffold` decides how many " +
+          "panes to show from a scaffold directive and the window it is measured in, so there " +
+          "is no parameter for a mode to be written to"
       ),
       refusal(
         document(
