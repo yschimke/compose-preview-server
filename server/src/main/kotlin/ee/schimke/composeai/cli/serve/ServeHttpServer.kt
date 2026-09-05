@@ -7880,6 +7880,7 @@ class ServeHttpServer(
                 spatial = p.spatial,
                 liveOnly = p.id in renderHost.liveOnlyPreviewIds,
                 views = previewEngagement.getValue(p.id).views,
+                remoteCompose = renderHost.hasRemoteComposeDoc(p.id),
               )
             },
         )
@@ -13191,6 +13192,19 @@ private data class PreviewDto(
   val liveOnly: Boolean = false,
   /** Number of viewer page opens for this preview since this server process started. */
   val views: Long = 0,
+  /**
+   * True when this preview publishes a Remote Compose document, fetchable verbatim at `GET
+   * /{system}/render/{id}.rc`.
+   *
+   * Not derivable from anything else on this DTO: `modes` describes how the *pixels* are produced,
+   * and a `snapshot` preview from a Remote Compose catalog carries an `ir/<id>.rc` sidecar while an
+   * otherwise identical one from a Jetpack Compose catalog does not. A client that wants the
+   * document rather than the raster — the UI builder's Remote Compose palette, an offline player
+   * harness — had to fetch `.rc` for every preview and treat 404 as "no", which is a request per
+   * preview to learn something the host already knows. Additive since `compose-preview-serve/v3`;
+   * false is both the default and the honest answer for a daemon-only host.
+   */
+  val remoteCompose: Boolean = false,
 )
 
 /**
