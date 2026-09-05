@@ -997,6 +997,11 @@ class ServeHttpServer(
         // A runtime id is an exact immutable pin. There is deliberately no unversioned or
         // `latest` route: an unavailable pin has to surface as an explicit migration decision.
         get("/ui-builder/runtime/{runtimeId}/{path...}") { handleUiBuilderRuntimeAsset() }
+        // The bundle under a content-addressed prefix. Registered before the catch-all so the
+        // prefix is matched as a version rather than as the first path segment of a bundle file.
+        get("/ui-builder/$UI_BUILDER_VERSION_SEGMENT/{version}/{path...}") {
+          handleUiBuilderVersionedAsset()
+        }
         get("/ui-builder/{path...}") { handleUiBuilderAsset() }
 
         // The CMP/Wasm Remote Compose player is a single shared app rather than a per-catalog app.
@@ -11040,14 +11045,76 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    val segments = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
+    serveUiBuilderPath(dir, call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() })
+  }
+
+  /** `GET /ui-builder/v/{version}/{path...}`: the same bundle under an immutable prefix. */
+  private suspend fun RoutingContext.handleUiBuilderVersionedAsset() {
+    val dir = uiBuilderDir
+    if (dir == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val version = call.parameters["version"].orEmpty()
+    val rest = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
+    // A catalog served under the id `v` would otherwise be shadowed by this route and unreachable.
+    // Absurd as an id, and exactly the kind of thing that is absurd until somebody does it, so the
+    // catalog wins and simply gets no versioned URLs rather than a 404 nobody can explain.
+    if (UI_BUILDER_VERSION_SEGMENT in uiBuilderCatalogs) {
+      serveUiBuilderPath(dir, listOf(UI_BUILDER_VERSION_SEGMENT, version) + rest)
+      return
+    }
+    serveUiBuilderPath(dir, rest, version = version)
+  }
+
+  /**
+   * One bundle, reachable unversioned or under a content prefix.
+   *
+   * The prefix goes on the **directory**, not on each filename, because nothing in the bundle can
+   * be rewritten: `index.html` names `uiBuilder.mjs` relatively, that module fetches `skiko.wasm`
+   * and `uiBuilder.wasm` relative to its own URL, and all of it is emitted by the Kotlin/Wasm
+   * build. Moving the whole tree under `/ui-builder/v/<digest>/` carries every one of those
+   * relative references with it, with no string surgery on generated output.
+   *
+   * [version] null means the request arrived at the unversioned path. The entry document then
+   * redirects to the current prefix — that redirect is the one revalidated response, and it is what
+   * a rollout changes. A non-entry file stays served here, uncached, so a URL somebody already
+   * holds keeps working.
+   */
+  private suspend fun RoutingContext.serveUiBuilderPath(
+    dir: File,
+    segments: List<String>,
+    version: String? = null,
+  ) {
     val scopedCatalog = segments.firstOrNull()?.takeIf(uiBuilderCatalogs::contains)
     if (scopedCatalog != null && segments.size == 1 && !call.request.path().endsWith("/")) {
-      call.respondRedirect("/ui-builder/$scopedCatalog/")
+      call.respondRedirect(uiBuilderEntryPath(scopedCatalog, version))
       return
     }
     val assetSegments = if (scopedCatalog == null) segments else segments.drop(1)
-    val rel = if (assetSegments.isEmpty()) "index.html" else assetSegments.joinToString("/")
+    val entry = assetSegments.isEmpty()
+    val current = uiBuilderBundleVersion
+    if (version == null && entry) {
+      call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+      call.respondRedirect(uiBuilderEntryPath(scopedCatalog, current))
+      return
+    }
+    if (version != null && version != current) {
+      // Only one bundle exists on disk, so a prefix naming another version has no bytes to serve.
+      // Answering with the current ones would make an immutable URL return two different files
+      // over its life, which is the single promise the prefix exists to keep. An entry document is
+      // sent to the current prefix instead — a stale bookmark still opens the builder — and a
+      // stale asset 404s, which is a tab still running last release's HTML being told to reload
+      // rather than being quietly handed this release's Wasm to run against it.
+      if (entry) {
+        call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+        call.respondRedirect(uiBuilderEntryPath(scopedCatalog, current))
+      } else {
+        call.respondText("not found", status = HttpStatusCode.NotFound)
+      }
+      return
+    }
+    val rel = if (entry) "index.html" else assetSegments.joinToString("/")
     val base = dir.canonicalFile.toPath()
     val file = File(dir, rel).canonicalFile
     if (!file.toPath().startsWith(base) || !file.isFile) {
@@ -11055,7 +11122,10 @@ class ServeHttpServer(
       return
     }
     val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
-    call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    call.response.headers.append(
+      HttpHeaders.CacheControl,
+      if (version == null) "no-cache" else UI_BUILDER_IMMUTABLE_CACHE_CONTROL,
+    )
     call.response.headers.append(HttpHeaders.ETag, etag)
     if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
       call.respond(HttpStatusCode.NotModified)
@@ -11063,6 +11133,51 @@ class ServeHttpServer(
     }
     val bytes = withContext(Dispatchers.IO) { file.readBytes() }
     call.respondBytes(bytes, wasmContentType(file.name))
+  }
+
+  /**
+   * A digest of the builder bundle's contents, used as its immutable URL prefix.
+   *
+   * Content, not `lastModified`. The bundle is baked into the deploy image, and an image rebuild
+   * rewrites timestamps whether or not a byte changed — so an mtime digest would retire every
+   * viewer's cached 44 MB on a redeploy that shipped the identical builder. Reading the tree costs
+   * one pass, and `by lazy` spends it on the first request rather than on every server's startup,
+   * including the ones with no builder at all.
+   *
+   * Path and length are mixed in alongside the bytes so a rename, or two files swapping contents,
+   * is a different bundle. Files are visited in sorted order because a filesystem's own order is
+   * not a promise, and a digest that depended on it would differ between two hosts serving the same
+   * bytes.
+   */
+  private val uiBuilderBundleVersion: String by lazy {
+    val dir = uiBuilderDir ?: return@lazy "none"
+    val base = dir.canonicalFile.toPath()
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(64 * 1024)
+    dir
+      .walkTopDown()
+      // A symlink out of the bundle is not part of it, and the serving path refuses to follow one
+      // anyway; hashing its target would let something outside the tree name the version.
+      .filter { it.isFile && it.canonicalFile.toPath().startsWith(base) }
+      .sortedBy { it.toPath().toAbsolutePath().normalize().toString() }
+      .forEach { file ->
+        digest.update(base.relativize(file.canonicalFile.toPath()).toString().toByteArray())
+        digest.update(file.length().toString().toByteArray())
+        file.inputStream().use { stream ->
+          while (true) {
+            val read = stream.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+          }
+        }
+      }
+    digest.digest().take(8).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+  }
+
+  private fun uiBuilderEntryPath(catalog: String?, version: String?): String {
+    val prefix =
+      if (version == null) "/ui-builder/" else "/ui-builder/$UI_BUILDER_VERSION_SEGMENT/$version/"
+    return if (catalog == null) prefix else "$prefix$catalog/"
   }
 
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {
@@ -12106,6 +12221,17 @@ class ServeHttpServer(
 
     /** Variant renders and all token-gated responses stay out of shared and browser caches. */
     private const val DYNAMIC_RESOURCE_CACHE_CONTROL = "no-store"
+
+    /** The path segment that introduces a UI-builder bundle version. */
+    private const val UI_BUILDER_VERSION_SEGMENT = "v"
+
+    /**
+     * A year, and `immutable` so a reload does not revalidate either.
+     *
+     * Safe only because the URL carries the bundle's content digest: the bytes behind one of these
+     * paths cannot change, so there is nothing for a revalidation to discover.
+     */
+    private const val UI_BUILDER_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
     /**
      * [STATIC_RESOURCE_CACHE_CONTROL]'s lifetime for a **bare player replay** on a box that is not

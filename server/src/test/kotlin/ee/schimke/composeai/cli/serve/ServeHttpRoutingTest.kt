@@ -1949,13 +1949,70 @@ class ServeHttpRoutingTest {
           assertEquals("/ui-builder/", response.header("Location"))
         }
       }
+      // The unversioned entry is a revalidated redirect into the content-addressed prefix. That
+      // redirect is the only thing a rollout has to invalidate; everything it points at is
+      // immutable.
+      val versionedEntry =
+        fetch("/ui-builder/", noRedirects).let { (code, response) ->
+          response.use {
+            assertEquals(302, code)
+            assertEquals("no-cache", response.header("Cache-Control"))
+            val location = response.header("Location")!!
+            assertTrue(location.startsWith("/ui-builder/v/"), location)
+            assertTrue(location.endsWith("/"), location)
+            location
+          }
+        }
+      fetch(versionedEntry).let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertTrue(response.body.string().contains("Compose UI builder"))
+          assertEquals(
+            "public, max-age=31536000, immutable",
+            response.header("Cache-Control"),
+          )
+        }
+      }
+      // Following the redirect still lands on the builder, so an existing link is unaffected.
       fetch("/ui-builder/").let { (code, response) ->
         response.use {
           assertEquals(200, code)
           assertTrue(response.body.string().contains("Compose UI builder"))
-          assertEquals("no-cache", response.header("Cache-Control"))
         }
       }
+      // A versioned asset is immutable and still answers a conditional request cheaply.
+      val versionedAsset = versionedEntry + "builder.mjs"
+      val assetEtag =
+        fetch(versionedAsset).let { (code, response) ->
+          response.use {
+            assertEquals(200, code)
+            assertEquals("window.composeUiBuilder = true", response.body.string())
+            assertEquals(
+              "public, max-age=31536000, immutable",
+              response.header("Cache-Control"),
+            )
+            response.header("ETag")!!
+          }
+        }
+      Request.Builder()
+        .url("http://127.0.0.1:${builderServer.port}$versionedAsset")
+        .header("If-None-Match", assetEtag)
+        .build()
+        .let { client.newCall(it).execute() }
+        .use { assertEquals(304, it.code) }
+      // A prefix naming a bundle this server does not have has no bytes to serve. The entry goes
+      // to the current one so a stale bookmark still opens; a stale asset 404s, so a tab running
+      // last release's HTML reloads rather than being handed this release's Wasm.
+      fetch("/ui-builder/v/0000000000000000/", noRedirects).let { (code, response) ->
+        response.use {
+          assertEquals(302, code)
+          assertEquals(versionedEntry, response.header("Location"))
+        }
+      }
+      assertEquals(
+        404,
+        fetch("/ui-builder/v/0000000000000000/builder.mjs").second.use { it.code },
+      )
       fetch("/ui-builder/builder.mjs").let { (code, response) ->
         response.use {
           assertEquals(200, code)
@@ -1979,6 +2036,13 @@ class ServeHttpRoutingTest {
         response.use {
           assertEquals(302, code)
           assertEquals("/ui-builder/remote-m3/", response.header("Location"))
+        }
+      }
+      // A catalog-scoped entry keeps its scope through the versioned prefix.
+      fetch("/ui-builder/remote-m3/", noRedirects).let { (code, response) ->
+        response.use {
+          assertEquals(302, code)
+          assertEquals("${versionedEntry}remote-m3/", response.header("Location"))
         }
       }
       fetch("/ui-builder/remote-m3/").let { (code, response) ->
