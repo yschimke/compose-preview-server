@@ -123,7 +123,7 @@ class M3CatalogComponentRecordTest {
       // and both are lambdas — `rememberCarouselState { n }` is a factory whose argument is one,
       // and the slot is called per index rather than per child.
       "layout/horizontal-carousel" to
-        "takes a CarouselState from rememberCarouselState { n }, whose argument is a lambda, and its content slot is called per item index rather than per child",
+        "takes a CarouselState from rememberCarouselState { n }, whose argument is a lambda, and its content slot is called per item index rather than per child (compose-ai-tools#5218)",
       "layout/supporting-pane-scaffold" to "adaptive API; panes are not plain composable slots",
       "m3/center-aligned-top-app-bar" to
         "scrollBehavior is a TopAppBarScrollBehavior from a remembered factory, which no ScreenValue expresses",
