@@ -82,5 +82,13 @@ repository boundary.
   class files leave the build solely inside `:ui-builder-render-bundle`'s polyglot, sit above it.
   Building needs both JDKs. Never raise a module's toolchain by editing the module —
   `:server:checkServerJvmFloor` scans the resolved distribution classpath and will say so.
+- **Never fabricate a component in the Wasm canvas to stand in for a library the canvas cannot
+  link.** The editor's canvas is Compose Multiplatform for Wasm; `androidx.wear.compose` is an
+  Android AAR it can never link, and hand-assembling a lookalike out of Material 3 pieces produces an
+  impression nothing in this build can check. A catalog whose components the canvas cannot draw gets
+  its fidelity from the streaming preview lane, which compiles the generated Kotlin against a real
+  classpath — not from a replica maintained here. Stated once, with the decision and what it costs,
+  in [`docs/design/UI_BUILDER_WEAR_SCREEN.md`](docs/design/UI_BUILDER_WEAR_SCREEN.md#the-line-a-component-is-never-faked-so-it-can-run-in-wasm)
+  ([#395](https://github.com/yschimke/compose-preview-server/pull/395) is the change it closed).
 - The source package stays `ee.schimke.composeai.cli.serve` until a separately reviewed rename.
 - UI-affecting PRs include viewable before/after evidence and update the visual harness when needed.
