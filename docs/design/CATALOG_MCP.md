@@ -121,7 +121,10 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
 | `ui_builder_list_catalogs`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to, the designs on this box, and one design's whole document |
 | `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one |
+| `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
+| `ui_builder_list_comments`, `ui_builder_await_comments` | `ui-builder-read` | Read a design's discussion, and **wait** for the next thing said in it |
+| `ui_builder_post_comment`, `ui_builder_resolve_comment_thread` | `ui-builder-write` | Say something on a design, and close a thread once it is answered |
 
 The `ui_builder_*` tools appear in `tools/list` only on a box that actually serves a UI builder
 (`--ui-builder-dir`). A box without one does not advertise them, because listed-and-failing tells an
@@ -144,6 +147,29 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
 4. `ui_builder_apply` — `operations` is an array of `DesignMutationV1`: `insertNode`, `setProperty`,
    `deleteNode`, `moveNode` and the rest. `operationId` is yours, and makes a retry idempotent.
 5. `ui_builder_export` — the Kotlin, or the refusals.
+
+### Watching, rather than asking again
+
+Two tools block instead of returning at once: `ui_builder_await_design` waits for the design to move
+past a `lastSequence` you quote, and `ui_builder_await_comments` waits for the discussion to move
+past a `sequence` you quote. Both return the moment a designer in the browser or another agent does
+something, and answer a `timedOut` reply when nothing happens within `waitSeconds`, which you act on
+by calling again with the same cursor. `ui_builder_await_design` replies with the released
+`DesignUpdateEnvelopeV1` — the identical frame the browser's own `/updates` socket receives.
+
+**Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, and this
+endpoint deliberately cannot send one: `/mcp` is stateless JSON-RPC, `GET /mcp` — the
+Streamable-HTTP listening stream a notification travels on — answers `405`, and `initialize`
+advertises `resources: {"subscribe": false}` rather than claiming otherwise. Honouring
+`resources/subscribe` would mean session ids, a per-session SSE stream, resumability and
+server-held subscription state: a stateful transport, which is the property this endpoint is built
+not to have. A call that blocks needs none of it, and it is the shape `poll_access` already uses
+here.
+
+Presence never wakes `ui_builder_await_design`. Who is looking at a design, and what they have
+selected, is excluded by design from the document, the revision and the durable sequence; waking an
+agent because a colleague moved their cursor would spend a tool call on something with nothing to
+act on.
 
 Two things are deliberately **not** taken from the message. The command's nested `actorId` is filled
 from the presented grant, because `UiBuilderProtocolMapper` rejects a command whose actor is not the
