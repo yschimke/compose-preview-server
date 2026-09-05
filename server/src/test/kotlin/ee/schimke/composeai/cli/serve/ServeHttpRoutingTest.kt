@@ -2489,6 +2489,20 @@ class ServeHttpRoutingTest {
   }
 
   @Test
+  fun `api previews says which previews publish a remote compose document`() {
+    // The flag the UI builder's Remote Compose palette reads: without it a client has to fetch
+    // `.rc` for every preview and read 404 as "no". `modes` cannot answer this — both sessions
+    // below are snapshot-backed, and only one carries an `ir/<id>.rc`.
+    val (code, api) = get("/compose-m3/api/previews")
+    assertEquals(200, code)
+    assertTrue(api.contains("\"remoteCompose\":true"), "rc document capability: $api")
+
+    val (bareCode, bare) = get("/api/previews?session=default-mod")
+    assertEquals(200, bareCode)
+    assertFalse(bare.contains("\"remoteCompose\":true"), "no rc sidecar, no claim: $bare")
+  }
+
+  @Test
   fun `a bundle without an rc sidecar 404s the rc render lane`() {
     // default-mod carries no `ir/` tree, so the client-side player lane resolves to NotFound rather
     // than serving an empty document.
