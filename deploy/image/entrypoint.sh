@@ -230,8 +230,14 @@ fi
 if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   args+=(--ui-builder-dir /opt/compose-preview-server/ui-builder)
   # Catalog publication does not imply authoring support. Enable only the explicitly reviewed
-  # catalog adapters; this deployment carries M3 plus the Remote Compose M3 catalog.
-  args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}")
+  # catalog adapters; this deployment carries M3, the Remote Compose M3 catalog, and Wear M3.
+  #
+  # `wear-m3` joins the default now that its canvas is checked rather than asserted: the Kotlin it
+  # generates is rendered by real Wear Compose in compose-ai-tools' `wear-m3` harness catalog, and
+  # the stitched `ScrollMode.LONG` capture matches the builder's own picture to a dp. Enabling an
+  # adapter is a claim that what an author sees is what they get, and that claim now has a render
+  # behind it.
+  args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}")
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")

@@ -305,7 +305,7 @@ services:
       # replacements, so a design does not disappear when preview.coo.ee updates.
       SERVE_UI_BUILDER_STATE_DIR: "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}"
       # Explicit authoring allowlist; publishing another preview catalog does not expose a builder.
-      SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}"
+      SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}"
       # The component record the Compose export generates from. The image ships one for
       # `m3-catalog` and the entrypoint installs it by default, so this is an override for a box
       # carrying its own discovery output — an empty value keeps the packaged record.
