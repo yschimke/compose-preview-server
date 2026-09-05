@@ -392,6 +392,12 @@ class ServeHttpServer(
    */
   private val uiBuilderNativePreview: UiBuilderNativePreviewLane? = null,
   /**
+   * Per-design reference overlays. Null leaves the reference routes unregistered, which is the
+   * honest answer on a host with no durable UI-builder state: an overlay that cannot outlive the
+   * session is not the feature, and a route that always forgets is worse than one that is absent.
+   */
+  private val uiBuilderReferenceStore: ServeUiBuilderReferenceStore? = null,
+  /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
    * has resolved. Null when the lane isn't wired at all. See [PlaygroundHealth].
@@ -848,6 +854,13 @@ class ServeHttpServer(
       routing {
         if (uiBuilderService != null && uiBuilderAuthorization != null) {
           installUiBuilderRoutes(uiBuilderService, uiBuilderAuthorization, uiBuilderNativePreview)
+          if (uiBuilderReferenceStore != null) {
+            installUiBuilderReferenceRoutes(
+              uiBuilderService,
+              uiBuilderAuthorization,
+              uiBuilderReferenceStore,
+            )
+          }
         }
         // `/healthz` — ungated liveness: "ok" the moment the listener is up. Leaks nothing, and
         // proves nothing beyond "the process is answering HTTP". The rolling-update gate is
