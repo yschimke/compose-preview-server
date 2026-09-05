@@ -279,6 +279,34 @@ test("a right-click on a layer opens the verbs that act on it", async ({ page })
     });
 });
 
+test("the layer menu lays a container out without opening a panel", async ({ page }) => {
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+    await openDock(page, "layers");
+
+    const row = await page.getByRole("button", { name: /Select main-background/ }).boundingBox();
+    expect(row).not.toBeNull();
+    await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2, { button: "right" });
+    await settle(page);
+
+    // The fixture's background has no padding, so the row offers to add one; the catalog is what
+    // says the modifier may go on this component at all.
+    await clickCompose(page, page.getByRole("button", { name: "Apply Pad by 16" }));
+    await waitForEditor(page, 109);
+    expect(
+        await page.evaluate(
+            () =>
+                globalThis.__uiBuilderEditor?.outcome === "accepted" &&
+                globalThis.__uiBuilderEditor?.operationSequence === 1,
+        ),
+    ).toBe(true);
+
+    // And the same row now offers to take it away.
+    await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2, { button: "right" });
+    await settle(page);
+    await expect(page.getByRole("button", { name: "Remove Pad by 16" })).toBeVisible();
+});
+
 test("the property inspector selects Google icons from a searchable catalog", async ({
     page,
 }, testInfo) => {
