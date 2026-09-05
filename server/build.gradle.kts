@@ -5,6 +5,7 @@ import org.gradle.api.artifacts.result.ResolvedArtifactResult
 import org.gradle.api.attributes.Category
 import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.attributes.Usage
+import org.gradle.api.publish.maven.tasks.GenerateMavenPom
 import org.gradle.api.tasks.ClasspathNormalizer
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.Sync
@@ -809,6 +810,69 @@ val stageRcFontResources =
   }
 
 sourceSets.main.get().resources.srcDir(stageRcFontResources)
+
+// The POM this module publishes must name coordinates a consumer can resolve.
+//
+// 3.1.0 shipped one that could not. `:server` gained
+// `implementation(project(":ui-builder-export"))`
+// while that module had no publishing configuration, so Gradle wrote the only identity it had into
+// the POM — `compose-preview-server:ui-builder-export-jvm:unspecified` — and every consumer of
+// `compose-preview-serve:3.1.0` failed to resolve it, including compose-ai-tools' own wire-drift
+// tests. Nothing caught it: the build was green, the publish succeeded, and the artifact was broken
+// only for the people downloading it.
+//
+// So this reads the generated POM rather than the build files. `unspecified` is the tell for an
+// unpublished project dependency, and a `groupId` equal to the Gradle root project name is the tell
+// for the same thing wearing a different mask — neither can appear in a POM anyone can use.
+abstract class CheckPublishedPomCoordinates : DefaultTask() {
+  @get:InputFiles abstract val pomFiles: ConfigurableFileCollection
+
+  @get:Input abstract val rootProjectName: Property<String>
+
+  @TaskAction
+  fun check() {
+    val root = rootProjectName.get()
+    val bad =
+      pomFiles.files
+        .filter { it.isFile }
+        .flatMap { pom ->
+          Regex("<dependency>(.*?)</dependency>", RegexOption.DOT_MATCHES_ALL)
+            .findAll(pom.readText())
+            .map { it.groupValues[1] }
+            .filter { dep ->
+              dep.contains("<version>unspecified</version>") ||
+                dep.contains("<groupId>$root</groupId>")
+            }
+            .map { dep ->
+              val field = { name: String ->
+                Regex("<$name>([^<]*)</$name>").find(dep)?.groupValues?.get(1) ?: "?"
+              }
+              "${field("groupId")}:${field("artifactId")}:${field("version")}"
+            }
+            .toList()
+        }
+        .sorted()
+
+    check(bad.isEmpty()) {
+      "The published POM names dependencies nobody can resolve: ${bad.joinToString(", ")}.\n" +
+        "A project dependency reaches the POM as a coordinate, so every project :server depends " +
+        "on at runtime has to be published - give it the maven-publish plugin, a group, a version " +
+        "and coordinates, and add it to release.yml's publish list. This is what broke " +
+        "compose-preview-serve 3.1.0."
+    }
+  }
+}
+
+val checkPublishedPomCoordinates =
+  tasks.register<CheckPublishedPomCoordinates>("checkPublishedPomCoordinates") {
+    description = "Fails if the published POM names an unresolvable coordinate."
+    group = "verification"
+    dependsOn(tasks.withType<GenerateMavenPom>())
+    pomFiles.from(tasks.withType<GenerateMavenPom>().map { it.destination })
+    rootProjectName.set(rootProject.name)
+  }
+
+tasks.named("check") { dependsOn(checkPublishedPomCoordinates) }
 
 mavenPublishing {
   publishToMavenCentral(automaticRelease = true)
