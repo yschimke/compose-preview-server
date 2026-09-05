@@ -230,7 +230,7 @@ internal fun Route.installUiBuilderRoutes(
                 imageBase64 = result.response.image,
                 taggedNodeIds = result.taggedNodeIds,
                 nodeBounds = result.nodeBounds.mapValues { (_, box) -> box.toNodeBoundsV1() },
-                compileError = result.response.exception,
+                compileError = result.failure,
               ),
             ),
             ContentType.Application.Json,
@@ -467,6 +467,13 @@ internal data class NativePreviewResultV1(
    * backend has no semantics producer, which costs the frame nothing.
    */
   val nodeBounds: Map<String, NativePreviewNodeBoundsV1> = emptyMap(),
+  /**
+   * Why there is no [imageBase64], in one sentence — a compiler error with its position, the
+   * compile lane's own exception, or "the renderer produced no frame". Null when a frame arrived.
+   *
+   * Named for the common case rather than renamed as it grew: a client keys off "is this null", and
+   * the field has carried a render-side reason since it started reporting one.
+   */
   val compileError: String? = null,
 )
 
