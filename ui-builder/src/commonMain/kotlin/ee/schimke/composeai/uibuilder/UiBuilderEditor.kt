@@ -2605,6 +2605,7 @@ private fun InsertPanel(
           is EditorCatalogRow.Variant ->
             CatalogVariantRow(
               variant = row.variant,
+              componentName = row.componentName,
               onDrag = { onCatalogDrag(row.variant.componentId, it) },
               onDrop = { onCatalogDrop(row.variant.componentId, row.variant, it) },
               canAdd = canAddCatalogComponent(row.variant.componentId),
@@ -3608,18 +3609,24 @@ private fun CatalogRow(
 @Composable
 private fun CatalogVariantRow(
   variant: EditorCatalogVariant,
+  /** The component this variant is of, for the names a screen reader and a script use. */
+  componentName: String,
   onDrag: (Offset?) -> Unit,
   onDrop: (Offset) -> Unit,
   canAdd: Boolean,
   onAdd: () -> Unit,
 ) {
   val label = variant.label
+  // "Filled tonal" is what the row shows, because the component it sits under is directly above it.
+  // What a script or a screen reader asks for has no such context and has to be unambiguous: a
+  // Button's `text` variant and the Text component would otherwise both answer to "Drag Text".
+  val qualified = "$label $componentName"
   Row(
     Modifier.fillMaxWidth().height(36.dp).padding(end = 4.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     IndentGuide(depth = 2)
-    CatalogDragHandle("${variant.componentId}#${variant.value}", label, onDrag, onDrop)
+    CatalogDragHandle("${variant.componentId}#${variant.value}", qualified, onDrag, onDrop)
     Row(Modifier.padding(start = 6.dp).weight(1f), verticalAlignment = Alignment.CenterVertically) {
       Text(
         label,
@@ -3638,7 +3645,7 @@ private fun CatalogVariantRow(
         )
       }
     }
-    CatalogAddButton(canAdd, onAdd, "$label ${variant.componentId}")
+    CatalogAddButton(canAdd, onAdd, qualified)
   }
 }
 

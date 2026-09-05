@@ -237,6 +237,68 @@ class CatalogMenuTest {
     assertEquals(0, componentsUnder(rows(cleared), "Containment").size, "the collapse came back")
   }
 
+  @Test
+  fun `a component the table does not know joins the shelf its kind names`() {
+    // `remote-m3`'s real shape: the two `remote-m3/widget-container-*` scaffolds this table says
+    // nothing about, beside the m3 components it does. Their kind label is "Scaffolds", which is
+    // also a declared shelf — so they join it rather than opening a second heading beside it, and
+    // the panel for that catalog reads as one tree. Nothing arranges that; it falls out of the
+    // fallback, which is exactly why it is worth a test.
+    val widget =
+      catalog.componentsById
+        .getValue("layout/scaffold")
+        .copy(
+          componentId = "remote-m3/widget-container-small",
+          displayName = "Wear widget · Small",
+        )
+    val rows =
+      UiBuilderEditorReducer(catalog.copy(components = catalog.components + widget))
+        .catalogRows(state)
+
+    assertEquals(
+      listOf("Scaffold", "Supporting pane scaffold", "Wear widget · Small"),
+      componentsUnder(rows, "Scaffolds").map { it.item.displayName },
+    )
+    assertEquals(
+      emptyList(),
+      rows
+        .filterIsInstance<EditorCatalogRow.Group>()
+        .map { it.name }
+        .filter {
+          it in EditorComponentKind.entries.map(EditorComponentKind::label) &&
+            it !in ComponentMenu.GROUP_ORDER
+        },
+      "an unshelved component opened a kind heading beside the real shelves",
+    )
+  }
+
+  @Test
+  fun `no two rows of one search answer to the same name`() {
+    // `ui-builder-editor.spec.mjs` drags `getByRole("img", {name: "Drag Text"})` after filtering to
+    // "Text", and Playwright's strict mode fails on a second match. Button's `text` variant is
+    // exactly that second match, which is why the variant rows qualify their names with the
+    // component. Every query anyone might type is checked, not just that one — the collision is a
+    // property of the panel, not of one string in one spec.
+    val queries = catalog.components.flatMap { listOf(it.displayName) + it.menuVariantValues() }
+    queries.forEach { query ->
+      val filtered = reducer.reduce(state, UiBuilderEditorEvent.SearchCatalog(query))
+      val names =
+        rows(filtered).mapNotNull {
+          when (it) {
+            is EditorCatalogRow.Component -> it.item.displayName
+            is EditorCatalogRow.Variant -> "${it.variant.label} ${it.componentName}"
+            is EditorCatalogRow.Group -> null
+          }
+        }
+
+      assertEquals(
+        names.distinct(),
+        names,
+        "two draggable rows share a name while filtering to “$query”",
+      )
+    }
+  }
+
   private fun rows(state: UiBuilderEditorState) = reducer.catalogRows(state)
 
   private fun componentsUnder(rows: List<EditorCatalogRow>, group: String) =

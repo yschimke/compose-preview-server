@@ -157,7 +157,15 @@ sealed interface EditorCatalogRow {
 
   data class Component(val item: EditorCatalogItem, val expanded: Boolean) : EditorCatalogRow
 
-  data class Variant(val variant: EditorCatalogVariant) : EditorCatalogRow
+  /**
+   * One variant, under the component row it belongs to.
+   *
+   * [componentName] rides along because the row draws only the variant's own label — "Filled tonal"
+   * — while the *name* a screen reader or a script asks for has to stand on its own: a Button's
+   * `text` variant and the Text component would otherwise both answer to "Drag Text".
+   */
+  data class Variant(val variant: EditorCatalogVariant, val componentName: String) :
+    EditorCatalogRow
 }
 
 data class EditorTreeRow(
@@ -1367,7 +1375,9 @@ class UiBuilderEditorReducer(
             item.variants.isNotEmpty() &&
               (filtering || item.componentId in state.expandedCatalogComponents)
           rows += EditorCatalogRow.Component(item, open)
-          if (open) item.variants.forEach { rows += EditorCatalogRow.Variant(it) }
+          if (open) {
+            item.variants.forEach { rows += EditorCatalogRow.Variant(it, item.displayName) }
+          }
         }
       }
     return rows
