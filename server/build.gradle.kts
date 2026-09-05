@@ -601,7 +601,14 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
 
   // The UI-builder runtime and its export module are the deliberately published libraries beneath
   // the server. Everything else in this build reaching its classpath is still a failure.
-  allowedProjects.set(listOf(":ui-builder-runtime", ":ui-builder-export"))
+  //
+  // `:ui-builder-render-bundle` is here because it is what the runtime's `api` edge now drags in:
+  // the packaged preview `PackagedUiBuilderRenderBundle.copyTo` materializes, which used to be a
+  // resource inside the runtime's own jar and is a published artifact of its own since #346. It
+  // has no source set — the jar is one PNG — so nothing about it reaches this classpath as code.
+  allowedProjects.set(
+    listOf(":ui-builder-runtime", ":ui-builder-export", ":ui-builder-render-bundle")
+  )
 
   // The same implementations named twice, because they can arrive by two different routes and the
   // identity differs between them.

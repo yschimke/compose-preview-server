@@ -17,7 +17,8 @@ PLUGIN_VERSION="${gate_version}" \
   --init-script "${fixture_root}/publish.init.gradle" \
   -PuiBuilderExtractionRepository="${published_repository}" \
   :ui-builder-runtime:publishMavenPublicationToUiBuilderExtractionRepository \
-  :ui-builder-web:publishMavenPublicationToUiBuilderExtractionRepository
+  :ui-builder-web:publishMavenPublicationToUiBuilderExtractionRepository \
+  :ui-builder-render-bundle:publishMavenPublicationToUiBuilderExtractionRepository
 
 cp -R "${fixture_root}/." "${consumer_root}/"
 rm "${consumer_root}/publish.init.gradle"
