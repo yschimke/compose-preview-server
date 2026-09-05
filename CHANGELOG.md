@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.1.0](https://github.com/yschimke/compose-preview-server/compare/v3.0.0...v3.1.0) (2026-09-05)
+
+
+### Features
+
+* **mcp:** let an agent author, edit and export a UI-builder design ([#300](https://github.com/yschimke/compose-preview-server/issues/300)) ([e88b454](https://github.com/yschimke/compose-preview-server/commit/e88b4541660778f77e6b676f77250afbb04b9f64))
+* **mcp:** move the MCP server into this repository ([#308](https://github.com/yschimke/compose-preview-server/issues/308)) ([26893fc](https://github.com/yschimke/compose-preview-server/commit/26893fc2f9a6e4393fc682588de6b26e0f30cb2f))
+* **serve:** drive a local Gradle build through a build-host process ([#294](https://github.com/yschimke/compose-preview-server/issues/294)) ([25a337b](https://github.com/yschimke/compose-preview-server/commit/25a337bfade615cbf9bc7fba7e69e732c4e2647b))
+* **serve:** let a visitor sign out of a GitHub-gated box ([#291](https://github.com/yschimke/compose-preview-server/issues/291)) ([d52e952](https://github.com/yschimke/compose-preview-server/commit/d52e952bf0bdc640d9ca676f23e2633567ebb634))
+* **server:** give the binary a command surface, with `ui` for a local project ([#306](https://github.com/yschimke/compose-preview-server/issues/306)) ([5b73a7c](https://github.com/yschimke/compose-preview-server/commit/5b73a7c20f08a7e5c3bb12d3d6e9680bd16db507))
+* **ui-builder-runtime:** enable explicitApi() and check an ABI dump ([#307](https://github.com/yschimke/compose-preview-server/issues/307)) ([d0caf5c](https://github.com/yschimke/compose-preview-server/commit/d0caf5c8028fecf0946eda08743ab25975866fcb))
+* **ui-builder:** render a design with real Compose, tagged so it stays addressable ([#302](https://github.com/yschimke/compose-preview-server/issues/302)) ([b1b3a75](https://github.com/yschimke/compose-preview-server/commit/b1b3a75422b23d930834b84ff9e56b00cad4fa5f))
+* **ui-builder:** show the host's native render beside the browser's canvas ([#304](https://github.com/yschimke/compose-preview-server/issues/304)) ([4c5a5d7](https://github.com/yschimke/compose-preview-server/commit/4c5a5d7c294c395e8bde00dab5d4d466edcfa4a0))
+* **ui-builder:** show the Kotlin an export would write, beside the canvas ([#295](https://github.com/yschimke/compose-preview-server/issues/295)) ([465ba01](https://github.com/yschimke/compose-preview-server/commit/465ba012f37930a7a6a3b5b6a6092135dfdcb8e8))
+* **ui-builder:** the editor and the export share one oracle ([#290](https://github.com/yschimke/compose-preview-server/issues/290)) ([7a31032](https://github.com/yschimke/compose-preview-server/commit/7a3103253a130c7f874953feecc58135d2bf966c))
+
+
+### Bug Fixes
+
+* **deploy:** ship the component record, so a packaged builder can export ([#305](https://github.com/yschimke/compose-preview-server/issues/305)) ([da5088b](https://github.com/yschimke/compose-preview-server/commit/da5088bec9d77924be41efa65edbf3f97c6080ab))
+* **deps:** update compose-ai-tools ([#297](https://github.com/yschimke/compose-preview-server/issues/297)) ([346218c](https://github.com/yschimke/compose-preview-server/commit/346218c9de1d362dbf0f5dd4b4d186adc6a15200))
+* **deps:** update compose-ai-tools to v1.79.0 ([#309](https://github.com/yschimke/compose-preview-server/issues/309)) ([6667119](https://github.com/yschimke/compose-preview-server/commit/66671198c60d9a95f4c40d74b88c5b06f7c68dba))
+* **deps:** update dependency com.squareup.okio:okio-fakefilesystem to v3.18.2 ([#296](https://github.com/yschimke/compose-preview-server/issues/296)) ([e362c2d](https://github.com/yschimke/compose-preview-server/commit/e362c2d426da09b34a1790b596601ab4f0fdbf2a))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.57.0 ([#298](https://github.com/yschimke/compose-preview-server/issues/298)) ([8af07c2](https://github.com/yschimke/compose-preview-server/commit/8af07c2dcd751815058b0c15dab25ecafcb87157))
+* **deps:** update playwright monorepo to v1.63.0 ([#299](https://github.com/yschimke/compose-preview-server/issues/299)) ([3317303](https://github.com/yschimke/compose-preview-server/commit/3317303e48813a68c233ec34a0b2a5fa8c4eedd0))
+
 ## [3.0.0](https://github.com/yschimke/compose-preview-server/compare/v2.23.0...v3.0.0) (2026-09-05)
 
 
