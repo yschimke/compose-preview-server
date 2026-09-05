@@ -57,7 +57,7 @@ class ServeCatalogMcp(
       capabilities: List<String>,
     ): String?
 
-    suspend fun poll(requestId: String, deviceSecret: String): String?
+    suspend fun poll(requestId: String, deviceSecret: String, waitSeconds: Long): String?
   }
 
   private data class PreviewTarget(val catalog: String, val previewId: String)
@@ -135,8 +135,9 @@ class ServeCatalogMcp(
         "This endpoint exposes every hosted Compose Preview catalog. Use list_projects to " +
           "discover catalog ids. Reading published previews needs preview access; made-to-order " +
           "renders and data products need live access. With no credential, call request_access, " +
-          "show the human its approveUrl and userCode, then poll_access until it answers " +
-          "approved; send the token it returns as the X-Compose-Preview-Token header.",
+          "show the human its approveUrl and userCode, then poll_access (which waits for the " +
+          "decision) until it answers approved; send the token it returns as the " +
+          "X-Compose-Preview-Token header.",
       )
     }
   }
@@ -161,10 +162,13 @@ class ServeCatalogMcp(
         tool(
           "poll_access",
           "Collect the outcome of a request_access, proving possession of its deviceSecret. " +
-            "Answers status=pending until a human decides — wait retryAfterSeconds between " +
-            "calls — then approved (with the token) or denied/expired. Send the token as the " +
-            "X-Compose-Preview-Token header on every later call.",
-          """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"}},"required":["requestId","deviceSecret"]}""",
+            "It HOLDS THE CALL OPEN and answers the moment the human decides — one call " +
+            "instead of a dozen, since each poll here costs a whole round trip through you. It " +
+            "waits 8 seconds by default; pass waitSeconds (up to 30) if your client tolerates a " +
+            "longer call. A wait that times out answers status=pending, and you simply call " +
+            "again. Then approved (with the token) or denied/expired. Send the " +
+            "token as the X-Compose-Preview-Token header on every later call.",
+          """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"},"waitSeconds":{"type":"integer","minimum":0,"maximum":30}},"required":["requestId","deviceSecret"]}""",
         )
       )
     }
@@ -294,7 +298,14 @@ class ServeCatalogMcp(
       "poll_access" -> {
         val broker = access ?: return toolError(ACCESS_DISABLED)
         val body =
-          broker.poll(args.requiredString("requestId"), args.requiredString("deviceSecret"))
+          broker.poll(
+            args.requiredString("requestId"),
+            args.requiredString("deviceSecret"),
+            // Default to waiting rather than to spinning: a client that says nothing is a client
+            // that would otherwise call this again in three seconds, through a model.
+            args["waitSeconds"]?.jsonPrimitive?.longOrNull
+              ?: ServeAgentGrants.DEFAULT_POLL_WAIT_SECONDS,
+          )
         body?.let { textResult(it) } ?: toolError(ACCESS_THROTTLED)
       }
       "status" -> textResult(statusJson().toString())

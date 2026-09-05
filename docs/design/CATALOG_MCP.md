@@ -77,8 +77,11 @@ transport does not need the other:
    `approveUrl`, `userCode` and the `deviceSecret` to keep.
 2. The client shows the **link and the code** to its human, who opens the page and checks the code
    matches before approving.
-3. `tools/call poll_access` with `requestId` + `deviceSecret` answers `pending` until someone
-   decides, then `approved` with the bearer.
+3. `tools/call poll_access` with `requestId` + `deviceSecret` answers `approved` with the bearer.
+   It **waits** for the decision rather than answering `pending` straight away, because every poll
+   here is a tool call through a model. `waitSeconds` defaults to 8 — inside a conservative
+   client's read timeout — and may be raised to 30 by a client that tolerates longer calls; a wait
+   that times out answers `pending` and you simply call again.
 
 **`initialize`, `ping`, `tools/list` and these two tools need no credential**; everything that reads
 a catalog still does. The gate is per message, not per endpoint, because a client that cannot finish

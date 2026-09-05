@@ -235,6 +235,33 @@ internet mint itself credentials.
 - **Not admin.** `--admin-token` routes are outside every scope. Nothing an agent can be granted
   reconfigures the box.
 
+## Waiting for the decision
+
+`POST /agent-access/poll` answers immediately by default — `pending`, with a `retryAfterSeconds` —
+which is RFC 8628's shape and exactly right for a shell loop, where a `sleep` costs nothing.
+
+It is wrong for an agent. Over MCP every poll is a **tool call through a model**: a human who takes
+half a minute to find the tab costs a dozen round trips, each with its own latency and tokens, for
+an answer that did not change. So the poll accepts an optional `waitSeconds` (clamped to 30) and
+holds the request open, answering the moment somebody approves or denies. One call instead of a
+dozen, and the human's click feels instant rather than landing up to three seconds early.
+
+- **Absent or zero is the old behaviour**, unchanged, so an interval poller keeps working.
+- **A wait that times out answers what an immediate poll would have** — `pending`, same retry
+  interval — so a caller that gives up is where it would have been anyway.
+- **Only `pending` waits.** `unknown` in particular answers at once: it is what a wrong device
+  secret gets, and holding those open would turn guessing at a secret into a way to occupy a
+  connection.
+- **Waiting spends one permit, not one per second.** The caller holds the rate limiter's permit for
+  the whole wait, which is the same budget an interval poller burns through much faster.
+
+The MCP tool defaults to waiting rather than to spinning, since a client that says nothing is a
+client that would otherwise call again in three seconds, through a model. Its default is **8
+seconds, not the 30 second maximum**: a held call only helps if the client holds it too, and a
+conservative HTTP client gives up sooner than this lane would like — OkHttp's default read timeout
+is 10s. A default that outlives the caller's timeout turns a latency improvement into a transport
+error, which is strictly worse than answering `pending`.
+
 ## Asking through MCP
 
 The catalog MCP endpoint (`/mcp`) carries the same two legs as tools, `request_access` and

@@ -75,6 +75,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -11237,7 +11238,8 @@ class ServeHttpServer(
           call.respondText("invalid poll: ${e.message}", status = HttpStatusCode.BadRequest)
           return
         }
-      val response = pollAgentGrant(store, parsed.requestId, parsed.deviceSecret)
+      val response =
+        pollAgentGrantAwaiting(store, parsed.requestId, parsed.deviceSecret, parsed.waitSeconds)
       call.respondText(
         JSON.encodeToString(ServeAgentGrants.PollResponse.serializer(), response),
         ContentType.Application.Json,
@@ -11253,6 +11255,43 @@ class ServeHttpServer(
    * bootstraps through MCP and one that curls the route must not have to learn two vocabularies for
    * "not yet".
    */
+  /**
+   * [pollAgentGrant], held open for up to [waitSeconds] (clamped) while the answer is still
+   * `pending`.
+   *
+   * Implemented as a short re-read loop rather than a signal the store fires: the store is a plain
+   * synchronized map with no coroutine machinery, and a tick a quarter of a second long makes an
+   * approval feel immediate to the human who just clicked while costing a handful of uncontended
+   * lock acquisitions over a whole wait. The alternative — a `CompletableDeferred` per pending
+   * request, completed by `approve`/`deny` — is a lower-latency, higher-coupling shape worth
+   * reaching for only if the tick ever shows up in a profile.
+   *
+   * Waiting does NOT re-charge the rate limiter: the caller holds one permit for the whole wait,
+   * which is the point. It is the same budget an interval poller spends much faster.
+   */
+  private suspend fun pollAgentGrantAwaiting(
+    store: ServeAgentGrantStore,
+    requestId: String,
+    deviceSecret: String,
+    waitSeconds: Long,
+  ): ServeAgentGrants.PollResponse {
+    val immediate = pollAgentGrant(store, requestId, deviceSecret)
+    val wait = waitSeconds.coerceIn(0, ServeAgentGrants.MAX_POLL_WAIT_SECONDS)
+    // Only `pending` is worth waiting on. `unknown` in particular must answer at once: it is what a
+    // wrong device secret gets, and holding those open would turn a guess into a way to occupy a
+    // connection.
+    if (wait <= 0 || immediate.status != ServeAgentGrants.PollResponse.PENDING) return immediate
+    val deadline = System.currentTimeMillis() + wait * 1000
+    while (System.currentTimeMillis() < deadline) {
+      delay(ServeAgentGrants.POLL_WAIT_TICK_MILLIS)
+      val next = pollAgentGrant(store, requestId, deviceSecret)
+      if (next.status != ServeAgentGrants.PollResponse.PENDING) return next
+    }
+    // Reached the deadline still pending: answer what an immediate poll would have, freshly read
+    // so `expiresInSeconds` reflects the time actually spent waiting.
+    return pollAgentGrant(store, requestId, deviceSecret)
+  }
+
   private fun pollAgentGrant(
     store: ServeAgentGrantStore,
     requestId: String,
@@ -11330,12 +11369,16 @@ class ServeHttpServer(
         }
       }
 
-      override suspend fun poll(requestId: String, deviceSecret: String): String? {
+      override suspend fun poll(
+        requestId: String,
+        deviceSecret: String,
+        waitSeconds: Long,
+      ): String? {
         val permit = tryAgentGrantPermit() ?: return null
         try {
           return JSON.encodeToString(
             ServeAgentGrants.PollResponse.serializer(),
-            pollAgentGrant(store, requestId, deviceSecret),
+            pollAgentGrantAwaiting(store, requestId, deviceSecret, waitSeconds),
           )
         } finally {
           permit.release()

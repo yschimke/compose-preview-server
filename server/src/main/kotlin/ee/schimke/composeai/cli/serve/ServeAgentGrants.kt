@@ -30,6 +30,34 @@ object ServeAgentGrants {
   const val REVOKE_PATH = "$BASE_PATH/revoke"
   const val WHOAMI_PATH = "$BASE_PATH/whoami"
 
+  /**
+   * The longest a poll may be held open. Chosen well inside the reverse proxies and load balancers
+   * a box sits behind (Caddy's defaults included), and short enough that a client which loses
+   * interest is not holding a connection for minutes.
+   */
+  const val MAX_POLL_WAIT_SECONDS = 30L
+
+  /**
+   * What a poll waits when the caller asked to wait but did not say how long — the MCP tool's
+   * default.
+   *
+   * Deliberately under ten seconds, not at [MAX_POLL_WAIT_SECONDS]. A held request is only useful
+   * if the CLIENT is willing to hold it too, and a conservative HTTP client gives up sooner than
+   * this lane would like: OkHttp's default read timeout is 10s, and it is the client this
+   * repository's own tests use. A default that outlives the caller's timeout turns a latency
+   * improvement into a transport error, which is strictly worse than answering `pending` — so the
+   * default fits inside the tightest common timeout, and a client that knows its own limits can ask
+   * for up to the maximum.
+   */
+  const val DEFAULT_POLL_WAIT_SECONDS = 8L
+
+  /**
+   * How often a held poll re-reads the store. Small enough that an approval feels instant to the
+   * human who just clicked, large enough that thirty seconds of waiting is a rounding error of lock
+   * acquisitions on a lane that is already rate-limited per caller.
+   */
+  const val POLL_WAIT_TICK_MILLIS = 250L
+
   /** The human's page for one request: `/agent-access/{requestId}`. */
   fun approvalPath(requestId: String): String =
     "$BASE_PATH/${WebEscaping.urlEncodeSegment(requestId)}"
@@ -84,7 +112,25 @@ object ServeAgentGrants {
     val maxCapabilities: List<String> = emptyList(),
   )
 
-  @Serializable data class PollRequest(val requestId: String = "", val deviceSecret: String = "")
+  @Serializable
+  data class PollRequest(
+    val requestId: String = "",
+    val deviceSecret: String = "",
+    /**
+     * Hold the request open for up to this many seconds, answering the moment a human decides.
+     *
+     * Zero (the default) is RFC 8628's shape: answer immediately, come back after
+     * [ServeAgentGrantStore.POLL_INTERVAL_SECONDS]. That is fine for a shell loop, where a sleep
+     * costs nothing, and wasteful for an MCP client, where every poll is a tool call through a
+     * model — a human taking half a minute to find the tab costs a dozen round trips, each with its
+     * own latency and tokens.
+     *
+     * Clamped to [MAX_POLL_WAIT_SECONDS]. A wait that reaches its deadline answers exactly what an
+     * immediate poll would have — `pending`, with the same retry interval — so a caller that gets
+     * bored is in the state it would have been in anyway.
+     */
+    val waitSeconds: Long = 0,
+  )
 
   /**
    * The poll answer. [status] follows RFC 8628's vocabulary closely enough to be unsurprising:
