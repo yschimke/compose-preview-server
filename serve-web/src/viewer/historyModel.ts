@@ -31,6 +31,17 @@ export interface ManifestEntry {
 
 export interface HistoryRow {
     href: string;
+    /**
+     * The same render, shown as a picture on the row.
+     *
+     * A timeline of dates and shas answers "how many versions are there" and nothing else — the
+     * question a reader actually brings to it is "which one looked like what", and only pixels
+     * answer that. It is the row's own href: every entry the menu draws is already a PNG the page
+     * can address, so the thumbnail costs no new URL rule and cannot point somewhere the link does
+     * not (see `renderUrlAt`). The Revision menu next to it has shown its runs this way since it
+     * was built; this is that, on the history the viewer keeps.
+     */
+    thumb: string;
     /** The newest published render — the one on the stage. Never true in project mode. */
     current: boolean;
     date: string;
@@ -76,6 +87,7 @@ export function historyMenuOf(
         const date = shortDate(v.date);
         rows.push({
             href,
+            thumb: href,
             current,
             date,
             meta: current

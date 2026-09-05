@@ -3721,6 +3721,14 @@ for (const fixture of listPageFixtures()) {
           });
         });
       }
+      // The render-history menu's thumbnails, which are published PNGs on a delivery branch and
+      // so are the one image lane on this page that is NOT served by the preview server. Without
+      // a stand-in the fetch simply fails offline, the element drops each `src` (see
+      // `HistoryMenu.item`) and `serve-viewer-history-menu-open` would diff a column of empty
+      // tiles — a picture that looks the same whether the thumbnails work or were deleted.
+      await page.route("https://raw.githubusercontent.com/**", (route) =>
+        route.fulfill({ path: renderPlaceholder, contentType: "image/png" }),
+      );
       // After the image lanes on purpose: Playwright matches the most recently registered
       // route first, and `**/render/**` above would otherwise answer an inspection fetch with
       // a PNG.

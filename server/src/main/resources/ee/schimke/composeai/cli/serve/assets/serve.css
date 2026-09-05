@@ -3801,7 +3801,7 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   background: var(--md-sys-color-surface-container-high);
   box-shadow: var(--md-sys-elevation-level2); }
 .cp-history-list { display: flex; flex-direction: column; gap: 2px; margin: 0; }
-.cp-history-item { display: flex; align-items: baseline; gap: 10px; padding: 9px 12px;
+.cp-history-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
   border: 0; border-radius: var(--md-sys-shape-corner-small);
   color: var(--cp-fg); text-decoration: none; white-space: nowrap; }
 .cp-history-item:hover { text-decoration: none;
@@ -3810,6 +3810,14 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
    pinned to — so the two menus answer "which one am I on?" the same way. */
 .cp-history-item[data-current="1"] { background: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-secondary-container); }
+/* The version, as a picture. A column of dates and shas says how many versions there are and
+   nothing about what any of them looked like — which is the question the menu is opened to answer.
+   Same 28px tile as `.cp-revision-thumb` beside it, so the two menus read as one family. A tile
+   whose PNG failed keeps its box (the source is dropped, so no broken-image glyph) and the dates
+   stay in one column. */
+.cp-history-thumb { flex: 0 0 auto; width: 28px; height: 28px; object-fit: contain;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  background: var(--md-sys-color-surface-container-highest); }
 .cp-history-date { font-variant-numeric: tabular-nums; }
 .cp-history-meta { font-size: 0.92em; opacity: 0.85; margin-left: auto;
   font-family: var(--cp-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
