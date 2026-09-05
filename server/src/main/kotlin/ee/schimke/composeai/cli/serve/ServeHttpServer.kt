@@ -12,6 +12,8 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
 import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
+import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
+import ee.schimke.composeai.uibuilder.decodeNewDesignStates
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.web.WebEscaping
@@ -38,6 +40,7 @@ import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
 import io.ktor.server.request.queryString
+import io.ktor.server.request.receiveParameters
 import io.ktor.server.request.receiveStream
 import io.ktor.server.response.ApplicationSendPipeline
 import io.ktor.server.response.respond
@@ -80,6 +83,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+
+/** The query values a create link carries into the design's permalink: identity, never content. */
+private val UI_BUILDER_IDENTITY_QUERY =
+  listOf("token", "actor", "clientId", "displayName", "color", "endpoint", "updatesEndpoint")
 
 /** A `/ui-builder/<catalog>/<designId>` design segment: the New design dialog's own id shape. */
 private val UI_BUILDER_DESIGN_SEGMENT = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -1018,6 +1025,11 @@ class ServeHttpServer(
           if (uiBuilderDir == null) call.respondText("not found", status = HttpStatusCode.NotFound)
           else call.respondRedirect("/ui-builder/")
         }
+        // Creating a design is a POST, and its answer is a redirect to the design's permalink.
+        // The form the New design dialog submits is an ordinary HTML form, so the browser follows
+        // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
+        // is the whole reason creation is not a navigation to a `?create=1` URL any more.
+        post("/ui-builder/{catalog}") { handleUiBuilderCreate() }
         // A runtime id is an exact immutable pin. There is deliberately no unversioned or
         // `latest` route: an unavailable pin has to surface as an explicit migration decision.
         get("/ui-builder/runtime/{runtimeId}/{path...}") { handleUiBuilderRuntimeAsset() }
@@ -11293,6 +11305,139 @@ class ServeHttpServer(
         val replacement = versioned(match.groupValues[1]) ?: return@replace match.value
         "\"$replacement\""
       }
+  }
+
+  /**
+   * `POST /ui-builder/<catalog>` — create one design, then `303` to its permalink.
+   *
+   * Plain `application/x-www-form-urlencoded`, because the point is that a browser can submit it
+   * without any script and follow the redirect on its own: POST/Redirect/GET, so the design's URL
+   * is the one left in the address bar and history, and reloading it re-opens rather than
+   * re-creates. The server seeds the document ([UiBuilderNewDesignSeed]) rather than accepting one,
+   * so the form carries intent — an id, a template, optional state variables — and not a payload a
+   * caller could shape into something the catalog does not serve. A caller that does want to hand
+   * over a whole document has `PUT /api/ui-builder/v1/designs/{id}`.
+   *
+   * Creating never overwrites: an id that already exists is answered with the same `303`, which is
+   * what "open or create" meant when this was a GET, minus the mutation-on-navigation.
+   */
+  private suspend fun RoutingContext.handleUiBuilderCreate() {
+    val dir = uiBuilderDir
+    val service = uiBuilderService
+    val authorization = uiBuilderAuthorization
+    if (dir == null || service == null || authorization == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val catalog = call.parameters["catalog"].orEmpty()
+    if (catalog !in uiBuilderCatalogs) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    // A form POST is the one request shape a hostile page can aim at this server with the reader's
+    // credentials attached, so it is refused unless the browser says it came from here. Both
+    // headers are absent on a non-browser client (curl, a script), which is not a cross-site
+    // request and is left alone; a browser that omits `Origin` on a same-origin POST still sends
+    // `Sec-Fetch-Site: same-origin`.
+    val fetchSite = call.request.headers["Sec-Fetch-Site"]
+    val origin = call.request.headers[HttpHeaders.Origin]
+    val sameOrigin =
+      when {
+        fetchSite != null -> fetchSite == "same-origin" || fetchSite == "none"
+        origin != null ->
+          // `Origin` is scheme://host[:port]; `Host` is the host[:port] this request was addressed
+          // to. Comparing the authorities is what "did this form come from this server?" means
+          // behind a proxy that terminates TLS, where the schemes legitimately differ.
+          call.request.headers[HttpHeaders.Host]?.let {
+            origin.substringAfter("://").equals(it, ignoreCase = true)
+          } == true
+        else -> true
+      }
+    if (!sameOrigin) {
+      call.respondText("cross-site design creation is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val actorId =
+      when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        UiBuilderAuthorizationDecision.Missing -> {
+          call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          return
+        }
+        UiBuilderAuthorizationDecision.Forbidden -> {
+          call.respondText("UI-builder write access required", status = HttpStatusCode.Forbidden)
+          return
+        }
+      }
+    val form = call.receiveParameters()
+    val designId = form["designId"].orEmpty().trim()
+    if (!isUiBuilderDesignSegment(designId)) {
+      call.respondText(
+        "a design id must start with a letter or number and use only path-safe characters",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val template =
+      form["template"]?.takeIf { it.isNotBlank() } ?: UiBuilderNewDesignSeed.DEFAULT_TEMPLATE
+    if (template !in UiBuilderNewDesignSeed.templateIds(catalog)) {
+      call.respondText(
+        "$template is not a template $catalog can start from",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val state =
+      try {
+        decodeNewDesignStates(form["state"]?.takeIf { it.isNotBlank() } ?: "[]")
+      } catch (e: IllegalArgumentException) {
+        call.respondText(
+          e.message ?: "the state variables are not valid",
+          status = HttpStatusCode.BadRequest,
+        )
+        return
+      }
+    val outcome =
+      withContext(Dispatchers.IO) {
+        ServeUiBuilderCreate(service, dir)
+          .create(
+            actorId = actorId,
+            catalogSystemId = catalog,
+            designId = designId,
+            templateId = template,
+            state = state,
+          )
+      }
+    when (outcome) {
+      is ServeUiBuilderCreate.Outcome.Created,
+      is ServeUiBuilderCreate.Outcome.AlreadyExists -> {
+        // 303, not 302: the method the browser follows with must be GET. A 302 leaves that to the
+        // client's discretion, and re-POSTing a create on a reload is the exact thing this route
+        // exists to stop.
+        call.response.headers.append(
+          HttpHeaders.Location,
+          uiBuilderPermalink(catalog, designId, call.request.queryParameters),
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is ServeUiBuilderCreate.Outcome.Refused ->
+        call.respondText(outcome.reason, status = HttpStatusCode.fromValue(outcome.status))
+    }
+  }
+
+  /** The design's own URL, carrying forward only the identity a create link was opened with. */
+  private fun uiBuilderPermalink(
+    catalog: String,
+    designId: String,
+    query: io.ktor.http.Parameters,
+  ): String {
+    val carried = UI_BUILDER_IDENTITY_QUERY.mapNotNull { name ->
+      val value = query[name] ?: return@mapNotNull null
+      "$name=" + java.net.URLEncoder.encode(value, "UTF-8")
+    }
+    val suffix = if (carried.isEmpty()) "" else carried.joinToString("&", prefix = "?")
+    return "/ui-builder/$catalog/$designId$suffix"
   }
 
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {
