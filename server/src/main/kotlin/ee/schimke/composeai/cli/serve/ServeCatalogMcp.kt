@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.daemon.devices.DeviceDimensions
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.web.WebEscaping
 import java.net.URLDecoder
@@ -192,10 +193,12 @@ class ServeCatalogMcp(
       tool(
         "render_preview",
         "Render one preview. Like local compose-ai-tools, the default semantics observation is " +
-          "token-frugal; request observe=png for pixels, or observe=svg for the " +
-          "compose/figma-svg vector export as SVG source. This made-to-order lane requires " +
-          "live grant scope. Use resources/read for the published snapshot lane.",
-        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+          "token-frugal; request observe=png for pixels, observe=svg for the compose/figma-svg " +
+          "vector export as SVG source, or observe=scroll-png / observe=scroll-svg for the " +
+          "full-page capture of a scrollable screen rather than the viewport crop. This " +
+          "made-to-order lane requires live grant scope. Use resources/read for the published " +
+          "snapshot lane.",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
     add(
@@ -207,6 +210,26 @@ class ServeCatalogMcp(
           "and are reported together, so comparing axes costs one round trip instead of N. " +
           "Capped at $MAX_MATRIX_CELLS cells. Requires live grant scope.",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"axes":{"type":"object","additionalProperties":{"type":"array","items":{"type":["string","number","boolean"]},"minItems":1}}},"required":["axes"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+      )
+    )
+    add(
+      tool(
+        "list_devices",
+        "List the `@Preview(device = ...)` ids this server's render lane recognises, with each " +
+          "one's dp size and density. The `device` override takes one of these ids; an " +
+          "unrecognised name renders the default frame rather than failing, so check here " +
+          "instead of guessing.",
+        EMPTY_SCHEMA,
+      )
+    )
+    add(
+      tool(
+        "diff_semantics",
+        "Compare two previews' semantics by testTag: which tags are only in one side, which " +
+          "moved, and which changed occupancy count. Identity is the authored testTag, not a " +
+          "positional ref, so a tag that stops resolving is reported rather than silently " +
+          "retargeted at different pixels. Requires live grant scope.",
+        """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"},"other":{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}}},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"otherOverrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"required":["other"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
     add(
@@ -242,7 +265,7 @@ class ServeCatalogMcp(
       tool(
         "preview-stories",
         "Storybook-MCP-compatible rendering of one or more story ids. Requires live scope.",
-        """{"type":"object","properties":{"storyIds":{"type":"array","items":{"type":"string"}},"storyId":{"type":"string"},"ids":{"type":"array","items":{"type":"string"}},"id":{"type":"string"},"observe":{"type":"string","enum":["png","svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["storyIds"]},{"required":["storyId"]},{"required":["ids"]},{"required":["id"]}]}""",
+        """{"type":"object","properties":{"storyIds":{"type":"array","items":{"type":"string"}},"storyId":{"type":"string"},"ids":{"type":"array","items":{"type":"string"}},"id":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["storyIds"]},{"required":["storyId"]},{"required":["ids"]},{"required":["id"]}]}""",
       )
     )
   }
@@ -303,6 +326,11 @@ class ServeCatalogMcp(
             rawOverrides?.keys.orEmpty().toList(),
           )
         }
+      }
+      "list_devices" -> textResult(devicesJson().toString())
+      "diff_semantics" -> {
+        requireLive(liveAuthorization)
+        diffSemanticsResult(args)
       }
       "render_matrix" -> {
         requireLive(liveAuthorization)
@@ -503,6 +531,167 @@ class ServeCatalogMcp(
     )
   }
 
+  /**
+   * The `device` override's accepted vocabulary, resolved from the render lane's own catalog.
+   *
+   * Geometry is not authored here — every value comes from [DeviceDimensions.resolve], the same
+   * call the render path makes when it decides what a `@Preview(device = …)` produces, so a name
+   * listed here is a frame the backend will actually render. The tool exists because an
+   * unrecognised device name is *not* an error on the render path: it falls through to the default
+   * frame, which from the caller's side is indistinguishable from a device that renders identically
+   * to the default.
+   */
+  private fun devicesJson(): JsonObject = buildJsonObject {
+    put("schema", "compose-preview/catalog-mcp-devices/v1")
+    put(
+      "devices",
+      buildJsonArray {
+        DeviceDimensions.KNOWN_DEVICE_IDS.forEach { id ->
+          val spec = DeviceDimensions.resolve(id)
+          add(
+            buildJsonObject {
+              put("id", id)
+              put("widthDp", spec.widthDp)
+              put("heightDp", spec.heightDp)
+              put("density", spec.density.toDouble())
+            }
+          )
+        }
+      },
+    )
+  }
+
+  /**
+   * Compare two previews' semantics by **authored testTag**, not by positional ref.
+   *
+   * The identity choice is the whole design, and it is [ServeSemanticsTags]': a `SemanticsRefs` ref
+   * indexes siblings that share an anchor, so `r/role:Button[0]` means "the first Button under this
+   * parent" and inserting a Button ahead of it silently retargets the same string at different
+   * pixels — a diff built on refs reports "unchanged" for exactly the edit a reader most needs to
+   * see. A `testTag` is authored, so it either survives an edit or stops resolving, and both are
+   * reported here.
+   *
+   * Reads the `tags` index off each side's annotations payload rather than re-walking the tree:
+   * that index is already the wire contract [ServeAnnotationsPayload] publishes, including its
+   * `count` (how many nodes carry the tag — a tag is only a usable identity while exactly one does)
+   * and its explicitly-named coordinate space.
+   */
+  private suspend fun diffSemanticsResult(args: JsonObject): JsonObject {
+    val left = args.previewTarget()
+    val other =
+      args["other"] as? JsonObject
+        ?: throw McpRequestException("diff_semantics requires an 'other' preview to compare with")
+    val right = other.previewTarget()
+
+    val leftTags = tagIndex(left, args["overrides"] as? JsonObject)
+    val rightTags = tagIndex(right, args["otherOverrides"] as? JsonObject)
+
+    val onlyLeft = (leftTags.keys - rightTags.keys).sorted()
+    val onlyRight = (rightTags.keys - leftTags.keys).sorted()
+    val shared = leftTags.keys.intersect(rightTags.keys).sorted()
+
+    val moved = buildJsonArray {
+      shared.forEach { tag ->
+        val a = leftTags[tag]!!
+        val b = rightTags[tag]!!
+        val boundsA = a["bounds"]
+        val boundsB = b["bounds"]
+        val countA = a["count"]?.jsonPrimitive?.contentOrNull
+        val countB = b["count"]?.jsonPrimitive?.contentOrNull
+        if (boundsA == boundsB && countA == countB) return@forEach
+        add(
+          buildJsonObject {
+            put("testTag", tag)
+            if (boundsA != boundsB) {
+              put(
+                "bounds",
+                buildJsonObject {
+                  put("before", boundsA ?: JsonNull)
+                  put("after", boundsB ?: JsonNull)
+                },
+              )
+            }
+            if (countA != countB) {
+              // A count change is an ambiguity appearing or disappearing, which is a different
+              // event from a move and is worth naming separately: a tag carried by two nodes is no
+              // longer an identity anything can resolve.
+              put(
+                "count",
+                buildJsonObject {
+                  put("before", a["count"] ?: JsonNull)
+                  put("after", b["count"] ?: JsonNull)
+                },
+              )
+            }
+          }
+        )
+      }
+    }
+
+    return textResult(
+      buildJsonObject {
+        put("schema", "compose-preview/catalog-mcp-semantics-diff/v1")
+        put("identity", "testTag")
+        put(
+          "left",
+          buildJsonObject {
+            put("uri", resourceUri(left.catalog, left.previewId))
+            put("taggedNodes", leftTags.size)
+          },
+        )
+        put(
+          "right",
+          buildJsonObject {
+            put("uri", resourceUri(right.catalog, right.previewId))
+            put("taggedNodes", rightTags.size)
+          },
+        )
+        put("onlyInLeft", JsonArray(onlyLeft.map(::JsonPrimitive)))
+        put("onlyInRight", JsonArray(onlyRight.map(::JsonPrimitive)))
+        put("changed", moved)
+        put(
+          "identical",
+          JsonPrimitive(onlyLeft.isEmpty() && onlyRight.isEmpty() && moved.isEmpty()),
+        )
+        if (leftTags.isEmpty() && rightTags.isEmpty()) {
+          put(
+            "note",
+            "neither preview carries a testTag, so there is nothing to compare by; this is an " +
+              "empty result, not a match",
+          )
+        }
+      }
+        .toString()
+    )
+  }
+
+  /** One side's `testTag -> {count, bounds, space}` index, off its annotations payload. */
+  private suspend fun tagIndex(
+    target: PreviewTarget,
+    rawOverrides: JsonObject?,
+  ): Map<String, JsonObject> =
+    withCatalog(target.catalog) { host ->
+      val preview = resolvePreview(host, target.previewId)
+      val overrides = parseOverrides(preview, rawOverrides)
+      val payload =
+        withRenderPermit {
+          when (val outcome = host.renderAnnotations(preview.id, overrides)) {
+            is AnnotationsOutcome.Ok -> outcome.json
+            AnnotationsOutcome.NotFound -> null
+            is AnnotationsOutcome.Failed -> throw McpRequestException(outcome.reason)
+          }
+        }
+          ?: throw McpRequestException(
+            "compose/semantics is not available for '${target.previewId}', so it cannot be diffed"
+          )
+      val tags =
+        runCatching { JSON.parseToJsonElement(payload.decodeToString()) }
+          .getOrNull()
+          ?.let { it as? JsonObject }
+          ?.get("tags") as? JsonObject
+      tags?.mapValues { (_, value) -> value as? JsonObject ?: JsonObject(emptyMap()) }.orEmpty()
+    }
+
   private suspend fun renderResult(
     host: ServeHost,
     previewId: String,
@@ -526,11 +715,16 @@ class ServeCatalogMcp(
     requestedKeys: List<String> = emptyList(),
   ): List<JsonObject> {
     if (observe !in OBSERVATION_MODES) {
-      throw McpRequestException("'observe' must be one of png, svg, semantics, or hash")
+      throw McpRequestException("'observe' must be one of ${OBSERVATION_MODES.orList()}")
     }
-    // Answered before the raster below, deliberately: the vector lane has its own export and would
-    // otherwise pay for a PNG whose bytes are then discarded.
+    // Answered before the raster below, deliberately: each of these lanes has its own export and
+    // would otherwise pay for a viewport PNG whose bytes are then discarded.
     if (observe == "svg") return listOf(textContent(renderSvg(host, previewId, overrides)))
+    if (observe == "scroll-svg") {
+      return listOf(textContent(renderScrollSvg(host, previewId, overrides)))
+    }
+    if (observe == "scroll-png")
+      return listOf(imageContent(renderScrollPng(host, previewId, overrides)))
     val rendered = renderPng(host, previewId, overrides)
     val png = rendered.png
     if (observe == "png") {
@@ -692,6 +886,54 @@ class ServeCatalogMcp(
         is SvgOutcome.Ok -> outcome.svg.decodeToString()
         SvgOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
         is SvgOutcome.Failed -> throw McpRequestException(outcome.reason)
+      }
+    }
+  }
+
+  /**
+   * The **full-page** counterparts of [renderSvg] and [renderPng] — `compose/figma-svg-long` and
+   * `render/scroll/long`, the whole scrollable screen rather than the viewport crop.
+   *
+   * Gated on [ServeHost.hasScrollExportFor] for the same reason the vector lane is gated on
+   * `hasSvgExportFor`: the tall re-render needs a daemon, so a static bundle has no scroll producer
+   * and its `NotFound` would otherwise read as "no such preview".
+   */
+  private fun requireScroll(host: ServeHost, previewId: String) {
+    if (!host.hasScrollExportFor(previewId)) {
+      throw McpRequestException(
+        "preview '$previewId' has no full-page scroll export; the tall re-render needs a daemon, " +
+          "and this catalog is serving published bytes"
+      )
+    }
+  }
+
+  private suspend fun renderScrollSvg(
+    host: ServeHost,
+    previewId: String,
+    overrides: PreviewOverrides,
+  ): String {
+    requireScroll(host, previewId)
+    return withRenderPermit {
+      when (val outcome = host.renderScrollSvg(previewId, overrides)) {
+        is SvgOutcome.Ok -> outcome.svg.decodeToString()
+        SvgOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
+        is SvgOutcome.Failed -> throw McpRequestException(outcome.reason)
+      }
+    }
+  }
+
+  private suspend fun renderScrollPng(
+    host: ServeHost,
+    previewId: String,
+    overrides: PreviewOverrides,
+  ): ByteArray {
+    requireScroll(host, previewId)
+    return withRenderPermit {
+      when (val outcome = host.renderScrollPng(previewId, overrides)) {
+        is RenderOutcome.Ok -> outcome.png
+        RenderOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
+        RenderOutcome.Busy -> throw McpRequestException("render busy; retry shortly")
+        is RenderOutcome.Failed -> throw McpRequestException(outcome.reason)
       }
     }
   }
@@ -889,6 +1131,7 @@ class ServeCatalogMcp(
     // preview, not per catalog, so without this an agent can only discover the vector lane by
     // asking for it and reading the refusal.
     put("svgAvailable", host.hasSvgExportFor(preview.id))
+    put("scrollAvailable", host.hasScrollExportFor(preview.id))
     preview.state?.let { put("state", it) }
     preview.theme?.let { put("theme", it) }
   }
@@ -1080,9 +1323,18 @@ class ServeCatalogMcp(
      */
     private const val MAX_MATRIX_CELLS = 24
     private val MATRIX_OBSERVATION_MODES = setOf("png", "hash")
+
+    /** `a, b, or c` — the list keeps its grammar as observations are added to it. */
+    private fun Collection<String>.orList(): String {
+      val items = toList()
+      return if (items.size < 2) items.joinToString()
+      else items.dropLast(1).joinToString() + ", or " + items.last()
+    }
+
     private const val RESOURCE_URI_PREFIX = "compose-preview://catalog/"
     private const val STORY_ID_SEPARATOR = "::"
-    private val OBSERVATION_MODES = setOf("png", "svg", "semantics", "hash")
+    private val OBSERVATION_MODES =
+      setOf("png", "svg", "scroll-png", "scroll-svg", "semantics", "hash")
     private const val CATALOG_FILTER_SCHEMA =
       """{"type":"object","properties":{"catalog":{"type":"string"}}}"""
     private val ANNOTATION_KINDS =
