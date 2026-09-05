@@ -307,6 +307,38 @@ test("the layer menu lays a container out without opening a panel", async ({ pag
     await expect(page.getByRole("button", { name: "Remove Add padding" })).toBeVisible();
 });
 
+test("the layer menu offers the scope the parent supplies, and not the other one", async ({
+    page,
+}) => {
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+    await openDock(page, "layers");
+
+    // `Modifier.align` and `Modifier.weight` come from the parent, not the child. This layer sits
+    // in a box, so the row offered is the nine-way alignment a box supplies — and neither of the
+    // single-axis alignments nor the weight, which only a row or a column can apply.
+    const row = await page.getByRole("button", { name: /Select main-scrim/ }).boundingBox();
+    expect(row).not.toBeNull();
+    await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2, { button: "right" });
+    await settle(page);
+
+    await expect(page.getByRole("button", { name: "Apply Align in the box" })).toBeVisible();
+    expect(await page.getByRole("button", { name: /Align across the/ }).count()).toBe(0);
+    expect(await page.getByRole("button", { name: /Take the leftover space/ }).count()).toBe(0);
+
+    await clickCompose(page, page.getByRole("button", { name: "Apply Align in the box" }));
+    await waitForEditor(page, 109);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        operationSequence: 1,
+        outcome: "accepted",
+    });
+
+    // And the same row now offers to take it away.
+    await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2, { button: "right" });
+    await settle(page);
+    await expect(page.getByRole("button", { name: "Remove Align in the box" })).toBeVisible();
+});
+
 test("the selection's values are editable over the design", async ({ page }) => {
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
