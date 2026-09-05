@@ -486,8 +486,15 @@ if [[ -z "${SERVE_ACCEPT_IMAGES:-}" ]]; then
   fi
 fi
 
+image_lane_on=0
 if [[ "${SERVE_ACCEPT_IMAGES:-}" == "1" || "${SERVE_ACCEPT_IMAGES:-}" == "true" ]]; then
   args+=(--accept-images)
+  # The flag alone is not a lane: the server needs a repository to gate uploads on, which is
+  # SERVE_IMAGE_UPLOAD_REPO or the sign-in repo it falls back to. Same condition the server calls
+  # `imageLaneConfigured`, and the grant capability below is fatal without it.
+  if [[ -n "${SERVE_IMAGE_UPLOAD_REPO:-}" || -n "${SERVE_GITHUB_AUTH_REPO:-}" ]]; then
+    image_lane_on=1
+  fi
   [[ -n "${SERVE_IMAGE_UPLOAD_REPO:-}" ]] &&
     args+=(--image-upload-repo "${SERVE_IMAGE_UPLOAD_REPO}")
   [[ -n "${SERVE_IMAGE_TTL:-}" ]] && args+=(--image-ttl "${SERVE_IMAGE_TTL}")
@@ -534,6 +541,24 @@ if [[ "${SERVE_AGENT_GRANTS:-}" == "1" || "${SERVE_AGENT_GRANTS:-}" == "true" ]]
     args+=(--agent-grant-scopes "${SERVE_AGENT_GRANT_SCOPES}")
   # Independent of the scope ceiling above. Each named capability is admitted only when its
   # backing lane is enabled; the prebuilt image always carries the UI-builder lane.
+  #
+  # `images` is the one that can be fatal: the server refuses to start when it is offered on a box
+  # with no image lane, because a human would tick a capability whose every upload then 404s. The
+  # compose default adds it whenever SERVE_IMAGE_UPLOAD_REPO names a repository, which is one
+  # variable short of the truth — `SERVE_ACCEPT_IMAGES=0` keeps the repository named and the lane
+  # shut, a combination that file documents as supported. Drop it here, where both answers are
+  # known, rather than let a documented configuration fail to boot. An operator who named the
+  # capability by hand gets the same treatment and a line saying so, which beats a refusal to start
+  # for a box that never wanted the lane.
+  # >>> image-capability-guard
+  if [[ "${image_lane_on:-0}" != "1" && "${SERVE_AGENT_GRANT_CAPABILITIES:-}" == *images* ]]; then
+    SERVE_AGENT_GRANT_CAPABILITIES="$(printf '%s' "${SERVE_AGENT_GRANT_CAPABILITIES}" | tr ',' '\n' |
+      grep -vx 'images' | paste -sd, -)"
+    echo "entrypoint: dropped the 'images' agent-grant capability — this box does not run the" \
+      "image lane (SERVE_ACCEPT_IMAGES is off, or no repository gates uploads). Name" \
+      "SERVE_IMAGE_UPLOAD_REPO and leave SERVE_ACCEPT_IMAGES unset to run it." >&2
+  fi
+  # <<< image-capability-guard
   [[ -n "${SERVE_AGENT_GRANT_CAPABILITIES:-}" ]] &&
     args+=(--agent-grant-capabilities "${SERVE_AGENT_GRANT_CAPABILITIES}")
   [[ -n "${SERVE_AGENT_GRANT_MAX_TTL:-}" ]] &&

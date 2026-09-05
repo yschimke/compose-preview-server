@@ -7,7 +7,11 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 compose="${COMPOSE_FILE_UNDER_TEST:-${here}/docker-compose.yml}"
 entrypoint="${ENTRYPOINT_FILE:-${here}/entrypoint.sh}"
 
-expected_capabilities='ui-builder-read,ui-builder-write,ui-builder-export'
+# The three UI-builder capabilities are unconditional — the image always packages that lane. The
+# `images` half is conditional on the upload repo being named, because the server refuses to start
+# when the capability is offered without the lane; `test-agent-grant-image-capability.sh` owns that
+# half. Written as one literal because that is how the compose file reads it.
+expected_capabilities='ui-builder-read,ui-builder-write,ui-builder-export${SERVE_IMAGE_UPLOAD_REPO:+,images}'
 
 grep -Fq \
   "SERVE_AGENT_GRANT_CAPABILITIES: \"\${SERVE_AGENT_GRANT_CAPABILITIES:-${expected_capabilities}}\"" \
