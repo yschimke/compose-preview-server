@@ -4304,6 +4304,80 @@ test("contract · snapshot overrides stay composed with a declared theme", async
   );
 });
 
+// A drag is one render, not one per stop.
+//
+// `input` fires once per step of a range control's travel, and every one of those used to reach
+// `/render`. A slide from 0.5 to 2.0 therefore issued fifteen renders of the same preview — which
+// the daemon serialises behind a 2s bounded lock, so most of the burst came back as a retryable
+// 503 and whichever refusal landed last is what the stage kept. The controls read as broken
+// precisely because they were being used the way a slider is used.
+//
+// The two halves are asserted apart on purpose. The links and the address bar describe the
+// CONTROLS, so they must track the thumb with no delay; only the render waits. Coalescing both
+// would have fixed the storm and put a lag on the URL of a page whose premise is that its address
+// describes what you are looking at.
+test("contract · dragging the font scale renders once, and updates its links throughout", async ({
+  page,
+}) => {
+  const requests = [];
+  for (const [name, contentType] of SERVE_ASSETS) {
+    await page.route(`**/assets/serve/**/${name}`, (route) =>
+      route.fulfill({
+        path: resolve(serveAssetsDir, name),
+        contentType,
+      }),
+    );
+  }
+  await page.route("**/render/**", async (route) => {
+    requests.push(new URL(route.request().url()));
+    await route.fulfill({
+      path: renderPlaceholder,
+      contentType: "image/png",
+    });
+  });
+  await page.goto("/preview-harness/fixtures/pages/serve-viewer-themes.html");
+  await expect.poll(() => requests.length).toBeGreaterThan(0);
+  await page.waitForTimeout(100);
+  requests.length = 0;
+
+  await openControlsDrawer(page);
+  // Every stop from 0.6 to 2.0, dispatched as the browser dispatches them during a drag.
+  const stops = [];
+  for (let v = 6; v <= 20; v++) stops.push((v / 10).toFixed(1));
+  const seen = await page.evaluate(async (values) => {
+    const slider = document.getElementById("cp-fontScale");
+    const steps = [];
+    for (const value of values) {
+      slider.value = value;
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+      // The copyable link is rebuilt synchronously on every event, so it already names the stop
+      // the thumb is on — no delay to wait out here, which is the point of reading it inline.
+      // Paired with the slider's OWN value because a range input normalises what it is handed
+      // ("2.0" comes back as "2"), and the assertion is that the two agree, not what they spell.
+      steps.push([
+        slider.value,
+        new URL(document.getElementById("cp-url-png").value).searchParams.get(
+          "fontScale",
+        ),
+      ]);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return steps;
+  }, stops);
+
+  // The link followed the thumb the whole way down.
+  expect(seen).toHaveLength(stops.length);
+  for (const [sliderValue, linkedValue] of seen) {
+    expect(linkedValue).toBe(sliderValue);
+  }
+
+  // And exactly one render came out of the drag, carrying the value it ended on.
+  await expect.poll(() => requests.length, { timeout: 5_000 }).toBe(1);
+  await page.waitForTimeout(300);
+  expect(requests).toHaveLength(1);
+  expect(requests.at(-1).searchParams.get("fontScale")).toBe(seen.at(-1)[0]);
+});
+
 // Clearing a string knob is an EDIT, not an absence. The viewer used to drop any empty knob value
 // before it ever reached the URL, so emptying a label silently re-rendered the author default —
 // and an `@OverrideVariant` seeded to "" (`strings = ["label="]`, which discovery preserves) opened

@@ -22,6 +22,7 @@ import {
 } from "./live/framePainter.js";
 import { visibilityMessage } from "./live/session.js";
 import * as rules from "./viewer/rules.js";
+import { CONTINUOUS_EDIT_DEBOUNCE_MS, debounced } from "./viewer/debounce.js";
 import { viewParam } from "./spec/views.js";
 import {
     activeSource,
@@ -95,17 +96,17 @@ function controlValue(el: Control): string {
 }
 
 /**
- * A render the server REFUSED because it could not apply the overrides asked for (#3449).
+ * A `/render` the server refused, carried through the promise chain as an Error so the single
+ * `.catch` below decides what to say and whether to ask again.
  *
- * `cpDropped` names the parameters it dropped, so the message can say which control is not being
- * honoured rather than "render failed" — the preview is fine, the live lane is not. `cpTerminal`
- * marks a 409: this preview has no live lane at all, so retrying never helps.
+ * `cpFailure` is attached for EVERY non-ok response, not only the dropped-overrides refusal it
+ * used to be limited to. That limit was the bug: the refusal the public server actually returns
+ * under load — `503 render busy; retry shortly` + `Retry-After: 2` — carries no such header, so it
+ * fell past the retry machinery into "render failed for this preview" despite the server having
+ * said, twice, that it was worth asking again.
  */
-interface DroppedOverridesError extends Error {
-    cpDropped?: string;
-    cpTerminal?: boolean;
-    /** `Retry-After` seconds from a non-terminal refusal, when the server sent one. */
-    cpRetryAfter?: number;
+interface SnapshotFailureError extends Error {
+    cpFailure?: rules.SnapshotFailure;
 }
 
 /**
@@ -894,17 +895,26 @@ function snapshotSettled() {
         fn();
     }
 }
-// A non-terminal refusal (503 + `Retry-After`) means the render lane exists and is merely cold,
-// busy, or out of seats — a cold Android daemon is tens of seconds, and it recovers on its own. The
-// page used to print "retry shortly" and then do nothing, leaving a deep link or the viewer's own
-// default player lane stuck on an error until the visitor touched a control or reloaded. So the
-// advice is now carried out: a bounded, server-paced retry.
+// A non-terminal refusal (503 / 429 + `Retry-After`) means the render lane exists and is merely
+// cold, busy, or out of seats — a cold Android daemon is tens of seconds, and it recovers on its
+// own. The page used to print "retry shortly" and then do nothing, leaving a deep link or the
+// viewer's own default player lane stuck on an error until the visitor touched a control or
+// reloaded. So the advice is now carried out: a bounded, server-paced retry.
+//
+// WHICH refusals reach this is decided in `viewer/snapshotRetry.js`, on the status. It used to be
+// decided here, on the presence of the dropped-overrides header, which meant the busiest refusal
+// the public server issues could not reach the retry it was explicitly asking for.
 //
 // Bounded because the alternative is a page that hammers a struggling box forever, and because a
 // lane that has not come up after this long is better reported than silently retried. The counter
 // is per *attempt sequence*, not per page: any control change starts a new render and resets it,
 // which is also what stops a queued retry from painting over a newer request — `snapshotGen` has
 // already moved on and the guard at the top of the handler drops it.
+// Cancels a coalesced continuous-control edit that has not started its render yet. A forward
+// declaration because the control it belongs to is wired much further down, long after
+// `refreshSnapshot` is defined; a no-op until then, which is exactly right for a page with no
+// pending edit.
+var cancelPendingContinuousEdit: () => void = function () {};
 var SNAPSHOT_RETRY_LIMIT = 4;
 var snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null;
 var snapshotRetries = 0;
@@ -916,6 +926,12 @@ function cancelSnapshotRetry() {
 function refreshSnapshot(isRetry?: boolean) {
     if (!isRetry) snapshotRetries = 0;
     cancelSnapshotRetry();
+    // A render is happening NOW, so a coalesced control edit still waiting to start one is
+    // redundant: this render reads the same controls that edit was queued to re-read. Without
+    // this, nudging the slider and then clicking a lane chip inside the debounce window spent two
+    // renders on one state. Calling it from the timer's own callback is a no-op — the wrapper
+    // clears its timer before invoking us — so a coalesced edit still renders exactly once.
+    cancelPendingContinuousEdit();
     status.textContent = "rendering…";
     var gen = ++snapshotGen;
     setSnapshotLoading(true);
@@ -935,30 +951,27 @@ function refreshSnapshot(isRetry?: boolean) {
     fetch(url, { credentials: "same-origin" })
         .then(function (response) {
             if (!response.ok) {
-                // The server refused to answer an override it could not apply, rather than handing back
-                // the un-overridden snapshot under a 200 (#3449). Name the params it dropped: "render
-                // failed" would read as a broken preview, when in fact the preview is fine and the live
-                // lane isn't.
-                var dropped = response.headers.get(
-                    "X-Compose-Preview-Dropped-Overrides",
+                // Everything the refusal told us, read once and handed to the rules next door.
+                // `X-Compose-Preview-Dropped-Overrides` means the server would have had to answer
+                // an override with pixels that ignore it, so it refused instead and named the
+                // params it dropped (#3449) — that shapes the sentence the visitor reads. The
+                // STATUS decides whether to ask again, for that refusal and every other one.
+                var after = parseInt(
+                    response.headers.get("Retry-After") || "",
+                    10,
                 );
-                if (dropped) {
-                    var e: DroppedOverridesError = new Error(
-                        "dropped overrides",
-                    );
-                    e.cpDropped = dropped;
-                    // 409 is terminal: retrying can never apply this override. 503 is the
-                    // opposite claim — the lane exists and is merely cold, busy or out of seats —
-                    // and the server says how long to wait.
-                    e.cpTerminal = response.status === 409;
-                    var after = parseInt(
-                        response.headers.get("Retry-After") || "",
-                        10,
-                    );
-                    if (after > 0) e.cpRetryAfter = after;
-                    throw e;
-                }
-                throw new Error("render " + response.status);
+                var e: SnapshotFailureError = new Error(
+                    "render " + response.status,
+                );
+                e.cpFailure = {
+                    status: response.status,
+                    dropped:
+                        response.headers.get(
+                            "X-Compose-Preview-Dropped-Overrides",
+                        ) || "",
+                    retryAfterSeconds: after > 0 ? after : 0,
+                };
+                throw e;
             }
             return response.blob();
         })
@@ -1004,42 +1017,39 @@ function refreshSnapshot(isRetry?: boolean) {
             };
             next.src = objectUrl;
         })
-        .catch(function (e: DroppedOverridesError) {
+        .catch(function (e: SnapshotFailureError) {
             if (gen !== snapshotGen) return;
             setSnapshotLoading(false);
-            if (e && e.cpDropped) {
-                var params = e.cpDropped.split(",").join(", ");
-                var willRetry =
-                    !e.cpTerminal && snapshotRetries < SNAPSHOT_RETRY_LIMIT;
-                showModeError(
-                    "Not rendered with " +
-                        params +
-                        " — " +
-                        (e.cpTerminal
-                            ? "this preview can only be served as its published snapshot."
-                            : willRetry
-                              ? "the live render is warming up; retrying…"
-                              : "the live render is unavailable right now; change a control to try again."),
-                );
-                if (willRetry) {
-                    snapshotRetries++;
-                    // Pace off the server's own `Retry-After` when it sent one, so a box that knows
-                    // it is busy sets the interval rather than the page guessing at it.
-                    var wait = (e.cpRetryAfter || 2) * 1000 * snapshotRetries;
-                    snapshotRetryTimer = setTimeout(function () {
-                        snapshotRetryTimer = null;
-                        if (gen !== snapshotGen) return;
-                        refreshSnapshot(true);
-                    }, wait);
-                    return;
-                }
-                snapshotSettled();
+            // A throw with no `cpFailure` never reached the server (a dropped connection, a
+            // rejected fetch). Status 0 is terminal by the rules next door, which is the same
+            // answer this branch always gave it.
+            var failure: rules.SnapshotFailure = (e && e.cpFailure) || {
+                status: 0,
+                dropped: "",
+                retryAfterSeconds: 0,
+            };
+            var willRetry = rules.willRetrySnapshot(
+                failure,
+                snapshotRetries,
+                SNAPSHOT_RETRY_LIMIT,
+            );
+            showModeError(
+                rules.snapshotFailureMessage(
+                    failure,
+                    willRetry,
+                    requestedExt === ".svg" ? "SVG" : "PNG",
+                ),
+            );
+            if (willRetry) {
+                snapshotRetries++;
+                var wait = rules.snapshotRetryWaitMs(failure, snapshotRetries);
+                snapshotRetryTimer = setTimeout(function () {
+                    snapshotRetryTimer = null;
+                    if (gen !== snapshotGen) return;
+                    refreshSnapshot(true);
+                }, wait);
                 return;
             }
-            showModeError(
-                (requestedExt === ".svg" ? "SVG" : "PNG") +
-                    " render failed for this preview.",
-            );
             snapshotSettled();
         });
     refreshLinks();
@@ -4380,11 +4390,34 @@ if (wasmToggle) {
         });
     }
 }
+// The font-scale slider is the control this coalescing exists for. Sixteen stops, one `input`
+// per stop, and on a session that can re-render every one of them was a `/render` the daemon had
+// to serialise — so a single drag issued fifteen renders, the server refused most of them with a
+// retryable 503, and whichever refusal happened to land last is what the stage kept. The readout
+// still updates on every event (the number under the visitor's thumb must track it); only the
+// render waits for the drag to stop.
+const scheduleControlsChanged = debounced(
+    onControlsChanged,
+    CONTINUOUS_EDIT_DEBOUNCE_MS,
+);
+// One edit of a continuous control. What DESCRIBES the controls happens now; what RENDERS them
+// waits for the drag to stop.
+//
+// The split is the point. The address bar, the copyable /render links and the spec baseline all
+// report what the controls currently say, so they follow the thumb with no delay — debouncing
+// `onControlsChanged` wholesale would have put a 200ms lag on the URL of a page whose whole
+// premise is that its address describes what you are looking at. Only the transport dispatch is
+// coalesced, and `onControlsChanged` re-runs this same sync when it fires.
+cancelPendingContinuousEdit = scheduleControlsChanged.cancel;
+function onContinuousControlEdit() {
+    refreshLinks();
+    scheduleControlsChanged();
+}
 if (fs) {
     fs.addEventListener("input", function () {
         fsVal!.textContent = fs.value;
         fontScaleTouched = true;
-        onControlsChanged();
+        onContinuousControlEdit();
     });
 }
 fields.forEach(function (f) {
@@ -4421,7 +4454,9 @@ if (sizeMode) {
         "cp-maxH",
     ].forEach(function (id) {
         var el = document.getElementById(id);
-        if (el) el.addEventListener("input", onControlsChanged);
+        // Typed, so `input` arrives per keystroke: "1280" was four renders of three widths
+        // nobody asked for. Same coalescing as the slider, same reason.
+        if (el) el.addEventListener("input", onContinuousControlEdit);
     });
 }
 // Overlay toggles are daemon-rendered: on the live lane they push a fresh setOverrides through
