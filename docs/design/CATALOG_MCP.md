@@ -66,6 +66,31 @@ An unauthenticated MCP request returns `401`, `WWW-Authenticate: Bearer`, and an
 `X-Compose-Preview-Agent-Access` header naming the absolute grant-request URL. The JSON response
 also contains that URL, allowing an MCP host to guide the user into the grant flow.
 
+### …or ask from inside the protocol
+
+The 401 above tells a client where to go; `request_access` and `poll_access` let it go there without
+leaving MCP. They mirror `POST /agent-access/request` and `POST /agent-access/poll` exactly — the
+same JSON bodies, the same per-address rate limit, the same two secrets — so an agent that has one
+transport does not need the other:
+
+1. `tools/call request_access` (optionally `scope`, `ttlSeconds`, `capabilities`, `label`) returns
+   `approveUrl`, `userCode` and the `deviceSecret` to keep.
+2. The client shows the **link and the code** to its human, who opens the page and checks the code
+   matches before approving.
+3. `tools/call poll_access` with `requestId` + `deviceSecret` answers `pending` until someone
+   decides, then `approved` with the bearer.
+
+**`initialize`, `ping`, `tools/list` and these two tools need no credential**; everything that reads
+a catalog still does. The gate is per message, not per endpoint, because a client that cannot finish
+`initialize` cannot reach the tool that asks for a credential either — the endpoint was a dead end
+for exactly the agent the grant flow exists to serve. Anything the server does not recognise is
+gated: a tool added later is closed until someone deliberately opens it.
+
+This is also the recovery path when a token stops working mid-task. Grants live in memory
+(`ServeAgentGrantStore`: *"a restart drops every request and every grant"*), so a redeploy of the
+host invalidates every bearer regardless of its remaining TTL. A client that meets a sudden 401 asks
+for a new grant the same way it asked for the first.
+
 ## MCP surface
 
 The endpoint implements Streamable HTTP MCP protocol versions `2025-06-18` and `2025-03-26`.
@@ -75,6 +100,8 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 
 | Operation | Access | Purpose |
 | --- | --- | --- |
+| `initialize`, `ping`, `tools/list` | none | Handshake and discovery; reads no catalog |
+| `request_access`, `poll_access` | none | Obtain a grant without leaving MCP (above) |
 | `status` | `preview` | Report readiness and the aggregate catalog set |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
 | `list_projects`, `list_previews` | `preview` | Discover catalogs and preview metadata |

@@ -39,10 +39,35 @@ class ServeCatalogMcp(
 ) {
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
+  /**
+   * The grant flow, as much of it as an MCP client needs and no more.
+   *
+   * Kept as a seam rather than a store reference so this class stays free of HTTP, rate limits and
+   * the request's own address: each method answers with the SAME JSON body the matching
+   * `/agent-access/…` route returns, so the two surfaces cannot drift into describing one flow two
+   * ways. Null means the box is throttling — a tool error, not an exception, because a client that
+   * asked too fast should be told to wait rather than handed a broken session.
+   */
+  interface AgentAccess {
+    suspend fun open(
+      label: String,
+      scope: String,
+      ttlSeconds: Long,
+      capabilities: List<String>,
+    ): String?
+
+    suspend fun poll(requestId: String, deviceSecret: String): String?
+  }
+
   private data class PreviewTarget(val catalog: String, val previewId: String)
 
+  /**
+   * [liveAuthorization] stays last so a caller can pass it as a trailing lambda; [access] is the
+   * optional one, absent on a box that issues no grants.
+   */
   suspend fun handle(
     request: JsonObject,
+    access: AgentAccess? = null,
     liveAuthorization: () -> ServeMachineAuthorization.Decision,
   ): Reply {
     val id = request["id"]
@@ -60,10 +85,10 @@ class ServeCatalogMcp(
         when (method) {
           "initialize" -> initialize(params)
           "ping" -> JsonObject(emptyMap())
-          "tools/list" -> buildJsonObject { put("tools", tools()) }
+          "tools/list" -> buildJsonObject { put("tools", tools(access != null)) }
           "tools/call" ->
             try {
-              callTool(params, liveAuthorization)
+              callTool(params, liveAuthorization, access)
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
             }
@@ -108,12 +133,40 @@ class ServeCatalogMcp(
         "instructions",
         "This endpoint exposes every hosted Compose Preview catalog. Use list_projects to " +
           "discover catalog ids. Reading published previews needs preview access; made-to-order " +
-          "renders and data products need live access.",
+          "renders and data products need live access. With no credential, call request_access, " +
+          "show the human its approveUrl and userCode, then poll_access until it answers " +
+          "approved; send the token it returns as the X-Compose-Preview-Token header.",
       )
     }
   }
 
-  private fun tools(): JsonArray = buildJsonArray {
+  private fun tools(accessEnabled: Boolean): JsonArray = buildJsonArray {
+    if (accessEnabled) {
+      // First in the list on purpose: a client with no credential can call only these two, and a
+      // model reading the list top-down should meet the way in before the tools it cannot use yet.
+      add(
+        tool(
+          "request_access",
+          "Ask a human for access to this server. Returns an approveUrl and a userCode: show " +
+            "BOTH to the person you are working with, ask them to open the link and check that " +
+            "the code on the page matches, then call poll_access. The link grants nothing by " +
+            "itself — keep the deviceSecret this returns, it is what collects the token. Use " +
+            "this when a call answered 'authorization_required', or when your token stopped " +
+            "working (a server restart drops every grant).",
+          """{"type":"object","properties":{"label":{"type":"string"},"scope":{"type":"string","enum":["preview","live","playground"]},"ttlSeconds":{"type":"integer"},"capabilities":{"type":"array","items":{"type":"string"}}}}""",
+        )
+      )
+      add(
+        tool(
+          "poll_access",
+          "Collect the outcome of a request_access, proving possession of its deviceSecret. " +
+            "Answers status=pending until a human decides — wait retryAfterSeconds between " +
+            "calls — then approved (with the token) or denied/expired. Send the token as the " +
+            "X-Compose-Preview-Token header on every later call.",
+          """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"}},"required":["requestId","deviceSecret"]}""",
+        )
+      )
+    }
     add(
       tool(
         "status",
@@ -197,10 +250,30 @@ class ServeCatalogMcp(
   private suspend fun callTool(
     params: JsonObject,
     liveAuthorization: () -> ServeMachineAuthorization.Decision,
+    access: AgentAccess?,
   ): JsonObject {
     val name = params.requiredString("name")
     val args = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
     return when (name) {
+      "request_access" -> {
+        val broker = access ?: return toolError(ACCESS_DISABLED)
+        val body =
+          broker.open(
+            label = args.optionalString("label").orEmpty(),
+            scope = args.optionalString("scope").orEmpty(),
+            ttlSeconds = args["ttlSeconds"]?.jsonPrimitive?.longOrNull ?: 0L,
+            capabilities =
+              (args["capabilities"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                ?: emptyList(),
+          )
+        body?.let { textResult(it) } ?: toolError(ACCESS_THROTTLED)
+      }
+      "poll_access" -> {
+        val broker = access ?: return toolError(ACCESS_DISABLED)
+        val body =
+          broker.poll(args.requiredString("requestId"), args.requiredString("deviceSecret"))
+        body?.let { textResult(it) } ?: toolError(ACCESS_THROTTLED)
+      }
       "status" -> textResult(statusJson().toString())
       "list_projects" -> textResult(projectsJson().toString())
       "list_previews" -> textResult(previewsJson(args.optionalString("catalog")).toString())
@@ -1015,5 +1088,46 @@ class ServeCatalogMcp(
     private val ANNOTATION_KINDS =
       setOf("compose/annotations", "compose/semantics", "compose/typography", "compose/tags")
     private val JSON = Json { ignoreUnknownKeys = false }
+
+    private const val ACCESS_DISABLED =
+      "This server does not issue agent access grants; ask its operator for a token."
+    private const val ACCESS_THROTTLED =
+      "Too many access requests from this address just now — wait a minute and try again."
+
+    /**
+     * JSON-RPC methods any caller may send, credential or not.
+     *
+     * Discovery only: what protocol this speaks, whether it is alive, and what it can be asked to
+     * do. None of them reads a catalog, renders anything, or names a preview — [listResources] and
+     * every catalog tool stay behind the gate. The reason to open these at all is that a client
+     * which cannot complete `initialize` cannot reach the tool that asks for a credential either,
+     * so an agent with no token has nowhere to start but out-of-band `curl`.
+     */
+    private val UNGATED_METHODS = setOf("initialize", "ping", "tools/list")
+
+    /**
+     * Tools callable without a grant — the two that exist to obtain one. Everything else in [tools]
+     * answers about this host's catalogs and needs at least `preview` scope.
+     */
+    private val UNGATED_TOOLS = setOf("request_access", "poll_access")
+
+    /**
+     * Whether this message must present a grant before it is handled.
+     *
+     * Lives here, beside the tools it speaks for, so the transport does not have to keep its own
+     * copy of the list — a second list is how a tool added on one side becomes reachable
+     * unauthenticated on the other. Anything unrecognised is gated: a method or tool name this
+     * version has never heard of is not a thing to open by default.
+     */
+    fun requiresGrant(request: JsonObject): Boolean {
+      val method = (request["method"] as? JsonPrimitive)?.contentOrNull ?: return true
+      // A notification (no `id`) is accepted and dropped without being handled at all.
+      if (request["id"] == null) return false
+      if (method in UNGATED_METHODS) return false
+      if (method != "tools/call") return true
+      val params = request["params"] as? JsonObject ?: return true
+      val name = (params["name"] as? JsonPrimitive)?.contentOrNull ?: return true
+      return name !in UNGATED_TOOLS
+    }
   }
 }
