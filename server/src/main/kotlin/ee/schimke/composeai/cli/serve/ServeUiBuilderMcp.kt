@@ -153,6 +153,15 @@ class ServeUiBuilderMcp(
             previewUrl = outcome.response.previewUrl,
             imageBase64 = outcome.response.image,
             taggedNodeIds = outcome.taggedNodeIds,
+            nodeBounds =
+              outcome.nodeBounds.mapValues { (_, box) ->
+                NativePreviewNodeBoundsV1(
+                  x = box.x,
+                  y = box.y,
+                  width = box.width,
+                  height = box.height,
+                )
+              },
             compileError = outcome.response.exception,
           ),
         )

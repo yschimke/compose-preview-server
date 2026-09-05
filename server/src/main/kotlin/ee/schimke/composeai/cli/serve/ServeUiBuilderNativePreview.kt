@@ -54,6 +54,19 @@ internal class ServeUiBuilderNativePreview(
    * difference between testing the lane and not testing it.
    */
   private val compile: (UiBuilderGeneratedCompose) -> PlaygroundRunResponse,
+  /**
+   * Where each tagged node drew on the frame the compile lane produced, keyed by design node id.
+   *
+   * A second seam beside [compile] rather than a field on its response: `PlaygroundRunResponse` is
+   * published from compose-ai-tools' `render-host` and cannot gain one from this repository. It
+   * does not need to — the bounds are a second capture, and this class owns the payload they ride
+   * on. Defaults to no bounds, which is what a host with no semantics-capable backend has and what
+   * every test that only cares about the frame wants: the overlay is an addition to the picture,
+   * never a precondition for it.
+   */
+  private val captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = {
+    emptyMap()
+  },
 ) : UiBuilderNativePreviewLane {
 
   override fun render(document: DesignDocumentV1): UiBuilderNativePreviewOutcome {
@@ -78,10 +91,13 @@ internal class ServeUiBuilderNativePreview(
           heightDp = environment.heightDp,
         )
       )
-    // Reported rather than inferred by the caller: the tag set is what a bounds lookup is keyed by,
-    // and a client that recomputed it from the document would drift the moment the projection
-    // stopped tagging something.
-    return UiBuilderNativePreviewOutcome.Rendered(response, document.nodes.keys.sorted())
+    // Only asked for a frame: a compile that failed has no render to read bounds off, and asking
+    // anyway would stand up a second daemon session to answer nothing.
+    val bounds = if (response.image == null) emptyMap() else captureNodeBounds(response)
+    // The tag set is reported rather than inferred by the caller: it is what a bounds lookup is
+    // keyed by, and a client that recomputed it from the document would drift the moment the
+    // projection stopped tagging something.
+    return UiBuilderNativePreviewOutcome.Rendered(response, document.nodes.keys.sorted(), bounds)
   }
 }
 
@@ -97,9 +113,20 @@ fun interface UiBuilderNativePreviewLane {
 }
 
 sealed interface UiBuilderNativePreviewOutcome {
-  /** The compile lane's answer, first frame and stream token included. */
-  data class Rendered(val response: PlaygroundRunResponse, val taggedNodeIds: List<String>) :
-    UiBuilderNativePreviewOutcome
+  /**
+   * The compile lane's answer, first frame and stream token included.
+   *
+   * [nodeBounds] maps a design node id to the box it drew, in the frame's own render pixels — the
+   * space [imageBase64][NativePreviewResultV1.imageBase64] is in, so a client scales both by the
+   * one factor it already computes to fit the image. A node the render never placed simply has no
+   * entry, which is the honest outcome and the one `UiBuilderInspectionSnapshot` already gives a
+   * lazy slot that never composed.
+   */
+  data class Rendered(
+    val response: PlaygroundRunResponse,
+    val taggedNodeIds: List<String>,
+    val nodeBounds: Map<String, AnnotationBounds> = emptyMap(),
+  ) : UiBuilderNativePreviewOutcome
 
   /** The generator's own reasons, unchanged. */
   data class Refused(val code: String, val reasons: List<String>) : UiBuilderNativePreviewOutcome

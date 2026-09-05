@@ -1539,6 +1539,15 @@ public class ServeRunner(
       buildPlaygroundAndroidRenderService(workRoot, opener)
     }
 
+    // The UI-builder's node-bounds capture, per backend: a second short session over the same
+    // compiled snippet that reads the render's `compose/semantics` tree so the native pane can
+    // outline and hit-test the nodes it drew. Absent where the backend is, exactly like the still
+    // frame — a design then shows its picture with no overlay rather than not showing it.
+    val androidNodeBounds = androidDaemonOpener?.let {
+      buildPlaygroundNodeBoundsService(workRoot, it)
+    }
+    val cmpNodeBounds = cmpDaemonOpener?.let { buildPlaygroundNodeBoundsService(workRoot, it) }
+
     // The runtime selector (issue #3215 follow-up). A catalog is offerable once it has published a
     // verified liveBundle whose manifest declares a backend this host can render; the mode set
     // falls
@@ -1606,6 +1615,20 @@ public class ServeRunner(
     val redeemRef = java.util.concurrent.atomic.AtomicReference<PlaygroundRedeemService?>()
     val tokenStore =
       PlaygroundTokenStore(onRemove = { token -> redeemRef.get()?.release(token.id) })
+    // Keyed off the response's own token, because that is the only handle a caller of the compile
+    // lane holds on the snippet it just compiled — the token store owns the classes and the work
+    // dir until it expires. A token already dropped, or a snippet whose backend has no bounds
+    // capture, is an empty map: the frame stands on its own.
+    val captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = { response ->
+      val snippet = response.previewToken?.let { tokenStore.get(it) }?.snippet
+      val capture =
+        when (snippet?.mode) {
+          PlaygroundMode.ANDROID -> androidNodeBounds
+          PlaygroundMode.CMP -> cmpNodeBounds
+          else -> null
+        }
+      if (snippet == null || capture == null) emptyMap() else capture.capture(snippet)
+    }
     val service =
       PlaygroundCompileService(
         catalogClasspath = { mode, catalog ->
@@ -1796,7 +1819,12 @@ public class ServeRunner(
         editing = { service.editLeaseHealth() },
       )
     }
-    return PlaygroundLane(compile = service, redeem = redeem, health = health)
+    return PlaygroundLane(
+      compile = service,
+      redeem = redeem,
+      health = health,
+      captureNodeBounds = captureNodeBounds,
+    )
   }
 
   /**
@@ -1923,6 +1951,13 @@ public class ServeRunner(
     val redeem: PlaygroundRedeemService,
     /** Read by `/status.json` to report why the lane is (or isn't) fully up. */
     val health: () -> PlaygroundHealth,
+    /**
+     * Where each tagged node drew on a compiled snippet's frame, for the UI-builder's native pane.
+     * Empty on a backend with no semantics producer.
+     */
+    val captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = {
+      emptyMap()
+    },
   )
 
   /**
@@ -2148,6 +2183,23 @@ public class ServeRunner(
     return PlaygroundAndroidRenderService(
       openSession = opener,
       newWorkDir = { java.io.File(workRoot, "android-render-${renderCounter.incrementAndGet()}") },
+    )
+  }
+
+  /**
+   * The UI-builder's node-bounds capture backend: renders a compiled snippet on the [opener] with
+   * `compose/semantics` enabled and projects the tree into `testTag → box in render pixels`.
+   * Backend-agnostic in the same way as the first-frame render — the [opener] picks desktop or
+   * Robolectric.
+   */
+  private fun buildPlaygroundNodeBoundsService(
+    workRoot: java.io.File,
+    opener: PlaygroundAndroidSessionOpener,
+  ): PlaygroundNodeBoundsService {
+    val boundsCounter = java.util.concurrent.atomic.AtomicLong()
+    return PlaygroundNodeBoundsService(
+      openSession = opener,
+      newWorkDir = { java.io.File(workRoot, "node-bounds-${boundsCounter.incrementAndGet()}") },
     )
   }
 
@@ -2692,14 +2744,18 @@ public class ServeRunner(
         // a failed call.
         uiBuilderNativePreview =
           uiBuilderLane?.let { lane ->
-            playgroundLane?.compile?.let { playground ->
-              val adapter = UiBuilderGeneratedPreviewAdapter(playground)
-              ServeUiBuilderNativePreview(lane.compose) { generated ->
-                // `true` here, and only here: this call site is downstream of the route's
-                // `ui-builder-export` capability check, and the source it submits came from
-                // `ScreenGenerator` against the component record rather than from the caller.
-                adapter.compile(generated, isSecurityChecked = true)
-              }
+            playgroundLane?.let { playground ->
+              val adapter = UiBuilderGeneratedPreviewAdapter(playground.compile)
+              ServeUiBuilderNativePreview(
+                executor = lane.compose,
+                compile = { generated ->
+                  // `true` here, and only here: this call site is downstream of the route's
+                  // `ui-builder-export` capability check, and the source it submits came from
+                  // `ScreenGenerator` against the component record rather than from the caller.
+                  adapter.compile(generated, isSecurityChecked = true)
+                },
+                captureNodeBounds = playground.captureNodeBounds,
+              )
             }
           },
         playgroundRateLimiter = playgroundLane?.let { buildPlaygroundRateLimiter() },

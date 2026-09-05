@@ -51,11 +51,21 @@ class ServeUiBuilderNativePreviewTest {
       ComponentRecordSource(mapOf(CATALOG to ScreenGeneratorScreenFixture.componentsFile()))::record
     )
 
+  private var boundsCaptures = 0
+
   private val lane =
-    ServeUiBuilderNativePreview(executor) { generated ->
-      submitted += generated
-      PlaygroundRunResponse(previewId = "generated", previewToken = "token", image = "png")
-    }
+    ServeUiBuilderNativePreview(
+      executor = executor,
+      compile = { generated ->
+        submitted += generated
+        PlaygroundRunResponse(previewId = "generated", previewToken = "token", image = "png")
+      },
+      captureNodeBounds = { response ->
+        boundsCaptures++
+        assertEquals("token", response.previewToken)
+        mapOf("heading" to AnnotationBounds(x = 8, y = 16, width = 200, height = 24))
+      },
+    )
 
   @Test
   fun `the rendered source carries every design node id as a test tag`() {
@@ -131,6 +141,43 @@ class ServeUiBuilderNativePreviewTest {
     assertEquals(emptyList(), submitted)
     assertTrue(refused.reasons.any { it.contains("matchParentSize") }, refused.reasons.toString())
     assertNull(refused.reasons.firstOrNull { it.contains("compile") })
+  }
+
+  @Test
+  fun `the frame carries the boxes its tagged nodes drew`() {
+    val rendered = assertIs<UiBuilderNativePreviewOutcome.Rendered>(lane.render(document()))
+
+    // Keyed by design node id, in the frame's own render pixels: the pane scales both by the one
+    // factor it computes to fit the image, so a box means the same thing as the pixels under it.
+    assertEquals(
+      mapOf("heading" to AnnotationBounds(x = 8, y = 16, width = 200, height = 24)),
+      rendered.nodeBounds,
+    )
+    // A subset of the tag set, not a rename of it: `column` is tagged and has no box here, which is
+    // what a node the render never placed looks like.
+    assertEquals(listOf("column", "heading"), rendered.taggedNodeIds)
+  }
+
+  @Test
+  fun `a compile with no frame is not asked for bounds`() {
+    // A failed compile has no render to read semantics off, and asking anyway would stand up a
+    // second daemon session to answer nothing.
+    val laneWithoutFrame =
+      ServeUiBuilderNativePreview(
+        executor = executor,
+        compile = { PlaygroundRunResponse(exception = "compilation failed") },
+        captureNodeBounds = {
+          boundsCaptures++
+          mapOf("heading" to AnnotationBounds(0, 0, 1, 1))
+        },
+      )
+
+    val rendered =
+      assertIs<UiBuilderNativePreviewOutcome.Rendered>(laneWithoutFrame.render(document()))
+
+    assertEquals(emptyMap(), rendered.nodeBounds)
+    assertEquals(0, boundsCaptures)
+    assertEquals("compilation failed", rendered.response.exception)
   }
 
   private fun document(): DesignDocumentV1 =

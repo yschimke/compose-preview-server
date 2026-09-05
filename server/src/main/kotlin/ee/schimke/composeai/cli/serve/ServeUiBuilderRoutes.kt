@@ -229,6 +229,7 @@ internal fun Route.installUiBuilderRoutes(
                 previewUrl = result.response.previewUrl,
                 imageBase64 = result.response.image,
                 taggedNodeIds = result.taggedNodeIds,
+                nodeBounds = result.nodeBounds.mapValues { (_, box) -> box.toNodeBoundsV1() },
                 compileError = result.response.exception,
               ),
             ),
@@ -443,8 +444,9 @@ private const val MAX_UI_BUILDER_REQUEST_BYTES = 8 * 1024 * 1024
  *
  * Its own shape, because the released protocol defines none — and deliberately not squeezed into
  * `ExportArtifactV1`, which describes source rather than a running preview. [taggedNodeIds] names
- * the design nodes the render is tagged with, so a client knows which ids `get_preview_data` will
- * report bounds for and can put selectable regions over an image the browser did not draw.
+ * the design nodes the render is tagged with, so a client knows which ids to expect a rectangle
+ * for, and [nodeBounds] is those rectangles — together they are what puts selectable regions over
+ * an image the browser did not draw.
  */
 @kotlinx.serialization.Serializable
 internal data class NativePreviewResultV1(
@@ -456,8 +458,34 @@ internal data class NativePreviewResultV1(
   val previewUrl: String? = null,
   val imageBase64: String? = null,
   val taggedNodeIds: List<String> = emptyList(),
+  /**
+   * Design node id → the box it drew, in the frame's own **render pixels**.
+   *
+   * A subset of [taggedNodeIds], never a rename of it: a node the render never placed — an
+   * off-screen row, a lazy slot that never composed — is tagged and has no rectangle, and saying so
+   * by omission is more honest than a zero-area box a client would draw. Empty where the render
+   * backend has no semantics producer, which costs the frame nothing.
+   */
+  val nodeBounds: Map<String, NativePreviewNodeBoundsV1> = emptyMap(),
   val compileError: String? = null,
 )
+
+/**
+ * One node's rectangle on the native frame, in render pixels with the origin at its top-left.
+ *
+ * Its own type rather than `render-host`'s `AnnotationBounds`: this is a wire shape this repository
+ * owns and versions with the payload around it, and the four fields are the whole of it.
+ */
+@kotlinx.serialization.Serializable
+internal data class NativePreviewNodeBoundsV1(
+  val x: Int,
+  val y: Int,
+  val width: Int,
+  val height: Int,
+)
+
+private fun AnnotationBounds.toNodeBoundsV1() =
+  NativePreviewNodeBoundsV1(x = x, y = y, width = width, height = height)
 
 /** Why there was no native render — the generator's own reasons, not a second vocabulary. */
 @kotlinx.serialization.Serializable
