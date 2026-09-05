@@ -127,7 +127,13 @@ authoritative state defaults to `/config/ui-builder-state` on the persistent `pr
 volume, and `SERVE_UI_BUILDER_STATE_DIR=none` is the explicit static-only opt-out.
 
 The compose deployment offers those three agent capabilities by default because the image always
-packages the builder lane. To narrow them, set `SERVE_AGENT_GRANT_CAPABILITIES` explicitly in
+packages the builder lane. `images` joins them when `SERVE_IMAGE_UPLOAD_REPO` names a repository —
+that is, when this box runs the upload lane — so an approved agent can host a rendered preview
+without holding a GitHub credential. It is conditional rather than flat because the server refuses
+to start when the capability is offered with no lane behind it; the entrypoint drops it again for
+the one shape the compose file cannot see, `SERVE_ACCEPT_IMAGES=0` with the repository still named.
+A human still ticks it per grant, and only if they themselves have access to the repository uploads
+are gated on. To narrow or widen either, set `SERVE_AGENT_GRANT_CAPABILITIES` explicitly in
 `.env`. The grant token belongs in `COMPOSE_PREVIEW_UI_BUILDER_TOKEN` for the remote MCP process,
 never in its argv; see [the live-session guide](../../docs/design/UI_BUILDER_LIVE_SESSION.md) and
 the [remote MCP reference](https://github.com/yschimke/compose-ai-tools/blob/main/docs/daemon/MCP.md#remote-ui-builder-tools).

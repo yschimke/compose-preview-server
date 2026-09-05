@@ -281,9 +281,20 @@ services:
       SERVE_AGENT_GRANTS: "${SERVE_AGENT_GRANTS:-}"
       SERVE_AGENT_GRANT_SCOPES: "${SERVE_AGENT_GRANT_SCOPES:-}"
       # Non-cumulative permissions a grant may carry beside its scope. UI-builder capabilities are
-      # enabled by default because this image always packages the authenticated design API; image
-      # upload remains opt-in through SERVE_ACCEPT_IMAGES/SERVE_IMAGE_UPLOAD_REPO.
-      SERVE_AGENT_GRANT_CAPABILITIES: "${SERVE_AGENT_GRANT_CAPABILITIES:-ui-builder-read,ui-builder-write,ui-builder-export}"
+      # enabled by default because this image always packages the authenticated design API.
+      #
+      # `images` joins them exactly when SERVE_IMAGE_UPLOAD_REPO names a repository — i.e. when this
+      # box runs the upload lane at all. It is conditional rather than flat because the server
+      # REFUSES TO START when the capability is offered without the lane ("a granted upload would
+      # have nowhere to go"), so an unconditional default would stop every box that does not upload.
+      # An agent still holds it only when a human ticks it on the approval page, and only when that
+      # human has access to the repository uploads are gated on — which since 2.21.0 is asked of the
+      # UPLOAD repo rather than the sign-in one, so the two may differ.
+      #
+      # The one case this line cannot see is SERVE_ACCEPT_IMAGES=0 with the repository still named
+      # (the documented "name it and keep the lane shut" opt-out): the entrypoint drops `images`
+      # there, where both answers are known. Set the variable explicitly to override either way.
+      SERVE_AGENT_GRANT_CAPABILITIES: "${SERVE_AGENT_GRANT_CAPABILITIES:-ui-builder-read,ui-builder-write,ui-builder-export${SERVE_IMAGE_UPLOAD_REPO:+,images}}"
       SERVE_AGENT_GRANT_MAX_TTL: "${SERVE_AGENT_GRANT_MAX_TTL:-}"
       SERVE_AGENT_GRANT_MAX_ACTIVE: "${SERVE_AGENT_GRANT_MAX_ACTIVE:-}"
       SERVE_AGENT_GRANT_RATE_LIMIT: "${SERVE_AGENT_GRANT_RATE_LIMIT:-}"
