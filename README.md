@@ -46,7 +46,37 @@ from Maven Central at the version in `gradle/libs.versions.toml`; wire contracts
 from [`compose-preview-contracts`](https://github.com/yschimke/compose-preview-contracts). There is
 no composite build, project substitution, shared version catalog, or `mavenLocal()` repository.
 
+## Java
+
+**Run the distribution on Java 17 or newer. The UI builder's PNG/SVG export needs Java 21.**
+
+The two numbers are one difference, and it is worth stating plainly rather than leaving to be
+inferred from build files. The server itself, `mcp serve`, and every artifact this repository
+publishes target Java 17, because `compose-ai-tools`' CLI compiles against them on a 17 toolchain
+and its `serve` / `mcp serve` commands launch this distribution's start script as a separate
+process, resolving `java` from `JAVA_HOME`/`PATH`. Only the UI builder's renderer is above that
+floor: the design it rasterizes is drawn by a Compose preview compiled for Java 21, packaged into
+the render bundle, and unpacked into a daemon that runs on the server's own JVM.
+
+On an older JVM the server still starts and everything else works; the UI builder loses PNG and SVG
+export and says so at startup, naming the version it found and the one it needs. Point `JAVA_HOME`
+at a Java 21 JDK to get it back, or pass `--ui-builder-state-dir none` to run without the UI builder
+at all. The published container image
+([`deploy/image/Dockerfile`](deploy/image/Dockerfile)) is built on Temurin 21 and clears both.
+
+Both floors are declared once, as `java-server` and `java-ui-builder` in
+[`gradle/libs.versions.toml`](gradle/libs.versions.toml), which is also where the reasoning lives.
+`:server:checkServerJvmFloor` fails the build if anything above `java-server` reaches the
+distribution's classpath, and the render bundle carries `java-ui-builder` as data so the startup
+message cannot drift from the bytes it describes.
+
 ## Build
+
+Building needs **both** JDKs on the machine: Gradle runs on 17, and `:ui-builder` /
+`:ui-builder-artwork` compile through a 21 toolchain. Gradle finds a 21 installed anywhere it
+already scans (`/usr/lib/jvm`, SDKMAN, asdf, jabba); if it cannot, the failure is
+`No matching toolchains found for requested specification: {languageVersion=21}` and the fix is to
+install one, not to lower the target.
 
 ```shell
 ./gradlew check ktfmtCheckAll

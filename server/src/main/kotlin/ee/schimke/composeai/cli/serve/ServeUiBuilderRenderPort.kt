@@ -52,6 +52,7 @@ internal class ServeUiBuilderRenderPort private constructor(private val host: Se
       root: Path,
       onLog: (String) -> Unit = { System.err.println("[ui-builder renderer] $it") },
     ): ServeUiBuilderRenderPort {
+      preflightJvm()
       val bundle = PackagedUiBuilderRenderBundle.copyTo(root)
       val generation = bundle.parent
       val state =
@@ -75,6 +76,43 @@ internal class ServeUiBuilderRenderPort private constructor(private val host: Se
         )
       )
     }
+
+    /**
+     * Fails before materializing a bundle this JVM cannot load, and says so in one sentence.
+     *
+     * The bundle carries `:ui-builder`'s compiled previews, which sit above the floor of every
+     * artifact a consumer resolves. Rendering them happens in a daemon `ServeRenderHost` starts
+     * from `java.home` — this process's own JVM — so on an older host the failure lands as an
+     * `UnsupportedClassVersionError` on the stderr of a process the operator never launched, with
+     * no mention of Java versions. `ServeRunner` catches what this throws and prints it beside the
+     * export capabilities that go with it, which is where an operator is already looking
+     * ([#344](https://github.com/yschimke/compose-preview-server/issues/344)).
+     *
+     * The required version is read from the bundle rather than written here: a copy in the server
+     * would be a second number to raise, and the one that drifts is the one nobody rebuilds.
+     */
+    private fun preflightJvm() {
+      jvmPreflightFailure(
+          required = PackagedUiBuilderRenderBundle.requiredJavaFeatureVersion(),
+          running = Runtime.version().feature(),
+          javaHome = System.getProperty("java.home"),
+        )
+        ?.let { error(it) }
+    }
+
+    /**
+     * The message, separated from the two values so it can be asserted without a second JVM.
+     *
+     * Null when this JVM can load the bundle. What a test pins is not the wording but the three
+     * things an operator has to be told and cannot get anywhere else: the version found, the
+     * version needed, and what to change.
+     */
+    internal fun jvmPreflightFailure(required: Int, running: Int, javaHome: String?): String? =
+      if (running >= required) null
+      else
+        "the packaged UI-builder renderer needs Java $required or newer, but this server is " +
+          "running Java $running from $javaHome — point JAVA_HOME at a Java $required JDK and " +
+          "restart, or pass --ui-builder-state-dir none to run without the UI builder"
 
     internal fun forHost(host: ServeRenderHost): ServeUiBuilderRenderPort =
       ServeUiBuilderRenderPort(host)
