@@ -387,6 +387,11 @@ class ServeHttpServer(
   /** Independent human/operator/agent authorization for [uiBuilderService]. */
   private val uiBuilderAuthorization: ServeUiBuilderAuthorization? = null,
   /**
+   * Compiles and renders a design with real Compose on this host. Non-null only where the builder
+   * and the playground compile lane are both configured, because a native render needs both.
+   */
+  private val uiBuilderNativePreview: UiBuilderNativePreviewLane? = null,
+  /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
    * has resolved. Null when the lane isn't wired at all. See [PlaygroundHealth].
@@ -836,7 +841,7 @@ class ServeHttpServer(
       }
       routing {
         if (uiBuilderService != null && uiBuilderAuthorization != null) {
-          installUiBuilderRoutes(uiBuilderService, uiBuilderAuthorization)
+          installUiBuilderRoutes(uiBuilderService, uiBuilderAuthorization, uiBuilderNativePreview)
         }
         // `/healthz` — ungated liveness: "ok" the moment the listener is up. Leaks nothing, and
         // proves nothing beyond "the process is answering HTTP". The rolling-update gate is

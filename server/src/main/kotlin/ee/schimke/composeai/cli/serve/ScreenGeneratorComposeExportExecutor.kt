@@ -67,58 +67,9 @@ internal class ScreenGeneratorComposeExportExecutor(
     require(request.revision == request.document.revision) { "export revision/document mismatch" }
     require(request.document.id == request.designId) { "export design/document mismatch" }
 
-    val catalogSystemId = request.document.catalogPin.systemId
-    val record =
-      when (val lookup = components(catalogSystemId)) {
-        is ComponentRecordSource.Lookup.Found -> lookup.record
-        // Two ways to have no record, and they need different sentences. Telling an operator who
-        // already passed `--ui-builder-components` to pass it is advice they cannot act on; what
-        // they need is the path and what went wrong with it, which only the source knows.
-        ComponentRecordSource.Lookup.Unconfigured ->
-          return refused(
-            NO_COMPONENT_RECORD,
-            listOf(
-              "this host has no discovered component record for catalog `$catalogSystemId`, so " +
-                "no call site can be proven; run a preview bundle for that catalog's module and " +
-                "pass it as `--ui-builder-components $catalogSystemId=<components.json>`"
-            ),
-          )
-        is ComponentRecordSource.Lookup.Unusable ->
-          return refused(
-            NO_COMPONENT_RECORD,
-            listOf(
-              "the component record configured for catalog `$catalogSystemId` could not be " +
-                "loaded: ${lookup.reason}"
-            ),
-          )
-      }
-    if (!generatesFrom(record)) {
-      // The capability advertised for this catalog is a configuration fact and cannot know today's
-      // file, so the version check lives here, where it can name the version. `ScreenGenerator`
-      // would refuse this too, but as an unproven call site — which reads like a stale document
-      // rather than like a record this build will not read.
-      return refused(
-        NO_COMPONENT_RECORD,
-        listOf(
-          "the component record for catalog `$catalogSystemId` is schema " +
-            "${record.schemaVersion}, and this build generates from " +
-            "$COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to $COMPONENT_RECORD_SCHEMA_VERSION; " +
-            "re-run discovery against a matching plugin version"
-        ),
-      )
-    }
-    val projection = ScreenDocumentProjection.project(request.document)
-    val document =
-      when (projection) {
-        is ScreenDocumentProjection.Outcome.Projected -> projection.document
-        is ScreenDocumentProjection.Outcome.Refused ->
-          return refused(UNEXPRESSIBLE_DOCUMENT, projection.reasons)
-      }
-    return when (
-      val generated = ScreenGenerator.generate(document, record, packageName, EXPRESSION_PACKAGES)
-    ) {
-      is ScreenGenerator.Result.Refused -> refused(UNPROVEN_CALL_SITE, generated.reasons)
-      is ScreenGenerator.Result.Emitted -> {
+    return when (val generated = generate(request.document)) {
+      is Generated.Refused -> refused(generated.code, generated.reasons)
+      is Generated.Emitted -> {
         val source = provenance(request) + generated.source
         ExportArtifactV1(
           format = ExportFormatV1.COMPOSE,
@@ -132,6 +83,80 @@ internal class ScreenGeneratorComposeExportExecutor(
           diagnostics = emptyList(),
         )
       }
+    }
+  }
+
+  /** The Kotlin for a document, or why there is none. */
+  internal sealed interface Generated {
+    data class Emitted(val source: String, val screenName: String) : Generated
+
+    data class Refused(val code: String, val reasons: List<String>) : Generated
+  }
+
+  /**
+   * The generator run itself, without the provenance header an export artifact wants.
+   *
+   * Split out of [export] so the **native preview** lane can ask the same question with [tagNodes]
+   * on and get the same refusals: a design that cannot be exported cannot be rendered natively
+   * either, and hearing about it twice in two vocabularies is how two surfaces start disagreeing
+   * about one document.
+   */
+  internal fun generate(
+    document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
+    tagNodes: Boolean = false,
+  ): Generated {
+    val catalogSystemId = document.catalogPin.systemId
+    val record =
+      when (val lookup = components(catalogSystemId)) {
+        is ComponentRecordSource.Lookup.Found -> lookup.record
+        // Two ways to have no record, and they need different sentences. Telling an operator who
+        // already passed `--ui-builder-components` to pass it is advice they cannot act on; what
+        // they need is the path and what went wrong with it, which only the source knows.
+        ComponentRecordSource.Lookup.Unconfigured ->
+          return Generated.Refused(
+            NO_COMPONENT_RECORD,
+            listOf(
+              "this host has no discovered component record for catalog `$catalogSystemId`, so " +
+                "no call site can be proven; run a preview bundle for that catalog's module and " +
+                "pass it as `--ui-builder-components $catalogSystemId=<components.json>`"
+            ),
+          )
+        is ComponentRecordSource.Lookup.Unusable ->
+          return Generated.Refused(
+            NO_COMPONENT_RECORD,
+            listOf(
+              "the component record configured for catalog `$catalogSystemId` could not be " +
+                "loaded: ${lookup.reason}"
+            ),
+          )
+      }
+    if (!generatesFrom(record)) {
+      // The capability advertised for this catalog is a configuration fact and cannot know today's
+      // file, so the version check lives here, where it can name the version. `ScreenGenerator`
+      // would refuse this too, but as an unproven call site — which reads like a stale document
+      // rather than like a record this build will not read.
+      return Generated.Refused(
+        NO_COMPONENT_RECORD,
+        listOf(
+          "the component record for catalog `$catalogSystemId` is schema " +
+            "${record.schemaVersion}, and this build generates from " +
+            "$COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to $COMPONENT_RECORD_SCHEMA_VERSION; " +
+            "re-run discovery against a matching plugin version"
+        ),
+      )
+    }
+    val screenName = ScreenDocumentProjection.screenNameFor(document)
+    val projected =
+      when (val projection = ScreenDocumentProjection.project(document, screenName, tagNodes)) {
+        is ScreenDocumentProjection.Outcome.Projected -> projection.document
+        is ScreenDocumentProjection.Outcome.Refused ->
+          return Generated.Refused(UNEXPRESSIBLE_DOCUMENT, projection.reasons)
+      }
+    return when (
+      val generated = ScreenGenerator.generate(projected, record, packageName, EXPRESSION_PACKAGES)
+    ) {
+      is ScreenGenerator.Result.Refused -> Generated.Refused(UNPROVEN_CALL_SITE, generated.reasons)
+      is ScreenGenerator.Result.Emitted -> Generated.Emitted(generated.source, screenName)
     }
   }
 
