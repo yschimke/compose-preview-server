@@ -235,6 +235,17 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")
+  # The component record the Compose export generates from. Until it shipped, this image passed
+  # none, so `composeCode` was false and the builder withdrew the export action on every deployed
+  # box — the code pane, the export tool and the native render all refuse without it.
+  #
+  # `m3-catalog` only, deliberately. `remote-m3` has no record and is not meant to: Remote Compose
+  # is kept out of the Compose exporter by design, and the capability is advertised per catalog, so
+  # naming one here enables it there and leaves the other honestly unable.
+  UI_BUILDER_RECORD="${SERVE_UI_BUILDER_COMPONENTS:-/opt/compose-preview-server/ui-builder-components/m3-catalog-components-v1.json}"
+  if [[ -f "${UI_BUILDER_RECORD}" ]]; then
+    args+=(--ui-builder-components "m3-catalog=${UI_BUILDER_RECORD}")
+  fi
 fi
 # Explicit per-catalog apps remain additive and take precedence over the packaged fallback.
 [[ -n "${SERVE_WASM_DIR:-}" ]] && args+=(--wasm-dir "${SERVE_WASM_DIR}")

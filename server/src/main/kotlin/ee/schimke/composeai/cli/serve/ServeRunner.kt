@@ -2330,9 +2330,12 @@ public class ServeRunner(
         // defeat `ComponentRecordSource`'s hot reload outright — the source would re-read a file
         // the service has already refused to ask it about.
         //
-        // So the question is whether every enabled catalog has a record **configured**, which is
-        // fixed for the process. The packaged image passes none, so it advertises nothing and the
-        // builder offers no action that can only fail — the point of gating this at all.
+        // So the question is whether a catalog has a record **configured**, which is fixed for the
+        // process. It is asked per catalog: `exportCapabilities` is a field of each
+        // `CatalogCapabilityV1`, and collapsing it to one boolean meant a deployment serving
+        // `m3-catalog` beside `remote-m3` — which deliberately has no record, Remote Compose being
+        // outside the Compose exporter — advertised no export anywhere, withdrawing the action
+        // from the catalog that could have used it.
         //
         // The cost, stated: a configured record that is missing, malformed, or on a schema this
         // generator will not read is still advertised, and every export of it refuses. That is the
@@ -2347,6 +2350,7 @@ public class ServeRunner(
                 png = false,
               ))
             .copy(composeCode = composeExportConfigured),
+        composeExportFor = { systemId -> systemId in uiBuilderComponents.keys },
       )
     val service =
       PersistentUiBuilderService(

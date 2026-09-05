@@ -306,6 +306,10 @@ services:
       SERVE_UI_BUILDER_STATE_DIR: "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}"
       # Explicit authoring allowlist; publishing another preview catalog does not expose a builder.
       SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}"
+      # The component record the Compose export generates from. The image ships one for
+      # `m3-catalog` and the entrypoint installs it by default, so this is an override for a box
+      # carrying its own discovery output — an empty value keeps the packaged record.
+      SERVE_UI_BUILDER_COMPONENTS: "${SERVE_UI_BUILDER_COMPONENTS:-}"
       # Naming this turns the image lane on (see SERVE_ACCEPT_IMAGES above): the repository an
       # uploader's GitHub token must have access to. Write access on a public repo, any grant on a
       # private one.
