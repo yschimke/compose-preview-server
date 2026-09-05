@@ -130,6 +130,27 @@ describe("historyMenuOf", () => {
         assert.equal(menu?.rows[1].span, null, "a single publish says nothing");
     });
 
+    it("gives every row a thumbnail of that render, in both addressing modes", () => {
+        // The menu is opened to find out what a version LOOKED like; dates and shas cannot answer
+        // that. The picture is the row's own link, so it can never point somewhere the link does
+        // not.
+        const hosted = historyMenuOf(HOSTED, entry());
+        assert.equal(hosted?.rows[0].thumb, hosted?.rows[0].href);
+        assert.ok(
+            hosted?.rows[0].thumb.startsWith(
+                "https://raw.githubusercontent.com/o/n/aaaaaaa/",
+            ),
+            hosted?.rows[0].thumb,
+        );
+        const local = historyMenuOf(
+            LOCAL,
+            entry({
+                versions: [{ blob: sha("a") }, { blob: sha("b") }],
+            }),
+        );
+        assert.equal(local?.rows[1].thumb, `/h/${sha("b")}.png`);
+    });
+
     it("carries the instability warning with its count", () => {
         const menu = historyMenuOf(
             HOSTED,

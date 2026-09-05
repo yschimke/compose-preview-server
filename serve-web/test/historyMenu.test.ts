@@ -110,6 +110,38 @@ describe("<cp-history-menu>", () => {
         assert.equal(items[1].hasAttribute("data-current"), false);
     });
 
+    it("shows each version as a picture, not just a date", async () => {
+        // The bug this closes: the panel listed dates and shas, so the one question a reader opens
+        // a render history to ask — what did it look like then? — had no answer on the row.
+        const items = (await mount()).querySelectorAll("a.cp-history-item");
+        const thumb = items[1].querySelector("img.cp-history-thumb");
+        assert.equal(
+            thumb?.getAttribute("src"),
+            items[1].getAttribute("href"),
+            "the picture is the render the row links to",
+        );
+        assert.equal(thumb?.getAttribute("loading"), "lazy");
+        assert.equal(thumb?.getAttribute("alt"), "", "the row already reads");
+        assert.equal(
+            items[0].firstElementChild?.tagName,
+            "IMG",
+            "the picture leads the row",
+        );
+    });
+
+    it("keeps the row readable when a thumbnail will not load", async () => {
+        // A rewritten delivery branch or an offline viewer would otherwise put a broken-image
+        // glyph on the row; the date and sha still answer, and the tile keeps the column aligned.
+        const thumb = (await mount()).querySelector<HTMLImageElement>(
+            "img.cp-history-thumb",
+        );
+        thumb?.dispatchEvent(new Event("error"));
+        await flush();
+        assert.equal(thumb?.hasAttribute("src"), false);
+        assert.equal(thumb?.getAttribute("data-failed"), "1");
+        assert.ok(thumb?.isConnected, "the tile stays, so the dates stay put");
+    });
+
     it("draws nothing when there is no timeline", async () => {
         const menu = await mount({
             inline: {
