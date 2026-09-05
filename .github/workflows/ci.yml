@@ -45,6 +45,20 @@ jobs:
           test -f "${dist_root}/ui-builder/uiBuilder.wasm"
           "${dist_root}/bin/compose-preview-server" --help
 
+  selector-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The consumer half of the preview-selector pin (compose-ai-tools#5185). `PreviewSelectorFixturesTest`
+      # runs the vendored table through this server's rule on every `check`; this step is the other
+      # question — whether the vendored copy is still the one the pinned compose-ai-tools release
+      # ships. It goes red on a pin bump that changed the table, which is when the obligation to
+      # re-sync becomes real, and no-ops while the pinned release predates the file.
+      - name: Check vendored preview-selector fixtures
+        run: ./scripts/sync-preview-selector-fixtures.sh --check
+
   deployment:
     runs-on: ubuntu-latest
     steps:
