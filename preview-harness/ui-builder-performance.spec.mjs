@@ -105,6 +105,106 @@ function sessionUrl(origin, clientId, create = false) {
     return `${origin}/ui-builder/?${query}`;
 }
 
+/**
+ * Bring `performance-jetcaster` into existence before a page opens it.
+ *
+ * The editor **opens** a design; it does not create one. A `?create=true` in the session URL is
+ * read by nothing — not this client, not the server — so a session pointed at a design that
+ * does not exist gets `notFound` from `openDesign`, sets a "Live error" status, and never calls
+ * `markReady()`. That is a page that never becomes interactive, which is indistinguishable from a
+ * slow one at [waitForInteractive]'s timeout and is what this spec used to fail on.
+ *
+ * Seeded from the same checked-in fixture `ui-builder-gate2.spec.mjs` replays, for two reasons: it
+ * is the document the measurements are about — a realistic Jetcaster Discover screen rather
+ * than an empty canvas — and it is where `search-placeholder` comes from, the node every
+ * [measureEdit] mutates. A hand-written stub here would drift from both.
+ */
+async function seedDesign(origin) {
+    const fixture = JSON.parse(
+        await readFile(
+            resolve(root, "docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json"),
+            "utf8",
+        ),
+    );
+    const [create, ...inserts] = fixture.operations;
+    expect(create.type).toBe("createDesign");
+    responseOf(
+        await apiCall(origin, {
+            type: "createDesign",
+            document: {
+                schema: fixture.documentSchema,
+                id: designId,
+                title: create.title,
+                revision: 0,
+                catalogPin: create.catalogPin,
+                environment: create.environment,
+                stateVariables: create.stateVariables,
+                roots: [],
+                nodes: {},
+                assets: {},
+                tokenBindings: {},
+            },
+        }),
+        "snapshot",
+    );
+    // One batch, not 108 calls: several container capabilities require children, so publishing
+    // each parent before its next fixture operation would expose a deliberately invalid
+    // intermediate document. Same reasoning, and same shape, as the gate2 replay.
+    const outcome = responseOf(
+        await apiCall(origin, {
+            type: "applyOperation",
+            submission: {
+                type: "batch",
+                designId,
+                operationId: "seed-jetcaster-discover-operations-v1",
+                actorId: "operator",
+                clientId: "performance-seed",
+                baseRevision: 0,
+                operations: inserts.map((operation) => {
+                    expect(operation.type).toBe("insertNode");
+                    return {
+                        type: "insertNode",
+                        node: operation.node,
+                        location: {
+                            parent: operation.parent ?? null,
+                            afterNodeId: operation.afterNodeId ?? null,
+                        },
+                    };
+                }),
+            },
+        }),
+        "operationOutcome",
+    );
+    expect(outcome.outcome, JSON.stringify(outcome.outcome)).toMatchObject({
+        type: "accepted",
+        committedRevision: 1,
+    });
+    return outcome.outcome.committedRevision;
+}
+
+let requestSequence = 0;
+
+async function apiCall(origin, request) {
+    const endpoint = `${origin}/api/ui-builder/v1/requests?token=${encodeURIComponent(token)}`;
+    const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            schemaVersion: 1,
+            requestId: `performance-seed-${++requestSequence}`,
+            actorId: "operator",
+            request,
+        }),
+    });
+    return { status: response.status, response: JSON.parse(await response.text()).response };
+}
+
+function responseOf(result, type) {
+    expect(result.status, JSON.stringify(result.response)).toBe(200);
+    expect(result.response.type).toBe(type);
+    return result.response;
+}
+
 async function waitForInteractive(page) {
     await page.waitForFunction(
         () =>
@@ -309,6 +409,9 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
     const observer = await context.newPage();
     const writer = await context.newPage();
     try {
+        // The seeded document is revision 1, not 0: the writer derives `baseRevision` from the
+        // revision it is asked to produce, so every edit below counts from what the seed left.
+        const seededRevision = await seedDesign(server.origin);
         await observer.goto(sessionUrl(server.origin, "performance-observer", true));
         await waitForInteractive(observer);
         await writer.goto(sessionUrl(server.origin, "performance-writer"));
@@ -317,7 +420,7 @@ test("UI-builder performance acceptance markers remain bounded", async ({ browse
 
         const editMeasurements = [];
         for (let index = 1; index <= warmupEdits + propagationSamples; index += 1) {
-            const measurement = await measureEdit(observer, index);
+            const measurement = await measureEdit(observer, seededRevision + index);
             if (index > warmupEdits) editMeasurements.push(measurement);
         }
 
