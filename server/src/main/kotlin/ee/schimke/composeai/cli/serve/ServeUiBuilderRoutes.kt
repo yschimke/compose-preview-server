@@ -153,6 +153,37 @@ internal fun Route.installUiBuilderRoutes(
   }
 
   /**
+   * Who the server decided this caller is.
+   *
+   * The browser editor cannot know its own actor id: it is derived from the operator token, the
+   * GitHub session or the presented agent grant, all of which live on the server side of the
+   * request. Without this the wasm host had to guess ("browser-user"), and every request it sent
+   * was rejected by the actor checks in this route and in `UiBuilderProtocolMapper`. Read-gated
+   * like the device presets, and a plain GET for the same reason: no new protocol request type.
+   */
+  get(UI_BUILDER_IDENTITY_PATH) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val actorId =
+      when (val decision = authorization.authorize(call, UiBuilderRouteCapability.READ)) {
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        UiBuilderAuthorizationDecision.Missing -> {
+          call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          return@get
+        }
+        UiBuilderAuthorizationDecision.Forbidden -> {
+          call.respondText("UI-builder read access required", status = HttpStatusCode.Forbidden)
+          return@get
+        }
+      }
+    call.respondText(
+      UI_BUILDER_JSON.encodeToString(UiBuilderIdentityV1(actorId = actorId)),
+      ContentType.Application.Json,
+      HttpStatusCode.OK,
+    )
+  }
+
+  /**
    * The device frames the builder's Screen inspector offers.
    *
    * A plain GET rather than a protocol request because the payload is derived from a compile-time
@@ -302,6 +333,9 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondProtocolEr
   )
 }
 
+@kotlinx.serialization.Serializable
+internal data class UiBuilderIdentityV1(val schemaVersion: Int = 1, val actorId: String)
+
 private val UI_BUILDER_JSON = Json {
   encodeDefaults = true
   explicitNulls = false
@@ -311,5 +345,6 @@ private val UI_BUILDER_JSON = Json {
 internal const val UI_BUILDER_REQUEST_PATH = "/api/ui-builder/v1/requests"
 internal const val UI_BUILDER_UPDATES_PATH = "/api/ui-builder/v1/designs/{designId}/updates"
 internal const val UI_BUILDER_DEVICE_PRESETS_PATH = "/api/ui-builder/v1/device-presets"
+internal const val UI_BUILDER_IDENTITY_PATH = "/api/ui-builder/v1/identity"
 private const val INVALID_REQUEST_ID = "invalid"
 private const val MAX_UI_BUILDER_REQUEST_BYTES = 8 * 1024 * 1024

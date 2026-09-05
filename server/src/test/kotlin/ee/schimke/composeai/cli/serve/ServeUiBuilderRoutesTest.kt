@@ -369,7 +369,8 @@ class ServeUiBuilderRoutesTest {
   private fun status(
     authenticatedActor: String?,
     request: ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1,
-  ): Int = post(authenticatedActor, request).use { it.code }
+    envelopeActor: String = authenticatedActor.orEmpty(),
+  ): Int = post(authenticatedActor, request, envelopeActor).use { it.code }
 
   private fun authenticatedPost(
     port: Int,
@@ -389,6 +390,31 @@ class ServeUiBuilderRoutesTest {
     if (bearer != null) builder.header("Authorization", "Bearer $bearer")
     if (serverToken != null) builder.header(ServeHttpServer.TOKEN_HEADER, serverToken)
     return client.newCall(builder.build()).execute().use { it.code }
+  }
+
+  @Test
+  fun `identity reports the authenticated actor the request lane demands`() {
+    assertEquals(401, identity(null).use { it.code })
+    assertEquals(403, identity("forbidden").use { it.code })
+
+    val body =
+      identity("github:someone").use {
+        assertEquals(200, it.code)
+        assertEquals(UiBuilderRouteCapability.READ, capabilities.last())
+        assertEquals("no-store", it.header("Cache-Control"))
+        it.body.string()
+      }
+    val payload = json.decodeFromString(UiBuilderIdentityV1.serializer(), body)
+    assertEquals(1, payload.schemaVersion)
+    assertEquals("github:someone", payload.actorId)
+    // The point of the endpoint: an envelope declaring what it reports is accepted.
+    assertEquals(200, status("github:someone", ListCatalogsRequestV1, payload.actorId))
+  }
+
+  private fun identity(authenticatedActor: String?): Response {
+    val builder = Request.Builder().url("http://127.0.0.1:${server.port}$UI_BUILDER_IDENTITY_PATH")
+    if (authenticatedActor != null) builder.header(ACTOR_HEADER, authenticatedActor)
+    return client.newCall(builder.build()).execute()
   }
 
   @Test
