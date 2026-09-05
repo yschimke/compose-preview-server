@@ -780,9 +780,9 @@ tasks.named("check") { dependsOn("checkServeModuleBoundary") }
  * was never in doubt.
  */
 abstract class CheckJvmClassFileFloor : DefaultTask() {
-  @get:InputFiles
-  @get:PathSensitive(PathSensitivity.NAME_ONLY)
-  abstract val classpath: ConfigurableFileCollection
+  // `@Classpath`, not `@InputFiles`: what this reads is the bytes of each class, so a jar
+  // rebuilt with the same content — a timestamp, a reordered manifest — must not re-run it.
+  @get:Classpath abstract val classpath: ConfigurableFileCollection
 
   /** The Java feature version every class on [classpath] must be loadable by. */
   @get:Input abstract val floor: Property<Int>
