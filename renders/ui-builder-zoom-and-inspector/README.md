@@ -12,6 +12,7 @@ captured from the hosted editor at `?mode=interactive-editor` by
 | `inspector.before.png` / `inspector.after.png` | the properties of one text layer: every declaration the catalog allows, versus the four the node carries plus a search and an add |
 | `layer-menu.before.png` / `layer-menu.after.png` | a right-click on a layer row: nothing, versus the verbs that act on it — which is why the row of icons above the canvas is now one overflow |
 | `container-menu.after.png` | the same menu on a container, carrying the layout modifiers its catalog entry declares, ticked where the node already has them |
+| `hover-editor.after.png` | the editor that follows the selection: the values one text node carries, edited where it is drawn |
 
 Regenerate with `EVIDENCE_SUFFIX=after npx playwright test -c capture-evidence.config.mjs` from
 `preview-harness/`, against a `:ui-builder:wasmFrontendDist` build of the branch.
