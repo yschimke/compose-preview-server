@@ -79,7 +79,9 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
       ),
       tool(
         "export_compose",
-        "Export a committed design revision as deterministic Compose source with diagnostics.",
+        "Export a committed design revision as deterministic Kotlin source with diagnostics — " +
+          "Jetpack Compose for a Material 3 screen, Remote Compose for a Wear widget, Wear " +
+          "Compose for a Wear screen.",
         revisionSchema,
       ),
       tool(
