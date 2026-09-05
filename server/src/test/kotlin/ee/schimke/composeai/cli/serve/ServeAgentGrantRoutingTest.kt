@@ -264,9 +264,11 @@ class ServeAgentGrantRoutingTest {
     // Same shape the HTTP route answers with — the two surfaces describe one flow.
     assertEquals("live", payload["requestedScope"]!!.jsonPrimitive.content)
 
+    // waitSeconds:0 — this assertion is about the answer, not about the waiting, and the tool
+    // otherwise holds the call open for its default while nobody is there to approve.
     val pending =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret"}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0}}}"""
       )
     assertEquals("pending", json(toolText(pending.second))["status"]!!.jsonPrimitive.content)
 
@@ -306,6 +308,127 @@ class ServeAgentGrantRoutingTest {
       )
     // The same answer an unknown id gets, deliberately: one must not distinguish the other.
     assertEquals("unknown", json(toolText(stolen.second))["status"]!!.jsonPrimitive.content)
+  }
+
+  /**
+   * A held poll returns the moment a human decides, rather than at the next tick of a client's own
+   * loop. The point is not latency for its own sake: over MCP every poll is a tool call through a
+   * model, so a human taking half a minute costs a dozen round trips unless the server can wait.
+   */
+  @Test
+  fun `a poll can wait for the decision instead of being asked again`() {
+    val (_, opened) = post("/agent-access/request", """{"scope":"live"}""")
+    val requestId = str(opened, "requestId")
+    val secret = str(opened, "deviceSecret")
+
+    // Approve from another thread, once the poll below is already waiting.
+    val approver = Thread {
+      Thread.sleep(400)
+      val (_, page) = get("/agent-access/$requestId?token=$operatorToken")
+      post(
+        "/agent-access/$requestId?token=$operatorToken",
+        "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800",
+        contentType = "application/x-www-form-urlencoded",
+      )
+    }
+    val started = System.currentTimeMillis()
+    approver.start()
+    val (code, polled) =
+      post(
+        "/agent-access/poll",
+        """{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":10}""",
+      )
+    val elapsed = System.currentTimeMillis() - started
+    approver.join()
+
+    assertEquals(200, code)
+    assertEquals("approved", str(polled, "status"))
+    assertTrue(str(polled, "token").isNotEmpty())
+    // It waited for the decision (rather than answering `pending` at once) …
+    assertTrue(elapsed >= 400, "returned in ${elapsed}ms, before the approval happened")
+    // … and returned on it, rather than sitting out the full wait.
+    assertTrue(elapsed < 9_000, "held the poll open for ${elapsed}ms after the decision")
+  }
+
+  /** A wait that reaches its deadline says exactly what an immediate poll would have. */
+  @Test
+  fun `a wait that times out is an ordinary pending answer`() {
+    val (_, opened) = post("/agent-access/request", """{"scope":"live"}""")
+    val started = System.currentTimeMillis()
+    val (code, polled) =
+      post(
+        "/agent-access/poll",
+        """{"requestId":"${str(opened, "requestId")}","deviceSecret":"${str(opened, "deviceSecret")}","waitSeconds":1}""",
+      )
+    val elapsed = System.currentTimeMillis() - started
+    assertEquals(200, code)
+    assertEquals("pending", str(polled, "status"))
+    assertTrue(elapsed >= 900, "did not actually wait: ${elapsed}ms")
+  }
+
+  /**
+   * Only `pending` is worth holding open. `unknown` — which is what a WRONG DEVICE SECRET gets —
+   * must answer at once, or guessing a secret becomes a way to occupy a connection for 30 seconds.
+   */
+  @Test
+  fun `a wrong device secret is refused immediately, however long a wait it asks for`() {
+    val (_, opened) = post("/agent-access/request", """{"scope":"live"}""")
+    val started = System.currentTimeMillis()
+    val (_, polled) =
+      post(
+        "/agent-access/poll",
+        """{"requestId":"${str(opened, "requestId")}","deviceSecret":"wrong","waitSeconds":30}""",
+      )
+    val elapsed = System.currentTimeMillis() - started
+    assertEquals("unknown", str(polled, "status"))
+    assertTrue(elapsed < 2_000, "held a bad secret open for ${elapsed}ms")
+  }
+
+  /** An absent `waitSeconds` keeps the original shape: answer now, come back in a few seconds. */
+  @Test
+  fun `a poll with no wait still answers immediately`() {
+    val (_, opened) = post("/agent-access/request", """{"scope":"live"}""")
+    val started = System.currentTimeMillis()
+    val (_, polled) =
+      post(
+        "/agent-access/poll",
+        """{"requestId":"${str(opened, "requestId")}","deviceSecret":"${str(opened, "deviceSecret")}"}""",
+      )
+    assertEquals("pending", str(polled, "status"))
+    assertTrue(System.currentTimeMillis() - started < 2_000)
+  }
+
+  /**
+   * The MCP tool waits by default, and the default is deliberately short.
+   *
+   * A held call only helps if the CLIENT holds it too, and a conservative HTTP client gives up
+   * before this lane would like — OkHttp's default read timeout is 10s, which is what the client in
+   * this very test uses. So the default has to fit inside the tightest common timeout; raising it
+   * towards the maximum would turn a latency improvement into a transport error.
+   */
+  @Test
+  fun `poll_access waits by default, and the default fits a conservative client`() {
+    assertTrue(
+      ServeAgentGrants.DEFAULT_POLL_WAIT_SECONDS in 1 until 10,
+      "the default wait must sit inside a 10s client read timeout",
+    )
+    assertTrue(ServeAgentGrants.DEFAULT_POLL_WAIT_SECONDS < ServeAgentGrants.MAX_POLL_WAIT_SECONDS)
+
+    val opened =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+      )
+    val payload = json(toolText(opened.second))
+    val started = System.currentTimeMillis()
+    // No waitSeconds: the tool should wait its default rather than answering at once, because a
+    // client that says nothing is one that would otherwise call again in three seconds.
+    val polled =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"${payload["requestId"]!!.jsonPrimitive.content}","deviceSecret":"${payload["deviceSecret"]!!.jsonPrimitive.content}"}}}"""
+      )
+    val elapsed = System.currentTimeMillis() - started
+    assertEquals("pending", json(toolText(polled.second))["status"]!!.jsonPrimitive.content)
+    assertTrue(elapsed >= 1_000, "answered in ${elapsed}ms; it did not wait at all")
   }
 
   /** The text content of a tool result. */
