@@ -291,7 +291,9 @@ class ServeCatalogMcp(
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"commit":{"type":"string"},"blob":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       )
     )
-    uiBuilder?.let { addAll(ServeUiBuilderMcp.declarations(::tool, uiBuilderNative)) }
+    uiBuilder?.let {
+      addAll(ServeUiBuilderMcp.declarations(::tool, uiBuilderNative, it.supportsComments))
+    }
     add(
       tool(
         "list_data_products",
