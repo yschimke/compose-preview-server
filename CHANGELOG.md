@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.21.0](https://github.com/yschimke/compose-preview-server/compare/v2.20.1...v2.21.0) (2026-09-04)
+
+
+### Features
+
+* **ui-builder:** pick a device frame from the catalog the renderer uses ([#264](https://github.com/yschimke/compose-preview-server/issues/264)) ([5ec9ab7](https://github.com/yschimke/compose-preview-server/commit/5ec9ab7fb0c0980222dc27809601bf413824434f))
+
+
+### Bug Fixes
+
+* **serve:** gate images on the repo it publishes to, and bake the playground compiler ([#268](https://github.com/yschimke/compose-preview-server/issues/268)) ([b8f6e4b](https://github.com/yschimke/compose-preview-server/commit/b8f6e4b8664e72d711c189c187eefbfc4ab84a1b))
+* **ui-builder:** read a bound minLines without throwing out of the validator ([#266](https://github.com/yschimke/compose-preview-server/issues/266)) ([5a41231](https://github.com/yschimke/compose-preview-server/commit/5a41231ef5aeeba8a6a7b608599851dc8a37102d))
+* **ui-builder:** undo and redo the whole history, not one step of it ([#267](https://github.com/yschimke/compose-preview-server/issues/267)) ([52464c2](https://github.com/yschimke/compose-preview-server/commit/52464c2fafc0bd6febba4c4a2d20939f6287d95f))
+
 ## [2.20.1](https://github.com/yschimke/compose-preview-server/compare/v2.20.0...v2.20.1) (2026-09-04)
 
 
