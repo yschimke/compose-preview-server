@@ -160,7 +160,7 @@ class UiBuilderEnumExportTest {
                 DesignNodeV1(
                   id = "row",
                   componentId = "layout/row",
-                  slots = mapOf("children" to listOf("label", "icon")),
+                  slots = mapOf("children" to listOf("label", "list")),
                 ),
               "label" to
                 DesignNodeV1(
@@ -170,19 +170,20 @@ class UiBuilderEnumExportTest {
                   // not emit. Enough to make the projection refuse, which is the precondition.
                   properties = mapOf("text" to StateValueV1("caption")),
                 ),
-              "icon" to
-                DesignNodeV1(
-                  id = "icon",
-                  componentId = "m3/icon",
-                  properties = mapOf("iconKey" to EnumValueV1("star")),
-                ),
+              // `m3/icon` used to be the example here and is recorded now. `layout/lazy-column`
+              // is still uncovered for a reason no table fixes — `items` is a `LazyListScope` DSL,
+              // not a composable slot — so it is the durable one to test the layering with.
+              "list" to DesignNodeV1(id = "list", componentId = "layout/lazy-column"),
             ),
         ),
         record,
       )
 
     assertTrue(refusals.any { "state variable `caption`" in it }, refusals.toString())
-    assertTrue(refusals.any { it == "no component `m3/icon` in this catalog" }, refusals.toString())
+    assertTrue(
+      refusals.any { it == "no component `layout/lazy-column` in this catalog" },
+      refusals.toString(),
+    )
   }
 
   @Test

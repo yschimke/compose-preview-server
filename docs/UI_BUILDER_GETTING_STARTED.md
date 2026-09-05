@@ -276,43 +276,55 @@ supply the bitmap in `provideWidgetData` and add the call by hand.
 
 ## Authoring a Wear screen
 
-`wear-m3` is the third adapter, and it answers the screen half of the question `remote-m3` answered
-for widgets. Two components are its own — `wear-m3/screen-scaffold` and
-`wear-m3/transforming-lazy-column` — and everything else in it is `m3-catalog`'s, borrowed for the
-canvas while Wear content ids do not exist yet.
+**New design → Wear Material 3** offers two templates: **Wear screen**, an empty `ScreenScaffold`
+with its clock over an empty `TransformingLazyColumn`, and **Activity list**, the same shape with
+wear-m3-catalog's own rows in it. Either opens on the small round watch frame — the scaffold reads
+its diameter from the document, so picking a watch in the Screen inspector's Wear OS presets is what
+changes it.
 
-The canvas draws the scaffold as a **long-screenshot stadium**: the frame's width, the content's
-height, round caps, with the first screenful outlined over the top cap and a line where it ends.
-That is the whole scrolling extent rather than a 192dp keyhole onto it, because the extent is what
-you are building.
+The list comes with the scaffold rather than being something to add afterwards: `ScreenScaffold`
+exists to hold one, its `contentPadding` means nothing until something reads it, and the generator
+refuses a scaffold whose content slot holds anything else. Add rows to the list and they stack in a
+straight column — more than a screenful is the normal case, and the canvas shows the whole extent:
 
 ![The Wear list screen drawn as a long-screenshot stadium](design/evidence/ui-builder-wear-screen/wear-screen-stadium.png)
 
-The screen's diameter comes from the **document's own frame**, so picking a watch in the Screen
-inspector's Wear OS presets is what changes it, and comparing where a list wraps at 192, 227 and
-240dp is three columns rather than three scroll positions:
+That is the frame's width, the content's height and round caps — the Wear long-screenshot form,
+because that is what you are building. Comparing where a list wraps at 192, 227 and 240dp is three
+columns rather than three scroll positions:
 
 ![The same design at the three round screen sizes](design/evidence/ui-builder-wear-screen/wear-screen-breakpoints.png)
 
-**The canvas is not Wear Compose, and says so on every component.**
-`androidx.wear.compose:compose-material3` is an Android AAR that a Compose/Wasm canvas cannot link,
-so nothing here draws the real component. The two that matter: rows are **not** transformed — the
-scaling and fading `SurfaceTransformation` gives a `TransformingLazyColumn` is what a Wear list
-looks like and is exactly what a plain Column cannot show — and the stadium's straight sides do not
-narrow toward the caps, so every row reads at least as wide as it will be. **Native** is where that
-question gets answered properly.
+The content components are `m3-catalog`'s, borrowed, except `wear-m3/list-header` which is Wear's
+own. A `wear-m3` design can also hold **any published `remote-m3` component**: the Remote Compose
+palette lists every preview that catalog publishes an `ir/<id>.rc` for, and the bytes are played
+in-process by the same player the deployed lanes use — so a row dropped in from there is drawn by
+the renderer a watch would use rather than by a re-creation.
+
+### Code, and the preview that checks it
 
 **Code** shows the real thing, which is the point of the stand-in. Unlike the widget container, the
-screen scaffold is *emitted* rather than erased: `ScreenScaffold` is a composable you call, so the
-generated Kotlin names it, wraps it in the `AppScaffold` that actually owns `TimeText`, and carries
-`Modifier.transformedHeight(this, spec)` and `SurfaceTransformation(spec)` on every row.
+screen scaffold is *emitted* rather than erased: the generated Kotlin calls `ScreenScaffold`, wraps
+it in the `AppScaffold` that owns `TimeText`, and carries `Modifier.transformedHeight(this, spec)`
+and `SurfaceTransformation(spec)` on every row.
 
 ![The Code pane on a Wear screen design](design/evidence/ui-builder-wear-screen/wear-screen-code-pane.png)
 
-A borrowed component with no Wear Compose counterpart is refused **by node** rather than
-approximated — the canvas will draw an `m3/filter-chip` and there is nothing on a watch to write it
-as. [`design/UI_BUILDER_WEAR_SCREEN.md`](design/UI_BUILDER_WEAR_SCREEN.md) has the whole design, the
-full list of what the canvas is knowingly wrong about, and what is not built yet.
+It emits **two** previews, and they answer different questions. `@WearPreviewDevices` is the screen
+as a watch shows it — one screenful, transformed, at every round size. The second is a
+`@ScrollingPreview(modes = [ScrollMode.LONG])` capture at `wearos_small_round`, and that one is the
+canvas's own picture: `LONG` stitches the whole scroll with the row transformation off, which is
+exactly what the stadium draws. Render it and you should get the canvas back.
+
+You do. Left to right: wear-m3-catalog's hand-written component, the builder's canvas, and the
+generated Kotlin compiled and captured on Android —
+
+![The reference, the canvas, and the generated screen rendered for real](design/evidence/ui-builder-wear-screen/wear-screen-round-trip.png)
+
+192 × 496dp on all three, rows at 72 → 136dp, 64dp tall with 4dp gaps, spanning 10 → 182dp.
+[`design/UI_BUILDER_WEAR_SCREEN.md`](design/UI_BUILDER_WEAR_SCREEN.md) carries the measurements,
+where each number came from, and what is still not the watch — chiefly that none of these three is a
+live frame, where `SurfaceTransformation` scales each row by its distance from the bezel.
 
 ## Adding a published Remote Compose component
 
@@ -355,6 +367,13 @@ be set. For a host you start yourself:
 `components.json` is a preview bundle's own discovery output. The record shipped here covers the
 component ids whose Compose mapping is unambiguous; ids it does not cover are **absent rather than
 guessed**, so they refuse by name instead of emitting Kotlin that does not compile.
+
+### The export's one classpath requirement
+
+A screen holding an `m3/icon` names `Icons.Filled.AccountCircle` and its kin, and the catalog's 46
+icon keys are mostly in **`androidx.compose.material:material-icons-extended`** rather than in
+`-core`. A generated file cannot add a dependency to the project it lands in, so a project pasting
+such an export needs that artifact; everything else the export names is Compose UI and Material 3.
 
 The capability is per catalog. `remote-m3` has no record and is not meant to — Remote Compose is
 kept out of the Compose exporter by design — so a host serving both advertises Compose export on
@@ -435,7 +454,7 @@ that line is drawn where it is, and where the one-way door between the two halve
 | `string` | Text input | Preserves an existing encoded value type; new values use `string` |
 | `boolean` | Toggle | `bool` |
 | `number` / `integer` with editor bounds | Bounded input and step controls | `float` / `int` |
-| `allowedValues` | Choice menu | Preserves the existing semantic type, such as `typographyToken` |
+| `allowedValues` | Choice menu | `enum`, or the existing semantic type such as `typographyToken` |
 | Explicit local color capability | Color/token input | Literal ARGB/RGB colors and declared Material tokens |
 | Object, array, nullable unions, or unbounded numbers | Read-only | No unsafe shape guessing |
 
@@ -443,6 +462,14 @@ Text currently covers content, typography style, weight, style, color, font size
 letter spacing, minimum/maximum lines, wrapping, overflow, alignment, decoration, box alignment,
 and layout weight. Environment axes—viewport, density, font scale, locale, theme, and layout
 direction—are deliberately not node properties.
+
+A property the catalog gives `allowedValues` takes the **`enum` wrapper**, not `string`. The two
+carry the same JSON scalar and both used to be accepted, so one authored intent could be committed
+two ways and then export down two unrelated paths; the reducer now rejects `string` on such a
+property, naming the node, the field and the wrapper it wants. A semantic type — a `style` written
+as `typographyToken` — is a different claim about the value and is still preserved. Designs that
+hold the old spelling keep rendering, keep exporting, and are rewritten to `enum` by the next edit
+to that field.
 
 Existing `size`, `fillMaxWidth`, and `padding` modifiers render and export. Their JSON is visible in
 the inspector, but modifier parameter editing is read-only until the released Design API has an
