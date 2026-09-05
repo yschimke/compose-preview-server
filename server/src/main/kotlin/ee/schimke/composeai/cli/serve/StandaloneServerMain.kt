@@ -19,10 +19,36 @@ public fun main(rawArgs: Array<String>) {
     options.printUsage()
     return
   }
-  ServeRunner(options, StandaloneBuildHost).run()
+
+  // The capability this binary did not have until now: with a build host, `--module app --discover`
+  // finds the Gradle project, builds its previews and serves them, which previously required the
+  // compose-ai-tools CLI to BE the server (#9). Without one, `StandaloneBuildHost` — which is no
+  // longer a set of stubs standing in for a real implementation, but the honest answer for a server
+  // that has no Gradle build behind it.
+  val buildHost =
+    BuildHostDiscovery.choose(args)?.let { choice ->
+      ProcessBuildHost.spawn(choice.binary, workingDirectory = null)?.also {
+        System.err.println("compose-preview build host: ${choice.binary} (from ${choice.source})")
+      }
+    }
+
+  try {
+    ServeRunner(options, buildHost ?: StandaloneBuildHost).run()
+  } finally {
+    buildHost?.close()
+  }
 }
 
-private object StandaloneBuildHost : ServeBuildHost {
+/**
+ * What the server can answer with no Gradle build behind it.
+ *
+ * This used to be a placeholder — seven methods stubbed because the real implementation lived in
+ * the compose-ai-tools CLI and could not be reached from here (#9). It is now the deliberate
+ * no-build mode: a server hosting published catalogs and prebuilt bundles has nothing to ask
+ * Gradle, and that is the common deployed case rather than a degraded one. When a build host IS
+ * available, [ProcessBuildHost] answers instead.
+ */
+internal object StandaloneBuildHost : ServeBuildHost {
   override fun autoInjectInitScriptArgs(projectRoot: File): List<String> = emptyList()
 
   override fun gradleProjectRoot(): File? = null

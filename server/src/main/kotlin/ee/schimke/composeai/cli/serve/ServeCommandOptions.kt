@@ -790,6 +790,8 @@ public class ServeCommandOptions(
   override val rowAwareSelection: Boolean
     get() = true
 
+  private val BUILD_HOST_ENV: String = BuildHostDiscovery.ENV
+
   public fun printUsage() {
     println(
       """
@@ -802,6 +804,14 @@ public class ServeCommandOptions(
       Options:
         --module <path>   Module to serve, scoping local Gradle discovery + build to it. Implies
                           --discover. Omit it (and --discover) to run module-less — see below.
+        --build-host <path|none>
+                          The `compose-preview` binary to run local Gradle work through. Only a
+                          server that also has --module / --discover needs one; a server hosting
+                          fetched bundles and catalogs has nothing to ask Gradle. Defaults to
+                          $BUILD_HOST_ENV in the environment, then `compose-preview` on PATH;
+                          `none` disables the search. This binary speaks a protocol to that
+                          process rather than linking a Gradle driver, which is why the server
+                          needs no Gradle on its own classpath.
         --discover        Opt in to local Gradle discovery + build. By default serve NEVER runs
                           Gradle: it hosts only the fetched --bundle(s) / --catalogs / uploaded
                           bundles as a pure preview server, even inside a Gradle checkout (so a

@@ -286,6 +286,12 @@ dependencies {
   // same way; what changed is that the module now lives beside the source tree it is compiled
   // against, instead of against whichever compose-ai-tools release this repository had pinned.
   api(libs.composeai.render.host)
+
+  // The build-host protocol. `implementation`, not `api`: the messages are this module's business
+  // with the CLI, and `ServeBuildHost` — the interface the rest of the server actually programs
+  // against — is unchanged and stays the published surface. A consumer of `compose-preview-serve`
+  // has no reason to see the wire types.
+  implementation(libs.composeai.build.host.protocol)
   // Authoritative persistence, validation, collaboration and export orchestration. The server
   // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
   api(project(":ui-builder-runtime"))
@@ -627,6 +633,7 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       // The render host, published from compose-ai-tools since #180. It arrives as a coordinate
       // now rather than as a project, so the positive allowlist has to name it — which is the
       // allowlist working as intended: the move had to be declared here to happen at all.
+      "ee.schimke.composeai:build-host-protocol",
       "ee.schimke.composeai:render-host",
       "ee.schimke.composeai:preview-discovery",
       "ee.schimke.composeai:render-session-api",
