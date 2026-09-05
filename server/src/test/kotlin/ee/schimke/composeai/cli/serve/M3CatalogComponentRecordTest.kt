@@ -210,7 +210,6 @@ class M3CatalogComponentRecordTest {
 
   private companion object {
     const val RECORD = "../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"
-    const val CAPABILITIES =
-      "../docs/design/fixtures/ui-builder/jetcaster-discover-capabilities-v1.json"
+    const val CAPABILITIES = "../docs/design/fixtures/ui-builder/m3-catalog-capabilities-v1.json"
   }
 }
