@@ -107,6 +107,8 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `list_projects`, `list_previews` | `preview` | Discover catalogs and preview metadata |
 | `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
 | `render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
+| `list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
+| `diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
 | `list_data_products` | `preview` | Discover structured products exposed by previews |
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
@@ -121,6 +123,37 @@ asking for it and reading the refusal. It is available only where the host adver
 daemon-backed session that can export `compose/figma-svg`. A catalog with neither is refused by
 name rather than reported as a missing preview. The lane shares the render semaphore with the PNG
 lane, so it is metered identically and cannot become a second unmetered renderer.
+
+### The full-page scroll lanes
+
+`observe=scroll-png` and `observe=scroll-svg` return `render/scroll/long` and
+`compose/figma-svg-long` — the whole scrollable screen (a virtualised `LazyColumn` re-rendered at an
+expanded viewport so every row composes) rather than the viewport crop. Both are gated on
+`ServeHost.hasScrollExportFor` and refused by name where absent, because the tall re-render needs a
+daemon and a static bundle has no scroll producer. `list_previews` reports `scrollAvailable` per
+preview beside `svgAvailable`. A non-scrolling preview yields its ordinary viewport output.
+
+### Devices
+
+`list_devices` publishes the `device` override's accepted vocabulary from `DeviceDimensions`, the
+same catalog the render path resolves against — no geometry is authored in the MCP layer. The tool
+exists because an unrecognised `device` value is **not** an error on the render path: it falls
+through to the default frame, which from the caller's side is indistinguishable from a device that
+happens to render identically to the default.
+
+### Comparing two previews
+
+`diff_semantics` compares two previews' semantics and reports tags present on only one side, tags
+whose bounds moved, and tags whose occupancy `count` changed.
+
+Identity is the authored `testTag`, deliberately, and not a `SemanticsRefs` ref. A ref indexes
+siblings sharing an anchor — `r/role:Button[0]` means "the first Button under this parent" — so
+inserting a Button ahead of it silently retargets the same string at different pixels, and a diff
+built on refs would report "unchanged" for exactly the edit a reader most needs to see. A `testTag`
+either survives an edit or stops resolving, and both are reported. A `count` change is reported
+separately from a move: a tag carried by two nodes is no longer an identity anything can resolve,
+which is a different event from the same node shifting. Two previews carrying no tags at all get an
+explicit note rather than an `identical` verdict they did not earn.
 
 ### Knowing whether an override landed
 
