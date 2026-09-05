@@ -134,6 +134,18 @@ class ServeCommandOptionsTest {
     }
   }
 
+  @Test
+  fun `open path defaults to the landing page and refuses a URL that would not open`() {
+    assertEquals("/", options(emptyList()).openBrowserPath)
+    assertEquals(
+      "/ui-builder/m3-catalog/",
+      options(listOf("--open-path", "/ui-builder/m3-catalog/")).openBrowserPath,
+    )
+    // The token is appended as a query, so a path carrying one of its own cannot be honoured.
+    assertFailsWith<IllegalArgumentException> { options(listOf("--open-path", "/x?token=1")) }
+    assertFailsWith<IllegalArgumentException> { options(listOf("--open-path", "ui-builder/")) }
+  }
+
   private fun options(args: List<String>): ServeCommandOptions =
     ServeCommandOptions(
       args = args,

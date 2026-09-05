@@ -193,6 +193,21 @@ public interface ServeOptions {
   public val openBrowser: Boolean
 
   /**
+   * Which page [openBrowser] opens. Defaults to the landing page, which is what every caller before
+   * the `ui` command wanted.
+   *
+   * A default implementation rather than another abstract member: this interface is published, and
+   * an option that every existing implementor answers identically should not be a source break for
+   * one that does not. `ui` overrides it with `/ui-builder/<catalog>/` — the builder is the page
+   * that command exists to open, and landing on the preview list instead would leave the user one
+   * unexplained navigation away from what they asked for.
+   *
+   * Always an absolute path with no query of its own; the session token is appended by the opener.
+   */
+  public val openBrowserPath: String
+    get() = "/"
+
+  /**
    * SSRF allowlist for `POST /bundles/{name}?url=` fetches: comma-separated hostnames the server
    * may fetch a bundle from. Empty = no URL fetch is allowed (fail closed), so `--accept-bundles`
    * alone only accepts uploads; a host must be explicitly trusted before the server will reach out.

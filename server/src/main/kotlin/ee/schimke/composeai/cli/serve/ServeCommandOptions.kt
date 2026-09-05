@@ -229,6 +229,21 @@ public class ServeCommandOptions(
   override val openBrowser: Boolean = "--open-browser" in args
 
   /**
+   * `--open-path <path>`: the page `--open-browser` opens. Rejected rather than silently ignored
+   * when it is not an absolute path or carries a query — the token is appended as one, and a second
+   * `?` would produce a URL that opens nothing.
+   */
+  override val openBrowserPath: String =
+    args
+      .flagValue("--open-path")
+      ?.takeIf { it.isNotBlank() }
+      ?.also {
+        require(it.startsWith("/") && '?' !in it && '#' !in it) {
+          "--open-path must be an absolute path with no query or fragment, got `$it`"
+        }
+      } ?: "/"
+
+  /**
    * SSRF allowlist for `POST /bundles/{name}?url=` fetches: comma-separated hostnames the server
    * may fetch a bundle from. Empty = no URL fetch is allowed (fail closed), so `--accept-bundles`
    * alone only accepts uploads; a host must be explicitly trusted before the server will reach out.
@@ -1185,6 +1200,12 @@ public class ServeCommandOptions(
         --ui-builder-migrate-state
                           Explicitly migrate a validated v1 design store to v2 before serving.
                           Retains the exact v1 generation for rollback; never runs implicitly.
+        --open-browser    Open a browser on the served URL at startup. Used by the `browse` and
+                          `ui` launchers; plain `serve` prints the link instead.
+        --open-path <path>
+                          Which page --open-browser opens. Absolute path, no query (the session
+                          token is appended as one). Defaults to the landing page; `ui` points it
+                          at /ui-builder/<catalog>/.
         --rc-player-wasm-dir <dir>
                           Experimental non-JVM Remote Compose player produced by
                           :rc-player-wasm:wasmPlayerDist. Serves it at /rc-player-wasm/ and enables
@@ -1210,13 +1231,25 @@ public class ServeCommandOptions(
   ): Boolean = previewMatcher(id, exactId, filter, previewRef, className, functionName)
 }
 
-private fun List<String>.flagValue(flag: String): String? {
+/**
+ * `--flag value` or `--flag=value`, whichever spelling was used.
+ *
+ * `internal` rather than private because the command surface parses the same argv before the
+ * options object exists — [ServerCommands] and [LocalUiBuilder] decide which flags a command
+ * implies, and a second copy of this rule would be a second spelling to keep in step.
+ */
+internal fun List<String>.flagValue(flag: String): String? {
   firstOrNull { it.startsWith("$flag=") }
     ?.let {
       return it.substringAfter("=")
     }
   val index = indexOf(flag)
   return if (index >= 0 && index + 1 < size) this[index + 1] else null
+}
+
+/** Whether [flag] was passed at all, in either spelling. */
+internal fun List<String>.hasFlag(flag: String): Boolean = any {
+  it == flag || it.startsWith("$flag=")
 }
 
 private fun List<String>.flagValuesAll(flag: String): List<String> = buildList {
