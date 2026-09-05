@@ -90,13 +90,13 @@ jobs:
           cache-provider: basic
           cache-read-only: true
       - name: Build distribution and publish Maven artifacts
-        # Both library modules and the immutable builder frontend publish too: `:server`'s POM names
-        # render-host and the UI-builder runtime at the same version, while its standalone
-        # distribution is assembled from the matching frontend archive. Build/verify the complete
-        # graph before this release job so a missing frontend artifact is caught before publication.
+        # The UI-builder runtime and the immutable builder frontend publish too: `:server`'s POM
+        # names the runtime at the same version, while its standalone distribution is assembled from
+        # the matching frontend archive. Build/verify the complete graph before this release job so a
+        # missing frontend artifact is caught before publication. The render host is no longer among
+        # them — it is published from compose-ai-tools since yschimke/compose-preview-server#180.
         run: >-
           ./gradlew :server:distTar
-          :render-host:publishAndReleaseToMavenCentral
           :ui-builder-runtime:publishAndReleaseToMavenCentral
           :ui-builder-web:publishAndReleaseToMavenCentral
           :server:publishAndReleaseToMavenCentral
