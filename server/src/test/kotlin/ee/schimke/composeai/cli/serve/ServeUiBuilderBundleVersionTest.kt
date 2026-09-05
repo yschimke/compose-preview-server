@@ -23,18 +23,16 @@ class ServeUiBuilderBundleVersionTest {
     // The bundle ships inside the deploy image, and rebuilding that image rewrites timestamps
     // whether or not the builder changed. An mtime-derived version would retire every viewer's
     // cached bundle on a redeploy that shipped identical bytes.
-    val first =
-      bundle(index = "<html>builder</html>", module = "export const a = 1", mtime = 1_000_000_000L)
-    val second =
-      bundle(index = "<html>builder</html>", module = "export const a = 1", mtime = 2_000_000_000L)
+    val first = bundle(index = SHELL, module = "export const a = 1", mtime = 1_000_000_000L)
+    val second = bundle(index = SHELL, module = "export const a = 1", mtime = 2_000_000_000L)
 
     assertEquals(versionOf(first), versionOf(second))
   }
 
   @Test
   fun `a changed byte gives a different version`() {
-    val before = bundle(index = "<html>builder</html>", module = "export const a = 1")
-    val after = bundle(index = "<html>builder</html>", module = "export const a = 2")
+    val before = bundle(index = SHELL, module = "export const a = 1")
+    val after = bundle(index = SHELL, module = "export const a = 2")
 
     assertNotEquals(versionOf(before), versionOf(after))
   }
@@ -43,24 +41,32 @@ class ServeUiBuilderBundleVersionTest {
   fun `a renamed file gives a different version, though every byte is still present`() {
     // Path is mixed in alongside the content precisely so this is not a collision: the same bytes
     // reachable under a different name are a different bundle to anything that imports them.
-    val before = bundle(index = "<html>builder</html>", module = "export const a = 1")
+    val before = bundle(index = SHELL, module = "export const a = 1")
     val after =
-      bundle(index = "<html>builder</html>", module = "export const a = 1").also {
-        File(it, "app.mjs").renameTo(File(it, "renamed.mjs"))
+      bundle(index = SHELL, module = "export const a = 1").also {
+        File(it, "extra.bin").renameTo(File(it, "renamed.bin"))
       }
 
     assertNotEquals(versionOf(before), versionOf(after))
+  }
+
+  private companion object {
+    /** A shell shaped like the generated one: a module reference the rewrite can find. */
+    const val SHELL = """<html><script type="module" src="app.mjs"></script></html>"""
   }
 
   private fun bundle(index: String, module: String, mtime: Long? = null): File {
     val dir = Files.createTempDirectory("ui-builder-bundle").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText(index)
     File(dir, "app.mjs").writeText(module)
+    // Renamed by one test. Kept out of the shell so the reference the version is read from stays
+    // live while the bundle around it changes.
+    File(dir, "extra.bin").writeText("payload")
     mtime?.let { dir.listFiles()?.forEach { file -> file.setLastModified(it) } }
     return dir
   }
 
-  /** The version prefix this server publishes, read off the entry redirect. */
+  /** The version prefix this server publishes, read off the shell's own asset reference. */
   private fun versionOf(dir: File): String {
     val server =
       ServeHttpServer(
@@ -73,13 +79,14 @@ class ServeUiBuilderBundleVersionTest {
         )
         .also { it.start() }
     try {
-      val client = OkHttpClient.Builder().followRedirects(false).build()
+      val client = OkHttpClient()
       val request = Request.Builder().url("http://127.0.0.1:${server.port}/ui-builder/").build()
       return client.newCall(request).execute().use { response ->
-        assertEquals(302, response.code)
-        val location = response.header("Location")!!
-        assertTrue(location.startsWith("/ui-builder/v/"), location)
-        location.removePrefix("/ui-builder/v/").trimEnd('/')
+        assertEquals(200, response.code)
+        val html = response.body.string()
+        val match = Regex("""src="/ui-builder/v/([^/"]+)/""").find(html)
+        assertTrue(match != null, html)
+        match!!.groupValues[1]
       }
     } finally {
       server.stop()

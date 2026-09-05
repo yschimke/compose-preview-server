@@ -81,6 +81,30 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 
+/** A `/ui-builder/<catalog>/<designId>` design segment: the New design dialog's own id shape. */
+private val UI_BUILDER_DESIGN_SEGMENT = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+
+/** Extensions that belong to the builder's static distribution rather than to a design id. */
+private val UI_BUILDER_ASSET_EXTENSIONS =
+  setOf(
+    "css",
+    "html",
+    "ico",
+    "js",
+    "json",
+    "map",
+    "mjs",
+    "otf",
+    "png",
+    "svg",
+    "ttf",
+    "txt",
+    "wasm",
+    "webp",
+    "woff",
+    "woff2",
+  )
+
 /**
  * The embedded Ktor (CIO) HTTP server fronting a [ServeSessionRegistry]. Thin IO shell: a token
  * gate, the routes, and the query-param → [ServeOverrides] → render → PNG glue. All shared,
@@ -11039,6 +11063,19 @@ class ServeHttpServer(
     call.respondBytes(bytes, wasmContentType(file.name))
   }
 
+  /**
+   * Whether a path segment can name a design rather than an asset.
+   *
+   * The same path-safe shape the New design dialog validates, which allows a `.`, minus anything
+   * carrying a static-asset extension. Without that exclusion a mistyped `uiBuilder.mjs` would
+   * answer `200 text/html` instead of `404`, and a module loader would report the confusion three
+   * layers away from the typo. Leading alphanumeric, so `..` never reaches the shell branch.
+   */
+  private fun isUiBuilderDesignSegment(segment: String): Boolean =
+    UI_BUILDER_DESIGN_SEGMENT.matches(segment) &&
+      (!segment.contains('.') ||
+        segment.substringAfterLast('.').lowercase() !in UI_BUILDER_ASSET_EXTENSIONS)
+
   private suspend fun RoutingContext.handleUiBuilderAsset() {
     val dir = uiBuilderDir
     if (dir == null) {
@@ -11088,37 +11125,49 @@ class ServeHttpServer(
   ) {
     val scopedCatalog = segments.firstOrNull()?.takeIf(uiBuilderCatalogs::contains)
     if (scopedCatalog != null && segments.size == 1 && !call.request.path().endsWith("/")) {
-      call.respondRedirect(uiBuilderEntryPath(scopedCatalog, version))
+      call.respondRedirect("/ui-builder/$scopedCatalog/")
       return
     }
     val assetSegments = if (scopedCatalog == null) segments else segments.drop(1)
-    val entry = assetSegments.isEmpty()
-    val current = uiBuilderBundleVersion
-    if (version == null && entry) {
-      call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
-      call.respondRedirect(uiBuilderEntryPath(scopedCatalog, current))
-      return
-    }
-    if (version != null && version != current) {
-      // Only one bundle exists on disk, so a prefix naming another version has no bytes to serve.
-      // Answering with the current ones would make an immutable URL return two different files
-      // over its life, which is the single promise the prefix exists to keep. An entry document is
-      // sent to the current prefix instead — a stale bookmark still opens the builder — and a
-      // stale asset 404s, which is a tab still running last release's HTML being told to reload
-      // rather than being quietly handed this release's Wasm to run against it.
-      if (entry) {
-        call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
-        call.respondRedirect(uiBuilderEntryPath(scopedCatalog, current))
-      } else {
+    if (version != null) {
+      // The versioned prefix carries assets only. The document keeps its own URL because the app
+      // reads both the catalog and the design id back out of `location.pathname` — moving it under
+      // a prefix would make `parts[1]` the digest, and every design URL a different design.
+      //
+      // Only one bundle exists on disk, so a prefix naming another version has nothing to serve.
+      // Answering with the current bytes would make an immutable URL return two different files
+      // over its life, which is the one promise the prefix exists to keep.
+      if (assetSegments.isEmpty() || version != uiBuilderBundleVersion) {
         call.respondText("not found", status = HttpStatusCode.NotFound)
+        return
       }
-      return
+    } else if (
+      scopedCatalog != null && assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])
+    ) {
+      // The cool-URI form: `/ui-builder/<catalog>/<designId>` names one design in the path instead
+      // of in a `?designId=` query, and the browser reads it back out of `location.pathname`. Only
+      // a catalog-scoped single segment that cannot be a file qualifies, so an asset that is simply
+      // missing still 404s rather than silently rendering the app shell.
+      val designId = assetSegments[0]
+      if (!File(dir, designId).isFile) {
+        if (call.request.path().endsWith("/")) {
+          call.respondRedirect("/ui-builder/$scopedCatalog/$designId")
+          return
+        }
+        respondUiBuilderShell(dir, File(dir, "index.html"))
+        return
+      }
     }
-    val rel = if (entry) "index.html" else assetSegments.joinToString("/")
+    val rel = if (assetSegments.isEmpty()) "index.html" else assetSegments.joinToString("/")
     val base = dir.canonicalFile.toPath()
     val file = File(dir, rel).canonicalFile
     if (!file.toPath().startsWith(base) || !file.isFile) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    // One door to the shell, so the reference rewrite cannot be reached around.
+    if (version == null && rel == "index.html") {
+      respondUiBuilderShell(dir, file)
       return
     }
     val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
@@ -11174,10 +11223,76 @@ class ServeHttpServer(
     digest.digest().take(8).joinToString("") { "%02x".format(it.toInt() and 0xff) }
   }
 
-  private fun uiBuilderEntryPath(catalog: String?, version: String?): String {
-    val prefix =
-      if (version == null) "/ui-builder/" else "/ui-builder/$UI_BUILDER_VERSION_SEGMENT/$version/"
-    return if (catalog == null) prefix else "$prefix$catalog/"
+  /**
+   * The builder's app shell, with its asset references pointed at the versioned prefix.
+   *
+   * Same `no-cache` contract as before: the shell is small, and it is the one document a rollout
+   * has to be able to change. The ETag folds in the bundle version because the body now depends on
+   * it — a byte-identical `index.html` serves a different shell once anything else in the tree
+   * changes, and a length-and-mtime ETag alone would call those two responses the same.
+   */
+  private suspend fun RoutingContext.respondUiBuilderShell(dir: File, index: File) {
+    if (!index.isFile) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val version = uiBuilderBundleVersion
+    val etag = "\"${index.length().toString(16)}-${index.lastModified().toString(16)}-$version\""
+    call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    call.response.headers.append(HttpHeaders.ETag, etag)
+    if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    val html = withContext(Dispatchers.IO) { index.readText() }
+    call.respondBytes(
+      versionUiBuilderShellReferences(dir, html, version).toByteArray(),
+      wasmContentType(index.name),
+    )
+  }
+
+  /**
+   * Rewrites the shell's relative references to `/ui-builder/v/<version>/…`.
+   *
+   * Rewriting the shell rather than moving the document is what lets the bundle be cached immutably
+   * at all. The shell names `uiBuilder.mjs` relative to the document, that module resolves
+   * `./uiBuilder.wasm` against `import.meta.url`, the Wasm imports `./skiko.mjs`, and `skiko.mjs`
+   * resolves `skiko.wasm` the same way — so making the one reference in the shell absolute and
+   * versioned carries the whole 44 MB chain into the immutable prefix, without touching a byte the
+   * Kotlin/Wasm build emitted.
+   *
+   * Two forms, which is what the generated shell contains: an attribute value
+   * (`src="uiBuilder.mjs"`) and an import-map target (`"./js-joda.esm.js"`). A reference is
+   * rewritten only when it resolves to a real file inside the bundle, so an absolute URL, a bare
+   * module specifier and a dead link all pass through as the build wrote them.
+   */
+  private fun versionUiBuilderShellReferences(dir: File, html: String, version: String): String {
+    val base = dir.canonicalFile.toPath()
+    val prefix = "/ui-builder/$UI_BUILDER_VERSION_SEGMENT/$version/"
+    fun versioned(reference: String): String? {
+      val relative = reference.removePrefix("./")
+      if (relative.isEmpty() || relative.startsWith("/") || "://" in relative) return null
+      val file = File(dir, relative).canonicalFile
+      if (!file.toPath().startsWith(base) || !file.isFile) return null
+      return prefix + relative
+    }
+    return html
+      .replace(Regex("""\b(src|href)="([^"]+)"""")) { match ->
+        val replacement = versioned(match.groupValues[2]) ?: return@replace match.value
+        "${match.groupValues[1]}=\"$replacement\""
+      }
+      // HTML does not require the quotes, and a shell that omits them would otherwise keep every
+      // asset on the unversioned path — caching silently defeated, with nothing failing to say so.
+      // Runs second: the quoted form is already rewritten and its `"` is excluded here, so a value
+      // is never rewritten twice.
+      .replace(Regex("""\b(src|href)=([^\s>"']+)""")) { match ->
+        val replacement = versioned(match.groupValues[2]) ?: return@replace match.value
+        "${match.groupValues[1]}=$replacement"
+      }
+      .replace(Regex(""""(\./[^"]+)"""")) { match ->
+        val replacement = versioned(match.groupValues[1]) ?: return@replace match.value
+        "\"$replacement\""
+      }
   }
 
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {

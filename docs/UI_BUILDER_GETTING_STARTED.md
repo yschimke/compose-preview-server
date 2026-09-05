@@ -23,13 +23,20 @@ live editor.
 5. Select a node and edit it in Properties. Changes are committed to the live revision
    automatically; Undo, Redo, Duplicate, and Delete use the same collaboration log.
 
-Direct creation URLs remain available for automation and bookmarks:
+A design has one URL, and it names the catalog and the design:
 
 ```text
-/ui-builder/remote-m3/?session=live&create=1&template=wear-widget-small&designId=my-remote-screen
+/ui-builder/remote-m3/my-remote-screen
 ```
 
-`create=1` only creates a missing design. It never overwrites an existing `designId`. The `blank`
+Open it and the design opens; open it for a design that does not exist yet and it is created. Add
+`?template=wear-widget-small` to choose what a missing design is seeded from — that is the direct
+creation URL for automation and bookmarks. Creation never overwrites an existing design, and
+`?create=0` refuses to create one at all. The seeding query is dropped from the address bar as soon
+as the design is open, so the URL you copy out of the browser is always the plain one above.
+
+The older query form (`/ui-builder/remote-m3/?session=live&create=1&designId=my-remote-screen`)
+still works and redirects itself to the canonical path. The `blank`
 template is a real, valid document: a `layout/scaffold` root with an empty `layout/box` in its
 required content slot. In `remote-m3`, creation starts with the Small Wear widget scaffold instead:
 a 216×76dp host frame with an empty content slot. Use `template=wear-widget-large` for the
@@ -74,10 +81,52 @@ They exist to answer one question: can the designer express a real widget? Both 
 from ordinary catalog components — `m3/surface`, `layout/box`, `layout/column`, `m3/text` — with no
 widget-specific authoring vocabulary, so anything you can do to them you can do to your own.
 
-Note where the boundary falls. The scaffold **is** the host frame — the squircle, its 8dp padding
-and its 26dp corners come from the Wear widget host, not from the widget — so picking Small or Large
-picks a canvas you design *inside* and never edit. The widget's own background is the `m3/surface`
-filling that canvas, which is what `WearWidgetDocument(background = …)` paints on-device.
+Note where the boundary falls. The scaffold **is** the host frame, modelled on
+`androidx.glance.wear.composable.WearWidgetContainer`: picking Small or Large picks the content box
+(200×60dp or 200×108dp on a 240dp screen), and the frame adds padding around it. It carries the
+container's own four parameters and nothing else —
+
+| Property | Default | What it is |
+| --- | --- | --- |
+| `background` | `#FF272430` | The **widget's** background, which the host paints as the rounded rect. The default is the literal `WearWidgetContainer` forks from Wear Material 3's `surfaceContainerLow` and applies when a widget declares none. |
+| `horizontalPaddingDp` | `8` | `WearWidgetParams.horizontalPaddingDp`. |
+| `verticalPaddingDp` | `8` | `WearWidgetParams.verticalPaddingDp`. |
+| `cornerRadiusDp` | `26` | `WearWidgetParams.cornerRadiusDp` — 26 squircle, 999 round, 0 rectangular. |
+
+The background belongs on the scaffold, not on a surface inside it. On-device the coloured squircle
+**is** the widget: `WearWidgetDocument(background = …)` hands the brush to the container, which
+paints it as the round rect and insets the content by the padding. Filling the content slot with a
+coloured surface instead draws a coloured rectangle inside a differently-coloured frame, which is
+not what any widget looks like.
+
+The radius is drawn behind the content rather than clipped, exactly as upstream does it, so content
+that overflows a corner is visible instead of silently cut off.
+
+### Gradients and images
+
+`WearWidgetBrush` has four factories — `color`, `verticalGradient`, `horizontalGradient` and
+`image` — and it is a **chain**: the container folds over every element, drawing each into the same
+rounded rect before the content. The `background` property is the solid-colour element, the one a
+string can carry. The other three are authored in the container's **`background` slot**, which is
+that chain: drop a **Linear gradient layer** or an **Image asset** into it and it paints across the
+whole frame, clipped to the corner radius, under the padded content. The slot accepts draw layers
+and images only — a Text is not a brush, and upstream has no way to express one as a background.
+
+A gradient layer's `direction` picks the axis, matching `verticalGradient` against
+`horizontalGradient`. The default fill applies only when the chain is *entirely* empty, which is
+what `WearWidgetBrush.isEmpty()` asks: a widget declaring a gradient and no colour gets the
+gradient, not the gradient over `#272430`.
+
+![The four widget background brushes: default, colour, gradient and image](design/evidence/ui-builder-remote-compose/widget-background-brushes.png)
+
+The image tile shows the brush slot composing and clipping a bitmap to the frame. Whether arbitrary
+widget artwork resolves in the browser is the builder's asset-registry question, not this
+scaffold's: `asset/image` currently draws real pixels for the project-owned artwork keys and a
+placeholder otherwise.
+
+A blank widget declares none of this, so both empty templates open on the default frame:
+
+![The empty Small and Large host frames on the default background](design/evidence/ui-builder-remote-compose/empty-widget-containers.png)
 
 | Hello widget | Weather widget |
 | --- | --- |

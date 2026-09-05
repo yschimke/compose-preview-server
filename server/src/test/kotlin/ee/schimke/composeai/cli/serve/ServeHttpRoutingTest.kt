@@ -1949,48 +1949,34 @@ class ServeHttpRoutingTest {
           assertEquals("/ui-builder/", response.header("Location"))
         }
       }
-      // The unversioned entry is a revalidated redirect into the content-addressed prefix. That
-      // redirect is the only thing a rollout has to invalidate; everything it points at is
-      // immutable.
-      val versionedEntry =
-        fetch("/ui-builder/", noRedirects).let { (code, response) ->
+      // The document stays where it is — the app reads its catalog and design id back out of
+      // `location.pathname` — and the shell's own asset references carry the version instead.
+      val versionedPrefix =
+        fetch("/ui-builder/").let { (code, response) ->
           response.use {
-            assertEquals(302, code)
+            assertEquals(200, code)
             assertEquals("no-cache", response.header("Cache-Control"))
-            val location = response.header("Location")!!
-            assertTrue(location.startsWith("/ui-builder/v/"), location)
-            assertTrue(location.endsWith("/"), location)
-            location
+            val html = response.body.string()
+            assertTrue(html.contains("Compose UI builder"))
+            // The reference the whole chain hangs off is absolute and versioned; nothing still
+            // points at the unversioned sibling, which is what would silently defeat the caching.
+            // This fixture writes the attribute unquoted, which the rewrite has to handle too:
+            // a shell that omits the quotes would otherwise keep every asset on the unversioned
+            // path, with the caching silently defeated and nothing failing to say so.
+            val match = Regex("""src="?(/ui-builder/v/[^"\s>]+/)builder\.mjs""").find(html)
+            assertTrue(match != null, html)
+            assertTrue(!html.contains("src=builder.mjs"), html)
+            match!!.groupValues[1]
           }
         }
-      fetch(versionedEntry).let { (code, response) ->
-        response.use {
-          assertEquals(200, code)
-          assertTrue(response.body.string().contains("Compose UI builder"))
-          assertEquals(
-            "public, max-age=31536000, immutable",
-            response.header("Cache-Control"),
-          )
-        }
-      }
-      // Following the redirect still lands on the builder, so an existing link is unaffected.
-      fetch("/ui-builder/").let { (code, response) ->
-        response.use {
-          assertEquals(200, code)
-          assertTrue(response.body.string().contains("Compose UI builder"))
-        }
-      }
-      // A versioned asset is immutable and still answers a conditional request cheaply.
-      val versionedAsset = versionedEntry + "builder.mjs"
+      // A versioned asset is immutable, and still answers a conditional request cheaply.
+      val versionedAsset = versionedPrefix + "builder.mjs"
       val assetEtag =
         fetch(versionedAsset).let { (code, response) ->
           response.use {
             assertEquals(200, code)
             assertEquals("window.composeUiBuilder = true", response.body.string())
-            assertEquals(
-              "public, max-age=31536000, immutable",
-              response.header("Cache-Control"),
-            )
+            assertEquals("public, max-age=31536000, immutable", response.header("Cache-Control"))
             response.header("ETag")!!
           }
         }
@@ -2000,19 +1986,14 @@ class ServeHttpRoutingTest {
         .build()
         .let { client.newCall(it).execute() }
         .use { assertEquals(304, it.code) }
-      // A prefix naming a bundle this server does not have has no bytes to serve. The entry goes
-      // to the current one so a stale bookmark still opens; a stale asset 404s, so a tab running
-      // last release's HTML reloads rather than being handed this release's Wasm.
-      fetch("/ui-builder/v/0000000000000000/", noRedirects).let { (code, response) ->
-        response.use {
-          assertEquals(302, code)
-          assertEquals(versionedEntry, response.header("Location"))
-        }
-      }
+      // A prefix naming a bundle this server does not have has nothing to serve, and the prefix
+      // carries assets only — it never answers with the shell.
+      assertEquals(404, fetch("${versionedPrefix}missing.mjs").second.use { it.code })
       assertEquals(
         404,
         fetch("/ui-builder/v/0000000000000000/builder.mjs").second.use { it.code },
       )
+      assertEquals(404, fetch("/ui-builder/v/0000000000000000/").second.use { it.code })
       fetch("/ui-builder/builder.mjs").let { (code, response) ->
         response.use {
           assertEquals(200, code)
@@ -2038,13 +2019,6 @@ class ServeHttpRoutingTest {
           assertEquals("/ui-builder/remote-m3/", response.header("Location"))
         }
       }
-      // A catalog-scoped entry keeps its scope through the versioned prefix.
-      fetch("/ui-builder/remote-m3/", noRedirects).let { (code, response) ->
-        response.use {
-          assertEquals(302, code)
-          assertEquals("${versionedEntry}remote-m3/", response.header("Location"))
-        }
-      }
       fetch("/ui-builder/remote-m3/").let { (code, response) ->
         response.use {
           assertEquals(200, code)
@@ -2057,6 +2031,48 @@ class ServeHttpRoutingTest {
           assertEquals("window.composeUiBuilder = true", response.body.string())
         }
       }
+      // The cool-URI form. `/ui-builder/<catalog>/<designId>` serves the same shell as the
+      // catalog root; the browser reads the design out of the path. Relative asset requests from
+      // that document resolve against `/ui-builder/<catalog>/`, which is the ordinary asset lane,
+      // so the trailing-slash spelling is redirected away rather than served.
+      fetch("/ui-builder/remote-m3/my-remote-screen").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertTrue(response.body.string().contains("Compose UI builder"))
+          assertEquals("no-cache", response.header("Cache-Control"))
+        }
+      }
+      fetch("/ui-builder/m3-catalog/mywidget3").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertTrue(response.body.string().contains("Compose UI builder"))
+        }
+      }
+      fetch("/ui-builder/m3-catalog/mywidget3/", noRedirects).let { (code, response) ->
+        response.use {
+          assertEquals(302, code)
+          assertEquals("/ui-builder/m3-catalog/mywidget3", response.header("Location"))
+        }
+      }
+      // A real asset still wins over the design lane, and a missing one still 404s rather than
+      // rendering the shell for a mistyped file name.
+      fetch("/ui-builder/m3-catalog/builder.mjs").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertEquals("window.composeUiBuilder = true", response.body.string())
+        }
+      }
+      // A design id may carry a dot, as the New design dialog allows; a static-asset extension
+      // may not, so a mistyped asset still 404s instead of answering with the shell.
+      fetch("/ui-builder/m3-catalog/my.widget").let { (code, response) ->
+        response.use {
+          assertEquals(200, code)
+          assertTrue(response.body.string().contains("Compose UI builder"))
+        }
+      }
+      assertEquals(404, fetch("/ui-builder/m3-catalog/missing.mjs").second.use { it.code })
+      assertEquals(404, fetch("/ui-builder/m3-catalog/my/widget").second.use { it.code })
+      assertEquals(404, fetch("/ui-builder/mywidget3").second.use { it.code })
       assertEquals(404, fetch("/ui-builder/wear-m3-catalog/").second.use { it.code })
       assertEquals(404, fetch("/ui-builder/../secret").second.use { it.code })
       assertEquals(404, fetch("/ui-builder/linked-secret.txt").second.use { it.code })
