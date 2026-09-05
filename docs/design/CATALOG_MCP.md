@@ -108,6 +108,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
 | `render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
 | `list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
+| `history_list` | `preview` | One preview's render timeline, or where to fetch it |
 | `diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
 | `list_data_products` | `preview` | Discover structured products exposed by previews |
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
@@ -123,6 +124,38 @@ asking for it and reading the refusal. It is available only where the host adver
 daemon-backed session that can export `compose/figma-svg`. A catalog with neither is refused by
 name rather than reported as a missing preview. The lane shares the render semaphore with the PNG
 lane, so it is metered identically and cannot become a second unmetered renderer.
+
+### History
+
+`history_list` answers in one of three `mode`s, and the field is load-bearing: the three are not
+interchangeable, and an agent that could not tell them apart would read "no versions" as "this
+preview has never changed".
+
+| `mode` | When | What comes back |
+|---|---|---|
+| `published` | the catalog was fetched from a delivery branch | `manifestUrl`, `repo`, `branch`, and `renderUrlTemplate` |
+| `local` | project mode — `serve` against a checkout | the timeline inline, each version carrying a `renderUrl` |
+| `none` | an uploaded bundle with neither | a `reason`, not an empty list |
+
+**The server does not proxy a published manifest.** `history.json` is a whole-catalog document on a
+public host, published by CI onto a branch that moves independently of this process; the browser
+viewer fetches it directly for the same reason. A server-side copy would be a cache with its own
+staleness against that branch, so the fetchable URL is returned instead, along with the template for
+addressing any single historical render (`raw.githubusercontent.com/<repo>/{commit}/{path}`).
+
+In `local` mode the timeline comes from [`ServeProjectHistory`], derived from the checkout's own
+delivery-branch commits and memoised per refresh window because one `git log --raw` over the branch
+is ~1.6s. Each version links to this server's content-addressed `/history/render/<blob>.png` lane,
+which only ever serves blobs the timeline already names.
+
+Delivery provenance wins over a local checkout where a deployment somehow has both: a catalog
+fetched from a delivery branch has already published what it rendered, and that is the truth about
+it rather than whatever the serving box's clone happens to contain.
+
+A timeline is not a commit list. Adjacent commits whose render bytes are identical collapse into one
+version, and a preview that keeps returning to a render it had already moved away from is reported
+`unstable` with a `flapCount` rather than as a preview with hundreds of changes — on the measured
+branch, five such previews accounted for a 40% reduction in entries.
 
 ### The full-page scroll lanes
 

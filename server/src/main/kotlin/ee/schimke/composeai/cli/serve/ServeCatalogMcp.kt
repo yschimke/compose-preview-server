@@ -21,6 +21,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -37,6 +38,12 @@ class ServeCatalogMcp(
   private val sessions: ServeSessionRegistry,
   private val renderSemaphore: Semaphore,
   private val renderQueueWaitSeconds: Long = 2,
+  /**
+   * Project mode's locally-derived timeline, when this server was started against a checkout. Null
+   * on a hosted box, where the published manifest on the delivery branch — not this process — is
+   * the truth about what a catalog has rendered. See [historyJson].
+   */
+  private val projectHistory: ServeProjectHistory? = null,
 ) {
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
@@ -234,6 +241,17 @@ class ServeCatalogMcp(
     )
     add(
       tool(
+        "history_list",
+        "The render timeline for one preview: which versions of its rendered bytes exist, when " +
+          "each appeared, and whether the preview is unstable (re-renders differently on every " +
+          "publish) rather than genuinely changing. Where this server holds the timeline it is " +
+          "returned inline; where the catalog is published from a delivery branch the manifest " +
+          "lives on that branch and this reports where to fetch it.",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+      )
+    )
+    add(
+      tool(
         "list_data_products",
         "List structured data-product kinds across catalogs, optionally filtered by target.",
         """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}}}""",
@@ -328,6 +346,13 @@ class ServeCatalogMcp(
         }
       }
       "list_devices" -> textResult(devicesJson().toString())
+      "history_list" -> {
+        val target = args.previewTarget()
+        withCatalog(target.catalog) { host ->
+          val preview = resolvePreview(host, target.previewId)
+          textResult(historyJson(host, target.catalog, preview.id).toString())
+        }
+      }
       "diff_semantics" -> {
         requireLive(liveAuthorization)
         diffSemanticsResult(args)
@@ -541,6 +566,140 @@ class ServeCatalogMcp(
    * frame, which from the caller's side is indistinguishable from a device that renders identically
    * to the default.
    */
+  /**
+   * One preview's render timeline, in whichever of the three shapes this deployment can honestly
+   * produce. The `mode` field says which, because the three are not interchangeable and an agent
+   * that cannot tell them apart would read "no versions" as "nothing ever changed".
+   *
+   * - `published` — the catalog came from a delivery branch, so the timeline it *has* is the
+   *   `history.json` published on that branch. This server does not proxy it: the manifest is a
+   *   whole-catalog document on a public host, the browser viewer fetches it directly for the same
+   *   reason, and a server-side copy would be a cache with its own staleness against a branch that
+   *   moves independently of this process. So the fetchable URL is returned instead, alongside the
+   *   template for addressing any single historical render.
+   * - `local` — project mode, where the timeline is derived from the checkout's own delivery-branch
+   *   commits and served inline, with each version addressable through this server's
+   *   `/history/render/<blob>.png` lane.
+   * - `none` — an uploaded bundle with neither. Reported as a reason rather than an empty list,
+   *   which would read as a preview that has never changed.
+   */
+  private suspend fun historyJson(
+    host: ServeHost,
+    catalog: String,
+    previewId: String,
+  ): JsonObject {
+    val provenance = bundleHost(host)?.provenance
+    val base = buildJsonObject {
+      put("schema", "compose-preview/catalog-mcp-history/v1")
+      put("catalog", catalog)
+      put("previewId", previewId)
+      put("uri", resourceUri(catalog, previewId))
+    }
+
+    if (provenance != null) {
+      val manifestUrl = ServeUrls.historyManifestUrl(provenance.repo, provenance.branch)
+      return JsonObject(
+        base +
+          buildJsonObject {
+            put("mode", "published")
+            put("repo", provenance.repo)
+            put("branch", provenance.branch)
+            provenance.commit?.let { put("commit", it) }
+            if (manifestUrl == null) {
+              put(
+                "reason",
+                "this catalog names a delivery branch but not one a manifest URL can be built " +
+                  "from, so its timeline is not addressable",
+              )
+            } else {
+              put("manifestUrl", manifestUrl)
+              put(
+                "note",
+                "the timeline is published on the delivery branch, not held by this server. " +
+                  "Fetch manifestUrl and read previews['$previewId']; each version's `commit` " +
+                  "and `path` address that render through renderUrlTemplate.",
+              )
+              put(
+                "renderUrlTemplate",
+                "https://raw.githubusercontent.com/${provenance.repo}/{commit}/{path}",
+              )
+            }
+          }
+      )
+    }
+
+    val history =
+      projectHistory
+        ?: return JsonObject(
+          base +
+            buildJsonObject {
+              put("mode", "none")
+              put(
+                "reason",
+                "this catalog has no delivery-branch provenance and this server has no checkout to " +
+                  "derive a timeline from; an uploaded bundle carries no history",
+              )
+            }
+        )
+
+    // Off the request dispatcher: the first call per refresh window shells out to `git log`.
+    val timeline =
+      withContext(Dispatchers.IO) { history.timelineJsonFor(previewId) }
+        ?: return JsonObject(
+          base +
+            buildJsonObject {
+              put("mode", "local")
+              put("versions", JsonArray(emptyList()))
+              put(
+                "reason",
+                "the local delivery-branch timeline names fewer than two distinct renders for this " +
+                  "preview, so there is no change to show",
+              )
+            }
+        )
+
+    val parsed = runCatching { JSON.parseToJsonElement(timeline).jsonObject }.getOrNull()
+    val entry = parsed?.get("previews")?.jsonObject?.get(previewId)?.jsonObject
+    return JsonObject(
+      base +
+        buildJsonObject {
+          put("mode", "local")
+          entry?.get("unstable")?.let { put("unstable", it) }
+          entry?.get("flapCount")?.let { put("flapCount", it) }
+          entry?.get("observations")?.let { put("observations", it) }
+          put(
+            "versions",
+            buildJsonArray {
+              entry?.get("versions")?.jsonArray?.forEach { version ->
+                val v = version.jsonObject
+                add(
+                  JsonObject(
+                    v +
+                      buildJsonObject {
+                        // Content-addressed and constrained to blobs this timeline already names,
+                        // so the URL cannot be steered at an arbitrary object in the repository.
+                        v["blob"]?.jsonPrimitive?.contentOrNull?.let {
+                          put("renderUrl", "/history/render/$it.png")
+                        }
+                      }
+                  )
+                )
+              }
+            },
+          )
+        }
+    )
+  }
+
+  /** The baked bundle behind [host], which is where delivery-branch provenance lives. */
+  private fun bundleHost(host: ServeHost): ServeBundleHost? =
+    when (host) {
+      is ServeBundleHost -> host
+      is ServeCatalogLiveHost -> host.bakedHost as? ServeBundleHost
+      is ServePerPreviewLiveHost -> host.bakedHost as? ServeBundleHost
+      else -> null
+    }
+
   private fun devicesJson(): JsonObject = buildJsonObject {
     put("schema", "compose-preview/catalog-mcp-devices/v1")
     put(
