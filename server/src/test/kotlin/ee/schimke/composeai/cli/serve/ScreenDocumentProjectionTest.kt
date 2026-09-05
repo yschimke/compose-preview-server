@@ -177,17 +177,37 @@ class ScreenDocumentProjectionTest {
   }
 
   @Test
-  fun `an enum value is refused, because nothing maps the wire spelling to a Kotlin member`() {
-    // The checked-in documents store `center` and `semiBold`, and `accountCircle` / `moreVert` on
-    // an `ImageVector` parameter whose entries are not members of that type at all. Appending
-    // either to the parameter's recorded type emits a reference that does not exist.
+  fun `a mapped enum value becomes the Kotlin member the table names`() {
+    // This test used to assert the opposite, and was left behind when the table arrived.
+    //
+    // The first projection derived a member by appending the document's value to the parameter's
+    // recorded type — `TextAlign` + `center` — which never compiled, so every enum was refused.
+    // `ENUM_MEMBERS` replaced that derivation with a lookup keyed by component and property, and
+    // `m3/text`.`textAlign` is one of the entries it carries. A test still demanding a refusal
+    // here was asserting the bug rather than the behaviour.
+    val projected = projected(document(text("textAlign" to EnumValueV1("center"))))
+
+    assertEquals(
+      ScreenValue.Reference(
+        rootFqn = "androidx.compose.ui.text.style.TextAlign",
+        members = listOf("Center"),
+        typeFqn = "androidx.compose.ui.text.style.TextAlign",
+      ),
+      projected.root.arguments.getValue("textAlign"),
+    )
+  }
+
+  @Test
+  fun `an enum value the table does not carry is refused, and names the ones it does`() {
+    // The half worth keeping from the old behaviour. A value with no member behind it must be
+    // named rather than guessed at: appending it to the parameter's type is what emitted
+    // references that do not exist, and the wire spellings are lower-camel besides.
     assertEquals(
       listOf(
-        "node `text`.`textAlign` is the enum value `center`, and nothing maps a catalog enum " +
-          "value to its Kotlin member — the wire spelling is lower-camel and some values name " +
-          "icons or authored variants rather than members of the parameter's own type"
+        "node `text`.`textAlign` is the enum value `diagonal`, which is not one of " +
+          "center, end, justify, start"
       ),
-      refusal(document(text("textAlign" to EnumValueV1("center")))),
+      refusal(document(text("textAlign" to EnumValueV1("diagonal")))),
     )
   }
 
