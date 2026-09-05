@@ -116,21 +116,66 @@ class UiBuilderEnumExportTest {
   }
 
   @Test
-  fun `a variant-selecting property refuses as a variant, not as a missing entry`() {
+  fun `a card variant selects the component it names`() {
     // `m3/card`.`variant` is `Card`, `ElevatedCard` or `OutlinedCard` — three symbols behind one
-    // catalog id. No table of members can express that, and a refusal that reads like a missing
-    // table entry would send someone to add one.
+    // catalog id, which is what made it a call-site decision rather than a value. It is a lookup
+    // now, so the export reads as the component the designer picked.
+    fun sourceFor(variant: String) =
+      (ScreenExportGate.export(
+          document(
+            roots = listOf("card"),
+            nodes =
+              linkedMapOf(
+                "card" to
+                  DesignNodeV1(
+                    id = "card",
+                    componentId = "m3/card",
+                    properties =
+                      mapOf(
+                        "variant" to EnumValueV1(variant),
+                        "containerColor" to
+                          ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1("surface"),
+                      ),
+                    slots = mapOf("content" to listOf("label")),
+                  ),
+                "label" to
+                  DesignNodeV1(
+                    id = "label",
+                    componentId = "m3/text",
+                    properties = mapOf("text" to StringValueV1("Latest")),
+                  ),
+              ),
+          ),
+          record,
+        ) as ScreenExportGate.Outcome.Emitted)
+        .source
+
+    assertTrue("ElevatedCard(" in sourceFor("elevated"), sourceFor("elevated"))
+    assertTrue("OutlinedCard(" in sourceFor("outlined"), sourceFor("outlined"))
+    assertTrue("Card(" in sourceFor("filled"), sourceFor("filled"))
+    // The defaults follow the component. All three factories return a `CardColors`, so the filled
+    // one would compile on an elevated card and quietly give it the filled card's other roles.
+    assertTrue("CardDefaults.elevatedCardColors(" in sourceFor("elevated"), sourceFor("elevated"))
+    assertTrue("CardDefaults.outlinedCardColors(" in sourceFor("outlined"), sourceFor("outlined"))
+    assertTrue("CardDefaults.cardColors(" in sourceFor("filled"), sourceFor("filled"))
+  }
+
+  @Test
+  fun `a variant nothing selects still refuses as a variant, not as a missing entry`() {
+    // `m3/button`.`style` includes `fab`, which is a different component with a different
+    // signature rather than another spelling of `Button`, so nothing selects it yet. The refusal
+    // must keep reading as a call-site decision rather than as a table entry somebody could add.
     val refusals =
       ScreenExportGate.refusals(
         document(
-          roots = listOf("card"),
+          roots = listOf("button"),
           nodes =
             linkedMapOf(
-              "card" to
+              "button" to
                 DesignNodeV1(
-                  id = "card",
-                  componentId = "m3/card",
-                  properties = mapOf("variant" to EnumValueV1("filled")),
+                  id = "button",
+                  componentId = "m3/button",
+                  properties = mapOf("style" to EnumValueV1("filledTonal")),
                   slots = mapOf("content" to emptyList()),
                 )
             ),
