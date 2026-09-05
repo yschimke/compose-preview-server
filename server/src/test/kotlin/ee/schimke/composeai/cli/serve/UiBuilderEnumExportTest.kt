@@ -330,10 +330,11 @@ class UiBuilderEnumExportTest {
                   // not emit. Enough to make the projection refuse, which is the precondition.
                   properties = mapOf("text" to StateValueV1("caption")),
                 ),
-              // `m3/icon` used to be the example here and is recorded now. `layout/lazy-column`
-              // is still uncovered for a reason no table fixes — `items` is a `LazyListScope` DSL,
-              // not a composable slot — so it is the durable one to test the layering with.
-              "list" to DesignNodeV1(id = "list", componentId = "layout/lazy-column"),
+              // The third id to hold this spot: `m3/icon` was recorded, then `layout/lazy-column`
+              // was too (#394). `m3/date-picker` is the durable one — it takes a `DatePickerState`
+              // from `rememberDatePickerState`, and a remembered factory is not a value any
+              // widening of the record's tables reaches.
+              "list" to DesignNodeV1(id = "list", componentId = "m3/date-picker"),
             ),
         ),
         record,
@@ -341,7 +342,7 @@ class UiBuilderEnumExportTest {
 
     assertTrue(refusals.any { "state variable `caption`" in it }, refusals.toString())
     assertTrue(
-      refusals.any { it == "no component `layout/lazy-column` in this catalog" },
+      refusals.any { it == "no component `m3/date-picker` in this catalog" },
       refusals.toString(),
     )
   }

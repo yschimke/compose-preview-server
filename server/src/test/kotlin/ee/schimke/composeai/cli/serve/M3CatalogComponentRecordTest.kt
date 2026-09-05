@@ -45,11 +45,10 @@ import kotlinx.serialization.json.jsonPrimitive
  * ## What "not covered" means, and why it is safe
  *
  * The record covers the components whose Compose mapping is unambiguous. Everything else — the
- * variant-selecting ids, the lazy containers whose `items` slot is a `LazyListScope` DSL rather
- * than a composable slot, the Remote Compose embed §5 deliberately keeps out of the Compose
- * exporter — is **absent rather than guessed**. That is safe by the generator's own contract: an id
- * it has no record for refuses by name, and a property the record does not declare refuses by name.
- * The failure mode of an incomplete record is a refusal an operator can read; the failure mode of a
+ * variant-selecting ids, the Remote Compose embed §5 deliberately keeps out of the Compose exporter
+ * — is **absent rather than guessed**. That is safe by the generator's own contract: an id it has
+ * no record for refuses by name, and a property the record does not declare refuses by name. The
+ * failure mode of an incomplete record is a refusal an operator can read; the failure mode of a
  * wrong one is Kotlin that does not compile in someone else's project.
  *
  * [uncovered] is therefore a checked-in list rather than an absence, so growing the record is a
@@ -79,6 +78,25 @@ import kotlinx.serialization.json.jsonPrimitive
  * `m3/icon` node the document always supplies the vector. So the call is authored with `TODO()` in
  * the position the record cannot fill: it compiles, it is what a person scaffolding by hand would
  * write, and it does not claim a value the record does not have.
+ *
+ * ## The lazy three, and the field that let them in
+ *
+ * `layout/lazy-column`, `layout/lazy-row` and `layout/lazy-grid` were on that list for one shared
+ * reason — "`items` is a `LazyListScope` DSL, not a composable slot" — and it was true of the
+ * **record shape**, not of the components. `LazyColumn`'s `content` is a plain `LazyListScope.() ->
+ * Unit`: not `@Composable`, so `composableSlot` was false and the container refused before anything
+ * was emitted, and satisfiable by a bare `{ … }` that does not compile, because `Text` is not a
+ * member of `LazyListScope`.
+ *
+ * Two upstream additions closed it (compose-ai-tools#5216, released in 1.83.0), and the three
+ * records use both: `TargetParameter.scopeDslReceiver` on the `content` parameter, which is what
+ * makes the slot fillable at all, and `ScreenNode.slotItems` from
+ * `ScreenDocumentProjection.SLOT_ITEMS`, which says each child is wrapped in `item { }`. The
+ * generator checks the second against the first rather than trusting it.
+ *
+ * `LazyVerticalGrid` is the one whose `code.call` needs a `TODO()`, for the `m3/icon` reason above:
+ * `columns` is required and `GridCells` has no placeholder. Every real document supplies it — the
+ * catalog marks `columns` required too — and the projection turns it into `GridCells.Adaptive(…)`.
  */
 class M3CatalogComponentRecordTest {
 
@@ -98,10 +116,14 @@ class M3CatalogComponentRecordTest {
   private val uncovered =
     mapOf(
       "asset/image" to "Image takes a Painter; no ScreenValue expresses one",
-      "layout/horizontal-carousel" to "items is a CarouselScope DSL, not a composable slot",
-      "layout/lazy-column" to "items is a LazyListScope DSL, not a composable slot",
-      "layout/lazy-grid" to "items is a LazyGridScope DSL, not a composable slot",
-      "layout/lazy-row" to "items is a LazyListScope DSL, not a composable slot",
+      // Not "items is a CarouselScope DSL" — that was this list's own guess and it is wrong.
+      // `HorizontalUncontainedCarousel(state = rememberCarouselState { 5 }, …) { CarouselItem() }`
+      // is how m3-catalog calls it: the content is a trailing composable slot taking an item
+      // index, not a scope DSL, so `ScreenNode.slotItems` does not reach it. Two things block it,
+      // and both are lambdas — `rememberCarouselState { n }` is a factory whose argument is one,
+      // and the slot is called per index rather than per child.
+      "layout/horizontal-carousel" to
+        "takes a CarouselState from rememberCarouselState { n }, whose argument is a lambda, and its content slot is called per item index rather than per child",
       "layout/supporting-pane-scaffold" to "adaptive API; panes are not plain composable slots",
       "m3/center-aligned-top-app-bar" to
         "scrollBehavior is a TopAppBarScrollBehavior from a remembered factory, which no ScreenValue expresses",
