@@ -159,7 +159,8 @@ RUN set -eu; \
 # `-Dcomposeai.cli.libRendererDir`, else `$APP_HOME/<name>`.
 #
 # `$APP_HOME` here is `/opt/compose-preview-server`, and the released SERVER tarball
-# carries only `bin/`, `lib/`, `wasm-ui/` and `ui-builder/` — those two sidecars are staged into
+# carries only `bin/`, `lib/`, `wasm-ui/`, `ui-builder/` and `ui-builder-components/` — those two
+# sidecars are staged into
 # compose-ai-tools' `:cli` distribution (`cli/build.gradle.kts`, `into("lib-daemon-desktop")`
 # / `into("lib-renderer")`), which this image never installed. So the lookup came back
 # empty, `desktopBundleDaemonLaunch` returned null, and every desktop catalog fell back

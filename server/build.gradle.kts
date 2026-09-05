@@ -191,6 +191,16 @@ distributions {
   main {
     contents { from(project(":wasm-ui").tasks.named("wasmFrontendDist")) { into("wasm-ui") } }
     contents { from(unpackUiBuilderWeb) { into("ui-builder") } }
+    // The component record the Compose export reads. Without it a packaged host advertises no
+    // Compose export at all — `--ui-builder-components` was read by `ComponentRecordSource` and
+    // written by nothing that shipped, so the builder's export action was withdrawn on every
+    // deployed box while the record sat in this repository unused.
+    contents {
+      from(rootProject.layout.projectDirectory.dir("docs/design/fixtures/ui-builder")) {
+        include("m3-catalog-components-v1.json")
+        into("ui-builder-components")
+      }
+    }
     contents {
       into("lib-renderer") { from(stageRendererLibs) }
       into("lib-daemon-desktop") { from(stageDaemonDesktopLibs) }

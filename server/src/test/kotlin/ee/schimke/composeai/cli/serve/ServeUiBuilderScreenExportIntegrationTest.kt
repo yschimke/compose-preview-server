@@ -123,6 +123,32 @@ class ServeUiBuilderScreenExportIntegrationTest {
   }
 
   @Test
+  fun `a catalog with a record advertises Compose export beside one without`() {
+    // The deployed shape: `m3-catalog` and `remote-m3` enabled together, a record for the first
+    // and deliberately none for the second — Remote Compose is kept out of the Compose exporter by
+    // design. The capability was computed once and copied onto every catalog, so this arrangement
+    // advertised no export **anywhere** and the builder withdrew the action from the catalog that
+    // could have used it. `exportCapabilities` is a field of each `CatalogCapabilityV1`; the host
+    // now answers it per catalog.
+    val running =
+      startServer(
+        records = mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile()),
+        catalogs = setOf(CATALOG_SYSTEM_ID, "remote-m3"),
+      )
+    try {
+      val catalogs = assertIs<CatalogsResponseV1>(response(running, ListCatalogsRequestV1))
+      assertEquals(
+        mapOf(CATALOG_SYSTEM_ID to true, "remote-m3" to false),
+        catalogs.catalogs.associate {
+          it.benchmark.catalogSystemId to it.exportCapabilities.composeCode
+        },
+      )
+    } finally {
+      running.close()
+    }
+  }
+
+  @Test
   fun `a host configured with no record advertises no Compose export`() {
     // The packaged deployment's case, and the one visible change this PR makes to the builder UI:
     // `deploy/image/entrypoint.sh` enables catalogs and passes no record, so the export action is
@@ -142,7 +168,8 @@ class ServeUiBuilderScreenExportIntegrationTest {
 
   private fun startServer(
     records: Map<String, File> =
-      mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
+      mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile()),
+    catalogs: Set<String> = setOf(CATALOG_SYSTEM_ID),
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     // Wired exactly as `ServeRunner` wires it, including the catalog id the record is keyed by.
@@ -154,14 +181,15 @@ class ServeUiBuilderScreenExportIntegrationTest {
         storage = FileUiBuilderStateStorage(stateDirectory),
         catalogs =
           CurrentM3UiBuilderCatalogExecutor(
-            catalogSystemIds = setOf(CATALOG_SYSTEM_ID),
+            catalogSystemIds = catalogs,
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
                 // The same expression `ServeRunner` computes, so this sees what a host would.
-                composeCode = setOf(CATALOG_SYSTEM_ID).all { it in records.keys },
+                composeCode = catalogs.all { it in records.keys },
                 svg = false,
                 png = false,
               ),
+            composeExportFor = { systemId -> systemId in records.keys },
           ),
         exporter = ScreenGeneratorComposeExportExecutor(source::record),
       )

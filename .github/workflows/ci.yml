@@ -43,6 +43,10 @@ jobs:
           test -f "${dist_root}/ui-builder/index.html"
           test -f "${dist_root}/ui-builder/uiBuilder.mjs"
           test -f "${dist_root}/ui-builder/uiBuilder.wasm"
+          # The component record the Compose export generates from. Absent, a packaged host
+          # advertises no Compose export at all and the builder withdraws the action — which is
+          # what every deployed box did while this file sat in the repository unshipped.
+          test -f "${dist_root}/ui-builder-components/m3-catalog-components-v1.json"
           "${dist_root}/bin/compose-preview-server" --help
 
   deployment:
