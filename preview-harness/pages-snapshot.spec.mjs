@@ -3012,6 +3012,18 @@ const FIXTURE_STATES = [
     // paints only its selected option, so a regression back to Pixel devices (or an Orientation
     // row reappearing on a watch) would move no baseline at all. Open the group and expand the
     // menu into a list box so every offered device is pixels the diff bot can see.
+    fixture: "serve-viewer-gestures",
+    suffix: "features-open",
+    apply: async (page) => {
+      // The one-handed gesture controls, which no end-state shot can show: "Detected features" is
+      // a closed `<details>` inside a drawer that also starts closed, so the row and the two
+      // fire-a-gesture buttons (issue #5102) are pixels nothing was capturing. Open both, the way
+      // a visitor does, so a change to either control moves a baseline.
+      await openControlsDrawer(page);
+      await page.click('[data-cp-group="features"] > summary');
+    },
+  },
+  {
     fixture: "serve-viewer-wear-screen",
     suffix: "size-open",
     apply: async (page) => {

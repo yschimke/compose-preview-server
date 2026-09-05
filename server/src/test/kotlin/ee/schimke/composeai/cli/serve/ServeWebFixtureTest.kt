@@ -4233,6 +4233,31 @@ class ServeWebFixtureTest {
       viewerGesturesDesktop.contains("id=\"cp-gestures\""),
       "a gesture-supporting preview shows no gesture control on a desktop session",
     )
+    // Firing the gesture, beside showing its hint (issue #5102). Labelled as the WEARER's gesture —
+    // someone reading a Wear catalog is looking up what a double pinch does, not what the API calls
+    // it — and carrying the wire kind the daemon invokes, so the two cannot drift apart.
+    assertTrue(
+      viewerGestures.contains("cp-gesture-invoke\" data-gesture=\"primary\"") &&
+        viewerGestures.contains(">Double pinch</button>"),
+      "a gesture-supporting preview offers a button that fires the primary gesture",
+    )
+    assertTrue(
+      viewerGestures.contains("cp-gesture-invoke\" data-gesture=\"dismiss\"") &&
+        viewerGestures.contains(">Wrist turn</button>"),
+      "a gesture-supporting preview offers a button that fires the dismiss gesture",
+    )
+    // The hidden holder the click writes and the render reads once — without it the buttons have
+    // nowhere to put the kind, and the render would carry no `gestureInvoke` at all.
+    assertTrue(
+      viewerGestures.contains("id=\"cp-gesture-invoke\""),
+      "the gesture-invoke buttons have the hidden field the render reads",
+    )
+    // Same lane rule as the hint row: a desktop session cannot invoke a handler, so the buttons are
+    // absent rather than dead.
+    assertFalse(
+      viewerGesturesDesktop.contains("cp-gesture-invoke"),
+      "a gesture-supporting preview offers no fire-a-gesture buttons on a desktop session",
+    )
     // The projected palette is inlined AFTER serve.css, so it wins at equal specificity — and it
     // carries both modes, so a dark-mode visitor to a light-first catalog still gets its brand.
     assertTrue(

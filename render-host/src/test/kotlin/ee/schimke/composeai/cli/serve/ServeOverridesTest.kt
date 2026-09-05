@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.daemon.protocol.GestureKindOverride
 import ee.schimke.composeai.daemon.protocol.Orientation
 import ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
 import ee.schimke.composeai.daemon.protocol.RemoteComposeProfile
@@ -146,6 +147,71 @@ class ServeOverridesTest {
       val parsed = ServeOverrides.parse(mapOf(bad))
       assertTrue(parsed is OverrideParse.Invalid, "expected Invalid for $bad, got $parsed")
     }
+  }
+
+  @Test
+  fun `gestureInvoke names the gesture the daemon fires`() {
+    // Issue #5102: the hint could be shown and then never taken up, because a double pinch and a
+    // wrist turn are sensor events with no pointer standing in for them.
+    assertEquals(
+      GestureKindOverride.PRIMARY,
+      ok(mapOf("gestureInvoke" to "primary")).gestures?.invoke,
+    )
+    assertEquals(
+      GestureKindOverride.DISMISS,
+      ok(mapOf("gestureInvoke" to "dismiss")).gestures?.invoke,
+    )
+    assertEquals(
+      GestureKindOverride.SCROLL,
+      ok(mapOf("gestureInvoke" to "scroll")).gestures?.invoke,
+    )
+    assertEquals(GestureKindOverride.PAGE, ok(mapOf("gestureInvoke" to "page")).gestures?.invoke)
+    // Case-insensitive, like every other friendly spelling here.
+    assertEquals(
+      GestureKindOverride.PRIMARY,
+      ok(mapOf("gestureInvoke" to "Primary")).gestures?.invoke,
+    )
+  }
+
+  @Test
+  fun `hints and an invocation ride the same override, so both can apply to one render`() {
+    // "Play the hint, then take it up" is one render, not two.
+    val o = ok(mapOf("gestures" to "true", "gestureInvoke" to "primary"))
+
+    assertEquals(true, o.gestures?.showHints)
+    assertEquals(GestureKindOverride.PRIMARY, o.gestures?.invoke)
+  }
+
+  @Test
+  fun `an invocation alone leaves the hint affordance untouched`() {
+    // Not `showHints = false`: the viewer's hint checkbox and its fire buttons are separate
+    // controls, and firing must not silently clear a hint the visitor asked for.
+    val o = ok(mapOf("gestureInvoke" to "dismiss"))
+
+    assertNotNull(o.gestures)
+    assertNull(o.gestures?.showHints)
+  }
+
+  @Test
+  fun `a malformed gestureInvoke value is rejected rather than firing something else`() {
+    for (bad in listOf("gestureInvoke" to "yes", "gestureInvoke" to "double-pinch")) {
+      val parsed = ServeOverrides.parse(mapOf(bad))
+      assertTrue(parsed is OverrideParse.Invalid, "expected Invalid for $bad, got $parsed")
+    }
+  }
+
+  @Test
+  fun `cache key differs when a gesture is fired, so an invocation is not served from cache`() {
+    // An invocation changes what the render shows; sharing a key with the un-fired render would
+    // hand back the frame from before the handler ran.
+    assertNotEquals(
+      ServeOverrides.cacheKey("preview.A", ok(mapOf("gestureInvoke" to "primary"))),
+      ServeOverrides.cacheKey("preview.A", ok(emptyMap())),
+    )
+    assertNotEquals(
+      ServeOverrides.cacheKey("preview.A", ok(mapOf("gestureInvoke" to "primary"))),
+      ServeOverrides.cacheKey("preview.A", ok(mapOf("gestureInvoke" to "dismiss"))),
+    )
   }
 
   @Test
