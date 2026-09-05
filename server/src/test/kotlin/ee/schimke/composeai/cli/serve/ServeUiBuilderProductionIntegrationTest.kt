@@ -4,7 +4,8 @@ import ee.schimke.composeai.uibuilder.protocol.*
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
-import ee.schimke.composeai.uibuilder.service.RevisionPinnedComposeExportExecutor
+import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
+import ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -74,7 +75,7 @@ class ServeUiBuilderProductionIntegrationTest {
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
         catalogs = CurrentM3UiBuilderCatalogExecutor(),
-        exporter = RevisionPinnedComposeExportExecutor(),
+        exporter = EchoingComposeExportExecutor(),
       )
     val server =
       ServeHttpServer(
@@ -167,3 +168,43 @@ class ServeUiBuilderProductionIntegrationTest {
     private val JSON_MEDIA_TYPE = "application/json".toMediaType()
   }
 }
+
+/**
+ * Echoes the pinned document, because this test is about **restart persistence**, not source.
+ *
+ * It used to inject `RevisionPinnedComposeExportExecutor`, the default this module's production
+ * wiring never took — and asserting that the design's text survives a restart never needed a
+ * Compose emitter, only one that carries the document through. The real generator
+ * (`ScreenGeneratorComposeExportExecutor`) is exercised by
+ * `ServeUiBuilderScreenExportIntegrationTest`, which supplies it the component record it needs;
+ * reaching for it here would make a persistence test fail on a catalog mismatch.
+ *
+ * A near-twin of the fake in `ProductionUiBuilderRuntimeTest`, and deliberately not shared: the two
+ * modules cannot see each other's test source without new build plumbing, and a duplicated
+ * fifteen-line test double is a far cheaper duplication than the emitter this change removed.
+ */
+private class EchoingComposeExportExecutor : UiBuilderExportExecutor {
+  override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
+    require(request.format == ExportFormatV1.COMPOSE) {
+      "${request.format} export is unsupported by this executor"
+    }
+    val content =
+      "// pinned ${request.designId}@${request.revision} ${request.documentHash}\n" +
+        ECHO_JSON.encodeToString(DesignDocumentV1.serializer(), request.document)
+    return ExportArtifactV1(
+      format = ExportFormatV1.COMPOSE,
+      mediaType = "text/x-kotlin; charset=utf-8",
+      encoding = ExportEncodingV1.UTF8,
+      content = content,
+      // A real digest, because `PersistentUiBuilderService` verifies it — an executor
+      // whose digest does not match its content is refused as an internal error, which is
+      // exactly the check that caught this fake's first attempt at a hash code.
+      contentDigest =
+        java.security.MessageDigest.getInstance("SHA-256")
+          .digest(content.toByteArray())
+          .joinToString("") { "%02x".format(it) },
+    )
+  }
+}
+
+private val ECHO_JSON = kotlinx.serialization.json.Json { encodeDefaults = true }
