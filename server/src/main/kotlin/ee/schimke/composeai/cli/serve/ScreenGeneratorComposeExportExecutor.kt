@@ -4,6 +4,7 @@ import ee.schimke.composeai.discovery.COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA
 import ee.schimke.composeai.discovery.COMPONENT_RECORD_SCHEMA_VERSION
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
+import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
@@ -67,24 +68,46 @@ internal class ScreenGeneratorComposeExportExecutor(
     require(request.revision == request.document.revision) { "export revision/document mismatch" }
     require(request.document.id == request.designId) { "export design/document mismatch" }
 
-    return when (val generated = generate(request.document)) {
-      is Generated.Refused -> refused(generated.code, generated.reasons)
-      is Generated.Emitted -> {
-        val source = provenance(request) + generated.source
-        ExportArtifactV1(
-          format = ExportFormatV1.COMPOSE,
-          mediaType = "text/x-kotlin; charset=utf-8",
-          encoding = ExportEncodingV1.UTF8,
-          content = source,
-          contentDigest = source.sha256(),
-          // No diagnostic at all on the success path, and that is the whole change. An artifact
-          // with an empty diagnostic list says "this is the screen you designed"; the one this
-          // replaces could only ever say "this is nearly it".
-          diagnostics = emptyList(),
-        )
+    // A record-free design — a Wear widget, a Wear screen — generates through its own emitter, and
+    // is asked first because the record-driven generator below can only ever refuse it: `remote-m3`
+    // and `wear-m3` deliberately have no component record. The Code pane already made this call;
+    // until now the export did not, so a widget's source could be read in the browser and never
+    // saved. Same `RecordFreeExport` entry point as the pane, so the two cannot disagree.
+    //
+    // With [packageName], where the pane passes none. A pane is a snippet to paste into a file that
+    // already has one; an artifact somebody writes to disk is that file.
+    RecordFreeExport.generate(request.document, packageName)?.let { recordFree ->
+      return when (recordFree) {
+        is RecordFreeExport.Generated.Emitted -> emitted(provenance(request) + recordFree.source)
+        // The document's own fault and named node by node, which is what this code means. There is
+        // no record involved to blame and no call site left unproven — the emitter reached a node
+        // it cannot write.
+        is RecordFreeExport.Generated.Refused -> refused(UNEXPRESSIBLE_DOCUMENT, recordFree.reasons)
       }
     }
+
+    return when (val generated = generate(request.document)) {
+      is Generated.Refused -> refused(generated.code, generated.reasons)
+      is Generated.Emitted -> emitted(provenance(request) + generated.source)
+    }
   }
+
+  /**
+   * A generated file as an artifact.
+   *
+   * No diagnostic at all on the success path, and that is the whole point of this executor. An
+   * artifact with an empty diagnostic list says "this is the screen you designed"; the one it
+   * replaced could only ever say "this is nearly it".
+   */
+  private fun emitted(source: String): ExportArtifactV1 =
+    ExportArtifactV1(
+      format = ExportFormatV1.COMPOSE,
+      mediaType = "text/x-kotlin; charset=utf-8",
+      encoding = ExportEncodingV1.UTF8,
+      content = source,
+      contentDigest = source.sha256(),
+      diagnostics = emptyList(),
+    )
 
   /** The Kotlin for a document, or why there is none. */
   internal sealed interface Generated {
@@ -105,6 +128,22 @@ internal class ScreenGeneratorComposeExportExecutor(
     document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
     tagNodes: Boolean = false,
   ): Generated {
+    // Refused here rather than emitted, and that asymmetry with `export` is the point. This lane
+    // hands its source to a Kotlin compile against the design's catalog bundle, and a record-free
+    // design's source is Remote Compose or Wear Compose — neither is on that classpath. Without
+    // this the refusal came back as `NO_COMPONENT_RECORD`, telling a designer previewing a widget
+    // to go and configure a `--ui-builder-components` record that would not have helped.
+    if (RecordFreeExport.applies(document)) {
+      return Generated.Refused(
+        RECORD_FREE_DESIGN,
+        listOf(
+          "this design generates its own source rather than Jetpack Compose — a Wear widget is " +
+            "Remote Compose, a Wear screen is Wear Compose — and the native preview lane compiles " +
+            "against the catalog bundle, which carries neither; export it instead, and preview it " +
+            "on the canvas"
+        ),
+      )
+    }
     val catalogSystemId = document.catalogPin.systemId
     val record =
       when (val lookup = components(catalogSystemId)) {
@@ -287,5 +326,11 @@ internal class ScreenGeneratorComposeExportExecutor(
 
     /** The document is expressible; the catalog cannot prove one of its call sites. */
     const val UNPROVEN_CALL_SITE = "UNPROVEN_CALL_SITE"
+
+    /**
+     * The design generates through a record-free emitter, which the asking lane cannot use. Only
+     * [generate] produces it — [export] serves these designs rather than refusing them.
+     */
+    const val RECORD_FREE_DESIGN = "RECORD_FREE_DESIGN"
   }
 }
