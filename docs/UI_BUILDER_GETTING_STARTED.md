@@ -294,13 +294,18 @@ inspector's Wear OS presets is what changes it, and comparing where a list wraps
 
 ![The same design at the three round screen sizes](design/evidence/ui-builder-wear-screen/wear-screen-breakpoints.png)
 
-**The canvas is not Wear Compose, and says so on every component.**
-`androidx.wear.compose:compose-material3` is an Android AAR that a Compose/Wasm canvas cannot link,
-so nothing here draws the real component. The two that matter: rows are **not** transformed — the
-scaling and fading `SurfaceTransformation` gives a `TransformingLazyColumn` is what a Wear list
-looks like and is exactly what a plain Column cannot show — and the stadium's straight sides do not
-narrow toward the caps, so every row reads at least as wide as it will be. **Native** is where that
-question gets answered properly.
+**The canvas is measured against the real thing, not guessed at.** The scaffold uses the content
+padding a real `ScreenScaffold` computes for that screen size (10dp x 20dp at 192, 12 x 23 at 227,
+13 x 24 at 240 - asserted in wear-m3-catalog by `ScreenScaffoldContentPaddingTest` against Wear
+Compose itself), Wear's own colours, and its 26dp card corner. Rendered beside wear-m3-catalog's
+stitched `ScrollMode.LONG` capture of the same list, every metric agrees to within a dp:
+
+![The builder's canvas beside wear-m3-catalog's stitched LONG capture](design/evidence/ui-builder-wear-screen/wear-screen-parity.png)
+
+That is possible because `LONG` stitches with the row transformation *off*, so the reference is the
+list's unscaled layout and a stadium-shaped Column can reproduce it exactly. What neither picture
+shows is a live frame: on a watch `SurfaceTransformation` scales and fades each row by its distance
+from the bezel. **Native** is what answers that question.
 
 **Code** shows the real thing, which is the point of the stand-in. Unlike the widget container, the
 screen scaffold is *emitted* rather than erased: `ScreenScaffold` is a composable you call, so the

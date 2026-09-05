@@ -42,49 +42,80 @@ compiles the design against the catalog's own bundle and renders it with real Co
 `ServeUiBuilderNativePreview` exists for, and whose own KDoc names Android as the thing the Wasm
 canvas cannot answer.
 
-## The stadium is the scroll extent, not the device
+## The stadium is the scroll extent, and it is the real one
 
-The canvas draws the scaffold as the frame's **width**, the content's **height**, and round caps —
-the Wear long-screenshot convention.
+The canvas draws the scaffold as the frame's **width**, the content's **height**, and round caps.
+That is not a metaphor for a watch - it is what a Wear long screenshot *is*, and there is a real one
+to check against. `@ScrollingPreview(modes = [ScrollMode.LONG])` on wear-m3-catalog's
+`TransformingLazyColumn` component stitches the whole scroll into one tall PNG, and the result is a
+stadium.
 
-![The Wear list screen drawn as a long-screenshot stadium](evidence/ui-builder-wear-screen/wear-screen-stadium.png)
+The important property of that capture, and the reason this stand-in can be exact rather than
+approximate: **`LONG` stitches with the row transformation off.** Every card on the reference is
+172dp wide at every position down the page - measured at each card's centre, not at a corner - so
+the capture is the list's *unscaled* layout. A stadium-shaped Column with the same content padding
+and the same item spacing is therefore not an impression of it. It is the same picture.
 
-The alternative is a 192dp keyhole showing one screenful. The extent wins for authoring, because
-what an author is building is the whole list and a keyhole hides most of it behind a scroll position
-they have to keep re-finding. The first screenful is still marked: a stroked circle over the top cap
-and the line where it ends.
+| At 192dp | Reference (`ScrollMode.LONG`) | The builder's canvas |
+| --- | --- | --- |
+| Frame | 192 x 496dp | 192 x 496dp |
+| Content padding | 10dp x 20dp | 10dp x 20dp |
+| First row | 72.0 to 136.0dp | 72.0 to 136.0dp |
+| Row height / gap | 64.0dp / 4.0dp | 64.0dp / 4.0dp |
+| Row span | 10.0 to 182.0dp | 10.0 to 182.0dp |
+| Clock glyphs | (75.5, 5.5) to (117.0, 18.0) | (75.5, 5.5) to (117.0, 16.0) |
+| Header glyphs | (69.5, 40.0) to (123.0, 55.0) | (69.0, 40.0) to (123.0, 54.0) |
+| Title glyphs | (23.0, 87.5) to (89.0, 99.0) | (23.0, 87.5) to (89.0, 98.5) |
+| Subtitle glyphs | (22.0, 108.5) to (58.5, 119.0) | (23.0, 108.0) to (59.5, 118.0) |
 
-Where the list wraps differs at 192, 227 and 240dp, and on the extent that comparison is three
-columns rather than three scroll positions:
+Everything is within a dp, and the residue is antialiasing thresholds in the measurement rather than
+layout. The two are the same design: the builder's template carries wear-m3-catalog's rows character
+for character, so a difference between the columns means something.
 
-![The same design at the three round screen sizes](evidence/ui-builder-wear-screen/wear-screen-breakpoints.png)
+![The builder's canvas beside wear-m3-catalog's stitched LONG capture](evidence/ui-builder-wear-screen/wear-screen-parity.png)
 
-The screen's diameter is read from the **document's own frame**, not from a scaffold property. The
-Screen inspector already offers `wearos_small_round`, `wearos_large_round` and `wearos_xl_round`
-from `DeviceDimensions`, so picking a watch is picking a device, and a fifth scaffold property would
-be a second answer to the same question that would disagree with the first the moment anyone changed
-one.
+### Where the numbers came from
 
-## What the canvas is knowingly wrong about
+Not from a token table, and not from a fraction of the diameter - both were tried and both were
+wrong. `ScreenScaffoldContentPaddingTest` in wear-m3-catalog composes the real `AppScaffold` /
+`ScreenScaffold` / `TransformingLazyColumn` under Robolectric and asserts what the scaffold hands
+its list:
 
-Stated here once, and again in each component's `wasm` note, because a stand-in that does not say
-what it is standing in for is just a wrong picture.
+| Screen | Horizontal | Vertical | as a fraction |
+| --- | --- | --- | --- |
+| 192dp (`wearos_small_round`) | 10dp | 20dp | 5.21% / 10.42% |
+| 227dp (`wearos_large_round`) | 12dp | 23dp | 5.29% / 10.13% |
+| 240dp (`wearos_xl_round`) | 13dp | 24dp | 5.42% / 10.00% |
 
-- **The rows are not transformed.** `TransformingLazyColumn` scales and fades its rows toward the
-  curved edges through `SurfaceTransformation` and `Modifier.transformedHeight`, and that treatment
-  *is* what a Wear list looks like. The canvas draws a plain `Column`. Approximating the curve with a
-  hand-rolled scale would draw a different wrong picture and imply it was the right one, so the
-  stand-in stays visibly plain and the transformation is emitted in the source.
-- **The sides are straight.** On a watch the usable width narrows toward the caps and a row near a
-  screenful's edge is inset; between the caps the extent is right, and at the caps it clips rather
-  than insets. Every row therefore reads at least as wide as it will be, and usually wider.
-- **`TimeText` is flat.** Its *height* is what displaces the content below it, and that much is
-  right; the curve is not something Compose Multiplatform draws.
-- **`EdgeButton` is a rectangle.** The canvas draws the borrowed `m3/button`; the generated source
-  calls `EdgeButton`, which takes its shape from the screen.
-- **The content components are Material 3.** A Wear `Button` is not a Material 3 `Button`, and
-  `TitleCard`, `ListHeader` and `EdgeButton` have no mobile counterpart at all. Real Wear content
-  ids are the next change; borrowing was the alternative to a scaffold with nothing to put in it.
+Neither column is a constant fraction, which is exactly why guessing failed. The builder
+interpolates between the three measured points rather than extrapolating a percentage.
+
+The rest is measured off the reference pixels: the clock's digits at 5.5dp from the top **at every
+screen size** (a constant, not a fraction), the 26dp card corner, and Wear's dark colours -
+`#000000` behind, `#332E3C` on the card, `#F6EDFF` for a title and the warm `#FFDCC2` for a
+subtitle, which is the one nobody guesses.
+
+### The first screenful is still marked
+
+A stroked circle over the top cap, and a line where it ends. The extent is the right thing to author
+in - a keyhole shows one screenful and hides the list being built - but "how much of this is above
+the fold" is the question it makes harder, so the canvas answers it.
+
+### What is still not the watch
+
+The long screenshot is not a frame. On a live screen `SurfaceTransformation` scales and fades each
+row by where it sits against the bezel, and a row near the curve is inset and shrunk. Neither the
+reference nor the canvas shows that, and neither claims to: `LONG` turns it off in order to stitch,
+and the canvas has no Wear Compose to turn on. A single-frame render - `ScrollMode.TOP` or `END` in
+that repository, or the builder's own native lane - is what answers *that* question.
+
+The scroll indicator is the one thing drawn rather than reproduced: the reference's is the real
+bezel indicator caught mid-stitch, and the canvas draws a plain bar in its place.
+
+The content components are still Material 3's, borrowed. The type sizes and the card shape are set
+by the template to Wear's measured values, which is what makes this design match; another design
+built from the same components starts from the mobile defaults again. Real Wear content ids are the
+change that fixes that properly.
 
 ## What the design generates
 

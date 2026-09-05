@@ -530,7 +530,7 @@ private fun wearM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
       wasm =
         supportedWasm.copy(
           notes =
-            "Drawn as a Wear long-screenshot stadium — the document frame's width, the content's height, round caps — with a frozen curved TimeText and an optional bezel scroll indicator. It is not Wear Compose: `androidx.wear.compose:compose-material3` is an Android AAR the Wasm canvas cannot link, so the round viewport's horizontal inset near the caps is not applied and a row reads wider here than on a watch."
+            "Drawn as a Wear long-screenshot stadium at the document frame's width, with the content padding the real `ScreenScaffold` computes for that screen size, the clock where `AppScaffold` puts it, and a bezel scroll indicator. It is not Wear Compose — `androidx.wear.compose:compose-material3` is an Android AAR the Wasm canvas cannot link — but it is measured against it: wear-m3-catalog's stitched `ScrollMode.LONG` capture of the same list matches this to within a dp."
         ),
       // No Compose export from the catalog's own record: `ScreenScaffold` is a scaffold with a
       // `contentPadding` lambda and a scroll-state argument that has to agree with the list inside
@@ -555,7 +555,7 @@ private fun wearM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
       wasm =
         supportedWasm.copy(
           notes =
-            "Drawn as a plain Column at full width. The transformation that scales and fades rows toward the curved edges — `SurfaceTransformation` and `Modifier.transformedHeight` — is what a Wear list looks like and is exactly what this cannot show; the generated Kotlin emits it, and the native render lane draws it. Treat the canvas as the running order, not the picture."
+            "Drawn as a plain Column at the list's own spacing. That is what a stitched `ScrollMode.LONG` capture of the real one is: `LONG` turns the row transformation off in order to stitch, so every row on the reference is full content width at every position and the Column reproduces it exactly. What neither shows is a live frame, where `SurfaceTransformation` scales and fades a row by its distance from the bezel; the generated Kotlin emits that, and a single-frame render is what draws it."
         ),
       code = null,
       svg =

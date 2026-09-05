@@ -23,7 +23,7 @@ import kotlinx.serialization.json.jsonObject
  * because the question is what a Wear screen looks like in the builder, not what the builder looks
  * like around it.
  */
-@Preview(widthDp = 168, heightDp = 280)
+@Preview(widthDp = 170, heightDp = 410)
 @Composable
 fun WearScreenSamplePreview() {
   UiBuilderSurface(
@@ -32,6 +32,9 @@ fun WearScreenSamplePreview() {
         designId = "wear-screen-preview",
         catalogPin = wearScreenSampleCatalogPin,
         environment = wearScreenSampleEnvironment(SMALL_ROUND_DP),
+        // No edge button: this render is compared pixel for pixel against wear-m3-catalog's
+        // stitched `ScrollMode.LONG` capture of the same list, which has none.
+        edgeButtonLabel = null,
       ),
     editorOverlay = false,
   )
@@ -47,7 +50,7 @@ fun WearScreenSamplePreview() {
  * inspector's Wear OS presets — rather than from a scaffold property, so switching size is
  * switching device.
  */
-@Preview(widthDp = 600, heightDp = 280)
+@Preview(widthDp = 580, heightDp = 410)
 @Composable
 fun WearScreenBreakpointsPreview() {
   Row(
@@ -65,6 +68,7 @@ fun WearScreenBreakpointsPreview() {
               designId = "wear-screen-$widthDp",
               catalogPin = wearScreenSampleCatalogPin,
               environment = wearScreenSampleEnvironment(widthDp),
+              edgeButtonLabel = null,
             ),
           editorOverlay = false,
         )

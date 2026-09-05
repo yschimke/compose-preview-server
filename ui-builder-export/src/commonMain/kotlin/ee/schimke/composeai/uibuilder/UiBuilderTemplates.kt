@@ -486,16 +486,14 @@ private fun NewDesignState.declaration(): JsonObject =
     )
   )
 
-/** The rows the Wear screen template opens on, matching the wear-m3 catalog's own list sticker. */
-private val WEAR_SCREEN_ROWS =
-  listOf(
-    "Morning run" to "5.2 km · 28 min",
-    "Heart rate" to "72 bpm",
-    "Sleep" to "7h 14m",
-    "Steps" to "6,482",
-    "Calories" to "412 kcal",
-    "Cycle" to "18 km · 41 min",
-  )
+/**
+ * The rows the Wear screen template opens on.
+ *
+ * Character for character the rows of wear-m3-catalog's own `TransformingLazyColumn` component, so
+ * the builder's canvas and that repository's stitched `ScrollMode.LONG` render are the same design
+ * drawn by two renderers — which is the only way a difference between them means anything.
+ */
+private val WEAR_SCREEN_ROWS = (1..6).map { "Session $it" to "${it * 4} min" }
 
 /**
  * The Wear list screen a `wear-m3` design opens on: a `ScreenScaffold` over a
@@ -524,7 +522,16 @@ fun wearScreenUiBuilderDocument(
       UiBuilderNode(
         id = "row-$index",
         componentId = "m3/card",
-        properties = JsonObject(mapOf("variant" to literal("enum", JsonPrimitive("filled")))),
+        // `shape = "large"` is what reaches the theme's corner radius — a card with no shape
+        // property draws `RoundedCornerShape(0.dp)`. Under the Wear screen scaffold that radius is
+        // 26dp, which is the reference card's.
+        properties =
+          JsonObject(
+            mapOf(
+              "variant" to literal("enum", JsonPrimitive("filled")),
+              "shape" to literal("enum", JsonPrimitive("large")),
+            )
+          ),
         modifiers = JsonArray(listOf(modifier("fillMaxWidth"))),
         // One column, not two texts. `m3/card` draws its content slot in a `Box`, so two
         // children would be stacked on top of each other and the card would take the whole
@@ -536,11 +543,34 @@ fun wearScreenUiBuilderDocument(
         componentId = "layout/column",
         properties =
           JsonObject(mapOf("horizontalAlignment" to literal("enum", JsonPrimitive("start")))),
-        modifiers = JsonArray(listOf(modifier("fillMaxWidth"))),
+        // Padding, so the row lands on the reference card's 64dp. A Wear `TitleCard` carries its
+        // own; a borrowed `m3/card` carries Material 3's, and the design is what makes up the
+        // difference rather than the renderer inventing a size for somebody's card.
+        modifiers =
+          JsonArray(
+            listOf(
+              modifier("fillMaxWidth"),
+              padding(WEAR_CARD_PADDING_DP, WEAR_CARD_TOP_PADDING_DP, WEAR_CARD_BOTTOM_PADDING_DP),
+            )
+          ),
         slots = mapOf("children" to listOf("row-$index-title", "row-$index-subtitle")),
       ),
-      wearScreenText("row-$index-title", rowTitle, "titleMedium", "onSurface", "start"),
-      wearScreenText("row-$index-subtitle", subtitle, "bodySmall", "onSurfaceVariant", "start"),
+      wearScreenText(
+        "row-$index-title",
+        rowTitle,
+        "titleMedium",
+        "onSurface",
+        "start",
+        fontSizeSp = WEAR_CARD_TITLE_SP,
+      ),
+      wearScreenText(
+        "row-$index-subtitle",
+        subtitle,
+        "bodySmall",
+        "onSurfaceVariant",
+        "start",
+        fontSizeSp = WEAR_CARD_SUBTITLE_SP,
+      ),
     )
   }
   val edgeButtonNodes =
@@ -583,7 +613,22 @@ fun wearScreenUiBuilderDocument(
         slots =
           mapOf("items" to listOf("list-header") + WEAR_SCREEN_ROWS.indices.map { "row-$it" }),
       ),
-      wearScreenText("list-header", title, "titleSmall", "onSurfaceVariant"),
+      // White, and 48dp tall: `ListHeader` on the reference draws `onSurface` on the screen's own
+      // background rather than the variant a caption takes, and its item is 48dp at every size.
+      wearScreenText(
+        "list-header",
+        title,
+        "titleSmall",
+        "onSurface",
+        fontSizeSp = WEAR_LIST_HEADER_SP,
+        modifiers =
+          JsonArray(
+            listOf(
+              modifier("fillMaxWidth"),
+              padding(0f, WEAR_LIST_HEADER_TOP_DP, WEAR_LIST_HEADER_BOTTOM_DP),
+            )
+          ),
+      ),
     ) + rowNodes + edgeButtonNodes
   return UiBuilderDocument(
     schema = "compose-ui-builder-document/v1-candidate",
@@ -598,12 +643,58 @@ fun wearScreenUiBuilderDocument(
   )
 }
 
+/**
+ * Type sizes measured off the reference render's glyph boxes, not read off a token table.
+ *
+ * Wear Material 3's type scale is not Material 3's: the same `titleMedium` name is a smaller face
+ * on a watch, and the borrowed `m3/text` reads the mobile scale. Setting the size explicitly is
+ * what makes "Session 1" the same 66dp wide in both renderers.
+ */
+private const val WEAR_CARD_TITLE_SP = 14f
+
+private const val WEAR_CARD_SUBTITLE_SP = 13f
+
+private const val WEAR_LIST_HEADER_SP = 14.5f
+
+/**
+ * Reference-measured, and asymmetric because the reference is.
+ *
+ * The row is 64dp, of which a borrowed card's own content is about 24dp short; the split is what
+ * puts the title's glyphs at 87.5dp rather than 2.5dp lower, which is where an even split left
+ * them. `padding` here is the design's, not the renderer's: a Wear `TitleCard` carries its own and
+ * a Material 3 one carries Material 3's, so the design makes up the difference rather than the
+ * canvas inventing a size for somebody else's card.
+ */
+private const val WEAR_CARD_PADDING_DP = 12.2f
+
+private const val WEAR_CARD_TOP_PADDING_DP = 9.7f
+
+private const val WEAR_CARD_BOTTOM_PADDING_DP = 14.7f
+
+/** Reference-measured: the list header's item is 48dp, with its label sitting low in it. */
+private const val WEAR_LIST_HEADER_TOP_DP = 16f
+
+private const val WEAR_LIST_HEADER_BOTTOM_DP = 12f
+
+private fun padding(horizontalDp: Float, topDp: Float, bottomDp: Float): JsonObject =
+  JsonObject(
+    mapOf(
+      "type" to JsonPrimitive("padding"),
+      "startDp" to JsonPrimitive(horizontalDp),
+      "topDp" to JsonPrimitive(topDp),
+      "endDp" to JsonPrimitive(horizontalDp),
+      "bottomDp" to JsonPrimitive(bottomDp),
+    )
+  )
+
 private fun wearScreenText(
   id: String,
   text: String,
   style: String,
   color: String,
   textAlign: String = "center",
+  fontSizeSp: Float? = null,
+  modifiers: JsonArray = JsonArray(listOf(modifier("fillMaxWidth"))),
 ): UiBuilderNode =
   UiBuilderNode(
     id = id,
@@ -615,8 +706,8 @@ private fun wearScreenText(
           "style" to literal("typographyToken", JsonPrimitive(style)),
           "color" to colorToken(color),
           "textAlign" to literal("enum", JsonPrimitive(textAlign)),
-        )
+        ) + fontSizeSp?.let { mapOf("fontSizeSp" to literal("float", JsonPrimitive(it))) }.orEmpty()
       ),
-    modifiers = JsonArray(listOf(modifier("fillMaxWidth"))),
+    modifiers = modifiers,
     slots = emptyMap(),
   )
