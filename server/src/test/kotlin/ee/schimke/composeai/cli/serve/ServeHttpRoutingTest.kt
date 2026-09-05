@@ -1949,13 +1949,51 @@ class ServeHttpRoutingTest {
           assertEquals("/ui-builder/", response.header("Location"))
         }
       }
-      fetch("/ui-builder/").let { (code, response) ->
-        response.use {
-          assertEquals(200, code)
-          assertTrue(response.body.string().contains("Compose UI builder"))
-          assertEquals("no-cache", response.header("Cache-Control"))
+      // The document stays where it is — the app reads its catalog and design id back out of
+      // `location.pathname` — and the shell's own asset references carry the version instead.
+      val versionedPrefix =
+        fetch("/ui-builder/").let { (code, response) ->
+          response.use {
+            assertEquals(200, code)
+            assertEquals("no-cache", response.header("Cache-Control"))
+            val html = response.body.string()
+            assertTrue(html.contains("Compose UI builder"))
+            // The reference the whole chain hangs off is absolute and versioned; nothing still
+            // points at the unversioned sibling, which is what would silently defeat the caching.
+            // This fixture writes the attribute unquoted, which the rewrite has to handle too:
+            // a shell that omits the quotes would otherwise keep every asset on the unversioned
+            // path, with the caching silently defeated and nothing failing to say so.
+            val match = Regex("""src="?(/ui-builder/v/[^"\s>]+/)builder\.mjs""").find(html)
+            assertTrue(match != null, html)
+            assertTrue(!html.contains("src=builder.mjs"), html)
+            match!!.groupValues[1]
+          }
         }
-      }
+      // A versioned asset is immutable, and still answers a conditional request cheaply.
+      val versionedAsset = versionedPrefix + "builder.mjs"
+      val assetEtag =
+        fetch(versionedAsset).let { (code, response) ->
+          response.use {
+            assertEquals(200, code)
+            assertEquals("window.composeUiBuilder = true", response.body.string())
+            assertEquals("public, max-age=31536000, immutable", response.header("Cache-Control"))
+            response.header("ETag")!!
+          }
+        }
+      Request.Builder()
+        .url("http://127.0.0.1:${builderServer.port}$versionedAsset")
+        .header("If-None-Match", assetEtag)
+        .build()
+        .let { client.newCall(it).execute() }
+        .use { assertEquals(304, it.code) }
+      // A prefix naming a bundle this server does not have has nothing to serve, and the prefix
+      // carries assets only — it never answers with the shell.
+      assertEquals(404, fetch("${versionedPrefix}missing.mjs").second.use { it.code })
+      assertEquals(
+        404,
+        fetch("/ui-builder/v/0000000000000000/builder.mjs").second.use { it.code },
+      )
+      assertEquals(404, fetch("/ui-builder/v/0000000000000000/").second.use { it.code })
       fetch("/ui-builder/builder.mjs").let { (code, response) ->
         response.use {
           assertEquals(200, code)

@@ -111,6 +111,9 @@ kotlin {
       implementation(libs.composeai.rc.player.compose)
       implementation(libs.kotlinx.serialization.json)
       implementation(project(":ui-builder-artwork"))
+      // Kotlin syntax highlighting for the Code pane. See `UiBuilderCodeHighlighting.kt` for why a
+      // Compose-native tokenizer rather than the playground's CodeMirror.
+      implementation(libs.snipme.highlights)
     }
     commonTest.dependencies { implementation(kotlin("test")) }
     getByName("jvmMain").dependencies {
@@ -230,7 +233,7 @@ tasks.register<Sync>("wasmFrontendDist") {
   from(rootProject.layout.projectDirectory.dir("docs/design/fixtures/ui-builder")) {
     include(
       "confetti-schedule-operations-v1.json",
-      "jetcaster-discover-capabilities-v1.json",
+      "m3-catalog-capabilities-v1.json",
       "jetcaster-discover-operations-v1.json",
     )
   }
