@@ -53,6 +53,20 @@ import kotlinx.serialization.json.jsonPrimitive
  *
  * [uncovered] is therefore a checked-in list rather than an absence, so growing the record is a
  * deliberate edit here and a shrinking list, not something that drifts.
+ *
+ * ## `m3/icon`, and the one thing this record authors that discovery could not print
+ *
+ * `m3/icon` was on that list — "`iconKey` resolves to an `ImageVector` the record cannot name" —
+ * and it is covered now that `ScreenDocumentProjection.ICON_MEMBERS` names one per catalog key. Its
+ * `code.call` is the single entry here that a discovery run would not have produced: `callSite`
+ * refuses a component whose required parameter has no placeholder, and `ImageVector` has none.
+ *
+ * That refusal is about the **placeholder table**, not about calling `Icon`, and the two are
+ * conflated in one boolean. `ScreenGenerator` reads `code.call` only as a licence — it builds the
+ * argument list from [ComponentRecordFile] parameters and the document's own values, and for an
+ * `m3/icon` node the document always supplies the vector. So the call is authored with `TODO()` in
+ * the position the record cannot fill: it compiles, it is what a person scaffolding by hand would
+ * write, and it does not claim a value the record does not have.
  */
 class M3CatalogComponentRecordTest {
 
@@ -78,7 +92,6 @@ class M3CatalogComponentRecordTest {
       "layout/lazy-row" to "items is a LazyListScope DSL, not a composable slot",
       "layout/supporting-pane-scaffold" to "adaptive API; panes are not plain composable slots",
       "m3/horizontal-floating-toolbar" to "experimental; content is a FlowRow-shaped scope",
-      "m3/icon" to "iconKey resolves to an ImageVector the record cannot name",
       "m3/search-bar" to "inputField is a typed lambda, not a plain composable slot",
       "m3/search-input-field" to "SearchBarDefaults.InputField is a member of an object",
       "m3/snackbar-host" to "takes a SnackbarHostState, which no ScreenValue expresses",
