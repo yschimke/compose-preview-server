@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetDeltaRequestV1
@@ -32,6 +33,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
@@ -156,6 +158,113 @@ internal fun Route.installUiBuilderRoutes(
       ContentType.Application.Json,
       response.httpStatus(),
     )
+  }
+
+  /**
+   * `PUT` one design into existence at its own URL.
+   *
+   * The envelope endpoint above already creates designs, and keeps doing so; this is the same
+   * command with the resource semantics a programmatic caller expects — the id is in the URL, the
+   * body is the document, and `If-None-Match: *` says out loud what the service has always done
+   * anyway: create, never overwrite. That precondition is required rather than assumed, so a client
+   * that meant `PUT`-as-replace is told it asked for something this design service does not offer
+   * instead of silently getting a create or a refusal it has to parse a message to explain.
+   *
+   * `201` carries `Location`, and the location is the editor permalink rather than this API path:
+   * the useful answer to "I made a design" is where a person can open it.
+   */
+  put(UI_BUILDER_DESIGN_PATH) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val actorId =
+      when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        UiBuilderAuthorizationDecision.Missing -> {
+          call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          return@put
+        }
+        UiBuilderAuthorizationDecision.Forbidden -> {
+          call.respondText("UI-builder write access required", status = HttpStatusCode.Forbidden)
+          return@put
+        }
+      }
+    val designId = call.parameters["designId"].orEmpty()
+    if (designId.isBlank()) {
+      call.respondText("a design id is required", status = HttpStatusCode.BadRequest)
+      return@put
+    }
+    if (call.request.headers[HttpHeaders.IfNoneMatch]?.trim() != "*") {
+      call.respondText(
+        "send `If-None-Match: *`. This route creates a design and never replaces one, so a " +
+          "PUT without that precondition is asking for something it cannot do.",
+        status = PRECONDITION_REQUIRED,
+      )
+      return@put
+    }
+    val bytes =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { input -> input.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
+      }
+    if (bytes.size > MAX_UI_BUILDER_REQUEST_BYTES) {
+      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+      return@put
+    }
+    val document =
+      try {
+        UI_BUILDER_JSON.decodeFromString(
+          DesignDocumentV1.serializer(),
+          bytes.toString(StandardCharsets.UTF_8),
+        )
+      } catch (_: SerializationException) {
+        call.respondText("body is not a DesignDocumentV1", status = HttpStatusCode.BadRequest)
+        return@put
+      }
+    if (document.id != designId) {
+      call.respondText(
+        "the document's id (${document.id}) is not the design this URL names",
+        status = HttpStatusCode.BadRequest,
+      )
+      return@put
+    }
+    val actor = AuthenticatedUiBuilderActor(actorId)
+    // `If-None-Match: *` is answered where the answer is known. The service reports a create onto
+    // an existing id as a bad request, indistinguishable in its code from a malformed one, so the
+    // precondition is evaluated as its own read first — and a create that still fails afterwards
+    // is the race between two of these, which is the same precondition failing a moment later.
+    val existing = service.executeMapped(OpenDesignRequestV1(designId), actor)
+    if (
+      existing !is UiBuilderServiceResponse.Error ||
+        existing.error.code != ServiceErrorCodeV1.NOT_FOUND
+    ) {
+      if (existing is UiBuilderServiceResponse.Error) {
+        call.respondText(existing.error.message, status = existing.httpStatus())
+        return@put
+      }
+      call.respondText(
+        "$designId already exists; If-None-Match: * requires that it does not",
+        status = HttpStatusCode.PreconditionFailed,
+      )
+      return@put
+    }
+    when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
+      is UiBuilderServiceResponse.Error -> {
+        val status =
+          if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST)
+            HttpStatusCode.PreconditionFailed
+          else created.httpStatus()
+        call.respondText(created.error.message, status = status)
+      }
+      else -> {
+        val catalogSystemId = document.catalogPin.systemId.takeIf { it.isNotBlank() }
+        if (catalogSystemId != null) {
+          call.response.headers.append(
+            HttpHeaders.Location,
+            "/ui-builder/$catalogSystemId/$designId",
+          )
+        }
+        call.respondText("created $designId", status = HttpStatusCode.Created)
+      }
+    }
   }
 
   if (nativePreview != null) {
@@ -386,6 +495,24 @@ internal fun ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1.required
     is UpdatePresenceRequestV1 -> UiBuilderRouteCapability.WRITE
   }
 
+/**
+ * Run one protocol request through the mapper and the service, as this actor.
+ *
+ * The envelope route does this inline because it also has a request id to answer with. The resource
+ * routes have no envelope, so they share this instead of repeating the mapping.
+ */
+internal suspend fun UiBuilderServicePort.executeMapped(
+  request: ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1,
+  actor: AuthenticatedUiBuilderActor,
+): UiBuilderServiceResponse =
+  when (val mapping = UiBuilderProtocolMapper.toServiceCall(actor, request)) {
+    is ProtocolRequestMapping.Mapped -> execute(mapping.call)
+    is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
+  }
+
+/** The refusal status as a bare code, for callers that answer outside Ktor's status type. */
+internal fun UiBuilderServiceResponse.httpStatusValue(): Int = httpStatus().value
+
 private fun UiBuilderServiceResponse.httpStatus(): HttpStatusCode =
   when (this) {
     is UiBuilderServiceResponse.Error ->
@@ -431,11 +558,15 @@ internal val UI_BUILDER_JSON = Json {
 }
 
 internal const val UI_BUILDER_REQUEST_PATH = "/api/ui-builder/v1/requests"
+internal const val UI_BUILDER_DESIGN_PATH = "/api/ui-builder/v1/designs/{designId}"
 internal const val UI_BUILDER_UPDATES_PATH = "/api/ui-builder/v1/designs/{designId}/updates"
 internal const val UI_BUILDER_DEVICE_PRESETS_PATH = "/api/ui-builder/v1/device-presets"
 internal const val UI_BUILDER_IDENTITY_PATH = "/api/ui-builder/v1/identity"
 internal const val UI_BUILDER_NATIVE_PREVIEW_PATH =
   "/api/ui-builder/v1/designs/{designId}/native-preview"
+/** 428, which Ktor's [HttpStatusCode] does not name. RFC 6585: the precondition is missing. */
+private val PRECONDITION_REQUIRED = HttpStatusCode(428, "Precondition Required")
+
 private const val INVALID_REQUEST_ID = "invalid"
 private const val MAX_UI_BUILDER_REQUEST_BYTES = 8 * 1024 * 1024
 

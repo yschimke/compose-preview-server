@@ -12,6 +12,8 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
 import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
+import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
+import ee.schimke.composeai.uibuilder.decodeNewDesignStates
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.web.WebEscaping
@@ -38,6 +40,7 @@ import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
 import io.ktor.server.request.queryString
+import io.ktor.server.request.receiveParameters
 import io.ktor.server.request.receiveStream
 import io.ktor.server.response.ApplicationSendPipeline
 import io.ktor.server.response.respond
@@ -80,6 +83,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+
+/** The query values a create link carries into the design's permalink: identity, never content. */
+private val UI_BUILDER_IDENTITY_QUERY =
+  listOf("token", "actor", "clientId", "displayName", "color", "endpoint", "updatesEndpoint")
 
 /** A `/ui-builder/<catalog>/<designId>` design segment: the New design dialog's own id shape. */
 private val UI_BUILDER_DESIGN_SEGMENT = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -1018,9 +1025,19 @@ class ServeHttpServer(
           if (uiBuilderDir == null) call.respondText("not found", status = HttpStatusCode.NotFound)
           else call.respondRedirect("/ui-builder/")
         }
+        // Creating a design is a POST, and its answer is a redirect to the design's permalink.
+        // The form the New design dialog submits is an ordinary HTML form, so the browser follows
+        // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
+        // is the whole reason creation is not a navigation to a `?create=1` URL any more.
+        post("/ui-builder/{catalog}") { handleUiBuilderCreate() }
         // A runtime id is an exact immutable pin. There is deliberately no unversioned or
         // `latest` route: an unavailable pin has to surface as an explicit migration decision.
         get("/ui-builder/runtime/{runtimeId}/{path...}") { handleUiBuilderRuntimeAsset() }
+        // The bundle under a content-addressed prefix. Registered before the catch-all so the
+        // prefix is matched as a version rather than as the first path segment of a bundle file.
+        get("/ui-builder/$UI_BUILDER_VERSION_SEGMENT/{version}/{path...}") {
+          handleUiBuilderVersionedAsset()
+        }
         get("/ui-builder/{path...}") { handleUiBuilderAsset() }
 
         // The CMP/Wasm Remote Compose player is a single shared app rather than a per-catalog app.
@@ -11077,28 +11094,79 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    val segments = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
+    serveUiBuilderPath(dir, call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() })
+  }
+
+  /** `GET /ui-builder/v/{version}/{path...}`: the same bundle under an immutable prefix. */
+  private suspend fun RoutingContext.handleUiBuilderVersionedAsset() {
+    val dir = uiBuilderDir
+    if (dir == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val version = call.parameters["version"].orEmpty()
+    val rest = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
+    // A catalog served under the id `v` would otherwise be shadowed by this route and unreachable.
+    // Absurd as an id, and exactly the kind of thing that is absurd until somebody does it, so the
+    // catalog wins and simply gets no versioned URLs rather than a 404 nobody can explain.
+    if (UI_BUILDER_VERSION_SEGMENT in uiBuilderCatalogs) {
+      serveUiBuilderPath(dir, listOf(UI_BUILDER_VERSION_SEGMENT, version) + rest)
+      return
+    }
+    serveUiBuilderPath(dir, rest, version = version)
+  }
+
+  /**
+   * One bundle, reachable unversioned or under a content prefix.
+   *
+   * The prefix goes on the **directory**, not on each filename, because nothing in the bundle can
+   * be rewritten: `index.html` names `uiBuilder.mjs` relatively, that module fetches `skiko.wasm`
+   * and `uiBuilder.wasm` relative to its own URL, and all of it is emitted by the Kotlin/Wasm
+   * build. Moving the whole tree under `/ui-builder/v/<digest>/` carries every one of those
+   * relative references with it, with no string surgery on generated output.
+   *
+   * [version] null means the request arrived at the unversioned path. The entry document then
+   * redirects to the current prefix — that redirect is the one revalidated response, and it is what
+   * a rollout changes. A non-entry file stays served here, uncached, so a URL somebody already
+   * holds keeps working.
+   */
+  private suspend fun RoutingContext.serveUiBuilderPath(
+    dir: File,
+    segments: List<String>,
+    version: String? = null,
+  ) {
     val scopedCatalog = segments.firstOrNull()?.takeIf(uiBuilderCatalogs::contains)
     if (scopedCatalog != null && segments.size == 1 && !call.request.path().endsWith("/")) {
       call.respondRedirect("/ui-builder/$scopedCatalog/")
       return
     }
     val assetSegments = if (scopedCatalog == null) segments else segments.drop(1)
-    // The cool-URI form: `/ui-builder/<catalog>/<designId>` names one design in the path instead
-    // of in a `?designId=` query, and the browser reads it back out of `location.pathname`. Only
-    // a catalog-scoped single segment that cannot be a file qualifies, so an asset that is simply
-    // missing still 404s rather than silently rendering the app shell. The trailing-slash form is
-    // redirected away because the shell loads `uiBuilder.mjs` relative to the document.
-    if (
+    if (version != null) {
+      // The versioned prefix carries assets only. The document keeps its own URL because the app
+      // reads both the catalog and the design id back out of `location.pathname` — moving it under
+      // a prefix would make `parts[1]` the digest, and every design URL a different design.
+      //
+      // Only one bundle exists on disk, so a prefix naming another version has nothing to serve.
+      // Answering with the current bytes would make an immutable URL return two different files
+      // over its life, which is the one promise the prefix exists to keep.
+      if (assetSegments.isEmpty() || version != uiBuilderBundleVersion) {
+        call.respondText("not found", status = HttpStatusCode.NotFound)
+        return
+      }
+    } else if (
       scopedCatalog != null && assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])
     ) {
+      // The cool-URI form: `/ui-builder/<catalog>/<designId>` names one design in the path instead
+      // of in a `?designId=` query, and the browser reads it back out of `location.pathname`. Only
+      // a catalog-scoped single segment that cannot be a file qualifies, so an asset that is simply
+      // missing still 404s rather than silently rendering the app shell.
       val designId = assetSegments[0]
       if (!File(dir, designId).isFile) {
         if (call.request.path().endsWith("/")) {
           call.respondRedirect("/ui-builder/$scopedCatalog/$designId")
           return
         }
-        respondUiBuilderShell(File(dir, "index.html"))
+        respondUiBuilderShell(dir, File(dir, "index.html"))
         return
       }
     }
@@ -11109,8 +11177,16 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
+    // One door to the shell, so the reference rewrite cannot be reached around.
+    if (version == null && rel == "index.html") {
+      respondUiBuilderShell(dir, file)
+      return
+    }
     val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
-    call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    call.response.headers.append(
+      HttpHeaders.CacheControl,
+      if (version == null) "no-cache" else UI_BUILDER_IMMUTABLE_CACHE_CONTROL,
+    )
     call.response.headers.append(HttpHeaders.ETag, etag)
     if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
       call.respond(HttpStatusCode.NotModified)
@@ -11121,25 +11197,247 @@ class ServeHttpServer(
   }
 
   /**
-   * The builder's app shell, served for a design URL that names no file.
+   * A digest of the builder bundle's contents, used as its immutable URL prefix.
    *
-   * Same `no-cache` + ETag contract as the ordinary asset lane: the shell is the same bytes for
-   * every design, so a conditional request still answers `304`.
+   * Content, not `lastModified`. The bundle is baked into the deploy image, and an image rebuild
+   * rewrites timestamps whether or not a byte changed — so an mtime digest would retire every
+   * viewer's cached 44 MB on a redeploy that shipped the identical builder. Reading the tree costs
+   * one pass, and `by lazy` spends it on the first request rather than on every server's startup,
+   * including the ones with no builder at all.
+   *
+   * Path and length are mixed in alongside the bytes so a rename, or two files swapping contents,
+   * is a different bundle. Files are visited in sorted order because a filesystem's own order is
+   * not a promise, and a digest that depended on it would differ between two hosts serving the same
+   * bytes.
    */
-  private suspend fun RoutingContext.respondUiBuilderShell(index: File) {
+  private val uiBuilderBundleVersion: String by lazy {
+    val dir = uiBuilderDir ?: return@lazy "none"
+    val base = dir.canonicalFile.toPath()
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(64 * 1024)
+    dir
+      .walkTopDown()
+      // A symlink out of the bundle is not part of it, and the serving path refuses to follow one
+      // anyway; hashing its target would let something outside the tree name the version.
+      .filter { it.isFile && it.canonicalFile.toPath().startsWith(base) }
+      .sortedBy { it.toPath().toAbsolutePath().normalize().toString() }
+      .forEach { file ->
+        digest.update(base.relativize(file.canonicalFile.toPath()).toString().toByteArray())
+        digest.update(file.length().toString().toByteArray())
+        file.inputStream().use { stream ->
+          while (true) {
+            val read = stream.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+          }
+        }
+      }
+    digest.digest().take(8).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+  }
+
+  /**
+   * The builder's app shell, with its asset references pointed at the versioned prefix.
+   *
+   * Same `no-cache` contract as before: the shell is small, and it is the one document a rollout
+   * has to be able to change. The ETag folds in the bundle version because the body now depends on
+   * it — a byte-identical `index.html` serves a different shell once anything else in the tree
+   * changes, and a length-and-mtime ETag alone would call those two responses the same.
+   */
+  private suspend fun RoutingContext.respondUiBuilderShell(dir: File, index: File) {
     if (!index.isFile) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    val etag = "\"${index.length().toString(16)}-${index.lastModified().toString(16)}\""
+    val version = uiBuilderBundleVersion
+    val etag = "\"${index.length().toString(16)}-${index.lastModified().toString(16)}-$version\""
     call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
     call.response.headers.append(HttpHeaders.ETag, etag)
     if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
       call.respond(HttpStatusCode.NotModified)
       return
     }
-    val bytes = withContext(Dispatchers.IO) { index.readBytes() }
-    call.respondBytes(bytes, wasmContentType(index.name))
+    val html = withContext(Dispatchers.IO) { index.readText() }
+    call.respondBytes(
+      versionUiBuilderShellReferences(dir, html, version).toByteArray(),
+      wasmContentType(index.name),
+    )
+  }
+
+  /**
+   * Rewrites the shell's relative references to `/ui-builder/v/<version>/…`.
+   *
+   * Rewriting the shell rather than moving the document is what lets the bundle be cached immutably
+   * at all. The shell names `uiBuilder.mjs` relative to the document, that module resolves
+   * `./uiBuilder.wasm` against `import.meta.url`, the Wasm imports `./skiko.mjs`, and `skiko.mjs`
+   * resolves `skiko.wasm` the same way — so making the one reference in the shell absolute and
+   * versioned carries the whole 44 MB chain into the immutable prefix, without touching a byte the
+   * Kotlin/Wasm build emitted.
+   *
+   * Two forms, which is what the generated shell contains: an attribute value
+   * (`src="uiBuilder.mjs"`) and an import-map target (`"./js-joda.esm.js"`). A reference is
+   * rewritten only when it resolves to a real file inside the bundle, so an absolute URL, a bare
+   * module specifier and a dead link all pass through as the build wrote them.
+   */
+  private fun versionUiBuilderShellReferences(dir: File, html: String, version: String): String {
+    val base = dir.canonicalFile.toPath()
+    val prefix = "/ui-builder/$UI_BUILDER_VERSION_SEGMENT/$version/"
+    fun versioned(reference: String): String? {
+      val relative = reference.removePrefix("./")
+      if (relative.isEmpty() || relative.startsWith("/") || "://" in relative) return null
+      val file = File(dir, relative).canonicalFile
+      if (!file.toPath().startsWith(base) || !file.isFile) return null
+      return prefix + relative
+    }
+    return html
+      .replace(Regex("""\b(src|href)="([^"]+)"""")) { match ->
+        val replacement = versioned(match.groupValues[2]) ?: return@replace match.value
+        "${match.groupValues[1]}=\"$replacement\""
+      }
+      // HTML does not require the quotes, and a shell that omits them would otherwise keep every
+      // asset on the unversioned path — caching silently defeated, with nothing failing to say so.
+      // Runs second: the quoted form is already rewritten and its `"` is excluded here, so a value
+      // is never rewritten twice.
+      .replace(Regex("""\b(src|href)=([^\s>"']+)""")) { match ->
+        val replacement = versioned(match.groupValues[2]) ?: return@replace match.value
+        "${match.groupValues[1]}=$replacement"
+      }
+      .replace(Regex(""""(\./[^"]+)"""")) { match ->
+        val replacement = versioned(match.groupValues[1]) ?: return@replace match.value
+        "\"$replacement\""
+      }
+  }
+
+  /**
+   * `POST /ui-builder/<catalog>` — create one design, then `303` to its permalink.
+   *
+   * Plain `application/x-www-form-urlencoded`, because the point is that a browser can submit it
+   * without any script and follow the redirect on its own: POST/Redirect/GET, so the design's URL
+   * is the one left in the address bar and history, and reloading it re-opens rather than
+   * re-creates. The server seeds the document ([UiBuilderNewDesignSeed]) rather than accepting one,
+   * so the form carries intent — an id, a template, optional state variables — and not a payload a
+   * caller could shape into something the catalog does not serve. A caller that does want to hand
+   * over a whole document has `PUT /api/ui-builder/v1/designs/{id}`.
+   *
+   * Creating never overwrites: an id that already exists is answered with the same `303`, which is
+   * what "open or create" meant when this was a GET, minus the mutation-on-navigation.
+   */
+  private suspend fun RoutingContext.handleUiBuilderCreate() {
+    val dir = uiBuilderDir
+    val service = uiBuilderService
+    val authorization = uiBuilderAuthorization
+    if (dir == null || service == null || authorization == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val catalog = call.parameters["catalog"].orEmpty()
+    if (catalog !in uiBuilderCatalogs) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    // A form POST is the one request shape a hostile page can aim at this server with the reader's
+    // credentials attached, so it is refused unless the browser says it came from here. Both
+    // headers are absent on a non-browser client (curl, a script), which is not a cross-site
+    // request and is left alone; a browser that omits `Origin` on a same-origin POST still sends
+    // `Sec-Fetch-Site: same-origin`.
+    val fetchSite = call.request.headers["Sec-Fetch-Site"]
+    val origin = call.request.headers[HttpHeaders.Origin]
+    val sameOrigin =
+      when {
+        fetchSite != null -> fetchSite == "same-origin" || fetchSite == "none"
+        origin != null ->
+          // `Origin` is scheme://host[:port]; `Host` is the host[:port] this request was addressed
+          // to. Comparing the authorities is what "did this form come from this server?" means
+          // behind a proxy that terminates TLS, where the schemes legitimately differ.
+          call.request.headers[HttpHeaders.Host]?.let {
+            origin.substringAfter("://").equals(it, ignoreCase = true)
+          } == true
+        else -> true
+      }
+    if (!sameOrigin) {
+      call.respondText("cross-site design creation is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val actorId =
+      when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        UiBuilderAuthorizationDecision.Missing -> {
+          call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          return
+        }
+        UiBuilderAuthorizationDecision.Forbidden -> {
+          call.respondText("UI-builder write access required", status = HttpStatusCode.Forbidden)
+          return
+        }
+      }
+    val form = call.receiveParameters()
+    val designId = form["designId"].orEmpty().trim()
+    if (!isUiBuilderDesignSegment(designId)) {
+      call.respondText(
+        "a design id must start with a letter or number and use only path-safe characters",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val template =
+      form["template"]?.takeIf { it.isNotBlank() } ?: UiBuilderNewDesignSeed.DEFAULT_TEMPLATE
+    if (template !in UiBuilderNewDesignSeed.templateIds(catalog)) {
+      call.respondText(
+        "$template is not a template $catalog can start from",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val state =
+      try {
+        decodeNewDesignStates(form["state"]?.takeIf { it.isNotBlank() } ?: "[]")
+      } catch (e: IllegalArgumentException) {
+        call.respondText(
+          e.message ?: "the state variables are not valid",
+          status = HttpStatusCode.BadRequest,
+        )
+        return
+      }
+    val outcome =
+      withContext(Dispatchers.IO) {
+        ServeUiBuilderCreate(service, dir)
+          .create(
+            actorId = actorId,
+            catalogSystemId = catalog,
+            designId = designId,
+            templateId = template,
+            state = state,
+          )
+      }
+    when (outcome) {
+      is ServeUiBuilderCreate.Outcome.Created,
+      is ServeUiBuilderCreate.Outcome.AlreadyExists -> {
+        // 303, not 302: the method the browser follows with must be GET. A 302 leaves that to the
+        // client's discretion, and re-POSTing a create on a reload is the exact thing this route
+        // exists to stop.
+        call.response.headers.append(
+          HttpHeaders.Location,
+          uiBuilderPermalink(catalog, designId, call.request.queryParameters),
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is ServeUiBuilderCreate.Outcome.Refused ->
+        call.respondText(outcome.reason, status = HttpStatusCode.fromValue(outcome.status))
+    }
+  }
+
+  /** The design's own URL, carrying forward only the identity a create link was opened with. */
+  private fun uiBuilderPermalink(
+    catalog: String,
+    designId: String,
+    query: io.ktor.http.Parameters,
+  ): String {
+    val carried = UI_BUILDER_IDENTITY_QUERY.mapNotNull { name ->
+      val value = query[name] ?: return@mapNotNull null
+      "$name=" + java.net.URLEncoder.encode(value, "UTF-8")
+    }
+    val suffix = if (carried.isEmpty()) "" else carried.joinToString("&", prefix = "?")
+    return "/ui-builder/$catalog/$designId$suffix"
   }
 
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {
@@ -12183,6 +12481,17 @@ class ServeHttpServer(
 
     /** Variant renders and all token-gated responses stay out of shared and browser caches. */
     private const val DYNAMIC_RESOURCE_CACHE_CONTROL = "no-store"
+
+    /** The path segment that introduces a UI-builder bundle version. */
+    private const val UI_BUILDER_VERSION_SEGMENT = "v"
+
+    /**
+     * A year, and `immutable` so a reload does not revalidate either.
+     *
+     * Safe only because the URL carries the bundle's content digest: the bytes behind one of these
+     * paths cannot change, so there is nothing for a revalidation to discover.
+     */
+    private const val UI_BUILDER_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
     /**
      * [STATIC_RESOURCE_CACHE_CONTROL]'s lifetime for a **bare player replay** on a box that is not
