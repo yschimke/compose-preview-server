@@ -1,0 +1,188 @@
+name: PR Body Syntax
+
+# Repairs the mangled-backtick markdown that agent-written PR descriptions keep
+# arriving with, so the visual evidence actually renders.
+#
+# The shape, seen verbatim in real PR bodies here (#317):
+#
+#   ![before: one lane](``https://raw.githubusercontent.com/.../before.png)``
+#
+# GitHub renders that as literal text and a stray code span — no image. This
+# repository's PR rule is that "UI-affecting PRs include viewable before/after
+# evidence" (AGENTS.md), so a PR that did the expensive part right — rendered
+# the previews, committed the PNGs, wrote the URLs — still fails its own bar
+# over two stray backticks. Cheaper to fix the body than to ask for a re-edit
+# every time. #317 is the case that motivated the port: three attempts to write
+# a working image link from the agent side all came back backticked, including
+# an HTML <img> tag, because the mangling happens between the agent and GitHub
+# rather than in what the agent wrote.
+#
+# Ported from yschimke/compose-ai-tools, where the same repair has been running
+# against the same failure mode. Keep the two in sync: a fix to the matcher
+# belongs in both, and the script and its tests are byte-identical apart from
+# the repository names in the fixtures.
+#
+# Detection and repair live in .github/scripts/fix-pr-body-markdown.mjs, which
+# only strips backticks ADJACENT TO A LINK DESTINATION — a destination can never
+# legally start with a backtick, so there is nothing to guess. Code spans, fenced
+# blocks, and every other backtick on the line are left alone. The script has its
+# own tests (the `selftest` job), because this edits descriptions unattended:
+# over-reach silently rewrites someone's prose, under-reach silently leaves the
+# images broken, and neither is visible without tests.
+#
+# Trigger notes:
+#   • `pull_request`, NOT `pull_request_target`. This never needs PR-head code —
+#     it reads the body from the API and writes it back through the API — so
+#     there is no reason to take on the `pull_request_target` footgun. The cost
+#     is that a fork PR's token is read-only, hence the same-repo guard on the
+#     `fix` job; PRs here come from `agent/…` branches on this repo.
+#   • The PATCH re-fires `edited`, so this workflow triggers itself exactly once
+#     more. That run finds nothing to change (the repair is idempotent) and
+#     stops. The concurrency group keeps the pair ordered rather than racing:
+#     `fix` is a read-modify-write against one mutable resource, so running two
+#     of them at once is a lost update by construction. `cancel-in-progress` is
+#     deliberately false — cancelling would mean an edit's repair silently never
+#     happens — and the queue cannot grow past one, since GitHub holds a single
+#     pending run per group and evicts it when a newer event arrives. The group
+#     is declared on the `fix` job rather than on the workflow, so `selftest`
+#     does not inherit it; see the note on that job.
+#   • The body is untrusted text: it is read into a file via a quoted shell
+#     variable, never interpolated into a command, per the repo zizmor policy —
+#     the same rule no-agent-attribution.yml follows for the title and body.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  push:
+    branches: [main]
+    paths:
+      - '.github/scripts/fix-pr-body-markdown*.mjs'
+      - '.github/workflows/pr-body-syntax.yml'
+
+permissions: {}
+
+# No workflow-level `concurrency:` on purpose. Only `fix` needs serializing, and
+# a workflow-level group gates the whole RUN — jobs never start, so `selftest`
+# would sit behind an unrelated run of the same PR no matter what it declares
+# for itself. Declaring the group per-job queues just that job instead.
+
+jobs:
+  fix:
+    name: Fix backticked link destinations
+    # Serialize per PR: this is a read-modify-write against a single mutable
+    # resource (the description), so two of these at once is a lost update.
+    concurrency:
+      group: pr-body-syntax-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: false
+    # Fork PRs get a read-only token, so the PATCH would 403. Skip rather than
+    # fail red on a PR whose author cannot be helped by this job anyway.
+    if: >-
+      ${{
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Pinned rather than taken from the runner image, matching every other
+      # Node job in ci.yml. The repair is a matcher this workflow runs against
+      # people's prose unattended; it should not silently change behaviour
+      # because the hosted image moved to a new major.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+
+      - name: Repair the description
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Read the CURRENT body, not `github.event.pull_request.body`. The
+          # payload is a snapshot from when the event fired, and this job PATCHes
+          # the whole description back — so a body edited while the run is queued
+          # or in flight would be overwritten by a repaired copy of the older
+          # text, silently eating someone's edit. The concurrency group cannot
+          # fix that: the staleness is baked into the payload before the group is
+          # ever evaluated. Re-reading here narrows the window to this job's own
+          # runtime. `.body // ""` maps a null body to the empty string, which
+          # the matcher treats as "nothing to fix", same as an empty payload did.
+          #
+          # Piped into `jq -j`, NOT captured in `$(…)`. Command substitution
+          # strips *every* trailing newline, not just the one jq -r appends, so a
+          # body ending in a blank line would come back shortened — and since the
+          # PATCH writes the whole description, a run that repaired a backtick
+          # would quietly reflow unrelated whitespace too. `jq -j` emits the
+          # string with no terminator at all, so body.md is byte-exact and the
+          # matcher's "preserves trailing newlines exactly" guarantee survives
+          # the round trip to the API.
+          gh api "repos/${REPO}/pulls/${PR_NUMBER}" | jq -j '.body // ""' > body.md
+          node .github/scripts/fix-pr-body-markdown.mjs body.md > fixed.md
+
+          if cmp -s body.md fixed.md; then
+            echo "Description is clean — nothing to fix."
+            exit 0
+          fi
+
+          echo "Repairing backticked link destinations:"
+          diff -u body.md fixed.md || true
+
+          gh api --method PATCH "repos/${REPO}/pulls/${PR_NUMBER}" \
+            -F body=@fixed.md >/dev/null
+
+          {
+            echo "### PR body repaired"
+            echo
+            echo "Removed backticks wrapping a markdown link destination, so the"
+            echo "linked images render inline. See"
+            echo '`.github/scripts/fix-pr-body-markdown.mjs`.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  selftest:
+    # The repair runs unattended against real PR descriptions, so its matcher
+    # gets tests on every PR and on every push that touches it.
+    name: Repair self-test
+    # Deliberately NOT in `fix`'s group. That group serializes a shared-resource
+    # write; this job only runs `node --test` against a file in the checkout,
+    # touches nothing shared, and is fully determined by the sha — so queueing it
+    # behind an unrelated run of the same PR buys nothing. Keyed by sha, with
+    # superseded runs cancelled: two events on one sha (opened then edited) would
+    # otherwise run byte-identical tests twice. Safe to cancel — the surviving
+    # run reports the same verdict on the same input.
+    #
+    # Expect to see runs of THIS workflow concluding `cancelled`, and do not read
+    # that as a failure. The `fix` job's PATCH re-fires `edited` at the same sha,
+    # so on any PR that actually gets repaired the first run's self-test is
+    # superseded by the second and cancelled — usually while still queued for a
+    # runner, which is the point: runner contention, not this workflow, is what
+    # makes waits here visible, so handing a slot back beats re-running a test
+    # whose input did not change.
+    #
+    # Because it can be cancelled, do NOT make this a required check on the
+    # "Protect Main" ruleset; a cancelled run would block a merge it has no
+    # verdict about. It gates the matcher on the PR that changes the matcher,
+    # which is where the mistake would be made.
+    concurrency:
+      group: pr-body-syntax-selftest-${{ github.sha }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+
+      - name: Run the PR-body repair self-test
+        run: node --test .github/scripts/fix-pr-body-markdown.test.mjs
