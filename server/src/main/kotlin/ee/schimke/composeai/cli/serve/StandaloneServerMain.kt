@@ -69,6 +69,24 @@ internal object StandaloneBuildHost : ServeBuildHost {
     ServeDiscovery(buildOk = false, manifests = emptyList())
 }
 
+/**
+ * Does one preview satisfy this invocation's `--id` / `--filter` / `--preview` request?
+ *
+ * The three selectors are independent predicates and **intersect**: `--id` is the id exactly and
+ * case-sensitively, `--filter` a case-insensitive substring of it, and `--preview` a loose
+ * reference matching any of the exact id, `<className>.<functionName>`, the bare function name, or
+ * a case-insensitive substring of the id. [className] / [functionName] are absent at call sites
+ * that only hold an id, where the metadata forms of `--preview` cannot fire.
+ *
+ * **This rule is stated twice.** compose-ai-tools answers the same question with
+ * `previewIdMatchesRequest` for every command that is not `serve`; the CLI used to pass that rule
+ * in here, and stopped when `serve` became a launcher (#180 step 4). The two are pinned against
+ * each other by a shared golden table — `docs/serve/preview-selector-fixtures.json`, owned upstream
+ * and vendored here by `scripts/sync-preview-selector-fixtures.sh` — which both repositories run
+ * ([compose-ai-tools#5185](https://github.com/yschimke/compose-ai-tools/issues/5185)). Change this
+ * rule and the table changes with it, or the two sides silently disagree, and a preview that stops
+ * matching raises no error anywhere.
+ */
 internal fun previewIdMatchesStandaloneRequest(
   id: String,
   exactId: String?,
