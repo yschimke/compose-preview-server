@@ -199,6 +199,83 @@ class UiBuilderEnumExportTest {
   }
 
   @Test
+  fun `a text field and a progress indicator select their components`() {
+    fun textField(variant: String) =
+      ScreenExportGate.export(
+        document(
+          roots = listOf("field"),
+          nodes =
+            linkedMapOf(
+              "field" to
+                DesignNodeV1(
+                  id = "field",
+                  componentId = "m3/text-field",
+                  properties =
+                    mapOf("variant" to EnumValueV1(variant), "value" to StringValueV1("Sofia")),
+                  // A nullable composable slot — `label` is `@Composable (() -> Unit)?` — which is
+                  // the shape a bare `{ … }` has to satisfy for any of these to export at all.
+                  slots = mapOf("label" to listOf("caption")),
+                ),
+              "caption" to
+                DesignNodeV1(
+                  id = "caption",
+                  componentId = "m3/text",
+                  properties = mapOf("text" to StringValueV1("Name")),
+                ),
+            ),
+        ),
+        record,
+      )
+
+    val filled =
+      textField("filled") as? ScreenExportGate.Outcome.Emitted
+        ?: error("refused: ${(textField("filled") as ScreenExportGate.Outcome.Refused).reasons}")
+    assertTrue("""TextField(value = "Sofia"""" in filled.source, filled.source)
+    assertTrue("label = {" in filled.source, filled.source)
+    assertTrue(
+      "OutlinedTextField(" in (textField("outlined") as ScreenExportGate.Outcome.Emitted).source
+    )
+
+    fun indicator(
+      variant: String,
+      vararg extra: Pair<String, ee.schimke.composeai.uibuilder.protocol.UiValueV1>,
+    ) =
+      ScreenExportGate.export(
+        document(
+          roots = listOf("bar"),
+          nodes =
+            linkedMapOf(
+              "bar" to
+                DesignNodeV1(
+                  id = "bar",
+                  componentId = "m3/progress-indicator",
+                  properties = mapOf("variant" to EnumValueV1(variant)) + extra,
+                )
+            ),
+        ),
+        record,
+      )
+
+    assertTrue(
+      "LinearProgressIndicator(" in (indicator("linear") as ScreenExportGate.Outcome.Emitted).source
+    )
+    assertTrue(
+      "CircularProgressIndicator(" in
+        (indicator("circular") as ScreenExportGate.Outcome.Emitted).source
+    )
+    // The determinate overload takes `progress: () -> Float`, and no value here is a lambda. The
+    // refusal has to say that rather than "no parameter `progress`", which is true and misleading.
+    val determinate =
+      (indicator(
+          "linear",
+          "progress" to ee.schimke.composeai.uibuilder.protocol.DecimalValueV1(0.4),
+        )
+          as ScreenExportGate.Outcome.Refused)
+        .reasons
+    assertTrue(determinate.any { "no value in this vocabulary is a lambda" in it }, "$determinate")
+  }
+
+  @Test
   fun `a variant nothing selects still refuses as a variant, not as a missing entry`() {
     // `layout/supporting-pane-scaffold` is an adaptive API whose panes are not plain composable
     // slots, so nothing selects its `layoutMode`. The refusal must keep reading as a call-site
