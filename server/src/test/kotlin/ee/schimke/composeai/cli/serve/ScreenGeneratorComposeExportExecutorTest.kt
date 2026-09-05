@@ -29,10 +29,18 @@ import kotlin.test.assertTrue
  *
  * **The golden below was compiled.** It was written into a Compose source set with material3,
  * foundation and ui on the classpath and `compileKotlinJvm` accepted it — the qualified
- * `MaterialTheme` reads, the qualified `Color(…)` call, the imported `Modifier` extensions and the
- * fully-qualified calls inside the two receiver-scoped slots. Turning that into a standing CI gate
- * (a checked-in fixture a Compose module compiles) is a follow-up; what is asserted here is that
- * the generator still produces exactly the text that was compiled.
+ * `MaterialTheme` reads, the qualified `Color(…)` call, and the imported `Modifier` extensions.
+ * Turning that into a standing CI gate (a checked-in fixture a Compose module compiles) is a
+ * follow-up; what is asserted here is that the generator still produces exactly the text that was
+ * compiled.
+ *
+ * It was regenerated once, when `preview-discovery` reached the version that stopped qualifying a
+ * component inside a receiver-scoped slot: the generator had assumed an import could not reach into
+ * one, and compose-ai-tools #5123 established by compiling it that an imported top-level composable
+ * resolves there perfectly well. Every component is imported and called by its simple name now.
+ * That was a real improvement arriving as a red golden, which is what a golden is for — but note
+ * the shape of it, because this repository pins that dependency and the next such change lands the
+ * same way.
  */
 class ScreenGeneratorComposeExportExecutorTest {
 
@@ -248,7 +256,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Card
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -257,10 +267,10 @@ import androidx.compose.ui.unit.dp
 fun ScheduleOperations() {
     Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize(), color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer, content = {
         Column(modifier = androidx.compose.ui.Modifier.padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 16.dp), content = {
-            androidx.compose.material3.Text(text = "Schedule", color = androidx.compose.material3.MaterialTheme.colorScheme.onBackground, style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
-            androidx.compose.material3.Card(modifier = androidx.compose.ui.Modifier.fillMaxWidth().clip(androidx.compose.material3.MaterialTheme.shapes.medium), shape = androidx.compose.material3.MaterialTheme.shapes.medium, content = {
-                androidx.compose.material3.Text(text = "Opening keynote", modifier = androidx.compose.ui.Modifier.width(120.dp), style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
-                androidx.compose.material3.Text(text = "09:00", color = androidx.compose.ui.graphics.Color(4284960932L))
+            Text(text = "Schedule", color = androidx.compose.material3.MaterialTheme.colorScheme.onBackground, style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
+            Card(modifier = androidx.compose.ui.Modifier.fillMaxWidth().clip(androidx.compose.material3.MaterialTheme.shapes.medium), shape = androidx.compose.material3.MaterialTheme.shapes.medium, content = {
+                Text(text = "Opening keynote", modifier = androidx.compose.ui.Modifier.width(120.dp), style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+                Text(text = "09:00", color = androidx.compose.ui.graphics.Color(4284960932L))
             })
         })
     })
