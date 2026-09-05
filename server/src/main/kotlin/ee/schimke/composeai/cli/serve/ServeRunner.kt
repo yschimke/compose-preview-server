@@ -15,6 +15,7 @@ import ee.schimke.composeai.previewdata.PreviewModule
 import ee.schimke.composeai.render.session.RenderSessionException
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
@@ -1825,6 +1826,7 @@ public class ServeRunner(
       redeem = redeem,
       health = health,
       captureNodeBounds = captureNodeBounds,
+      catalogBackend = { id -> catalogTargets?.targets()?.firstOrNull { it.id == id }?.backend },
     )
   }
 
@@ -1959,6 +1961,14 @@ public class ServeRunner(
     val captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = {
       emptyMap()
     },
+    /**
+     * A served catalog's bundle backend (`desktop` / `android`), or null when it is not offerable.
+     *
+     * Read fresh per call rather than snapshotted, for the reason [PlaygroundCatalogTargets] reads
+     * its own list fresh: catalogs are fetched in the background *after* this lane is wired, so a
+     * map captured here would be empty for the life of the process.
+     */
+    val catalogBackend: (String) -> String? = { null },
   )
 
   /**
@@ -2331,6 +2341,17 @@ public class ServeRunner(
      * production wrapper around several formats, and the native lane wants exactly this one.
      */
     val compose: ScreenGeneratorComposeExportExecutor,
+    /**
+     * Which daemon each enabled catalog's designs are rendered on, from the catalog's own
+     * declaration ([UiBuilderPreviewSurfaces]).
+     *
+     * A catalog knows this and the host does not: `wear-m3` is Wear Compose, Wear Compose is an
+     * Android AAR, so a Wear design is a Robolectric render — true of the catalog wherever it is
+     * served and whatever the operator called the bundle. Deriving it from the served bundle's
+     * manifest instead would make it true only once the bundle had loaded, which is after this lane
+     * is wired and after the first design can be opened.
+     */
+    val nativeBackends: Map<String, String>,
   ) : AutoCloseable {
     override fun close() {
       renderer?.close()
@@ -2442,6 +2463,11 @@ public class ServeRunner(
           systemId in uiBuilderComponents.keys || systemId in RecordFreeExport.CATALOG_SYSTEM_IDS
         },
       )
+    val nativeBackends =
+      catalogs.listCatalogs().associate { catalog ->
+        catalog.benchmark.catalogSystemId to
+          UiBuilderPreviewSurfaces.from(catalog.statusSemantics).native.backend
+      }
     val service =
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(directory.toPath()),
@@ -2483,6 +2509,7 @@ public class ServeRunner(
           }
           .getOrNull(),
       compose = compose,
+      nativeBackends = nativeBackends,
     )
   }
 
@@ -2806,6 +2833,34 @@ public class ServeRunner(
               val adapter = UiBuilderGeneratedPreviewAdapter(playground.compile)
               ServeUiBuilderNativePreview(
                 executor = lane.compose,
+                // A builder catalog id is not a served catalog id, and the daemon comes from the
+                // bundle rather than from either. `wear-m3` is where that stopped being a
+                // distinction without a difference: its bundle lives in another repository (served
+                // under whatever `--catalogs` id it was given) and, because Wear Compose is an
+                // Android AAR, it is a Robolectric bundle. Unmapped catalogs keep compiling against
+                // a served catalog of their own name on the desktop daemon, which is what every
+                // host did before this.
+                nativeTarget = { builderCatalog ->
+                  val served = uiBuilderNativeCatalogs[builderCatalog] ?: builderCatalog
+                  val backend = lane.nativeBackends[builderCatalog]
+                  // A catalog that declares the Android daemon, mapped at a bundle this host serves
+                  // as a desktop one, is refused rather than sent to Skiko. That combination is a
+                  // real deployment mistake — the operator mapped `wear-m3` at the wrong catalog,
+                  // or has not served the Wear bundle at all — and the compile it would produce
+                  // fails on every `androidx.wear.compose` import, which reads like the design is
+                  // broken. Only checked where the host can answer: a pinned `--playground-bundle`
+                  // host reports no backend, and pinning is itself the operator saying which bundle
+                  // each mode uses.
+                  val servedBackend = playground.catalogBackend(served)
+                  when {
+                    backend == UiBuilderPreviewSurfaces.BACKEND_ANDROID &&
+                      servedBackend != null &&
+                      servedBackend != UiBuilderPreviewSurfaces.BACKEND_ANDROID -> null
+                    backend == UiBuilderPreviewSurfaces.BACKEND_ANDROID ->
+                      UiBuilderNativeTarget(served, UiBuilderGeneratedCompose.COMPOSE_ANDROID)
+                    else -> UiBuilderNativeTarget(served, UiBuilderGeneratedCompose.COMPOSE_CMP)
+                  }
+                },
                 compile = { generated ->
                   // `true` here, and only here: this call site is downstream of the route's
                   // `ui-builder-export` capability check, and the source it submits came from

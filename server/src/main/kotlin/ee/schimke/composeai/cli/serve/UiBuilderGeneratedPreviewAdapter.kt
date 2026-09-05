@@ -15,7 +15,27 @@ data class UiBuilderGeneratedCompose(
   val catalog: String,
   val widthDp: Int,
   val heightDp: Int,
-)
+  /**
+   * The playground `confType`, which is the same choice as "which daemon draws this".
+   *
+   * `compose-cmp` is the Skiko desktop daemon and was the only value while `m3-catalog` was the
+   * only catalog with a native lane. `compose-android` is the Robolectric daemon, and it is not an
+   * optimisation for Wear — it is the requirement. `androidx.wear.compose:compose-material3` is an
+   * Android AAR: a Wear screen does not compile on the desktop classpath at all, let alone render.
+   *
+   * Defaulted, so every existing caller and test keeps the mode it had; the field exists because
+   * the design's catalog now decides it ([UiBuilderNativeTarget]).
+   */
+  val confType: String = COMPOSE_CMP,
+) {
+  companion object {
+    /** The Skiko desktop daemon — every catalog whose components are Compose Multiplatform. */
+    const val COMPOSE_CMP = "compose-cmp"
+
+    /** The Robolectric daemon, and the only one that can load an Android AAR. */
+    const val COMPOSE_ANDROID = "compose-android"
+  }
+}
 
 /**
  * Submits capability-generated Compose to the existing Playground compile and render lane.
@@ -45,6 +65,9 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
     require(generated.widthDp > 0 && generated.heightDp > 0) {
       "generated preview dimensions must be positive"
     }
+    require(generated.confType.isNotBlank()) {
+      "UI-builder generated previews require an exact playground mode"
+    }
 
     return playground.run(
       PlaygroundRunRequest(
@@ -60,7 +83,7 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
               ),
             ),
           ),
-        confType = "compose-cmp",
+        confType = generated.confType,
         catalog = generated.catalog,
       ),
       isSecurityChecked = isSecurityChecked,

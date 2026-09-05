@@ -67,6 +67,22 @@ internal class ServeUiBuilderNativePreview(
   private val captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = {
     emptyMap()
   },
+  /**
+   * Where a design's catalog is compiled and rendered, or null when this host cannot.
+   *
+   * A UI-builder catalog id and a served-catalog id are not the same namespace and only looked like
+   * it while `m3-catalog` was the only catalog with a native lane: a `wear-m3` design has to be
+   * built against a bundle that carries `androidx.wear.compose:compose-material3`, which the host
+   * serves under whatever `--catalogs` id its operator gave it. The daemon comes with it — Wear
+   * Compose is an Android AAR, so that bundle is a `compose-android` one — which is why this
+   * returns the pair rather than a string.
+   *
+   * Defaults to the identity mapping on the desktop daemon, which is exactly what this lane did
+   * before there was anything else to do.
+   */
+  private val nativeTarget: (String) -> UiBuilderNativeTarget? = {
+    UiBuilderNativeTarget(catalog = it, confType = UiBuilderGeneratedCompose.COMPOSE_CMP)
+  },
 ) : UiBuilderNativePreviewLane {
 
   override fun render(document: DesignDocumentV1): UiBuilderNativePreviewOutcome {
@@ -76,19 +92,34 @@ internal class ServeUiBuilderNativePreview(
         is ScreenGeneratorComposeExportExecutor.Generated.Refused ->
           return UiBuilderNativePreviewOutcome.Refused(outcome.code, outcome.reasons)
       }
+    // The design's own catalog, not a default. A design pinned to one catalog and compiled against
+    // another is a screen made of different components that happens to type-check. Refused before
+    // the compile rather than after, and by name: "this host has no bundle for `wear-m3`" is an
+    // operator's line of configuration, where a compiler error about an unresolved
+    // `androidx.wear.compose.material3.ScreenScaffold` reads like a bug in the design.
+    val catalogSystemId = document.catalogPin.systemId
+    val target =
+      nativeTarget(catalogSystemId)
+        ?: return UiBuilderNativePreviewOutcome.Refused(
+          NO_NATIVE_CATALOG,
+          listOf(
+            "this host compiles no bundle for catalog `$catalogSystemId`, so there is nothing to " +
+              "render this design against; serve that catalog's bundle and map it with " +
+              "`--ui-builder-native-catalog $catalogSystemId=<served catalog>`"
+          ),
+        )
     val environment = document.environment
     val response =
       compile(
         UiBuilderGeneratedCompose(
           source = generated.source,
           composableName = generated.screenName,
-          // The design's own catalog, not a default. A design pinned to one catalog and compiled
-          // against another is a screen made of different components that happens to type-check.
-          catalog = document.catalogPin.systemId,
+          catalog = target.catalog,
           // The document's own frame, so the streamed render and the browser canvas are the same
           // size and a bounds rectangle means the same thing in both.
           widthDp = environment.widthDp,
           heightDp = environment.heightDp,
+          confType = target.confType,
         )
       )
     // Only asked for a frame: a compile that failed has no render to read bounds off, and asking
@@ -104,7 +135,29 @@ internal class ServeUiBuilderNativePreview(
       failure = if (response.image == null) response.noFrameReason() else null,
     )
   }
+
+  internal companion object {
+    /**
+     * The design is fine and this host cannot build it: no served bundle is mapped to its catalog.
+     *
+     * Distinct from the generator's own codes on purpose. `UNPROVEN_CALL_SITE` and
+     * `RECORD_FREE_DESIGN` are things to change about the *design*; this one is a thing to change
+     * about the *host*, and telling a designer to edit their screen because an operator has not
+     * served a Wear bundle is the wrong half of the system to send them to.
+     */
+    const val NO_NATIVE_CATALOG = "NO_NATIVE_CATALOG"
+  }
 }
+
+/**
+ * Which served bundle, on which daemon, a UI-builder catalog's designs are rendered against.
+ *
+ * Two fields rather than one because they are not independently choosable: a bundle's dependency
+ * set decides its backend, so naming a bundle names a daemon. Carrying them together is what stops
+ * a host from asking the Skiko daemon to load an Android AAR and reporting the resulting compile
+ * failure as the design's fault.
+ */
+data class UiBuilderNativeTarget(val catalog: String, val confType: String)
 
 /**
  * Why this response carries no frame, in one sentence a designer can act on.

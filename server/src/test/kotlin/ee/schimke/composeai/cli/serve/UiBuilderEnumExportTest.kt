@@ -279,7 +279,8 @@ class UiBuilderEnumExportTest {
   fun `a variant nothing selects still refuses as a variant, not as a missing entry`() {
     // `layout/supporting-pane-scaffold` is an adaptive API whose panes are not plain composable
     // slots, so nothing selects its `layoutMode`. The refusal must keep reading as a call-site
-    // decision rather than as a table entry somebody could add.
+    // decision rather than as a table entry somebody could add — and must describe an adaptive
+    // component's modes rather than a card's three callables.
     val refusals =
       ScreenExportGate.refusals(
         document(
@@ -298,7 +299,7 @@ class UiBuilderEnumExportTest {
       )
 
     assertTrue(
-      refusals.any { "names a component variant rather than a value" in it },
+      refusals.any { "names a layout mode of one adaptive component rather than a value" in it },
       refusals.toString(),
     )
   }
