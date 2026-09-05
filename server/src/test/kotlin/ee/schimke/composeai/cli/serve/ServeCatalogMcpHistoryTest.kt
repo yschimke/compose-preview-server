@@ -418,4 +418,109 @@ class ServeCatalogMcpHistoryTest {
     assertTrue(body.isError())
     assertTrue(body.errorText().contains("no render for"), body.errorText())
   }
+
+  // ---- project mode: diff and read
+  // ---------------------------------------------------------------
+
+  // These lanes were covered for `history_list` only. The published path and the local one reach
+  // the timeline through completely different code — a parsed manifest held by the bundle host
+  // versus JSON re-parsed out of ServeProjectHistory — and only the published half was exercised,
+  // so the local half of `historyView` was reachable in production and untested.
+
+  @Test
+  fun `diff works against a locally derived timeline`() {
+    val history = projectHistory(blobs = mapOf(blobA to png(1), blobB to png(2)))
+    val body = call(bundleHost(), projectHistory = history, tool = "history_diff").payload()
+
+    assertEquals("local", body["mode"]!!.jsonPrimitive.content)
+    assertEquals(blobA, body["to"]!!.jsonObject["blob"]!!.jsonPrimitive.content)
+    assertEquals(blobB, body["from"]!!.jsonObject["blob"]!!.jsonPrimitive.content)
+    assertEquals(true, body["changed"]!!.jsonPrimitive.content.toBoolean())
+  }
+
+  @Test
+  fun `a local diff addresses renders through this server, not GitHub`() {
+    // The local lane has no repo to build a raw URL from; its renders are served by blob sha out of
+    // the checkout. Getting this wrong would hand back a URL that resolves nowhere.
+    val history = projectHistory(blobs = mapOf(blobA to png(1), blobB to png(2)))
+    val body = call(bundleHost(), projectHistory = history, tool = "history_diff").payload()
+
+    assertEquals(
+      "/history/render/$blobA.png",
+      body["to"]!!.jsonObject["renderUrl"]!!.jsonPrimitive.content,
+    )
+    assertTrue(
+      !body["from"]!!.jsonObject["renderUrl"]!!.jsonPrimitive.content.contains("githubusercontent")
+    )
+  }
+
+  @Test
+  fun `diff refuses a single-render preview in local mode too`() {
+    val single =
+      listOf(header(sha, "2026-05-22T11:08:37+00:00", "one"), raw(blobA, renderPath))
+        .joinToString("\n")
+    val history = projectHistory(logText = single, blobs = mapOf(blobA to png(1)))
+    val body = call(bundleHost(), projectHistory = history, tool = "history_diff")
+
+    assertTrue(body.isError())
+    // `timelineJsonFor` returns null below two versions, so this is the no-timeline refusal rather
+    // than the "needs two" one — both are honest, and the message must not claim a timeline exists.
+    assertTrue(body.errorText().contains("history_list"), body.errorText())
+  }
+
+  @Test
+  fun `read serves a local blob out of the repository`() {
+    val history = projectHistory(blobs = mapOf(blobA to png(1), blobB to png(2)))
+    val body =
+      call(
+        bundleHost(),
+        projectHistory = history,
+        tool = "history_read",
+        extraArgs = ""","blob":"$blobA"""",
+      )
+    val content = body["result"]!!.jsonObject["content"]!!.jsonArray
+
+    assertEquals("image", content[0].jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals(
+      Base64.getEncoder().encodeToString(png(1)),
+      content[0].jsonObject["data"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `read resolves a local version by its commit as well as its blob`() {
+    val history = projectHistory(blobs = mapOf(blobA to png(1), blobB to png(2)))
+    val body =
+      call(
+        bundleHost(),
+        projectHistory = history,
+        tool = "history_read",
+        extraArgs = ""","commit":"${sha.take(8)}"""",
+      )
+    val content = body["result"]!!.jsonObject["content"]!!.jsonArray
+
+    assertEquals("image", content[0].jsonObject["type"]!!.jsonPrimitive.content)
+    assertEquals(
+      Base64.getEncoder().encodeToString(png(1)),
+      content[0].jsonObject["data"]!!.jsonPrimitive.content,
+      "the newest commit carries blobA, so addressing by either must land on the same bytes",
+    )
+  }
+
+  @Test
+  fun `read reports a blob the timeline names but the repository has lost`() {
+    // The local counterpart of "the branch will not serve it": the timeline is derived from the
+    // log, so it can name an object a shallow or pruned clone no longer holds.
+    val history = projectHistory(blobs = mapOf(blobB to png(2)))
+    val body =
+      call(
+        bundleHost(),
+        projectHistory = history,
+        tool = "history_read",
+        extraArgs = ""","blob":"$blobA"""",
+      )
+
+    assertTrue(body.isError())
+    assertTrue(body.errorText().contains("no object"), body.errorText())
+  }
 }
