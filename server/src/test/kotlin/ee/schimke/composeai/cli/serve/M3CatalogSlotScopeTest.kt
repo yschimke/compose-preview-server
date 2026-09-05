@@ -24,25 +24,24 @@ import kotlinx.serialization.json.Json
  */
 class M3CatalogSlotScopeTest {
 
-  private val record: ComponentRecordFile =
-    Json { ignoreUnknownKeys = true }.decodeFromString(File(RECORD).readText())
+  private val record: ComponentRecordFile = Json {
+    ignoreUnknownKeys = true
+  }
+    .decodeFromString(File(RECORD).readText())
 
   /** Every receiver-scoped slot the shipped record attests, by capability id and parameter name. */
   private fun attested(): Map<Pair<String, String>, String> =
     record.components
       .flatMap { component ->
         component.componentIds.flatMap { id ->
-          component.slots.mapNotNull { slot ->
-            slot.receiverScope?.let { (id to slot.name) to it }
-          }
+          component.slots.mapNotNull { slot -> slot.receiverScope?.let { (id to slot.name) to it } }
         }
       }
       .toMap()
 
   /** Every scope the projection claims, resolved through the same slot alias it applies. */
   private fun claimed(): Map<Pair<String, String>, String> =
-    ScreenDocumentProjection.SLOT_SCOPES
-      .flatMap { (id, slots) ->
+    ScreenDocumentProjection.SLOT_SCOPES.flatMap { (id, slots) ->
         slots.map { (slot, scope) ->
           (id to ScreenDocumentProjection.parameterForSlotName(id, slot)) to scope
         }

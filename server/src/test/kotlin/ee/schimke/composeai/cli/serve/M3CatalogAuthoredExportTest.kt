@@ -52,7 +52,8 @@ import kotlinx.serialization.json.jsonPrimitive
  * Every node here is one the refusal list named: an `m3/text` carrying a `style` (51 of the 119
  * refusals), an `m3/icon` (29, plus an unproven call site behind them), an `m3/card` with a
  * `containerColor` and an `elevationDp`, a `layout/column` with a `verticalSpacingDp`, and an
- * `m3/surface` with a `containerColor` and a `shapeDp`. None of them is exotic; together they are
+ * `m3/surface` with a `containerColor` and a `shapeDp`, and a `weight` on a `Row` child — the
+ * largest single refusal left after the icons landed. None of them is exotic; together they are
  * roughly what a screen is.
  */
 class M3CatalogAuthoredExportTest {
@@ -126,7 +127,12 @@ class M3CatalogAuthoredExportTest {
         id = "caption",
         componentId = "m3/text",
         properties =
-          mapOf("text" to StringValueV1("Signed in"), "style" to EnumValueV1("bodySmall")),
+          mapOf(
+            "text" to StringValueV1("Signed in"),
+            "style" to EnumValueV1("bodySmall"),
+            // In the `Row`'s `RowScope`, so this is legal here and refuses anywhere else.
+            "weight" to DecimalValueV1(1.0),
+          ),
       ),
       DesignNodeV1(
         id = "card",
@@ -210,43 +216,36 @@ class M3CatalogAuthoredExportTest {
     // than as a count: a count goes green for the wrong reason the first time one of them is
     // silently dropped instead of refused.
     assertTrue(
-      source.contains(
-        "color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer"
-      ),
+      source.contains("color = MaterialTheme.colorScheme.surfaceContainer"),
       source,
     )
     assertTrue(
-      source.contains("shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)"),
+      source.contains("shape = RoundedCornerShape(12.dp)"),
       source,
     )
     assertTrue(
-      source.contains(
-        "verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)"
-      ),
+      source.contains("verticalArrangement = Arrangement.spacedBy(8.dp)"),
       source,
     )
     assertTrue(
-      source.contains("style = androidx.compose.material3.MaterialTheme.typography.headlineSmall"),
+      source.contains("style = MaterialTheme.typography.headlineSmall"),
       source,
     )
     assertTrue(
       source.contains(
-        "colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = " +
-          "androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)"
+        "colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)"
       ),
       source,
     )
     assertTrue(
-      source.contains(
-        "elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp)"
-      ),
+      source.contains("elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)"),
       source,
     )
 
     // The icon, which is the one value that is an extension property rather than a path: the
     // expression reads as a qualified member and only compiles because the import travels with it.
     assertTrue(
-      source.contains("imageVector = androidx.compose.material.icons.Icons.Filled.AccountCircle"),
+      source.contains("imageVector = Icons.Filled.AccountCircle"),
       source,
     )
     assertTrue(
@@ -256,10 +255,13 @@ class M3CatalogAuthoredExportTest {
     // `sizeDp` is not a parameter of `Icon` and never was; the catalog declares `size` among the
     // component's modifier capabilities, and this is where it goes.
     assertTrue(source.contains("Modifier.size(24.dp)"), source)
+    // The layout weight: a scoped modifier, supplied by the `Row`'s receiver, so it is written by
+    // simple name and imported nowhere — and its argument is a `Float`, because `weight(1.0)` does
+    // not compile.
+    assertTrue(source.contains("modifier = Modifier.weight(1.0f)"), source)
+    assertTrue(!source.contains("import androidx.compose.foundation.layout.RowScope"), source)
     assertTrue(
-      source.contains(
-        "tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant"
-      ),
+      source.contains("tint = MaterialTheme.colorScheme.onSurfaceVariant"),
       source,
     )
   }

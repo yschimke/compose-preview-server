@@ -291,7 +291,8 @@ object ScreenDocumentProjection {
      * `weight(1.0)` does not compile, which is what [ScreenValue.Fractional32] exists for.
      *
      * Outside a row or a column it stays refused, and the refusal now says where the node actually
-     * is — a weight on a `Box` child is a design mistake worth reading rather than a gap in a table.
+     * is — a weight on a `Box` child is a design mistake worth reading rather than a gap in a
+     * table.
      */
     private fun weightLink(value: UiValueV1, node: DesignNodeV1, scope: String?): ChainLink? {
       val where = "node `${node.id}`.`weight`"

@@ -257,20 +257,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Card
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 @Composable
 fun ScheduleOperations() {
-    Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize(), color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer, content = {
-        Column(modifier = androidx.compose.ui.Modifier.padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 16.dp), content = {
-            Text(text = "Schedule", color = androidx.compose.material3.MaterialTheme.colorScheme.onBackground, style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
-            Card(modifier = androidx.compose.ui.Modifier.fillMaxWidth().clip(androidx.compose.material3.MaterialTheme.shapes.medium), shape = androidx.compose.material3.MaterialTheme.shapes.medium, content = {
-                Text(text = "Opening keynote", modifier = androidx.compose.ui.Modifier.width(120.dp), style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
-                Text(text = "09:00", color = androidx.compose.ui.graphics.Color(4284960932L))
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainer, content = {
+        Column(modifier = Modifier.padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 16.dp), content = {
+            Text(text = "Schedule", color = MaterialTheme.colorScheme.onBackground, style = MaterialTheme.typography.headlineSmall)
+            Card(modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium), shape = MaterialTheme.shapes.medium, content = {
+                Text(text = "Opening keynote", modifier = Modifier.width(120.dp), style = MaterialTheme.typography.bodyMedium)
+                Text(text = "09:00", color = Color(4284960932L))
             })
         })
     })
