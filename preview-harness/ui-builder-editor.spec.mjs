@@ -34,6 +34,15 @@ async function clickCompose(page, locator) {
     await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
 }
 
+// The docks start closed: the editor opens on the canvas and every panel is a switch on a rail.
+// A test that drives a panel opens it first, the way an operator does.
+async function openDock(page, name) {
+    const open = page.getByRole("button", { name: `Open ${name} panel` });
+    if ((await open.count()) === 0) return;
+    await clickCompose(page, open);
+    await settle(page);
+}
+
 async function fillCompose(page, locator, value) {
     const current = (await locator.textContent()) ?? "";
     const bounds = await locator.boundingBox();
@@ -78,7 +87,10 @@ test("the pinned editor canvas preserves clean 1280x800 geometry and pixels", as
     const clean = await page.screenshot();
     const cleanManifest = await page.evaluate(() => globalThis.__uiBuilderInspection);
 
-    await page.setViewportSize({ width: 1920, height: 900 });
+    // Tall enough for the design at 1:1 with the editor's chrome around it. The top bar, the
+    // status strip under the canvas and the workspace padding come to a little over 100 dp, so a
+    // 900 dp window scales an 800 dp design down and this test would be comparing a resample.
+    await page.setViewportSize({ width: 1920, height: 1000 });
     await page.goto("index.html?mode=interactive-editor-clean");
     await waitForEditor(page, 108);
     const canvas = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
@@ -166,7 +178,7 @@ test("mobile editor defaults to the design and exposes collapsible dock panels",
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
 
-    await expect(page.getByText("m3-catalog component catalog", { exact: true })).toBeHidden();
+    await expect(page.getByText("m3-catalog components", { exact: true })).toBeHidden();
     await expect(page.getByText("m3/surface", { exact: true })).toBeHidden();
     const canvas = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
     expect(canvas.scale).toBeGreaterThan(0.25);
@@ -180,7 +192,7 @@ test("mobile editor defaults to the design and exposes collapsible dock panels",
     });
 
     await clickCompose(page, page.getByRole("button", { name: "Open components panel" }));
-    await expect(page.getByText("m3-catalog component catalog", { exact: true })).toBeVisible();
+    await expect(page.getByText("m3-catalog components", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Close components panel" }),
     ).toBeVisible();
@@ -191,7 +203,7 @@ test("mobile editor defaults to the design and exposes collapsible dock panels",
     });
 
     await clickCompose(page, page.getByRole("button", { name: "Open properties panel" }));
-    await expect(page.getByText("m3-catalog component catalog", { exact: true })).toBeHidden();
+    await expect(page.getByText("m3-catalog components", { exact: true })).toBeHidden();
     await expect(page.getByText("m3/surface", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Close properties panel" }),
@@ -221,6 +233,8 @@ test("the property inspector selects Google icons from a searchable catalog", as
 }, testInfo) => {
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
+    await openDock(page, "layers");
+    await openDock(page, "properties");
 
     const iconLayer = await page
         .getByRole("button", { name: /Select search-leading-icon/ })
@@ -299,6 +313,8 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
 
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
+    await openDock(page, "layers");
+    await openDock(page, "properties");
     const initialState = await page.evaluate(() => globalThis.__uiBuilderEditor);
     expect(initialState).toMatchObject({
         revision: 108,
@@ -579,6 +595,8 @@ test("capability inspector validates and commits typed scaffold and Text propert
 
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
+    await openDock(page, "layers");
+    await openDock(page, "properties");
     const canvasBefore = await page.evaluate(() => globalThis.__uiBuilderEditorCanvas);
 
     await clickCompose(page, page.getByRole("button", { name: /Select pane-scaffold/ }));
@@ -620,6 +638,8 @@ test("capability inspector validates and commits typed scaffold and Text propert
     // of the test can then exercise the supporting-pane Text node without a test-only reset path.
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
+    await openDock(page, "layers");
+    await openDock(page, "properties");
     await clickCompose(page, page.getByRole("button", { name: /Select pane-scaffold/ }));
     await page.waitForFunction(
         () => globalThis.__uiBuilderEditor?.selectedNodeId === "pane-scaffold",
@@ -706,13 +726,13 @@ test("screen settings update the render environment without writing component no
     await page.setViewportSize({ width: 1920, height: 900 });
     await page.goto("index.html?mode=interactive-editor");
     await waitForEditor(page, 108);
+    await openDock(page, "screen");
     const beforeState = await page.evaluate(() => globalThis.__uiBuilderEditor);
     const before = await page.screenshot();
     if (process.env.UPDATE_UI_BUILDER_EVIDENCE === "true") {
         await writeFile("snapshots/ui-builder-screen-settings-before.png", before);
     }
 
-    await clickCompose(page, page.getByRole("button", { name: "Screen", exact: true }));
     await expect(page.getByText("Screen environment", { exact: true })).toBeVisible();
     await fillCompose(page, page.getByRole("textbox", { name: "Width (dp)" }), "1000");
     await fillCompose(page, page.getByRole("textbox", { name: "Font scale" }), "1.15");
@@ -786,7 +806,7 @@ test("top-level theme builder updates colours typography and shapes atomically",
     await waitForEditor(page, 108);
     const before = await page.screenshot();
 
-    await clickCompose(page, page.getByRole("button", { name: "Theme inspector" }));
+    await openDock(page, "theme");
     await expect(page.getByText("Theme builder", { exact: true })).toBeVisible();
     await fillCompose(page, page.getByRole("textbox", { name: "Primary colour" }), "#FFFF6B8A");
     await fillCompose(page, page.getByRole("textbox", { name: "Background colour" }), "#FF101525");
