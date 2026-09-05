@@ -16,9 +16,15 @@ The dependency graph is `:server -> :ui-builder-runtime` and `:server -> ee.schi
 (published from compose-ai-tools since #180, and this repository's own module before that); there is no
 edge between the libraries. The runtime emits a contracts-shaped `UiBuilderRenderRequest`, and the
 server adapts it to `ServeRenderHost`. This removes `ui-builder-protocol` and UI-builder service
-types from the offline render/history artifact. The generic packaged preview bundle is a build-time
-resource of the runtime that owns its revision lifecycle; the frontend is only its build-time
-producer and is absent from the runtime classpath and POM.
+types from the offline render/history artifact.
+
+> Superseded on 2026-09-05: the packaged preview bundle was a build-time resource of the runtime,
+> copied out of the frontend's build directory. It is now `:ui-builder-render-bundle`, published as
+> `compose-preview-ui-builder-render-bundle` and resolved by the runtime as a coordinate
+> ([#350](https://github.com/yschimke/compose-preview-server/pull/350)). The frontend is no longer
+> the runtime's build-time producer, and the frontend's compiled previews no longer ship inside a
+> server-side jar. The boundary this section describes is now stated in full, and enforced, in
+> [`UI_BUILDER_PROJECT_BOUNDARY.md`](UI_BUILDER_PROJECT_BOUNDARY.md).
 
 This is a module boundary before it is a repository boundary. Publishing it now makes a future
 repository move mechanical without adding another release train while service, ACL and export

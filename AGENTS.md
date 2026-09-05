@@ -31,6 +31,14 @@ repository boundary.
 
 - The build resolves released coordinates from Maven Central. Do not add `mavenLocal()`, a composite
   include of `compose-ai-tools`, project substitution, or a shared catalog outside this repository.
+- **The UI builder is a second project inside this repository, on the same release line.** Which
+  modules are in it, the four published seams the server may reach it through, and the rule that it
+  never depends on the server, are written once in
+  [`docs/design/UI_BUILDER_PROJECT_BOUNDARY.md`](docs/design/UI_BUILDER_PROJECT_BOUNDARY.md) and
+  enforced by [`.github/scripts/ui-builder-project-boundary.sh`](.github/scripts/ui-builder-project-boundary.sh)
+  on every pull request. Moving a module between the two projects, or adding a seam, is a change to
+  that document in the same pull request as the code
+  ([#346](https://github.com/yschimke/compose-preview-server/issues/346)).
 - Which repository a module belongs in is decided by the layer rule, written once in
   [`docs/design/REPOSITORY_LAYERS.md`](https://github.com/yschimke/compose-ai-tools/blob/main/docs/design/REPOSITORY_LAYERS.md):
   contracts is shape, compose-ai-tools is offline behaviour, this repository is HTTP and the

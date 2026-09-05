@@ -18,6 +18,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The UI builder is a second project in this repository (docs/design/UI_BUILDER_PROJECT_BOUNDARY.md).
+  # Its own job rather than a step in `gradle`: the check reads build files and needs no JDK, no
+  # Gradle and no cache, so it answers in seconds and says which boundary broke rather than being
+  # the twelfth line of a build log.
+  ui-builder-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/ui-builder-project-boundary.sh
+
   gradle:
     runs-on: ubuntu-latest
     steps:
