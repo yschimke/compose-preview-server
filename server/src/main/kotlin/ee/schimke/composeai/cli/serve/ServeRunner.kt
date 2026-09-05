@@ -2243,6 +2243,12 @@ public class ServeRunner(
   private data class UiBuilderLane(
     val service: PersistentUiBuilderService,
     val renderer: AutoCloseable?,
+    /**
+     * The Compose half of the export, kept so the native render lane can ask it the same question
+     * with node tagging on. Not reached through [service]: the service's exporter may be the
+     * production wrapper around several formats, and the native lane wants exactly this one.
+     */
+    val compose: ScreenGeneratorComposeExportExecutor,
   ) : AutoCloseable {
     override fun close() {
       renderer?.close()
@@ -2351,6 +2357,7 @@ public class ServeRunner(
     return UiBuilderLane(
       service = service,
       renderer = renderer,
+      compose = compose,
     )
   }
 
@@ -2661,6 +2668,22 @@ public class ServeRunner(
         uiBuilderAuthorization =
           uiBuilderLane?.let {
             ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)
+          },
+        // Both halves or nothing: a native render needs the generator (to write the Kotlin) and
+        // the playground lane (to compile and run it). A host with a builder and no compiler
+        // simply has no such route, which is what a client discovers rather than being told after
+        // a failed call.
+        uiBuilderNativePreview =
+          uiBuilderLane?.let { lane ->
+            playgroundLane?.compile?.let { playground ->
+              val adapter = UiBuilderGeneratedPreviewAdapter(playground)
+              ServeUiBuilderNativePreview(lane.compose) { generated ->
+                // `true` here, and only here: this call site is downstream of the route's
+                // `ui-builder-export` capability check, and the source it submits came from
+                // `ScreenGenerator` against the component record rather than from the caller.
+                adapter.compile(generated, isSecurityChecked = true)
+              }
+            }
           },
         playgroundRateLimiter = playgroundLane?.let { buildPlaygroundRateLimiter() },
         // Reads a served preview's Kotlin, for two consumers with different requirements:

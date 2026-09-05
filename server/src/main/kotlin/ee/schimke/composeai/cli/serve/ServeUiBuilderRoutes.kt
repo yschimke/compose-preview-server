@@ -52,6 +52,12 @@ import kotlinx.serialization.json.Json
 internal fun Route.installUiBuilderRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
+  /**
+   * The native render lane, on a host that can compile. Null simply leaves the route out: a box
+   * with no playground bundle has no Kotlin compiler and no catalog classpath, and a route that
+   * always answers "unavailable" is worse than one a client can discover the absence of.
+   */
+  nativePreview: UiBuilderNativePreviewLane? = null,
 ) {
   post(UI_BUILDER_REQUEST_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -150,6 +156,87 @@ internal fun Route.installUiBuilderRoutes(
       ContentType.Application.Json,
       response.httpStatus(),
     )
+  }
+
+  if (nativePreview != null) {
+    /**
+     * One design, compiled and rendered by real Compose on this host.
+     *
+     * A plain POST rather than a protocol request for the same reason the device presets are a
+     * plain GET: the released `UiBuilderRequestV1` union has no native-render request, and adding
+     * one means releasing `ui-builder-protocol`. Gated on EXPORT rather than READ because it
+     * compiles and runs the Kotlin an export hands back — an actor that may not read that source
+     * may not run it.
+     */
+    post(UI_BUILDER_NATIVE_PREVIEW_PATH) {
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      val actorId =
+        when (val decision = authorization.authorize(call, UiBuilderRouteCapability.EXPORT)) {
+          is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+          UiBuilderAuthorizationDecision.Missing -> {
+            call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+            call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+            return@post
+          }
+          UiBuilderAuthorizationDecision.Forbidden -> {
+            call.respondText("UI-builder export access required", status = HttpStatusCode.Forbidden)
+            return@post
+          }
+        }
+      val designId = call.parameters["designId"].orEmpty()
+      if (designId.isBlank()) {
+        call.respondText("a design id is required", status = HttpStatusCode.BadRequest)
+        return@post
+      }
+      // Read through the service, as this actor, so the design's own access control decides
+      // whether there is anything to render. A lane that took the document from anywhere else
+      // would be a way to render a design you cannot open.
+      val mapping =
+        UiBuilderProtocolMapper.toServiceCall(
+          AuthenticatedUiBuilderActor(actorId),
+          GetSnapshotRequestV1(designId = designId, revision = null),
+        )
+      val snapshot =
+        (mapping as? ProtocolRequestMapping.Mapped)?.let { service.execute(it.call) }
+          as? UiBuilderServiceResponse.Snapshot
+      if (snapshot == null) {
+        call.respondText("no such design", status = HttpStatusCode.NotFound)
+        return@post
+      }
+      val document = snapshot.snapshot.state.document
+      val result = withContext(Dispatchers.IO) { nativePreview.render(document) }
+      when (result) {
+        is UiBuilderNativePreviewOutcome.Refused ->
+          call.respondText(
+            UI_BUILDER_JSON.encodeToString(
+              NativePreviewRefusalV1.serializer(),
+              NativePreviewRefusalV1(code = result.code, reasons = result.reasons),
+            ),
+            ContentType.Application.Json,
+            // Not a 500: the design is expressible or it is not, and that is a fact about the
+            // document the caller sent rather than a failure of this host.
+            HttpStatusCode.UnprocessableEntity,
+          )
+        is UiBuilderNativePreviewOutcome.Rendered ->
+          call.respondText(
+            UI_BUILDER_JSON.encodeToString(
+              NativePreviewResultV1.serializer(),
+              NativePreviewResultV1(
+                designId = designId,
+                revision = document.revision,
+                previewId = result.response.previewId,
+                previewToken = result.response.previewToken,
+                previewUrl = result.response.previewUrl,
+                imageBase64 = result.response.image,
+                taggedNodeIds = result.taggedNodeIds,
+                compileError = result.response.exception,
+              ),
+            ),
+            ContentType.Application.Json,
+            HttpStatusCode.OK,
+          )
+      }
+    }
   }
 
   /**
@@ -346,5 +433,36 @@ internal const val UI_BUILDER_REQUEST_PATH = "/api/ui-builder/v1/requests"
 internal const val UI_BUILDER_UPDATES_PATH = "/api/ui-builder/v1/designs/{designId}/updates"
 internal const val UI_BUILDER_DEVICE_PRESETS_PATH = "/api/ui-builder/v1/device-presets"
 internal const val UI_BUILDER_IDENTITY_PATH = "/api/ui-builder/v1/identity"
+internal const val UI_BUILDER_NATIVE_PREVIEW_PATH =
+  "/api/ui-builder/v1/designs/{designId}/native-preview"
 private const val INVALID_REQUEST_ID = "invalid"
 private const val MAX_UI_BUILDER_REQUEST_BYTES = 8 * 1024 * 1024
+
+/**
+ * What a native render produced.
+ *
+ * Its own shape, because the released protocol defines none — and deliberately not squeezed into
+ * `ExportArtifactV1`, which describes source rather than a running preview. [taggedNodeIds] names
+ * the design nodes the render is tagged with, so a client knows which ids `get_preview_data` will
+ * report bounds for and can put selectable regions over an image the browser did not draw.
+ */
+@kotlinx.serialization.Serializable
+internal data class NativePreviewResultV1(
+  val schema: String = "compose-preview/ui-builder-native-preview/v1",
+  val designId: String,
+  val revision: Long,
+  val previewId: String? = null,
+  val previewToken: String? = null,
+  val previewUrl: String? = null,
+  val imageBase64: String? = null,
+  val taggedNodeIds: List<String> = emptyList(),
+  val compileError: String? = null,
+)
+
+/** Why there was no native render — the generator's own reasons, not a second vocabulary. */
+@kotlinx.serialization.Serializable
+internal data class NativePreviewRefusalV1(
+  val schema: String = "compose-preview/ui-builder-native-preview-refusal/v1",
+  val code: String,
+  val reasons: List<String>,
+)
