@@ -21,6 +21,11 @@ repository boundary.
   request `/regenerate-goldens` asks for the same thing.
 - Immediately before every push, fetch `origin main` and confirm the branch or PR has not merged.
 - Open or update a PR automatically after a completed coding change. Never auto-merge.
+- In a PR body write `![alt](url)` plainly, and **leave any backticks that appear around the URL
+  alone**. They are injected between an agent and GitHub rather than authored, and the
+  [`PR Body Syntax`](.github/workflows/pr-body-syntax.yml) workflow strips them in place within a
+  minute of the edit. Hand-fixing or re-posting to "correct" them does not work — the next write is
+  mangled the same way.
 
 ## Boundary rules
 
