@@ -49,7 +49,17 @@ import kotlinx.serialization.json.longOrNull
  *
  * That is what makes this safe to expose. The gate an agent reaches is the gate a person reaches.
  */
-class ServeUiBuilderMcp(private val service: UiBuilderServicePort) {
+class ServeUiBuilderMcp(
+  private val service: UiBuilderServicePort,
+  /**
+   * The native render lane, on a box that has one.
+   *
+   * Null on a host without a playground bundle — compiling a design needs a Kotlin compiler and the
+   * catalog's own classpath, which not every deployment carries. The tool is then absent rather
+   * than present and failing, exactly as the whole surface is on a box with no builder.
+   */
+  private val nativePreview: UiBuilderNativePreviewLane? = null,
+) {
 
   /** What a tool needs from the caller before it may run. Null when the name is not ours. */
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
@@ -60,6 +70,10 @@ class ServeUiBuilderMcp(private val service: UiBuilderServicePort) {
       CREATE_DESIGN,
       APPLY -> UiBuilderRouteCapability.WRITE
       EXPORT -> UiBuilderRouteCapability.EXPORT
+      // The same capability as an export, and for the same reason: a native render compiles and
+      // runs the Kotlin an export hands back, so an actor who may not read that source may not
+      // run it. Absent entirely on a host that cannot compile.
+      RENDER_NATIVE -> if (nativePreview == null) null else UiBuilderRouteCapability.EXPORT
       else -> null
     }
 
@@ -96,9 +110,53 @@ class ServeUiBuilderMcp(private val service: UiBuilderServicePort) {
             revision = args.number("revision"),
             format = args.exportFormat(),
           )
+        RENDER_NATIVE -> return renderNative(args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor))
+  }
+
+  /**
+   * A design compiled and rendered by real Compose on the host.
+   *
+   * The one reply here that is **not** an [McpResponseEnvelopeV1], and deliberately so: a native
+   * render is not a `UiBuilderRequestV1`, the released contract defines no request type for one,
+   * and inventing an envelope shape for a request the contract does not define would be worse than
+   * being plainly outside it. The tool description says as much.
+   *
+   * The design is read back through the service as this actor, so a design's own access control
+   * decides whether there is anything to render — a lane that took the document from anywhere else
+   * would be a way to render a design you cannot open.
+   */
+  private suspend fun renderNative(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val lane = nativePreview ?: throw McpRequestException("this host has no native render lane")
+    val designId = args.requiredText("designId")
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
+        as? UiBuilderServiceResponse.Snapshot
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    val document = snapshot.snapshot.state.document
+    return when (val outcome = lane.render(document)) {
+      is UiBuilderNativePreviewOutcome.Refused ->
+        UI_BUILDER_JSON.encodeToString(
+          NativePreviewRefusalV1.serializer(),
+          NativePreviewRefusalV1(code = outcome.code, reasons = outcome.reasons),
+        )
+      is UiBuilderNativePreviewOutcome.Rendered ->
+        UI_BUILDER_JSON.encodeToString(
+          NativePreviewResultV1.serializer(),
+          NativePreviewResultV1(
+            designId = designId,
+            revision = document.revision,
+            previewId = outcome.response.previewId,
+            previewToken = outcome.response.previewToken,
+            previewUrl = outcome.response.previewUrl,
+            imageBase64 = outcome.response.image,
+            taggedNodeIds = outcome.taggedNodeIds,
+            compileError = outcome.response.exception,
+          ),
+        )
+    }
   }
 
   /**
@@ -227,9 +285,13 @@ class ServeUiBuilderMcp(private val service: UiBuilderServicePort) {
     const val CREATE_DESIGN = "ui_builder_create_design"
     const val APPLY = "ui_builder_apply"
     const val EXPORT = "ui_builder_export"
+    const val RENDER_NATIVE = "ui_builder_render_native"
 
     /** Every tool this class answers to, in the order a session naturally uses them. */
     val TOOL_NAMES = listOf(LIST_CATALOGS, LIST_DESIGNS, GET_DESIGN, CREATE_DESIGN, APPLY, EXPORT)
+
+    /** Separate because it exists only where the host can compile. */
+    val NATIVE_TOOL_NAMES = listOf(RENDER_NATIVE)
 
     private const val DEFAULT_DESIGN_PAGE = 50
     private const val MCP_CLIENT_ID = "mcp"
@@ -238,8 +300,11 @@ class ServeUiBuilderMcp(private val service: UiBuilderServicePort) {
      * Tool declarations, built with the caller's own `tool` helper so this list has the same shape
      * as every other tool on the surface rather than a second one that drifts.
      */
-    fun declarations(tool: (String, String, String) -> JsonObject): List<JsonObject> =
-      listOf(
+    fun declarations(
+      tool: (String, String, String) -> JsonObject,
+      native: Boolean = false,
+    ): List<JsonObject> =
+      listOfNotNull(
         tool(
           LIST_CATALOGS,
           "List the component catalogs a UI-builder design can pin to, with each catalog's " +
@@ -313,6 +378,24 @@ class ServeUiBuilderMcp(private val service: UiBuilderServicePort) {
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
+        if (!native) null
+        else
+          tool(
+            RENDER_NATIVE,
+            "Compile a design and render it with real Compose on this host, rather than in the " +
+              "browser's Wasm canvas — the way to see what a design looks like on Android. " +
+              "Returns the first frame, the token the live frame stream is opened with, and the " +
+              "design node ids the render is tagged with, so `get_preview_data` can report each " +
+              "node's bounds and a client can put selectable regions over the image. The reply " +
+              "is not an McpResponseEnvelopeV1: the released contract defines no request type " +
+              "for a native render.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "revision":{"type":"integer","description":"A past revision. Omit for the current one."}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
       )
   }
 }

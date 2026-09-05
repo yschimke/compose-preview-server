@@ -574,7 +574,8 @@ class ServeHttpServer(
         sessions,
         renderSemaphore,
         projectHistory = projectHistory,
-        uiBuilder = uiBuilderService?.let(::ServeUiBuilderMcp),
+        uiBuilder = uiBuilderService?.let { ServeUiBuilderMcp(it, uiBuilderNativePreview) },
+        uiBuilderNative = uiBuilderNativePreview != null,
       )
     else null
   private val unleasedThemeSemaphore = Semaphore(1)
