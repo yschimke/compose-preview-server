@@ -20,25 +20,11 @@
       "unsupported": "No honest SVG or declared fallback exists; export must fail."
     }
   },
-  "groupOrder": [
-    "Scaffolds",
-    "Layout",
-    "Navigation",
-    "Actions",
-    "Selection",
-    "Text inputs",
-    "Containment",
-    "Communication",
-    "Content",
-    "Styles",
-    "Embedded"
-  ],
   "components": [
     {
       "componentId": "asset/image",
       "displayName": "Image asset",
       "role": "Leaf",
-      "group": "Content",
       "traits": ["ImageContent"],
       "slots": [],
       "properties": [
@@ -56,7 +42,6 @@
       "componentId": "layout/box",
       "displayName": "Box",
       "role": "Container",
-      "group": "Layout",
       "traits": ["OrderedContent", "OverlayContent"],
       "slots": [
         { "name": "children", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
@@ -74,7 +59,6 @@
       "componentId": "layout/column",
       "displayName": "Column",
       "role": "Container",
-      "group": "Layout",
       "traits": ["OrderedContent", "VerticalContent"],
       "slots": [
         { "name": "children", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
@@ -95,7 +79,6 @@
       "componentId": "layout/horizontal-carousel",
       "displayName": "Horizontal uncontained carousel",
       "role": "Container",
-      "group": "Containment",
       "traits": ["OrderedContent", "CarouselContent", "ScrollableContent", "RepeatedContent"],
       "slots": [
         { "name": "items", "cardinality": { "min": 1, "max": null }, "ordered": true, "acceptedRoles": ["Container"], "acceptedTraits": ["CarouselItem"] }
@@ -117,7 +100,6 @@
       "componentId": "layout/lazy-column",
       "displayName": "Lazy column",
       "role": "Container",
-      "group": "Layout",
       "traits": ["OrderedContent", "VerticalContent", "ScrollableContent", "RepeatedContent"],
       "slots": [
         { "name": "items", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Container", "Leaf"], "acceptedTraits": ["ListItem"] }
@@ -137,7 +119,6 @@
       "componentId": "layout/lazy-grid",
       "displayName": "Adaptive lazy vertical grid",
       "role": "Container",
-      "group": "Layout",
       "traits": ["OrderedContent", "GridContent", "ScrollableContent", "RepeatedContent"],
       "slots": [
         { "name": "items", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Container", "Leaf"], "acceptedTraits": ["GridItem"] }
@@ -159,7 +140,6 @@
       "componentId": "layout/lazy-row",
       "displayName": "Lazy row",
       "role": "Container",
-      "group": "Layout",
       "traits": ["OrderedContent", "HorizontalContent", "ScrollableContent", "RepeatedContent"],
       "slots": [
         { "name": "items", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Container", "Leaf"], "acceptedTraits": ["ListItem"] }
@@ -180,7 +160,6 @@
       "componentId": "layout/row",
       "displayName": "Row",
       "role": "Container",
-      "group": "Layout",
       "traits": ["OrderedContent", "HorizontalContent"],
       "slots": [
         { "name": "children", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
@@ -199,7 +178,6 @@
       "componentId": "layout/scaffold",
       "displayName": "Scaffold",
       "role": "Scaffold",
-      "group": "Scaffolds",
       "traits": ["ScreenContent"],
       "slots": [
         { "name": "topBar", "cardinality": { "min": 0, "max": 1 }, "ordered": false, "acceptedRoles": ["Container"], "acceptedTraits": ["TopBar"] },
@@ -221,7 +199,6 @@
       "componentId": "layout/supporting-pane-scaffold",
       "displayName": "Supporting pane scaffold",
       "role": "Scaffold",
-      "group": "Scaffolds",
       "traits": ["ScreenContent", "AdaptivePaneLayout"],
       "slots": [
         { "name": "mainPane", "cardinality": { "min": 1, "max": 1 }, "ordered": false, "acceptedRoles": ["Scaffold", "Container"], "acceptedTraits": ["ScreenContent"] },
@@ -244,8 +221,6 @@
       "componentId": "m3/button",
       "displayName": "Button",
       "role": "Container",
-      "group": "Actions",
-      "variantProperty": "style",
       "traits": ["Action", "ToolbarItem"],
       "slots": [
         { "name": "content", "cardinality": { "min": 1, "max": null }, "ordered": true, "acceptedRoles": ["Leaf", "Container"], "acceptedTraits": ["TextContent", "IconContent"] },
@@ -267,8 +242,6 @@
       "componentId": "m3/card",
       "displayName": "Card",
       "role": "Container",
-      "group": "Containment",
-      "variantProperty": "variant",
       "traits": ["GridItem", "CarouselItem", "ListItem", "OverlayContent"],
       "slots": [
         { "name": "content", "cardinality": { "min": 1, "max": null }, "ordered": true, "acceptedRoles": ["Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
@@ -290,7 +263,6 @@
       "componentId": "m3/center-aligned-top-app-bar",
       "displayName": "Top app bar",
       "role": "Container",
-      "group": "Navigation",
       "traits": ["TopBar", "ScreenContent"],
       "slots": [
         { "name": "title", "cardinality": { "min": 0, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["TextContent"] }
@@ -309,7 +281,6 @@
       "componentId": "m3/checkbox",
       "displayName": "Checkbox",
       "role": "Leaf",
-      "group": "Selection",
       "traits": ["SelectionControl", "Action"],
       "slots": [],
       "properties": [
@@ -325,8 +296,6 @@
       "componentId": "m3/date-picker",
       "displayName": "Date picker",
       "role": "Leaf",
-      "group": "Selection",
-      "variantProperty": "mode",
       "traits": ["PickerContent", "DateContent"],
       "slots": [],
       "properties": [
@@ -343,7 +312,6 @@
       "componentId": "m3/dialog",
       "displayName": "Dialog",
       "role": "Container",
-      "group": "Containment",
       "traits": ["DialogContent", "OverlayContent"],
       "slots": [
         { "name": "icon", "cardinality": { "min": 0, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["IconContent"] },
@@ -366,7 +334,6 @@
       "componentId": "m3/filter-chip",
       "displayName": "Filter chip",
       "role": "Container",
-      "group": "Selection",
       "traits": ["SelectionControl", "ListItem"],
       "slots": [
         { "name": "label", "cardinality": { "min": 1, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["TextContent"] },
@@ -387,7 +354,6 @@
       "componentId": "m3/horizontal-divider",
       "displayName": "Horizontal divider",
       "role": "Leaf",
-      "group": "Containment",
       "traits": ["DividerContent"],
       "slots": [],
       "properties": [
@@ -403,7 +369,6 @@
       "componentId": "m3/horizontal-floating-toolbar",
       "displayName": "Horizontal floating toolbar",
       "role": "Container",
-      "group": "Actions",
       "traits": ["ToolbarContent", "OverlayContent"],
       "slots": [
         { "name": "content", "cardinality": { "min": 1, "max": null }, "ordered": true, "acceptedRoles": ["Container", "Leaf"], "acceptedTraits": ["ToolbarItem"] }
@@ -423,7 +388,6 @@
       "componentId": "m3/icon",
       "displayName": "Icon",
       "role": "Leaf",
-      "group": "Content",
       "traits": ["IconContent"],
       "slots": [],
       "properties": [
@@ -441,8 +405,6 @@
       "componentId": "m3/icon-button",
       "displayName": "Icon button",
       "role": "Container",
-      "group": "Actions",
-      "variantProperty": "variant",
       "traits": ["Action", "OverlayControl", "ToolbarItem"],
       "slots": [
         { "name": "content", "cardinality": { "min": 1, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["IconContent"] }
@@ -465,7 +427,6 @@
       "componentId": "m3/list-item",
       "displayName": "List item",
       "role": "Container",
-      "group": "Containment",
       "traits": ["ListItem", "GridItem"],
       "slots": [
         { "name": "headline", "cardinality": { "min": 1, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["TextContent"] },
@@ -484,7 +445,6 @@
       "componentId": "m3/primary-tab-row",
       "displayName": "Tab row",
       "role": "Container",
-      "group": "Navigation",
       "traits": ["TabBar", "OrderedContent"],
       "slots": [
         { "name": "tabs", "cardinality": { "min": 1, "max": null }, "ordered": true, "acceptedRoles": ["Container"], "acceptedTraits": ["TabItem"] }
@@ -501,8 +461,6 @@
       "componentId": "m3/progress-indicator",
       "displayName": "Progress indicator",
       "role": "Leaf",
-      "group": "Communication",
-      "variantProperty": "variant",
       "traits": ["Feedback", "Decoration"],
       "slots": [],
       "properties": [
@@ -519,7 +477,6 @@
       "componentId": "m3/radio-button",
       "displayName": "Radio button",
       "role": "Leaf",
-      "group": "Selection",
       "traits": ["SelectionControl", "Action"],
       "slots": [],
       "properties": [
@@ -535,7 +492,6 @@
       "componentId": "m3/search-bar",
       "displayName": "Search bar",
       "role": "Container",
-      "group": "Navigation",
       "traits": ["TopBar", "SearchContent"],
       "slots": [
         { "name": "inputField", "cardinality": { "min": 1, "max": 1 }, "ordered": false, "acceptedRoles": ["Container"], "acceptedTraits": ["SearchInput"] },
@@ -555,7 +511,6 @@
       "componentId": "m3/search-input-field",
       "displayName": "Search input field",
       "role": "Container",
-      "group": "Navigation",
       "traits": ["SearchInput", "TextInput"],
       "slots": [
         { "name": "placeholder", "cardinality": { "min": 0, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["TextContent"] },
@@ -578,7 +533,6 @@
       "componentId": "m3/slider",
       "displayName": "Slider",
       "role": "Leaf",
-      "group": "Selection",
       "traits": ["SelectionControl", "FormField"],
       "slots": [],
       "properties": [
@@ -597,7 +551,6 @@
       "componentId": "m3/snackbar-host",
       "displayName": "Snackbar host",
       "role": "Container",
-      "group": "Communication",
       "traits": ["SnackbarHost"],
       "slots": [
         { "name": "snackbar", "cardinality": { "min": 0, "max": 1 }, "ordered": false, "acceptedRoles": ["Container", "Leaf"], "acceptedTraits": ["SnackbarContent"] }
@@ -616,7 +569,6 @@
       "componentId": "m3/surface",
       "displayName": "Surface",
       "role": "Container",
-      "group": "Layout",
       "traits": ["ScreenContent", "PaneContent", "GridItem", "ListItem"],
       "slots": [
         { "name": "content", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
@@ -642,7 +594,6 @@
       "componentId": "m3/switch",
       "displayName": "Switch",
       "role": "Leaf",
-      "group": "Selection",
       "traits": ["SelectionControl", "Action"],
       "slots": [],
       "properties": [
@@ -658,7 +609,6 @@
       "componentId": "m3/tab",
       "displayName": "Tab",
       "role": "Container",
-      "group": "Navigation",
       "traits": ["TabItem", "SelectionControl"],
       "slots": [
         { "name": "text", "cardinality": { "min": 1, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["TextContent"] }
@@ -675,7 +625,6 @@
       "componentId": "m3/text",
       "displayName": "Text",
       "role": "Leaf",
-      "group": "Content",
       "traits": ["TextContent"],
       "slots": [],
       "properties": [
@@ -705,8 +654,6 @@
       "componentId": "m3/text-field",
       "displayName": "Text field",
       "role": "Container",
-      "group": "Text inputs",
-      "variantProperty": "variant",
       "traits": ["TextInput", "FormField"],
       "slots": [
         { "name": "label", "cardinality": { "min": 0, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["TextContent"] },
@@ -732,8 +679,6 @@
       "componentId": "m3/time-picker",
       "displayName": "Time picker",
       "role": "Leaf",
-      "group": "Selection",
-      "variantProperty": "mode",
       "traits": ["PickerContent", "TimeContent"],
       "slots": [],
       "properties": [
@@ -751,7 +696,6 @@
       "componentId": "remote-compose/document",
       "displayName": "Remote Compose document",
       "role": "Container",
-      "group": "Embedded",
       "traits": ["RemoteContent", "OrderedContent", "DynamicSlots"],
       "slots": [],
       "properties": [
@@ -768,7 +712,6 @@
       "componentId": "shape/colour-dot",
       "displayName": "Colour dot",
       "role": "Leaf",
-      "group": "Styles",
       "traits": ["Decoration", "DrawLayer"],
       "slots": [],
       "properties": [
@@ -784,7 +727,6 @@
       "componentId": "shape/linear-gradient",
       "displayName": "Linear gradient layer",
       "role": "Leaf",
-      "group": "Styles",
       "traits": ["DrawLayer", "OverlayContent"],
       "slots": [],
       "properties": [
@@ -801,7 +743,6 @@
       "componentId": "shape/radial-gradient",
       "displayName": "Radial gradient layer",
       "role": "Leaf",
-      "group": "Styles",
       "traits": ["DrawLayer", "BackgroundContent"],
       "slots": [],
       "properties": [

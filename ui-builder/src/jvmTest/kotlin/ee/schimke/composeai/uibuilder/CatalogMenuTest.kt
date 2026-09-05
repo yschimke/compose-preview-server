@@ -7,6 +7,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -30,12 +31,70 @@ class CatalogMenuTest {
   private val state = reducer.initial(document, selectedNodeId = "discover-grid")
 
   @Test
-  fun `every component sits on a family the catalog ordered`() {
-    val ordered = catalog.groupOrder.toSet()
-    val used = catalog.components.map { it.group }.toSet()
+  fun `the menu table covers this catalog and nothing else`() {
+    // The `StarterContent` bargain, for the same reason: a table beside the catalog rather than a
+    // field on it (see `ComponentMenu`) only stays true if something checks. A component that
+    // arrives in the catalog with no shelf falls back to its kind heading in the product, which is
+    // a quiet regression to the panel this replaced — so it fails here instead.
+    val known = catalog.components.map { it.componentId }.toSet()
 
-    assertEquals(emptySet<String?>(), used - ordered, "families missing from groupOrder")
-    assertEquals(emptyList(), catalog.components.filter { it.group == null }.map { it.componentId })
+    assertEquals(
+      emptyList(),
+      known.filter { ComponentMenu.groupOf(it) == null }.sorted(),
+      "components with no shelf",
+    )
+    assertEquals(
+      emptyList(),
+      (ComponentMenu.componentIds - known).sorted(),
+      "shelved components the catalog no longer has",
+    )
+    assertEquals(
+      emptyList(),
+      known.mapNotNull(ComponentMenu::groupOf).distinct().filterNot {
+        it in ComponentMenu.GROUP_ORDER
+      },
+      "shelves missing from GROUP_ORDER",
+    )
+  }
+
+  @Test
+  fun `every declared variant property is an enum on the component that names it`() {
+    catalog.components.forEach { component ->
+      val name = ComponentMenu.variantPropertyOf(component.componentId) ?: return@forEach
+      val property = component.propertiesByName[name]
+      assertNotNull(property, "${component.componentId} declares no property $name")
+      assertTrue(
+        property.allowedValues.isNotEmpty(),
+        "${component.componentId}.$name is not an enum, so it enumerates no variants",
+      )
+      assertEquals(
+        property.allowedValues.mapNotNull { it.jsonPrimitive.contentOrNull },
+        component.menuVariantValues(),
+        component.componentId,
+      )
+    }
+  }
+
+  @Test
+  fun `a catalog the table says nothing about keeps the kind headings`() {
+    // What `wear-m3` and `remote-m3` get, and what this panel was before: a component with no
+    // shelf falls back to its kind, so an unstyled catalog is unstyled rather than ungrouped.
+    val unknown =
+      UiBuilderEditorReducer(
+          catalog.copy(
+            components =
+              catalog.components.map { it.copy(componentId = "unknown/${it.componentId}") }
+          )
+        )
+        .catalogRows(state)
+        .filterIsInstance<EditorCatalogRow.Group>()
+        .map { it.name }
+
+    assertEquals(
+      EditorComponentKind.entries.map { it.label }.filter { it in unknown },
+      unknown,
+      "an unshelved catalog should read as Scaffolds/Containers/Composables",
+    )
   }
 
   @Test
@@ -43,9 +102,9 @@ class CatalogMenuTest {
     val rows = reducer.catalogRows(state)
     val groups = rows.filterIsInstance<EditorCatalogRow.Group>().map { it.name }
 
-    // Not alphabetical, and not the id order the fixture is written in: `groupOrder` is what says
+    // Not alphabetical, and not the id order the fixture is written in: `GROUP_ORDER` is what says
     // a scaffold is the first thing you reach for and a gradient is not.
-    assertEquals(catalog.groupOrder.filter { it in groups }, groups)
+    assertEquals(ComponentMenu.GROUP_ORDER.filter { it in groups }, groups)
     // The count on a heading is the components under it, so heading and rows cannot disagree.
     rows.filterIsInstance<EditorCatalogRow.Group>().forEach { group ->
       val under =
@@ -153,7 +212,7 @@ class CatalogMenuTest {
       inserted(explicit).properties.getValue("variant").jsonObject["value"]?.jsonPrimitive?.content,
     )
     assertEquals(
-      catalog.componentsById.getValue("m3/card").variantValues.first(),
+      catalog.componentsById.getValue("m3/card").menuVariantValues().first(),
       component(rows(state), "m3/card").item.variants.single { it.default }.value,
     )
   }

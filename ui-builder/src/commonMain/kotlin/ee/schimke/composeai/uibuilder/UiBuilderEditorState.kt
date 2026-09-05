@@ -1310,8 +1310,11 @@ class UiBuilderEditorReducer(
    *
    * Grouped by family rather than by [EditorComponentKind], which is what the panel used to do and
    * what made it unreadable at 39 components: "Containers" held a scaffold's tab row, a card, a
-   * dialog and a plain Row, which is every question except the one being asked. The families are
-   * the catalog's own — the shelf a component sits on there is the shelf it sits on here.
+   * dialog and a plain Row, which is every question except the one being asked. The families come
+   * from [ComponentMenu], and are the ones the published catalog puts the same components under.
+   *
+   * A catalog [ComponentMenu] says nothing about falls back to the kind headings, which is exactly
+   * the panel this replaced — so a second catalog is unstyled rather than broken.
    *
    * **A search overrides every twisty.** While [UiBuilderEditorState.catalogQuery] is non-blank
    * every surviving group is open and every surviving component shows its variants, because a
@@ -1327,13 +1330,23 @@ class UiBuilderEditorReducer(
         .map { it.editorCatalogItem() }
         .filter { it.matches(needle) }
         .sortedBy(EditorCatalogItem::displayName)
-    val order = catalog.groupOrder.withIndex().associate { (index, name) -> name to index }
+    // The declared shelves, then the kind labels an unshelved catalog falls back to — in *kind*
+    // order, so a catalog `ComponentMenu` says nothing about reads Scaffolds, Containers,
+    // Composables exactly as this panel always did, rather than alphabetically.
+    // `distinct` because the two lists overlap: "Scaffolds" is both a declared shelf and a kind
+    // label, and without it the later entry would win and push the shelf to the end of the panel.
+    val order =
+      (ComponentMenu.GROUP_ORDER + EditorComponentKind.entries.map(EditorComponentKind::label))
+        .distinct()
+        .withIndex()
+        .associate { (index, name) -> name to index }
     val rows = mutableListOf<EditorCatalogRow>()
     items
       .groupBy(EditorCatalogItem::group)
       .entries
-      // Declared order first, then alphabetically — a group the catalog forgot to order still
-      // lands somewhere a reader can predict rather than wherever the map happened to put it.
+      // Declared order first, then alphabetically — a group the table forgot to order, and the
+      // kind labels a second catalog falls back to, still land somewhere a reader can predict
+      // rather than wherever the map happened to put them.
       .sortedWith(compareBy({ order[it.key] ?: Int.MAX_VALUE }, { it.key }))
       .forEach { (group, groupItems) ->
         val expanded = filtering || group !in state.collapsedCatalogGroups
@@ -1356,12 +1369,12 @@ class UiBuilderEditorReducer(
       componentId = componentId,
       displayName = displayName,
       kind = kind,
-      group = group ?: kind.label,
+      group = ComponentMenu.groupOf(componentId) ?: kind.label,
       variants =
-        variantValues.mapIndexed { index, value ->
+        menuVariantValues().mapIndexed { index, value ->
           EditorCatalogVariant(
             componentId = componentId,
-            property = variantProperty.orEmpty(),
+            property = ComponentMenu.variantPropertyOf(componentId).orEmpty(),
             value = value,
             label = variantLabel(value),
             // The catalog's first allowed value is what `defaultEncodedValue` writes on a plain

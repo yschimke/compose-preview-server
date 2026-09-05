@@ -16,18 +16,6 @@ data class CapabilityCatalog(
   val schema: String,
   val benchmark: CapabilityBenchmark,
   val statusSemantics: JsonObject = JsonObject(emptyMap()),
-  /**
-   * The display order of [ComponentCapability.group], most useful first.
-   *
-   * Presentation config the component list cannot express: the components are declared in id order
-   * so that a diff of this file reads, and id order puts `asset/image` above `layout/scaffold`,
-   * which is not the order anybody builds a screen in. A group missing from here sorts
-   * alphabetically after the ones named, so a new group appears somewhere sensible without this
-   * list having to be edited in the same commit.
-   *
-   * The same field, for the same reason, as `groupOrder` in a catalog's `catalog.spec.json`.
-   */
-  val groupOrder: List<String> = emptyList(),
   val components: List<ComponentCapability>,
 ) {
   val componentsById: Map<String, ComponentCapability> by lazy {
@@ -49,29 +37,6 @@ data class ComponentCapability(
   val componentId: String,
   val displayName: String,
   val role: String,
-  /**
-   * The family this component belongs to on the catalog's own shelf — "Actions", "Selection",
-   * "Containment" — or null for a catalog that has not been grouped.
-   *
-   * Vocabulary borrowed from `@file:CatalogGroup(section = …)` in m3-catalog rather than invented
-   * here, so the builder's component menu and the published catalog name the same shelf the same
-   * way. [role] is not a substitute: it says what a component may *hold*, which is why the menu
-   * grouped by it put a Scaffold, a Card and a Row under one heading.
-   */
-  val group: String? = null,
-  /**
-   * The property whose [PropertyCapability.allowedValues] enumerate this component's **variants** —
-   * `m3/card.variant`, `m3/button.style`, `m3/time-picker.mode`.
-   *
-   * Declared rather than guessed. Every heuristic for "which property is the variant" is wrong
-   * somewhere in this catalog: `m3/icon.iconKey` is an enum of forty-seven icons and no more a
-   * variant than `layout/row.horizontalArrangement` is, while `m3/text-field.variant` and
-   * `m3/button.style` are the same idea under two names. The catalog knows; nothing else does.
-   *
-   * A name this component does not declare, or one whose property has no allowed values, is ignored
-   * — the component simply offers no variants, which is what it did before this field existed.
-   */
-  val variantProperty: String? = null,
   val traits: List<String> = emptyList(),
   val slots: List<SlotCapability> = emptyList(),
   @Transient val dynamicSlots: DynamicSlotCapability? = null,
@@ -84,19 +49,6 @@ data class ComponentCapability(
   val slotsByName: Map<String, SlotCapability> by lazy { slots.associateBy(SlotCapability::name) }
   val propertiesByName: Map<String, PropertyCapability> by lazy {
     properties.associateBy(PropertyCapability::name)
-  }
-
-  /**
-   * The values [variantProperty] may take, in the order the catalog declares them.
-   *
-   * Empty when the component names no variant property, when the name does not resolve, or when the
-   * property it names is not an enum — the three ways the declaration can be stale, all answered
-   * the same way rather than by a failure, because a wrong variant list must never be the reason a
-   * component cannot be inserted.
-   */
-  val variantValues: List<String> by lazy {
-    val property = variantProperty?.let(propertiesByName::get) ?: return@lazy emptyList()
-    property.allowedValues.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
   }
 }
 
