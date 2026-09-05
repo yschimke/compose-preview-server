@@ -496,6 +496,14 @@ sealed interface UiBuilderEditorEvent {
   /** Shows or hides one component's variants in the insert panel. */
   data class ToggleCatalogComponent(val componentId: String) : UiBuilderEditorEvent
 
+  /**
+   * Opens every shelf in the insert panel — the way back out of a corner of the catalog.
+   *
+   * It does not also close every component: the variants you opened are what you were looking at,
+   * and "show me everything" is a statement about the shelves.
+   */
+  data object ExpandAllCatalogGroups : UiBuilderEditorEvent
+
   data class SelectNode(val nodeId: String) : UiBuilderEditorEvent
 
   /** Narrows the layers panel. Purely a view over the document; it writes nothing. */
@@ -1009,6 +1017,8 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.SearchCatalog -> state.copy(catalogQuery = event.query)
       is UiBuilderEditorEvent.ToggleCatalogGroup ->
         state.copy(collapsedCatalogGroups = state.collapsedCatalogGroups.toggled(event.group))
+      is UiBuilderEditorEvent.ExpandAllCatalogGroups ->
+        state.copy(collapsedCatalogGroups = emptySet())
       is UiBuilderEditorEvent.ToggleCatalogComponent ->
         state.copy(
           expandedCatalogComponents = state.expandedCatalogComponents.toggled(event.componentId)

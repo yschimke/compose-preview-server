@@ -51,7 +51,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
@@ -632,6 +631,7 @@ fun UiBuilderEditor(
         selectionMenu = selectionMenu,
         catalogSystemId = catalog.benchmark.catalogSystemId,
         catalogRows = reducer.catalogRows(state),
+        totalCatalogComponents = catalog.components.size,
         layerRows = layerRows,
         collaborators = collaborators,
         dropTarget = reducer.dropTarget(state, draggedComponentId ?: "m3/text"),
@@ -2464,6 +2464,7 @@ private fun EditorNavigator(
   onClose: (() -> Unit)?,
   catalogSystemId: String,
   catalogRows: List<EditorCatalogRow>,
+  totalCatalogComponents: Int,
   layerRows: List<EditorLayerRow>,
   collaborators: List<UiBuilderCollaborator>,
   dropTarget: ParentSlot?,
@@ -2496,6 +2497,7 @@ private fun EditorNavigator(
           InsertPanel(
             state = state,
             catalogRows = catalogRows,
+            totalCatalogComponents = totalCatalogComponents,
             dropTarget = dropTarget,
             onCatalogDrag = onCatalogDrag,
             onCatalogDrop = onCatalogDrop,
@@ -2536,6 +2538,10 @@ private fun EditorNavigator(
 private fun InsertPanel(
   state: UiBuilderEditorState,
   catalogRows: List<EditorCatalogRow>,
+  /**
+   * Every component the catalog has, which is what the All row counts — not what survived a filter.
+   */
+  totalCatalogComponents: Int,
   dropTarget: ParentSlot?,
   onCatalogDrag: (String, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
@@ -2574,6 +2580,12 @@ private fun InsertPanel(
       overflow = TextOverflow.Ellipsis,
     )
     LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+      item {
+        CatalogAllRow(totalCatalogComponents) {
+          if (state.catalogQuery.isNotBlank()) dispatch(UiBuilderEditorEvent.SearchCatalog(""))
+          dispatch(UiBuilderEditorEvent.ExpandAllCatalogGroups)
+        }
+      }
       items(catalogRows, key = EditorCatalogRow::catalogRowKey) { row ->
         when (row) {
           is EditorCatalogRow.Group ->
@@ -3385,67 +3397,152 @@ private fun RemoteComposeSourceRow(
 }
 
 /**
- * A family heading: the shelf's name, how many components are on it, and a twisty.
+ * The row above the shelves: how many components there are in total, and a way back to all of them.
  *
- * A heading rather than the plain label [KindHeading] draws, because unlike a kind heading this one
- * is a control — the whole row is the hit target, since a 12 dp chevron is not something to ask
- * anybody to aim at.
+ * The catalog's tree leads with the same row for the same reason — the default view of a catalog
+ * should be the whole catalog, and once you have filtered or collapsed your way into a corner of it
+ * there has to be something to press to get back out. Pressing it clears the search and opens every
+ * shelf.
  */
 @Composable
-private fun CatalogGroupRow(row: EditorCatalogRow.Group, onToggle: () -> Unit) {
-  Row(
+private fun CatalogAllRow(total: Int, onShowAll: () -> Unit) {
+  Surface(
     Modifier.fillMaxWidth()
-      .height(34.dp)
-      .background(Color(0xff202126))
-      .clickable(onClick = onToggle)
-      .semantics {
-        contentDescription = "${if (row.expanded) "Collapse" else "Expand"} ${row.name}"
-      }
-      .padding(start = 10.dp, end = 12.dp),
-    verticalAlignment = Alignment.CenterVertically,
+      .padding(horizontal = 12.dp, vertical = 4.dp)
+      .clip(RoundedCornerShape(20.dp))
+      .clickable(onClick = onShowAll),
+    shape = RoundedCornerShape(20.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
   ) {
-    DisclosureChevron(row.expanded, MaterialTheme.colorScheme.primary)
-    Text(
-      row.name.uppercase(),
-      Modifier.padding(start = 4.dp).weight(1f),
-      color = MaterialTheme.colorScheme.primary,
-      style = MaterialTheme.typography.labelSmall,
-      fontWeight = FontWeight.Bold,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-    )
-    CountBadge(row.count)
+    Row(
+      Modifier.padding(start = 16.dp, end = 8.dp).height(40.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        "All",
+        Modifier.weight(1f).semantics { contentDescription = "Show all $total components" },
+        style = MaterialTheme.typography.bodyLarge,
+      )
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+      ) {
+        Text(
+          total.toString(),
+          Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+          color = MaterialTheme.colorScheme.onPrimaryContainer,
+          style = MaterialTheme.typography.labelMedium,
+        )
+      }
+    }
   }
 }
 
 /**
- * The chevron a group or a component row turns to say whether it is open.
+ * A shelf: its name, how many components are on it, and a twisty.
  *
- * Rotated rather than two icons, so the two states cannot drift apart in size or weight, and so the
- * arrow points the way the catalog's own tree points it: right for shut, down for open.
+ * Sentence case on a plain ground, not the small-caps label on a filled bar the kind headings used
+ * to draw. That styling belonged to a heading over a run of rows; this is a **row** — the whole
+ * width is the hit target, it opens and shuts, and it is the top of a tree whose other rows are
+ * sentence case too. An open shelf takes the accent bar and the accent colour, which is the only
+ * thing on the panel saying which branch you are inside.
  */
 @Composable
-private fun DisclosureChevron(expanded: Boolean, tint: Color) {
+private fun CatalogGroupRow(row: EditorCatalogRow.Group, onToggle: () -> Unit) {
+  val accent =
+    if (row.expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+  Row(
+    Modifier.fillMaxWidth().height(40.dp).clickable(onClick = onToggle).semantics {
+      contentDescription = "${if (row.expanded) "Collapse" else "Expand"} ${row.name}"
+    },
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    // The accent bar, drawn in the gutter every child row's guide line also runs down, so the open
+    // shelf and its contents are one column rather than a coloured row above unrelated rows.
+    Box(
+      Modifier.padding(start = 8.dp)
+        .width(3.dp)
+        .height(24.dp)
+        .background(
+          if (row.expanded) MaterialTheme.colorScheme.primary else Color.Transparent,
+          RoundedCornerShape(2.dp),
+        )
+    )
+    DisclosureTriangle(row.expanded, accent, Modifier.padding(start = 5.dp))
+    Text(
+      row.name,
+      Modifier.padding(start = 2.dp).weight(1f),
+      color = accent,
+      style = MaterialTheme.typography.bodyLarge,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    RowCount(row.count, MaterialTheme.colorScheme.surfaceVariant)
+  }
+}
+
+/**
+ * The twisty a shelf or a component turns to say whether it is open.
+ *
+ * One glyph rotated rather than two, so the states cannot drift apart in weight, and a solid
+ * triangle rather than a chevron because that is what the catalog's tree draws and this panel is
+ * meant to read as the same control.
+ */
+@Composable
+private fun DisclosureTriangle(expanded: Boolean, tint: Color, modifier: Modifier = Modifier) {
   Icon(
-    Icons.Filled.ChevronRight,
+    Icons.Filled.ArrowDropDown,
     contentDescription = null,
-    Modifier.size(16.dp).rotate(if (expanded) 90f else 0f),
+    modifier.size(20.dp).rotate(if (expanded) 0f else -90f),
     tint = tint,
   )
 }
 
-/** How many things are under a row, as the pill the catalog's tree puts at the end of one. */
+/** A placeholder the width of [DisclosureTriangle], so rows without one still line up. */
 @Composable
-private fun CountBadge(count: Int) {
+private fun DisclosureSpacer() {
+  Spacer(Modifier.width(20.dp))
+}
+
+/**
+ * How many things are under a row.
+ *
+ * A shelf count sits in a pill and a component's variant count does not, which is the weighting the
+ * catalog's tree uses: the top level is how you choose where to look, and a number that far down is
+ * a detail about one row.
+ */
+@Composable
+private fun RowCount(count: Int, background: Color) {
   Surface(
-    shape = RoundedCornerShape(8.dp),
-    color = MaterialTheme.colorScheme.surfaceVariant,
+    Modifier.padding(end = 12.dp),
+    shape = RoundedCornerShape(10.dp),
+    color = background,
   ) {
     Text(
       count.toString(),
-      Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+      Modifier.padding(horizontal = 7.dp, vertical = 1.dp),
       color = MaterialTheme.colorScheme.onSurfaceVariant,
       style = MaterialTheme.typography.labelSmall,
+    )
+  }
+}
+
+/**
+ * The vertical rule that runs down a shelf's children, in the gutter its heading's accent bar is
+ * in.
+ *
+ * Without it a component row indented under a heading and a component row indented under nothing
+ * look the same, which at 280 dp — where a long display name pushes the indent out of view — is
+ * most of them.
+ */
+@Composable
+private fun IndentGuide(depth: Int) {
+  Box(Modifier.width(9.dp + 12.dp * (depth - 1)).fillMaxHeight(), Alignment.CenterStart) {
+    Box(
+      Modifier.padding(start = 9.dp)
+        .width(1.dp)
+        .fillMaxHeight()
+        .background(MaterialTheme.colorScheme.outlineVariant)
     )
   }
 }
@@ -3461,11 +3558,25 @@ private fun CatalogRow(
   onToggleVariants: () -> Unit,
 ) {
   Row(
-    Modifier.fillMaxWidth().height(42.dp).padding(start = 12.dp, end = 12.dp),
+    Modifier.fillMaxWidth().height(44.dp).padding(end = 4.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
+    IndentGuide(depth = 1)
+    // Only a component that HAS variants gets a twisty, and a spacer keeps the ones that do not
+    // aligned with the ones that do — a ragged left edge on half the rows reads as a rendering
+    // fault rather than as a component with nothing behind it.
+    if (item.variants.isEmpty()) DisclosureSpacer()
+    else {
+      Box(
+        Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onToggleVariants).semantics {
+          contentDescription = "${if (expanded) "Hide" else "Show"} ${item.displayName} variants"
+        }
+      ) {
+        DisclosureTriangle(expanded, MaterialTheme.colorScheme.onSurfaceVariant)
+      }
+    }
     CatalogDragHandle(item.componentId, item.displayName, onDrag, onDrop)
-    Column(Modifier.padding(start = 8.dp).weight(1f)) {
+    Column(Modifier.padding(start = 6.dp).weight(1f)) {
       Text(item.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
       Text(
         item.componentId,
@@ -3474,31 +3585,21 @@ private fun CatalogRow(
         maxLines = 1,
       )
     }
-    // Only a component that HAS variants gets a twisty, and the count beside it is what says how
-    // many are behind it — a chevron over nothing is a control that does nothing when pressed.
     if (item.variants.isNotEmpty()) {
-      Row(
-        Modifier.clip(RoundedCornerShape(8.dp))
-          .clickable(onClick = onToggleVariants)
-          .semantics {
-            contentDescription = "${if (expanded) "Hide" else "Show"} ${item.displayName} variants"
-          }
-          .padding(horizontal = 4.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        CountBadge(item.variants.size)
-        DisclosureChevron(expanded, MaterialTheme.colorScheme.onSurfaceVariant)
-      }
+      Text(
+        item.variants.size.toString(),
+        Modifier.padding(end = 4.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+      )
     }
-    TextButton(onClick = onAdd, enabled = canAdd) {
-      Text("Add", Modifier.semantics { contentDescription = "Add ${item.displayName}" })
-    }
+    CatalogAddButton(canAdd, onAdd, item.displayName)
   }
 }
 
 /**
- * One variant under its component: the same row, indented, adding the same component with one
- * property already chosen.
+ * One variant under its component: the same row, one level further in, adding the same component
+ * with one property already chosen.
  *
  * It carries a drag handle for the same reason the component row does — a variant you can only Add
  * into the selected slot is a variant that cannot be dropped where you are looking, and "drop it
@@ -3514,11 +3615,12 @@ private fun CatalogVariantRow(
 ) {
   val label = variant.label
   Row(
-    Modifier.fillMaxWidth().height(34.dp).padding(start = 34.dp, end = 12.dp),
+    Modifier.fillMaxWidth().height(36.dp).padding(end = 4.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
+    IndentGuide(depth = 2)
     CatalogDragHandle("${variant.componentId}#${variant.value}", label, onDrag, onDrop)
-    Row(Modifier.padding(start = 8.dp).weight(1f), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(start = 6.dp).weight(1f), verticalAlignment = Alignment.CenterVertically) {
       Text(
         label,
         style = MaterialTheme.typography.bodySmall,
@@ -3536,9 +3638,21 @@ private fun CatalogVariantRow(
         )
       }
     }
-    TextButton(onClick = onAdd, enabled = canAdd) {
-      Text("Add", Modifier.semantics { contentDescription = "Add $label ${variant.componentId}" })
-    }
+    CatalogAddButton(canAdd, onAdd, "$label ${variant.componentId}")
+  }
+}
+
+/**
+ * The one verb every palette row carries, sized so two levels of indent still leave room for it.
+ */
+@Composable
+private fun CatalogAddButton(canAdd: Boolean, onAdd: () -> Unit, label: String) {
+  TextButton(
+    onClick = onAdd,
+    enabled = canAdd,
+    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+  ) {
+    Text("Add", Modifier.semantics { contentDescription = "Add $label" })
   }
 }
 

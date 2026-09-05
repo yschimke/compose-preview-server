@@ -86,13 +86,31 @@ The insert panel used to be one flat list under three headings taken from a comp
 not the one a person asks ("where is the card"), which is how `Containers` came to hold a tab row, a
 card, a dialog and a plain `Row` under one word.
 
-It is now the tree the published catalog draws beside its grid: a family heading with a count, the
-components under it, and a component's variants under that. The families are not invented here —
-they are the vocabulary `@file:CatalogGroup(section = …)` already uses in m3-catalog, carried on the
-capability catalog as `ComponentCapability.group` and ordered by `CapabilityCatalog.groupOrder`, the
-same field a `catalog.spec.json` uses for the same job.
+It is now the tree the published catalog draws beside its grid, drawn the way that one is: an **All**
+pill carrying the whole count, sentence-case shelf rows with a solid twisty and an accent bar down
+the open branch, a muted count at the end of every row, and an indent rule down each shelf's
+children. The families are not invented here — they are the vocabulary
+`@file:CatalogGroup(section = …)` already uses in m3-catalog.
 
-**A variant is one property, named by the catalog.** `ComponentCapability.variantProperty` says which
+They are carried in [`ComponentMenu`](../../ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/ComponentMenu.kt),
+**not** on the capability catalog, and that is load-bearing. The catalog is a wire document whose
+shape is `CatalogCapabilityV1` in `compose-preview-contracts`, decoded by
+`CurrentM3UiBuilderCatalogExecutor` with `ignoreUnknownKeys = false` on purpose; a key invented here
+is a catalog that repository cannot read. It is also not a capability: nothing the server advertises,
+validates or exports depends on which shelf a component is displayed on. So it sits beside
+`StarterContent`, which is there for the same reason, and `CatalogMenuTest` checks it against the
+packaged catalog the way `StarterContentTest` checks that one. A catalog the table says nothing
+about — `wear-m3`, `remote-m3` — falls back to the kind headings this panel had before.
+
+One structural difference from the catalog's own tree is the data rather than the design: the catalog
+splits `Progress Linear` and `Progress Circular` into two components under a `Progress indicators`
+group, where the builder has one `m3/progress-indicator` whose `variant` property is `linear` or
+`circular`. The builder's tree is the same shape one level shallower — what the catalog spends a
+group level on, this spends a variant level on. Thumbnails are the one thing knowingly left out: the
+builder bakes no pixels per component, and a row with a missing image is worse than a row without
+one.
+
+**A variant is one property, named by the table.** `ComponentMenu.variantPropertyOf` says which
 of a component's properties enumerates its variants — `m3/card.variant`, `m3/button.style`,
 `m3/time-picker.mode` — and the rows under a component are that property's `allowedValues`, in
 declaration order, the first marked `default` because that is the one `defaultEncodedValue` already

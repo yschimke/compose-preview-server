@@ -10,14 +10,26 @@ person is looking for, so `Containers` held a tab row, a card, a dialog and a pl
 component with variants had none of them, because the catalog's variant property was reachable only
 by inserting the component and editing it in the inspector.
 
-After it, the panel is the same tree the published catalog draws: the catalog's own families as
-collapsible headings with a count, the components under each, and a component's variants as rows
-under it — each with its own Add, and the catalog's first value marked `default`.
+After it, the panel is the tree the published catalog draws beside its grid, and it is drawn the way
+that one is: an **All** pill carrying the whole count, sentence-case shelf rows with a solid twisty
+and an accent bar down the open branch, a muted count at the end of every row, and an indent rule
+running down each shelf's children. Under a shelf are its components, and under a component are its
+variants — each with its own Add, and the catalog's first value marked `default`.
+
+One structural difference from the catalog's own tree, and it is the data rather than the design: the
+catalog splits `Progress Linear` and `Progress Circular` into two components under a
+`Progress indicators` group, where the builder has one `m3/progress-indicator` whose `variant`
+property is `linear` or `circular`. So the builder's tree is the same shape one level shallower —
+what the catalog spends a group level on, this spends a variant level on.
+
+Not here, and knowingly: **thumbnails**. The catalog's rows carry one because that page has the
+pixels; the builder bakes none per component, and a row with a missing image is worse than a row
+without one.
 
 | file | what it is |
 | --- | --- |
 | `menu.before.png` | the panel grouped by role, as it shipped |
-| `menu.after.png` | the same panel grouped by the catalog's families, with counts and twisties |
+| `menu.after.png` | the same panel as the catalog's tree: All pill, shelves, accent bar, indent rules |
 | `menu.variants.after.png` | the panel filtered to `filled` — a variant name, not any component's |
 
 All three are `composePreviewRender` output for previews in
