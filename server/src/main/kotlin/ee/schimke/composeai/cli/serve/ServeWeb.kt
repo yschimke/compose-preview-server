@@ -1723,6 +1723,39 @@ ${captureControlsHtml().prependIndent("          ")}
       "</span>$delta</span>$where</li>"
   }
 
+  /**
+   * The rows of a published index that belong to the catalog serving [system].
+   *
+   * One repository may declare **several** design systems — `yschimke/wear-m3-catalog` publishes
+   * `:catalog` as `wear-m3-catalog` and `:remote-catalog` as `remote-m3` — and the index producer
+   * reads that repository's issues once and publishes the identical file onto *both* delivery
+   * branches (`parity-issues.yml`, whose two jobs differ only in `system`). That is deliberate: a
+   * locator names the system it was filed against, so one issue set can feed both indexes.
+   *
+   * Nothing downstream honoured it. [issuesForPreview] and [issuesForRow] match on component id and
+   * preview id, and two catalogs built from one repository share both vocabularies — every
+   * `Button/Filled` report filed against `remote-m3` therefore landed on the `wear-m3-catalog` row
+   * of the same name, and four preview ids (`pageindicator-horizontal__ideal__default__192dp` and
+   * its siblings) collide outright. On the wear catalog's own comparison wall that came to 527 of
+   * 690 pills, headed by an issue whose title says it is fixed on the very catalog it was being
+   * shown on. The component-id match is what makes an umbrella report reach every component it
+   * names, so the fix is not to narrow it but to scope the index first.
+   *
+   * A row with **no** system is kept: the field is optional on the wire, and an index published
+   * before the producer emitted one carries badges that are still this catalog's best guess. Only a
+   * row that positively names a *different* system is dropped, which is the same "positive evidence
+   * only, never inference from absence" rule the acceptance lifecycle join is built on.
+   *
+   * **Display only.** The acceptance lifecycle join resolves an issue by URL, and an acceptance may
+   * legitimately cite an issue filed against a sibling system; scoping that would turn a `closed`
+   * lifecycle into `unknown` and lose a stale finding. Handlers therefore pass the whole index as
+   * `acceptanceIssues` and the scoped list as `parityIssues`.
+   */
+  fun issuesForSystem(issues: List<ParityIssue>, system: String?): List<ParityIssue> {
+    if (system.isNullOrBlank()) return issues
+    return issues.filter { it.system == null || it.system == system }
+  }
+
   private fun issuesForPreview(
     issues: List<ParityIssue>,
     preview: ServePreview,
@@ -12034,6 +12067,16 @@ $cards
     hasReferenceFor: (String) -> Boolean = { false },
     parityIssues: List<ParityIssue> = emptyList(),
     /**
+     * The complete issue index used to resolve acceptance lifecycle state, exactly as
+     * [referenceComparisonPage] takes it. [parityIssues] is the list this catalog *displays* —
+     * scoped to its own design system by [issuesForSystem] — and the lifecycle join must not
+     * inherit that filter: an acceptance resolves an issue by URL, and one filed against a sibling
+     * system published from the same repository is still positive evidence of closure. Scoping it
+     * would answer `unknown` where the index plainly says `closed`, and a stale acceptance would
+     * stop being reported.
+     */
+    acceptanceIssues: List<ParityIssue> = parityIssues,
+    /**
      * The catalog inventory the acceptance walk resolves its targets against — null when this
      * catalog publishes no known-difference document, which leaves the panel and the engine's
      * bundle off the page entirely.
@@ -12472,7 +12515,7 @@ $cards
             artifactQuery = q,
             previews = acceptanceAudit,
             issues =
-              parityIssues
+              acceptanceIssues
                 .map { KnownDifferenceIssue(it.repository, it.number, it.state) }
                 .distinctBy { Triple(it.repository, it.number, it.state) },
           )
