@@ -7,6 +7,7 @@ import ee.schimke.composeai.uibuilder.protocol.AccessibilityV1
 import ee.schimke.composeai.uibuilder.protocol.ClipModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
+import ee.schimke.composeai.uibuilder.protocol.DecimalValueV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DimensionUnitV1
@@ -223,6 +224,62 @@ class ScreenDocumentProjectionTest {
           "center, end, justify, start"
       ),
       refusal(document(text("textAlign" to EnumValueV1("middle")))),
+    )
+  }
+
+  @Test
+  fun `a property whose values are an enumeration is read the same through either wrapper`() {
+    // A `string` wrapper on an `allowedValues` property is the legacy spelling the reducer now
+    // rejects on a write (#339). Documents already hold it, already render, and refused here with
+    // a type error naming `TextStyle` — a message about the wrapper's consequence rather than the
+    // wrapper. Both spellings resolve through the one table instead.
+    assertEquals(
+      projected(document(text("textAlign" to EnumValueV1("center")))).root.arguments,
+      projected(document(text("textAlign" to StringValueV1("center")))).root.arguments,
+    )
+  }
+
+  @Test
+  fun `an icon key becomes a chain, because the icon is an extension property`() {
+    // `androidx.compose.material.icons.Icons.Filled.Star` written as one qualified path does not
+    // resolve: the member is an extension on `Icons.Filled` declared in a different package, so it
+    // has to be imported and read by its simple name.
+    val icon =
+      projected(
+          document(
+            DesignNodeV1(
+              id = "icon",
+              componentId = "m3/icon",
+              properties = mapOf("iconKey" to EnumValueV1("star")),
+            )
+          )
+        )
+        .root
+        .arguments
+        .getValue("imageVector") as ScreenValue.Chain
+    assertEquals(
+      listOf(ChainLink("androidx.compose.material.icons.filled.Star", property = true)),
+      icon.links,
+    )
+    assertEquals("androidx.compose.ui.graphics.vector.ImageVector", icon.typeFqn)
+  }
+
+  @Test
+  fun `an icon size becomes a modifier link, because Icon has no such parameter`() {
+    val icon =
+      projected(
+        document(
+          DesignNodeV1(
+            id = "icon",
+            componentId = "m3/icon",
+            properties = mapOf("iconKey" to EnumValueV1("star"), "sizeDp" to DecimalValueV1(24.0)),
+          )
+        )
+      )
+    assertFalse("sizeDp" in icon.root.arguments)
+    assertEquals(
+      listOf(ChainLink("androidx.compose.foundation.layout.size", listOf(dp(24)))),
+      (icon.root.arguments.getValue("modifier") as ScreenValue.Chain).links,
     )
   }
 
