@@ -83,6 +83,26 @@ approve something right now, clicks it and approves — and the attacker's polle
 The code closes it, because the attacker cannot make the agent's terminal print the attacker's code.
 This is the same control, for the same reason, as the one on a TV's sign-in screen.
 
+## Why a dead grant says which kind of dead
+
+`GET /agent-access/whoami` answers an inactive credential with a `reason` and a human-readable
+`message`, not merely `active: false`. An agent whose calls start failing has to choose between
+retrying, re-running the approval flow, and stopping because a human revoked it — and those are
+very different responses to what used to be one indistinguishable empty reply.
+
+| `reason` | Means |
+|---|---|
+| `absent` | no credential on the request |
+| `malformed` | not shaped like a grant token |
+| `expired` | known here, past its TTL |
+| `unknown` | revoked, **or** issued by a previous run of this server |
+
+`unknown` deliberately conflates revocation with a restart. Nothing in the store is persisted, so a
+redeploy invalidates every outstanding token, and telling the two apart would mean keeping a
+tombstone for every revoked token — retaining exactly what revocation is meant to discard. The
+message names both causes so the reader can tell which happened from context the server does not
+have.
+
 ## Scopes, and the ceiling on them
 
 Three, ordered, each implying the ones below:

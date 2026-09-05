@@ -411,6 +411,36 @@ class ServeAgentGrantStore(
     return grant.takeIf { it.expiresAtMillis > clock() }
   }
 
+  /**
+   * Why a presented token is not a live grant — the thing `/agent-access/whoami` could not say.
+   *
+   * An agent whose calls start failing has to decide between "wait, this is transient", "re-run the
+   * approval flow" and "stop, a human revoked me", and until this existed every one of those looked
+   * identical: an inactive answer with no fields set. [UNKNOWN] deliberately covers both a revoked
+   * grant and one minted by a previous run of this process — nothing here is persisted, so a
+   * redeploy invalidates every outstanding token — because the store keeps no tombstone that could
+   * tell them apart, and adding one would mean retaining exactly what revocation discards.
+   */
+  enum class TokenState(val wire: String) {
+    LIVE("live"),
+    ABSENT("absent"),
+    MALFORMED("malformed"),
+    EXPIRED("expired"),
+    UNKNOWN("unknown"),
+  }
+
+  /** Classify [presented] for the whoami reply. Never echoes the token itself. */
+  fun describeToken(presented: String?): TokenState {
+    if (presented.isNullOrBlank()) return TokenState.ABSENT
+    if (!isWellFormedToken(presented)) return TokenState.MALFORMED
+    val id = byToken[presented] ?: return TokenState.UNKNOWN
+    val grant = grants[id] ?: return TokenState.UNKNOWN
+    // An expired grant lingers until [purge] sweeps it, so this window is where "expired" can be
+    // reported precisely. After the sweep the same token reads as UNKNOWN, which is honest: the
+    // store genuinely no longer knows it.
+    return if (grant.expiresAtMillis > clock()) TokenState.LIVE else TokenState.EXPIRED
+  }
+
   /** The live grant with this id, or null when unknown/expired. */
   fun grant(id: String?): Grant? {
     val key = id ?: return null
