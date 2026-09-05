@@ -119,6 +119,37 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
+| `ui_builder_list_catalogs`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to, the designs on this box, and one design's whole document |
+| `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one |
+| `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
+
+The `ui_builder_*` tools appear in `tools/list` only on a box that actually serves a UI builder
+(`--ui-builder-dir`). A box without one does not advertise them, because listed-and-failing tells an
+agent this server can do something it cannot.
+
+### Authoring a design over MCP
+
+The tools are a typed door onto the same `UiBuilderServicePort` the browser's Design API calls, so
+the reply is the released `McpResponseEnvelopeV1` and the request shapes are the released
+`UiBuilderRequestV1` ones. A session looks like:
+
+1. `ui_builder_list_catalogs` — a document's `catalogPin` names a catalog revision the service
+   checks, so this is where a real one comes from.
+2. `ui_builder_create_design` — with a whole `document`, or `fromDesignId` to copy an existing
+   design. There is no "blank template" argument: a starter document assembled inside the server
+   would carry a pin invented there, and the service would reject it. A copy carries a pin that is
+   real by construction.
+3. `ui_builder_get_design` — read the `revision` to quote next. `baseRevision` is how a concurrent
+   edit is detected, so an agent that guesses it *is* the concurrent edit.
+4. `ui_builder_apply` — `operations` is an array of `DesignMutationV1`: `insertNode`, `setProperty`,
+   `deleteNode`, `moveNode` and the rest. `operationId` is yours, and makes a retry idempotent.
+5. `ui_builder_export` — the Kotlin, or the refusals.
+
+Two things are deliberately **not** taken from the message. The command's nested `actorId` is filled
+from the presented grant, because `UiBuilderProtocolMapper` rejects a command whose actor is not the
+authenticated one and the point of that check is that a caller does not choose. And the capability
+is checked per tool against the same `UiBuilderRouteCapability` mapping the HTTP routes use, off the
+call the credential arrived on — the gate an agent reaches is the gate a person reaches.
 
 `observe=svg` returns the vector as SVG **source** in a `text` content block, not as a base64
 `image` block with `mimeType: image/svg+xml`. The symmetry with `png` is tempting, but almost no MCP
@@ -258,18 +289,24 @@ collide.
 
 ## Relationship to UI-builder MCP
 
-These are separate MCP products with shared authentication:
+One endpoint, two authorization vocabularies:
 
 | Surface | Endpoint/transport | Authorization | State model |
 | --- | --- | --- | --- |
-| Catalog MCP | `/mcp`, Streamable HTTP | `preview` / `live` scopes | Stateless aggregate catalog queries and renders |
-| UI-builder MCP | UI-builder sidecar, configurable path such as `/ui-builder/mcp` | `ui-builder-read`, `ui-builder-write`, `ui-builder-export` capabilities | Stateful collaborative design session |
+| Catalog tools | `/mcp`, Streamable HTTP | `preview` / `live` scopes | Stateless aggregate catalog queries and renders |
+| UI-builder tools | `/mcp`, same transport | `ui-builder-read`, `ui-builder-write`, `ui-builder-export` capabilities | Stateless per call; a design's revision is carried explicitly as `baseRevision` |
 
-The UI-builder MCP remains a thin authoring adapter over the preview server's authenticated Design
-API. It may keep a stateful MCP session because revisions and collaboration benefit from one. The
-catalog endpoint has no authoring state and deliberately remains stateless. Both present the same
-agent bearer to preview-server APIs, and both rely on the same authenticated-user grant approval,
-TTL, audit, and revocation implementation.
+This was planned as a separate sidecar on a path of its own, with a stateful session. It is one
+endpoint instead, and the session is stateless, for two reasons. An agent already holds exactly one
+bearer for the box, and a second endpoint would have meant a second origin check, a second body cap
+and a second place for the two to drift about what a grant means. And the stateful session it would
+have kept turned out to buy nothing: the Design API already carries the revision in the request, so
+`baseRevision` does the work a session cursor would have done, and does it in a form a retry can
+repeat.
+
+What did not change is the capability model. `ui-builder-read`, `ui-builder-write` and
+`ui-builder-export` are checked per call through the same mapping the HTTP routes use, so a grant
+that reaches the browser's Design API reaches these tools and nothing more.
 
 ## Security and capacity
 
