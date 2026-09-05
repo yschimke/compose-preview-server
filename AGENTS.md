@@ -74,5 +74,12 @@ repository boundary.
   in. `docs/serve/preview-selector-fixtures.json` is the shared golden table that pins them; it is
   owned upstream, vendored by `scripts/sync-preview-selector-fixtures.sh`, and run by
   `PreviewSelectorFixturesTest`. Change the rule, change the table upstream in the same change.
+- Two JVM floors, `java-server` (17) and `java-ui-builder` (21), declared once in
+  `gradle/libs.versions.toml` with the reasoning beside them. Everything a consumer compiles or
+  resolves against is 17, because compose-ai-tools' `:cli` compiles against published
+  `compose-preview-serve` on a 17 toolchain; only `:ui-builder` and `:ui-builder-artwork`, whose
+  class files leave the build solely inside `:ui-builder-render-bundle`'s polyglot, sit above it.
+  Building needs both JDKs. Never raise a module's toolchain by editing the module —
+  `:server:checkServerJvmFloor` scans the resolved distribution classpath and will say so.
 - The source package stays `ee.schimke.composeai.cli.serve` until a separately reviewed rename.
 - UI-affecting PRs include viewable before/after evidence and update the visual harness when needed.
