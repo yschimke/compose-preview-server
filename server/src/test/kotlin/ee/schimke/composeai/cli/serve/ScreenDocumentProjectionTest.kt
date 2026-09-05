@@ -58,6 +58,13 @@ class ScreenDocumentProjectionTest {
       typeFqn = "androidx.compose.ui.unit.Dp",
     )
 
+  /** Every reason a document produced, empty when it projected — for cases that assert both. */
+  private fun reasonsFor(document: DesignDocumentV1): List<String> =
+    when (val outcome = ScreenDocumentProjection.project(document)) {
+      is ScreenDocumentProjection.Outcome.Refused -> outcome.reasons
+      is ScreenDocumentProjection.Outcome.Projected -> emptyList()
+    }
+
   private fun refusal(document: DesignDocumentV1): List<String> =
     (ScreenDocumentProjection.project(document) as ScreenDocumentProjection.Outcome.Refused).reasons
 
@@ -181,25 +188,56 @@ class ScreenDocumentProjectionTest {
   }
 
   @Test
-  fun `a variant property is refused as a call-site decision, not as a missing member`() {
-    // `m3/button`.`style` is not a value at all: the catalog spells three Compose components as one
-    // id, so there is no member to name. Its own sentence, because "no mapping" would send somebody
-    // to add a table entry that cannot exist.
+  fun `a variant nothing selects is refused as a call-site decision, not as a missing member`() {
+    // A variant property is not a value at all: it names a component. Where `COMPONENT_VARIANTS`
+    // says which one, the projection selects it; where nothing does — `layout/supporting-pane
+    // -scaffold` is an adaptive API with no record — this is the sentence, and it has to keep
+    // reading as a call-site decision rather than as a table entry somebody could add.
     assertEquals(
       listOf(
-        "node `button`.`style` is `outlined`, which names a component variant rather than a " +
-          "value: the catalog spells three Compose components as one id, and choosing between " +
-          "them is a call-site decision this projection cannot make from a parameter"
+        "node `panes`.`layoutMode` is `expandedTwoPane`, which names a component variant rather " +
+          "than a value: the catalog spells three Compose components as one id, and choosing " +
+          "between them is a call-site decision this projection cannot make from a parameter"
       ),
       refusal(
         document(
           DesignNodeV1(
-            id = "button",
-            componentId = "m3/button",
-            properties = mapOf("style" to EnumValueV1("outlined")),
+            id = "panes",
+            componentId = "layout/supporting-pane-scaffold",
+            properties = mapOf("layoutMode" to EnumValueV1("expandedTwoPane")),
           )
         )
       ),
+    )
+  }
+
+  @Test
+  fun `a button style selects the component, and a fab is not a Button under another name`() {
+    // Eleven of the twelve variants are the same signature under another name. `fab` is not:
+    // `FloatingActionButton`'s content slot has no receiver where `Button`'s is a `RowScope`, so a
+    // weight that is legal in a `TextButton` must refuse inside a fab. Reading the scope from the
+    // catalog id rather than from the variant would have emitted it against a receiver that is not
+    // there.
+    fun weightInside(style: String) =
+      reasonsFor(
+        document(
+          DesignNodeV1(
+            id = "button",
+            componentId = "m3/button",
+            properties = mapOf("style" to EnumValueV1(style)),
+            slots = mapOf("content" to listOf("text")),
+          ),
+          text("weight" to DecimalValueV1(1.0)),
+          roots = listOf("button"),
+        )
+      )
+    assertEquals(emptyList(), weightInside("text"))
+    assertEquals(
+      listOf(
+        "node `text`.`weight` is a layout weight, which `Modifier.weight` supplies from a row's " +
+          "or column's scope; this node sits at the root, which has no receiver"
+      ),
+      weightInside("fab"),
     )
   }
 
