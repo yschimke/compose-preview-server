@@ -111,7 +111,9 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `render_preview` | `live` | Render with optional overrides; defaults to a token-frugal semantics/hash observation, with `observe=png` for pixels and `observe=svg` for the `compose/figma-svg` vector export |
 | `render_matrix` | `live` | Render one preview across a cross-product of override axes in a single call |
 | `list_devices` | `preview` | The `device` override's accepted vocabulary, with each frame's dp size and density |
-| `history_list` | `preview` | One preview's render timeline, or where to fetch it |
+| `history_list` | `preview` | One preview's render timeline |
+| `history_diff` | `preview` | Compare two of its recorded renders |
+| `history_read` | `preview` | One historical render's pixels, by commit or blob |
 | `diff_semantics` | `live` | Compare two previews' semantics by authored `testTag` |
 | `list_data_products` | `preview` | Discover structured products exposed by previews |
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
@@ -140,11 +142,20 @@ preview has never changed".
 | `local` | project mode — `serve` against a checkout | the timeline inline, each version carrying a `renderUrl` |
 | `none` | an uploaded bundle with neither | a `reason`, not an empty list |
 
-**The server does not proxy a published manifest.** `history.json` is a whole-catalog document on a
-public host, published by CI onto a branch that moves independently of this process; the browser
-viewer fetches it directly for the same reason. A server-side copy would be a cache with its own
-staleness against that branch, so the fetchable URL is returned instead, along with the template for
-addressing any single historical render (`raw.githubusercontent.com/<repo>/{commit}/{path}`).
+**`published` answers from the copy the load already holds.** `ServeCatalogStore` fetches
+`history.json` from the same immutable tree as `catalog.json` — the load is pinned to one commit by
+construction — and parses it into the bundle host. So the timeline is in memory, describes exactly
+the catalog being served, and is reported with the `pinnedCommit` it belongs to. There is no
+independent staleness to manage: history is as fresh as the catalog it describes.
+
+Answering inline rather than by URL is not a convenience. `m3-catalog`'s manifest is **1,008,000
+bytes** across 1336 previews; the slice describing one preview is **497 bytes**. Sending a caller to
+fetch the whole document to read one row is a 2000:1 overfetch, and it assumes the caller can reach
+`raw.githubusercontent.com` at all — which an agent behind an allowlist often cannot, even while the
+MCP endpoint is reachable. `manifestUrl` is still returned for a caller that wants the whole
+catalog's timeline, and each version carries the `renderUrl` serving those exact bytes.
+
+A publisher that ships no `history.json` keeps the URL-only answer as the degraded path.
 
 In `local` mode the timeline comes from [`ServeProjectHistory`], derived from the checkout's own
 delivery-branch commits and memoised per refresh window because one `git log --raw` over the branch
@@ -159,6 +170,25 @@ A timeline is not a commit list. Adjacent commits whose render bytes are identic
 version, and a preview that keeps returning to a render it had already moved away from is reported
 `unstable` with a `flapCount` rather than as a preview with hundreds of changes — on the measured
 branch, five such previews accounted for a 40% reduction in entries.
+
+### Comparing and reading historical renders
+
+`history_diff` compares two of a preview's recorded renders, defaulting to the two newest — *did the
+last publish move this preview?* It is a **metadata** comparison: the timeline's versions are
+already collapsed distinct renders, so whether the bytes changed is answered by their content ids
+without fetching either image on either side.
+
+It reports `unstable` alongside, and says so explicitly when set. That is the point of having it:
+on a preview that re-renders differently on publishes that did not change it, a byte difference is
+not evidence of a real change — the same question `flake-triage` otherwise settles with a
+repeat-render oracle, answered here from precomputed data.
+
+`history_read` returns one historical render's pixels through this server, addressed by `commit` or
+`blob` (a prefix is enough). `preview` scope rather than `live`, matching the HTTP permalink lane:
+it replays already-published bytes and commissions no render. It is still bounded — the published
+lane goes through the bundle host's pinned-fetch permit and its miss cache, and the project-mode
+lane only ever serves blobs the timeline already names. A timeline that names a version the branch
+will not hand over is reported as such, distinctly from a version that does not exist.
 
 ### The full-page scroll lanes
 
