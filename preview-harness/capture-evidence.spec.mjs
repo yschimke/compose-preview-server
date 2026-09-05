@@ -61,4 +61,20 @@ test("capture evidence", async ({ page }) => {
     await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2, { button: "right" });
     await settle(page);
     await page.screenshot({ path: `${OUT}/layer-menu.${SUFFIX}.png` });
+    // Fresh, because the menu above is still open and a Compose popup does not close on Escape.
+    await page.goto("index.html?mode=interactive-editor");
+    await ready(page);
+    await openDock(page, "layers");
+
+    // A container, whose catalog entry declares layout modifiers: the same menu then carries them.
+    const container = await page
+        .getByRole("button", { name: /Select main-background/ })
+        .boundingBox();
+    await page.mouse.click(
+        container.x + container.width / 2,
+        container.y + container.height / 2,
+        { button: "right" },
+    );
+    await settle(page);
+    await page.screenshot({ path: `${OUT}/container-menu.${SUFFIX}.png` });
 });
