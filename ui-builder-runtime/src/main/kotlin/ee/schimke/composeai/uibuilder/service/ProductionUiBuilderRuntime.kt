@@ -654,6 +654,73 @@ private fun wearM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
   val wearButton =
     wearOwn("m3/button", "wear-m3/button", "Button", "a Material 3 Button", "`Button`")
 
+  /**
+   * A Wear selection row: `CheckboxButton`, `SwitchButton`, `RadioButton`.
+   *
+   * These are the first Wear components here that are **not** a renamed Material 3 one, and the
+   * reason is their shape. Wear's are not the mobile controls: a `CheckboxButton` is a full-width
+   * filled row carrying a label, an optional secondary label and the tick at its end — a list item,
+   * which is why it takes `ListItem` and lands in a `TransformingLazyColumn`. Borrowing
+   * `m3/checkbox` would have put a 20dp square on a watch and called it the same component.
+   *
+   * No `icon` slot yet, though upstream's takes one: the wear catalog has no icon id — `m3/icon`
+   * left with the other Material borrows, because its key resolves to a vector through a table the
+   * export module cannot reach — so an icon slot here would be one nothing could fill.
+   */
+  val singleTextSlot = components.getValue("m3/filter-chip").slots.first { it.name == "label" }
+
+  fun wearSelectionRow(
+    componentId: String,
+    displayName: String,
+    stateProperty: String,
+    generatesAs: String,
+  ) =
+    components.getValue("m3/card").let { card ->
+      card.copy(
+        componentId = componentId,
+        displayName = displayName,
+        role = "Container",
+        traits = listOf("ListItem", "SelectionControl"),
+        // Copied from the chip's `label` rather than declared here, for the reason every other slot
+        // in this file is copied: the protocol's slot type is not imported into this module, and
+        // one
+        // shape that already means "exactly one text child" beats a second spelling of it.
+        slots =
+          listOf(
+            singleTextSlot,
+            singleTextSlot.copy(
+              name = "secondaryLabel",
+              cardinality = singleTextSlot.cardinality.copy(min = 0, max = 1),
+            ),
+          ),
+        properties =
+          listOf(
+            PropertyCapabilityV1(
+              name = stateProperty,
+              // `["boolean", "string"]`, the catalog's spelling of "a flag or a read of a declared
+              // state variable" — which is what makes a group of radio rows pick one option between
+              // them rather than each holding its own.
+              jsonType = JsonArray(listOf(JsonPrimitive("boolean"), JsonPrimitive("string"))),
+            ),
+            PropertyCapabilityV1(name = "enabled", jsonType = JsonPrimitive("boolean")),
+          ),
+        modifierCapabilities = emptyList(),
+        wasm =
+          card.wasm.copy(
+            notes =
+              "Wear Material 3's $generatesAs: a full-width filled row with its label, an optional secondary label, and the control at the end. Drawn on the canvas out of Material 3 pieces in that shape, because the Wasm canvas cannot link `androidx.wear.compose:compose-material3` — the mobile control on its own is the wrong component, not a smaller one."
+          ),
+        code = null,
+      )
+    }
+
+  val wearCheckboxButton =
+    wearSelectionRow("wear-m3/checkbox-button", "Checkbox button", "checked", "`CheckboxButton`")
+  val wearSwitchButton =
+    wearSelectionRow("wear-m3/switch-button", "Switch button", "checked", "`SwitchButton`")
+  val wearRadioButton =
+    wearSelectionRow("wear-m3/radio-button", "Radio button", "selected", "`RadioButton`")
+
   // Foundation only. Every one of these is `androidx.compose.foundation` or `androidx.compose.ui`,
   // shared by both platforms, so borrowing it claims nothing about which Material library a Wear
   // screen is built from — which is exactly what borrowing a Material component did claim.
@@ -715,8 +782,17 @@ private fun wearM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
         catalogRevision = "wear-screen-scaffold-v1",
       ),
     components =
-      listOf(scaffold, transformingLazyColumn, listHeader, wearText, wearCard, wearButton) +
-        borrowed,
+      listOf(
+        scaffold,
+        transformingLazyColumn,
+        listHeader,
+        wearText,
+        wearCard,
+        wearButton,
+        wearCheckboxButton,
+        wearSwitchButton,
+        wearRadioButton,
+      ) + borrowed,
   )
 }
 

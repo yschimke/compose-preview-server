@@ -117,6 +117,38 @@ class WearM3ScreenCatalogTest {
     }
   }
 
+  /**
+   * Wear's selection rows are rows: a label, an optional secondary label, and a state.
+   *
+   * The shape matters beyond this catalog. `StarterContent` in `:ui-builder` seeds these three by
+   * slot name from a table that module cannot check against this catalog, so the names are pinned
+   * here — and the reason they are rows at all is the reason they are not borrowed: a Wear
+   * `CheckboxButton` is a full-width labelled row, where `m3/checkbox` is a 20dp square.
+   */
+  @Test
+  fun `each wear selection row carries a label, a secondary label and its own state`() {
+    listOf(
+        "wear-m3/checkbox-button" to "checked",
+        "wear-m3/switch-button" to "checked",
+        "wear-m3/radio-button" to "selected",
+      )
+      .forEach { (componentId, stateProperty) ->
+        val component = wear.components.single { it.componentId == componentId }
+
+        assertEquals(
+          listOf("label", "secondaryLabel"),
+          component.slots.map { it.name },
+          componentId,
+        )
+        assertEquals(1, component.slots.first().cardinality.min, componentId)
+        assertEquals(0, component.slots.last().cardinality.min, componentId)
+        assertTrue(component.properties.any { it.name == stateProperty }, componentId)
+        assertTrue(component.properties.any { it.name == "enabled" }, componentId)
+        // A list item, which is what puts it in the transforming lazy column.
+        assertTrue("ListItem" in component.traits, componentId)
+      }
+  }
+
   /** An id with no packaged adapter is refused by name rather than served as something else. */
   @Test
   fun `a catalog with no adapter is refused`() {

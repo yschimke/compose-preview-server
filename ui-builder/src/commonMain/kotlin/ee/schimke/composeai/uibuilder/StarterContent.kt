@@ -97,6 +97,9 @@ internal object StarterContent {
       // grey pill, and a palette drop that looks like neither a checkbox nor a switch is the case
       // starter content exists for. Turning one off is a click.
       "m3/checkbox" to mapOf("checked" to starterBool(true)),
+      "wear-m3/checkbox-button" to mapOf("checked" to starterBool(true)),
+      "wear-m3/switch-button" to mapOf("checked" to starterBool(true)),
+      "wear-m3/radio-button" to mapOf("selected" to starterBool(true)),
       // One of a group is chosen, or the group is a row of empty circles.
       "m3/radio-button" to mapOf("selected" to starterBool(true)),
       // Something to look at. A slider at zero is a track with the thumb jammed against the left
@@ -122,6 +125,13 @@ internal object StarterContent {
       "m3/icon-button" to mapOf("content" to listOf(icon("favorite", "Favorite"))),
       "m3/filter-chip" to mapOf("label" to listOf(text("Filter", "labelLarge"))),
       "m3/center-aligned-top-app-bar" to mapOf("title" to listOf(text("Title", "titleLarge"))),
+      // Wear's selection rows, seeded with the label they are mostly made of. The child is
+      // `wear-m3/text` rather than `m3/text`: these live in the `wear-m3` catalog, which has no
+      // mobile Material component in it at all, and a seed naming one would be dropped as not
+      // fitting the slot — which is the check doing its job.
+      "wear-m3/checkbox-button" to wearSelectionRowSeed(),
+      "wear-m3/switch-button" to wearSelectionRowSeed(),
+      "wear-m3/radio-button" to wearSelectionRowSeed(),
       // A label and a placeholder, which is the field Material's own samples draw. An empty text
       // field is a rounded rectangle: nothing about it says what it is for, and `label` is the part
       // a form is unreadable without.
@@ -231,6 +241,18 @@ private fun icon(iconKey: String, contentDescription: String): StarterNode =
 
 private fun column(vararg children: StarterNode): StarterNode =
   StarterNode(componentId = "layout/column", slots = mapOf("children" to children.toList()))
+
+private fun wearSelectionRowSeed(): Map<String, List<StarterNode>> =
+  mapOf(
+    "label" to listOf(wearText("Label")),
+    "secondaryLabel" to listOf(wearText("Secondary label")),
+  )
+
+private fun wearText(value: String): StarterNode =
+  StarterNode(
+    componentId = "wear-m3/text",
+    properties = mapOf("text" to starterLiteral("string", value)),
+  )
 
 private fun tab(label: String, selected: Boolean = false): StarterNode =
   StarterNode(

@@ -77,6 +77,25 @@ The rename changes no pixels: `WearScreenSamplePreview` renders byte-identically
 ([`renders/ui-builder-wear-borrow/`](../../renders/ui-builder-wear-borrow/README.md)). It changes
 what the design says it holds.
 
+## The first components that were never Material 3's
+
+`wear-m3/checkbox-button`, `wear-m3/switch-button` and `wear-m3/radio-button` are the first ids here
+that are not a renamed borrow, and the reason is shape rather than size. Upstream's are **rows**: a
+filled, full-width container with a label, an optional secondary label and the control at the end —
+which is why each carries `ListItem` and drops into a `TransformingLazyColumn`. `m3/checkbox` is a
+20dp square. There was no version of borrowing that produced the right component.
+
+They follow the same split as everything else on this canvas: the drawing is borrowed — a Material 3
+`Checkbox`, `Switch` or `RadioButton` inside a row assembled to Wear's geometry — and the identity,
+the notes and the generated Kotlin are Wear's, down to the callback names (`onCheckedChange` for the
+two toggles, `onSelect` for the radio, because a radio cannot be un-selected by pressing it).
+
+The labels are slots rather than properties, so the text in a row is an ordinary `wear-m3/text` node
+the operator can style and the exporter emits as Wear's `Text`. There is no `icon` slot, though
+upstream's components take one: this catalog has no icon id at all
+([why](#what-may-be-borrowed-foundation-and-nothing-material)), so the slot would be one nothing
+could fill.
+
 ## The stadium is the scroll extent, and it is the real one
 
 The canvas draws the scaffold as the frame's **width**, the content's **height**, and round caps.
@@ -254,11 +273,16 @@ it as, so the generator names the node and stops rather than emitting Kotlin tha
   watch — but each is still *drawn* as its Material 3 lookalike, and the template still makes up the
   difference with type sizes and padding measured off the reference. What is left is the sizes, not
   the naming.
-- **No Wear controls yet.** Wear Material 3 publishes `CheckboxButton`, `SwitchButton`,
-  `RadioButton`, `Slider`, `Stepper`, `DatePicker`, `TimePicker` and its own `AlertDialog`, and none
-  of them has an id here. They are not borrowable — a Wear `CheckboxButton` is a full-width row with
-  a label, not the mobile checkbox — so each needs a `wear-m3/…` id and an emitter branch of its
-  own.
+- **The selection rows are in; the rest of Wear's controls are not.**
+  `wear-m3/checkbox-button`, `wear-m3/switch-button` and `wear-m3/radio-button` map to upstream's
+  `CheckboxButton`, `SwitchButton` and `RadioButton` — full-width labelled rows, which is why they
+  carry `ListItem` and why borrowing `m3/checkbox` was never possible. Wear also publishes `Slider`,
+  `Stepper`, `DatePicker`, `TimePicker` and its own `AlertDialog`, and none of those has an id yet.
+- **A selection row inside a list takes the height treatment only.** `ListHeader` and `TitleCard`
+  also take `transformation = SurfaceTransformation(spec)`; upstream's samples show those two doing
+  it and show nothing for the selection rows, and this repository has no compiled Wear dependency to
+  check the signature against. `Modifier.transformedHeight` is emitted either way, so a row measures
+  against the scroll; the scale and fade toward the bezel is what it misses.
 - **`EdgeButton` is placed, not shaped.** The slot generates a real `EdgeButton`; the canvas draws
   the borrowed flat button at the bottom cap, because the shape comes from the screen. The parity
   template carries none for that reason.

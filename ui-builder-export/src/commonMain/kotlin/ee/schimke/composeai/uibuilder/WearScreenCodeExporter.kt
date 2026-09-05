@@ -1,6 +1,8 @@
 package ee.schimke.composeai.uibuilder
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -188,6 +190,18 @@ object WearScreenCodeExporter {
 
   internal const val BUTTON = "wear-m3/button"
 
+  /**
+   * Wear's selection rows, which have no Material 3 counterpart worth borrowing.
+   *
+   * `CheckboxButton`, `SwitchButton` and `RadioButton` are full-width labelled rows rather than the
+   * bare controls, so they arrive here as Wear ids from the start rather than as a rename.
+   */
+  internal const val CHECKBOX_BUTTON = "wear-m3/checkbox-button"
+
+  internal const val SWITCH_BUTTON = "wear-m3/switch-button"
+
+  internal const val RADIO_BUTTON = "wear-m3/radio-button"
+
   internal const val INDENT = "    "
 
   /**
@@ -221,6 +235,9 @@ internal class WearContentEmitter(
   private var usesEdgeButton = false
   private var usesArrangement = false
   private var usesDp = false
+
+  /** Which of Wear's selection rows the screen used, so each imports itself and no more. */
+  private val usesSelectionRows = mutableSetOf<String>()
 
   /**
    * The scaffold's content, as `TransformingLazyColumn` item bodies.
@@ -340,6 +357,30 @@ internal class WearContentEmitter(
       // No transformation on a layout container, even directly inside an item.
       // `SurfaceTransformation` is a surface treatment and a `Column` draws no surface; upstream
       // puts it on the `TitleCard` or the `ListHeader` inside, which is what a nested emit reaches.
+      WearScreenCodeExporter.CHECKBOX_BUTTON ->
+        selectionRow(
+          node,
+          "CheckboxButton",
+          "checked",
+          "onCheckedChange = {}",
+          pad,
+          depth,
+          transformed,
+        )
+      WearScreenCodeExporter.SWITCH_BUTTON ->
+        selectionRow(
+          node,
+          "SwitchButton",
+          "checked",
+          "onCheckedChange = {}",
+          pad,
+          depth,
+          transformed,
+        )
+      // `onSelect`, not `onClick` or `onCheckedChange`: upstream names a radio's callback for what
+      // it does, and a radio cannot be un-selected by pressing it.
+      WearScreenCodeExporter.RADIO_BUTTON ->
+        selectionRow(node, "RadioButton", "selected", "onSelect = {}", pad, depth, transformed)
       "layout/column" -> {
         usesColumn = true
         container("Column", node, "children", pad, depth)
@@ -417,6 +458,53 @@ internal class WearContentEmitter(
       "${pad}transformation = SurfaceTransformation(spec),",
     )
 
+  /**
+   * One of Wear's three selection rows.
+   *
+   * They take the same arguments under different names — `checked`/`onCheckedChange` for the two
+   * toggles, `selected`/`onSelect` for the radio — so one emitter writes all three and the names
+   * come in as arguments.
+   *
+   * **Only the height treatment inside a list.** `ListHeader` and `TitleCard` also take
+   * `transformation = SurfaceTransformation(spec)`, and upstream's own list samples pass it to
+   * those two; this generator has no sample and no compiled dependency that shows the selection
+   * rows accept the same parameter, and an argument that may not exist is Kotlin that does not
+   * compile. `Modifier.transformedHeight` is applied either way, so a row still measures against
+   * the list's scroll — what it misses is the scale and fade toward the bezel.
+   */
+  private fun selectionRow(
+    node: UiBuilderNode,
+    symbol: String,
+    stateArgument: String,
+    callbackArgument: String,
+    pad: String,
+    depth: Int,
+    transformed: Boolean,
+  ): List<String> {
+    usesSelectionRows += symbol
+    usesText = true
+    val on = node.boolean(stateArgument)
+    val label = node.slots["label"].orEmpty()
+    val secondary = node.slots["secondaryLabel"].orEmpty()
+    return listOf(
+      "${pad}$symbol(",
+      "${pad}${INDENT}$stateArgument = $on,",
+      "${pad}${INDENT}$callbackArgument,",
+      "${pad}${INDENT}enabled = ${node.boolean("enabled", true)},",
+    ) +
+      (if (transformed) listOf("${pad}${INDENT}modifier = Modifier.transformedHeight(this, spec),")
+      else emptyList()) +
+      listOf("${pad}${INDENT}label = {") +
+      label.flatMap { emit(it, depth + 2) } +
+      listOf("${pad}${INDENT}},") +
+      (if (secondary.isEmpty()) emptyList()
+      else
+        listOf("${pad}${INDENT}secondaryLabel = {") +
+          secondary.flatMap { emit(it, depth + 2) } +
+          listOf("${pad}${INDENT}},")) +
+      listOf("${pad})")
+  }
+
   private fun refused(reason: String): List<String> {
     refusals += reason
     return emptyList()
@@ -445,6 +533,7 @@ internal class WearContentEmitter(
     if (timeText) add("androidx.wear.compose.material3.timeTextCurvedText")
     if (usesListHeader) add("androidx.wear.compose.material3.ListHeader")
     if (usesCard) add("androidx.wear.compose.material3.TitleCard")
+    usesSelectionRows.forEach { add("androidx.wear.compose.material3.$it") }
     add("androidx.wear.compose.material3.lazy.rememberTransformationSpec")
     add("androidx.wear.compose.material3.lazy.transformedHeight")
     // `androidx.wear.compose:compose-ui-tooling`, not `androidx.wear:wear-tooling-preview`. The
@@ -466,6 +555,19 @@ internal class WearContentEmitter(
 
   // Properties arrive as the wire's typed values — `{"type": "string", "value": "…"}` — so a read
   // that took `properties[name]` straight would see the wrapper object and never the value.
+  /**
+   * A boolean property, resolved the way the canvas resolves it.
+   *
+   * A control's state may be a literal or a `stateEquals` read of a declared variable, and a Wear
+   * screen's generator has no state preamble to write a comparison into — so a bound control emits
+   * the value the binding compares against. That is the same thing the canvas draws, and it is
+   * stated here rather than silently: a Wear screen is generated as a still.
+   */
+  private fun UiBuilderNode.boolean(name: String, fallback: Boolean = false): Boolean {
+    val value = properties[name] as? JsonObject ?: return fallback
+    return (value["value"] as? JsonPrimitive)?.booleanOrNull ?: fallback
+  }
+
   private fun UiBuilderNode.string(name: String): String =
     (properties[name] as? JsonObject)?.get("value")?.jsonPrimitive?.contentOrNull.orEmpty()
 

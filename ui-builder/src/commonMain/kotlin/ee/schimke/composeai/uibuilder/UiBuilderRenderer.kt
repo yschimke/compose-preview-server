@@ -975,6 +975,29 @@ private fun RenderNode(
         )
       }
     }
+    // Wear's selection rows, which are not the mobile controls in a smaller size: each is a
+    // full-width filled row carrying a label, an optional secondary label, and its control at the
+    // end. The row is what makes them list items on a watch.
+    "wear-m3/checkbox-button",
+    "wear-m3/switch-button",
+    "wear-m3/radio-button" ->
+      WearSelectionRow(
+        node = node,
+        modifier = measured,
+        enabled = enabled,
+        label = { next -> slot("label").forEach { child(it, next) } },
+        secondaryLabel = { next -> slot("secondaryLabel").forEach { child(it, next) } },
+        hasSecondaryLabel = slot("secondaryLabel").isNotEmpty(),
+        control = { checked ->
+          when (node.componentId) {
+            "wear-m3/switch-button" ->
+              Switch(checked = checked, onCheckedChange = { activate() }, enabled = enabled)
+            "wear-m3/radio-button" ->
+              RadioButton(selected = checked, onClick = activate, enabled = enabled)
+            else -> Checkbox(checked = checked, onCheckedChange = { activate() }, enabled = enabled)
+          }
+        },
+      )
     "m3/dialog" ->
       BuilderDialogSurface(
         node = node,
@@ -2579,6 +2602,62 @@ private val JetcasterDarkColorScheme =
     surfaceContainerHigh = Color(0xFF282A30),
     surfaceContainerHighest = Color(0xFF33353B),
   )
+
+/**
+ * A Wear selection row, drawn out of Material 3 pieces in the shape Wear publishes.
+ *
+ * `CheckboxButton`, `SwitchButton` and `RadioButton` are the reason `wear-m3` does not borrow
+ * `m3/checkbox`: upstream's are not the mobile controls at a watch size, they are **rows** — a
+ * filled, full-width container with a label, an optional secondary label, and the control at the
+ * end, which is why they sit in a `TransformingLazyColumn` as items. Drawing the bare mobile
+ * control would be a different component wearing the same name.
+ *
+ * The geometry is upstream's: a fully rounded 52dp row on `surfaceContainer`, its label column at
+ * the start and the control at the end. What it cannot be is the real thing — the Wasm canvas
+ * cannot link `androidx.wear.compose:compose-material3` — and the catalog's own notes say so.
+ */
+@Composable
+private fun WearSelectionRow(
+  node: UiBuilderNode,
+  modifier: Modifier,
+  enabled: Boolean,
+  label: @Composable (Modifier) -> Unit,
+  secondaryLabel: @Composable (Modifier) -> Unit,
+  hasSecondaryLabel: Boolean,
+  control: @Composable (Boolean) -> Unit,
+) {
+  // `checked` on the two toggles, `selected` on the radio: one row, and the property the component
+  // declares decides which name it reads.
+  val on = if ("selected" in node.properties) node.bool("selected") else node.bool("checked")
+  Surface(
+    modifier = modifier.fillMaxWidth().heightIn(min = WEAR_SELECTION_ROW_HEIGHT_DP.dp),
+    shape = RoundedCornerShape(percent = 50),
+    color = MaterialTheme.colorScheme.surfaceContainer,
+    contentColor = MaterialTheme.colorScheme.onSurface,
+  ) {
+    Row(
+      Modifier.padding(
+        horizontal = WEAR_SELECTION_ROW_PADDING_DP.dp,
+        vertical = WEAR_SELECTION_ROW_VERTICAL_PADDING_DP.dp,
+      ),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(WEAR_SELECTION_ROW_PADDING_DP.dp),
+    ) {
+      Column(Modifier.weight(1f)) {
+        label(Modifier)
+        if (hasSecondaryLabel) secondaryLabel(Modifier)
+      }
+      control(on)
+    }
+  }
+}
+
+/** Upstream's selection-row geometry, in dp. */
+private const val WEAR_SELECTION_ROW_HEIGHT_DP = 52
+
+private const val WEAR_SELECTION_ROW_PADDING_DP = 14
+
+private const val WEAR_SELECTION_ROW_VERTICAL_PADDING_DP = 6
 
 /**
  * The Material 3 component a Wear content id is drawn as, or the id itself.

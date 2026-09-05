@@ -30,20 +30,35 @@ class StarterContentTest {
       )
       .document
 
+  /**
+   * Every entry for *this* catalog checks out, and every entry for another one says which.
+   *
+   * The table serves more than one catalog now: `wear-m3` assembles its own components in
+   * `:ui-builder-runtime` — a module this test cannot see — so its ids are absent here by
+   * construction rather than by mistake. They are held to the prefix instead, and
+   * `WearM3ScreenCatalogTest` checks the slots and properties those seeds rely on.
+   */
   @Test
   fun `every starter entry names a component slot and value the catalog declares`() {
-    StarterContent.componentIds.forEach { componentId ->
-      val component =
-        assertNotNull(catalog.componentsById[componentId], "$componentId is not in the catalog")
-      StarterContent.forComponent(componentId).forEach { (slotName, children) ->
-        val slot =
-          assertNotNull(
-            component.slotsByName[slotName],
-            "$componentId does not declare slot $slotName",
-          )
-        assertCheckedSeed(component, slot, children)
+    val foreign = StarterContent.componentIds.filterNot { it in catalog.componentsById }
+    assertTrue(
+      foreign.all { it.startsWith("wear-m3/") },
+      "starter entries for components no catalog here declares: $foreign",
+    )
+    StarterContent.componentIds
+      .filter { it in catalog.componentsById }
+      .forEach { componentId ->
+        val component =
+          assertNotNull(catalog.componentsById[componentId], "$componentId is not in the catalog")
+        StarterContent.forComponent(componentId).forEach { (slotName, children) ->
+          val slot =
+            assertNotNull(
+              component.slotsByName[slotName],
+              "$componentId does not declare slot $slotName",
+            )
+          assertCheckedSeed(component, slot, children)
+        }
       }
-    }
   }
 
   private fun assertCheckedSeed(
