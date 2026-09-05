@@ -13,5 +13,6 @@ export * from "./motionPlayback.js";
 export * from "./ownedParams.js";
 export * from "./renderQuery.js";
 export * from "./reportFrame.js";
+export * from "./snapshotRetry.js";
 export * from "./specBaseline.js";
 export * from "./themeChoice.js";
