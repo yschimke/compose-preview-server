@@ -88,22 +88,52 @@ class PlaygroundAndroidRenderService(
           runCatching { session.enableExtensions(listOf(OVERRIDES_EXTENSION_ID)) }
             .getOrNull()
             ?.let { OVERRIDES_EXTENSION_ID !in it.unknown } == true
-        val png = renderFirstFrame(session, snippet.previewId)
+        val attempt = renderFirstFrame(session, snippet.previewId)
+        val png = attempt.png
+        if (png == null) reportNoFrame(snippet, attempt.reason)
         if (png != null && knobsArmed) drainOverrideDeclarations(session, snippet)
         png
       } finally {
         runCatching { session.close() }
       }
-    } catch (_: Exception) {
+    } catch (t: Exception) {
       // A render failure is a clean "no frame" to the caller; it must never escape as a throwable
-      // out of the render seam.
+      // out of the render seam. It must not vanish either: the caller sees a null it cannot explain
+      // and the operator has the only copy of the cause, so say it here before dropping it.
+      reportNoFrame(snippet, "${t.javaClass.simpleName}: ${t.message ?: "no message"}")
       null
     } finally {
       runCatching { workDir.deleteRecursively() }
     }
   }
 
-  private fun renderFirstFrame(session: RenderSession, previewId: String): ByteArray? {
+  /**
+   * The one place a swallowed render failure becomes visible.
+   *
+   * Nothing downstream can report this: [render]'s contract is `ByteArray?`, the compile lane
+   * carries the null through as a frameless response, and every surface above sees only the
+   * absence. So the host log is where "why was there no frame" is answered — for the playground's
+   * still image, and for the UI builder's native pane, which is the same seam.
+   */
+  private fun reportNoFrame(snippet: PlaygroundTokenStore.PlaygroundSnippet, reason: String?) {
+    System.err.println(
+      "serve: no first frame for ${snippet.previewId} (${snippet.mode.name}) — " +
+        (reason ?: "no reason reported")
+    )
+  }
+
+  /**
+   * One render attempt: the PNG, or why there isn't one.
+   *
+   * Six different things end this method without bytes — a rejected request, an expired budget, a
+   * `renderFailed` notification, a daemon that finished without naming a file, a path that isn't
+   * one, and an unreadable file — and until they were named they were one indistinguishable null.
+   * They are not the same problem and they do not have the same fix, so the reason travels with the
+   * (absent) bytes rather than being reconstructed by a reader of the log.
+   */
+  private data class FrameAttempt(val png: ByteArray?, val reason: String? = null)
+
+  private fun renderFirstFrame(session: RenderSession, previewId: String): FrameAttempt {
     val latch = CountDownLatch(1)
     val pngPath = AtomicReference<String?>()
     val failure = AtomicReference<String?>()
@@ -117,7 +147,14 @@ class PlaygroundAndroidRenderService(
           latch.countDown()
         }
         "renderFailed" -> {
-          failure.set("daemon reported renderFailed")
+          // The daemon's own words where it sent any: "renderFailed" alone says a render was
+          // attempted and nothing about what went wrong in it.
+          val detail = FAILURE_DETAIL_KEYS.firstNotNullOfOrNull { key ->
+            params[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+          }
+          failure.set(
+            detail?.let { "daemon reported renderFailed: $it" } ?: "daemon reported renderFailed"
+          )
           latch.countDown()
         }
       }
@@ -129,13 +166,26 @@ class PlaygroundAndroidRenderService(
           reason = "playground-first-frame",
           timeout = ackTimeout,
         )
-      if (ack.rejected.isNotEmpty()) return@use null
-      if (!latch.await(renderBudget.inWholeMilliseconds, TimeUnit.MILLISECONDS)) return@use null
-      if (failure.get() != null) return@use null
-      val path = pngPath.get() ?: return@use null
+      if (ack.rejected.isNotEmpty()) {
+        return@use FrameAttempt(null, "the daemon rejected the render request")
+      }
+      if (!latch.await(renderBudget.inWholeMilliseconds, TimeUnit.MILLISECONDS)) {
+        return@use FrameAttempt(null, "the render budget of $renderBudget expired")
+      }
+      failure.get()?.let {
+        return@use FrameAttempt(null, it)
+      }
+      val path =
+        pngPath.get() ?: return@use FrameAttempt(null, "the render finished without a PNG path")
       val file = File(path)
-      if (!file.isFile) return@use null
-      runCatching { file.readBytes() }.getOrNull()
+      if (!file.isFile) return@use FrameAttempt(null, "the rendered PNG $path is not a file")
+      runCatching { file.readBytes() }
+        .fold(
+          onSuccess = { FrameAttempt(it) },
+          onFailure = {
+            FrameAttempt(null, "the rendered PNG $path could not be read: ${it.message}")
+          },
+        )
     }
   }
 
@@ -192,5 +242,14 @@ class PlaygroundAndroidRenderService(
      * and the `OVERRIDES_SUFFIX` [ServeBundleDaemon.readPreviews] looks for.
      */
     const val OVERRIDES_SIDECAR_SUFFIX: String = ".overrides.json"
+
+    /**
+     * Where a `renderFailed` notification might carry its cause, most specific first.
+     *
+     * A list rather than one key because the notification is the daemon's, not this repository's:
+     * backends spell the field differently and a future one may spell it differently again, and
+     * reading three keys costs nothing next to logging "renderFailed" with no cause at all.
+     */
+    private val FAILURE_DETAIL_KEYS = listOf("message", "reason", "error")
   }
 }

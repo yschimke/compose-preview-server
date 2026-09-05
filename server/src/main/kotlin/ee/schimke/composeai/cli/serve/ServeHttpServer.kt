@@ -81,6 +81,30 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 
+/** A `/ui-builder/<catalog>/<designId>` design segment: the New design dialog's own id shape. */
+private val UI_BUILDER_DESIGN_SEGMENT = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+
+/** Extensions that belong to the builder's static distribution rather than to a design id. */
+private val UI_BUILDER_ASSET_EXTENSIONS =
+  setOf(
+    "css",
+    "html",
+    "ico",
+    "js",
+    "json",
+    "map",
+    "mjs",
+    "otf",
+    "png",
+    "svg",
+    "ttf",
+    "txt",
+    "wasm",
+    "webp",
+    "woff",
+    "woff2",
+  )
+
 /**
  * The embedded Ktor (CIO) HTTP server fronting a [ServeSessionRegistry]. Thin IO shell: a token
  * gate, the routes, and the query-param → [ServeOverrides] → render → PNG glue. All shared,
@@ -11034,6 +11058,19 @@ class ServeHttpServer(
     call.respondBytes(bytes, wasmContentType(file.name))
   }
 
+  /**
+   * Whether a path segment can name a design rather than an asset.
+   *
+   * The same path-safe shape the New design dialog validates, which allows a `.`, minus anything
+   * carrying a static-asset extension. Without that exclusion a mistyped `uiBuilder.mjs` would
+   * answer `200 text/html` instead of `404`, and a module loader would report the confusion three
+   * layers away from the typo. Leading alphanumeric, so `..` never reaches the shell branch.
+   */
+  private fun isUiBuilderDesignSegment(segment: String): Boolean =
+    UI_BUILDER_DESIGN_SEGMENT.matches(segment) &&
+      (!segment.contains('.') ||
+        segment.substringAfterLast('.').lowercase() !in UI_BUILDER_ASSET_EXTENSIONS)
+
   private suspend fun RoutingContext.handleUiBuilderAsset() {
     val dir = uiBuilderDir
     if (dir == null) {
@@ -11047,6 +11084,24 @@ class ServeHttpServer(
       return
     }
     val assetSegments = if (scopedCatalog == null) segments else segments.drop(1)
+    // The cool-URI form: `/ui-builder/<catalog>/<designId>` names one design in the path instead
+    // of in a `?designId=` query, and the browser reads it back out of `location.pathname`. Only
+    // a catalog-scoped single segment that cannot be a file qualifies, so an asset that is simply
+    // missing still 404s rather than silently rendering the app shell. The trailing-slash form is
+    // redirected away because the shell loads `uiBuilder.mjs` relative to the document.
+    if (
+      scopedCatalog != null && assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])
+    ) {
+      val designId = assetSegments[0]
+      if (!File(dir, designId).isFile) {
+        if (call.request.path().endsWith("/")) {
+          call.respondRedirect("/ui-builder/$scopedCatalog/$designId")
+          return
+        }
+        respondUiBuilderShell(File(dir, "index.html"))
+        return
+      }
+    }
     val rel = if (assetSegments.isEmpty()) "index.html" else assetSegments.joinToString("/")
     val base = dir.canonicalFile.toPath()
     val file = File(dir, rel).canonicalFile
@@ -11063,6 +11118,28 @@ class ServeHttpServer(
     }
     val bytes = withContext(Dispatchers.IO) { file.readBytes() }
     call.respondBytes(bytes, wasmContentType(file.name))
+  }
+
+  /**
+   * The builder's app shell, served for a design URL that names no file.
+   *
+   * Same `no-cache` + ETag contract as the ordinary asset lane: the shell is the same bytes for
+   * every design, so a conditional request still answers `304`.
+   */
+  private suspend fun RoutingContext.respondUiBuilderShell(index: File) {
+    if (!index.isFile) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val etag = "\"${index.length().toString(16)}-${index.lastModified().toString(16)}\""
+    call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    call.response.headers.append(HttpHeaders.ETag, etag)
+    if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    val bytes = withContext(Dispatchers.IO) { index.readBytes() }
+    call.respondBytes(bytes, wasmContentType(index.name))
   }
 
   private suspend fun RoutingContext.handleUiBuilderRuntimeAsset() {
