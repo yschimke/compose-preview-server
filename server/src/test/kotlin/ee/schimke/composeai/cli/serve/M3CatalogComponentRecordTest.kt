@@ -91,10 +91,16 @@ class M3CatalogComponentRecordTest {
       "layout/lazy-grid" to "items is a LazyGridScope DSL, not a composable slot",
       "layout/lazy-row" to "items is a LazyListScope DSL, not a composable slot",
       "layout/supporting-pane-scaffold" to "adaptive API; panes are not plain composable slots",
+      "m3/date-picker" to
+        "takes a DatePickerState from rememberDatePickerState, which no ScreenValue expresses",
+      "m3/dialog" to
+        "AlertDialog is a window and needs an onDismissRequest a design cannot write; the builder draws and emits its surface inline instead",
       "m3/horizontal-floating-toolbar" to "experimental; content is a FlowRow-shaped scope",
       "m3/search-bar" to "inputField is a typed lambda, not a plain composable slot",
       "m3/search-input-field" to "SearchBarDefaults.InputField is a member of an object",
       "m3/snackbar-host" to "takes a SnackbarHostState, which no ScreenValue expresses",
+      "m3/time-picker" to
+        "takes a TimePickerState from rememberTimePickerState, which no ScreenValue expresses",
       "remote-compose/document" to "typed embed, kept out of the Compose exporter by design",
       "shape/linear-gradient" to "a Modifier, not a component",
       "shape/radial-gradient" to "a Modifier, not a component",
