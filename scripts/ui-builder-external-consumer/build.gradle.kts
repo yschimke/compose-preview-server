@@ -100,11 +100,31 @@ tasks.register("verifyExtractionConsumer") {
         jar.getEntry("ee/schimke/composeai/uibuilder/service/UiBuilderServicePort.class") != null
       )
       check(jar.getEntry("ee/schimke/composeai/uibuilder/catalogs/m3-catalog-v1.json") != null)
+      // The render bundle is deliberately NOT in this jar any more (#346). It is a frontend build
+      // output and now ships as `compose-preview-ui-builder-render-bundle`, resolved transitively
+      // through the runtime's `api` edge — asserted below on the classpath, which is the only
+      // property `PackagedUiBuilderRenderBundle.copyTo` actually needs.
       check(
         jar.getEntry(
           "ee/schimke/composeai/uibuilder/renderer/ui-builder-renderer.bundle.png"
-        ) != null
-      )
+        ) == null
+      ) {
+        "the render bundle is back inside compose-preview-ui-builder-runtime"
+      }
+    }
+
+    // What a consumer resolving only `compose-preview-ui-builder-runtime` must still get: the
+    // bundle, from wherever. Reading it off the resolved classpath rather than out of a named
+    // artifact is the consumer's own view of it, and the one that would break if the transitive
+    // edge were ever weakened to `implementation`.
+    val bundleEntry = "ee/schimke/composeai/uibuilder/renderer/ui-builder-renderer.bundle.png"
+    val bundleCarriers =
+      runtimeClasspath.resolve().filter { artifact ->
+        artifact.extension == "jar" &&
+          ZipFile(artifact).use { jar -> jar.getEntry(bundleEntry) != null }
+      }
+    check(bundleCarriers.size == 1) {
+      "expected exactly one artifact carrying $bundleEntry, found $bundleCarriers"
     }
 
     val webArtifact = webArchive.incoming.artifacts.artifacts.single()
