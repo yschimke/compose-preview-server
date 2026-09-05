@@ -77,4 +77,16 @@ test("capture evidence", async ({ page }) => {
     );
     await settle(page);
     await page.screenshot({ path: `${OUT}/container-menu.${SUFFIX}.png` });
+
+    // The editor that follows the selection: one text node's own values, over the design.
+    await page.goto("index.html?mode=interactive-editor");
+    await ready(page);
+    const heading = await page.evaluate(
+        () =>
+            globalThis.__uiBuilderInspection.nodes.find((n) => n.nodeId === "detail-podcast-title")
+                ?.bounds,
+    );
+    await page.mouse.click(heading.x + heading.width / 2, heading.y + heading.height / 2);
+    await settle(page);
+    await page.screenshot({ path: `${OUT}/hover-editor.${SUFFIX}.png` });
 });

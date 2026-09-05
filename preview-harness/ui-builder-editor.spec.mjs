@@ -291,7 +291,7 @@ test("the layer menu lays a container out without opening a panel", async ({ pag
 
     // The fixture's background has no padding, so the row offers to add one; the catalog is what
     // says the modifier may go on this component at all.
-    await clickCompose(page, page.getByRole("button", { name: "Apply Pad by 16" }));
+    await clickCompose(page, page.getByRole("button", { name: "Apply Add padding" }));
     await waitForEditor(page, 109);
     expect(
         await page.evaluate(
@@ -304,7 +304,72 @@ test("the layer menu lays a container out without opening a panel", async ({ pag
     // And the same row now offers to take it away.
     await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2, { button: "right" });
     await settle(page);
-    await expect(page.getByRole("button", { name: "Remove Pad by 16" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove Add padding" })).toBeVisible();
+});
+
+test("the selection's values are editable over the design", async ({ page }) => {
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+
+    const title = await page.evaluate(
+        () =>
+            globalThis.__uiBuilderInspection.nodes.find((n) => n.nodeId === "detail-podcast-title")
+                ?.bounds,
+    );
+    expect(title).toBeTruthy();
+    await page.mouse.click(title.x + title.width / 2, title.y + title.height / 2);
+    await page.waitForFunction(
+        () => globalThis.__uiBuilderEditor?.selectedNodeId === "detail-podcast-title",
+    );
+    await settle(page);
+
+    // Only what the node carries: the same rule the panel opens on, in a card with no room to
+    // offer anything else.
+    const text = page.getByRole("textbox", { name: "Text value" });
+    await expect(text).toBeVisible();
+    await expect(page.getByRole("button", { name: "Style value" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Color value" })).toHaveCount(0);
+
+    // Leaving the field is the commit, and Enter is how you say so without moving the pointer.
+    // Selected and retyped rather than backspaced: the card shows one line of a value that may be
+    // longer than the box, so what is on screen is not what is in the document.
+    await clickCompose(page, text);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type("Edited over the design");
+    await page.keyboard.press("Enter");
+    await waitForEditor(page, 109);
+    expect(await page.evaluate(() => globalThis.__uiBuilderEditor)).toMatchObject({
+        selectedNodeId: "detail-podcast-title",
+        selectedText: "Edited over the design",
+        outcome: "accepted",
+    });
+});
+
+test("adding padding lands the caret in the number it just chose", async ({ page }) => {
+    await page.goto("index.html?mode=interactive-editor");
+    await waitForEditor(page, 108);
+    await openDock(page, "layers");
+
+    const row = await page.getByRole("button", { name: /Select main-background/ }).boundingBox();
+    expect(row).not.toBeNull();
+    await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2, { button: "right" });
+    await settle(page);
+    await clickCompose(page, page.getByRole("button", { name: "Apply Add padding" }));
+    await waitForEditor(page, 109);
+
+    // 16 is a starting point rather than a decision, so the caret is already in the field: typing
+    // straight after the menu press is what proves it, since nothing else here would take the keys.
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type("24");
+    await page.keyboard.press("Enter");
+    await waitForEditor(page, 110);
+    expect(
+        await page.evaluate(
+            () =>
+                globalThis.__uiBuilderEditor?.outcome === "accepted" &&
+                globalThis.__uiBuilderEditor?.operationSequence === 2,
+        ),
+    ).toBe(true);
 });
 
 test("the property inspector selects Google icons from a searchable catalog", async ({
