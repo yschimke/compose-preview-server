@@ -99,6 +99,34 @@ import kotlinx.serialization.json.doubleOrNull
  * and the refusal says that is what is missing. A wire-to-Kotlin mapping is where this becomes
  * expressible, and it belongs in the catalog rather than in a projection.
  */
+/**
+ * The Kotlin parameter a catalog slot fills, when the two are not spelled the same.
+ *
+ * A capability catalog names slots for designers — `layout/column` has `children` — and a Compose
+ * signature names them for the compiler: `Column(content = …)`. The generator emits `<parameter> =
+ * { … }` from the record's own parameter list, so a document slot that keeps the catalog's spelling
+ * either fails to match the record or emits `children = { … }`, which does not compile. Neither is
+ * recoverable from data: the record describes the real signature and the document describes the
+ * design, and the fact that these two names mean the same region is knowledge that lives in
+ * neither.
+ *
+ * So it is authored, here, per component — and deliberately **not** by renaming the parameter in
+ * the record, which would make the record lie about the signature it exists to attest.
+ *
+ * An id with no entry passes its slot names through unchanged, which is right for the majority:
+ * `layout/scaffold`'s `topBar`, `snackbarHost` and `content` already match `Scaffold`'s, and so do
+ * `m3/filter-chip`'s `label` and `leadingIcon`.
+ */
+private val SLOT_PARAMETERS: Map<String, Map<String, String>> =
+  mapOf(
+    "layout/box" to mapOf("children" to "content"),
+    "layout/column" to mapOf("children" to "content"),
+    "layout/row" to mapOf("children" to "content"),
+  )
+
+private fun parameterForSlot(componentId: String, slot: String): String =
+  SLOT_PARAMETERS[componentId]?.get(slot) ?: slot
+
 internal object ScreenDocumentProjection {
 
   sealed interface Outcome {
@@ -181,7 +209,9 @@ internal object ScreenDocumentProjection {
           componentId = node.componentId,
           arguments = arguments(node),
           slots =
-            node.slots.mapValues { (_, children) -> children.mapNotNull { child -> node(child) } },
+            node.slots
+              .mapKeys { (slot, _) -> parameterForSlot(node.componentId, slot) }
+              .mapValues { (_, children) -> children.mapNotNull { child -> node(child) } },
         )
       } finally {
         visiting.remove(id)
