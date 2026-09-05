@@ -102,6 +102,8 @@ class M3CatalogComponentRecordTest {
       "m3/list-item" to "startAccentColor is a drawBehind, not a parameter of ListItem",
       "m3/primary-tab-row" to "tabs is a TabRow scope, and the row's own indicator takes a lambda",
       "m3/search-bar" to "inputField is a typed lambda, not a plain composable slot",
+      "m3/text-field" to
+        "variant picks between TextField and OutlinedTextField, which is a second callable one record cannot name",
       "m3/search-input-field" to "SearchBarDefaults.InputField is a member of an object",
       "m3/snackbar-host" to "takes a SnackbarHostState, which no ScreenValue expresses",
       "m3/tab" to
