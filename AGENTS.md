@@ -92,3 +92,20 @@ repository boundary.
   ([#395](https://github.com/yschimke/compose-preview-server/pull/395) is the change it closed).
 - The source package stays `ee.schimke.composeai.cli.serve` until a separately reviewed rename.
 - UI-affecting PRs include viewable before/after evidence and update the visual harness when needed.
+
+## The hosted catalog MCP server
+
+[`.mcp.json`](.mcp.json) registers `compose-preview-catalog`, the deployment of this repository's
+own `:mcp` module at `https://preview.coo.ee/mcp`. It is how an agent reads the hosted catalogs and
+drives a UI-builder design — `ui_builder_get_design`, `ui_builder_apply`, `ui_builder_export`,
+`ui_builder_render_native` — against the running server rather than a local one.
+
+The credential is `$COMPOSE_PREVIEW_TOKEN`, sent as `X-Compose-Preview-Token`. With the variable
+unset the header is empty and every call answers `authorization_required`; that is the normal cold
+start, not a misconfiguration. Recover it through the server's own device-code flow: call
+`request_access` with the scope and capabilities the task needs (`ui-builder-read`,
+`ui-builder-write`, `ui-builder-export` are separate from the `preview -> live -> playground`
+compute ladder), show the human the `approveUrl` and `userCode` it returns, then `poll_access` until
+it answers `approved`. A server restart drops every grant, so a token that stopped working is asked
+for again the same way. Designs are private to their owner and collaborators, so a grant reads only
+what its actor has been given an ACL for.
