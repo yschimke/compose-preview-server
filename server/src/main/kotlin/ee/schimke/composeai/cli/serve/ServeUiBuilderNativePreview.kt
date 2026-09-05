@@ -97,9 +97,63 @@ internal class ServeUiBuilderNativePreview(
     // The tag set is reported rather than inferred by the caller: it is what a bounds lookup is
     // keyed by, and a client that recomputed it from the document would drift the moment the
     // projection stopped tagging something.
-    return UiBuilderNativePreviewOutcome.Rendered(response, document.nodes.keys.sorted(), bounds)
+    return UiBuilderNativePreviewOutcome.Rendered(
+      response,
+      document.nodes.keys.sorted(),
+      bounds,
+      failure = if (response.image == null) response.noFrameReason() else null,
+    )
   }
 }
+
+/**
+ * Why this response carries no frame, in one sentence a designer can act on.
+ *
+ * The compile lane reports a failure in whichever field fits it, and only one of those is an
+ * `exception`: a snippet that does not compile comes back with ERROR [diagnostics] and a null
+ * exception, because the playground frontend draws those as inline squiggles rather than as a
+ * message. The UI builder has no such editor to squiggle — it sent a design, not source — so a
+ * caller that forwarded the exception alone reported "compiled, no frame" for a compile that
+ * failed, which is the one reading that is never true. Read every field, in the order that puts the
+ * most specific cause first, and fall back to naming the renderer rather than to silence.
+ */
+internal fun PlaygroundRunResponse.noFrameReason(): String {
+  exception
+    ?.takeIf { it.isNotBlank() }
+    ?.let {
+      return it
+    }
+  val errors = diagnostics.filter { it.severity == PlaygroundSeverity.ERROR }
+  if (errors.isNotEmpty()) {
+    val shown = errors.take(MAX_REPORTED_DIAGNOSTICS).joinToString("\n") { it.render() }
+    val hidden = errors.size - MAX_REPORTED_DIAGNOSTICS
+    return if (hidden > 0) "$shown\n… and $hidden more" else shown
+  }
+  // Compiled, a @Preview was discovered (that failure sets `exception`), and the render seam still
+  // came back empty: no sidecar for this mode, or a render this host swallowed. Say which half of
+  // the lane it was, so the next question is asked of the host rather than of the design.
+  return "the design compiled, but this host's renderer produced no frame for it"
+}
+
+/**
+ * One diagnostic as text: the compiler's own message, anchored where it has a position.
+ *
+ * [PlaygroundDiagnostic.line]/[PlaygroundDiagnostic.ch] are 0-based, because CodeMirror is; a human
+ * counts from one, so they are shifted here and nowhere else.
+ */
+private fun PlaygroundDiagnostic.render(): String {
+  val anchor =
+    when {
+      file == null -> null
+      line == null -> file
+      ch == null -> "$file:${line!! + 1}"
+      else -> "$file:${line!! + 1}:${ch!! + 1}"
+    }
+  return if (anchor == null) message else "$anchor: $message"
+}
+
+/** Enough to see the shape of a broken compile, short of pasting a whole build log into a pane. */
+private const val MAX_REPORTED_DIAGNOSTICS = 5
 
 /**
  * The seam `ServeHttpServer` takes, so the lane itself can stay internal.
@@ -126,6 +180,14 @@ sealed interface UiBuilderNativePreviewOutcome {
     val response: PlaygroundRunResponse,
     val taggedNodeIds: List<String>,
     val nodeBounds: Map<String, AnnotationBounds> = emptyMap(),
+    /**
+     * Why there is no frame, or null when there is one.
+     *
+     * Derived here rather than at each caller so the HTTP route and the MCP tool cannot report a
+     * different reason for the same response — and so neither has to know that the compile lane
+     * spreads its failures across `exception` and `diagnostics`. See [noFrameReason].
+     */
+    val failure: String? = null,
   ) : UiBuilderNativePreviewOutcome
 
   /** The generator's own reasons, unchanged. */

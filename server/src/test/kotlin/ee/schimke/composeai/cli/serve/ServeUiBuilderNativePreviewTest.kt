@@ -178,6 +178,67 @@ class ServeUiBuilderNativePreviewTest {
     assertEquals(emptyMap(), rendered.nodeBounds)
     assertEquals(0, boundsCaptures)
     assertEquals("compilation failed", rendered.response.exception)
+    assertEquals("compilation failed", rendered.failure)
+  }
+
+  @Test
+  fun `a frame reports no failure`() {
+    val rendered = assertIs<UiBuilderNativePreviewOutcome.Rendered>(lane.render(document()))
+
+    assertNull(rendered.failure)
+  }
+
+  @Test
+  fun `compiler errors are the failure when the lane set no exception`() {
+    // The regression this exists for: the compile lane reports a broken snippet as ERROR
+    // diagnostics with a null `exception`, because the playground frontend draws those as inline
+    // squiggles. A caller that read the exception alone reported a compile failure as "compiled,
+    // no frame" — the one reading of a frameless response that is never true.
+    val laneWithDiagnostics =
+      ServeUiBuilderNativePreview(
+        executor = executor,
+        compile = {
+          PlaygroundRunResponse(
+            diagnostics =
+              listOf(
+                PlaygroundDiagnostic(PlaygroundSeverity.WARNING, "unused import", "Screen.kt", 1),
+                PlaygroundDiagnostic(
+                  PlaygroundSeverity.ERROR,
+                  "unresolved reference: Scaffold",
+                  "UiBuilderGeneratedScreen.kt",
+                  line = 11,
+                  ch = 4,
+                ),
+              )
+          )
+        },
+      )
+
+    val rendered =
+      assertIs<UiBuilderNativePreviewOutcome.Rendered>(laneWithDiagnostics.render(document()))
+
+    // Positions are shifted to 1-based: the wire shape counts from zero because CodeMirror does,
+    // and this string is read by a person.
+    assertEquals(
+      "UiBuilderGeneratedScreen.kt:12:5: unresolved reference: Scaffold",
+      rendered.failure,
+    )
+  }
+
+  @Test
+  fun `a compile that neither failed nor drew names the renderer`() {
+    // Compiled, a @Preview was discovered (that miss sets `exception`), and the render seam still
+    // came back empty. Blaming the design here would send the reader to the wrong half of the lane.
+    val laneWithoutRenderer =
+      ServeUiBuilderNativePreview(executor = executor, compile = { PlaygroundRunResponse() })
+
+    val rendered =
+      assertIs<UiBuilderNativePreviewOutcome.Rendered>(laneWithoutRenderer.render(document()))
+
+    assertEquals(
+      "the design compiled, but this host's renderer produced no frame for it",
+      rendered.failure,
+    )
   }
 
   private fun document(): DesignDocumentV1 =
