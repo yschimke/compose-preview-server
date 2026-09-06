@@ -2240,6 +2240,7 @@ class ServeWebTest {
         listOf(preview),
         token = "t",
         referencesFor = { listOf(referenceFor(it)) },
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
         parityIssues =
           listOf(
             ParityIssue(
@@ -2256,6 +2257,7 @@ class ServeWebTest {
               title = "Glyph colour is darker than the design token",
               url = "https://github.com/yschimke/m3-catalog/issues/40",
               state = "open",
+              parity = "known-difference",
               previewIds = listOf("button"),
             ),
             ParityIssue(
@@ -2271,32 +2273,54 @@ class ServeWebTest {
           ),
       )
     assertTrue(html.contains("<th class=\"cp-compare-bugs-head\">Bugs</th>"), html)
-    // Open before closed: the column is read for "does someone already know?", and a closed report
-    // answers that more weakly than an open one.
     val cell = html.substringAfter("class=\"cp-compare-bugs\"").substringBefore("</td>")
-    assertTrue(cell.indexOf(">#40<") < cell.indexOf(">#41<"), cell)
-    assertTrue(cell.contains("cp-compare-bug--closed"), "the closed one says so: $cell")
-    // Matched on the component as well as on the preview id — an issue may name either.
-    assertTrue(cell.contains("/issues/41"), cell)
-    assertFalse(cell.contains("/issues/39"), "an exact-variant issue must not broaden: $cell")
-    // The pill says what the issue is, not just that there is one: "does someone already know?" is
-    // the question this column exists for and a bare number cannot answer it.
+    val summary = cell.substringAfter("cp-compare-bug-summary").substringBefore("</summary>")
+    // Collapsed, the cell is the OPEN numbers and nothing else — the line a reader scanning the
+    // wall for "does anyone know about this?" reads without opening anything.
     assertTrue(
-      cell.contains(
-        "<span class=\"cp-compare-bug-title\">Glyph colour is darker than the design token</span>"
+      summary.contains(
+        "<span class=\"cp-compare-bug-chip\" data-bug-scope=\"component\">#40</span>"
       ),
       cell,
     )
-    // …and the tooltip still carries state, number and the untruncated title, since the visible
-    // title is capped at the column width.
+    assertFalse(
+      summary.contains("#41"),
+      "a closed report does not spend a number on the collapsed line: $cell",
+    )
+    // …but it is not silent about the closed one either: a row where everything filed is closed
+    // must not read like a row nobody has ever looked at. No count on it — see the marker's note.
+    assertTrue(summary.contains("cp-compare-bug-chip--closed\">closed</span>"), cell)
+    // Open before closed in the panel: the column is read for "does someone already know?", and a
+    // closed report answers that more weakly than an open one.
+    assertTrue(cell.indexOf(">#40<") < cell.indexOf(">#41<"), cell)
+    assertTrue(cell.contains("cp-compare-bug-item--closed"), "the closed one says so: $cell")
+    assertTrue(cell.contains("<span class=\"cp-compare-bug-state\">closed</span>"), cell)
+    // Matched on the component as well as on the preview id — an issue may name either.
+    assertTrue(cell.contains("/issues/41"), cell)
+    assertFalse(cell.contains("/issues/39"), "an exact-variant issue must not broaden: $cell")
+    // Opened, the panel says what each issue IS, which is the fact the collapsed number cannot
+    // carry and the reason the disclosure exists at all.
     assertTrue(
-      cell.contains("title=\"open · #40 Glyph colour is darker than the design token\""),
+      cell.contains(
+        "<span class=\"cp-compare-bug-title\" title=\"Glyph colour is darker than the design " +
+          "token\">Glyph colour is darker than the design token</span>"
+      ),
       cell,
     )
+    // The reporter's classification rides along, since "known-difference" and "nobody has verified
+    // this" are different answers to the question the panel was opened to settle.
+    assertTrue(cell.contains("<span class=\"cp-compare-bug-tag\">known-difference</span>"), cell)
     // "+ file" is offered on every row, including rows with nothing filed: an unfiled bad score is
     // exactly what a reader is scanning this wall for. It lands on the focused comparison, which
-    // files a report naming that exact preview AND reference.
-    assertTrue(cell.contains("cp-compare-bug-new"), cell)
+    // files a report naming that exact preview AND reference. OUTSIDE the disclosure, because a row
+    // with nothing filed has no disclosure to put it in.
+    assertTrue(cell.substringAfter("</details>").contains("cp-compare-bug-new"), cell)
+    // The panel closes by saying what it is as of. Nothing here re-checks GitHub, so a `closed`
+    // with no date would invite more trust than a render-time snapshot can carry.
+    assertTrue(
+      cell.contains("<p class=\"cp-compare-bug-asof\">index as of 2026-09-05 20:08 UTC</p>"),
+      cell,
+    )
     assertTrue(cell.contains("/compare/button?token=t&amp;reference=button"), cell)
     // The numbers join the haystack, so `#40` narrows the wall to the rows a report names — and so
     // do the titles, because the pill now shows them and a filter has to match what the reader can
@@ -2342,12 +2366,21 @@ class ServeWebTest {
       )
     val cell = html.substringAfter("class=\"cp-compare-bugs\"").substringBefore("</td>")
     assertTrue(cell.contains("/issues/42"), "component scope crosses the theme pair: $cell")
+    // The contract rides on BOTH halves — the collapsed number and its panel entry — because they
+    // are one claim about one preview and `CompareWall` hides them together.
     assertTrue(
       cell.contains(
-        "data-bug-scope=\"variant\" data-bug-preview-ids=\"${dark.id}\" hidden " +
-          "href=\"https://github.com/yschimke/m3-catalog/issues/43\""
+        "<span class=\"cp-compare-bug-chip\" data-bug-scope=\"variant\" " +
+          "data-bug-preview-ids=\"${dark.id}\" hidden>#43</span>"
       ),
-      "the dark issue is available for the browser's theme switch but hidden at light: $cell",
+      "the dark issue is serialized for the browser's theme switch but hidden at light: $cell",
+    )
+    assertTrue(
+      cell.contains(
+        "<li class=\"cp-compare-bug-item\" data-bug-scope=\"variant\" " +
+          "data-bug-preview-ids=\"${dark.id}\" hidden>"
+      ),
+      "…and so is the panel entry it belongs to: $cell",
     )
   }
 

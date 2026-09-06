@@ -1796,61 +1796,122 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The wall's **Bugs** cell: what is already filed against this row, and one link to file more.
+   * The wall's **Bugs** cell: one line saying what is already filed against this row, a disclosure
+   * carrying the detail, and one link to file more.
    *
-   * The pill carries the issue's **title** beside its number. It used to be the number alone, with
-   * the title on the tooltip, and that was a width decision — a wall already carrying three picture
-   * panels cannot afford a column that grows with whatever someone typed into GitHub. What it cost
-   * was the column's whole purpose: "does someone already know?" is not answered by `#77`, so every
-   * row with a number on it had to be hovered, or opened, before the reader learned whether the
-   * filed issue was even about the difference they were looking at.
+   * Collapsed, the cell is ONE line: the OPEN issue numbers, the closed marker, and "+ file". That
+   * is a width decision as much as a height one, and this column was spending both — every issue
+   * was a full-width pill on its own line carrying its title, so a row with four reports stood four
+   * lines tall and 350px wide on a wall whose other three columns are pictures, and the wear
+   * catalog's wall carries 690 pills over 620 rows. Bare numbers cost 5 characters each and the
+   * whole line now measures ~130px.
    *
-   * The width promise is kept in CSS instead of by omission: the title is one line, ellipsised at
-   * the column's cap, and dropped entirely below the width the pictures need (see `serve.css`). The
-   * tooltip still carries state, number and the untruncated title, so nothing that was reachable
-   * before has moved out of reach.
+   * What the pill's title was there for is not lost, it moves behind the disclosure: the open
+   * issues with their titles, the CLOSED ones — which are worth having and worth not spending a
+   * line each on, since "someone already looked at this and closed it" is a weaker answer than an
+   * open report — and the classification the index carries. A reader scanning for "does anyone know
+   * about this?" is answered by the collapsed line; a reader who wants to know *what* they know
+   * opens one row.
+   *
+   * **A snapshot, and it says so.** The panel closes with the index's own `generatedAt`, because
+   * the state on screen is whatever `parity/issues.json` said when this page was rendered. The
+   * index is regenerated on every issue event, so it is rarely more than a tick behind — but
+   * "rarely" is not "never", and a row that says `closed` without saying *as of when* invites the
+   * reader to trust it further than it can carry. Nothing here re-checks GitHub: that would put an
+   * outbound call on a public server's render path for a fact this column does not need to be live
+   * about.
+   *
+   * No counts anywhere, deliberately. Variant-scoped rows are hidden and shown by `CompareWall` as
+   * the theme swaps ([scopeAttrs] rides on both the collapsed number and its panel entry), so any
+   * number the server printed would be a number the browser could invalidate. The closed marker
+   * therefore says `closed` and not `2 closed`, and each panel entry carries its own state word.
    *
    * "+ file" is always offered, including on a row with nothing filed, because that row is the
-   * point: a bad score with no issue against it is the one a reader is scanning for. [detailHref]
-   * is the focused comparison for the served pair — the report that names the exact preview AND
-   * reference — and [fallbackHref] the viewer's own report, for a row with no reference to focus.
+   * point: a bad score with no issue against it is the one a reader is scanning for. It stays
+   * OUTSIDE the disclosure for the same reason — a row with nothing filed has no disclosure at all
+   * — and beside the numbers rather than under them, so that row costs one line and not two.
+   * [detailHref] is the focused comparison for the served pair — the report that names the exact
+   * preview AND reference — and [fallbackHref] the viewer's own report, for a row with no reference
+   * to focus.
    */
   private fun compareBugsCellHtml(
     issues: List<ParityIssue>,
     activePreviewId: String,
     detailHref: String?,
     fallbackHref: String,
+    generatedAt: String?,
   ): String {
-    val links =
-      issues.joinToString("") { issue ->
-        val closed = if (issue.state == "closed") " cp-compare-bug--closed" else ""
-        val title = issue.title.trim()
-        // An untitled issue cannot happen through the index — `parity-issues.mjs` refuses one — but
-        // the pill is rendered from catalog-published data, so the empty case renders the number
-        // alone rather than a stray separator and an empty span.
-        val tip =
-          if (title.isEmpty()) "${issue.state} · #${issue.number}"
-          else "${issue.state} · #${issue.number} $title"
-        val titleHtml =
-          if (title.isEmpty()) ""
-          else "<span class=\"cp-compare-bug-title\">${WebEscaping.htmlEscape(title)}</span>"
-        val scopeAttrs =
-          if (issue.scope != "variant") " data-bug-scope=\"component\""
-          else {
-            val previewIds = issue.previewIds.joinToString(" ")
-            val hidden = if (activePreviewId in issue.previewIds) "" else " hidden"
-            " data-bug-scope=\"variant\" data-bug-preview-ids=\"${WebEscaping.htmlEscape(previewIds)}\"$hidden"
-          }
-        "<a class=\"cp-compare-bug$closed\"$scopeAttrs href=\"${WebEscaping.htmlEscape(issue.url)}\" " +
-          "rel=\"noopener\" title=\"${WebEscaping.htmlEscape(tip)}\">" +
-          "<span class=\"cp-compare-bug-num\">#${issue.number}</span>$titleHtml</a>"
-      }
     val file =
       "<a class=\"cp-compare-bug-new\" " +
         "href=\"${WebEscaping.htmlEscape(detailHref ?: fallbackHref)}\" " +
         "data-bug-fallback=\"${WebEscaping.htmlEscape(fallbackHref)}\" " +
         "title=\"Report what is wrong with this comparison\">+&#8202;file</a>"
-    return "\n            <td class=\"cp-compare-bugs\">$links$file</td>"
+    if (issues.isEmpty()) return "\n            <td class=\"cp-compare-bugs\">$file</td>"
+
+    // The contract `CompareWall` toggles on, unchanged and now carried TWICE per issue — on the
+    // collapsed number and on its panel entry — because both are the same claim about the same
+    // preview and the browser hides them together.
+    fun scopeAttrs(issue: ParityIssue): String =
+      if (issue.scope != "variant") " data-bug-scope=\"component\""
+      else {
+        val previewIds = issue.previewIds.joinToString(" ")
+        val hidden = if (activePreviewId in issue.previewIds) "" else " hidden"
+        " data-bug-scope=\"variant\" data-bug-preview-ids=\"${WebEscaping.htmlEscape(previewIds)}\"$hidden"
+      }
+
+    val open = issues.filter { it.state == "open" }
+    val numbers =
+      open.joinToString("") { issue ->
+        "<span class=\"cp-compare-bug-chip\"${scopeAttrs(issue)}>#${issue.number}</span>"
+      }
+    // A row whose every report is closed still says so on the collapsed line — otherwise the only
+    // thing distinguishing it from a row nobody has ever looked at is a disclosure triangle.
+    val closedMark =
+      if (issues.none { it.state == "closed" }) ""
+      else "<span class=\"cp-compare-bug-chip cp-compare-bug-chip--closed\">closed</span>"
+    val entries =
+      issues.joinToString("") { issue ->
+        val closed = issue.state == "closed"
+        val title = issue.title.trim()
+        // An untitled issue cannot happen through the index — `parity-issues.mjs` refuses one — but
+        // the entry is rendered from catalog-published data, so the empty case renders the number
+        // alone rather than a stray empty line.
+        val titleHtml =
+          if (title.isEmpty()) ""
+          else
+            "<span class=\"cp-compare-bug-title\" title=\"${WebEscaping.htmlEscape(title)}\">" +
+              "${WebEscaping.htmlEscape(title)}</span>"
+        // The classification the reporter chose, when the issue carries one. It is the difference
+        // between "we know and we disagree with the kit" and "nobody has verified this yet", which
+        // is most of what a reader opening this panel is trying to learn.
+        val tag =
+          issue.parity
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "<span class=\"cp-compare-bug-tag\">${WebEscaping.htmlEscape(it)}</span>" }
+            .orEmpty()
+        val state = if (closed) "<span class=\"cp-compare-bug-state\">closed</span>" else ""
+        "<li class=\"cp-compare-bug-item${if (closed) " cp-compare-bug-item--closed" else ""}\"" +
+          "${scopeAttrs(issue)}>" +
+          "<a class=\"cp-compare-bug\" href=\"${WebEscaping.htmlEscape(issue.url)}\" " +
+          "rel=\"noopener\"><span class=\"cp-compare-bug-num\">#${issue.number}</span>" +
+          "$state$tag</a>$titleHtml</li>"
+      }
+    val asOf =
+      generatedAt
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+          "<p class=\"cp-compare-bug-asof\">index as of " +
+            "${WebEscaping.htmlEscape(prettyDate(it))}</p>"
+        }
+        .orEmpty()
+    // The panel is ONE element so it can be lifted out of flow: an open row must not push the
+    // wall's picture columns sideways, and `<details>` gives its children no common box.
+    return "\n            <td class=\"cp-compare-bugs\">" +
+      "<details class=\"cp-compare-bug-disclosure\">" +
+      "<summary class=\"cp-compare-bug-summary\" title=\"What is already filed here\">" +
+      "$numbers$closedMark</summary>" +
+      "<div class=\"cp-compare-bug-panel\">" +
+      "<ul class=\"cp-compare-bug-list\">$entries</ul>$asOf</div></details>$file</td>"
   }
 
   /**
@@ -9826,6 +9887,12 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     parityIssues: List<ParityIssue> = emptyList(),
     /**
+     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
+     * at the foot of an opened Bugs panel. Null on an index that declares none, which simply omits
+     * the line — the panel is still a snapshot, it just cannot say of when.
+     */
+    parityIssuesGeneratedAt: String? = null,
+    /**
      * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
      * span.
      */
@@ -10125,7 +10192,14 @@ ${captureControlsHtml().prependIndent("          ")}
               referencesFor(preview.id).firstOrNull()?.let { detailHref(preview, it) }
             }
         val bugCell =
-          if (showBugs) compareBugsCellHtml(bugs, current.id, servedDetail, "$viewer#cp-report")
+          if (showBugs)
+            compareBugsCellHtml(
+              bugs,
+              current.id,
+              servedDetail,
+              "$viewer#cp-report",
+              parityIssuesGeneratedAt,
+            )
           else ""
         // The row's component identity, which a locator has to name and the wall's picker cannot
         // derive: `ServeIssueReport.componentIdFor` reads the catalog's own id where there is one
