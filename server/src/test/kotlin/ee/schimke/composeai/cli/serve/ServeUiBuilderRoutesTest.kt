@@ -2,8 +2,12 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantScope
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
+import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
+import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.HttpRequestEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.HttpResponseEnvelopeV1
@@ -15,7 +19,9 @@ import ee.schimke.composeai.uibuilder.protocol.PresenceV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.UpdatePresenceRequestV1
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceError
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
@@ -53,6 +59,8 @@ class ServeUiBuilderRoutesTest {
     object : UiBuilderServicePort {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
         calls += call
+        val request = call.request
+        if (request is UiBuilderServiceRequest.ExportDesign) return exportAnswer(request)
         return UiBuilderServiceResponse.Catalogs(emptyList())
       }
 
@@ -345,6 +353,113 @@ class ServeUiBuilderRoutesTest {
     socket.cancel()
   }
 
+  /**
+   * What the stub answers an export with: an artifact of the requested format, or the refusal the
+   * real service would give a design that is not there. `missing` is the design id that does not
+   * exist; everything else renders.
+   */
+  @Volatile
+  private var exportAnswer: (UiBuilderServiceRequest.ExportDesign) -> UiBuilderServiceResponse =
+    { request ->
+      if (request.designId == "missing") {
+        UiBuilderServiceResponse.Error(
+          UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "design missing does not exist")
+        )
+      } else {
+        val provenance =
+          ExportDiagnosticV1(
+            severity = DiagnosticSeverityV1.INFO,
+            code = "REVISION_PINNED_DAEMON_RENDER",
+            message =
+              "Rendered design ${request.designId} revision ${request.revision ?: 7} (hash) " +
+                "through the packaged Compose UI-builder preview.",
+          )
+        when (request.format) {
+          ExportFormatV1.SVG ->
+            UiBuilderServiceResponse.Export(
+              ExportArtifactV1(
+                format = ExportFormatV1.SVG,
+                mediaType = "image/svg+xml; charset=utf-8",
+                encoding = ExportEncodingV1.UTF8,
+                content = LIVE_SVG,
+                contentDigest = "svg-digest",
+                diagnostics = listOf(provenance),
+              )
+            )
+          ExportFormatV1.PNG ->
+            UiBuilderServiceResponse.Export(
+              ExportArtifactV1(
+                format = ExportFormatV1.PNG,
+                mediaType = "image/png",
+                encoding = ExportEncodingV1.BASE64,
+                content = java.util.Base64.getEncoder().encodeToString(LIVE_PNG),
+                contentDigest = "png-digest",
+                diagnostics = listOf(provenance),
+              )
+            )
+          ExportFormatV1.COMPOSE -> error("the live routes never ask for Compose")
+        }
+      }
+    }
+
+  @Test
+  fun `live svg export is export-gated and serves the current revision as svg`() {
+    assertEquals(401, liveExport(null, "export.svg").use { it.code })
+    assertEquals(403, liveExport("forbidden", "export.svg").use { it.code })
+
+    liveExport("github:someone", "export.svg").use { response ->
+      assertEquals(200, response.code)
+      assertEquals(UiBuilderRouteCapability.EXPORT, capabilities.last())
+      assertEquals("image/svg+xml; charset=utf-8", response.header("Content-Type"))
+      assertEquals("no-store", response.header("Cache-Control"))
+      assertEquals("\"svg-digest\"", response.header("ETag"))
+      assertEquals("inline; filename=\"design-1.svg\"", response.header("Content-Disposition"))
+      // The URL named no revision, so the header is how a consumer learns which one it got.
+      assertEquals("7", response.header(UI_BUILDER_REVISION_HEADER))
+      assertEquals(LIVE_SVG, response.body.string())
+    }
+    // The route is the protocol export by another name: same request, same actor, no revision pin.
+    val export = assertIs<UiBuilderServiceRequest.ExportDesign>(calls.last().request)
+    assertEquals("design-1", export.designId)
+    assertEquals(ExportFormatV1.SVG, export.format)
+    assertNull(export.revision)
+    assertEquals("github:someone", calls.last().actor.actorId)
+  }
+
+  @Test
+  fun `live png export decodes the artifact and honours download and revision`() {
+    liveExport("actor", "export.png?download=1&revision=3").use { response ->
+      assertEquals(200, response.code)
+      assertEquals("image/png", response.header("Content-Type"))
+      assertEquals("attachment; filename=\"design-1.png\"", response.header("Content-Disposition"))
+      assertEquals("3", response.header(UI_BUILDER_REVISION_HEADER))
+      assertTrue(LIVE_PNG.contentEquals(response.body.bytes()))
+    }
+    val export = assertIs<UiBuilderServiceRequest.ExportDesign>(calls.last().request)
+    assertEquals(ExportFormatV1.PNG, export.format)
+    assertEquals(3L, export.revision)
+  }
+
+  @Test
+  fun `live export answers a refusal with the refusal's status and a bad revision before asking`() {
+    assertEquals(404, liveExport("actor", "export.svg", designId = "missing").use { it.code })
+    val before = calls.size
+    assertEquals(400, liveExport("actor", "export.svg?revision=latest").use { it.code })
+    assertEquals(before, calls.size, "a malformed revision must not reach the service")
+  }
+
+  private fun liveExport(
+    authenticatedActor: String?,
+    suffix: String,
+    designId: String = "design-1",
+  ): Response {
+    val builder =
+      Request.Builder()
+        .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/designs/$designId/$suffix")
+    if (authenticatedActor != null) builder.header(ACTOR_HEADER, authenticatedActor)
+    return client.newCall(builder.build()).execute()
+  }
+
   private fun post(
     authenticatedActor: String?,
     request: ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1,
@@ -454,3 +569,10 @@ class ServeUiBuilderRoutesTest {
     const val ACTOR_HEADER = "X-Test-Ui-Builder-Actor"
   }
 }
+
+private const val LIVE_SVG =
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4 4\"><rect width=\"4\" height=\"4\"/></svg>"
+
+/** A PNG signature followed by a few bytes: enough to prove the base64 came back as bytes. */
+private val LIVE_PNG =
+  byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D)
