@@ -76,20 +76,21 @@ A design has one URL, and it names the catalog and the design:
 Opening it opens the design. It does not create one: a `GET` never writes, so a mistyped link
 reports a design that is not there rather than quietly making it.
 
-**Both segments are required.** `/ui-builder/<designId>`, with the catalog left out, is not a
-shorter spelling of the same link — it is not a design URL at all, and the server answers `404`.
-The routing reads the first segment as a catalog name, so a single segment that names no catalog
-falls through to the static bundle and is looked up as a file; that is what keeps a genuinely
-missing asset a `404` instead of silently rendering the app shell. Nothing on the page can say
-"you meant the other form", because the request never reaches the app.
+**Both segments are canonical, and the short form redirects to them.** `/ui-builder/<designId>`,
+with the catalog left out, is not a design URL: the routing reads the first segment as a catalog
+name, and the app reads the catalog back out of `location.pathname` before it has fetched anything.
+It is a link people and agents build anyway, because the design's *API* resource below **is**
+catalog-free — `/api/ui-builder/v1/designs/<designId>` names a design with its id alone, since the
+server reads the catalog out of the stored document's `catalogPin` — so an id that works against
+the API used to produce a `404` that looks like a deleted design
+([#509](https://github.com/yschimke/compose-preview-server/issues/509)).
 
-The trap is that the design's *API* resource below **is** catalog-free — `/api/ui-builder/v1/designs/<designId>`
-names a design with its id alone, because the server reads the catalog out of the stored document's
-`catalogPin`. The browser URL cannot: the app reads the catalog back out of `location.pathname`
-before it has fetched anything. So an id that works against the API is not a browser link, and
-pasting one produces a `404` that looks like a deleted design. Whether the short form should
-redirect to the canonical one is
-[#509](https://github.com/yschimke/compose-preview-server/issues/509).
+The server now answers it with `302` to `/ui-builder/<catalog>/<designId>`, reading the missing
+segment from that same `catalogPin`. It does that **as the caller**: designs are private to their
+owner and collaborators, and a redirect that fired for any id that exists would tell a stranger
+both that a (fairly guessable) id is taken and which catalog it pins. Whoever cannot open the
+design still gets a `404`, and so does an id that names nothing — which is also what keeps a
+genuinely missing asset a `404` instead of silently rendering the app shell.
 
 Creating is a `POST`. The New design dialog opens on a form factor — Mobile, Wear, RemoteCompose
 — with a generated id already filled in (a `cheeky-raccoon`, reshuffled or overwritten as you
