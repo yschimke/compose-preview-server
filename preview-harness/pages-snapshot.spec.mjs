@@ -5282,3 +5282,132 @@ test("contract · a catalog's sub-groups share rows instead of each claiming one
   const filtered = await box("cp-group-button");
   expect(filtered.width).toBe(badge.width);
 });
+
+test("contract · the front door's search collapses into the bar and reaches component names", async ({
+  page,
+}) => {
+  // Three things a DOM assertion in Kotlin cannot see, because all three are the script's
+  // behaviour rather than the page's markup.
+  //
+  // The field starts collapsed and the button expands it, focused — a disclosure that opens
+  // without moving focus into it is a control a keyboard cannot use.
+  //
+  // A component name reaches its CATALOG. `/api/components` is the same cross-catalog index the
+  // command palette reads, and nothing on a card names the components inside it, so before this
+  // typing "slider" emptied the page. The card whose catalog published the hit has to survive the
+  // filter, and the hit itself has to be listed.
+  //
+  // And the index is read from an element emitted at the END of the body, after this script — so
+  // a lookup taken when the script parses finds nothing, for ever. That failure is silent: the
+  // catalog half keeps working and the component half simply never matches.
+  for (const [name, contentType] of SERVE_ASSETS) {
+    await page.route(`**/assets/serve/**/${name}`, (route) =>
+      route.fulfill({ path: resolve(serveAssetsDir, name), contentType }),
+    );
+  }
+  await page.route("**/hero/**", (route) =>
+    route.fulfill({ path: renderPlaceholder, contentType: "image/png" }),
+  );
+  await page.route("**/render/**", (route) =>
+    route.fulfill({ path: renderPlaceholder, contentType: "image/png" }),
+  );
+  await page.route("**/api/components**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        components: [
+          {
+            label: "Slider",
+            catalog: "wear-m3",
+            catalogTitle: "Wear Compose Material 3",
+            href: "/wear-m3/p/slider",
+            keywords: "slider control",
+          },
+        ],
+      }),
+    }),
+  );
+  await page.goto("/preview-harness/fixtures/pages/serve-home-index.html");
+
+  await expect(page.locator("#cp-site-search-field")).toBeHidden();
+  await page.click("#cp-site-search-toggle");
+  await expect(page.locator("#cp-site-search-field")).toBeVisible();
+  expect(
+    await page.evaluate(() => document.activeElement?.id),
+  ).toBe("cp-browser-catalog-search");
+
+  const cards = () => page.locator(".cp-sys:not([hidden])");
+  const all = await cards().count();
+
+  // Nothing on the Wear card's own text says "slider"; its catalog's component index does.
+  await page.fill("#cp-browser-catalog-search", "slider");
+  await expect(page.locator(".cp-home-component")).toHaveCount(1);
+  await expect(page.locator(".cp-home-component")).toContainText("Slider");
+  await expect(cards()).toHaveCount(1);
+  await expect(cards().first()).toContainText("Wear Compose Material 3");
+
+  // A query that matches neither index says so rather than leaving a silently empty page.
+  await page.fill("#cp-browser-catalog-search", "nothing-matches-this");
+  await expect(page.locator("#cp-browser-catalog-empty")).toBeVisible();
+
+  // Escape collapses the field AND clears the filter — a hidden query still filtering the grid is
+  // a page nobody can explain.
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#cp-site-search-field")).toBeHidden();
+  await expect(cards()).toHaveCount(all);
+});
+
+test("contract · a refused UI Builder explains itself inside the card", async ({
+  page,
+}) => {
+  // The refused chip is a `<details>`: it has to open with no script, keep its explanation inside
+  // the card that refused, and — the part only a browser can check — WRAP there. A card is a grid
+  // whose column sizes to its content, so a sentence in it used to widen the track past the tile
+  // and run out through its side.
+  for (const [name, contentType] of SERVE_ASSETS) {
+    await page.route(`**/assets/serve/**/${name}`, (route) =>
+      route.fulfill({ path: resolve(serveAssetsDir, name), contentType }),
+    );
+  }
+  await page.route("**/hero/**", (route) =>
+    route.fulfill({ path: renderPlaceholder, contentType: "image/png" }),
+  );
+  await page.route("**/render/**", (route) =>
+    route.fulfill({ path: renderPlaceholder, contentType: "image/png" }),
+  );
+  await page.goto("/preview-harness/fixtures/pages/serve-home-index.html");
+  // The fixture is generated for a PERMITTED visitor — the refused shape turns on who is looking,
+  // not on the page — so the refused chip is stood up here from the same markup the server emits.
+  await page.evaluate(() => {
+    const row = document.querySelector(".cp-sys-actions");
+    const compare = row.querySelector(
+      "a.cp-action-chip:not(.cp-action-chip--primary)",
+    ).outerHTML;
+    row.innerHTML =
+      '<details class="cp-action-note">' +
+      '<summary class="cp-action-chip cp-action-chip--locked">UI Builder' +
+      '<span class="cp-action-chip-hint" aria-hidden="true">why?</span></summary>' +
+      '<span class="cp-action-note-body">Creating a design needs write access to ' +
+      "yschimke/compose-ai-tools, which the account you are signed in with (someone) does not " +
+      "have. Ask an operator to add you, or sign in with an account that has it.</span></details>" +
+      compare;
+  });
+
+  await expect(page.locator(".cp-action-note-body")).toBeHidden();
+  await page.click(".cp-action-chip--locked");
+  await expect(page.locator(".cp-action-note-body")).toBeVisible();
+
+  const fits = await page.evaluate(() => {
+    const card = document.querySelector(".cp-sys");
+    const note = document.querySelector(".cp-action-note-body");
+    const c = card.getBoundingClientRect();
+    const n = note.getBoundingClientRect();
+    return {
+      insideRight: n.right <= c.right + 1,
+      // Wrapped, not one long line: the sentence is far wider than a card at one line.
+      lines: Math.round(n.height / parseFloat(getComputedStyle(note).lineHeight)),
+    };
+  });
+  expect(fits.insideRight).toBe(true);
+  expect(fits.lines).toBeGreaterThan(1);
+});

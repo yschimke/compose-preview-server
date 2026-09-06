@@ -354,6 +354,72 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
   color: var(--md-sys-color-primary); }
 .cp-settings-session .cp-settings-tour { margin-right: 0; }
 
+/* The header's collapsed search (ServeWeb.headerSearchControl). It replaced a full-width sticky
+   bar under the header, which spent a band of every visitor's screen on a control most of them
+   never open — on the front door, whose whole job is to show catalogs, it sat between the reader
+   and the first row of them. The button is styled as one more nav action, so the bar reads as one
+   row of controls rather than a search bolted onto it, and the field it expands sits inline beside
+   it on a desktop and drops to a full-width row of its own on a phone. */
+.cp-site-search { display: inline-flex; align-items: center; gap: 6px; }
+.cp-site-search-btn { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 36px; min-height: 36px; padding: 6px; border: 0;
+  border-radius: var(--md-sys-shape-corner-full); background: transparent;
+  color: var(--md-sys-color-on-surface-variant); font-size: 20px; line-height: 1; cursor: pointer;
+  transition: background var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
+.cp-site-search-btn:hover, .cp-site-search-btn[aria-expanded="true"] {
+  color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+.cp-site-search-btn:focus-visible { outline: 3px solid var(--md-sys-color-secondary);
+  outline-offset: 2px; }
+.cp-site-search-field { display: flex; align-items: center; min-height: 36px; padding: 0 14px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-high); }
+.cp-site-search-field[hidden] { display: none; }
+.cp-site-search-field:focus-within { outline: 3px solid var(--md-sys-color-secondary);
+  outline-offset: 2px; }
+.cp-site-search-input { width: clamp(150px, 20vw, 260px); min-width: 0; padding: 0; border: 0;
+  outline: 0;
+  background: transparent; color: var(--md-sys-color-on-surface); font: inherit;
+  font-size: var(--md-sys-typescale-body-medium-size);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking); }
+.cp-site-search-input::placeholder { color: var(--md-sys-color-on-surface-variant); }
+/* An open field needs room the bar does not have on a laptop, and `.cp-site-brand` is `flex: none`
+   — so without this the two words of product name simply overlap the field instead of yielding to
+   it. The mark stays: it is the home link, and it is what a visitor recognises. The phone rule
+   below drops the wordmark outright, expanded or not. */
+@media (max-width: 1180px) {
+  .cp-site-header:has(.cp-site-search-btn[aria-expanded="true"]) .cp-site-wordmark { display: none; }
+}
+/* The other half of the search: components matched across every catalog, listed above the grid the
+   same query filters. Rows rather than cards — a name and where it comes from is the whole answer,
+   and a hit list that looked like the catalog grid below it would read as more catalogs. */
+.cp-home-components { margin: 0 0 24px; }
+.cp-home-components[hidden] { display: none; }
+.cp-home-components-head { margin: 0 0 8px;
+  font-size: var(--md-sys-typescale-title-small-size);
+  color: var(--md-sys-color-on-surface-variant); }
+.cp-home-component-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0;
+  list-style: none; }
+.cp-home-component { display: inline-flex; align-items: baseline; gap: 8px; padding: 8px 14px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+  color: var(--md-sys-color-on-surface); text-decoration: none;
+  font-size: var(--md-sys-typescale-label-large-size); }
+.cp-home-component:hover { text-decoration: none; border-color: var(--md-sys-color-outline);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+.cp-home-component-name { font-weight: 500; }
+.cp-home-component-catalog { color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium-size); }
+@media (max-width: 640px) {
+  /* No room for a field beside the brand: the bar keeps the button and the field takes the row
+     under it, full width, which is where a phone expects a search to open anyway. */
+  .cp-site-search { position: static; }
+  .cp-site-search-field { position: absolute; left: 0; right: 0; top: calc(100% - 4px);
+    z-index: 40; min-height: 44px;
+    box-shadow: var(--md-sys-elevation-level2); }
+  .cp-site-search-input { width: 100%; flex: 1; }
+}
+
 /* Opt-in keyboard layer: a quiet persistent hint rail, command palette and first-run tour. */
 .cp-keyboard-modal-open { overflow: hidden; }
 .cp-keyboard-hints { position: fixed; left: 50%; bottom: 14px; z-index: 44;
@@ -893,17 +959,82 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
 .cp-actions-panel .cp-action-chip, .cp-actions-panel .cp-bg-btn {
   width: 100%; min-height: 40px; justify-content: flex-start; text-align: left; }
 .cp-catalog-download { margin: 30px 0 0; }
-.cp-action-chip { display: inline-flex; align-items: center; min-height: 32px; padding: 6px 16px;
+/* One chip, three weights. M3 calls this an assist chip and draws it as a PILL — which is what the
+   rest of this chrome already does with a small interactive target (the nav actions, the interface
+   switch, the search bar), so the square corners here were the odd ones out. The base is the quiet
+   outlined form; `--primary` is the tonal one a card's leading action wears, and `--locked` is the
+   same shape with the fill taken away and the outline dashed, so an action that is present but not
+   yours to take reads as unavailable before it is read at all.
+
+   `min-height` and the 8px gap keep every variant on one baseline whether or not it carries a
+   leading glyph, so a row of mixed chips does not stagger. */
+.cp-action-chip { display: inline-flex; align-items: center; gap: 8px;
+  min-height: 34px; padding: 6px 16px;
   border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-corner-small);
-  background: transparent; color: var(--md-sys-color-on-surface-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-label-large-size);
   letter-spacing: var(--md-sys-typescale-label-large-tracking); font-weight: 500;
-  text-decoration: none; white-space: nowrap;
-  transition: background var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
+  text-decoration: none; white-space: nowrap; cursor: pointer;
+  transition: background var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard),
+    border-color var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard),
+    box-shadow var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
 .cp-action-chip:hover, .cp-action-chip:focus-visible { text-decoration: none;
   color: var(--md-sys-color-on-surface);
-  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+  border-color: var(--md-sys-color-outline);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%,
+    var(--md-sys-color-surface-container-low)); }
+.cp-action-chip:focus-visible { outline: 3px solid var(--md-sys-color-secondary);
+  outline-offset: 2px; }
+.cp-action-chip:active { box-shadow: none;
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%,
+    var(--md-sys-color-surface-container-low)); }
+/* The leading glyph is decoration with a job: it separates two chips whose labels are both verbs
+   at a glance. Sized off the label so it scales with it, and never allowed to set the row height. */
+.cp-action-chip-icon { font-size: 1.05em; line-height: 1; }
+/* The card's leading action — the one that starts work rather than inspecting it. Tonal `primary
+   container`, the M3 weight for a suggested action, so "UI Builder" reads as the offer and
+   "compare to Figma" as the alternative beside it rather than the two competing. */
+.cp-action-chip--primary { border-color: transparent;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container); }
+.cp-action-chip--primary:hover, .cp-action-chip--primary:focus-visible {
+  border-color: transparent; color: var(--md-sys-color-on-primary-container);
+  background: color-mix(in srgb, var(--md-sys-color-on-primary-container) 8%,
+    var(--md-sys-color-primary-container));
+  box-shadow: var(--md-sys-elevation-level1); }
+.cp-action-chip--primary:active { box-shadow: none;
+  background: color-mix(in srgb, var(--md-sys-color-on-primary-container) 12%,
+    var(--md-sys-color-primary-container)); }
+/* Present, explained, not available. A dashed outline and no fill is the one treatment that says
+   "this is not a live control" without hiding it — and it is still a real disclosure, so it keeps
+   the hover and focus affordances of something you may click. */
+.cp-action-chip--locked { border-style: dashed; background: transparent;
+  color: var(--md-sys-color-on-surface-variant); list-style: none; }
+.cp-action-chip--locked::-webkit-details-marker { display: none; }
+.cp-action-chip-hint { color: var(--md-sys-color-primary);
+  font-size: var(--md-sys-typescale-label-medium-size); text-decoration: underline; }
+/* The explanation the locked chip opens: one sentence, in the card, under the chip that refused.
+   `position: static` — it is content the card grows to hold, not a popover, so nothing about it
+   can be clipped by a tile that is shorter than the sentence. */
+.cp-action-note { pointer-events: auto; min-width: 0; max-width: 100%; }
+/* A card's implicit column is `auto`, which sizes to its CONTENT — so a paragraph inside the meta
+   block widened the track past the card box drawn around it, and the sentence ran out through the
+   side of the tile instead of wrapping. `minmax(0, 1fr)` pins the track to the card, and the
+   item's `min-width: 0` lets it be smaller than its own text. Everything in a card until now was
+   short enough to hide this. */
+.cp-card.cp-sys { grid-template-columns: minmax(0, 1fr); }
+.cp-card.cp-sys .cp-meta { min-width: 0; }
+/* Open, it takes the row: the sentence is longer than any chip, and a flex item whose `min-width`
+   is `auto` would size to that sentence and push it out through the side of the card. */
+.cp-action-note[open] { flex: 1 1 100%; }
+.cp-action-note-body { display: block; margin: 8px 0 0; padding: 8px 12px;
+  border-radius: var(--md-sys-shape-corner-small);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-body-small-size);
+  font-weight: 400; letter-spacing: normal; white-space: normal; overflow-wrap: anywhere; }
 /* M3 search bar: a filled `surface-container-high` pill with NO outline — the fill is the
    affordance. Focus is the shared 3dp `secondary` ring rather than a border colour change. */
 .cp-search { flex: 1 1 260px; max-width: 420px; min-height: 44px; padding: 10px 18px; font: inherit;
@@ -1546,7 +1677,7 @@ cp-parity-scores { display: contents; }
    link underneath. */
 .cp-sys-actions { position: relative; z-index: 2; margin: 12px 0 0;
   display: flex; flex-wrap: wrap; gap: 8px; pointer-events: none; }
-.cp-sys-actions > a { pointer-events: auto; }
+.cp-sys-actions > a, .cp-sys-actions > details { pointer-events: auto; }
 /* Focus lands on the inner link now, so the card's own `:focus-visible` rules can never match (a
    `<div>` never takes focus) — every one of them has to be restated on `:focus-within` or keyboard
    focus silently loses the treatment pointer hover gets: the lift, the elevation, the state layer
@@ -4556,22 +4687,6 @@ cp-page-zoom button:focus-visible {
 .cp-component-browser .cp-main { max-width: 1680px; }
 .cp-component-browser .cp-catalog-head-row { align-items: center; margin-bottom: 18px; }
 .cp-component-browser .cp-catalog-head-row .cp-head-toggles { margin-left: auto; }
-.cp-browser-home-tools { position: sticky; top: var(--site-header-height); z-index: 20;
-  margin: 0 0 24px;
-  padding: 8px 0; background: var(--cp-bg); }
-.cp-browser-search { width: 100%; max-width: 520px; min-height: 48px; padding: 0 16px;
-  display: flex; align-items: center; gap: 12px;
-  border-radius: var(--md-sys-shape-corner-full);
-  background: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-on-surface-variant); }
-.cp-browser-search:focus-within { outline: 3px solid var(--md-sys-color-secondary);
-  outline-offset: 2px; }
-.cp-browser-search-icon { flex: 0 0 auto; font-size: 20px; line-height: 1; }
-.cp-browser-search-input { min-width: 0; flex: 1; padding: 0; border: 0; outline: 0;
-  background: transparent; color: var(--md-sys-color-on-surface); font: inherit;
-  font-size: var(--md-sys-typescale-body-medium-size);
-  letter-spacing: var(--md-sys-typescale-body-medium-tracking); }
-.cp-browser-search-input::placeholder { color: var(--md-sys-color-on-surface-variant); }
 .cp-browser-provenance { margin-top: 7px; color: var(--md-sys-color-on-surface-variant);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--md-sys-typescale-body-small-size); overflow-wrap: anywhere; }
@@ -4611,7 +4726,6 @@ cp-page-zoom button:focus-visible {
   .cp-component-browser .cp-nav-close { display: none; }
 }
 @media (max-width: 640px) {
-  .cp-browser-home-tools { top: var(--site-header-height); }
   .cp-browser-breadcrumb { white-space: normal; }
   .cp-browser-siblings { grid-template-columns: 1fr; }
   .cp-browser-sibling-next { grid-column: 1; }

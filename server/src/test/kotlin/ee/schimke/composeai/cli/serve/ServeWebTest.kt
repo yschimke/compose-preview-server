@@ -699,6 +699,153 @@ class ServeWebTest {
     assertTrue(html.contains("<meta name=\"twitter:title\" content=\"Design systems\">"), html)
   }
 
+  private fun builderSystem(id: String) =
+    ServeWeb.HomeSystem(
+      system = id,
+      title = id,
+      subtitle = null,
+      previewCount = 1,
+      trust = null,
+      heroPreviewId = null,
+    )
+
+  private fun builderHome(invite: ServeWeb.UiBuilderInvite?, componentBrowser: Boolean = false) =
+    ServeWeb.homeIndexPage(
+      listOf(builderSystem("m3-catalog"), builderSystem("plain")),
+      token = "unused",
+      isPublic = true,
+      uiBuilder = invite,
+      componentBrowser = componentBrowser,
+    )
+
+  /**
+   * The builder was reachable only by knowing its URL, so the whole authoring surface was invisible
+   * from the front door. The card offers it — on the catalogs the builder actually runs for, and to
+   * the visitors whose credential the create route will accept.
+   */
+  @Test
+  fun `a front-door card offers the UI builder to a permitted visitor`() {
+    val html =
+      builderHome(
+        ServeWeb.UiBuilderInvite(
+          systems = setOf("m3-catalog"),
+          signedIn = true,
+          permitted = true,
+        )
+      )
+
+    assertTrue(
+      html.contains(
+        "<a class=\"cp-action-chip cp-action-chip--primary\" href=\"/ui-builder/m3-catalog/\" " +
+          "aria-label=\"m3-catalog: open the UI Builder\">"
+      ),
+      html,
+    )
+    // …but only for a catalog the builder is configured for. Every other card is unchanged.
+    assertFalse(html.contains("/ui-builder/plain/"), html)
+    assertEquals(1, Regex("cp-action-chip--primary").findAll(html).count(), html)
+  }
+
+  /**
+   * The refusal is the point. A signed-in visitor whose account does not carry the write capability
+   * used to get *nothing* — no chip, no explanation, no way to learn that the builder exists or
+   * what would let them in. Silence is indistinguishable from the feature not being there.
+   */
+  @Test
+  fun `a visitor without access gets the reason rather than an absence`() {
+    val html =
+      builderHome(
+        ServeWeb.UiBuilderInvite(
+          systems = setOf("m3-catalog"),
+          signedIn = true,
+          permitted = false,
+          deniedReason = "Creating a design needs write access to acme/design.",
+        )
+      )
+
+    assertTrue(html.contains("cp-action-chip cp-action-chip--locked"), html)
+    assertTrue(
+      html.contains(
+        "<span class=\"cp-action-note-body\">" +
+          "Creating a design needs write access to acme/design.</span>"
+      ),
+      html,
+    )
+    // Explained, not offered: nothing on the page links the create route.
+    assertFalse(html.contains("/ui-builder/m3-catalog/"), html)
+  }
+
+  /** Creating a design is a write, so an anonymous visitor is offered the header's sign-in only. */
+  @Test
+  fun `a signed-out visitor is offered no builder action at all`() {
+    val html =
+      builderHome(
+        ServeWeb.UiBuilderInvite(
+          systems = setOf("m3-catalog"),
+          signedIn = false,
+          permitted = false,
+          deniedReason = "Creating a design needs write access to acme/design.",
+        )
+      )
+
+    assertFalse(html.contains("UI Builder"), html)
+    // …and a host that does not run the builder says nothing about it either.
+    assertFalse(builderHome(null).contains("UI Builder"), html)
+  }
+
+  /** Catalog mode is for browsing components, not authoring against them — as with the compare. */
+  @Test
+  fun `component-browser mode drops the builder action`() {
+    val html =
+      builderHome(
+        ServeWeb.UiBuilderInvite(
+          systems = setOf("m3-catalog"),
+          signedIn = true,
+          permitted = true,
+        ),
+        componentBrowser = true,
+      )
+
+    assertFalse(html.contains("UI Builder"), html)
+  }
+
+  /**
+   * The front door's search is one field over two indexes: the catalog cards in the DOM, and the
+   * cross-catalog component index the command palette already reads. Typing a component's name used
+   * to empty the page — nothing on a card names the components inside it.
+   */
+  @Test
+  fun `the front-door search reaches component names, and collapses into the bar`() {
+    val html =
+      ServeWeb.homeIndexPage(
+        listOf(builderSystem("m3-catalog")),
+        token = "unused",
+        isPublic = true,
+      )
+
+    // Collapsed: the control in the bar is a disclosure button over a hidden field.
+    assertTrue(html.contains("id=\"cp-site-search-toggle\""), html)
+    assertTrue(
+      html.contains("aria-expanded=\"false\" aria-controls=\"cp-site-search-field\""),
+      html,
+    )
+    assertTrue(
+      html.contains("<div class=\"cp-site-search-field\" id=\"cp-site-search-field\" hidden>"),
+      html,
+    )
+    // The header search sits in the header, not in the page body it filters.
+    assertTrue(html.indexOf("cp-site-search-toggle") < html.indexOf("<main"), html)
+    // Components: the same index the palette reads, matched by label AND by keywords, and the card
+    // whose catalog published a hit stays visible even when its own text matched nothing.
+    assertTrue(html.contains("data-cp-global-components=\"/api/components\""), html)
+    assertTrue(html.contains("(c.label||\"\")+\" \"+(c.keywords||\"\")"), html)
+    assertTrue(html.contains("owners[c.getAttribute(\"data-cp-system\")]===true"), html)
+    assertTrue(html.contains("id=\"cp-home-components\""), html)
+    // Component labels come from a catalog's own export: they are text, never markup.
+    assertTrue(html.contains("name.textContent=c.label"), html)
+    assertFalse(html.contains("innerHTML"), html)
+  }
+
   /**
    * The comparison used to be reachable only from a catalog's own landing page, so "compare this
    * system against its Figma" cost a visit to the catalog first and was invisible from `/`
@@ -752,8 +899,8 @@ class ServeWebTest {
     // …and no EMPTY row stands in for it. The chip lives inside the card now, so the grid's own
     // stretch is what makes a card with an action and one without the same size — the reserved
     // placeholder row the outside-the-card layout needed is gone.
-    assertEquals(3, Regex("<p class=\"cp-sys-actions\">").findAll(html).count(), html)
-    assertFalse(html.contains("<p class=\"cp-sys-actions\"></p>"), html)
+    assertEquals(3, Regex("<div class=\"cp-sys-actions\">").findAll(html).count(), html)
+    assertFalse(html.contains("<div class=\"cp-sys-actions\"></div>"), html)
   }
 
   /**
