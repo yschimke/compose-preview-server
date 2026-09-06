@@ -2598,7 +2598,7 @@ public class ServeRunner(
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(directory.toPath()),
         catalogs = catalogs,
-        exporter = exporter,
+        exporter = RootSurfaceGroundAnnotatedExporter(exporter),
       )
     // An unusable design is the one startup condition that is invisible by construction: the host
     // comes up healthy and serves everything else, so without this line the only evidence is a
