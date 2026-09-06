@@ -22,6 +22,21 @@ repository boundary.
   request `/regenerate-goldens` asks for the same thing.
 - Immediately before every push, fetch `origin main` and confirm the branch or PR has not merged.
 - Open or update a PR automatically after a completed coding change. Never auto-merge.
+- **Embed images only from a GitHub-hosted origin — including images this server serves.** Claude
+  Code on the web silently rewrites `![alt](url)` to `[alt](url)` on the way to the API whenever the
+  destination is not a GitHub host, so the picture lands as a bare link and the API still returns
+  201. Kept: `raw.githubusercontent.com`, `github.com/<owner>/<repo>/raw/<ref>/…`,
+  `github.com/user-attachments/assets/…`, and the `user-images` / `private-user-images` / `avatars`
+  / `objects` / `media` / `gist` `.githubusercontent.com` hosts. Stripped: everything else,
+  **`preview.coo.ee` included** — so a PR here that shows off a rendered page must point at the
+  committed PNG under [`docs/evidence/`](docs/evidence/) or [`docs/images/`](docs/images/) through a
+  commit-pinned `raw.githubusercontent.com` URL, never at the deployment. Measured variant-by-variant
+  on [#456](https://github.com/yschimke/compose-preview-server/issues/456); upstream it is
+  [anthropics/claude-code#89540](https://github.com/anthropics/claude-code/issues/89540) (open,
+  `area:security`), an anti-exfiltration control rather than a bug to route around. The rewrite is a
+  blind regex — it fires inside code spans and fenced blocks, and an `<img src=…>` is HTML-escaped
+  into a code span — so no spelling of a non-GitHub host renders. `preview.coo.ee` remains the right
+  thing to **link** to in prose; it is only image embeds that need the GitHub origin.
 - In a PR body write `![alt](url)` plainly, and **leave any backticks that appear around the URL
   alone**. They are injected between an agent and GitHub rather than authored, and the
   [`PR Body Syntax`](.github/workflows/pr-body-syntax.yml) workflow strips them in place within a
