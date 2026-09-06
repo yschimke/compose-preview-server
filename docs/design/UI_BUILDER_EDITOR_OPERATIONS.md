@@ -76,6 +76,50 @@ asked for `m3/icon`'s trait after `m3/icon` had left the catalog. The `remote-m3
 is the one known survivor: the brushes it takes are not in that reviewed subset yet, and the test
 names it rather than tolerating it.
 
+## Generating trees, and refusing them
+
+Two tests in `:ui-builder` ask the catalog's own question from both ends.
+
+[`GeneratedDocumentTest`](../../ui-builder/src/jvmTest/kotlin/ee/schimke/composeai/uibuilder/GeneratedDocumentTest.kt)
+builds documents the way a person does — select a node, pick a component, press Add — and asserts
+each one is valid at every tier it could be wrong at: structural, catalog, export, and round trip.
+It does not write nodes directly, and that is the point. A generator that assembled JSON could
+produce shapes no sequence of editor operations reaches, and every failure it found would need
+triaging for whether the document was reachable at all before it meant anything. Where a child lands
+is not the generator's decision either: it asks `dropTarget`, which is the call the palette's Add
+makes, and inserts at exactly what comes back — `InsertComponent` refuses a target the current
+selection does not resolve to, which is what stops a stale panel writing into a slot that has moved.
+
+Seeds are fixed, so a failure reproduces from the seed alone. The catalog is the grammar, so a
+component or slot added to it is generated the day it is declared.
+
+[`MutatedDocumentTest`](../../ui-builder/src/jvmTest/kotlin/ee/schimke/composeai/uibuilder/MutatedDocumentTest.kt)
+is the other direction: it takes a generated document, breaks exactly one rule, and asserts the code
+that names it — an incompatible slot child, a required slot emptied, a slot past its maximum, a
+dangling child id, an undeclared slot or component, a missing required property, an enum value the
+catalog does not allow, an undeclared modifier, a node in two slots, a cycle, a root count other than
+one, an unreachable node. One tier at a time is what makes a failure readable: a document broken
+three ways is refused whatever the validator actually noticed. Those mutations write the document
+directly on purpose — the question there is what the *validator* does with a bad document however it
+arrived, and the editor's own doors are asked separately, where being refused is not enough and the
+document has to come back unchanged.
+
+Three things they found, each pinned by the test that found it so the list cannot grow quietly:
+
+- **`m3/button.leadingIcon` is unreachable from Add.** `findDestination` takes the first slot that
+  accepts and has room, and that slot sits behind an unbounded `content` which accepts an icon too.
+  Dragging into the named slot is the only way in
+  ([#430](https://github.com/yschimke/compose-preview-server/issues/430)).
+- **A button or a progress indicator inserted from the palette cannot be exported.** An insert
+  writes an entry for every slot the catalog declares, so every button carries an empty
+  `leadingIcon`, which the record has no parameter for and the export refuses on the key being
+  present. A progress indicator arrives determinate, and a determinate one takes a lambda the
+  document vocabulary cannot express. The checked-in goldens are hand-authored operation lists that
+  write only what somebody meant to write, which is why the Jetcaster fixture exports three buttons
+  happily and nothing caught either of these (same issue).
+- **Nothing bounds the root count before export**, so a design with zero or two roots can be stored
+  and never exported ([#429](https://github.com/yschimke/compose-preview-server/issues/429)).
+
 ## Starter content
 
 A container inserted from the palette arrives holding typical content rather than empty: an icon
