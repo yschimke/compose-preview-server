@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.11.0](https://github.com/yschimke/compose-preview-server/compare/v3.10.0...v3.11.0) (2026-09-06)
+
+
+### Features
+
+* **ui-builder:** a tool surface an agent can work in — context, correction, cleanup ([#495](https://github.com/yschimke/compose-preview-server/issues/495)) ([61993d1](https://github.com/yschimke/compose-preview-server/commit/61993d16fa4691a122d33cc3edd7be603fa4ecc9))
+* **ui-builder:** export a screen on the devices its design named ([#498](https://github.com/yschimke/compose-preview-server/issues/498)) ([c59d7d0](https://github.com/yschimke/compose-preview-server/commit/c59d7d009a0c93e55d40d7859ae7cb671d74ac67))
+* **ui-builder:** generate the custom-component operation for an inline body ([#471](https://github.com/yschimke/compose-preview-server/issues/471)) ([e0ce003](https://github.com/yschimke/compose-preview-server/commit/e0ce003581fa251577377e76306ce7393282b0f7))
+* **ui-builder:** make an ordinary screen export ([#494](https://github.com/yschimke/compose-preview-server/issues/494)) ([6fe1c2a](https://github.com/yschimke/compose-preview-server/commit/6fe1c2a4756553c4e212f6234f1d178735b863e9))
+* **ui-builder:** mark the palette rows the Compose export cannot write ([#502](https://github.com/yschimke/compose-preview-server/issues/502)) ([ef5bbc8](https://github.com/yschimke/compose-preview-server/commit/ef5bbc84432c720d6c351eee914cf7c87a78630d))
+* **ui-builder:** play inline Remote Compose content by capturing it ([#504](https://github.com/yschimke/compose-preview-server/issues/504)) ([33f69a0](https://github.com/yschimke/compose-preview-server/commit/33f69a08795e6a5ef96176e1e25548cfa99aca79))
+* **ui-builder:** put a picture in a design, end to end ([#503](https://github.com/yschimke/compose-preview-server/issues/503)) ([af58f10](https://github.com/yschimke/compose-preview-server/commit/af58f10ec3a01b684d47d08157b3eb76c85e4037))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.59.0 ([#501](https://github.com/yschimke/compose-preview-server/issues/501)) ([2c91a9e](https://github.com/yschimke/compose-preview-server/commit/2c91a9e90e5721a42f0ca202349c458b2aaf2fc0))
+* **serve:** carry the density a preview actually renders at ([#472](https://github.com/yschimke/compose-preview-server/issues/472)) ([3192698](https://github.com/yschimke/compose-preview-server/commit/319269809952436f9e212a0fbb345a7a142c52cf))
+* **serve:** resolve the RC replay's density from the device too ([#482](https://github.com/yschimke/compose-preview-server/issues/482)) ([e666965](https://github.com/yschimke/compose-preview-server/commit/e666965b652a64a976c7d12fabffaabe85a8e870))
+* **ui-builder:** refuse at commit what fails at render or export ([#497](https://github.com/yschimke/compose-preview-server/issues/497)) ([d75bff6](https://github.com/yschimke/compose-preview-server/commit/d75bff68579e0979a6288d851797aef1f1d1c9df))
+* **ui-builder:** wrap a card with no height, and name a coloured root that does not fill the frame ([#499](https://github.com/yschimke/compose-preview-server/issues/499)) ([69d8d12](https://github.com/yschimke/compose-preview-server/commit/69d8d126a08bfcdfdcf11b57a42a346e9c82bbbd))
+
 ## [3.10.0](https://github.com/yschimke/compose-preview-server/compare/v3.9.0...v3.10.0) (2026-09-06)
 
 
