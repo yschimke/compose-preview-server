@@ -301,7 +301,14 @@ class ServeCatalogMcp(
       )
     )
     uiBuilder?.let {
-      addAll(ServeUiBuilderMcp.declarations(::tool, uiBuilderNative, it.supportsComments))
+      addAll(
+        ServeUiBuilderMcp.declarations(
+          ::tool,
+          uiBuilderNative,
+          it.supportsComments,
+          it.supportsAssets,
+        )
+      )
     }
     add(
       tool(

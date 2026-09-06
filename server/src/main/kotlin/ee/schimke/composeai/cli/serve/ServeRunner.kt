@@ -18,6 +18,7 @@ import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
+import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
@@ -2538,7 +2539,23 @@ public class ServeRunner(
     }
     val compose =
       ScreenGeneratorComposeExportExecutor(records::record, packs = packs.map { it.id }.toSet())
-    val exporter = renderer?.let { ProductionUiBuilderExportExecutor(it, compose) } ?: compose
+    // Uploaded asset bytes, content-addressed, in their own directory beside the design state for
+    // the reason the references and the comments have one: the state file is rewritten on every
+    // accepted operation, and a photograph must not ride along with every keystroke. The export
+    // executor reads the same store so a daemon render draws what the canvas draws.
+    val assetStore = runCatching {
+      FileUiBuilderAssetStore(directory.resolve("assets").toPath())
+    }
+      .onFailure {
+        System.err.println(
+          "serve: UI-builder asset store unavailable (${it.message}); " +
+            "the builder works, and a design cannot hold an uploaded image"
+        )
+      }
+      .getOrNull()
+    val exporter =
+      renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
+        ?: compose
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
@@ -2599,6 +2616,7 @@ public class ServeRunner(
         storage = FileUiBuilderStateStorage(directory.toPath()),
         catalogs = catalogs,
         exporter = RootSurfaceGroundAnnotatedExporter(exporter),
+        assets = assetStore,
       )
     // An unusable design is the one startup condition that is invisible by construction: the host
     // comes up healthy and serves everything else, so without this line the only evidence is a
@@ -2988,6 +3006,7 @@ public class ServeRunner(
         uiBuilderService = uiBuilderLane?.service,
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
+        uiBuilderAssets = uiBuilderLane?.service,
         uiBuilderAuthorization =
           uiBuilderLane?.let {
             ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)

@@ -29,6 +29,8 @@ import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetWrite
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -111,11 +113,24 @@ class ServeUiBuilderMcp(
    */
   private val references: ServeUiBuilderReferenceStore? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
+  /**
+   * The bytes behind a design's `assets` map, on a host that keeps them.
+   *
+   * Null on a host with no durable UI-builder state; the tool is then absent rather than present
+   * and refusing, which is the rule the whole surface follows. This is what lets an agent put a
+   * photograph in a design: `asset/image` names an `assetKey`, and until this tool existed nothing
+   * on this surface could put bytes behind one.
+   */
+  private val assets: UiBuilderAssetPort? = null,
 ) {
 
   /** Whether this host keeps design discussions, and so whether the comment tools exist. */
   val supportsComments: Boolean
     get() = comments != null
+
+  /** Whether this host keeps design assets, and so whether [PUT_ASSET] exists. */
+  val supportsAssets: Boolean
+    get() = assets != null
 
   /** What a tool needs from the caller before it may run. Null when the name is not ours. */
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
@@ -140,6 +155,9 @@ class ServeUiBuilderMcp(
       // no `delete` capability to hand out on purpose — see [DELETE_DESIGN].
       DELETE_DESIGN -> UiBuilderRouteCapability.WRITE
       EXPORT -> UiBuilderRouteCapability.EXPORT
+      // A write to the design — the registry is part of the document and moves its revision —
+      // gated as one, and absent where the host has nowhere to keep the bytes.
+      PUT_ASSET -> if (assets == null) null else UiBuilderRouteCapability.WRITE
       // The same capability as an export, and for the same reason: a native render compiles and
       // runs the Kotlin an export hands back, so an actor who may not read that source may not
       // run it. Absent entirely on a host that cannot compile.
@@ -185,6 +203,7 @@ class ServeUiBuilderMcp(
             format = args.exportFormat(),
           )
         RENDER_NATIVE -> return renderNative(args, actor)
+        PUT_ASSET -> return envelope(callId, putAsset(args, actor))
         AWAIT_DESIGN -> return awaitDesign(args, actor)
         LIST_COMMENTS,
         AWAIT_COMMENTS,
@@ -652,6 +671,49 @@ class ServeUiBuilderMcp(
     )
   }
 
+  /**
+   * Put bytes behind an `assetKey`, so an `asset/image` naming it draws a photograph.
+   *
+   * The bytes arrive base64-encoded because an MCP argument is JSON text; the service sniffs them
+   * (PNG, JPEG, GIF or WebP), stores them by digest, pins the binding into the design's `assets`
+   * and answers the same accepted outcome an `$APPLY` does, with the new revision to quote next.
+   * Idempotent by content: the same bytes under the same key answer `idempotentReplay` and move
+   * nothing.
+   */
+  private suspend fun putAsset(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): UiBuilderServiceResponse {
+    val lane = assets ?: throw McpRequestException("this host keeps no design assets")
+    val encoded = args.requiredText(ASSET_BYTES_ARGUMENT)
+    val bytes =
+      try {
+        java.util.Base64.getDecoder().decode(encoded.trim())
+      } catch (_: IllegalArgumentException) {
+        throw McpRequestException("`$ASSET_BYTES_ARGUMENT` is not base64")
+      }
+    return try {
+      lane.putAsset(
+        UiBuilderAssetWrite(
+          actor = actor,
+          designId = args.requiredText("designId"),
+          assetKey = args.requiredText("assetKey"),
+          bytes = bytes,
+        )
+      )
+    } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (_: Exception) {
+      UiBuilderServiceResponse.Error(
+        ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
+          ServiceErrorCodeV1.INTERNAL,
+          "UI-builder asset store failed",
+          retryable = true,
+        )
+      )
+    }
+  }
+
   private fun apply(args: JsonObject, actor: AuthenticatedUiBuilderActor): UiBuilderRequestV1 {
     val operations =
       (args["operations"] as? JsonArray)
@@ -781,6 +843,10 @@ class ServeUiBuilderMcp(
     const val APPLY = "ui_builder_apply"
     const val EXPORT = "ui_builder_export"
     const val RENDER_NATIVE = "ui_builder_render_native"
+    const val PUT_ASSET = "ui_builder_put_asset"
+
+    /** The argument [PUT_ASSET] carries the picture in. */
+    const val ASSET_BYTES_ARGUMENT = "imageBase64"
     const val LIST_COMMENTS = "ui_builder_list_comments"
     const val POST_COMMENT = "ui_builder_post_comment"
     const val RESOLVE_COMMENT_THREAD = "ui_builder_resolve_comment_thread"
@@ -845,6 +911,9 @@ class ServeUiBuilderMcp(
     /** Separate because it exists only where the host can compile. */
     val NATIVE_TOOL_NAMES = listOf(RENDER_NATIVE)
 
+    /** Separate because it exists only where the host keeps design assets. */
+    val ASSET_TOOL_NAMES = listOf(PUT_ASSET)
+
     /** Separate because they exist only where the host keeps a discussion. */
     val COMMENT_TOOL_NAMES =
       listOf(LIST_COMMENTS, POST_COMMENT, RESOLVE_COMMENT_THREAD, AWAIT_COMMENTS)
@@ -865,6 +934,7 @@ class ServeUiBuilderMcp(
       tool: (String, String, String) -> JsonObject,
       native: Boolean = false,
       comments: Boolean = false,
+      assets: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -981,6 +1051,28 @@ class ServeUiBuilderMcp(
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
+        if (!assets) null
+        else
+          tool(
+            PUT_ASSET,
+            "Put a picture behind an `assetKey`, so an `asset/image` node naming that key draws " +
+              "it instead of a placeholder. Send the PNG, JPEG, GIF or WebP bytes base64-encoded " +
+              "in `$ASSET_BYTES_ARGUMENT`; the server stores them by content digest and pins " +
+              "{mediaType, contentDigest, source: uploaded} into the design's `assets` map under " +
+              "the key. This moves the design's revision, and the reply carries the new one to " +
+              "quote as `baseRevision`. Idempotent by content — the same bytes under the same " +
+              "key change nothing. Put the picture first, then insert the `asset/image` node " +
+              "with $APPLY: the reducer refuses a key that is neither pinned in the design nor " +
+              "in the catalog's own registry. A pinned key whose bytes a lane cannot show " +
+              "renders as a visible placeholder, never as an error.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "assetKey":{"type":"string","description":"1 to 64 characters of letters, digits, '.', '_' or '-'; what the node's assetKey property names."},
+              "$ASSET_BYTES_ARGUMENT":{"type":"string","description":"The image bytes, base64. At most 1 MiB decoded."}
+            },"required":["designId","assetKey","$ASSET_BYTES_ARGUMENT"],"additionalProperties":false}
+            """,
+          ),
         tool(
           DESIGN_ACCESS,
           "Read who can open a design: its owner, and every actor it has been shared with, each " +

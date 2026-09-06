@@ -1,12 +1,14 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.protocol.AssetKeyValueV1
 import ee.schimke.composeai.uibuilder.protocol.BooleanValueV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
+import ee.schimke.composeai.uibuilder.protocol.EnumValueV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
@@ -115,7 +117,6 @@ class M3CatalogComponentRecordTest {
   /** Capability ids the record deliberately does not cover yet, each with the reason. */
   private val uncovered =
     mapOf(
-      "asset/image" to "Image takes a Painter; no ScreenValue expresses one",
       // Not "items is a CarouselScope DSL" — that was this list's own guess and it is wrong.
       // `HorizontalUncontainedCarousel(state = rememberCarouselState { 5 }, …) { CarouselItem() }`
       // is how m3-catalog calls it: the content is a trailing composable slot taking an item
@@ -222,7 +223,7 @@ class M3CatalogComponentRecordTest {
                 DesignNodeV1(
                   id = "column",
                   componentId = "layout/column",
-                  slots = mapOf("children" to listOf("heading", "divider", "agree")),
+                  slots = mapOf("children" to listOf("heading", "divider", "photo", "agree")),
                 ),
               "heading" to
                 DesignNodeV1(
@@ -235,6 +236,20 @@ class M3CatalogComponentRecordTest {
                     ),
                 ),
               "divider" to DesignNodeV1(id = "divider", componentId = "m3/horizontal-divider"),
+              // A picture (#477's `asset/image` row). Its bytes live in the design's asset store
+              // and no generated Kotlin can carry them, so the record lane writes the real
+              // `Image(...)` with a placeholder painter and says so in a warning.
+              "photo" to
+                DesignNodeV1(
+                  id = "photo",
+                  componentId = "asset/image",
+                  properties =
+                    mapOf(
+                      "assetKey" to AssetKeyValueV1("avatar-lain"),
+                      "contentDescription" to StringValueV1("lain"),
+                      "contentScale" to EnumValueV1("crop"),
+                    ),
+                ),
               // A selection control, which is the shape the record could not carry until now: its
               // required `onCheckedChange` is nullable, so a call site can write `null` for it, and
               // `checked` is an ordinary boolean the document supplies. Included here because a
@@ -275,6 +290,17 @@ class M3CatalogComponentRecordTest {
     assertTrue(source.contains("Column(content = {"), source)
     assertTrue(source.contains("""Text(text = "Discover""""), source)
     assertTrue(source.contains("HorizontalDivider("), source)
+    assertTrue(source.contains("Image("), source)
+    assertTrue(source.contains("ColorPainter("), source)
+    assertTrue(source.contains("ContentScale.Crop"), source)
+    assertTrue(source.contains("contentDescription = \"lain\""), source)
+    assertTrue(source.contains("Asset placeholder: node photo draws asset 'avatar-lain'"), source)
+    val placeholder =
+      artifact.diagnostics.single {
+        it.code == ScreenGeneratorComposeExportExecutor.ASSET_PLACEHOLDER
+      }
+    assertEquals(DiagnosticSeverityV1.WARNING, placeholder.severity)
+    assertTrue("avatar-lain" in placeholder.message, placeholder.message)
     assertTrue(source.contains("Checkbox("), source)
     assertTrue(source.contains("checked = true"), source)
     assertTrue(!source.contains("children ="), source)
