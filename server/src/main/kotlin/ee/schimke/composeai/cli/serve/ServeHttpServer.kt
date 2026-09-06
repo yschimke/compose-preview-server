@@ -9354,6 +9354,10 @@ class ServeHttpServer(
           // preview, so an unaliased (Android-only) variant reports false and its override controls
           // (knobs, App theme) render disabled/informational rather than enabled-but-dead.
           canRenderOverrides = renderHost.canRenderOverridesFor(preview.id),
+          // Per-preview too, and for the same reason: the size-override inputs are authored in dp
+          // and converted against this before they go on the wire as px, so a page carrying the
+          // wrong one sends the renderer a frame in the wrong unit.
+          renderDensity = catalogBundleHost(renderHost)?.renderDensityFor(preview.id),
           // The knob values THIS request asked for, so the controls open on them rather than on the
           // preview's declaration — unless this page's picture cannot be showing them, in which
           // case seeding is the very disagreement the parameter exists to remove, pointed the other

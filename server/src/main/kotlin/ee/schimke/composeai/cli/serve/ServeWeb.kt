@@ -13594,6 +13594,14 @@ ${scriptTag("known-differences.js")}
      */
     canRenderOverrides: Boolean = canApplyOverrides,
     /**
+     * The density this preview's renders are produced at, from [ServeBundleHost.renderDensityFor] —
+     * null when nothing this session carries says, which is what [FALLBACK_RENDER_DENSITY] is for.
+     *
+     * Per-preview rather than per-page because that is what it describes: two previews in one
+     * catalog differ the moment one of them names a device.
+     */
+    renderDensity: Float? = null,
+    /**
      * The override params THIS REQUEST carried (`knob.<key>`, `rc.<name>`), already filtered to the
      * render lane's own keys and normalised the way the page's links are (`requestOverrideParams`).
      *
@@ -15884,7 +15892,7 @@ ${scriptTag("known-differences.js")}
         </span>
       </div>
       $historyInlineHtml
-      <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel" data-render-density="$RENDER_DENSITY" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$unseededAttr$wasmAttr$rcAttr$historyAttrs$pinnedAttr$generationAttr>
+      <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel" data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$unseededAttr$wasmAttr$rcAttr$historyAttrs$pinnedAttr$generationAttr>
         $navDrawer
         <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>
         $inspectLegendHtml
@@ -17259,14 +17267,36 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
     "https://github.com/yschimke/compose-ai-tools/blob/main/docs/public-preview-server.md#running-one"
 
   /**
-   * Render density the `serve` backend captures at (the manifest default — `PreviewManifestEntry`
-   * resolves `density ?: 2.0f`). The size-override inputs are authored in **dp** (the Compose
-   * unit); the viewer converts dp→px against this factor before sending the px-valued `widthPx` /
-   * `min…Px` / `max…Px` query params, so the wire and copyable `/render` URLs stay in pixels like
-   * every other override. Carried to the page as `data-render-density` so the conversion isn't a
-   * hidden magic number.
+   * The density a page falls back to when nothing this session carries says what the preview
+   * renders at — the last step of the render lane's own chain (`density ?: params.density ?: device
+   * density ?: 2.0`), and correct for exactly the previews that reach that step.
+   *
+   * It used to be the ONLY answer: `data-render-density` was this constant on every page of every
+   * catalog, so the value was right only by coincidence. The size-override inputs are authored in
+   * **dp** (the Compose unit) and the viewer converts dp→px against this factor before sending the
+   * px-valued `widthPx` / `min…Px` / `max…Px` params, so on a preview that renders at another
+   * density every one of those numbers reached the renderer in the wrong unit. That is the ordinary
+   * case rather than a corner one: 42 of the 56 device ids `DeviceDimensions` knows are not 2.0, so
+   * `@Preview(device = "id:pixel_5")` renders at 2.75, and a 200dp frame typed into the Fixed box
+   * went out as 400px where the renderer wanted 550.
+   *
+   * [ServeBundleHost.renderDensityFor] answers for a preview whose manifest — or whose device —
+   * says; this is what a page carries when neither does.
    */
-  private const val RENDER_DENSITY = 2
+  private const val FALLBACK_RENDER_DENSITY = 2f
+
+  /**
+   * `data-render-density`'s value: the preview's own density, else [FALLBACK_RENDER_DENSITY].
+   *
+   * Written without a trailing `.0`, so the common densities stay the short strings they were (`2`,
+   * not `2.0`) and a fractional one keeps its digits (`2.625`). The viewer parses it with
+   * `parseFloat`, which reads either, but the attribute is also what a reader inspecting the page
+   * sees when they ask why a dp box became the px it did.
+   */
+  internal fun renderDensityAttr(density: Float?): String {
+    val value = density?.takeIf { it > 0f && it.isFinite() } ?: FALLBACK_RENDER_DENSITY
+    return if (value == value.toInt().toFloat()) value.toInt().toString() else value.toString()
+  }
 
   private data class ScreenDevice(
     val id: String,
