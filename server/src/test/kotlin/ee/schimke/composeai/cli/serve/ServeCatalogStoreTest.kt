@@ -3447,6 +3447,200 @@ class ServeCatalogStoreTest {
     assertEquals(0, pool.snapshot().blobs, "nothing addressed by a branch ref may be pooled")
   }
 
+  /**
+   * A minimal record: what `composePreviewDiscover` writes, shrunk to the fields a reader checks.
+   */
+  private val componentRecord =
+    """{"schemaVersion":2,"module":"catalog","variant":"main","components":[
+      {"canonicalId":"catalog/dev.example.CardKt.SessionCard","componentIds":[],
+       "symbol":{"jvmOwner":"dev.example.CardKt","callable":"dev.example.SessionCard",
+                 "name":"SessionCard","origin":"PROJECT"},
+       "code":{"call":"SessionCard()","imports":["dev.example.SessionCard"]},
+       "signatureKnown":true}]}"""
+
+  /**
+   * A served catalog is assembled from explicitly fetched parts, so a record the producer wrote
+   * beside `catalog.json` is invisible to the UI builder unless this store stages it. It is what
+   * lets a served catalog become a component pack without an operator copying a build output onto
+   * the box.
+   */
+  @Test
+  fun `catalog stages the declared component record`() {
+    val requested = CopyOnWriteArrayList<String>()
+    val catalog =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3","componentsFile":"components.json",
+       "components":[{"componentId":"Button/Filled","images":[{"path":"images/button.png"}]}]}
+      """
+        .trimIndent()
+    val fetch: (String) -> ByteArray? = { url ->
+      requested += url
+      when {
+        url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+        url.endsWith("/components.json") -> componentRecord.encodeToByteArray()
+        url.endsWith("/images/button.png") -> png()
+        else -> null
+      }
+    }
+    val store = store(TrustStore.EMPTY, fetch = fetch)
+
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+
+    assertTrue(requested.any { it.endsWith("/components.json") }, "the record is fetched")
+    val staged =
+      assertNotNull(store.componentRecord("compose-m3"), "the record reached the generation")
+    assertEquals(componentRecord, staged.readText())
+    assertEquals(File(store.liveDir("compose-m3")!!, "components.json"), staged)
+  }
+
+  @Test
+  fun `a declared component record that is not one is left out, and the catalog still serves`() {
+    val catalog =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3","componentsFile":"components.json",
+       "components":[{"componentId":"Button/Filled","images":[{"path":"images/button.png"}]}]}
+      """
+        .trimIndent()
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+          url.endsWith("/components.json") -> "<html>not found</html>".encodeToByteArray()
+          url.endsWith(".png") -> png()
+          else -> null
+        }
+      }
+
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+    assertNull(store.componentRecord("compose-m3"))
+  }
+
+  /**
+   * The Gradle plugin packs the record into every bundle, so a catalog that publishes a live bundle
+   * carries its record whether or not its producer published the file beside `catalog.json` — which
+   * is every catalog rendered by a current plugin, today.
+   */
+  @Test
+  fun `a trusted live bundle supplies the component record where the branch declares none`() {
+    val bundle =
+      polyglotBundle(
+        manifest =
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["a"],"coverPreviewId":"a",""" +
+            """"externalResources":[]}""",
+        extra = mapOf("components.json" to componentRecord.encodeToByteArray()),
+      )
+    val json =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3",
+       "liveBundle":{"path":"bundle/","file":"compose-m3-bundle.png"},
+       "components":[{"componentId":"Button/Filled","images":[
+         {"path":"images/button-filled/ideal__default__dark.png","theme":"dark","previewId":"FilledButton_Dark"}]}]}
+      """
+        .trimIndent()
+    val fetch: (String) -> ByteArray? = { url ->
+      when {
+        url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> json.toByteArray()
+        url.endsWith("bundle/compose-m3-bundle.png") -> bundle
+        url.endsWith(".png") -> png()
+        else -> null
+      }
+    }
+    val trust =
+      TrustStore(
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+      )
+    val store =
+      ServeCatalogStore(
+        root = tempRoot(),
+        register = { n, h -> registered[n] = h },
+        trust = { trust },
+        fetch = fetch,
+        buildTrustedBundle = { _, _, _, _, _, _ -> false },
+      )
+    assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
+
+    val lifted = assertNotNull(store.componentRecord("compose-m3"), "lifted out of the bundle")
+    assertEquals(componentRecord, lifted.readText())
+  }
+
+  /**
+   * The UI builder derives a pack at startup, before any catalog has loaded, so it asks for the
+   * record ahead of the load — by the same route the load takes, into a file the next load's sweep
+   * leaves alone.
+   */
+  @Test
+  fun `a component record can be fetched ahead of any load, from the branch or the bundle`() {
+    val declared =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3","componentsFile":"components.json",
+       "components":[]}
+      """
+        .trimIndent()
+    val fromBranch =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> declared.encodeToByteArray()
+          url.endsWith("/components.json") -> componentRecord.encodeToByteArray()
+          else -> null
+        }
+      }
+    val fetched = assertNotNull(fromBranch.fetchComponentRecord("compose-m3"))
+    assertEquals(componentRecord, fetched.readText())
+    assertNull(fromBranch.liveDir("compose-m3"), "nothing was loaded")
+    assertTrue(
+      fetched.path.contains(ServeCatalogStore.COMPONENT_RECORD_CACHE_DIR),
+      "kept outside the generation directories: ${fetched.path}",
+    )
+
+    val bundled =
+      """
+      {"schema":"design-parity-catalog/v1","system":"compose-m3",
+       "liveBundle":{"path":"bundle/","file":"bundle.png"},"components":[]}
+      """
+        .trimIndent()
+    val bundle =
+      polyglotBundle(
+        manifest =
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["a"],"coverPreviewId":"a","externalResources":[]}""",
+        extra = mapOf("components.json" to componentRecord.encodeToByteArray()),
+      )
+    val fromBundle =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> bundled.encodeToByteArray()
+          url.endsWith("bundle/bundle.png") -> bundle
+          else -> null
+        }
+      }
+    assertEquals(
+      componentRecord,
+      assertNotNull(fromBundle.fetchComponentRecord("compose-m3")).readText(),
+    )
+
+    // A bundle packed before records existed, and a catalog with no bundle at all: null, not a
+    // failure — the pack is simply not offered until the catalog republishes.
+    val oldBundle =
+      polyglotBundle(
+        manifest =
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["a"],"coverPreviewId":"a","externalResources":[]}"""
+      )
+    val fromOldBundle =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> bundled.encodeToByteArray()
+          url.endsWith("bundle/bundle.png") -> oldBundle
+          else -> null
+        }
+      }
+    assertNull(fromOldBundle.fetchComponentRecord("compose-m3"))
+    val bare = """{"schema":"design-parity-catalog/v1","system":"compose-m3","components":[]}"""
+    val fromNothing =
+      store(TrustStore.EMPTY) { url ->
+        if (url.endsWith("/${ServeCatalogStore.CATALOG_FILE}")) bare.encodeToByteArray() else null
+      }
+    assertNull(fromNothing.fetchComponentRecord("compose-m3"))
+  }
+
   private fun polyglotBundle(
     manifest: String,
     extra: Map<String, ByteArray> = emptyMap(),

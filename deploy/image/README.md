@@ -127,8 +127,8 @@ authoritative state defaults to `/config/ui-builder-state` on the persistent `pr
 volume, and `SERVE_UI_BUILDER_STATE_DIR=none` is the explicit static-only opt-out.
 `SERVE_UI_BUILDER_PACKS` (`<catalog>=<platform>[,…]`, e.g. `confetti-mobile=mobile`) offers served
 catalogs as **component packs** inside every builder catalog of that platform — their own composables
-on a shelf an author switches on from the editor's settings; each pack needs its `components.json`
-named in `SERVE_UI_BUILDER_COMPONENTS` beside `m3-catalog`'s. See
+on a shelf an author switches on from the editor's settings. A pack's component record is read from
+the served catalog's delivery branch, so nothing else needs configuring. See
 [`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](../../docs/design/UI_BUILDER_COMPONENT_PACKS.md).
 
 The compose deployment offers those three agent capabilities by default because the image always

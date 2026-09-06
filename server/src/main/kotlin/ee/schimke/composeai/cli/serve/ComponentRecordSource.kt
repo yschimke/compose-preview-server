@@ -17,6 +17,16 @@ import kotlinx.serialization.json.Json
  * neither would refuse a document that is perfectly valid against its own. Keyed by catalog system
  * id, an export either finds its own catalog's record or is told that catalog has none.
  *
+ * ## Two places a record comes from
+ *
+ * A file the operator named (`--ui-builder-components <catalog>=<components.json>`) wins, because
+ * it is the one they are looking at. Otherwise the **served catalog** of the same id supplies it:
+ * `ServeCatalogStore` stages the record its delivery branch declares, or lifts it out of the live
+ * bundle, and [served] resolves that file. Resolved per call rather than captured, because a served
+ * catalog loads after this source is built and is re-fetched on every refresh into a new generation
+ * directory — a `File` captured once would be stale or absent. A catalog with neither is
+ * [Lookup.Unconfigured], and the export names both ways of fixing that.
+ *
  * ## What this still does not pin
  *
  * A record is **not revision-pinned**. A design pinned to an older catalog revision exports against
@@ -31,10 +41,11 @@ import kotlinx.serialization.json.Json
  * replaced — the export would look stale for no visible reason. So the file's identity is checked
  * on every call and the parse is reused only while it holds.
  *
- * The identity is `(length, lastModified)`. Not a digest: hashing the file on every export costs
- * more than it buys, and the failure mode a digest would catch — a rewrite that keeps both size and
- * timestamp — needs a deliberate `touch -r`. A path that no longer exists is null again rather than
- * the last good parse, because a caller asking "is there a record?" should get today's answer.
+ * The identity is `(path, length, lastModified)`. Not a digest: hashing the file on every export
+ * costs more than it buys, and the failure mode a digest would catch — a rewrite that keeps both
+ * size and timestamp — needs a deliberate `touch -r`. A path that no longer exists is null again
+ * rather than the last good parse, because a caller asking "is there a record?" should get today's
+ * answer.
  *
  * ## Failures are null, once
  *
@@ -43,11 +54,18 @@ import kotlinx.serialization.json.Json
  * record is a startup-shaped problem, and a builder exporting in a loop would otherwise fill the
  * log with the same line.
  */
-internal class ComponentRecordSource(private val files: Map<String, File>) {
+internal class ComponentRecordSource(
+  private val files: Map<String, File>,
+  /**
+   * The served catalog's own record for a catalog id, or null where none is served. Consulted only
+   * for a catalog [files] does not name.
+   */
+  private val served: (catalogSystemId: String) -> File? = { null },
+) {
 
   private data class Parsed(val identity: Identity?, val lookup: Lookup)
 
-  private data class Identity(val length: Long, val lastModified: Long)
+  private data class Identity(val path: String, val length: Long, val lastModified: Long)
 
   /**
    * Concurrent, because `PersistentUiBuilderService` runs up to four exports at once on its own
@@ -69,7 +87,7 @@ internal class ComponentRecordSource(private val files: Map<String, File>) {
    * useless to an operator who passed it and is looking at a typo in the path.
    */
   sealed interface Lookup {
-    /** No path was configured for this catalog. */
+    /** No path was configured for this catalog, and no served catalog supplies one. */
     data object Unconfigured : Lookup
 
     /**
@@ -80,10 +98,14 @@ internal class ComponentRecordSource(private val files: Map<String, File>) {
     data class Found(val record: ComponentRecordFile) : Lookup
   }
 
+  /** Whether [catalogSystemId] has a record the operator named, as opposed to a served one. */
+  fun isConfigured(catalogSystemId: String): Boolean = catalogSystemId in files
+
   /** The record for [catalogSystemId], or which of the two ways there isn't one. */
   fun record(catalogSystemId: String): Lookup {
-    val path = files[catalogSystemId] ?: return Lookup.Unconfigured
-    val identity = path.takeIf { it.isFile }?.let { Identity(it.length(), it.lastModified()) }
+    val path = files[catalogSystemId] ?: served(catalogSystemId) ?: return Lookup.Unconfigured
+    val identity =
+      path.takeIf { it.isFile }?.let { Identity(it.absolutePath, it.length(), it.lastModified()) }
     last[catalogSystemId]?.let { if (it.identity == identity) return it.lookup }
     val lookup =
       if (identity == null) {

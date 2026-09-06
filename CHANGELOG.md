@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.8.0](https://github.com/yschimke/compose-preview-server/compare/v3.7.0...v3.8.0) (2026-09-06)
+
+
+### Features
+
+* **serve:** connect without a grant on a public box, and refresh within a session ([#434](https://github.com/yschimke/compose-preview-server/issues/434)) ([4b64d8d](https://github.com/yschimke/compose-preview-server/commit/4b64d8df1e4a678b2dea19c2203ff7005d9923a1))
+* **ui-builder:** export the determinate progress indicator ([#435](https://github.com/yschimke/compose-preview-server/issues/435)) ([8068358](https://github.com/yschimke/compose-preview-server/commit/80683581e7d8c904ff47b21cc73b5640e23bc61e))
+* **ui-builder:** keep designs in the repository, and design the builder's screens with the builder ([#433](https://github.com/yschimke/compose-preview-server/issues/433)) ([6a268d5](https://github.com/yschimke/compose-preview-server/commit/6a268d57ccc659f505984dccdff71a5c42ca52bd))
+* **ui-builder:** offer other catalogs' components as platform-scoped packs ([#421](https://github.com/yschimke/compose-preview-server/issues/421)) ([3149e18](https://github.com/yschimke/compose-preview-server/commit/3149e182fdebe7631f11f6881db9eab618774a98))
+* **ui-builder:** read a component pack's record from the served catalog ([#437](https://github.com/yschimke/compose-preview-server/issues/437)) ([57bcdfb](https://github.com/yschimke/compose-preview-server/commit/57bcdfb4449abe2a94c0d4e7f587a7f4c5dd8f44))
+
 ## [3.7.0](https://github.com/yschimke/compose-preview-server/compare/v3.6.0...v3.7.0) (2026-09-06)
 
 

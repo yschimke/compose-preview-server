@@ -1840,6 +1840,18 @@ class ServeCatalogMcp(
      * which cannot complete `initialize` cannot reach the tool that asks for a credential either,
      * so an agent with no token has nowhere to start but out-of-band `curl`.
      */
+    /**
+     * Methods answered before any credential is looked at.
+     *
+     * Deliberately only the three that disclose nothing about this host's catalogs.
+     * `resources/list` is NOT here even though a client calls it during its opening handshake and a
+     * `401` there is what makes the whole server read as "needs authentication": that listing
+     * enumerates real previews, and ungating the *method* would skip the scope check entirely and
+     * serve it on a token-gated box. The fix for the handshake belongs one layer down, where
+     * [ServeMachineAuthorization] knows whether this box publishes anonymously — on a `--public`
+     * box `preview` scope is satisfied by presenting nothing, so this answers; on a private box it
+     * still refuses.
+     */
     private val UNGATED_METHODS = setOf("initialize", "ping", "tools/list")
 
     /**
