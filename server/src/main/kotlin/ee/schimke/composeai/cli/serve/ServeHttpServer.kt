@@ -3616,6 +3616,9 @@ class ServeHttpServer(
           // from the same repository shares both. See [ServeWeb.issuesForSystem].
           parityIssues =
             ServeWeb.issuesForSystem(renderHost.parityIssues()?.issues.orEmpty(), sessionId),
+          // The index's own stamp, so an opened Bugs panel can say what its `closed` is as of. The
+          // scope filter above does not touch it: `generatedAt` describes the publish, not a row.
+          parityIssuesGeneratedAt = renderHost.parityIssues()?.generatedAt,
           version = SERVE_VERSION,
           displayTitle = catalogBundleHost(renderHost)?.title,
           // A top-level site's pages carry their session in the ORIGIN, so same-session links
