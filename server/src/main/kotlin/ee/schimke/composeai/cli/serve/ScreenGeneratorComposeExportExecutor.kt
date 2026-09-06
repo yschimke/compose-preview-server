@@ -8,11 +8,13 @@ import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
+import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
+import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
 import ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor
 import java.security.MessageDigest
@@ -278,12 +280,52 @@ internal class ScreenGeneratorComposeExportExecutor(
           return Generated.Refused(UNEXPRESSIBLE_DOCUMENT, projection.reasons)
       }
     return when (
-      val generated = ScreenGenerator.generate(projected, merged, packageName, EXPRESSION_PACKAGES)
+      val generated =
+        ScreenGenerator.generate(
+          projected,
+          merged,
+          packageName,
+          EXPRESSION_PACKAGES,
+          previewFor(document.environment),
+        )
     ) {
       is ScreenGenerator.Result.Refused -> Generated.Refused(UNPROVEN_CALL_SITE, generated.reasons)
       is ScreenGenerator.Result.Emitted -> Generated.Emitted(generated.source, screenName)
     }
   }
+
+  /**
+   * The previews a generated screen carries, or null for none — which is what an export emitted
+   * before this and what a design naming no devices still gets.
+   *
+   * Gated on [DesignEnvironmentV1.exportDevices] rather than emitted always, deliberately. A
+   * `@Preview` is a claim about how a screen should be looked at, and until a design named devices
+   * nothing in the document made that claim: turning it on for every export would put a preview
+   * into files whose authors never asked for one, and the frame would be the only picture — which
+   * is the picture the builder canvas already is.
+   *
+   * When a design *has* named devices, the frame comes along. The design's own size is the canvas
+   * its author approved, and a file that draws a screen on a Pixel Fold but not on the size it was
+   * designed at has dropped the one picture that was signed off. The generator puts the frame on
+   * its own wrapper and the devices on another, so the two do not contend.
+   *
+   * `density` and `layoutDirection` are deliberately not carried: `@Preview` has no parameter for
+   * either. Naming that here beats leaving the next reader to wonder whether their omission was an
+   * oversight.
+   */
+  private fun previewFor(environment: DesignEnvironmentV1): ScreenGenerator.Preview? =
+    environment.exportDevices
+      .takeIf { it.isNotEmpty() }
+      ?.let { devices ->
+        ScreenGenerator.Preview(
+          widthDp = environment.widthDp,
+          heightDp = environment.heightDp,
+          fontScale = environment.fontScale,
+          locale = environment.locale,
+          darkMode = environment.theme == ThemeV1.DARK,
+          devices = devices,
+        )
+      }
 
   /** The records of the packs a design uses, aliased to the pack's ids, or why there are none. */
   private sealed interface PackRecords {
