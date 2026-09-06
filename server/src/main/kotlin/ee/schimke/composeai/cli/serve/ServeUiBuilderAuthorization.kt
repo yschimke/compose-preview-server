@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import io.ktor.server.application.ApplicationCall
 
 enum class UiBuilderRouteCapability {
@@ -10,10 +11,29 @@ enum class UiBuilderRouteCapability {
 }
 
 sealed interface UiBuilderAuthorizationDecision {
-  data class Authorized(val actorId: String) : UiBuilderAuthorizationDecision {
+  /**
+   * [onBehalfOfActorId] is the human an agent grant delegates for — see
+   * [ServeMachineAuthorization.Decision.Authorized]. Null for a credential that speaks for itself.
+   */
+  data class Authorized(val actorId: String, val onBehalfOfActorId: String? = null) :
+    UiBuilderAuthorizationDecision {
     init {
       require(actorId.isNotBlank()) { "UI-builder actor id must not be blank" }
     }
+
+    /**
+     * The identity to hand the design service, delegation included.
+     *
+     * Every route builds its actor through this rather than from [actorId], so an agent reaches a
+     * design exactly where its approver does — the design service is where that question is
+     * answered, and it can only answer it if the whole identity gets there.
+     */
+    val actor: AuthenticatedUiBuilderActor
+      get() =
+        AuthenticatedUiBuilderActor(
+          actorId,
+          onBehalfOfActorId?.takeIf { it.isNotBlank() && it != actorId },
+        )
   }
 
   data object Missing : UiBuilderAuthorizationDecision
@@ -49,7 +69,7 @@ fun interface ServeUiBuilderAuthorization {
           authorization.authorizeCapability(call, capability.agentGrantCapability(), presented)
       ) {
         is ServeMachineAuthorization.Decision.Authorized ->
-          UiBuilderAuthorizationDecision.Authorized(decision.actorId)
+          UiBuilderAuthorizationDecision.Authorized(decision.actorId, decision.onBehalfOfActorId)
         ServeMachineAuthorization.Decision.Missing -> UiBuilderAuthorizationDecision.Missing
         is ServeMachineAuthorization.Decision.Forbidden -> UiBuilderAuthorizationDecision.Forbidden
       }

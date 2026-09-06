@@ -1,7 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
-import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -119,9 +118,9 @@ private suspend fun ApplicationCall.authorizedDesign(
   capability: UiBuilderRouteCapability,
 ): String? {
   response.headers.append(HttpHeaders.CacheControl, "no-store")
-  val actorId =
+  val actor =
     when (val decision = authorization.authorize(this, capability)) {
-      is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
       UiBuilderAuthorizationDecision.Missing -> {
         response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
         respondReferenceError(HttpStatusCode.Unauthorized, "authentication is required")
@@ -139,7 +138,7 @@ private suspend fun ApplicationCall.authorizedDesign(
   }
   val mapping =
     UiBuilderProtocolMapper.toServiceCall(
-      AuthenticatedUiBuilderActor(actorId),
+      actor,
       GetSnapshotRequestV1(designId = designId, revision = null),
     )
   val snapshot = (mapping as? ProtocolRequestMapping.Mapped)?.let { service.execute(it.call) }

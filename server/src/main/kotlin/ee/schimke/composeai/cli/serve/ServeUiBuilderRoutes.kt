@@ -98,9 +98,9 @@ internal fun Route.installUiBuilderRoutes(
     }
 
     val decision = authorization.authorize(call, envelope.request.requiredCapability())
-    val actorId =
+    val actor =
       when (decision) {
-        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing -> {
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
           call.respondProtocolError(
@@ -121,7 +121,7 @@ internal fun Route.installUiBuilderRoutes(
           return@post
         }
       }
-    if (envelope.actorId != actorId) {
+    if (envelope.actorId != actor.actorId) {
       call.respondProtocolError(
         envelope.requestId,
         ServiceErrorCodeV1.UNAUTHORIZED,
@@ -131,8 +131,7 @@ internal fun Route.installUiBuilderRoutes(
       return@post
     }
 
-    val mapping =
-      UiBuilderProtocolMapper.toServiceCall(AuthenticatedUiBuilderActor(actorId), envelope.request)
+    val mapping = UiBuilderProtocolMapper.toServiceCall(actor, envelope.request)
     val response =
       when (mapping) {
         is ProtocolRequestMapping.Mapped ->
@@ -176,9 +175,9 @@ internal fun Route.installUiBuilderRoutes(
    */
   put(UI_BUILDER_DESIGN_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-    val actorId =
+    val actor =
       when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
-        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing -> {
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
           call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
@@ -227,7 +226,6 @@ internal fun Route.installUiBuilderRoutes(
       )
       return@put
     }
-    val actor = AuthenticatedUiBuilderActor(actorId)
     // `If-None-Match: *` is answered where the answer is known. The service reports a create onto
     // an existing id as a bad request, indistinguishable in its code from a malformed one, so the
     // precondition is evaluated as its own read first — and a create that still fails afterwards
@@ -280,9 +278,9 @@ internal fun Route.installUiBuilderRoutes(
      */
     post(UI_BUILDER_NATIVE_PREVIEW_PATH) {
       call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-      val actorId =
+      val actor =
         when (val decision = authorization.authorize(call, UiBuilderRouteCapability.EXPORT)) {
-          is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+          is UiBuilderAuthorizationDecision.Authorized -> decision.actor
           UiBuilderAuthorizationDecision.Missing -> {
             call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
             call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
@@ -303,7 +301,7 @@ internal fun Route.installUiBuilderRoutes(
       // would be a way to render a design you cannot open.
       val mapping =
         UiBuilderProtocolMapper.toServiceCall(
-          AuthenticatedUiBuilderActor(actorId),
+          actor,
           GetSnapshotRequestV1(designId = designId, revision = null),
         )
       val snapshot =
@@ -426,8 +424,8 @@ internal fun Route.installUiBuilderRoutes(
       return@webSocket
     }
     val decision = authorization.authorize(call, UiBuilderRouteCapability.READ)
-    val actorId = (decision as? UiBuilderAuthorizationDecision.Authorized)?.actorId
-    if (actorId == null) {
+    val actor = (decision as? UiBuilderAuthorizationDecision.Authorized)?.actor
+    if (actor == null) {
       close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "UI-builder read access required"))
       return@webSocket
     }
@@ -438,7 +436,7 @@ internal fun Route.installUiBuilderRoutes(
       try {
         service.subscribe(
           UiBuilderSubscriptionCall(
-            actor = AuthenticatedUiBuilderActor(actorId),
+            actor = actor,
             designId = designId,
             afterSequence = afterSequence,
           )

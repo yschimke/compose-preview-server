@@ -6764,6 +6764,125 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
+   * `GET /ui-builder/{catalog}/{designId}/access` — who can open one design, and the form that
+   * changes it.
+   *
+   * A design's access control has existed in the protocol since v1 and had, until this page, no
+   * user interface at all: a person could create a design and then had no way to let a colleague —
+   * or an agent working for someone else — open it, because the only door to
+   * `UpdateDesignAccessRequestV1` was a hand-written protocol POST. This is that door, drawn.
+   *
+   * Server-rendered rather than a panel inside the wasm editor for the same reason the create form
+   * is: it needs the server's own view of identity (who *you* are here is decided by the token, the
+   * GitHub session or a grant, none of which the editor can see), and a page a link can point at is
+   * something an owner can send to the person asking for access.
+   *
+   * Every actor id on this page came from a person typing it or from the design's stored access,
+   * and both are escaped without exception.
+   */
+  fun uiBuilderAccessPage(
+    designId: String,
+    designHref: String,
+    formAction: String,
+    ownerActorId: String,
+    /** `actorId`, `role`, `what it may do`, `granted by` — already ordered for display. */
+    grants: List<UiBuilderAccessRow>,
+    viewerActorId: String,
+    notice: String = "",
+    navSuffix: String = "",
+    version: String? = null,
+    siteName: String = "",
+    themeCss: String = "",
+  ): String {
+    val esc = WebEscaping::htmlEscape
+    val noticeBlock =
+      if (notice.isBlank()) "" else "<p class=\"cp-grant-withheld\">${esc(notice)}</p>"
+    val rows =
+      if (grants.isEmpty())
+        "<tr><td colspan=\"4\"><em>Nobody else. This design is yours alone.</em></td></tr>"
+      else
+        grants.joinToString("\n") { row ->
+          """
+          <tr>
+            <td><code>${esc(row.actorId)}</code></td>
+            <td>${esc(row.role)}</td>
+            <td>${esc(row.allowed)}</td>
+            <td>
+              <form method="post" action="${esc(formAction)}">
+                <input type="hidden" name="actorId" value="${esc(row.actorId)}">
+                <button class="cp-grant-deny" type="submit" name="action" value="revoke">Remove</button>
+              </form>
+            </td>
+          </tr>
+          """
+            .trimIndent()
+        }
+    return document(
+      title = "Share ${esc(designId)} — compose-preview",
+      unfurlDescription = "Who can open this UI-builder design.",
+      version = version,
+      navSuffix = navSuffix,
+      siteName = siteName,
+      themeCss = themeCss,
+      body =
+        """
+        <h1 class="cp-head">Who can open ${esc(designId)}</h1>
+        <p class="cp-sub">Sharing is per design. An actor id is how this server names whoever is asking:
+        <code>github:&lt;login&gt;</code> for a signed-in person, <code>operator</code> for the token
+        holder, <code>agent:&lt;fingerprint&gt;</code> for an agent's approved grant — an agent can read
+        its own from <code>/agent-access/whoami</code>. You are <code>${esc(viewerActorId)}</code>.</p>
+        $noticeBlock
+
+        <dl class="cp-grant-facts">
+          <dt>Owner</dt><dd><code>${esc(ownerActorId)}</code></dd>
+        </dl>
+
+        <table class="cp-table">
+          <thead><tr><th>Shared with</th><th>Role</th><th>May</th><th></th></tr></thead>
+          <tbody>
+          $rows
+          </tbody>
+        </table>
+
+        <form class="cp-grant-form" method="post" action="${esc(formAction)}">
+          <fieldset class="cp-grant-fieldset">
+            <legend>Share with somebody else</legend>
+            <label class="cp-grant-ttl">
+              <span>Actor id</span>
+              <input type="text" name="actorId" placeholder="github:octocat" required>
+            </label>
+            <label class="cp-grant-scope">
+              <input type="radio" name="role" value="viewer" checked>
+              <span class="cp-grant-scope-name">viewer</span>
+              <span class="cp-grant-scope-what">may open and export this design</span>
+            </label>
+            <label class="cp-grant-scope">
+              <input type="radio" name="role" value="editor">
+              <span class="cp-grant-scope-name">editor</span>
+              <span class="cp-grant-scope-what">may also change it</span>
+            </label>
+          </fieldset>
+          <div class="cp-grant-actions">
+            <button class="cp-grant-approve" type="submit" name="action" value="share">Share</button>
+          </div>
+        </form>
+
+        <p class="cp-grant-fineprint">Neither role may share this design on: only its owner can, which is
+        why granting one is safe to do for somebody who only needs to look.</p>
+        <a class="cp-back" href="${esc(designHref)}">← Back to the design</a>
+        """
+          .trimIndent(),
+    )
+  }
+
+  /** One row of [uiBuilderAccessPage]'s table, already flattened for display. */
+  data class UiBuilderAccessRow(
+    val actorId: String,
+    val role: String,
+    val allowed: String,
+  )
+
+  /**
    * `GET /agent-access/{requestId}` — the page a human opens because an agent asked them to, and
    * the only place a grant is ever created. See
    * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).

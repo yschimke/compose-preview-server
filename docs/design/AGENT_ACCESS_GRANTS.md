@@ -227,6 +227,63 @@ internet mint itself credentials.
   and every error message carry only a fingerprint (`sha256` prefix). The audit line names the
   approver, the label, the scopes, the expiry, and that fingerprint.
 
+## Acting for the person who approved
+
+A grant is a **delegation**, not a stranger's bearer token: it exists because a named human clicked
+*approve*. Everywhere else on this server that distinction is invisible, because a scope ladder asks
+how much of the machine may be spent and not whose it is. In the UI builder it is the whole story,
+because there authority is **per design**, designs outlive grants, and an actor id is what a design
+stores.
+
+Without the delegation, both directions failed, and both were the same bug:
+
+- **A design an agent created was owned by `agent:<fingerprint>`.** That id stops existing when the
+  grant expires. The person who approved the grant — who asked for the design, and whose link the
+  agent sent them — opened it and got a blank editor and a `403`, permanently, with no way to grant
+  themselves anything, because only the owner can manage access and the owner was a token that no
+  longer exists.
+- **A design the person owned could not be read by their agent.** "Use my design `scrappy-gecko`"
+  answered `forbidden: actor may not read design scrappy-gecko`, and the only fix was a protocol
+  call the agent was equally unable to make.
+
+So an approved grant records its approver's **actor id** (`github:<login>`, or `operator`) beside
+the display name it already recorded, and every UI-builder route carries both halves of the identity
+to the service: the agent's own id, and the person it acts for. The service reads the pair in
+exactly one place — the design's access check — where a delegate may do what its principal may do:
+
+- A design an agent creates **is owned by the approver**. It outlives the grant, in the hands of the
+  person who asked for it.
+- A design the approver can open, their agent can open. Same for write and export, each still gated
+  at the door by the `ui-builder-read` / `-write` / `-export` capability the grant carries.
+- **Nothing widens.** The delegate reaches exactly the designs its principal reaches, with exactly
+  the actions that design granted the principal — an agent whose approver is a viewer is a viewer.
+- **Authorship stays the agent's.** Operations, comments, presence and undo eligibility are all
+  recorded under `agent:<fingerprint>`. Delegation decides what may be touched; it never decides who
+  touched it. So the audit record still says an agent did it, and a person and their agent never
+  collide in one design's presence.
+- **An operator-token approval delegates too**, as `operator` — the same id that token holder gets
+  in a browser, so the two are the same person there as well.
+
+A grant with no recorded approver — one restored across a process that predates the field — carries
+no delegation at all rather than a blank one, and behaves exactly as it did before.
+
+## Sharing a design with somebody else
+
+Delegation answers "my agent and I are one session". It deliberately does not answer "let my
+colleague in", and that is a separate door, per design, which now exists in both places a person or
+an agent might look for it:
+
+- **In the browser**, `GET /ui-builder/{catalog}/{designId}/access` — the owner sees who can open the
+  design and shares it with an actor id, as `viewer` (read and export) or `editor` (also write).
+- **Over MCP**, `ui_builder_design_access` reads that same list and `ui_builder_share_design`
+  changes it. An agent acting under a grant shares as the person who approved it, so what it can
+  share is what they can share.
+
+Neither role carries `manageAccess` or `delete`: being shared with never becomes the power to share
+on, and a design keeps exactly one owner. An agent that needs to know which id to name can read its
+own from `GET /agent-access/whoami`, which now answers with `actorId` and — when it is acting for
+somebody — `onBehalfOfActorId`.
+
 ## What it is not
 
 - **Not a session.** No cookies, no refresh, no sliding expiry. It ends when it ends.

@@ -34,7 +34,17 @@ class ServeMachineAuthorization(
   private val isPublic: Boolean = false,
 ) {
   sealed interface Decision {
-    data class Authorized(val actorId: String) : Decision
+    /**
+     * [onBehalfOfActorId] is the human this credential delegates for, and only an agent grant has
+     * one: a grant exists because a person clicked *approve*, so the actor behind it is that
+     * person's delegate rather than a stranger who happens to hold a bearer token. Null for every
+     * credential that speaks for itself — the operator token and a GitHub session.
+     *
+     * What consumes it is the UI builder, where authority is per design and a design outlives any
+     * grant. Nothing else reads it: a scope ladder asks how much of the machine may be spent, not
+     * whose it is.
+     */
+    data class Authorized(val actorId: String, val onBehalfOfActorId: String? = null) : Decision
 
     data object Missing : Decision
 
@@ -46,11 +56,11 @@ class ServeMachineAuthorization(
     required: AgentGrantScope,
     presentedToken: String? = null,
   ): Decision {
-    if (hasOperatorToken(call)) return Decision.Authorized("operator")
+    if (hasOperatorToken(call)) return Decision.Authorized(OPERATOR_ACTOR_ID)
 
     presentedGrant(call, presentedToken)?.let { grant ->
       return if (grant.allows(required)) {
-        Decision.Authorized("agent:${grant.fingerprint}")
+        grant.authorized()
       } else {
         Decision.Forbidden(
           "This agent grant covers ${grant.scopes.joinToString(", ") { it.wire }}; " +
@@ -75,7 +85,7 @@ class ServeMachineAuthorization(
         AgentGrantScope.LIVE -> true
         AgentGrantScope.PLAYGROUND -> githubAuth.hasRepositoryAccess(call)
       }
-    return if (allowed) Decision.Authorized("github:$login")
+    return if (allowed) Decision.Authorized(ServeAgentGrants.githubActorId(login))
     else Decision.Forbidden("Repository access is required for '${required.wire}'.")
   }
 
@@ -84,16 +94,16 @@ class ServeMachineAuthorization(
     required: AgentGrantCapability,
     presentedToken: String? = null,
   ): Decision {
-    if (hasOperatorToken(call)) return Decision.Authorized("operator")
+    if (hasOperatorToken(call)) return Decision.Authorized(OPERATOR_ACTOR_ID)
 
     val login = githubAuth?.currentLogin(call)
     if (login != null && githubAuth.hasRepositoryAccess(call)) {
-      return Decision.Authorized("github:$login")
+      return Decision.Authorized(ServeAgentGrants.githubActorId(login))
     }
 
     presentedGrant(call, presentedToken)?.let { grant ->
       return if (grant.allows(required)) {
-        Decision.Authorized("agent:${grant.fingerprint}")
+        grant.authorized()
       } else {
         Decision.Forbidden("This agent grant does not include '${required.wire}'.")
       }
@@ -150,5 +160,20 @@ class ServeMachineAuthorization(
 
   private companion object {
     const val BEARER_PREFIX = "Bearer "
+
+    const val OPERATOR_ACTOR_ID = ServeAgentGrants.OPERATOR_ACTOR_ID
+
+    /**
+     * The agent's own identity, and the approver it acts for.
+     *
+     * The delegation is dropped when the store never recorded an approver — a grant restored from
+     * an older process, or minted by a test — because an actor that claims to act for nobody must
+     * not silently become that nobody.
+     */
+    fun ServeAgentGrantStore.Grant.authorized(): Decision.Authorized =
+      Decision.Authorized(
+        actorId = ServeAgentGrants.agentActorId(fingerprint),
+        onBehalfOfActorId = approvedByActorId.takeIf { it.isNotBlank() },
+      )
   }
 }

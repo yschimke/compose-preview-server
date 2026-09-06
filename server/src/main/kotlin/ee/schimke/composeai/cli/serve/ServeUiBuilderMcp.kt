@@ -2,18 +2,24 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommandV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignUpdateEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
+import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
+import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.McpResponseEnvelopeV1
+import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
+import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
@@ -92,14 +98,19 @@ class ServeUiBuilderMcp(
     when (tool) {
       LIST_CATALOGS,
       LIST_DESIGNS,
-      GET_DESIGN -> UiBuilderRouteCapability.READ
+      GET_DESIGN,
+      // Reading a design's access list is gated at the door like any other read, and by the
+      // service on top of that: only the owner is told who else holds a grant.
+      DESIGN_ACCESS -> UiBuilderRouteCapability.READ
       AWAIT_DESIGN -> UiBuilderRouteCapability.READ
       LIST_COMMENTS,
       AWAIT_COMMENTS -> if (comments == null) null else UiBuilderRouteCapability.READ
       POST_COMMENT,
       RESOLVE_COMMENT_THREAD -> if (comments == null) null else UiBuilderRouteCapability.WRITE
       CREATE_DESIGN,
-      APPLY -> UiBuilderRouteCapability.WRITE
+      APPLY,
+      // Sharing writes to the design's access control, and the service admits only its owner.
+      SHARE_DESIGN -> UiBuilderRouteCapability.WRITE
       EXPORT -> UiBuilderRouteCapability.EXPORT
       // The same capability as an export, and for the same reason: a native render compiles and
       // runs the Kotlin an export hands back, so an actor who may not read that source may not
@@ -134,6 +145,8 @@ class ServeUiBuilderMcp(
             revision = args.number("revision"),
           )
         CREATE_DESIGN -> createDesign(args, actor)
+        DESIGN_ACCESS -> GetDesignAccessRequestV1(designId = args.requiredText("designId"))
+        SHARE_DESIGN -> share(args, actor)
         APPLY -> apply(args, actor)
         EXPORT ->
           ExportDesignRequestV1(
@@ -150,6 +163,42 @@ class ServeUiBuilderMcp(
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor))
+  }
+
+  /**
+   * Grant or revoke one actor's access to a design.
+   *
+   * The access revision is read here rather than demanded from the caller. The service takes one to
+   * refuse a change written against a stale access list, which is the right contract for a
+   * long-lived editor holding the list on screen; an agent that just called this tool has no such
+   * screen, and making it fetch a number only to hand the same number straight back would be
+   * ceremony, not safety. The read is inside the same actor's authority, so nothing is skipped: a
+   * caller who may not manage this design is refused by the read exactly as by the write.
+   */
+  private suspend fun share(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): UpdateDesignAccessRequestV1 {
+    val designId = args.requiredText("designId")
+    val actorId = args.requiredText("actorId")
+    val current =
+      execute(GetDesignAccessRequestV1(designId), actor) as? UiBuilderServiceResponse.DesignAccess
+        ?: throw McpRequestException(
+          "no design `$designId` whose sharing this actor may manage; only its owner can, and " +
+            "$DESIGN_ACCESS says who that is"
+        )
+    val mutation =
+      if (args[REVOKE_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true) {
+        RevokeActorAccessMutationV1(actorId)
+      } else {
+        val role = args.accessRole()
+        GrantActorAccessMutationV1(actorId, role, role.defaultActions())
+      }
+    return UpdateDesignAccessRequestV1(
+      designId = designId,
+      baseAccessRevision = current.access.accessRevision,
+      mutations = listOf(mutation),
+    )
   }
 
   /**
@@ -498,6 +547,22 @@ class ServeUiBuilderMcp(
       )
   }
 
+  /** `editor` or `viewer`; an omitted role shares the design read-only, the safer default. */
+  private fun JsonObject.accessRole(): DesignAccessRoleV1 {
+    val requested = text("role") ?: return DesignAccessRoleV1.VIEWER
+    return when (requested.lowercase()) {
+      "editor" -> DesignAccessRoleV1.EDITOR
+      "viewer" -> DesignAccessRoleV1.VIEWER
+      // Deliberately not offered: ownership is a transfer, not a share, and the service says so
+      // too — a grant naming the owner role is refused there rather than quietly downgraded.
+      "owner" ->
+        throw McpRequestException(
+          "a design has one owner and sharing does not change it; share as 'editor' or 'viewer'"
+        )
+      else -> throw McpRequestException("unknown role '$requested'; use 'editor' or 'viewer'")
+    }
+  }
+
   companion object {
     const val LIST_CATALOGS = "ui_builder_list_catalogs"
     const val LIST_DESIGNS = "ui_builder_list_designs"
@@ -511,10 +576,41 @@ class ServeUiBuilderMcp(
     const val RESOLVE_COMMENT_THREAD = "ui_builder_resolve_comment_thread"
     const val AWAIT_COMMENTS = "ui_builder_await_comments"
     const val AWAIT_DESIGN = "ui_builder_await_design"
+    const val DESIGN_ACCESS = "ui_builder_design_access"
+    const val SHARE_DESIGN = "ui_builder_share_design"
+
+    private const val REVOKE_ARGUMENT = "revoke"
+
+    /**
+     * What a shared role may do.
+     *
+     * An editor gets the three actions a person editing a design uses; a viewer gets the two that
+     * only read — `export` included, because a design's exported Kotlin is a rendering of what the
+     * viewer is already looking at, and withholding it would make a shared design unusable to the
+     * one audience it was shared with. Neither carries `manageAccess` or `delete`: those stay with
+     * the owner, so being shared with never becomes the power to share on.
+     */
+    private fun DesignAccessRoleV1.defaultActions(): List<DesignAccessActionV1> =
+      when (this) {
+        DesignAccessRoleV1.EDITOR ->
+          listOf(DesignAccessActionV1.READ, DesignAccessActionV1.WRITE, DesignAccessActionV1.EXPORT)
+        DesignAccessRoleV1.VIEWER -> listOf(DesignAccessActionV1.READ, DesignAccessActionV1.EXPORT)
+        DesignAccessRoleV1.OWNER -> DesignAccessActionV1.entries
+      }
 
     /** Every tool this class answers to, in the order a session naturally uses them. */
     val TOOL_NAMES =
-      listOf(LIST_CATALOGS, LIST_DESIGNS, GET_DESIGN, AWAIT_DESIGN, CREATE_DESIGN, APPLY, EXPORT)
+      listOf(
+        LIST_CATALOGS,
+        LIST_DESIGNS,
+        GET_DESIGN,
+        AWAIT_DESIGN,
+        CREATE_DESIGN,
+        APPLY,
+        EXPORT,
+        DESIGN_ACCESS,
+        SHARE_DESIGN,
+      )
 
     /** Separate because it exists only where the host can compile. */
     val NATIVE_TOOL_NAMES = listOf(RENDER_NATIVE)
@@ -633,6 +729,36 @@ class ServeUiBuilderMcp(
             "revision":{"type":"integer"},
             "format":{"type":"string","description":"compose, svg or png. Defaults to compose."}
           },"required":["designId"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          DESIGN_ACCESS,
+          "Read who can open a design: its owner, and every actor it has been shared with, each " +
+            "with the role and the actions that grant carries. Only the owner may ask — this is " +
+            "the answer to \"who else is in here\" and to \"what is the id I must name when " +
+            "sharing\".",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"}
+          },"required":["designId"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          SHARE_DESIGN,
+          "Share a design with somebody else, or take that sharing back. `actorId` is the other " +
+            "party's actor id as this server spells it — `github:<login>` for a signed-in " +
+            "person, `operator` for the token holder, `agent:<fingerprint>` for another agent's " +
+            "grant; $DESIGN_ACCESS lists the ones a design already carries. A `viewer` may read " +
+            "and export, an `editor` may also change the design, and neither may share it on. " +
+            "Only the design's owner may share it, and an agent acting under an approved grant " +
+            "shares as the person who approved that grant.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "actorId":{"type":"string","description":"Who to share with, e.g. github:octocat."},
+            "role":{"type":"string","description":"editor or viewer. Defaults to viewer."},
+            "$REVOKE_ARGUMENT":{"type":"boolean","description":"Take this actor's access away instead."}
+          },"required":["designId","actorId"],"additionalProperties":false}
           """,
         ),
         if (!comments) null

@@ -134,6 +134,14 @@ class ServeAgentGrantStore(
     val label: String,
     /** GitHub login, or `operator (token)` — see [ServeAgentGrants]. */
     val approvedBy: String,
+    /**
+     * The same approver as [approvedBy], as an actor id (`github:<login>`, `operator`) — see
+     * [ServeAgentGrants.Approver.actorId].
+     *
+     * Blank only where nobody named one: a grant this store minted before the field existed, or a
+     * test that constructs one directly. A blank is read as "no delegation", never as an actor.
+     */
+    val approvedByActorId: String = "",
     val issuedAtMillis: Long,
     val expiresAtMillis: Long,
   ) {
@@ -282,6 +290,7 @@ class ServeAgentGrantStore(
     scope: AgentGrantScope,
     ttlSeconds: Long,
     capabilities: Set<AgentGrantCapability> = emptySet(),
+    approvedByActorId: String = "",
   ): Grant? {
     synchronized(this) {
       // Lookup, expiry validation and the state transition all inside the lock. Split across it,
@@ -310,6 +319,7 @@ class ServeAgentGrantStore(
           capabilities = grantedCapabilities,
           label = request.label,
           approvedBy = approvedBy,
+          approvedByActorId = approvedByActorId,
           issuedAtMillis = now,
           expiresAtMillis = now + ttl * 1000,
         )
