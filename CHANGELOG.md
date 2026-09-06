@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.10.0](https://github.com/yschimke/compose-preview-server/compare/v3.9.0...v3.10.0) (2026-09-06)
+
+
+### Features
+
+* **serve:** offer the UI builder from the front door, and collapse its search into the bar ([#459](https://github.com/yschimke/compose-preview-server/issues/459)) ([33bc400](https://github.com/yschimke/compose-preview-server/commit/33bc400239ca3884ac138a4606fb9313e4924d75))
+* **serve:** stage a render's own ground into the PNG with ?bg= ([#467](https://github.com/yschimke/compose-preview-server/issues/467)) ([96514cc](https://github.com/yschimke/compose-preview-server/commit/96514cc09af5c524ac28bde5c7e82327ac688e32))
+* **ui-builder:** add a Lottie element to the Wear widget catalog ([#457](https://github.com/yschimke/compose-preview-server/issues/457)) ([b1a4951](https://github.com/yschimke/compose-preview-server/commit/b1a49515c26e65a1380d229219d1986d1b1f8db5))
+* **ui-builder:** an agent's grant is a delegation, and a design can be shared ([#468](https://github.com/yschimke/compose-preview-server/issues/468)) ([56949a0](https://github.com/yschimke/compose-preview-server/commit/56949a05a488a565fff885230c423928775dea3b))
+* **ui-builder:** edit a screen at its extent, beside the frame it ships at ([#458](https://github.com/yschimke/compose-preview-server/issues/458)) ([ef4e2e6](https://github.com/yschimke/compose-preview-server/commit/ef4e2e6da827d1ae8db6cacc38d12900c048e8b3))
+* **ui-builder:** embed Remote Compose in mobile and Wear designs, and Compose back inside it ([#460](https://github.com/yschimke/compose-preview-server/issues/460)) ([58a27fd](https://github.com/yschimke/compose-preview-server/commit/58a27fd211df0b1869788b57c24194ebd0bfff03))
+* **ui-builder:** let a design name the devices it exports as ([#465](https://github.com/yschimke/compose-preview-server/issues/465)) ([08e6aae](https://github.com/yschimke/compose-preview-server/commit/08e6aae8afd881b5777da5f54e4933ed8f042098))
+
+
+### Bug Fixes
+
+* **build:** check every published module's POM, not only the server's ([#454](https://github.com/yschimke/compose-preview-server/issues/454)) ([eb711f7](https://github.com/yschimke/compose-preview-server/commit/eb711f73a1944f1e34fd039afb524051274d057e))
+* **serve:** fill a triptych column with the frame it is showing ([#470](https://github.com/yschimke/compose-preview-server/issues/470)) ([f2adbee](https://github.com/yschimke/compose-preview-server/commit/f2adbeea11afdf5c295bb8bc6c49f3500c1821f7))
+* **serve:** keep the eyedropper's readout out of the spec lane's width ([#469](https://github.com/yschimke/compose-preview-server/issues/469)) ([1e763cb](https://github.com/yschimke/compose-preview-server/commit/1e763cba8a3e2456e5ebdf44c2016f375c6776a3))
+* **viewer:** freeze the eyedropper reading that is on screen ([#466](https://github.com/yschimke/compose-preview-server/issues/466)) ([3393c75](https://github.com/yschimke/compose-preview-server/commit/3393c75e25a4d377ad729e16e2d782d08d3af3bd))
+
 ## [3.9.0](https://github.com/yschimke/compose-preview-server/compare/v3.8.0...v3.9.0) (2026-09-06)
 
 
