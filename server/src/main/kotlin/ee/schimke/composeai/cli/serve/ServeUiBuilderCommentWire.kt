@@ -58,8 +58,40 @@ data class StoredCommentThread(
   val resolvedAtEpochMillis: Long? = null,
   val createdAtEpochMillis: Long = 0,
   val updatedAtEpochMillis: Long = 0,
+  /**
+   * The board [StoredCommentBoard.sequence] this thread last *said* something at.
+   *
+   * The wall clock next to it is for a person reading the panel; this is what [acknowledgedBy] is
+   * compared against, because acknowledgement has to be exact. A millisecond comparison would call
+   * a reply acknowledged whenever it landed inside the same millisecond as the acknowledgement,
+   * which is rare, silent and exactly the failure this whole field exists to stop.
+   *
+   * Only what somebody *said* moves it — a comment, a resolve, a reopen. An acknowledgement and a
+   * reaction deliberately do not: both are one actor's own bookkeeping, and bumping this would make
+   * an agent's `eyes` on a thread read to every other actor as new activity to catch up on.
+   *
+   * A thread stored before this field existed carries 0, which is below every acknowledgement and
+   * so reads as unacknowledged. That is the safe direction: an old thread resurfaces once rather
+   * than being silently marked as seen by somebody who never saw it.
+   */
+  val updatedAtSequence: Long = 0,
+  /**
+   * Per actor, the board sequence at which they last acknowledged this thread.
+   *
+   * Acknowledgement is **per actor and is not resolution**: it says "I have read this", not "this
+   * is settled", and the two are different claims. An agent that resolves a thread it has not fixed
+   * is lying; an agent that stays silent is invisible. This is the third answer.
+   *
+   * Writing into a thread acknowledges it for the writer, so posting a reply, resolving, or
+   * reacting never leaves an actor being nagged about their own words.
+   */
+  val acknowledgedBy: Map<String, Long> = emptyMap(),
   val comments: List<StoredComment> = emptyList(),
-)
+) {
+  /** Whether [actorId] has yet to catch up with what was said here. */
+  fun isUnacknowledgedBy(actorId: String): Boolean =
+    (acknowledgedBy[actorId] ?: -1L) < updatedAtSequence
+}
 
 /**
  * One thing somebody said.
@@ -88,6 +120,18 @@ data class StoredComment(
   val body: String,
   val createdAtEpochMillis: Long = 0,
   val editedAtEpochMillis: Long? = null,
+  /**
+   * Emoji to the actors who reacted with it, oldest first.
+   *
+   * A map rather than a list of rows because that is how a panel draws it — one chip per emoji with
+   * a count and a tooltip of who — and because it makes a second reaction from the same actor
+   * idempotent by construction.
+   *
+   * Reactions exist for the large class of answers that do not deserve a reply: a person 👍-ing a
+   * fix, an agent 👀-ing a comment it has just picked up. A reply to say either would be noise in a
+   * thread somebody has to read.
+   */
+  val reactions: Map<String, List<String>> = emptyMap(),
 ) {
   companion object {
     const val AUTHOR_KIND_HUMAN: String = "human"
@@ -153,6 +197,14 @@ data class CommentPostRequest(
 /** The request body for `POST …/comments/{threadId}/resolution`. */
 @Serializable data class CommentResolutionRequest(val resolved: Boolean)
 
+/**
+ * The request body for `POST …/comments/{threadId}/{commentId}/reactions`.
+ *
+ * [on] false takes the reaction back, so one route both adds and removes and a client does not have
+ * to remember which verb removes a thing it added with a `POST`.
+ */
+@Serializable data class CommentReactionRequest(val reaction: String, val on: Boolean = true)
+
 /** What a refusal says, in the one shape every comment route answers errors in. */
 @Serializable data class CommentErrorResponse(val message: String)
 
@@ -161,5 +213,14 @@ const val MAX_COMMENT_BODY: Int = 4000
 
 /** The ceiling on a display name; the label beside an author, not a document. */
 const val MAX_COMMENT_DISPLAY_NAME: Int = 80
+
+/**
+ * The ceiling on one reaction.
+ *
+ * Long enough for any emoji a client sends — a family with four skin tones and joiners is around a
+ * dozen code units — and far too short for a sentence somebody is trying to smuggle past the reply
+ * route's own limits.
+ */
+const val MAX_COMMENT_REACTION: Int = 24
 
 private const val MAX_ANCHOR_ID = 200

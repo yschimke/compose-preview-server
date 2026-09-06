@@ -76,6 +76,22 @@ A design has one URL, and it names the catalog and the design:
 Opening it opens the design. It does not create one: a `GET` never writes, so a mistyped link
 reports a design that is not there rather than quietly making it.
 
+**Both segments are canonical, and the short form redirects to them.** `/ui-builder/<designId>`,
+with the catalog left out, is not a design URL: the routing reads the first segment as a catalog
+name, and the app reads the catalog back out of `location.pathname` before it has fetched anything.
+It is a link people and agents build anyway, because the design's *API* resource below **is**
+catalog-free — `/api/ui-builder/v1/designs/<designId>` names a design with its id alone, since the
+server reads the catalog out of the stored document's `catalogPin` — so an id that works against
+the API used to produce a `404` that looks like a deleted design
+([#509](https://github.com/yschimke/compose-preview-server/issues/509)).
+
+The server now answers it with `302` to `/ui-builder/<catalog>/<designId>`, reading the missing
+segment from that same `catalogPin`. It does that **as the caller**: designs are private to their
+owner and collaborators, and a redirect that fired for any id that exists would tell a stranger
+both that a (fairly guessable) id is taken and which catalog it pins. Whoever cannot open the
+design still gets a `404`, and so does an id that names nothing — which is also what keeps a
+genuinely missing asset a `404` instead of silently rendering the app shell.
+
 Creating is a `POST`. The New design dialog opens on a form factor — Mobile, Wear, RemoteCompose
 — with a generated id already filled in (a `cheeky-raccoon`, reshuffled or overwritten as you
 like) and its state variables folded away until asked for. It submits an ordinary form to
@@ -337,10 +353,62 @@ canvas instead of the 216×124dp frame the design was authored in.
 
 ![The Code pane showing a widget's generated Kotlin](design/evidence/ui-builder-remote-compose/widget-code-pane.png)
 
-Refusals work the way the Compose exporter's do: a node with no Remote Compose counterpart is named
-rather than approximated. An image background is the one to expect — `WearWidgetBrush.image` takes a
-`RemoteImageBitmap`, which generated source cannot name from an asset key, so the refusal says to
-supply the bitmap in `provideWidgetData` and add the call by hand.
+### A picture in the content slot
+
+An image is the one node whose bytes stay out of the generated file, and the reason is not a
+limitation: album art, an avatar or a logo is *application data* that changes long after the file is
+written, so baking today's bytes in would generate a widget that draws the picture the design was
+built with forever. The design names an asset **key**; the generated code takes a bitmap.
+
+```kotlin
+@RemoteComposable
+@Composable
+fun NowPlayingWidgetContent(albumArt: RemoteImageBitmap) {
+    RemoteRow(modifier = RemoteModifier.fillMaxSize()) {
+        RemoteImage(
+            remoteBitmap = albumArt,
+            contentDescription = "Album art".rs,
+            modifier = RemoteModifier.size(60.rdp, 60.rdp).clip(RemoteRoundedCornerShape(8.rdp)),
+            contentScale = ContentScale.Crop,
+        )
+        …
+    }
+}
+
+class NowPlayingWidget(
+    // The design's `album-art` asset.
+    private val albumArt: RemoteImageBitmap = ImageBitmap(1, 1).rb,
+) : GlanceWearWidget() { … }
+```
+
+One parameter per distinct key, named after it, defaulted to a **blank** 1×1 bitmap — which is what
+lets the generated `@Preview` beside it still compile, and is deliberately not a picture: a
+placeholder that looked like artwork would be a preview showing something the design does not have.
+Pass the real bitmap when the application constructs the widget.
+
+The **background** slot is the case that still refuses, and for a reason particular to it:
+`WearWidgetBrush.image` takes a `RemoteImageBitmap` and the brush chain is built in
+`provideWidgetData`, outside composition, where nothing resolves an asset key. The refusal says to
+supply the bitmap there and add `WearWidgetBrush.image(bitmap)` by hand.
+
+### What else a widget body can say
+
+The modifiers are `RemoteModifier`'s, not Compose's, and the palette offers exactly the ones the
+generator can write — `size`, `width`, `height`, `widthIn`, `heightIn`, `fillMax*`, `padding`,
+`background`, `border`, `clip`, `alpha`, `offset`, `rotate`, `scale`, `zIndex`, `wrapContentSize`,
+the scrolls, `weight` and the three alignments. Four Compose modifiers are missing from a widget's
+inspector on purpose, because Remote Compose has no counterpart: `matchParentSize` (use
+`fillMaxSize`), `aspectRatio` (state a `size`), `shadow` (a played document draws no elevation) and
+`testTag`.
+
+Two of them are written by the *container* rather than as a call: `background` with a shape becomes
+`clip(shape).background(colour)`, because `RemoteModifier.background` takes no shape, and an
+alignment becomes the row's, column's or box's own argument, because a played document aligns its
+content as a group. That last one is why a box whose children ask to be aligned differently from one
+another is refused: `RemoteBox` has one `contentAlignment` for all of them.
+
+Refusals work the way the Compose exporter's do: a node or modifier with no Remote Compose
+counterpart is named, with the reason and the route that does work, rather than approximated.
 
 ## Authoring a Wear screen
 
@@ -642,8 +710,9 @@ the line is "the canvas cannot draw it" rather than "the export cannot write it"
 [`design/UI_BUILDER_VALUE_SEMANTICS.md`](design/UI_BUILDER_VALUE_SEMANTICS.md).
 
 An optional property can be **unset** again, so the component's own default applies: the editor's
-`removeNodeProperty` operation names the node and the field, and on the wire a `setProperty` whose
-value is `{"type": "null"}` means the same thing. A required property cannot be unset — the
+`removeNodeProperty` operation names the node and the field, and on the wire
+`removeNodeProperty` is its own mutation (a `setProperty` whose value is `{"type": "null"}` still
+means the same thing). A required property cannot be unset — the
 refusal names it — and unsetting a property the node does not hold is accepted as the no-op it is.
 Undo puts the value back.
 
@@ -689,7 +758,7 @@ with the same bearer. One tool per protocol request, plus the ones the contract 
 | `ui_builder_get_design` | `ui-builder-read` | One whole document, and the revision to quote next; the pinned catalog only with `includeCatalog: true` |
 | `ui_builder_await_design` | `ui-builder-read` | Waits for somebody else to change the design, and returns what they changed |
 | `ui_builder_create_design` | `ui-builder-write` | A design, from a document or copied from one |
-| `ui_builder_apply` | `ui-builder-write` | `DesignMutationV1` operations — insert, set (a null value unsets), delete, move |
+| `ui_builder_apply` | `ui-builder-write` | `DesignMutationV1` operations — insert, set, removeNodeProperty (a null set unsets too), delete, move |
 | `ui_builder_export` | `ui-builder-export` | The generator's Kotlin, or its refusals |
 | `ui_builder_put_asset` | `ui-builder-write` | A picture behind an `assetKey`, for an `asset/image` node to draw |
 | `ui_builder_design_access` | `ui-builder-read` | Who can open the design: its owner, and everyone it is shared with |
@@ -700,6 +769,8 @@ with the same bearer. One tool per protocol request, plus the ones the contract 
 | `ui_builder_list_comments` | `ui-builder-read` | The discussion on a design, and the cursor to wait from |
 | `ui_builder_await_comments` | `ui-builder-read` | Waits for the next thing anybody says about the design |
 | `ui_builder_post_comment` | `ui-builder-write` | A reply, or a new thread pinned to a mark, a node or a point |
+| `ui_builder_acknowledge_comment` | `ui-builder-write` | Says you have **read** a thread, or the whole discussion — not that it is settled |
+| `ui_builder_react_to_comment` | `ui-builder-write` | An emoji on one comment, or `on: false` to take it back; the lightest acknowledgement |
 | `ui_builder_resolve_comment_thread` | `ui-builder-write` | Closes a thread once it is answered, or reopens one |
 
 They are absent from `tools/list` on a box that serves no builder, and `ui_builder_render_native` is
