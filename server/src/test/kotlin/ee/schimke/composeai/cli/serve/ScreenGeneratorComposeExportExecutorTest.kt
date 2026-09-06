@@ -42,6 +42,12 @@ import kotlin.test.assertTrue
  * That was a real improvement arriving as a red golden, which is what a golden is for — but note
  * the shape of it, because this repository pins that dependency and the next such change lands the
  * same way.
+ *
+ * And once more when a card's content gained the `Box` this catalog says it is
+ * (`ScreenDocumentProjection.cardContentBox`): the two texts inside the card now sit in a
+ * `Box(modifier = Modifier.fillMaxWidth())` rather than straight under `Card`'s `ColumnScope`,
+ * which is what the canvas and the capability exporter had drawn all along. `Box` is a plain
+ * foundation call site the same classpath resolves; the change is structural, not lexical.
  */
 class ScreenGeneratorComposeExportExecutorTest {
 
@@ -252,6 +258,7 @@ class ScreenGeneratorComposeExportExecutorTest {
 
 package generated.uibuilder
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -273,8 +280,10 @@ fun ScheduleOperations() {
         Column(modifier = Modifier.padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 16.dp), content = {
             Text(text = "Schedule", color = MaterialTheme.colorScheme.onBackground, style = MaterialTheme.typography.headlineSmall)
             Card(modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium), shape = MaterialTheme.shapes.medium, content = {
-                Text(text = "Opening keynote", modifier = Modifier.width(120.dp), style = MaterialTheme.typography.bodyMedium)
-                Text(text = "09:00", color = Color(4284960932L))
+                Box(modifier = Modifier.fillMaxWidth(), content = {
+                    Text(text = "Opening keynote", modifier = Modifier.width(120.dp), style = MaterialTheme.typography.bodyMedium)
+                    Text(text = "09:00", color = Color(4284960932L))
+                })
             })
         })
     })
