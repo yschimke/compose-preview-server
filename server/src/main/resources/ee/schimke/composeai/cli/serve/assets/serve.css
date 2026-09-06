@@ -2625,7 +2625,21 @@ cp-history-menu { display: contents; }
    by scrolling the page, and on a phone `146,122 · M3 Wear OS Apps Design Kit #494451 · Render
    #332e3c · Δ 22` is wider than the content column — the delta, which is the answer, is the part
    that falls off the end. */
-.cp-spec-pick { flex-basis: 100%; line-height: 1.4; min-height: 1.4em; font-size: 0.72rem;
+/* `width: 0` with `min-width: 100%` is what keeps the reading out of the lane's WIDTH, and it is
+   the second half of reserving the row (issue #464). `.cp-spec-lane` is `inline-flex`, so it is
+   shrink-to-fit: its width is decided by its contents, and a `flex-basis: 100%` row contributes
+   nothing while it is empty and the whole available width once it holds text. Measured on
+   `/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec` at the reporter's
+   own 1280x683: the lane sat at 1020px with the row reserved and empty, leaving the SVG and 3D
+   toggles beside it on the same line of `.cp-preview-primary` — itself `flex-wrap: wrap`. The first
+   reading widened the lane to the full 1224px, those two toggles wrapped onto a new line, and the
+   stage moved down 6px. Under the cursor, mid-hover, on every hover and again on every leave.
+   Reserving the row's HEIGHT never addressed that, because the shift came from the row's width.
+   `width: 0` is what the lane measures itself against, so the reading cannot move it; `min-width`
+   resolves against the settled lane afterwards, so the row still spans it. The row scrolls a long
+   reading rather than growing, which `overflow-x` below already provided for. */
+.cp-spec-pick { flex-basis: 100%; width: 0; min-width: 100%;
+  line-height: 1.4; min-height: 1.4em; font-size: 0.72rem;
   overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
   color: var(--cp-fg-muted); white-space: nowrap;
   font-family: var(--cp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
