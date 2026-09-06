@@ -120,30 +120,73 @@ internal class ScreenGeneratorComposeExportExecutor(
 
     return when (val generated = generate(request.document)) {
       is Generated.Refused -> refused(generated.code, generated.reasons)
-      is Generated.Emitted -> emitted(provenance(request) + generated.source)
+      is Generated.Emitted ->
+        emitted(
+          provenance(request) + generated.assetPlaceholders.commentedNotes() + generated.source,
+          generated.assetPlaceholders.map { it.warning() },
+        )
     }
   }
 
   /**
    * A generated file as an artifact.
    *
-   * No diagnostic at all on the success path, and that is the whole point of this executor. An
-   * artifact with an empty diagnostic list says "this is the screen you designed"; the one it
-   * replaced could only ever say "this is nearly it".
+   * No diagnostic about its own compilability on the success path, and that is the whole point of
+   * this executor. An artifact with an empty diagnostic list says "this is the screen you
+   * designed"; the one it replaced could only ever say "this is nearly it". The one warning it does
+   * carry, [ASSET_PLACEHOLDER], is about the design rather than the generator: a picture the source
+   * could not bundle stands in the frame as a coloured painter, and the person pasting the file
+   * needs to know which line to replace and with which bytes.
    */
-  private fun emitted(source: String): ExportArtifactV1 =
+  private fun emitted(
+    source: String,
+    warnings: List<ExportDiagnosticV1> = emptyList(),
+  ): ExportArtifactV1 =
     ExportArtifactV1(
       format = ExportFormatV1.COMPOSE,
       mediaType = "text/x-kotlin; charset=utf-8",
       encoding = ExportEncodingV1.UTF8,
       content = source,
       contentDigest = source.sha256(),
-      diagnostics = emptyList(),
+      diagnostics = warnings,
+    )
+
+  /**
+   * The asset lines of the header: which `Image(...)` stands in for which picture.
+   *
+   * Beside the provenance rather than inline at the call, because the generator emits from a typed
+   * value tree that carries no comments — and a header the reader sees first is where a "replace
+   * this" belongs anyway. Every value here is document-supplied and folded per physical line by the
+   * rule [refused] uses.
+   */
+  private fun List<ScreenDocumentProjection.AssetPlaceholder>.commentedNotes(): String {
+    if (isEmpty()) return ""
+    return map { it.note() }.commented() + "\n\n"
+  }
+
+  private fun ScreenDocumentProjection.AssetPlaceholder.note(): String =
+    "Asset placeholder: node ${nodeId} draws asset '$assetKey'" +
+      (if (contentDigest != null) " (${mediaType ?: "image"}, $contentDigest)"
+      else " (not in this design's assets)") +
+      " as a ColorPainter; bundle the picture as a resource and pass painterResource(...) there."
+
+  private fun ScreenDocumentProjection.AssetPlaceholder.warning(): ExportDiagnosticV1 =
+    ExportDiagnosticV1(
+      severity = DiagnosticSeverityV1.WARNING,
+      code = ASSET_PLACEHOLDER,
+      message = note(),
     )
 
   /** The Kotlin for a document, or why there is none. */
   internal sealed interface Generated {
-    data class Emitted(val source: String, val screenName: String) : Generated
+    data class Emitted(
+      val source: String,
+      val screenName: String,
+      /**
+       * The pictures the source stands in for; see [ScreenDocumentProjection.Outcome.Projected].
+       */
+      val assetPlaceholders: List<ScreenDocumentProjection.AssetPlaceholder> = emptyList(),
+    ) : Generated
 
     data class Refused(val code: String, val reasons: List<String>) : Generated
   }
@@ -273,16 +316,16 @@ internal class ScreenGeneratorComposeExportExecutor(
       if (packRecords.isEmpty()) record
       else record.copy(components = record.components + packRecords.flatMap { it.components })
     val screenName = ScreenDocumentProjection.screenNameFor(document)
-    val projected =
-      when (val projection = ScreenDocumentProjection.project(document, screenName, tagNodes)) {
-        is ScreenDocumentProjection.Outcome.Projected -> projection.document
+    val projection =
+      when (val outcome = ScreenDocumentProjection.project(document, screenName, tagNodes)) {
+        is ScreenDocumentProjection.Outcome.Projected -> outcome
         is ScreenDocumentProjection.Outcome.Refused ->
-          return Generated.Refused(UNEXPRESSIBLE_DOCUMENT, projection.reasons)
+          return Generated.Refused(UNEXPRESSIBLE_DOCUMENT, outcome.reasons)
       }
     return when (
       val generated =
         ScreenGenerator.generate(
-          projected,
+          projection.document,
           merged,
           packageName,
           EXPRESSION_PACKAGES,
@@ -290,7 +333,8 @@ internal class ScreenGeneratorComposeExportExecutor(
         )
     ) {
       is ScreenGenerator.Result.Refused -> Generated.Refused(UNPROVEN_CALL_SITE, generated.reasons)
-      is ScreenGenerator.Result.Emitted -> Generated.Emitted(generated.source, screenName)
+      is ScreenGenerator.Result.Emitted ->
+        Generated.Emitted(generated.source, screenName, projection.assetPlaceholders)
     }
   }
 
@@ -538,6 +582,13 @@ internal class ScreenGeneratorComposeExportExecutor(
 
     /** The document is expressible; the catalog cannot prove one of its call sites. */
     const val UNPROVEN_CALL_SITE = "UNPROVEN_CALL_SITE"
+
+    /**
+     * A warning, not a refusal: an `asset/image` was written as `Image(painter = ColorPainter(…))`
+     * because its picture is bytes in the design's asset store, which no generated Kotlin can
+     * carry. The message names the node, the key and the digest to bundle.
+     */
+    const val ASSET_PLACEHOLDER = "ASSET_PLACEHOLDER"
 
     /**
      * The design generates through a record-free emitter, which the asking lane cannot use. Only

@@ -30,6 +30,7 @@ import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
+import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.nio.file.Path
@@ -485,6 +486,98 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `the asset tool appears only where the host keeps design assets, and puts a picture`() {
+    val withoutStore = tools(start())
+    assertTrue(
+      ServeUiBuilderMcp.ASSET_TOOL_NAMES.none { it in withoutStore },
+      withoutStore.toString(),
+    )
+    running?.close()
+    running = null
+
+    val server = start(withAssets = true)
+    assertTrue(ServeUiBuilderMcp.ASSET_TOOL_NAMES.all { it in tools(server) })
+    val designId = document().id
+    val documentJson = json.encodeToString(DesignDocumentV1.serializer(), document())
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      "{\"designId\":\"$designId\",\"document\":$documentJson}",
+    )
+
+    // The whole reason the tool exists (#478): bytes behind a key, then a node naming the key.
+    val stored =
+      response(
+        envelope(
+          server,
+          ServeUiBuilderMcp.PUT_ASSET,
+          putAssetArguments(designId, "avatar-lain", PNG_HEADER),
+        )
+      )
+    val accepted = assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(stored).outcome)
+    assertEquals(1, accepted.committedRevision)
+
+    val snapshot =
+      assertIs<SnapshotResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.GET_DESIGN,
+            "{\"designId\":\"$designId\",\"includeCatalog\":true}",
+          )
+        )
+      )
+    val binding = snapshot.snapshot.state.document.assets.getValue("avatar-lain")
+    assertEquals("image/png", binding.mediaType)
+    assertTrue(binding.contentDigest.startsWith("sha256:"), binding.contentDigest)
+
+    // Not an image: the service's refusal, in the envelope, rather than a tool error.
+    val refused =
+      response(
+        envelope(
+          server,
+          ServeUiBuilderMcp.PUT_ASSET,
+          putAssetArguments(designId, "junk", "nope".encodeToByteArray()),
+        )
+      )
+    assertEquals(ServiceErrorCodeV1.BAD_REQUEST, assertIs<ErrorResponseV1>(refused).error.code)
+
+    // The node that names the key. #497 refuses an `assetKey` nothing resolves at commit, and the
+    // pinned key is resolved — so the picture's node commits, and a guessed key's node does not.
+    fun insertPhoto(operationId: String, baseRevision: Long, key: String) =
+      response(
+        envelope(
+          server,
+          ServeUiBuilderMcp.APPLY,
+          "{\"designId\":\"$designId\",\"operationId\":\"$operationId\",\"baseRevision\":" +
+            "$baseRevision,\"operations\":[{\"type\":\"insertNode\",\"node\":{\"id\":" +
+            "\"$operationId\",\"componentId\":\"asset/image\",\"properties\":{\"assetKey\":" +
+            "{\"type\":\"assetKey\",\"value\":\"$key\"}},\"modifiers\":[{\"type\":\"size\"," +
+            "\"widthDp\":40,\"heightDp\":40}]},\"location\":{\"parent\":{\"nodeId\":" +
+            "\"column\",\"slot\":\"children\"}}}]}",
+        )
+      )
+    val committed =
+      assertIs<OperationOutcomeResponseV1>(
+        insertPhoto("photo", accepted.committedRevision, "avatar-lain")
+      )
+    assertIs<AcceptedOutcomeV1>(committed.outcome, committed.toString())
+    val guessed =
+      assertIs<OperationOutcomeResponseV1>(
+        insertPhoto("guess", accepted.committedRevision + 1, "avatar-nobody")
+      )
+    val rejection = assertIs<RejectedOutcomeV1>(guessed.outcome)
+    assertEquals(RejectionCodeV1.INVALID_PROPERTY, rejection.code)
+    assertTrue(rejection.message.contains("avatar-nobody"), rejection.message)
+  }
+
+  private fun putAssetArguments(designId: String, assetKey: String, bytes: ByteArray): String {
+    val encoded = java.util.Base64.getEncoder().encodeToString(bytes)
+    return "{\"designId\":\"$designId\",\"assetKey\":\"$assetKey\"," +
+      "\"${ServeUiBuilderMcp.ASSET_BYTES_ARGUMENT}\":\"$encoded\"}"
+  }
+
+  @Test
   fun `a caller without the capability is refused by name rather than served`() {
     // The service is configured; the authorization is not. The refusal has to say which grant is
     // missing, because "unauthorized" on a surface with three capabilities is not actionable.
@@ -499,6 +592,7 @@ class ServeUiBuilderMcpIntegrationTest {
   private fun start(
     withUiBuilder: Boolean = true,
     withAuthorization: Boolean = true,
+    withAssets: Boolean = false,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -522,6 +616,8 @@ class ServeUiBuilderMcpIntegrationTest {
                 mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
               )::record
             ),
+          assets =
+            if (withAssets) FileUiBuilderAssetStore(stateDirectory.resolve("assets")) else null,
         )
     val server =
       ServeHttpServer(
@@ -533,6 +629,7 @@ class ServeUiBuilderMcpIntegrationTest {
           catalogMcpEnabled = true,
           machineAuthorization = ServeMachineAuthorization(OPERATOR_TOKEN, null, null),
           uiBuilderService = service,
+          uiBuilderAssets = if (withAssets) service else null,
           uiBuilderAuthorization =
             if (withAuthorization)
               ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null)
@@ -636,6 +733,14 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   private companion object {
+    /** A PNG signature and an IHDR chunk, which is what the asset lane sniffs. */
+    val PNG_HEADER: ByteArray =
+      byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) +
+        byteArrayOf(0, 0, 0, 0x0D) +
+        "IHDR".encodeToByteArray() +
+        byteArrayOf(0, 0, 0, 40, 0, 0, 0, 40) +
+        byteArrayOf(8, 6, 0, 0, 0) +
+        ByteArray(4)
     const val OPERATOR_TOKEN = "ui-builder-mcp-operator-token"
     const val CATALOG_SYSTEM_ID = "m3-catalog"
     val JSON_MEDIA_TYPE = "application/json".toMediaType()

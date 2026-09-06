@@ -23,6 +23,7 @@ import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
@@ -471,6 +472,12 @@ class ServeHttpServer(
    */
   private val uiBuilderCommentStore: ServeUiBuilderCommentStore? = null,
   /**
+   * The asset lane of [uiBuilderService] — the bytes behind a design's `assets` map. Null leaves
+   * the asset routes and the `ui_builder_put_asset` tool unregistered, which is what a host with no
+   * durable UI-builder state honestly has: a picture the next restart forgets is not the feature.
+   */
+  private val uiBuilderAssets: UiBuilderAssetPort? = null,
+  /**
    * Observability for the playground lane on `/status.json` — which posture admitted it, whether
    * the configured jail actually contains anything on this host, and whether each mode's classpath
    * has resolved. Null when the lane isn't wired at all. See [PlaygroundHealth].
@@ -660,6 +667,7 @@ class ServeHttpServer(
               uiBuilderNativePreview,
               uiBuilderCommentStore,
               references = uiBuilderReferenceStore,
+              assets = uiBuilderAssets,
             )
           },
         uiBuilderNative = uiBuilderNativePreview != null,
@@ -960,6 +968,9 @@ class ServeHttpServer(
               uiBuilderAuthorization,
               uiBuilderCommentStore,
             )
+          }
+          if (uiBuilderAssets != null) {
+            installUiBuilderAssetRoutes(uiBuilderAuthorization, uiBuilderAssets)
           }
         }
         // `/healthz` — ungated liveness: "ok" the moment the listener is up. Leaks nothing, and

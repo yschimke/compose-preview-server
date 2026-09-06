@@ -151,6 +151,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
+| `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
 | `ui_builder_design_access` | `ui-builder-read` | Who can open a design — its owner, and everyone it has been shared with |
 | `ui_builder_share_design` | `ui-builder-write` | Share a design with another actor as `viewer` or `editor`, or take that back |
 | `ui_builder_list_comments`, `ui_builder_await_comments` | `ui-builder-read` | Read a design's discussion, and **wait** for the next thing said in it |
@@ -190,8 +191,16 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
    `setProperty` with `{"type":"null"}` as its value **unsets** the property rather than storing a
    null — the way back after trying one — and is refused, naming the node and the field, when the
    catalog requires it.
-5. `ui_builder_export` — the Kotlin, or the refusals.
-6. `ui_builder_rename_design` when the design has become something else, and
+5. `ui_builder_put_asset` — when a screen needs a photograph. `asset/image` names an `assetKey`,
+   and the reducer refuses a key that is neither in the catalog's registry nor pinned in the
+   design, so put the picture **first**: this stores PNG, JPEG, GIF or WebP bytes (base64, at most
+   1 MiB) content-addressed and pins the key into the design's `assets` map, moving the revision
+   like an apply does. Then insert the node naming the key. See
+   [`UI_BUILDER_ASSETS.md`](UI_BUILDER_ASSETS.md).
+6. `ui_builder_export` — the Kotlin, or the refusals. An `asset/image` exports as the real
+   `Image(...)` with a `ColorPainter` in place of the picture and an `ASSET_PLACEHOLDER` warning
+   naming the key and digest to bundle.
+7. `ui_builder_rename_design` when the design has become something else, and
    `ui_builder_delete_design` when it was a probe. Rename is open to anybody who may write the
    design and moves no revision. Delete is **owner only** — an agent under a grant owns what it
    created as the person who approved the grant — so a session can clear its own litter and cannot
