@@ -12338,6 +12338,20 @@ class ServeHttpServer(
    * OAuth exchange adds is a note that this request has somewhere to return to when it resolves.
    */
   private suspend fun RoutingContext.handleOAuthAuthorize(store: ServeAgentGrantStore) {
+    // Charged to the same per-address budget as its two siblings, which it had been missing. This
+    // is the endpoint of the three that creates the most state — a row in the grant store AND one
+    // in the OAuth pending map — and, like `POST /agent-access/request`, it is reachable with no
+    // credential at all. The map ceilings bound the damage either way; the budget is what stops one
+    // caller spending those ceilings on everybody else's behalf.
+    val permit = acquireAgentGrantPermit() ?: return
+    try {
+      authorizeThroughApprovalPage(store)
+    } finally {
+      permit.release()
+    }
+  }
+
+  private suspend fun RoutingContext.authorizeThroughApprovalPage(store: ServeAgentGrantStore) {
     val query = call.request.queryParameters
     val clientId = query["client_id"]
     val redirectUri = query["redirect_uri"]
