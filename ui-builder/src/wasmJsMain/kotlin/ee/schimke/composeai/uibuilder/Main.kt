@@ -625,7 +625,12 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
 
   LaunchedEffect(config) {
     val availableCatalogs = loadLiveCatalogs(http)
-    newDesignCatalogs = availableCatalogs.mapNotNull(::newDesignCatalog)
+    // Form-factor order — Mobile, Wear, RemoteCompose — however the host lists them: the chooser
+    // is a "what am I making" question, not a catalog registry.
+    newDesignCatalogs =
+      availableCatalogs.mapNotNull(::newDesignCatalog).sortedBy {
+        NEW_DESIGN_CATALOG_ORDER.indexOf(it.systemId)
+      }
     if (config.startWithNewDesign) return@LaunchedEffect
     val selectedCatalog =
       availableCatalogs.singleOrNull { it.benchmark.catalogSystemId == config.catalogSystemId }
@@ -1480,12 +1485,20 @@ private suspend fun loadLiveCatalogs(http: UiBuilderProtocolHttpClient): List<Ca
     is UiBuilderHttpResult.SnapshotRequired -> error(result.error.message)
   }
 
+/** The chooser's order. Anything not named here (there is nothing today) sorts first. */
+private val NEW_DESIGN_CATALOG_ORDER = listOf("m3-catalog", "wear-m3", "remote-m3")
+
+/**
+ * Labelled by what a person is making — a phone screen, a watch screen, a RemoteCompose widget —
+ * rather than by the catalog that draws it. "Material 3" and "Wear Material 3" told an M3 reader
+ * the truth and everyone else nothing about which chip to press.
+ */
 private fun newDesignCatalog(catalog: CatalogCapabilityV1): UiBuilderNewDesignCatalog? =
   when (catalog.benchmark.catalogSystemId) {
     "m3-catalog" ->
       UiBuilderNewDesignCatalog(
         systemId = "m3-catalog",
-        label = "Material 3",
+        label = "Mobile",
         templates =
           listOf(
             UiBuilderNewDesignTemplate(
@@ -1498,7 +1511,7 @@ private fun newDesignCatalog(catalog: CatalogCapabilityV1): UiBuilderNewDesignCa
     "remote-m3" ->
       UiBuilderNewDesignCatalog(
         systemId = "remote-m3",
-        label = "Remote Material 3",
+        label = "RemoteCompose",
         templates =
           listOf(
             UiBuilderNewDesignTemplate(
@@ -1526,7 +1539,7 @@ private fun newDesignCatalog(catalog: CatalogCapabilityV1): UiBuilderNewDesignCa
     "wear-m3" ->
       UiBuilderNewDesignCatalog(
         systemId = "wear-m3",
-        label = "Wear Material 3",
+        label = "Wear",
         templates =
           listOf(
             UiBuilderNewDesignTemplate(
