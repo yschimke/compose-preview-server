@@ -11,14 +11,40 @@ consumer_root="${scratch_root}/consumer"
 gate_version="0.0.0-extraction-gate-SNAPSHOT"
 mkdir -p "${published_repository}" "${consumer_root}"
 
+# The modules to stage are DERIVED, not listed. This gate used to name three of them here while
+# `release.yml` named five somewhere else, and the two lists disagreed for six releases: this script
+# staged `:ui-builder-render-bundle` (so the gate passed) while the release never published it (so
+# every consumer of 3.3.0 through 3.8.0 got a POM naming an artifact that was not on Maven Central).
+# `printPublishedProjectPaths` is now the only place the set is decided, and the release job reads
+# the same one through `publishReleaseArtifacts`. Staging the WHOLE release set rather than the
+# subset the fixture resolves is deliberate: it also proves every module the release will publish
+# can actually be published, which is the half no gate covered.
+#
+# `publishAllPublications…` rather than `publishMavenPublication…` because the set now spans both
+# plain-JVM modules (one `maven` publication) and multiplatform ones (a root publication plus a
+# per-target one); naming a single publication would silently stage half of a KMP module.
+# Filtered to project paths rather than taken whole: `--quiet` keeps Gradle's own chatter off
+# stdout, but a JVM launched with `JAVA_TOOL_OPTIONS` prints a banner that some environments put
+# there, and one stray line would become an unresolvable task name.
+mapfile -t published_projects < <(
+  "${source_root}/gradlew" --no-daemon --quiet printPublishedProjectPaths | grep '^:'
+)
+test "${#published_projects[@]}" -gt 0 || {
+  echo "printPublishedProjectPaths returned no modules - the release would publish nothing" >&2
+  exit 1
+}
+
+publish_tasks=()
+for project_path in "${published_projects[@]}"; do
+  publish_tasks+=("${project_path}:publishAllPublicationsToUiBuilderExtractionRepository")
+done
+
 PLUGIN_VERSION="${gate_version}" \
   "${source_root}/gradlew" \
   --no-daemon \
   --init-script "${fixture_root}/publish.init.gradle" \
   -PuiBuilderExtractionRepository="${published_repository}" \
-  :ui-builder-runtime:publishMavenPublicationToUiBuilderExtractionRepository \
-  :ui-builder-web:publishMavenPublicationToUiBuilderExtractionRepository \
-  :ui-builder-render-bundle:publishMavenPublicationToUiBuilderExtractionRepository
+  "${publish_tasks[@]}"
 
 cp -R "${fixture_root}/." "${consumer_root}/"
 rm "${consumer_root}/publish.init.gradle"

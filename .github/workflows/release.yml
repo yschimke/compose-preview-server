@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_maven:
+        description: Publish this release's Maven Central artifacts
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -60,7 +65,82 @@ jobs:
             -f "ref=refs/tags/${TAG}" -f "sha=${SHA}" >/dev/null
           echo "created tag ${TAG} at ${SHA}"
 
-  publish:
+  # ---------------------------------------------------------------------------
+  # Release lanes
+  # ---------------------------------------------------------------------------
+  #
+  # A release used to be one job that built the distributions, published five Maven Central
+  # artifacts and un-drafted the release, all or nothing. That coupled two things with very
+  # different tempos: 3.0.0 through 3.8.0 landed inside about 24 hours, and every one of them pushed
+  # an immutable, irrevocable set of coordinates to Central whether or not any consumer-visible
+  # library had changed.
+  #
+  # So the lanes are split. The DISTRIBUTION lane (tarballs, the GitHub release, the preview-host
+  # image) is what `compose-preview serve` and `compose-preview mcp serve` actually launch, and it
+  # always runs. The MAVEN lane is skippable, which makes a server-only release possible.
+  #
+  # Skipping is deliberate and explicit, never inferred: `workflow_dispatch` takes a `publish_maven`
+  # input, and on the normal push path the release PR carries the `release:no-maven` label. Default
+  # is to publish, so the do-nothing case is exactly today's behaviour.
+  #
+  # BEFORE SKIPPING, note what a Maven-less release means for consumers. compose-ai-tools' single
+  # `composeai-preview-serve` pin is used for BOTH the tarball fetch (`SERVE_VERSION`, checked by
+  # `check_preview_server_pin.py`) and a `testImplementation` coordinate in `:cli`. That pin cannot
+  # name a server-only release until it is split in two. Skip the Maven lane for releases nothing
+  # pins yet, not for one you are about to ask compose-ai-tools to move to.
+  lanes:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      maven: ${{ steps.decide.outputs.maven }}
+    steps:
+      - name: Decide whether the Maven lane runs
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_PUBLISH_MAVEN: ${{ inputs.publish_maven }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            # A boolean input arrives as the string "true" or "false".
+            maven="${DISPATCH_PUBLISH_MAVEN}"
+            reason="workflow_dispatch input publish_maven=${maven}"
+          else
+            # The squashed release commit resolves back to the release PR, so its labels are
+            # readable after the merge. `|| true` because a commit with no associated PR (a direct
+            # push to main) is not an error - it just carries no opt-out.
+            labels="$(gh api "repos/{owner}/{repo}/commits/${SHA}/pulls" \
+              --jq '.[].labels[].name' 2>/dev/null || true)"
+            if printf '%s\n' "${labels}" | grep -qx 'release:no-maven'; then
+              maven=false
+              reason="the release PR carries the release:no-maven label"
+            else
+              maven=true
+              reason="no release:no-maven label on the release PR"
+            fi
+          fi
+          case "${maven}" in
+            true|false) ;;
+            *) echo "::error::could not decide the Maven lane (got '${maven}')"; exit 1 ;;
+          esac
+          echo "maven=${maven}" >> "$GITHUB_OUTPUT"
+          echo "Maven lane: ${maven} (${reason})"
+          if [ "${maven}" = "false" ]; then
+            echo "::warning::Publishing a server-only release - no Maven Central artifacts."
+          fi
+
+  # The distribution lane. Builds and attaches both standalone archives; `compose-preview serve` and
+  # `compose-preview mcp serve` in the CLI fetch THESE, so a release missing either is a command
+  # that cannot start. Deliberately does NOT un-draft - `finish-release` does that once every lane
+  # this release asked for has succeeded.
+  publish-distributions:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
@@ -68,11 +148,6 @@ jobs:
       contents: write
     env:
       PLUGIN_VERSION: ${{ needs.release-please.outputs.tag_name }}
-      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -97,30 +172,8 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
-      - name: Build distribution and publish Maven artifacts
-        # The UI-builder runtime, the export projection and the immutable builder frontend publish
-        # too: `:server`'s POM names the runtime AND the export module at the same version, while
-        # its standalone distribution is assembled from the matching frontend archive. The export
-        # module is on this list because 3.1.0 shipped without it — `:server` gained a dependency on
-        # an unpublished project, so the POM recorded
-        # `compose-preview-server:ui-builder-export-jvm:unspecified` and `compose-preview-serve`
-        # became unresolvable for every consumer. Anything `:server` depends on at runtime belongs
-        # here. Build/verify the complete graph before this release job so a
-        # missing frontend artifact is caught before publication. The render host is no longer among
-        # them — it is published from compose-ai-tools since yschimke/compose-preview-server#180.
-        #
-        # `:mcp` is the fourth, since the MCP server moved here from compose-ai-tools
-        # (compose-ai-tools#5176). It publishes as `compose-preview-mcp` and also ships a standalone
-        # tarball, uploaded below: `compose-preview mcp serve` in the CLI fetches and runs THAT
-        # archive, the same way `serve` fetches the server distribution, so a release that published
-        # the jar but not the tarball would leave the CLI command with nothing to launch.
-        run: >-
-          ./gradlew :server:distTar :mcp:distTar
-          :ui-builder-runtime:publishAndReleaseToMavenCentral
-          :ui-builder-export:publishAndReleaseToMavenCentral
-          :ui-builder-web:publishAndReleaseToMavenCentral
-          :server:publishAndReleaseToMavenCentral
-          :mcp:publishAndReleaseToMavenCentral
+      - name: Build the standalone distributions
+        run: ./gradlew :server:distTar :mcp:distTar
       - name: Upload standalone server distribution
         run: >-
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
@@ -131,6 +184,66 @@ jobs:
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
           "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
           --clobber
+
+  # The Maven lane. WHICH modules it publishes is not decided here: `publishReleaseArtifacts` in the
+  # root build derives the set from the modules applying the publishing plugin, and
+  # `scripts/check-ui-builder-external-consumer.sh` stages that same derived set. This job used to
+  # name the modules inline, which is how `:ui-builder-render-bundle` was left out of 3.3.0 through
+  # 3.8.0 while sitting at `compile` scope in a published POM - six releases nobody could resolve.
+  # Do not reintroduce a list here; see the comment above `publishedProjectPaths` in
+  # `build.gradle.kts`.
+  publish-maven:
+    needs: [release-please, lanes]
+    if: ${{ needs.lanes.outputs.maven == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PLUGIN_VERSION: ${{ needs.release-please.outputs.tag_name }}
+      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+      - name: Derive version from tag
+        run: echo "PLUGIN_VERSION=${PLUGIN_VERSION#v}" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          # Same two floors as the distribution lane above, for the same reason.
+          java-version: |
+            21
+            17
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Publish Maven artifacts
+        run: ./gradlew publishReleaseArtifacts
+
+  # One release goes out, or none does. The GitHub release stays a DRAFT until every lane this
+  # release asked for has succeeded, so a failed Maven publish cannot leave a tag whose tarballs
+  # exist and whose coordinates do not - which is the shape of the 3.3.0 breakage, arrived at by a
+  # different road. `publish-maven` being SKIPPED is a pass; being FAILED is not.
+  finish-release:
+    needs: [release-please, lanes, publish-distributions, publish-maven]
+    if: >-
+      ${{ !cancelled()
+      && needs.publish-distributions.result == 'success'
+      && (needs.publish-maven.result == 'success' || needs.publish-maven.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # No checkout in this job, so `gh` has no git remote to infer the repository from.
+      GH_REPO: ${{ github.repository }}
+    steps:
       - name: Publish the draft GitHub release
         run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false --latest
 
@@ -157,7 +270,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   preview-host-image:
-    needs: [release-please, publish, resolve-preview-host-tools]
+    needs: [release-please, finish-release, resolve-preview-host-tools]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
       contents: read
@@ -175,18 +288,18 @@ jobs:
       SERVE_ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
 
   # The PR half, split out so it never runs against a half-published release. Runs on an ordinary
-  # push (the normal case) or straight after a SUCCESSFUL publish, so the next release PR opens
+  # push (the normal case) or straight after a SUCCESSFUL release, so the next release PR opens
   # against a baseline that includes the release just made. Deliberately not after a failed
   # publish: the baseline is stale in exactly the way that produces a phantom PR.
   #
-  # `!cancelled()` rather than `success()` because `publish` is skipped on an ordinary push, and a
-  # skipped dependency would otherwise skip this job too.
+  # `!cancelled()` rather than `success()` because `finish-release` is skipped on an ordinary push,
+  # and a skipped dependency would otherwise skip this job too.
   update-release-pr:
-    needs: [release-please, publish]
+    needs: [release-please, finish-release]
     if: >-
       ${{ !cancelled()
       && (needs.release-please.outputs.release_created != 'true'
-      || needs.publish.result == 'success') }}
+      || needs.finish-release.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

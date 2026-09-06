@@ -165,6 +165,40 @@ Releases publish that distribution beside the Maven library, then build the prod
 configuration lives in [`deploy/image`](deploy/image/) and
 [`deploy/preview.coo.ee`](deploy/preview.coo.ee/).
 
+## Release lanes
+
+A release has two independent lanes in
+[`release.yml`](.github/workflows/release.yml):
+
+| Lane | Ships | Runs |
+| --- | --- | --- |
+| Distribution | `compose-preview-server-<v>.tar.gz` and `compose-preview-mcp-<v>.tar.gz` on the GitHub release, then the `compose-preview-host` image | Always |
+| Maven | Every published module, to Maven Central | Unless opted out |
+
+The GitHub release stays a draft until every lane this release asked for has succeeded, so a failed
+Maven publish never leaves a tag whose tarballs exist and whose coordinates do not.
+
+**Which modules the Maven lane publishes is derived, not listed.** Every subproject applying the
+publishing plugin is in the release, via `publishReleaseArtifacts` in the root
+[`build.gradle.kts`](build.gradle.kts);
+[`scripts/check-ui-builder-external-consumer.sh`](scripts/check-ui-builder-external-consumer.sh)
+stages that same derived set. Do not add a module list to the workflow — two hand-maintained copies
+of this set is what left `compose-preview-ui-builder-render-bundle` unpublished while a released POM
+named it at `compile` scope, making `compose-preview-serve` unresolvable from 3.3.0 to 3.8.0.
+
+### Releasing a server without Maven artifacts
+
+Because the fast lane moves far quicker than any consumer-visible library, a release can skip Maven
+Central entirely — two ways, both explicit:
+
+- add the **`release:no-maven`** label to the release-please PR before merging it; or
+- run the workflow manually with the **`publish_maven`** input unchecked.
+
+The default is to publish. Before skipping, note that compose-ai-tools' single
+`composeai-preview-serve` pin currently names *both* the tarball it downloads at runtime and a
+`testImplementation` coordinate in `:cli`, so it cannot be moved to a server-only release until that
+pin is split in two. Skip the Maven lane for releases nothing pins yet.
+
 ## Repository boundary
 
 `checkServeModuleBoundary` walks the resolved runtime classpath, transitives included. It rejects
