@@ -836,6 +836,33 @@ class ServeWebFixtureTest {
           previewIds =
             listOf("com.example.ProfileScreenPreview", "button-filled__ideal__default__light"),
         ),
+        // Two more open reports on the same component, so the fixture row carries the case the
+        // collapsed line exists for: one issue proves the markup, a run of them proves the height.
+        // A row like this used to stand five lines tall.
+        ParityIssue(
+          repository = "yschimke/m3-catalog",
+          number = 57,
+          title = "Container radius is 12dp where the kit's Shape page says 16dp",
+          url = "https://github.com/yschimke/m3-catalog/issues/57",
+          state = "open",
+          area = "spec",
+          parity = "regression",
+          component = "IconButton/Tonal",
+          previewIds =
+            listOf("com.example.ProfileScreenPreview", "button-filled__ideal__default__light"),
+        ),
+        ParityIssue(
+          repository = "yschimke/m3-catalog",
+          number = 63,
+          title = "Upstream: the tonal container ignores the theme's secondary container role",
+          url = "https://github.com/yschimke/m3-catalog/issues/63",
+          state = "open",
+          area = "renderer",
+          parity = "upstream",
+          component = "IconButton/Tonal",
+          previewIds =
+            listOf("com.example.ProfileScreenPreview", "button-filled__ideal__default__light"),
+        ),
       )
 
     // Render the fixtures with a producer-trust badge so the visual-diff harness captures it: a
@@ -1767,6 +1794,9 @@ class ServeWebFixtureTest {
         },
         reportIssue = fixtureWallReportIssue(),
         parityIssues = parityIssues,
+        // The wall's Bugs column is a disclosure, and a snapshot that says so — the harness has to
+        // capture the line it collapses to AND the date under the panel, or neither is diffed.
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
     // The Remote Compose PLAYER WALL: the same compare page in `?format=rc`, backed by a catalog's
     // published `rc-compare` manifest instead of by an in-browser render. Only the rc format is

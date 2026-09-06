@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.6.0](https://github.com/yschimke/compose-preview-server/compare/v3.5.0...v3.6.0) (2026-09-06)
+
+
+### Features
+
+* **serve:** collapse the compare wall's Bugs column to one line ([#420](https://github.com/yschimke/compose-preview-server/issues/420)) ([e027039](https://github.com/yschimke/compose-preview-server/commit/e02703906f68d5c2445beeefb7245a7422a82e1a))
+* **ui-builder:** export a button's container colour, whichever style it is ([#417](https://github.com/yschimke/compose-preview-server/issues/417)) ([1c8f66e](https://github.com/yschimke/compose-preview-server/commit/1c8f66e37c70effe191b31cde91196abc9ba1776))
+
+
+### Bug Fixes
+
+* **serve:** ignore registration metadata the OAuth façade has no use for ([#419](https://github.com/yschimke/compose-preview-server/issues/419)) ([c3367ef](https://github.com/yschimke/compose-preview-server/commit/c3367ef5d549626a5b9272e379ba50404e5484ad))
+
 ## [3.5.0](https://github.com/yschimke/compose-preview-server/compare/v3.4.0...v3.5.0) (2026-09-06)
 
 

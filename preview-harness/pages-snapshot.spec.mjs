@@ -1249,6 +1249,41 @@ const FIXTURE_STATES = [
     },
   },
   {
+    // The Bugs column OPENED. Collapsed it is a line of numbers, which the `picked` shot above
+    // already carries; what only exists behind a click is the panel — the titles, the closed
+    // reports the collapsed line only marks, the `parity:` classification, and the line saying
+    // what date the whole thing is a snapshot of. That last one is the reason this is a shot and
+    // not a note: a panel that quietly stopped saying "as of" would still look correct, and the
+    // wall's whole claim is that a `closed` here is a snapshot rather than live GitHub state.
+    //
+    // Runs after `picked`, so it inherits the 1280 viewport that state restores from — the width
+    // the reference lane's three panels need. `parkPointer` because opening a disclosure moves
+    // the rows below it under the resting pointer.
+    fixture: "serve-format-compare",
+    suffix: "bugs-open",
+    viewport: { width: 1280, height: 900 },
+    parkPointer: true,
+    apply: async (page) => {
+      await page.addStyleTag({
+        content:
+          "*, *::before, *::after { transition-duration: 0ms !important; }",
+      });
+      const summary = page
+        .locator(".cp-compare-row:not([hidden]) .cp-compare-bug-summary")
+        .first();
+      await summary.click();
+      // The panel, not merely the `open` attribute: `:has()` hides the whole disclosure when every
+      // entry inside it is hidden for the theme on screen, and a shot of a collapsed row would
+      // pass an `[open]` assertion while showing nothing this state exists to show.
+      await expect(
+        page.locator(".cp-compare-bug-disclosure[open] .cp-compare-bug-list"),
+      ).toBeVisible();
+      await expect(
+        page.locator(".cp-compare-bug-disclosure[open] .cp-compare-bug-asof"),
+      ).toBeVisible();
+    },
+  },
+  {
     // A component under the POINTER. The sheet carries no resting marks, so this is the whole
     // discovery story: the outline appears where you point, and it appears whether or not the
     // opt-in layer is on (this shot is taken with it off, which is the default). A hover state
