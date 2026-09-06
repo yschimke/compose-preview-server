@@ -5,6 +5,7 @@ import ee.schimke.composeai.discovery.ScreenValue
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.protocol.AccessibilityV1
 import ee.schimke.composeai.uibuilder.protocol.AdaptiveGridValueV1
+import ee.schimke.composeai.uibuilder.protocol.BooleanValueV1
 import ee.schimke.composeai.uibuilder.protocol.ClipModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
@@ -902,6 +903,92 @@ class ScreenDocumentProjectionTest {
           )
         )
         .any { "which `Modifier.weight` supplies from a row's or column's scope" in it }
+    )
+  }
+
+
+  private fun indicator(vararg properties: Pair<String, UiValueV1>) =
+    DesignNodeV1(
+      id = "bar",
+      componentId = "m3/progress-indicator",
+      properties = mapOf("variant" to EnumValueV1("linear")) + properties,
+    )
+
+  @Test
+  fun `a progress value becomes the lambda the determinate indicator takes`() {
+    // Refused outright until `ScreenValue.Lambda` existed (compose-ai-tools#5219), on the honest
+    // grounds that no value in this vocabulary was a lambda. The catalog's own note says what the
+    // argument means: absent is the indeterminate indicator, present is the determinate one, which
+    // is Kotlin overload resolution and needs no variant of its own.
+    val progress =
+      assertIs<ScreenValue.Lambda>(
+        projected(document(indicator("progress" to DecimalValueV1(0.4)), roots = listOf("bar")))
+          .root
+          .arguments
+          .getValue("progress")
+      )
+
+    assertEquals(ScreenValue.Fractional32(0.4f), progress.result)
+  }
+
+  @Test
+  fun `an absent progress is still the indeterminate indicator, with no argument invented`() {
+    val arguments =
+      projected(document(indicator(), roots = listOf("bar"))).root.arguments
+
+    assertFalse("progress" in arguments, arguments.keys.toString())
+  }
+
+  @Test
+  fun `indeterminate is spent, because the argument list already says which overload`() {
+    // True or false, it restates the choice `progress` makes. Emitting it would hand the component
+    // a parameter neither overload declares.
+    fun argumentsFor(vararg properties: Pair<String, UiValueV1>) =
+      projected(document(indicator(*properties), roots = listOf("bar"))).root.arguments
+
+    assertFalse("indeterminate" in argumentsFor("indeterminate" to BooleanValueV1(true)))
+    assertFalse(
+      "indeterminate" in
+        argumentsFor(
+          "indeterminate" to BooleanValueV1(false),
+          "progress" to DecimalValueV1(0.4),
+        )
+    )
+  }
+
+  @Test
+  fun `not indeterminate and no progress is the one contradiction worth refusing`() {
+    assertEquals(
+      listOf(
+        "node `bar` is not indeterminate and sets no `progress`; the determinate indicator is " +
+          "chosen by passing one, and there is nothing here to pass"
+      ),
+      refusal(
+        document(indicator("indeterminate" to BooleanValueV1(false)), roots = listOf("bar"))
+      ),
+    )
+  }
+
+  @Test
+  fun `a progress that does not survive Float is refused rather than drawn as zero`() {
+    // The same narrowing every other number here gets. `1.0e-46` collapses to zero, and a bar drawn
+    // empty is not the one that was designed.
+    assertEquals(
+      listOf("node `bar`.`progress` is 1.0E-46, which does not survive `Float`"),
+      refusal(document(indicator("progress" to DecimalValueV1(1.0e-46)), roots = listOf("bar"))),
+    )
+  }
+
+  @Test
+  fun `a progress read from state still refuses under its own name`() {
+    // The lambda is expressible now; the state variable inside it is not, and it says so as a state
+    // read rather than as a progress problem.
+    assertEquals(
+      listOf(
+        "node `bar`.`progress` reads the state variable `pct`, which needs a " +
+          "`remember { mutableStateOf(…) }` preamble this projection does not emit"
+      ),
+      refusal(document(indicator("progress" to StateValueV1("pct")), roots = listOf("bar"))),
     )
   }
 }
