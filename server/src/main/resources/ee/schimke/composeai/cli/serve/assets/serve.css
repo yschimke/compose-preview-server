@@ -3004,16 +3004,38 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
   border-radius: 6px; }
 .cp-rc-px { color: var(--cp-fg-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
 .cp-reference-meta { margin: 12px 0 20px; color: var(--cp-fg-muted); font-size: 0.82rem; }
+/* The filed-issue list, on the viewer, the focused comparison and the parity dashboard.
+
+   A DISCLOSURE, for the reason the wall's Bugs column is one: this panel used to open at full
+   height between the viewer's title and the picture the page is for, so a component with four
+   reports pushed its own preview toward the fold — and the dashboard repeats the same block once
+   per component, which is that page's entire body. Collapsed it is the label and the open numbers;
+   in flow rather than floated, because these pages have the width the wall does not.
+
+   The rows themselves are unchanged. This is where they are, not what they are. */
 .cp-parity-issues { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 12px; background: var(--md-sys-color-surface-container); }
-.cp-parity-issues ul { list-style: none; margin: 7px 0 0; padding: 0; display: grid; gap: 6px; }
+.cp-parity-issues-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  cursor: pointer; list-style: none; }
+.cp-parity-issues-sum::-webkit-details-marker { display: none; }
+/* Last, after the numbers, and pushed to the end of the line: a leading triangle would sit between
+   the label and the numbers, which are the two things being read together. */
+.cp-parity-issues-sum::after { content: "⌄"; margin-left: auto; color: var(--cp-fg-muted); }
+.cp-parity-issues[open] .cp-parity-issues-sum::after { content: "⌃"; }
+.cp-parity-issue-chip { color: light-dark(#8a1c1c, #ef9292); font-size: .78rem;
+  font-variant-numeric: tabular-nums; }
+.cp-parity-issues-sum:hover .cp-parity-issue-chip { text-decoration: underline; }
+/* No number on it, for the reason the wall's marker carries none: one rule, spelled once. */
+.cp-parity-issue-chip--closed { color: var(--cp-fg-faint); font-variant-numeric: normal; }
+.cp-parity-issues ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .cp-parity-issue { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
 .cp-parity-issue > span { color: var(--cp-fg-muted); font-size: .75rem; white-space: nowrap; }
 .cp-parity-issue.closed { opacity: .58; }
+/* What the panel is as of — the same claim the wall's panel closes with, and the same reason. */
+.cp-parity-issues-asof { margin: 10px 0 0; color: var(--cp-fg-faint); font-size: .7rem; }
 .cp-issue-badge { display: inline-flex; width: fit-content; margin-top: 5px; padding: 2px 7px;
   border-radius: 999px; background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container);
   font-size: .68rem; font-weight: 650; }
-.cp-parity-issue-group h3 { margin-bottom: 0; }
 .cp-reference-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   margin: 14px 0 10px; color: var(--cp-fg-muted); font-size: 0.8rem; }
 .cp-reference-picker > span { margin-right: 2px; font-weight: 650; }

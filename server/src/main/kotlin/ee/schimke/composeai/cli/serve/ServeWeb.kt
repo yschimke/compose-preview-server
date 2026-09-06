@@ -1522,7 +1522,37 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /** Render catalog-published GitHub issues. Every href has already been rebuilt by the store. */
-  private fun parityIssueRowsHtml(issues: List<ParityIssue>): String {
+  /**
+   * The filed-issue list, as a **disclosure**: one line of the open numbers, and the issues
+   * themselves behind it.
+   *
+   * The same trade the wall's Bugs column makes ([compareBugsCellHtml]), for the same reason and on
+   * the three pages that carry this list. On the viewer it was the worst of the three: a full-width
+   * panel between the preview's title and the preview, four issues tall, so a catalog with a few
+   * reports against a component pushed the picture the page exists for below the fold. On the
+   * parity dashboard the same block repeats per component, which is the page's whole body.
+   *
+   * [label] is what the summary reads before the numbers — "Issues" on the viewer and the focused
+   * comparison, the component's name on the dashboard, where the heading and the list were two
+   * elements saying one thing. Blank drops it, for a band whose own `<h2>` already says what these
+   * are. [openByDefault] is for the one list whose page is *about* it and whose reader arrived to
+   * read it, rather than to look at a picture with it beside them.
+   *
+   * The panel closes with the index's [generatedAt] wherever the caller can supply one, for the
+   * reason [compareBugsCellHtml] gives: these rows are a snapshot taken when the page was rendered,
+   * nothing re-checks GitHub, and a `closed` with no date invites more trust than that can carry.
+   *
+   * No counts, again: the summary lists the open numbers and marks the closed ones without saying
+   * how many. Unlike the wall there is no theme swap to invalidate a count here — but two spellings
+   * of one rule is how the two drift, and "closed" is not less informative than "1 closed" when the
+   * numbers themselves are one click away.
+   */
+  private fun parityIssueRowsHtml(
+    issues: List<ParityIssue>,
+    generatedAt: String? = null,
+    label: String = "Issues",
+    openByDefault: Boolean = false,
+  ): String {
     if (issues.isEmpty()) return ""
     val rows =
       issues.joinToString("\n") { issue ->
@@ -1535,7 +1565,38 @@ ${captureControlsHtml().prependIndent("          ")}
           "rel=\"noopener\">#${issue.number} ${WebEscaping.htmlEscape(issue.title)}</a>" +
           "<span>${WebEscaping.htmlEscape(meta)}</span></li>"
       }
-    return "<aside class=\"cp-parity-issues\"><strong>Issues</strong><ul>$rows</ul></aside>"
+    val open = issues.filter { it.state == "open" }
+    val numbers =
+      open.joinToString("") { "<span class=\"cp-parity-issue-chip\">#${it.number}</span>" }
+    // With nothing open, the numbers ARE the closed ones — dimmed, and in place of the marker. The
+    // marker's whole job is "there is more behind this line"; on a list with nothing else to show
+    // it would be the line, and `closed` alone says less than `#41` does for the same width. The
+    // dashboard's closed band is exactly this case, and so is a wall row whose reports all landed.
+    val closedMark =
+      when {
+        issues.none { it.state == "closed" } -> ""
+        open.isEmpty() ->
+          issues.joinToString("") {
+            "<span class=\"cp-parity-issue-chip cp-parity-issue-chip--closed\">#${it.number}</span>"
+          }
+        else -> "<span class=\"cp-parity-issue-chip cp-parity-issue-chip--closed\">closed</span>"
+      }
+    val asOf =
+      generatedAt
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+          "<p class=\"cp-parity-issues-asof\">index as of " +
+            "${WebEscaping.htmlEscape(prettyDate(it))}</p>"
+        }
+        .orEmpty()
+    val heading =
+      label
+        .takeIf { it.isNotBlank() }
+        ?.let { "<strong>${WebEscaping.htmlEscape(it)}</strong>" }
+        .orEmpty()
+    return "<details class=\"cp-parity-issues\"${if (openByDefault) " open" else ""}>" +
+      "<summary class=\"cp-parity-issues-sum\">$heading$numbers$closedMark</summary>" +
+      "<ul>$rows</ul>$asOf</details>"
   }
 
   /** Compact, non-link form safe to place inside a card whose whole body is already an anchor. */
@@ -1865,10 +1926,20 @@ ${captureControlsHtml().prependIndent("          ")}
         "<span class=\"cp-compare-bug-chip\"${scopeAttrs(issue)}>#${issue.number}</span>"
       }
     // A row whose every report is closed still says so on the collapsed line — otherwise the only
-    // thing distinguishing it from a row nobody has ever looked at is a disclosure triangle.
+    // thing distinguishing it from a row nobody has ever looked at is a disclosure marker. And with
+    // nothing open, the numbers ARE the closed ones: the marker's job is "there is more behind this
+    // line", so on a line with nothing else it would BE the line, and `closed` says less than `#41`
+    // for the same width. Same rule as [parityIssueRowsHtml], spelled the same way.
     val closedMark =
-      if (issues.none { it.state == "closed" }) ""
-      else "<span class=\"cp-compare-bug-chip cp-compare-bug-chip--closed\">closed</span>"
+      when {
+        issues.none { it.state == "closed" } -> ""
+        open.isEmpty() ->
+          issues.joinToString("") { issue ->
+            "<span class=\"cp-compare-bug-chip cp-compare-bug-chip--closed\"" +
+              "${scopeAttrs(issue)}>#${issue.number}</span>"
+          }
+        else -> "<span class=\"cp-compare-bug-chip cp-compare-bug-chip--closed\">closed</span>"
+      }
     val entries =
       issues.joinToString("") { issue ->
         val closed = issue.state == "closed"
@@ -10927,6 +10998,12 @@ $rows
     knownDifferences: KnownDifferenceScope? = null,
     parityIssues: List<ParityIssue> = emptyList(),
     /**
+     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
+     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
+     * the line — the panel is still a snapshot, it just cannot say of when.
+     */
+    parityIssuesGeneratedAt: String? = null,
+    /**
      * The complete issue index used to resolve acceptance lifecycle state. [parityIssues] remains
      * the comparison-filtered list rendered in the Issues panel; an acceptance can legitimately
      * refer to an issue whose independently published preview/reference locators are stale, so the
@@ -11195,7 +11272,7 @@ ${scriptTag("known-differences.js")}
       withPin("$basePath/compare/${WebEscaping.urlEncodeSegment(preview.id)}?$query", pin)
     }
     val revisionsBlock = revisionsHtml(revisions) { pin -> pageHref(pin, reference.id) }
-    val issueRows = parityIssueRowsHtml(parityIssues)
+    val issueRows = parityIssueRowsHtml(parityIssues, generatedAt = parityIssuesGeneratedAt)
     val referencePicker =
       if (referenceChoices.size <= 1) ""
       else {
@@ -12141,6 +12218,12 @@ $cards
     hasReferenceFor: (String) -> Boolean = { false },
     parityIssues: List<ParityIssue> = emptyList(),
     /**
+     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
+     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
+     * the line — the panel is still a snapshot, it just cannot say of when.
+     */
+    parityIssuesGeneratedAt: String? = null,
+    /**
      * The complete issue index used to resolve acceptance lifecycle state, exactly as
      * [referenceComparisonPage] takes it. [parityIssues] is the list this catalog *displays* —
      * scoped to its own design system by [issuesForSystem] — and the lifecycle join must not
@@ -12448,9 +12531,16 @@ $cards
         val open = parityIssues.filter { it.state == "open" }
         val closed = parityIssues.filter { it.state == "closed" }
         val groups = open.groupBy { it.component ?: "Unscoped" }
+        // The component's name IS the disclosure's label. It used to be an `<h3>` above the panel
+        // and the panel said "Issues" underneath it — two elements for one fact, and on a catalog
+        // with thirty mapped components that is thirty headings each followed by an open list.
+        // Collapsed, this band becomes what a dashboard band should be: one line per component,
+        // scannable, with the reports one click away.
         val summary =
           groups.entries.joinToString("\n") { (component, rows) ->
-            "<section class=\"cp-parity-issue-group\"><h3>${esc(component)} (${rows.size})</h3>${parityIssueRowsHtml(rows)}</section>"
+            "<section class=\"cp-parity-issue-group\">" +
+              "${parityIssueRowsHtml(rows, generatedAt = parityIssuesGeneratedAt, label = component)}" +
+              "</section>"
           }
         // The heading counts *components*, and `open` is rows: an umbrella issue contributes one
         // row per component it names, so counting rows here would report three components with an
@@ -12467,7 +12557,14 @@ $cards
         val closedBand =
           if (closedIssues.isEmpty()) ""
           else
-            "<h2 class=\"cp-status-sec\">Closed issues (${closedIssues.size})</h2>${parityIssueRowsHtml(closedIssues)}"
+            "<h2 class=\"cp-status-sec\">Closed issues (${closedIssues.size})</h2>" +
+              parityIssueRowsHtml(
+                closedIssues,
+                generatedAt = parityIssuesGeneratedAt,
+                // No label: the `<h2>` above it already says "Closed issues", and everything in
+                // here is closed, so the summary is the numbers themselves.
+                label = "",
+              )
         openBand + closedBand
       }
     val issueBand =
@@ -13104,6 +13201,12 @@ ${scriptTag("known-differences.js")}
      */
     sessionInOrigin: Boolean = false,
     parityIssues: List<ParityIssue> = emptyList(),
+    /**
+     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
+     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
+     * the line — the panel is still a snapshot, it just cannot say of when.
+     */
+    parityIssuesGeneratedAt: String? = null,
     componentBrowser: Boolean = false,
     /**
      * The catalog change feed the footer offers as **Changelog** and the head declares as this
@@ -13223,7 +13326,9 @@ ${scriptTag("known-differences.js")}
     val navSuffix =
       querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
     val displayName = previewDisplayName(preview)
-    val issueRows = if (componentBrowser) "" else parityIssueRowsHtml(parityIssues)
+    val issueRows =
+      if (componentBrowser) ""
+      else parityIssueRowsHtml(parityIssues, generatedAt = parityIssuesGeneratedAt)
     val label = WebEscaping.htmlEscape(displayName)
     val idText = WebEscaping.htmlEscape(preview.id)
     val modes = preview.modes.joinToString(",") { it.wire }
