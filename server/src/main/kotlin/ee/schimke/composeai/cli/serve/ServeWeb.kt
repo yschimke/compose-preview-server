@@ -7580,6 +7580,153 @@ ${captureControlsHtml().prependIndent("          ")}
     )
   }
 
+  /**
+   * `GET /admin/ui-builder`: the operator's screen over every UI-builder design on the host.
+   *
+   * The list and the delete both go through the JSON routes under `/admin/ui-builder/designs`,
+   * carrying the admin token in the
+   * [ee.schimke.composeai.cli.serve.ServeHttpServer.ADMIN_TOKEN_HEADER] header — the page only ever
+   * sees the token a browser opened it with (`?token=`), and re-sends that. No token in the URL
+   * means the page renders but every call answers 404, which the script says in place rather than
+   * showing an empty host.
+   *
+   * Delete is a confirm-then-DELETE: there is no soft delete and no undo on the service, so the
+   * prompt names the design and its owner before the request is made.
+   */
+  fun uiBuilderAdminPage(adminToken: String?, version: String? = null): String {
+    val suffix = querySuffix(adminToken?.let { "token=" + WebEscaping.urlEncodeSegment(it) } ?: "")
+    return document(
+      title = "UI-builder designs — admin — compose-preview",
+      version = version,
+      navSuffix = suffix,
+      body =
+        """
+        <h1 class="cp-head">UI-builder designs</h1>
+        <p class="cp-sub">Every design this host holds, whoever owns it. Deleting one removes its
+          history, its reference overlay and its comments, and closes any editor that has it open.
+          There is no undo.</p>
+        <div class="cp-admin-bar">
+          <span id="cp-admin-count" class="cp-muted"></span>
+          <button class="cp-doc-btn" id="cp-admin-reload" type="button">Reload</button>
+        </div>
+        <div class="cp-doc-result" id="cp-admin-status" hidden></div>
+        <div class="cp-status-scroll"><table class="cp-table cp-admin-table" id="cp-admin-table">
+          <thead><tr>
+            <th>Design</th><th>Catalog</th><th>Owner</th><th>Rev</th><th>Open</th>
+            <th>Created</th><th>Updated</th><th></th>
+          </tr></thead>
+          <tbody id="cp-admin-rows"></tbody>
+        </table></div>
+        <script>${uiBuilderAdminScript(adminToken)}</script>
+        """
+          .trimIndent(),
+    )
+  }
+
+  /** Drives the admin page: fetch the design list, render rows, confirm-then-DELETE a design. */
+  private fun uiBuilderAdminScript(adminToken: String?): String =
+    """
+    (function () {
+      var rows = document.getElementById("cp-admin-rows");
+      var count = document.getElementById("cp-admin-count");
+      var status = document.getElementById("cp-admin-status");
+      var reload = document.getElementById("cp-admin-reload");
+      var token = ${jsString(adminToken.orEmpty())};
+      var headers = token ? { "X-Compose-Preview-Admin-Token": token } : {};
+      function show(text, isError) {
+        status.hidden = false;
+        status.className = "cp-doc-result" + (isError ? " cp-doc-error" : "");
+        status.textContent = text;
+      }
+      function hide() { status.hidden = true; }
+      function cell(row, text, mono) {
+        var td = document.createElement("td");
+        if (mono) { var c = document.createElement("code"); c.textContent = text; td.appendChild(c); }
+        else td.textContent = text;
+        row.appendChild(td);
+        return td;
+      }
+      function when(ms) {
+        if (!ms) return "";
+        var d = new Date(ms);
+        var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+        return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+          " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+      }
+      function render(designs) {
+        rows.textContent = "";
+        count.textContent = designs.length === 1 ? "1 design" : designs.length + " designs";
+        if (!designs.length) {
+          var empty = document.createElement("tr");
+          var td = cell(empty, "No designs on this host.");
+          td.colSpan = 8; td.className = "cp-muted";
+          rows.appendChild(empty);
+          return;
+        }
+        designs.forEach(function (d) {
+          var tr = document.createElement("tr");
+          tr.setAttribute("data-design-id", d.designId);
+          var title = cell(tr, "");
+          var strong = document.createElement("strong");
+          strong.textContent = d.title || "(untitled)";
+          title.appendChild(strong);
+          title.appendChild(document.createElement("br"));
+          var id = document.createElement("code");
+          id.textContent = d.designId;
+          title.appendChild(id);
+          cell(tr, d.catalogSystemId, true);
+          cell(tr, d.ownerActorId + (d.collaborators ? " +" + d.collaborators : ""), true);
+          cell(tr, String(d.revision));
+          cell(tr, String(d.activeSubscribers));
+          cell(tr, when(d.createdAtEpochMillis));
+          cell(tr, when(d.updatedAtEpochMillis));
+          var actions = cell(tr, "");
+          var del = document.createElement("button");
+          del.type = "button";
+          del.className = "cp-doc-btn cp-admin-delete";
+          del.textContent = "Delete";
+          del.addEventListener("click", function () { remove(d, del); });
+          actions.appendChild(del);
+          rows.appendChild(tr);
+        });
+      }
+      function failure(response) {
+        if (response.status === 404 && !token) {
+          return "This page needs the admin token: open it as /admin/ui-builder?token=…";
+        }
+        return response.text().then(function (t) {
+          return "HTTP " + response.status + (t ? ": " + t : "");
+        });
+      }
+      function load() {
+        hide();
+        count.textContent = "Loading…";
+        fetch("/admin/ui-builder/designs", { headers: headers, cache: "no-store" })
+          .then(function (r) {
+            if (!r.ok) return Promise.resolve(failure(r)).then(function (m) { throw new Error(m); });
+            return r.json();
+          })
+          .then(function (body) { render(body.designs || []); })
+          .catch(function (e) { count.textContent = ""; rows.textContent = ""; show(String(e.message || e), true); });
+      }
+      function remove(d, button) {
+        var label = (d.title || "(untitled)") + " (" + d.designId + ", owned by " + d.ownerActorId + ")";
+        if (!window.confirm("Delete " + label + "?\n\nThis removes its history, overlay and comments. There is no undo.")) return;
+        button.disabled = true;
+        fetch("/admin/ui-builder/designs/" + encodeURIComponent(d.designId), { method: "DELETE", headers: headers })
+          .then(function (r) {
+            if (!r.ok) return Promise.resolve(failure(r)).then(function (m) { throw new Error(m); });
+            show("Deleted " + label + ".", false);
+            load();
+          })
+          .catch(function (e) { button.disabled = false; show(String(e.message || e), true); });
+      }
+      reload.addEventListener("click", load);
+      load();
+    })();
+    """
+      .trimIndent()
+
   /** Drives the upload page: POST the picked/dropped/linked document, then show its permalink. */
   private fun docUploadScript(querySuffix: String): String =
     """

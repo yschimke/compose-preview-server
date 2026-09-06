@@ -3467,6 +3467,18 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   word-break: break-word; border-radius: var(--md-sys-shape-corner-medium);
   background: var(--md-sys-color-surface-container-low);
   font-size: var(--md-sys-typescale-body-small-size); }
+/* The admin UI-builder designs page (GET /admin/ui-builder): a count + reload bar above the
+   status-page table, and a per-row delete that reads as destructive rather than primary. */
+.cp-admin-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  max-width: 860px; margin: 0 0 12px; }
+.cp-admin-table { max-width: none; }
+.cp-admin-table td { vertical-align: middle; white-space: nowrap; }
+.cp-admin-table td:last-child { padding-right: 0; text-align: right; }
+.cp-admin-table td:first-child { white-space: normal; min-width: 220px; }
+.cp-doc-btn.cp-admin-delete { min-height: 32px; padding: 6px 16px;
+  background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
+.cp-doc-btn.cp-admin-delete:hover { background: var(--md-sys-color-error); }
+.cp-doc-btn.cp-admin-delete:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
 .cp-doc-result { max-width: 720px; margin: 18px 0 0; padding: 16px 20px;
   border-radius: var(--md-sys-shape-corner-medium); border: 0;
   background: var(--md-sys-color-surface-container-low);

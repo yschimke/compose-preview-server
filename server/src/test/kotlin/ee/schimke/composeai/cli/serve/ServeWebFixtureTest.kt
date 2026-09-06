@@ -3294,6 +3294,10 @@ class ServeWebFixtureTest {
         urlUploadAllowed = true,
         version = version,
       )
+    // The UI-builder admin screen (`GET /admin/ui-builder`): the operator's list of every design
+    // with a delete per row. The rows are fetched by the page's script, so the fixture is the
+    // chrome around an empty table; the harness stubs the JSON route to fill it.
+    val uiBuilderAdmin = ServeWeb.uiBuilderAdminPage(adminToken = token, version = version)
     // The playground Stage-1 editor (`GET /playground`): the code box, mode selector, and result
     // pane. Always token-gated (the lane runs user code, refused under `--public`), so the fixture
     // renders the non-public form the server actually serves.
@@ -4062,6 +4066,7 @@ class ServeWebFixtureTest {
         "serve-agent-access-capabilities.html" to agentAccessCapabilities,
         "serve-agent-access-granted.html" to agentAccessGranted,
         "serve-docs-upload.html" to docUpload,
+        "serve-admin-ui-builder.html" to uiBuilderAdmin,
         "serve-playground.html" to playground,
         "serve-playground-uncompilable.html" to playgroundUncompilable,
         "serve-doc-lottie.html" to docLottie,
