@@ -107,6 +107,68 @@ internal fun Route.installUiBuilderCommentRoutes(
     }
   }
 
+  /**
+   * "I have read this", for one thread or for the whole board.
+   *
+   * Separate from resolution on purpose, and the reason is in
+   * [ServeUiBuilderCommentStore.acknowledge]: an actor that has read a comment but not yet acted on
+   * it either stays silent, which is invisible, or resolves, which is a claim about the question
+   * that is not true yet. This is the third thing to say, it is per actor, and it is what empties
+   * the notice an agent's tool replies carry.
+   */
+  post(UI_BUILDER_COMMENTS_ACKNOWLEDGEMENT_PATH) {
+    val actor =
+      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
+        ?: return@post
+    call.respondAcknowledgement(store, actor, threadId = null)
+  }
+
+  post(UI_BUILDER_COMMENT_ACKNOWLEDGEMENT_PATH) {
+    val actor =
+      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
+        ?: return@post
+    val threadId = call.parameters["threadId"].orEmpty()
+    if (threadId.isBlank()) {
+      call.respondCommentError(HttpStatusCode.BadRequest, "a thread id is required")
+      return@post
+    }
+    call.respondAcknowledgement(store, actor, threadId)
+  }
+
+  /**
+   * An emoji on one comment, added or taken back.
+   *
+   * One route for both directions rather than a `DELETE` carrying a body, because the thing a
+   * client has is a chip it toggles.
+   */
+  post(UI_BUILDER_COMMENT_REACTION_PATH) {
+    val actor =
+      call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
+        ?: return@post
+    val commentId = call.parameters["commentId"].orEmpty()
+    if (commentId.isBlank()) {
+      call.respondCommentError(HttpStatusCode.BadRequest, "a comment id is required")
+      return@post
+    }
+    val request = call.receiveCommentBody(CommentReactionRequest.serializer()) ?: return@post
+    when (
+      val result =
+        withContext(Dispatchers.IO) {
+          store.react(actor.designId, actor.actorId, commentId, request.reaction, request.on)
+        }
+    ) {
+      is CommentWriteResult.Refused ->
+        // 422 for a reaction the store will not keep, 404 for a comment that is not there: the
+        // two are different questions and a client retries only one of them.
+        call.respondCommentError(
+          if (result.reason.startsWith("no such")) HttpStatusCode.NotFound
+          else HttpStatusCode.UnprocessableEntity,
+          result.reason,
+        )
+      is CommentWriteResult.Stored -> call.respondBoard(result.board)
+    }
+  }
+
   delete(UI_BUILDER_COMMENT_THREAD_PATH) {
     val actor =
       call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.WRITE)
@@ -212,6 +274,21 @@ internal fun Route.installUiBuilderCommentRoutes(
 
 /** One caller admitted to one design's discussion. */
 private data class CommentActor(val actorId: String, val designId: String)
+
+/** The board once [threadId] — or all of it — is marked as read by this actor. */
+private suspend fun ApplicationCall.respondAcknowledgement(
+  store: ServeUiBuilderCommentStore,
+  actor: CommentActor,
+  threadId: String?,
+) {
+  when (
+    val result =
+      withContext(Dispatchers.IO) { store.acknowledge(actor.designId, actor.actorId, threadId) }
+  ) {
+    is CommentWriteResult.Refused -> respondCommentError(HttpStatusCode.NotFound, result.reason)
+    is CommentWriteResult.Stored -> respondBoard(result.board)
+  }
+}
 
 /**
  * Whether this actor can read this design, asked of the service rather than assumed.
@@ -330,6 +407,15 @@ internal const val UI_BUILDER_COMMENT_THREAD_PATH =
 
 internal const val UI_BUILDER_COMMENT_RESOLUTION_PATH =
   "/api/ui-builder/v1/designs/{designId}/comments/{threadId}/resolution"
+
+internal const val UI_BUILDER_COMMENTS_ACKNOWLEDGEMENT_PATH =
+  "/api/ui-builder/v1/designs/{designId}/comments/acknowledgement"
+
+internal const val UI_BUILDER_COMMENT_ACKNOWLEDGEMENT_PATH =
+  "/api/ui-builder/v1/designs/{designId}/comments/{threadId}/acknowledgement"
+
+internal const val UI_BUILDER_COMMENT_REACTION_PATH =
+  "/api/ui-builder/v1/designs/{designId}/comments/{threadId}/{commentId}/reactions"
 
 /** A comment is text. The bound is the body ceiling with room for the envelope around it. */
 private const val MAX_COMMENT_BODY_BYTES = 64 * 1024

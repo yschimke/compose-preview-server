@@ -232,6 +232,71 @@ class ServeUiBuilderCommentsIntegrationTest {
   }
 
   @Test
+  fun `a comment the agent has not seen rides along on the reply it is already reading`() {
+    val server = start()
+    createDesign(server)
+    // A designer says something while the agent is mid-edit. Nothing tells it to look.
+    server.comments!!.post(
+      DESIGN_ID,
+      "github:yuri",
+      CommentPostRequest(
+        anchor = StoredCommentAnchor(nodeId = "row"),
+        body = "The play icon looks like a cross.",
+        displayName = "Yuri",
+      ),
+    )
+
+    val read = envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"$DESIGN_ID"}""")
+    val notice = Json.parseToJsonElement(read).jsonObject["comments"]!!.jsonObject
+    assertEquals(1, notice["unacknowledged"]!!.jsonPrimitive.content.toInt())
+    // The excerpt is the part that survives an agent skimming: a count is easy to skip past, a
+    // quoted sentence naming a node it is holding is not.
+    val thread = notice["threads"]!!.jsonArray.single().jsonObject
+    assertEquals("The play icon looks like a cross.", thread["excerpt"]!!.jsonPrimitive.content)
+    assertEquals("row", thread["nodeId"]!!.jsonPrimitive.content)
+    assertEquals("Yuri", thread["author"]!!.jsonPrimitive.content)
+
+    // Acknowledging is not resolving: the block goes, the thread stays open.
+    val acknowledged =
+      envelope(
+        server,
+        ServeUiBuilderMcp.ACKNOWLEDGE_COMMENT,
+        """{"designId":"$DESIGN_ID","threadId":"${thread["id"]!!.jsonPrimitive.content}"}""",
+      )
+    assertTrue(acknowledged.contains("\"resolved\":false"), acknowledged)
+
+    val quiet = envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"$DESIGN_ID"}""")
+    assertEquals(null, Json.parseToJsonElement(quiet).jsonObject["comments"], quiet)
+  }
+
+  @Test
+  fun `a reaction is the lightest acknowledgement, and reaches the page as one`() {
+    val server = start()
+    createDesign(server)
+    val posted =
+      server.comments!!.post(DESIGN_ID, "github:yuri", CommentPostRequest(body = "Padding?"))
+    val commentId =
+      (posted as CommentWriteResult.Stored).board.threads.single().comments.single().id
+
+    val reacted =
+      envelope(
+        server,
+        ServeUiBuilderMcp.REACT_TO_COMMENT,
+        """{"designId":"$DESIGN_ID","commentId":"$commentId","reaction":"👀"}""",
+      )
+    assertTrue(reacted.contains("👀"), reacted)
+
+    // Read back over HTTP, which is what the panel does: the chip is there, the thread is still
+    // open, and the agent is no longer being nagged about a comment it has picked up.
+    val read = comments(server, "GET", "/api/ui-builder/v1/designs/$DESIGN_ID/comments", null)
+    assertEquals(200, read.first, read.second)
+    assertTrue(read.second.contains("👀"), read.second)
+    assertTrue(read.second.contains("\"resolved\":false"), read.second)
+    val quiet = envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"$DESIGN_ID"}""")
+    assertEquals(null, Json.parseToJsonElement(quiet).jsonObject["comments"], quiet)
+  }
+
+  @Test
   fun `the comment tools are listed only where the host keeps a discussion`() {
     val withStore = tools(start())
     assertTrue(
@@ -333,6 +398,9 @@ class ServeUiBuilderCommentsIntegrationTest {
   }
 
   private fun start(withComments: Boolean = true): RunningServer {
+    val store =
+      if (!withComments) null
+      else ServeUiBuilderCommentStore(stateDirectory.resolve("comments-$withComments"))
     val registry = ServeSessionRegistry(open = { null })
     val service =
       PersistentUiBuilderService(
@@ -366,12 +434,10 @@ class ServeUiBuilderCommentsIntegrationTest {
           uiBuilderService = service,
           uiBuilderAuthorization =
             ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null),
-          uiBuilderCommentStore =
-            if (!withComments) null
-            else ServeUiBuilderCommentStore(stateDirectory.resolve("comments-$withComments")),
+          uiBuilderCommentStore = store,
         )
         .also(ServeHttpServer::start)
-    return RunningServer(server, registry).also { running = it }
+    return RunningServer(server, registry, store).also { running = it }
   }
 
   private fun envelope(server: RunningServer, tool: String, arguments: String = "{}"): String {
@@ -451,6 +517,15 @@ class ServeUiBuilderCommentsIntegrationTest {
   private data class RunningServer(
     val server: ServeHttpServer,
     val registry: ServeSessionRegistry,
+    /**
+     * The same store the routes and the MCP tools reach.
+     *
+     * Held so a test can speak as a *second* actor. Both doors in this test authenticate with the
+     * one operator token, so every comment posted through them is the agent's own — and an agent is
+     * never told to catch up with what it said itself, which is the case the unacknowledged notice
+     * exists for.
+     */
+    val comments: ServeUiBuilderCommentStore?,
   ) : AutoCloseable {
     override fun close() {
       server.stop()
