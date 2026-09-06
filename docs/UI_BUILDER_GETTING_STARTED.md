@@ -337,10 +337,62 @@ canvas instead of the 216×124dp frame the design was authored in.
 
 ![The Code pane showing a widget's generated Kotlin](design/evidence/ui-builder-remote-compose/widget-code-pane.png)
 
-Refusals work the way the Compose exporter's do: a node with no Remote Compose counterpart is named
-rather than approximated. An image background is the one to expect — `WearWidgetBrush.image` takes a
-`RemoteImageBitmap`, which generated source cannot name from an asset key, so the refusal says to
-supply the bitmap in `provideWidgetData` and add the call by hand.
+### A picture in the content slot
+
+An image is the one node whose bytes stay out of the generated file, and the reason is not a
+limitation: album art, an avatar or a logo is *application data* that changes long after the file is
+written, so baking today's bytes in would generate a widget that draws the picture the design was
+built with forever. The design names an asset **key**; the generated code takes a bitmap.
+
+```kotlin
+@RemoteComposable
+@Composable
+fun NowPlayingWidgetContent(albumArt: RemoteImageBitmap) {
+    RemoteRow(modifier = RemoteModifier.fillMaxSize()) {
+        RemoteImage(
+            remoteBitmap = albumArt,
+            contentDescription = "Album art".rs,
+            modifier = RemoteModifier.size(60.rdp, 60.rdp).clip(RemoteRoundedCornerShape(8.rdp)),
+            contentScale = ContentScale.Crop,
+        )
+        …
+    }
+}
+
+class NowPlayingWidget(
+    // The design's `album-art` asset.
+    private val albumArt: RemoteImageBitmap = ImageBitmap(1, 1).rb,
+) : GlanceWearWidget() { … }
+```
+
+One parameter per distinct key, named after it, defaulted to a **blank** 1×1 bitmap — which is what
+lets the generated `@Preview` beside it still compile, and is deliberately not a picture: a
+placeholder that looked like artwork would be a preview showing something the design does not have.
+Pass the real bitmap when the application constructs the widget.
+
+The **background** slot is the case that still refuses, and for a reason particular to it:
+`WearWidgetBrush.image` takes a `RemoteImageBitmap` and the brush chain is built in
+`provideWidgetData`, outside composition, where nothing resolves an asset key. The refusal says to
+supply the bitmap there and add `WearWidgetBrush.image(bitmap)` by hand.
+
+### What else a widget body can say
+
+The modifiers are `RemoteModifier`'s, not Compose's, and the palette offers exactly the ones the
+generator can write — `size`, `width`, `height`, `widthIn`, `heightIn`, `fillMax*`, `padding`,
+`background`, `border`, `clip`, `alpha`, `offset`, `rotate`, `scale`, `zIndex`, `wrapContentSize`,
+the scrolls, `weight` and the three alignments. Four Compose modifiers are missing from a widget's
+inspector on purpose, because Remote Compose has no counterpart: `matchParentSize` (use
+`fillMaxSize`), `aspectRatio` (state a `size`), `shadow` (a played document draws no elevation) and
+`testTag`.
+
+Two of them are written by the *container* rather than as a call: `background` with a shape becomes
+`clip(shape).background(colour)`, because `RemoteModifier.background` takes no shape, and an
+alignment becomes the row's, column's or box's own argument, because a played document aligns its
+content as a group. That last one is why a box whose children ask to be aligned differently from one
+another is refused: `RemoteBox` has one `contentAlignment` for all of them.
+
+Refusals work the way the Compose exporter's do: a node or modifier with no Remote Compose
+counterpart is named, with the reason and the route that does work, rather than approximated.
 
 ## Authoring a Wear screen
 
