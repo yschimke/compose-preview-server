@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.bundle.BundleVerifier
+import ee.schimke.composeai.daemon.devices.DeviceDimensions
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.StreamCodec
@@ -1610,6 +1611,44 @@ class ServeBundleHost(
     val computed = java.util.Optional.ofNullable(computeContentCrop(previewId, gutter))
     cropCache[previewId] = computed
     return computed.orElse(null)
+  }
+
+  /**
+   * The density this preview's renders are produced at, or null when nothing this session carries
+   * says.
+   *
+   * Resolved exactly the way the render lane resolves it
+   * (`PreviewManifestRouter.ResolvedRenderParams`: `density ?: params.density ?: device density ?:
+   * 2.0`), because the two must agree or a dp→px conversion made against this answer sends the
+   * renderer a frame in the wrong unit. The last step of that chain — the 2.0 default — is
+   * deliberately NOT applied here: it belongs to the caller, which has to know the difference
+   * between "this preview renders at 2.0" and "nothing here knows", and `ServeWeb` documents which
+   * it is emitting.
+   *
+   * Both manifests are read because a session has one or the other, never both. An uploaded
+   * bundle's root `previews.json` carries the discovery params, `density` among them. A published
+   * catalog stages `previews/variants.json` instead, whose `PreviewParamsMeta` has no density field
+   * at all — but it does carry the raw `@Preview(device = …)` string, and the device catalog is
+   * what the renderer would have resolved the density from anyway. That second path is the one that
+   * answers on a published catalog, which is most of what this server hosts.
+   *
+   * The device is usually the whole story: of the 56 ids `DeviceDimensions` knows, 42 are not 2.0 —
+   * 2.625 is the commonest at 15 — so `@Preview(device = "id:pixel_5")` renders at 2.75 and a page
+   * that said 2 converted every dp box the reader typed by 0.73 of what it meant. The Wear ids are
+   * all 2.0, so the Wear catalogs were right by luck; the phone ones were not.
+   */
+  fun renderDensityFor(previewId: String): Float? {
+    // A manifest may state anything; a non-positive density is no answer, so it falls through to
+    // the device rather than suppressing it.
+    previewParamsById[previewId]
+      ?.density
+      ?.takeIf { it > 0f }
+      ?.let {
+        return it
+      }
+    val device =
+      variantMeta[previewId]?.previewParams?.device?.takeIf { it.isNotBlank() } ?: return null
+    return runCatching { DeviceDimensions.resolve(device).density }.getOrNull()?.takeIf { it > 0f }
   }
 
   /**

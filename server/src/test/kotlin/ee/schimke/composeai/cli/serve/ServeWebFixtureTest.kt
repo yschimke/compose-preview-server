@@ -6765,6 +6765,44 @@ class ServeWebFixtureTest {
   }
 
   /**
+   * The page carries the density the preview actually renders at, not a constant.
+   *
+   * `ServeBundleHost.renderDensityFor` resolves it and `ServeBakedCatalogPreviewParamsTest` pins
+   * that; this is the other half — that the resolved value reaches the attribute the viewer reads,
+   * and that a session which cannot answer still emits the documented fallback rather than nothing.
+   * The two halves are what make the dp→px conversion behind the Fixed / Max / Min / Within inputs
+   * agree with the renderer.
+   */
+  @Test
+  fun `the viewer page carries the preview's own render density`() {
+    val stated =
+      ServeWeb.viewerPage(
+        previews.first(),
+        token,
+        siblings = previews,
+        sessionId = "compose-m3",
+        canApplyOverrides = true,
+        renderDensity = 2.75f,
+      )
+    assertTrue(
+      stated.contains("data-render-density=\"2.75\""),
+      "a preview rendering at 2.75 says so, so a dp box converts against 2.75",
+    )
+    val unknown =
+      ServeWeb.viewerPage(
+        previews.first(),
+        token,
+        siblings = previews,
+        sessionId = "compose-m3",
+        canApplyOverrides = true,
+      )
+    assertTrue(
+      unknown.contains("data-render-density=\"2\""),
+      "and a session that cannot answer falls back, exactly as every page used to",
+    )
+  }
+
+  /**
    * The eyedropper's readout may not change the LANE'S WIDTH, which is issue #464: hovering the
    * comparison moved the preview down the screen, and moving off it moved the preview back.
    *
