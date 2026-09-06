@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessResponseV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
@@ -10,13 +11,20 @@ import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
+import ee.schimke.composeai.uibuilder.protocol.DesignsResponseV1
+import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportResponseV1
 import ee.schimke.composeai.uibuilder.protocol.InsertNodeMutationV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.McpResponseEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.NodeLocationV1
+import ee.schimke.composeai.uibuilder.protocol.NullValueV1
 import ee.schimke.composeai.uibuilder.protocol.OperationOutcomeResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ParentSlotV1
+import ee.schimke.composeai.uibuilder.protocol.RejectedOutcomeV1
+import ee.schimke.composeai.uibuilder.protocol.RejectionCodeV1
+import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
+import ee.schimke.composeai.uibuilder.protocol.SetPropertyMutationV1
 import ee.schimke.composeai.uibuilder.protocol.SnapshotResponseV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
@@ -28,7 +36,9 @@ import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -81,12 +91,14 @@ class ServeUiBuilderMcpIntegrationTest {
     val catalogs = envelope(server, ServeUiBuilderMcp.LIST_CATALOGS)
     assertTrue(catalogs.contains(CATALOG_SYSTEM_ID), catalogs)
 
-    // 2. A design.
+    // 2. A design. `includeCatalog` because this test decodes the reply as the released shape,
+    // whose snapshot carries the catalog; the default leaves it out, and the test below is about
+    // that.
     val created =
       envelope(
         server,
         ServeUiBuilderMcp.CREATE_DESIGN,
-        """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
       )
     assertIs<SnapshotResponseV1>(response(created))
 
@@ -94,7 +106,13 @@ class ServeUiBuilderMcpIntegrationTest {
     // edit is detected, and an agent that guessed it would be the concurrent edit.
     val snapshot =
       assertIs<SnapshotResponseV1>(
-        response(envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}"""))
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.GET_DESIGN,
+            """{"designId":"agent-screen","includeCatalog":true}""",
+          )
+        )
       )
     assertEquals("agent-screen", snapshot.snapshot.designId)
     val revision = snapshot.snapshot.state.document.revision
@@ -195,6 +213,245 @@ class ServeUiBuilderMcpIntegrationTest {
         )
       )
     assertEquals(emptyList(), revoked.access.actorGrants)
+  }
+
+  @Test
+  fun `a snapshot leaves the catalog out unless asked, and is small`() {
+    val server = start()
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+      )
+    val read = envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}""")
+    for (reply in listOf(created, read)) {
+      val snapshot =
+        Json.parseToJsonElement(reply).jsonObject["response"]!!.jsonObject["snapshot"]!!.jsonObject
+      // Dropped, not blanked: an agent reading the reply sees an absence, and the document's own
+      // `catalogPin` still names the catalog exactly.
+      assertNull(snapshot["catalog"], reply)
+      assertEquals(
+        CATALOG_SYSTEM_ID,
+        snapshot["state"]!!
+          .jsonObject["document"]!!
+          .jsonObject["catalogPin"]!!
+          .jsonObject["systemId"]!!
+          .jsonPrimitive
+          .content,
+      )
+      // The whole point: a two-node design is a couple of KB, not sixty.
+      assertTrue(reply.length < 4_000, "${reply.length} bytes: $reply")
+    }
+
+    // The released shape, byte for byte, when the caller wants it.
+    val whole =
+      envelope(
+        server,
+        ServeUiBuilderMcp.GET_DESIGN,
+        """{"designId":"agent-screen","includeCatalog":true}""",
+      )
+    val snapshot = assertIs<SnapshotResponseV1>(response(whole)).snapshot
+    assertEquals(CATALOG_SYSTEM_ID, snapshot.catalog.benchmark.catalogSystemId)
+    assertTrue(whole.length > read.length * 5, "${whole.length} vs ${read.length}")
+  }
+
+  @Test
+  fun `the catalog list is a summary carrying the pin, with the whole capability on request`() {
+    val server = start()
+    val summary =
+      Json.parseToJsonElement(envelope(server, ServeUiBuilderMcp.LIST_CATALOGS)).jsonObject
+    assertEquals(
+      "compose-preview/ui-builder-catalog-summary/v1",
+      summary["schema"]!!.jsonPrimitive.content,
+    )
+    val catalog = summary["catalogs"]!!.jsonArray.single().jsonObject
+    assertEquals(CATALOG_SYSTEM_ID, catalog["systemId"]!!.jsonPrimitive.content)
+    // The pin a document must carry — which the capability itself never spelled, so an agent
+    // used to guess the digest. This is the one the test document below pins, and creating with
+    // it succeeds.
+    assertEquals(
+      CatalogReferenceV1(CATALOG_SYSTEM_ID, "candidate", "candidate", "candidate"),
+      json.decodeFromJsonElement(CatalogReferenceV1.serializer(), catalog["catalogPin"]!!),
+    )
+    val components = catalog["components"]!!.jsonArray.map { it.jsonObject }
+    val text = components.single { it["id"]!!.jsonPrimitive.content == "m3/text" }
+    val properties = text["properties"]!!.jsonArray.map { it.jsonPrimitive.content }
+    // Required, and restricted, read off the row: what a mutation has to get right.
+    assertTrue("text:string!" in properties, properties.toString())
+    assertTrue(
+      properties.any { it.startsWith("style:string=displayLarge|") },
+      properties.toString(),
+    )
+    val column = components.single { it["id"]!!.jsonPrimitive.content == "layout/column" }
+    val slots = column["slots"]!!.jsonArray.map { it.jsonPrimitive.content }
+    assertTrue(slots.any { it.startsWith("children[0..*]") }, slots.toString())
+    assertTrue("padding" in catalog["modifiers"]!!.jsonArray.map { it.jsonPrimitive.content })
+    // What authoring does not need is not there.
+    assertNull(text["wasm"])
+    assertNull(text["svg"])
+    assertNull(text["code"])
+    // The whole point: on this catalog the released envelope is about 58 KB and this about 12.
+    val summaryBytes = summary.toString().length
+    assertTrue(summaryBytes < 16_000, "$summaryBytes bytes: $summary")
+
+    // `full` is the released envelope, with everything.
+    val whole = envelope(server, ServeUiBuilderMcp.LIST_CATALOGS, """{"full":true}""")
+    val listed = assertIs<CatalogsResponseV1>(response(whole))
+    assertEquals(CATALOG_SYSTEM_ID, listed.catalogs.single().benchmark.catalogSystemId)
+    assertTrue(whole.length > summaryBytes * 4, "${whole.length} vs $summaryBytes")
+
+    // And either can be narrowed to the components a call is about.
+    val narrowed =
+      envelope(
+        server,
+        ServeUiBuilderMcp.LIST_CATALOGS,
+        """{"full":true,"componentIds":["m3/text","layout/column"]}""",
+      )
+    assertEquals(
+      listOf("layout/column", "m3/text"),
+      assertIs<CatalogsResponseV1>(response(narrowed))
+        .catalogs
+        .single()
+        .components
+        .map { it.componentId }
+        .sorted(),
+    )
+  }
+
+  @Test
+  fun `an optional property can be unset with null, and a required one cannot`() {
+    val server = start()
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    fun set(operationId: String, baseRevision: Long, mutation: DesignMutationV1) =
+      response(
+        envelope(
+          server,
+          ServeUiBuilderMcp.APPLY,
+          """{"designId":"agent-screen","operationId":"$operationId","baseRevision":$baseRevision,"operations":${json.encodeToString(ListSerializer(DesignMutationV1.serializer()), listOf(mutation))}}""",
+        )
+      )
+
+    // Try a property, then take it back — the shape of an edit an export diagnostic prompts.
+    assertIs<AcceptedOutcomeV1>(
+      assertIs<OperationOutcomeResponseV1>(
+          set(
+            "try",
+            0,
+            SetPropertyMutationV1("column", "verticalArrangement", StringValueV1("center")),
+          )
+        )
+        .outcome
+    )
+    assertIs<AcceptedOutcomeV1>(
+      assertIs<OperationOutcomeResponseV1>(
+          set("unset", 1, SetPropertyMutationV1("column", "verticalArrangement", NullValueV1))
+        )
+        .outcome
+    )
+    val column =
+      Json.parseToJsonElement(
+          envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}""")
+        )
+        .jsonObject["response"]!!
+        .jsonObject["snapshot"]!!
+        .jsonObject["state"]!!
+        .jsonObject["document"]!!
+        .jsonObject["nodes"]!!
+        .jsonObject["column"]!!
+        .jsonObject
+    // Back as it was: the node is there, and the property is gone rather than null.
+    assertFalse(
+      "verticalArrangement" in (column["properties"]?.jsonObject ?: emptyMap()),
+      column.toString(),
+    )
+
+    // A required property stays required, and the refusal names the node and the field.
+    val refused =
+      assertIs<RejectedOutcomeV1>(
+        assertIs<OperationOutcomeResponseV1>(
+            set("unset-text", 2, SetPropertyMutationV1("session", "text", NullValueV1))
+          )
+          .outcome
+      )
+    assertEquals(RejectionCodeV1.INVALID_DOCUMENT, refused.code)
+    assertEquals("required property text is missing", refused.message)
+    assertEquals("session", refused.nodeId)
+    assertEquals("text", refused.field)
+  }
+
+  @Test
+  fun `an agent renames its design and deletes it when it is done`() {
+    val server = start()
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"probe","document":${json.encodeToString(DesignDocumentV1.serializer(), document().copy(id = "probe", title = "Delegation works"))}}""",
+    )
+
+    val renamed =
+      Json.parseToJsonElement(
+          envelope(
+            server,
+            ServeUiBuilderMcp.RENAME_DESIGN,
+            """{"designId":"probe","title":"Discord client"}""",
+          )
+        )
+        .jsonObject
+    assertEquals(
+      "compose-preview/ui-builder-design-renamed/v1",
+      renamed["schema"]!!.jsonPrimitive.content,
+    )
+    val entry = renamed["design"]!!.jsonObject
+    assertEquals("Discord client", entry["title"]!!.jsonPrimitive.content)
+    // The revision did not move: a title is not design content, and an edit in flight against
+    // revision 0 is still against revision 0.
+    assertEquals("0", entry["revision"]!!.jsonPrimitive.content)
+    val listed =
+      assertIs<DesignsResponseV1>(
+        response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}"""))
+      )
+    assertEquals("Discord client", listed.designs.single { it.designId == "probe" }.title)
+
+    val deleted =
+      Json.parseToJsonElement(
+          envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"probe"}""")
+        )
+        .jsonObject
+    assertEquals(
+      "compose-preview/ui-builder-design-deleted/v1",
+      deleted["schema"]!!.jsonPrimitive.content,
+    )
+    assertEquals("probe", deleted["designId"]!!.jsonPrimitive.content)
+    // Gone from every angle, and a second delete is the service's own "not found" rather than a
+    // silent yes.
+    assertEquals(
+      ServiceErrorCodeV1.NOT_FOUND,
+      assertIs<ErrorResponseV1>(
+          response(envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"probe"}"""))
+        )
+        .error
+        .code,
+    )
+    assertEquals(
+      ServiceErrorCodeV1.NOT_FOUND,
+      assertIs<ErrorResponseV1>(
+          response(envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"probe"}"""))
+        )
+        .error
+        .code,
+    )
+    assertTrue(
+      assertIs<DesignsResponseV1>(
+          response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}"""))
+        )
+        .designs
+        .none { it.designId == "probe" }
+    )
   }
 
   @Test
