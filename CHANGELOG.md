@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.12.0](https://github.com/yschimke/compose-preview-server/compare/v3.11.0...v3.12.0) (2026-09-06)
+
+
+### Features
+
+* **ui-builder:** a RemoveNodeProperty operation, sent as the null write the server unsets on ([#505](https://github.com/yschimke/compose-preview-server/issues/505)) ([8aef08a](https://github.com/yschimke/compose-preview-server/commit/8aef08a178591a3399989d5f5cd4a70c9bd06574))
+* **ui-builder:** carry unacknowledged comments on tool replies, and separate seen from settled ([#512](https://github.com/yschimke/compose-preview-server/issues/512)) ([2948685](https://github.com/yschimke/compose-preview-server/commit/2948685599370b109644c38ed0fb50ddcc84eaec))
+* **ui-builder:** read RemoveNodePropertyMutationV1, the unset in its own words ([#513](https://github.com/yschimke/compose-preview-server/issues/513)) ([96e6a45](https://github.com/yschimke/compose-preview-server/commit/96e6a45878c8fd036fde8b599abaef5ef1283591))
+
+
+### Bug Fixes
+
+* **ui-builder:** carry the asset registry across the language boundary, and rehash the fixtures ([#514](https://github.com/yschimke/compose-preview-server/issues/514)) ([84e0758](https://github.com/yschimke/compose-preview-server/commit/84e075813ab5f93c2f039533dbbb2489f6271ae6))
+* **ui-builder:** compose a card's content in a Box in the record-driven export, as the canvas draws it ([#506](https://github.com/yschimke/compose-preview-server/issues/506)) ([68b1cfd](https://github.com/yschimke/compose-preview-server/commit/68b1cfdb8416ec3cfb33f4bbdfb366b17597d007))
+* **ui-builder:** write the widget vocabulary remote-m3 offers, and redirect the catalog-less design URL ([#515](https://github.com/yschimke/compose-preview-server/issues/515)) ([9cb8d0b](https://github.com/yschimke/compose-preview-server/commit/9cb8d0bcca8879dd8575313781997126f29b04dd))
+
 ## [3.11.0](https://github.com/yschimke/compose-preview-server/compare/v3.10.0...v3.11.0) (2026-09-06)
 
 
