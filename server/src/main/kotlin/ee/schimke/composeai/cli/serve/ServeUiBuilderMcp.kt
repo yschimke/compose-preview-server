@@ -1131,12 +1131,13 @@ class ServeUiBuilderMcp(
           "Apply design mutations — insertNode, setProperty, deleteNode, moveNode and the rest of " +
             "DesignMutationV1 — as one operation. `baseRevision` is the revision you read, and a " +
             "mismatch is reported rather than merged, so a concurrent edit cannot be lost. This " +
-            "is how an agent adds a scaffold, fills its slots and sets modifiers. A setProperty " +
-            "whose value is `{\"type\":\"null\"}` unsets the property — the way back after " +
-            "trying one — and is refused, naming the node and the field, when the catalog " +
-            "requires it. When somebody has commented on the design and you have not " +
-            "acknowledged it, the outcome carries a `comments` block naming the threads waiting " +
-            "on you; read it, because it is somebody talking about what you are editing.",
+            "is how an agent adds a scaffold, fills its slots and sets modifiers. " +
+            "`removeNodeProperty` (or a setProperty whose value is `{\"type\":\"null\"}`) " +
+            "unsets the property — the way back after trying one — and is refused, naming the " +
+            "node and the field, when the catalog requires it. When somebody has commented on " +
+            "the design and you have not acknowledged it, the outcome carries a `comments` " +
+            "block naming the threads waiting on you; read it, because it is somebody talking " +
+            "about what you are editing.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
