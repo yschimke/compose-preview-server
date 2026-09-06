@@ -154,9 +154,42 @@ class ServeIssueReportTest {
         .replace("overrides: {{overrides}}", "overrides: {\"uiMode\":\"dark\"}")
         .replace(
           "{{render}}",
-          "https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark",
+          // As `fillReport` fills it — through `withStage`, the TS mirror of [ServeIssueReport
+          // .withStage]. Substituting the bare URL here would assert an invariant the two paths do
+          // not actually share, and hide a drift between them rather than catch it.
+          "https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark&bg=auto",
         ),
     )
+  }
+
+  @Test
+  fun `the stage is appended to a render URL, once, and to nothing else`() {
+    assertEquals(
+      "https://h/x/render/a.png?bg=auto",
+      ServeIssueReport.withStage("https://h/x/render/a.png"),
+    )
+    assertEquals(
+      "https://h/x/render/a.png?uiMode=dark&bg=auto",
+      ServeIssueReport.withStage("https://h/x/render/a.png?uiMode=dark"),
+    )
+    // A reporter who picked a stage keeps it — including `off`, which is how the raw alpha is
+    // asked for from a body that would otherwise composite one.
+    assertEquals(
+      "https://h/x/render/a.png?bg=off",
+      ServeIssueReport.withStage("https://h/x/render/a.png?bg=off"),
+    )
+    // A `bg`-like value that is not the parameter must not be mistaken for one.
+    assertEquals(
+      "https://h/x/render/a.png?debug=1&bg=auto",
+      ServeIssueReport.withStage("https://h/x/render/a.png?debug=1"),
+    )
+    // Not ours to append to: a design reference, a viewer page, a null.
+    assertEquals(
+      "https://h/x/reference/a.png",
+      ServeIssueReport.withStage("https://h/x/reference/a.png"),
+    )
+    assertEquals("https://h/x/p/a", ServeIssueReport.withStage("https://h/x/p/a"))
+    assertNull(ServeIssueReport.withStage(null))
   }
 
   @Test
@@ -172,9 +205,12 @@ class ServeIssueReportTest {
     val body = ServeIssueReport.body(full)
     // GitHub renders this inline (via its camo proxy), so the reporter's evidence is visible in the
     // issue without anyone clicking through.
+    // …carrying `bg=auto`, so the picture is legible where it lands. A render is transparent by
+    // design and GitHub's page is white, so a dark-first catalog's sticker embeds as a blank
+    // rectangle without it — see [ServeRenderMatte].
     assertTrue(
       body.contains(
-        "![Article](https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark)"
+        "![Article](https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark&bg=auto)"
       ),
       body,
     )
@@ -198,10 +234,14 @@ class ServeIssueReportTest {
       body.contains(
         "| ![reference](https://preview.coo.ee/jetnews/reference/article-card-figma.png" +
           "?uiMode=dark) | " +
-          "![Article](https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark) |"
+          "![Article](https://preview.coo.ee/jetnews/render/Article__dark.png" +
+          "?uiMode=dark&bg=auto) |"
       ),
       body,
     )
+    // The RENDER takes the stage and the reference does not: a design reference is opaque art with
+    // nothing to composite, and both panels have to be the pixels they claim to be.
+    assertFalse(body.contains("reference/article-card-figma.png?uiMode=dark&bg="), body)
     // The third panel has no URL — the browser composes it — so the body says so and asks for it.
     assertTrue(body.contains("The DIFF between those two panels"), body)
     assertTrue(body.contains("capture control"), body)

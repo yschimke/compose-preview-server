@@ -353,7 +353,7 @@ internal object ServeIssueReport {
     val hasRender = !withoutToken(ctx.renderUrl).isNullOrBlank()
     val render =
       if (renderPlaceholder) RENDER_PLACEHOLDER.takeIf { hasRender }
-      else withoutToken(ctx.renderUrl)?.takeIf { it.isNotBlank() }
+      else withStage(withoutToken(ctx.renderUrl))?.takeIf { it.isNotBlank() }
     // Whether the render can be *embedded* is decided by the real URL even when the body is the
     // JS template, so both forms of the body have the same shape and the placeholder swap can't
     // turn a working image into a broken one. Two independent conditions have to hold: GitHub's
@@ -704,6 +704,37 @@ internal object ServeIssueReport {
    * This is **reachability only**. Whether the lane will actually serve the request is a separate
    * question — see [Context.publicRender], which [body] requires as well.
    */
+  /**
+   * A render URL with the stage asked for — `?bg=auto`, [ServeRenderMatte].
+   *
+   * An issue body is the case the stage exists for. A render is transparent by design, every
+   * surface on this server puts it on a resolved ground in CSS, and none of that survives the trip
+   * into a GitHub comment: what lands there is raw alpha on GitHub's white. A dark-first catalog
+   * then files its bug reports as blank rectangles — which is literally what
+   * [wear-m3-catalog#284](https://github.com/yschimke/wear-m3-catalog/issues/284) looks like, an
+   * issue about a card's missing border whose screenshot shows neither the card nor the border.
+   *
+   * `auto` rather than a fixed shape because the right ground differs per render and the server can
+   * measure which: a round capture keeps its bezel, a screen template that paints its own surface
+   * is left alone, and only a sticker that would be invisible gets plates. A reader who wants the
+   * raw alpha appends `&bg=off`, and the link in the body still points at the same preview either
+   * way.
+   *
+   * Left alone when the URL already carries a `bg` (a reporter who chose one keeps it) or is not
+   * one of ours to append to.
+   */
+  internal fun withStage(url: String?): String? {
+    val value = url?.trim()?.takeIf { it.isNotEmpty() } ?: return url
+    if (!value.contains("/render/")) return value
+    val query = value.substringAfter('?', "")
+    if (query.split('&').any { it.substringBefore('=') == ServeRenderMatte.PARAM }) return value
+    return value +
+      (if (query.isEmpty()) "?" else "&") +
+      ServeRenderMatte.PARAM +
+      "=" +
+      ServeRenderMatte.Mode.AUTO.wire
+  }
+
   fun isEmbeddable(url: String?): Boolean {
     val u = url?.trim() ?: return false
     if (!u.startsWith("https://")) return false

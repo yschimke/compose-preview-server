@@ -10,6 +10,7 @@ import ee.schimke.composeai.data.layoutinspector.ComposeFigmaSvgProduct
 import ee.schimke.composeai.data.layoutinspector.ExplodedSvg
 import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
+import ee.schimke.composeai.data.render.PreviewClip
 import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
@@ -4118,11 +4119,17 @@ class ServeHttpServer(
   private suspend fun RoutingContext.respondPinnedAsset(
     outcome: ServeBundleHost.PinnedOutcome?,
     missing: String,
+    /**
+     * Applied to the bytes on the way out, for the render lane's `?bg=` stage. Identity everywhere
+     * else — a design reference is already opaque art, and a permalink to one has nothing to
+     * composite.
+     */
+    transform: suspend (ByteArray) -> ByteArray = { it },
   ) {
     when (outcome) {
       is ServeBundleHost.PinnedOutcome.Ok -> {
         markGeneration("pinned-asset", prebakedImageCacheControl(isPublic))
-        call.respondBytes(outcome.bytes, ContentType.Image.PNG)
+        call.respondBytes(transform(outcome.bytes), ContentType.Image.PNG)
       }
       // The lane is admission-bounded, and a shed request is not a dead link. Saying so with a 503
       // + Retry-After keeps a link checker (and a visitor) from concluding that a revision which
@@ -5858,6 +5865,40 @@ class ServeHttpServer(
     return runCatching { raw.decodeURLQueryComponent(plusIsSpace = true) }.getOrDefault(raw)
   }
 
+  /**
+   * The ground and shape a `?bg=` request should composite for [previewId], or null when this host
+   * cannot state one (an unknown id, a preview with no backdrop in the chain).
+   *
+   * Resolved through [ServeWeb.backdropFor] and [ServeWeb.effectiveDeviceFrame] — the very
+   * functions the viewer, the grid and the compare wall draw their CSS from — so a matted PNG and
+   * the page it was copied off cannot disagree about what is behind the render. That sharing is the
+   * whole design: the resolvers already existed and already agreed with each other; all that was
+   * missing was a lane that put their answer into bytes.
+   */
+  private fun renderStage(
+    renderHost: ServeHost,
+    sessionId: String?,
+    previewId: String,
+    overrides: Map<String, String>,
+  ): ServeRenderMatte.Stage? {
+    val preview = renderHost.previews.firstOrNull { it.id == previewId } ?: return null
+    val darkFirst =
+      ServeWeb.SystemDisplay.resolveDarkFirst(
+        // The system name, exactly as the cmp-jvm lane resolves it: on a mounted catalog the
+        // session id IS the system (`/remote-m3/render/…`), and a session without one has no
+        // declared surface to prefer anyway.
+        sessionId.orEmpty(),
+        catalogBundleHost(renderHost)?.stageSurface,
+      )
+    val frame = ServeWeb.effectiveDeviceFrame(preview, overrides)
+    return ServeRenderMatte.Stage(
+      backdrop = ServeWeb.backdropFor(preview, darkFirst, overrides["uiMode"]),
+      clip = frame?.let { PreviewClip.resolve(it.isRound, it.widthDp, it.heightDp) },
+      frameWidthDp = frame?.widthDp,
+      frameHeightDp = frame?.heightDp,
+    )
+  }
+
   private fun catalogBundleHost(host: ServeHost): ServeBundleHost? =
     when (host) {
       is ServeBundleHost -> host
@@ -6139,6 +6180,11 @@ class ServeHttpServer(
         key == "scroll" ||
         key == "rcPlayer" ||
         key == "mode" ||
+        // A stage (`?bg=`) is post-processing over the bytes rather than a different render, but
+        // the thumbnail's URL is the *content hash* of the un-matted pixels — answering a matted
+        // request from it would serve the wrong bytes under an `immutable` lifetime. Same rule as
+        // the pin below: leave the lane, take the ordinary render path, get the stage applied.
+        key == ServeRenderMatte.PARAM ||
         // A pin asks for a *different* version of the render, which the in-memory thumbnail is by
         // definition not — it is baked from the catalog on disk. Same rule as the overrides above:
         // anything that changes which pixels are being asked for leaves this lane.
@@ -9622,6 +9668,48 @@ class ServeHttpServer(
           .removeSuffix(".a11y")
           .removeSuffix(".annotations")
           .removeSuffix(".rc")
+      // `?bg=`: composite the preview's resolved stage into the PNG ([ServeRenderMatte]).
+      //
+      // Deliberately NOT an override param, and that is the whole reason it can sit on a permalink.
+      // It changes no pixel the renderer produced — it paints a ground *under* bytes some lane has
+      // already decided on — so it does not turn a replay into a live render, does not escalate the
+      // grant scope, does not make a request "made to order", and leaves a pin or a generation
+      // meaning exactly what it meant. Every lane below therefore keeps its own cache lifetime: the
+      // bytes are a pure function of the bytes it was going to serve anyway, and `bg` is in the
+      // URL.
+      //
+      // A blank value is treated as absent rather than as an error, because that is what an empty
+      // form field or a stripped query leaves behind, and refusing it would break a link over
+      // punctuation.
+      val requestedStage =
+        call.request.queryParameters[ServeRenderMatte.PARAM]?.takeIf { it.isNotBlank() }
+      val stageMode = ServeRenderMatte.Mode.parse(requestedStage)
+      if (requestedStage != null && stageMode == null) {
+        call.respondText(
+          "unknown '${ServeRenderMatte.PARAM}' value '$requestedStage'; expected one of " +
+            ServeRenderMatte.Mode.wires(),
+          status = HttpStatusCode.BadRequest,
+        )
+        return@withLeasedSession
+      }
+      // Applied on the way out of every lane below that answers with a preview raster, so a stage
+      // asked for on one lane is not silently missing on another. A no-op unless `bg=` was given,
+      // and [ServeRenderMatte.apply] is itself a no-op on anything it cannot stage — a raster this
+      // host has no preview record for, an undecodable image, a capture too large to be worth a
+      // pass — so no lane can fail because of it.
+      //
+      // On [Dispatchers.Default] because it is CPU work — a pass over the frame, some fills, and a
+      // PNG re-encode, measured at 3-18 ms and 5-12 ms respectively on this catalog's renders — and
+      // the request dispatcher's threads are not for that. Small, but every lane here serves images
+      // and the one that does not block is the one that keeps a grid responsive.
+      val staged: suspend (ByteArray, Map<String, String>) -> ByteArray = { bytes, overrides ->
+        if (stageMode == null) bytes
+        else {
+          val stage = renderStage(renderHost, sessionId, previewId, overrides)
+          if (stage == null) bytes
+          else withContext(Dispatchers.Default) { ServeRenderMatte.apply(bytes, stageMode, stage) }
+        }
+      }
       // The prebaked grid-thumbnail lane: a catalog card asks for `?thumb=<hash>` and gets a
       // downscaled copy of its render straight out of memory — no override parse, no admission, no
       // disk read, no chance of waking a daemon. This is the whole point of the lane: a catalog
@@ -9769,6 +9857,10 @@ class ServeHttpServer(
               withContext(Dispatchers.IO) { it.pinnedRender(pinnedCommit, previewId) }
             },
           missing = "no published render for that preview at that revision",
+          // A pin is override-free by construction (`onDemand` refuses one above), so the stage is
+          // resolved against the preview's own frame — which is what a permalink in an issue body
+          // wants: the ground this render was published on.
+          transform = { staged(it, emptyMap()) },
         )
         return@withLeasedSession
       }
@@ -9795,11 +9887,11 @@ class ServeHttpServer(
       // override param other than `rcPlayer` may be present. `.svg` is excluded because the staged
       // artifact is a raster and the structural export is a different product.
       if (!wantSvg && !wantSlots && !wantA11y && !wantAnnotations && bareRcPlayerRequest()) {
-        val staged =
+        val stagedRaster =
           renderHost.publishedRcPlayerRender(previewId, RcPlayerBackend.CMP_JVM).takeIf {
             call.request.queryParameters["rcPlayer"]?.lowercase() == RcPlayerBackend.CMP_JVM.wire
           }
-        if (staged != null) {
+        if (stagedRaster != null) {
           // Cached exactly like the daemon-backed player lanes below, and for the same reason:
           // these ARE the published bytes. This path returns before that decision is reached, so
           // it has to make the same one — otherwise the one player whose staged raster costs a
@@ -9808,7 +9900,7 @@ class ServeHttpServer(
             RenderOutcome.Generation.RC_PUBLISHED.wire,
             if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else PRIVATE_REPLAY_CACHE_CONTROL,
           )
-          call.respondBytes(staged, ContentType.Image.PNG)
+          call.respondBytes(staged(stagedRaster, emptyMap()), ContentType.Image.PNG)
           return@withLeasedSession
         }
       }
@@ -9847,6 +9939,8 @@ class ServeHttpServer(
           format,
           webMode,
           sessionId,
+          // PNG only; an SVG export has no alpha to composite and is handed through untouched.
+          stage = { bytes -> staged(bytes, emptyMap()) },
           cacheControl =
             if (!bareRaster) DYNAMIC_RESOURCE_CACHE_CONTROL
             else if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else PRIVATE_REPLAY_CACHE_CONTROL,
@@ -10165,7 +10259,7 @@ class ServeHttpServer(
                     else STATIC_RESOURCE_CACHE_CONTROL
                   } else DYNAMIC_RESOURCE_CACHE_CONTROL,
                 )
-                call.respondBytes(outcome.png, ContentType.Image.PNG)
+                call.respondBytes(staged(outcome.png, overrideParams), ContentType.Image.PNG)
               }
             }
             RenderOutcome.NotFound ->
@@ -10509,6 +10603,11 @@ class ServeHttpServer(
     format: RcJvmServerRenderer.Format,
     webMode: Boolean,
     sessionId: String,
+    /**
+     * The `?bg=` stage, applied to a raster result. Identity when the request asked for none, and
+     * never applied to the SVG product — a structural export carries no alpha to composite.
+     */
+    stage: suspend (ByteArray) -> ByteArray = { it },
     /** Lifetime for a successful render — see the call site for which requests earn one. */
     cacheControl: String,
   ) {
@@ -10581,7 +10680,10 @@ class ServeHttpServer(
           } else {
             ContentType.Image.PNG
           }
-        call.respondBytes(bytes, contentType)
+        call.respondBytes(
+          if (format == RcJvmServerRenderer.Format.SVG) bytes else stage(bytes),
+          contentType,
+        )
       }
       is RcJvmServerRenderer.RenderResult.Unavailable -> {
         // The chip is only offered when the sidecar is present, so this is a torn-down install

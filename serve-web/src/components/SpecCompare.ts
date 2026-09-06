@@ -81,6 +81,18 @@ interface SpecCompareSource {
     spec: boolean;
 }
 
+/**
+ * A point the eyedropper can read at: the pointer's sub-pixel position and what it was over.
+ *
+ * The target rides along rather than being recovered with `elementFromPoint`, so a reading taken
+ * from a remembered position resolves to the same panel the pointer was actually on.
+ */
+interface PickPoint {
+    x: number;
+    y: number;
+    target: Node | null;
+}
+
 /** What `viewer.js` calls on the way into and out of the lane. */
 interface SpecCompareApi {
     view(): SpecView;
@@ -203,6 +215,30 @@ export class SpecCompare extends ControllerElement {
     } | null = null;
     /** A frozen reading holds the panel still; pointer moves are ignored until it is released. */
     private pickFrozen = false;
+    /**
+     * The reading currently in the row — what the visitor is looking at.
+     *
+     * A click latches THIS rather than taking a fresh reading at the click's own coordinates, and
+     * the difference is not academic: Chromium rounds `MouseEvent.clientX/clientY` to whole CSS
+     * pixels while the `pointermove` that drew the line carries fractions, so re-reading at the
+     * click lands on a neighbouring pixel of the normalised space. Measured on the triptych at
+     * devicePixelRatio 2, one click on a held-still pointer: the row read
+     * `146,122 · Figma #494451 · Render #332e3c · Δ 22` and froze
+     * `146,121 · Figma #332e3c · Render #332e3c · identical` — the one gesture whose whole purpose
+     * is to hold what is on screen replaced it with a different pixel and the opposite verdict.
+     * The error grows with the panel's scale, since it is a whole CSS pixel of it.
+     */
+    private pickLive = "";
+    /**
+     * Where the pointer is over the comparison, tracked on every move INCLUDING while frozen, and
+     * null while it is outside.
+     *
+     * Releasing the latch hands the row back to the live reading, and live means the pixel the
+     * pointer is on now — not the one it was on when the latch closed, and not the click's rounded
+     * position. Only `pointermove` carries the sub-pixel coordinates that produced the readings, so
+     * they are kept from there rather than recovered from the releasing event.
+     */
+    private pickPoint: PickPoint | null = null;
     /**
      * Whether the frames on the stage are the pair currently being asked for.
      *
@@ -410,11 +446,20 @@ export class SpecCompare extends ControllerElement {
     private bindPick(): void {
         if (!this.compare) return;
         this.on(this.compare, "pointermove", (event) => {
+            const pointer = event as PointerEvent;
+            // Kept even while frozen. The latch stops the ROW from moving, not the pointer, and
+            // releasing it has to put the reading back where the cursor actually ended up.
+            this.pickPoint = {
+                x: pointer.clientX,
+                y: pointer.clientY,
+                target: pointer.target as Node | null,
+            };
             if (this.pickFrozen) return;
-            this.pickAt(event as PointerEvent);
+            this.showPick(this.pickPoint);
         });
         this.on(this.compare, "pointerleave", () => {
-            if (!this.pickFrozen) this.setPick("");
+            this.pickPoint = null;
+            if (!this.pickFrozen) this.showPick(null);
         });
         // Click freezes the reading so it can be read and copied without the cursor holding still;
         // clicking again, or Escape, releases it. Only a settled reading is announced — the panel
@@ -430,48 +475,77 @@ export class SpecCompare extends ControllerElement {
                 )
             )
                 return;
-            const reading = this.pickFrozen
-                ? ""
-                : this.pickAt(event as PointerEvent);
-            if (!this.pickFrozen && !reading) return;
-            this.pickFrozen = !this.pickFrozen;
-            this.announcePick(this.pickFrozen ? reading : "");
-            document
-                .getElementById("cp-spec-pick")
-                ?.classList.toggle("cp-spec-pick--frozen", this.pickFrozen);
+            if (this.pickFrozen) {
+                this.releaseFreeze();
+                return;
+            }
+            // Latch what is ON SCREEN. Re-reading at the click's coordinates instead is the whole
+            // of [pickLive]: they are the pointer's rounded to whole CSS pixels, so the gesture
+            // froze a line the visitor had never seen.
+            if (!this.pickLive) return;
+            this.pickFrozen = true;
+            this.announcePick(this.pickLive);
+            this.markFrozen(true);
         });
         this.on(document, "keydown", (event) => {
             if ((event as KeyboardEvent).key !== "Escape" || !this.pickFrozen)
                 return;
-            this.pickFrozen = false;
-            this.announcePick("");
-            document
-                .getElementById("cp-spec-pick")
-                ?.classList.remove("cp-spec-pick--frozen");
-            this.setPick("");
+            this.releaseFreeze();
         });
     }
 
-    /** Read both sides under the pointer; returns the line shown, or "" when there is nothing. */
-    private pickAt(event: PointerEvent | MouseEvent): string {
+    /** Put the frozen styling on the row, or take it off. */
+    private markFrozen(frozen: boolean): void {
+        document
+            .getElementById("cp-spec-pick")
+            ?.classList.toggle("cp-spec-pick--frozen", frozen);
+    }
+
+    /**
+     * Let a frozen reading go, by either route — a second click or Escape — and hand the row back
+     * to the pointer.
+     *
+     * The two routes used to end differently: Escape blanked the row while a second click left the
+     * latched line in place, now unstyled, so it read as a LIVE reading of whatever the cursor had
+     * since moved onto. Both now re-read at the tracked position, which restores the same line the
+     * pointer would have drawn had it never been frozen — and blanks the row when the pointer has
+     * left the comparison, because there is nothing under it to describe.
+     */
+    private releaseFreeze(): void {
+        this.pickFrozen = false;
+        this.announcePick("");
+        this.markFrozen(false);
+        this.showPick(this.pickPoint);
+    }
+
+    /** Draw the reading for a point into the row, or empty it when there is nothing to read. */
+    private showPick(point: PickPoint | null): string {
+        this.pickLive = point ? this.readingFor(point) : "";
+        this.setPick(this.pickLive);
+        return this.pickLive;
+    }
+
+    /**
+     * Read both sides at a point; returns the line, or "" when there is nothing to say about it.
+     *
+     * Every no-reading path returns "" rather than leaving the previous line up: an unreadable
+     * pair, a point in the gutter between two panels and a pair that has not settled are all cases
+     * where the row would otherwise go on describing a pixel the pointer has left.
+     */
+    private readingFor(point: PickPoint): string {
         const pair = this.frames;
         if (!pair || !this.pickSettled) return "";
-        const panel = this.pickPanels().find((c) =>
-            c.contains(event.target as Node),
-        );
-        if (!panel) {
-            this.setPick("");
-            return "";
-        }
+        const panel = this.pickPanels().find((c) => c.contains(point.target));
+        if (!panel) return "";
         const pixels = this.pickBuffers(pair);
         if (!pixels) return "";
         const rect = panel.getBoundingClientRect();
         if (!(rect.width > 0 && rect.height > 0)) return "";
         // The panel is the normalised space scaled to fit its box, so the mapping is that scale
         // and nothing else — no per-side offset, because both sides already share this origin.
-        const x = ((event.clientX - rect.left) * pair.width) / rect.width;
-        const y = ((event.clientY - rect.top) * pair.height) / rect.height;
-        const line = summarise(
+        const x = ((point.x - rect.left) * pair.width) / rect.width;
+        const y = ((point.y - rect.top) * pair.height) / rect.height;
+        return summarise(
             readingAt(
                 pixels.reference,
                 pixels.candidate,
@@ -483,8 +557,6 @@ export class SpecCompare extends ControllerElement {
             this.sourceLabel || "Spec",
             "Render",
         );
-        this.setPick(line);
-        return line;
     }
 
     /**
@@ -526,11 +598,14 @@ export class SpecCompare extends ControllerElement {
         this.pickPixels = null;
         this.pickFrozen = false;
         this.pickSettled = false;
+        // The tracked point named a surface this pair may not have — a view switch comes through
+        // here, and the plain Spec view has no panels at all — so it goes with the reading rather
+        // than waiting to be re-read into the next one.
+        this.pickLive = "";
+        this.pickPoint = null;
         this.setPick("");
         this.announcePick("");
-        document
-            .getElementById("cp-spec-pick")
-            ?.classList.remove("cp-spec-pick--frozen");
+        this.markFrozen(false);
     }
 
     /**

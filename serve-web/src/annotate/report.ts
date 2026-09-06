@@ -109,12 +109,35 @@ export function needsRender(template: string): boolean {
  * with it — a report that is malformed or unindexable, produced by the very path meant to make a
  * failed comparison still reportable.
  */
+/**
+ * A render URL with `?bg=auto` on it — the server-composited stage, `ServeRenderMatte`.
+ *
+ * The mirror of `ServeIssueReport.withStage`, and the two have to agree: the server writes this
+ * body when the page has no script, this fills the same body from live page state, and a report
+ * whose screenshot is legible or not depending on which path wrote it would be worse than either.
+ * Kept deliberately dumb — append unless there is already a `bg`, leave anything that is not a
+ * render URL alone — so there is nothing for the two spellings to diverge on.
+ *
+ * Why at all: a render is transparent by design and every surface here puts it on a resolved ground
+ * in CSS, none of which survives into a GitHub comment. Without this a dark-first catalog files its
+ * bug reports as blank rectangles.
+ */
+export function withStage(url: string): string {
+    if (!url.includes("/render/")) return url;
+    const query = url.split("?")[1] ?? "";
+    if (query.split("&").some((p) => p.split("=")[0] === "bg")) return url;
+    return url + (query ? "&" : "?") + "bg=auto";
+}
+
 export function fillReport(
     template: string,
     renderUrl: string,
     scores: string | null,
 ): string {
-    const filled = template.replace(RENDER_DESTINATION, `](${renderUrl})`);
+    const filled = template.replace(
+        RENDER_DESTINATION,
+        `](${withStage(renderUrl)})`,
+    );
     const lines = filled.split("\n");
     const at = lines.indexOf(RAW_SCORES_ROW);
     // No row means nothing to fill: a body the server wrote without one (it had no measurements
