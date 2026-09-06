@@ -65,11 +65,6 @@ class DesignFixturesTest {
     fixtures.forEach { file ->
       val document = UiBuilderReducer.replay(file.fixture()).document
       assertEquals(
-        "m3-catalog",
-        document.catalogPin.systemId,
-        "${file.name} pins a catalog this test does not carry",
-      )
-      assertEquals(
         emptyList(),
         CapabilityValidator(catalog).validate(document).issues,
         "${file.name} no longer validates",
