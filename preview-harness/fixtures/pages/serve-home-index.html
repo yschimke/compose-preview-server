@@ -24,6 +24,17 @@
     </a>
   </div>
   <nav class="cp-site-nav" aria-label="Primary navigation">
+    <div class="cp-site-search">
+      <button type="button" class="cp-site-search-btn" id="cp-site-search-toggle"
+        aria-expanded="false" aria-controls="cp-site-search-field"
+        title="Search catalogs and components"
+        aria-label="Search catalogs and components"><span aria-hidden="true">⌕</span></button>
+      <div class="cp-site-search-field" id="cp-site-search-field" hidden>
+        <input id="cp-browser-catalog-search" class="cp-site-search-input" type="search"
+          autocomplete="off" spellcheck="false" placeholder="Search catalogs and components"
+          aria-label="Search catalogs and components">
+      </div>
+    </div>
     <div class="cp-interface-mode" role="group" aria-label="Interface mode">
       <button type="button" data-cp-interface-mode="catalog" aria-pressed="false">Catalog</button>
       <button type="button" data-cp-interface-mode="dev" aria-pressed="true">Dev</button>
@@ -72,39 +83,38 @@
   </nav>
 </header>
         <main class="cp-main">
-        <div class="cp-browser-home-tools">
-  <label class="cp-browser-search">
-    <span class="cp-browser-search-icon" aria-hidden="true">⌕</span>
-    <input id="cp-browser-catalog-search" class="cp-browser-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search catalogs" aria-label="Search catalogs">
-  </label>
+        <div id="cp-home-components" class="cp-home-components" hidden>
+  <h2 class="cp-home-components-head">Components</h2>
+  <ul class="cp-home-component-list"></ul>
 </div>
-<p id="cp-browser-catalog-empty" class="cp-empty" hidden>No catalogs match your search.</p><script>(function(){var q=document.getElementById("cp-browser-catalog-search"),e=document.getElementById("cp-browser-catalog-empty");if(!q)return;q.addEventListener("input",function(){var n=q.value.trim().toLowerCase(),shown=0;document.querySelectorAll(".cp-sys").forEach(function(c){var hit=!n||(c.getAttribute("data-browser-search")||"").indexOf(n)>=0;c.hidden=!hit;if(hit)shown++;});document.querySelectorAll(".cp-section-title").forEach(function(h){var g=h.nextElementSibling;h.hidden=!!g&&!Array.prototype.some.call(g.children,function(c){return !c.hidden;});});document.querySelectorAll(".cp-section-unit").forEach(function(u){u.hidden=!u.querySelector(".cp-sys:not([hidden])");});if(e)e.hidden=shown!==0;});})();</script>
+<p id="cp-browser-catalog-empty" class="cp-empty" hidden>Nothing matches your search.</p>
+<script>(function(){var q=document.getElementById("cp-browser-catalog-search"),e=document.getElementById("cp-browser-catalog-empty"),t=document.getElementById("cp-site-search-toggle"),f=document.getElementById("cp-site-search-field"),r=document.getElementById("cp-home-components"),l=r&&r.querySelector(".cp-home-component-list"),index=null,pending=false;if(!q)return;function expand(open){if(!t||!f)return;t.setAttribute("aria-expanded",open?"true":"false");f.hidden=!open;if(open){q.focus();}else{q.value="";apply();}}if(t&&f){t.addEventListener("click",function(){expand(f.hidden);});q.addEventListener("keydown",function(ev){if(ev.key==="Escape"){expand(false);t.focus();}});}function sourceUrl(){var s=document.querySelector("[data-cp-global-components]");return s&&s.getAttribute("data-cp-global-components");}function load(){if(index||pending)return;var url=sourceUrl();if(!url)return;pending=true;fetch(url,{headers:{Accept:"application/json"}}).then(function(res){if(!res.ok)throw new Error("HTTP "+res.status);return res.json();}).then(function(body){index=(body&&body.components)||[];apply();},function(){index=[];}).then(function(){pending=false;});}function hitsFor(n){if(!index||!n)return [];return index.filter(function(c){return ((c.label||"")+" "+(c.keywords||"")).toLowerCase().indexOf(n)>=0;});}function apply(){var n=q.value.trim().toLowerCase(),hits=hitsFor(n),owners={},shown=0;hits.forEach(function(c){owners[c.catalog]=true;});document.querySelectorAll(".cp-sys").forEach(function(c){var hit=!n||(c.getAttribute("data-browser-search")||"").indexOf(n)>=0||owners[c.getAttribute("data-cp-system")]===true;c.hidden=!hit;if(hit)shown++;});document.querySelectorAll(".cp-section-title").forEach(function(h){var g=h.nextElementSibling;h.hidden=!!g&&!Array.prototype.some.call(g.children,function(c){return !c.hidden;});});document.querySelectorAll(".cp-section-unit").forEach(function(u){u.hidden=!u.querySelector(".cp-sys:not([hidden])");});if(r&&l){l.textContent="";hits.slice(0,24).forEach(function(c){var li=document.createElement("li"),a=document.createElement("a"),name=document.createElement("span"),from=document.createElement("span");a.className="cp-home-component";a.href=c.href;name.className="cp-home-component-name";name.textContent=c.label;from.className="cp-home-component-catalog";from.textContent=c.catalogTitle||c.catalog;a.appendChild(name);a.appendChild(from);li.appendChild(a);l.appendChild(li);});r.hidden=hits.length===0;}if(e)e.hidden=!(n&&shown===0&&hits.length===0);}q.addEventListener("input",function(){load();apply();});})();</script>
 <div class="cp-section-title">
   <h1 class="cp-head">Design Systems</h1>
   <span class="cp-section-count">3 design systems</span>
 </div>
       <div class="cp-grid cp-syslist" id="cp-grid">
-      <div class="cp-card cp-sys" data-browser-search="compose material 3 compose-m3 androidx.compose.material3:material3 yschimke/compose-ai-tools">
+      <div class="cp-card cp-sys" data-browser-search="compose material 3 compose-m3 androidx.compose.material3:material3 yschimke/compose-ai-tools" data-cp-system="compose-m3">
   <div class="cp-imgwrap"><img loading="eager" decoding="async" width="168" height="68" alt="Compose Material 3 preview" src="/hero/compose-m3/1f0c9a4b7d2e6503.png"></div>
   <div class="cp-meta">
     <div class="cp-sys-title"><a class="cp-sys-open" href="/compose-m3/">Compose Material 3</a></div>
       <div class="cp-id">compose-m3</div>
       <div class="cp-sys-desc">androidx.compose.material3:material3</div>
-      <p class="cp-sys-actions"><a class="cp-action-chip" href="/compose-m3/compare?format=reference" aria-label="Compose Material 3: compare to Figma">compare to Figma</a></p>
+      <div class="cp-sys-actions"><a class="cp-action-chip cp-action-chip--primary" href="/ui-builder/compose-m3/" aria-label="Compose Material 3: open the UI Builder"><span class="cp-action-chip-icon" aria-hidden="true">✎</span>UI Builder</a><a class="cp-action-chip" href="/compose-m3/compare?format=reference" aria-label="Compose Material 3: compare to Figma">compare to Figma</a></div>
       <div class="cp-sys-foot">42 previews</div>
   </div>
 </div>
-<div class="cp-card cp-sys" data-bg-theme="dark" data-browser-search="wear compose material 3 wear-m3 androidx.wear.compose:compose-material3 yschimke/compose-ai-tools">
+<div class="cp-card cp-sys" data-bg-theme="dark" data-browser-search="wear compose material 3 wear-m3 androidx.wear.compose:compose-material3 yschimke/compose-ai-tools" data-cp-system="wear-m3">
   <div class="cp-imgwrap"><img loading="eager" decoding="async" width="132" height="132" alt="Wear Compose Material 3 preview" src="/hero/wear-m3/9b3d51ca08e7f264.png"></div>
   <div class="cp-meta">
     <div class="cp-sys-title"><a class="cp-sys-open" href="/wear-m3/">Wear Compose Material 3</a></div>
       <div class="cp-id">wear-m3</div>
       <div class="cp-sys-desc">androidx.wear.compose:compose-material3</div>
-      <p class="cp-sys-actions"><a class="cp-action-chip" href="/wear-m3/compare?format=reference" aria-label="Wear Compose Material 3: compare to Figma">compare to Figma</a></p>
+      <div class="cp-sys-actions"><a class="cp-action-chip" href="/wear-m3/compare?format=reference" aria-label="Wear Compose Material 3: compare to Figma">compare to Figma</a></div>
       <div class="cp-sys-foot">18 previews</div>
   </div>
 </div>
-<div class="cp-card cp-sys" data-bg-theme="dark" data-browser-search="remote compose material 3 remote-m3 androidx.wear.compose.remote:remote-material3 yschimke/compose-ai-tools">
+<div class="cp-card cp-sys" data-bg-theme="dark" data-browser-search="remote compose material 3 remote-m3 androidx.wear.compose.remote:remote-material3 yschimke/compose-ai-tools" data-cp-system="remote-m3">
   <div class="cp-imgwrap"><img loading="lazy" alt="Remote Compose Material 3 preview" src="/remote-m3/render/Button-Filled__ideal__default__light.png"></div>
   <div class="cp-meta">
     <div class="cp-sys-title"><a class="cp-sys-open" href="/remote-m3/">Remote Compose Material 3</a></div>
@@ -121,7 +131,7 @@
   <span class="cp-section-count">2 catalogs</span>
 </div>
       <div class="cp-grid cp-syslist cp-section-unit-grid" id="cp-grid-1" data-cols="2">
-      <div class="cp-card cp-sys" data-browser-search="meshcore meshcore-mobile ee.schimke.meshcore yschimke/meshcore-mobile">
+      <div class="cp-card cp-sys" data-browser-search="meshcore meshcore-mobile ee.schimke.meshcore yschimke/meshcore-mobile" data-cp-system="meshcore-mobile">
   <div class="cp-imgwrap"><img loading="lazy" alt="MeshCore preview" src="/meshcore-mobile/render/device-manycontacts__ideal__default__compact.png"></div>
   <div class="cp-meta">
     <div class="cp-sys-title"><a class="cp-sys-open" href="/meshcore-mobile/">MeshCore</a></div>
@@ -130,13 +140,13 @@
       <div class="cp-sys-foot">33 previews</div>
   </div>
 </div>
-<div class="cp-card cp-sys" data-browser-search="homeassistant remotecompose homeassistant-remotecompose ee.schimke.homeassistant yschimke/homeassistant-remotecompose">
+<div class="cp-card cp-sys" data-browser-search="homeassistant remotecompose homeassistant-remotecompose ee.schimke.homeassistant yschimke/homeassistant-remotecompose" data-cp-system="homeassistant-remotecompose">
   <div class="cp-imgwrap"><span class="cp-sys-noimg">no preview</span></div>
   <div class="cp-meta">
     <div class="cp-sys-title"><a class="cp-sys-open" href="/homeassistant-remotecompose/">HomeAssistant RemoteCompose</a></div>
       <div class="cp-id">homeassistant-remotecompose</div>
       <div class="cp-sys-desc">ee.schimke.homeassistant</div>
-      <p class="cp-sys-actions"><a class="cp-action-chip" href="/homeassistant-remotecompose/compare?format=reference" aria-label="HomeAssistant RemoteCompose: compare to design references">compare to design references</a></p>
+      <div class="cp-sys-actions"><a class="cp-action-chip" href="/homeassistant-remotecompose/compare?format=reference" aria-label="HomeAssistant RemoteCompose: compare to design references">compare to design references</a></div>
       <div class="cp-sys-foot">9 previews</div>
   </div>
 </div>
@@ -148,7 +158,7 @@
   <span class="cp-section-count">1 catalog</span>
 </div>
       <div class="cp-grid cp-syslist cp-section-unit-grid" id="cp-grid-2" data-cols="1">
-      <div class="cp-card cp-sys" data-bg-theme="dark" data-browser-search="confetti (wear) confetti-wear dev.johnoreilly.confetti joreilly/confetti">
+      <div class="cp-card cp-sys" data-bg-theme="dark" data-browser-search="confetti (wear) confetti-wear dev.johnoreilly.confetti joreilly/confetti" data-cp-system="confetti-wear">
   <div class="cp-imgwrap"><img loading="lazy" alt="Confetti (Wear) preview" src="/confetti-wear/render/conference-screen__ideal__default__dark.png"></div>
   <div class="cp-meta">
     <div class="cp-sys-title"><a class="cp-sys-open" href="/confetti-wear/">Confetti (Wear)</a></div>

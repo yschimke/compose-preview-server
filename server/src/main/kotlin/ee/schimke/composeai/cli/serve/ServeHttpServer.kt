@@ -2256,6 +2256,53 @@ class ServeHttpServer(
         )
       }
 
+  /**
+   * What the front door may offer this visitor about the UI builder — see
+   * [ServeWeb.UiBuilderInvite].
+   *
+   * Null when the builder is not deployed here at all (`--ui-builder` unset, or no catalog
+   * authoring-enabled): there is nothing to advertise and nothing to explain.
+   *
+   * The permission question is asked of [uiBuilderAuthorization], with the **same capability the
+   * create route will demand** ([UiBuilderRouteCapability.WRITE]) and off the same call, so the
+   * card and the POST behind it can never disagree. That matters more than it sounds: the
+   * credential can be an operator token, a GitHub session with repository access, or an agent
+   * grant, and only the authorizer knows which of them this request carries.
+   *
+   * A refusal is turned into a sentence rather than into an absence. [ServeMachineAuthorization]
+   * answers `Missing` for a signed-in visitor whose account lacks the repository access the
+   * capability gates on — it never got as far as a credential it could name — so the reason is
+   * assembled here, where the repository and the login are both known.
+   */
+  private fun RoutingContext.uiBuilderInvite(): ServeWeb.UiBuilderInvite? {
+    val authorization = uiBuilderAuthorization ?: return null
+    if (uiBuilderDir == null || uiBuilderCatalogs.isEmpty()) return null
+    val login = githubAuth?.currentLogin(call)
+    val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)
+    val permitted = decision is UiBuilderAuthorizationDecision.Authorized
+    return ServeWeb.UiBuilderInvite(
+      systems = uiBuilderCatalogs,
+      // An operator token is a sign-in for this purpose: it carries the capability, and hiding the
+      // action from the one credential that always has it would be a strange kind of security.
+      signedIn = login != null || permitted,
+      permitted = permitted,
+      deniedReason = if (permitted) "" else uiBuilderDeniedReason(login),
+    )
+  }
+
+  /** Why this visitor may not create a design, in the terms they can act on. */
+  private fun uiBuilderDeniedReason(login: String?): String {
+    val repository = githubAuth?.accessRepository()?.takeIf { it.isNotBlank() }
+    val account = login?.let { "the account you are signed in with ($it)" } ?: "your session"
+    return if (repository != null) {
+      "Creating a design needs write access to $repository, which $account does not have. " +
+        "Ask an operator to add you, or sign in with an account that has it."
+    } else {
+      "Creating a design needs UI-builder write access, which $account does not carry. " +
+        "Ask an operator for access."
+    }
+  }
+
   /** The two wire values of the Catalog / Dev switch; null for absent, empty, or anything else. */
   private fun interfaceMode(value: String?): Boolean? =
     when (value?.lowercase()) {
@@ -5901,6 +5948,7 @@ class ServeHttpServer(
         version = SERVE_VERSION,
         unfurl = unfurl,
         githubAuth = githubAuthStatus(),
+        uiBuilder = uiBuilderInvite(),
       ),
       ContentType.Text.Html,
     )
@@ -11676,6 +11724,45 @@ class ServeHttpServer(
   }
 
   /**
+   * Refuse a design creation in the shape the caller can read: the styled explanation
+   * ([ServeWeb.accessDeniedPage]) for a browser, the one-line `text/plain` [plain] for everything
+   * else. The status is the same either way — this changes the body, never the answer.
+   *
+   * "A browser" is `Accept: text/html`, which a form submission always sends and `fetch`/curl
+   * effectively never do, so no API client is handed a page it would have to parse out of.
+   */
+  private suspend fun RoutingContext.respondUiBuilderDenied(
+    status: HttpStatusCode,
+    plain: String,
+    reason: String,
+  ) {
+    val wantsHtml =
+      call.request.headers[HttpHeaders.Accept]?.contains(ContentType.Text.Html.toString()) == true
+    if (!wantsHtml) {
+      call.respondText(plain, status = status)
+      return
+    }
+    markGeneration("static-page", DYNAMIC_RESOURCE_CACHE_CONTROL)
+    call.respondText(
+      ServeWeb.accessDeniedPage(
+        reason,
+        linkToken(),
+        isPublic,
+        // Only offer the round trip when it can actually complete and is not already done.
+        signInHref =
+          githubAuth
+            ?.takeIf { oauthCanRoundTrip() && it.currentLogin(call) == null }
+            ?.loginPath(call),
+        version = SERVE_VERSION,
+        githubAuth = githubAuthStatus(),
+        componentBrowser = componentBrowserMode(),
+      ),
+      ContentType.Text.Html,
+      status,
+    )
+  }
+
+  /**
    * `POST /ui-builder/<catalog>` — create one design, then `303` to its permalink.
    *
    * Plain `application/x-www-form-urlencoded`, because the point is that a browser can submit it
@@ -11729,12 +11816,24 @@ class ServeHttpServer(
       when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
         is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
         UiBuilderAuthorizationDecision.Missing -> {
+          // The header is for the script; the body is for whoever submitted the form. A browser
+          // that followed a `<form method="post">` here renders whatever comes back, so a bare
+          // "authentication is required" is a page with no way forward — see
+          // [ServeWeb.accessDeniedPage].
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
-          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          respondUiBuilderDenied(
+            HttpStatusCode.Unauthorized,
+            "authentication is required",
+            uiBuilderDeniedReason(githubAuth?.currentLogin(call)),
+          )
           return
         }
         UiBuilderAuthorizationDecision.Forbidden -> {
-          call.respondText("UI-builder write access required", status = HttpStatusCode.Forbidden)
+          respondUiBuilderDenied(
+            HttpStatusCode.Forbidden,
+            "UI-builder write access required",
+            uiBuilderDeniedReason(githubAuth?.currentLogin(call)),
+          )
           return
         }
       }

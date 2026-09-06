@@ -31,7 +31,10 @@ class ServeComponentBrowserTest {
       )
 
     assertTrue(html.contains("id=\"cp-browser-catalog-search\""))
-    assertTrue(html.contains("class=\"cp-browser-search-input\""))
+    // Collapsed to its icon in the bar, expanded on click — the field exists up front (hidden) so
+    // it is there for the script and for find-in-page, but it costs the layout nothing.
+    assertTrue(html.contains("id=\"cp-site-search-toggle\""))
+    assertTrue(html.contains("class=\"cp-site-search-input\""))
     assertTrue(html.contains("aria-label=\"Interface mode\""))
     assertFalse(html.contains("Catalog / Dev mode"))
     assertTrue(html.contains(">Dev</button>"))
@@ -51,7 +54,7 @@ class ServeComponentBrowserTest {
       html.contains("<a class=\"cp-sys-open\" href=\"/compose-m3/?token=$token\">Material 3</a>"),
       html,
     )
-    assertTrue(html.contains("No catalogs match your search."))
+    assertTrue(html.contains("Nothing matches your search."))
     assertTrue(html.contains("h.hidden=!!g&&!Array.prototype.some.call(g.children"))
     assertTrue(html.contains("class=\"cp-component-browser\""))
     assertFalse(html.contains("84 preview(s)"))
@@ -455,8 +458,5 @@ class ServeComponentBrowserTest {
 
     assertTrue(css.contains(".cp-catalog-tools { position: sticky; top: var(--site-header-height)"))
     assertTrue(css.contains(".cp-preview-head { position: sticky; top: var(--site-header-height)"))
-    assertTrue(
-      css.contains(".cp-browser-home-tools { position: sticky; top: var(--site-header-height)")
-    )
   }
 }

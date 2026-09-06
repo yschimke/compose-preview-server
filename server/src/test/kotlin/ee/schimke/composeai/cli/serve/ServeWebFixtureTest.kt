@@ -1032,6 +1032,16 @@ class ServeWebFixtureTest {
             logoutHref = "/auth/github/logout?return=%2F",
             login = "yschimke",
           ),
+        // Signed in AND permitted, on one of the three design systems: the golden then holds a card
+        // carrying both actions beside a card carrying only the comparison, which is the row the
+        // chip row's alignment exists for. The refused shape is a unit-test concern — it turns on
+        // the visitor, not on the page, so a second golden of the same grid would pin nothing new.
+        uiBuilder =
+          ServeWeb.UiBuilderInvite(
+            systems = setOf("compose-m3"),
+            signedIn = true,
+            permitted = true,
+          ),
       )
     // The render-history timeline: a viewer served from a delivery branch, so it carries the
     // history.json URL + repo that `<cp-history-menu>` needs. Registered as its own page fixture so
@@ -7106,7 +7116,8 @@ class ServeWebFixtureTest {
     assertTrue(
       assetText("serve.css").contains(".cp-sys-actions") &&
         assetText("serve.css").contains("pointer-events: none; }") &&
-        assetText("serve.css").contains(".cp-sys-actions > a { pointer-events: auto; }"),
+        assetText("serve.css")
+          .contains(".cp-sys-actions > a, .cp-sys-actions > details { pointer-events: auto; }"),
       "the action row passes clicks through to the tile link; only its chips take them",
     )
     // Both halves on one line, and both load-bearing: the rounding, because `overflow: visible`
