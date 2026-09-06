@@ -355,6 +355,9 @@ const TAG_INDEX_PAYLOAD = {
 // the catalog-palette pair exists to show a served design system re-theming the chrome from its own
 // `tokens.dtcg.json`, which is invisible without the stylesheet the palette overrides.
 const STYLED_FIXTURES = new Set([
+  // The UI-builder admin screen. Its whole claim is a table the page's own script fills from
+  // `/admin/ui-builder/designs`, so it needs the stylesheet for the table and the delete button.
+  "serve-admin-ui-builder",
   "serve-component-browser-home",
   "serve-component-browser-catalog",
   "serve-component-browser-component",
@@ -897,7 +900,68 @@ async function settleScroll(page) {
     .catch(() => {});
 }
 
+// What `/admin/ui-builder/designs` answers under the admin fixture: the committed HTML carries an
+// empty table (the rows are fetched, never baked in), so this is the only way the capture shows
+// the surface people actually see — a row per design with its owner and a delete.
+const ADMIN_UI_BUILDER_DESIGNS = {
+  schema: "compose-preview-serve/admin-ui-builder-designs/v1",
+  designs: [
+    {
+      designId: "cheeky-raccoon",
+      title: "Discover",
+      revision: 42,
+      catalogSystemId: "m3-catalog",
+      ownerActorId: "github:yschimke",
+      collaborators: 2,
+      createdAtEpochMillis: 1756684800000,
+      updatedAtEpochMillis: 1757116800000,
+      activeSubscribers: 1,
+    },
+    {
+      designId: "shady-goose",
+      title: "Activity list",
+      revision: 7,
+      catalogSystemId: "wear-m3",
+      ownerActorId: "operator",
+      collaborators: 0,
+      createdAtEpochMillis: 1756944000000,
+      updatedAtEpochMillis: 1756944000000,
+      activeSubscribers: 0,
+    },
+    {
+      designId: "feral-pickle",
+      title: "",
+      revision: 0,
+      catalogSystemId: "remote-m3",
+      ownerActorId: "agent:3f9c1a",
+      collaborators: 0,
+      createdAtEpochMillis: 1757030400000,
+      updatedAtEpochMillis: 1757030400000,
+      activeSubscribers: 0,
+    },
+  ],
+};
+
 const FIXTURE_STATES = [
+  {
+    // The admin screen with its designs loaded. The default capture of this fixture shows the
+    // page after the fetch FAILED (no server behind the harness), which is a real state — the
+    // token-less hint — but not the one the screen exists for.
+    fixture: "serve-admin-ui-builder",
+    suffix: "designs",
+    apply: async (page) => {
+      await page.route("**/admin/ui-builder/designs", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(ADMIN_UI_BUILDER_DESIGNS),
+        }),
+      );
+      await page.click("#cp-admin-reload");
+      await expect(page.locator("#cp-admin-rows tr")).toHaveCount(3);
+      await expect(page.locator("#cp-admin-count")).toHaveText("3 designs");
+    },
+  },
   {
     // The locator scope is inside the catalog report disclosure, so every resting page capture
     // hides it. Keep one focused-comparison state open: this is where component-wide versus exact

@@ -326,6 +326,13 @@ class ServeHttpServer(
    */
   private val siteAdmin: ServeSiteAdmin? = null,
   /**
+   * Runtime **UI-builder** administration ([ServeUiBuilderAdmin]) — listing every design on the
+   * host and deleting one, whoever owns it. Gated by the same [adminToken]; null ⇒ the
+   * `/admin/ui-builder` routes are **not registered at all**. Deliberately outside
+   * [uiBuilderAuthorization]: no `ui-builder-*` grant reaches it.
+   */
+  private val uiBuilderAdmin: ServeUiBuilderAdmin? = null,
+  /**
    * Shared secret for the `/admin/catalogs` routes (`--admin-token`). Separate from the browsing
    * [token] on purpose: a public box hands its browse URL to everyone, so admin needs its own
    * credential and must stay gated even when [isPublic] is set. Null/blank ⇒ no admin routes, so a
@@ -697,6 +704,11 @@ class ServeHttpServer(
 
   /** As [adminEnabled], for the `/admin/sites` routes. Same token, separately supplied admin. */
   private val siteAdminEnabled: Boolean = siteAdmin != null && !adminToken.isNullOrBlank()
+
+  /**
+   * As [adminEnabled], for the `/admin/ui-builder` routes. Same token, separately supplied admin.
+   */
+  private val uiBuilderAdminEnabled: Boolean = uiBuilderAdmin != null && !adminToken.isNullOrBlank()
 
   /** As [adminEnabled], for `POST /admin/onboard`. Same token, separately supplied onboarder. */
   private val onboardingEnabled: Boolean = onboarding != null && !adminToken.isNullOrBlank()
@@ -1549,6 +1561,34 @@ class ServeHttpServer(
             if (rejectBadAdminToken()) return@delete
             val host = call.parameters["host"].orEmpty()
             respondAdminSiteResult(withContext(Dispatchers.IO) { admin.remove(host) })
+          }
+        }
+
+        // Runtime UI-builder administration: the operator's list of every design on this host and
+        // the only way to delete one. The page at `/admin/ui-builder` is the screen; the JSON
+        // routes under `/admin/ui-builder/designs` are what it (and a script) drive. Same
+        // fail-closed shape as the other admin surfaces: no admin object or no token, no routes.
+        if (uiBuilderAdminEnabled) {
+          val admin = uiBuilderAdmin!!
+          get("/admin/ui-builder") {
+            if (rejectBadAdminToken()) return@get
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.respondText(
+              ServeWeb.uiBuilderAdminPage(
+                adminToken = call.request.queryParameters["token"],
+                version = SERVE_VERSION,
+              ),
+              ContentType.Text.Html,
+            )
+          }
+          get("/admin/ui-builder/designs") {
+            if (rejectBadAdminToken()) return@get
+            respondAdminUiBuilderDesigns(admin)
+          }
+          delete("/admin/ui-builder/designs/{designId}") {
+            if (rejectBadAdminToken()) return@delete
+            val designId = call.parameters["designId"].orEmpty()
+            respondAdminUiBuilderResult(withContext(Dispatchers.IO) { admin.delete(designId) })
           }
         }
 
@@ -4864,6 +4904,54 @@ class ServeHttpServer(
         call.respondText(result.reason, status = HttpStatusCode.BadRequest)
       is ServeSiteAdmin.Result.Conflict ->
         call.respondText(result.reason, status = HttpStatusCode.Conflict)
+    }
+  }
+
+  /** `GET /admin/ui-builder/designs`: every UI-builder design on this host, oldest first. */
+  private suspend fun RoutingContext.respondAdminUiBuilderDesigns(admin: ServeUiBuilderAdmin) {
+    val designs = withContext(Dispatchers.IO) { admin.list() }
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.respondText(
+      JSON.encodeToString(
+        AdminUiBuilderDesignsResponse.serializer(),
+        AdminUiBuilderDesignsResponse(
+          designs =
+            designs.map {
+              AdminUiBuilderDesignDto(
+                designId = it.designId,
+                title = it.title,
+                revision = it.revision,
+                catalogSystemId = it.catalogPin.systemId,
+                ownerActorId = it.ownerActorId,
+                collaborators = it.collaborators,
+                createdAtEpochMillis = it.createdAtEpochMillis,
+                updatedAtEpochMillis = it.updatedAtEpochMillis,
+                activeSubscribers = it.activeSubscribers,
+              )
+            }
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /** Map a [ServeUiBuilderAdmin.Result] onto its HTTP status + JSON body. */
+  private suspend fun RoutingContext.respondAdminUiBuilderResult(
+    result: ServeUiBuilderAdmin.Result
+  ) {
+    when (result) {
+      is ServeUiBuilderAdmin.Result.Deleted ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminUiBuilderDesignResult.serializer(),
+            AdminUiBuilderDesignResult(designId = result.designId, status = "deleted"),
+          ),
+          ContentType.Application.Json,
+        )
+      is ServeUiBuilderAdmin.Result.NotFound ->
+        call.respondText("no such design: ${result.designId}", status = HttpStatusCode.NotFound)
+      is ServeUiBuilderAdmin.Result.Invalid ->
+        call.respondText(result.reason, status = HttpStatusCode.BadRequest)
     }
   }
 
@@ -14248,6 +14336,30 @@ private fun ServeSourceModule.toDto() =
     skipReason = skipReason,
     previewFunctions = previewFunctions,
   )
+
+/** One design on `GET /admin/ui-builder/designs`. */
+@Serializable
+private data class AdminUiBuilderDesignDto(
+  val designId: String,
+  val title: String,
+  val revision: Long,
+  val catalogSystemId: String,
+  val ownerActorId: String,
+  val collaborators: Int,
+  val createdAtEpochMillis: Long,
+  val updatedAtEpochMillis: Long,
+  val activeSubscribers: Int,
+)
+
+@Serializable
+private data class AdminUiBuilderDesignsResponse(
+  val schema: String = "compose-preview-serve/admin-ui-builder-designs/v1",
+  val designs: List<AdminUiBuilderDesignDto> = emptyList(),
+)
+
+/** The result of `DELETE /admin/ui-builder/designs/{designId}`. */
+@Serializable
+private data class AdminUiBuilderDesignResult(val designId: String, val status: String)
 
 /** One configured hostname on `GET /admin/sites`. */
 @Serializable private data class AdminSiteDto(val host: String, val system: String)
