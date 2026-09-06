@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.9.0](https://github.com/yschimke/compose-preview-server/compare/v3.8.0...v3.9.0) (2026-09-06)
+
+
+### Features
+
+* **serve:** let an MCP agent present a grant it obtained mid-session ([#445](https://github.com/yschimke/compose-preview-server/issues/445)) ([46f91b6](https://github.com/yschimke/compose-preview-server/commit/46f91b6972e5ec03a383b53555fe5a044a724935))
+* **ui-builder:** design the component-packs screens, and follow the chrome that moved ([#438](https://github.com/yschimke/compose-preview-server/issues/438)) ([f6e0009](https://github.com/yschimke/compose-preview-server/commit/f6e00093b15adb2873d95f7f85293c4c285f6f79))
+* **ui-builder:** let an operator repair a quarantined design, not only delete it ([#448](https://github.com/yschimke/compose-preview-server/issues/448)) ([a95414d](https://github.com/yschimke/compose-preview-server/commit/a95414dc332b4ed6dbe2010141bbbfa8f936864f))
+* **ui-builder:** open a new Material 3 screen on a phone, not the fixture's canvas ([#447](https://github.com/yschimke/compose-preview-server/issues/447)) ([87a7c6e](https://github.com/yschimke/compose-preview-server/commit/87a7c6e22ed92b07e3738452303bf88f6feaf972))
+* **ui-builder:** write a Wear pack component from its record ([#444](https://github.com/yschimke/compose-preview-server/issues/444)) ([f174bae](https://github.com/yschimke/compose-preview-server/commit/f174bae4718c1fed8179513f3a2fccc0f4456fa2))
+
+
+### Bug Fixes
+
+* **release:** derive the Maven publish set, and split the release lanes ([#449](https://github.com/yschimke/compose-preview-server/issues/449)) ([0541a93](https://github.com/yschimke/compose-preview-server/commit/0541a9327e4e240572490d286065a9df7da48a9a))
+* **ui-builder-runtime:** name the designs a host cannot serve, not just how many ([#440](https://github.com/yschimke/compose-preview-server/issues/440)) ([2b82b88](https://github.com/yschimke/compose-preview-server/commit/2b82b885882745be521d6059b3bb8bd2983f11ca))
+* **ui-builder-runtime:** trim a repair candidate's slot, not just its node map ([#452](https://github.com/yschimke/compose-preview-server/issues/452)) ([3572e70](https://github.com/yschimke/compose-preview-server/commit/3572e7083ad9e5555800da6e468ba8b7f9420a7c))
+* **ui-builder:** bound a design's roots, and give the widget background a brush to hold ([#450](https://github.com/yschimke/compose-preview-server/issues/450)) ([e7533aa](https://github.com/yschimke/compose-preview-server/commit/e7533aa7dd7f65acaa343ec88c287730a2317d04))
+* **ui-builder:** check a stored design when it is used, not when the service starts ([#439](https://github.com/yschimke/compose-preview-server/issues/439)) ([dbcb6e9](https://github.com/yschimke/compose-preview-server/commit/dbcb6e924731988a861053cb2a9481e129a9aa4f))
+* **ui-builder:** generate a widget preview that renders at the widget's footprint ([#446](https://github.com/yschimke/compose-preview-server/issues/446)) ([31ed230](https://github.com/yschimke/compose-preview-server/commit/31ed23074e66cefd218447b436b2fdba8ff3898a))
+
 ## [3.8.0](https://github.com/yschimke/compose-preview-server/compare/v3.7.0...v3.8.0) (2026-09-06)
 
 
