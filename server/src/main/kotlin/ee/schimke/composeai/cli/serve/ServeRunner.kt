@@ -2516,6 +2516,18 @@ public class ServeRunner(
         catalogs = catalogs,
         exporter = exporter,
       )
+    // A quarantined design is the one startup condition that is invisible by construction: the host
+    // comes up healthy and serves everything else, so without this line the only evidence is an
+    // admin API nobody queries until a design is reported missing. Named, not counted — the id and
+    // the reason are what an operator needs to decide between repairing the catalog and retiring
+    // the design, and a bare count sends them looking for which one.
+    service.adminQuarantinedDesigns().forEach { (designId, reason) ->
+      System.err.println(
+        "serve: WARNING UI-builder design $designId is quarantined and will not be served: " +
+          "$reason — repair the catalog it pins and restart, or retire it through the " +
+          "UI-builder admin API"
+      )
+    }
     if (uiBuilderMigrateState) {
       try {
         val migration = service.migratePersistenceToLatest()

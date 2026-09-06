@@ -258,6 +258,10 @@ public class PersistentUiBuilderService(
   private var persisted: PersistedServiceV1 = loadedPersistence.value
   private var persistenceFormat: PersistenceFormat = loadedPersistence.format
   private val runtime = linkedMapOf<String, RuntimeDesign>()
+  /**
+   * Stored designs this build cannot serve, by id, each with the reason. See [quarantinePersisted].
+   */
+  private val quarantined = linkedMapOf<String, String>()
   private var nextSubscriberId = 1L
   private val exportPermits = Semaphore(limits.maximumConcurrentExports)
   private val exportTaskRunner = BoundedUiBuilderExportTaskRunner(limits.maximumConcurrentExports)
@@ -297,36 +301,92 @@ public class PersistentUiBuilderService(
   }
 
   init {
-    validatePersisted(persisted)
-    persisted.designs.forEach { (designId, _) -> runtime[designId] = RuntimeDesign() }
+    quarantined.putAll(quarantinePersisted(persisted))
+    persisted.designs.keys.filterNot(quarantined::containsKey).forEach { designId ->
+      runtime[designId] = RuntimeDesign()
+    }
   }
 
-  private fun validatePersisted(value: PersistedServiceV1) {
+  /**
+   * Sort the stored designs into the ones this build can serve and the ones it cannot.
+   *
+   * **A stored document must never be able to stop the server starting.** This used to throw on the
+   * first design that failed, out of a constructor, so one document took the whole host with it —
+   * every other design, the catalogs, the playground and the viewer included. Both production
+   * outages it caused were a rule tightening under data that was written when the rule was looser:
+   * a slot that began requiring role *and* trait rather than either
+   * ([#424](https://github.com/yschimke/compose-preview-server/pull/424)) left a `layout/lazy-grid`
+   * sitting in a scaffold's `topBar` that no later release could load. The design was legal when
+   * the editor accepted it and wrote it to disk, which is the whole difficulty: validity here is a
+   * moving target, and the stored corpus cannot be re-authored to chase it.
+   *
+   * So a design that no longer satisfies today's rules is *quarantined* rather than fatal. It stays
+   * in [persisted] — it is data the operator has not agreed to lose, and it is written back on
+   * every subsequent commit — but it gets no [RuntimeDesign], every request naming it is refused
+   * with the reason, and it is reported through [adminListDesigns] and [diagnostics] so it is
+   * visible rather than merely absent. Repairing the catalog and restarting un-quarantines it,
+   * because this runs again against the same bytes.
+   *
+   * What stays fatal is damage that prevents a coherent load at all — unreadable bytes, a failed
+   * checksum, unparseable JSON — which [decode] handles, and which is a different claim from "this
+   * document no longer matches a rule that moved".
+   */
+  private fun quarantinePersisted(value: PersistedServiceV1): Map<String, String> {
+    // Deliberately still fatal, and deliberately not a quarantine: the count is a property of the
+    // configured limit rather than of any one document, so there is no offending design to hold
+    // back — only an arbitrary choice of which to drop. An operator who lowers the limit below the
+    // stored corpus wants to hear about it.
     require(value.designs.size <= limits.maximumDesigns) {
       "stored design count exceeds configured limit"
     }
-    value.designs.forEach { (designId, design) ->
-      require(designId == design.document.id) { "stored design key/id mismatch for $designId" }
-      require(design.document.nodes.size <= limits.maximumNodesPerDesign) {
-        "stored node count exceeds configured limit for $designId"
-      }
-      documentQuotaIssue(design.document)?.let {
-        throw UiBuilderPersistenceException("stored design $designId exceeds configured limit: $it")
-      }
-      validateTopology(design.document)?.let {
-        throw UiBuilderPersistenceException("invalid stored design $designId: ${it.message}")
-      }
-      val catalog =
-        catalogs.resolve(design.document.catalogPin)
-          ?: throw UiBuilderPersistenceException("catalog unavailable for stored design $designId")
-      catalogs.validate(design.document, catalog)?.let {
-        throw UiBuilderPersistenceException("invalid stored design $designId: ${it.message}")
+    return buildMap {
+      value.designs.forEach { (designId, design) ->
+        storedDesignIssue(designId, design)?.let { put(designId, it) }
       }
     }
   }
 
+  /** Why this build cannot serve [design], or null when it can. */
+  private fun storedDesignIssue(designId: String, design: PersistedDesignV1): String? {
+    if (designId != design.document.id) return "stored design key/id mismatch"
+    if (design.document.nodes.size > limits.maximumNodesPerDesign) {
+      return "stored node count exceeds configured limit"
+    }
+    documentQuotaIssue(design.document)?.let {
+      return "exceeds configured limit: $it"
+    }
+    validateTopology(design.document)?.let {
+      return it.message
+    }
+    val catalog = catalogs.resolve(design.document.catalogPin) ?: return "catalog unavailable"
+    catalogs.validate(design.document, catalog)?.let {
+      return it.message
+    }
+    return null
+  }
+
+  /** The refusal a request naming a quarantined design gets, or null when it names none. */
+  private fun quarantineRefusal(designId: String): UiBuilderServiceError? =
+    quarantined[designId]?.let {
+      UiBuilderServiceError(
+        ServiceErrorCodeV1.MIGRATION_REQUIRED,
+        "design $designId is quarantined and cannot be served by this build: $it",
+      )
+    }
+
   override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
-    if (call.request is UiBuilderServiceRequest.ExportDesign) return export(call)
+    val request = call.request
+    if (request is UiBuilderServiceRequest.ExportDesign) {
+      // Export deliberately runs outside the service lock, so it does not pass through
+      // [executeLocked]'s gate and needs its own. The read is taken under the lock because
+      // [adminDeleteDesign] can retire a quarantined design concurrently.
+      lock
+        .withLock { quarantineRefusal(request.designId) }
+        ?.let {
+          return UiBuilderServiceResponse.Error(it)
+        }
+      return export(call)
+    }
     val execution = lock.withLock { executeLocked(call) }
     drain(execution.mailboxes)
     return execution.response
@@ -339,6 +399,7 @@ public class PersistentUiBuilderService(
     val subscriberId: Long
     val mailbox: SubscriberMailbox
     lock.withLock {
+      quarantineRefusal(call.designId)?.let { throw UiBuilderSubscriptionRejectedException(it) }
       val design =
         persisted.designs[call.designId]
           ?: throw UiBuilderSubscriptionRejectedException(notFound(call.designId))
@@ -376,8 +437,16 @@ public class PersistentUiBuilderService(
     }
   }
 
-  private fun executeLocked(call: UiBuilderServiceCall): LockedExecution =
-    when (val request = call.request) {
+  private fun executeLocked(call: UiBuilderServiceCall): LockedExecution {
+    // One gate rather than a check at each of the ten lookups below: a quarantined design is still
+    // in `persisted.designs`, so every one of those would otherwise find it and serve it from a
+    // model this build has already judged it cannot honour.
+    quarantinedTarget(call.request)?.let { designId ->
+      quarantineRefusal(designId)?.let {
+        return serviceError(it)
+      }
+    }
+    return when (val request = call.request) {
       UiBuilderServiceRequest.ListCatalogs ->
         LockedExecution(UiBuilderServiceResponse.Catalogs(catalogs.listCatalogs()))
       is UiBuilderServiceRequest.CreateDesign -> create(call.actor, request.document)
@@ -396,6 +465,24 @@ public class PersistentUiBuilderService(
       is UiBuilderServiceRequest.UpdatePresence -> presence(call.actor, request)
       is UiBuilderServiceRequest.ExportDesign ->
         error("export is executed outside the service lock")
+    }
+  }
+
+  /** The design a request names, when it names one. */
+  private fun quarantinedTarget(request: UiBuilderServiceRequest): String? =
+    when (request) {
+      is UiBuilderServiceRequest.OpenDesign -> request.designId
+      is UiBuilderServiceRequest.GetDesignAccess -> request.designId
+      is UiBuilderServiceRequest.UpdateDesignAccess -> request.designId
+      is UiBuilderServiceRequest.ApplyOperation -> request.submission.designId
+      is UiBuilderServiceRequest.GetSnapshot -> request.designId
+      is UiBuilderServiceRequest.GetDelta -> request.designId
+      is UiBuilderServiceRequest.UpdatePresence -> request.designId
+      is UiBuilderServiceRequest.ExportDesign -> request.designId
+      UiBuilderServiceRequest.ListCatalogs -> null
+      is UiBuilderServiceRequest.CreateDesign -> null
+      is UiBuilderServiceRequest.ListDesigns -> null
+      is UiBuilderServiceRequest.PreviewCatalogUpgrade -> null
     }
 
   private fun create(
@@ -2117,12 +2204,17 @@ public class PersistentUiBuilderService(
       }
   }
 
+  override fun adminQuarantinedDesigns(): Map<String, String> = lock.withLock {
+    LinkedHashMap(quarantined)
+  }
+
   override fun adminDeleteDesign(designId: String): Boolean {
     val closed: List<SubscriberMailbox> = lock.withLock {
       if (designId !in persisted.designs) return false
       // Durable first: a subscriber whose stream closes has lost the design, not merely the
       // connection, and must not observe that before the removal is on disk.
       commitPersisted(persisted.copy(designs = persisted.designs - designId))
+      quarantined.remove(designId)
       val removed = runtime.remove(designId)
       mutationBuckets.keys.removeIf { (_, bucketDesignId) -> bucketDesignId == designId }
       removed?.subscribers?.values?.map { it.mailbox }.orEmpty()
@@ -2156,7 +2248,12 @@ public class PersistentUiBuilderService(
         ?: throw UiBuilderPersistenceException(
           "persistence migration requires recoverable migration storage"
         )
-    validatePersisted(persisted)
+    // Per-design validity is deliberately not a precondition here. This migration re-encodes bytes
+    // that are already loaded and already being served into a v2 envelope; it changes the envelope,
+    // never a document. Requiring every stored design to satisfy the current rules would mean a
+    // host holding one quarantined design could never migrate its persistence — the same trap as
+    // failing startup, moved to the operator's explicit request. What guards this path is the
+    // round-trip preflight below, which is a property of the encoding rather than of the content.
     val migratedBytes = encode(persisted, PersistenceFormat.V2)
     val preflight = decode(migratedBytes)
     check(preflight.format == PersistenceFormat.V2 && preflight.value == persisted) {

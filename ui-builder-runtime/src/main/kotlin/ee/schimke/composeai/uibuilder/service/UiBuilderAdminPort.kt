@@ -41,4 +41,19 @@ public interface UiBuilderAdminPort {
    * exists.
    */
   public fun adminDeleteDesign(designId: String): Boolean
+
+  /**
+   * Stored designs this build refuses to serve, by id, each with the reason.
+   *
+   * A quarantined design is stored intact and written back on every commit, but it has no runtime
+   * state and every request naming it is refused. Reported rather than hidden so an operator can
+   * see what the host is holding back and act on it — repair the catalog it pins and restart, or
+   * retire it with [adminDeleteDesign].
+   *
+   * Deliberately a method beside [adminListDesigns] rather than a field on
+   * [UiBuilderAdminDesignSummary]: this artifact is published and its ABI is checked, and a new
+   * constructor parameter on a data class changes `copy` and every `componentN` — binary-breaking
+   * for a consumer compiled against an earlier release. A defaulted method is additive.
+   */
+  public fun adminQuarantinedDesigns(): Map<String, String> = emptyMap()
 }
