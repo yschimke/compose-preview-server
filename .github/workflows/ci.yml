@@ -13,9 +13,27 @@ on:
 permissions:
   contents: read
 
+# A pull request cancels its own superseded runs; a push to `main` does not cancel anything.
+#
+# `${{ github.ref }}` alone puts every push to `main` in ONE group, so each merge cancelled the
+# previous commit's run. On a fast merge train that means commits reach `main` with no completed
+# CI at all — four times on 2026-09-06 alone (runs 1179, 1182, 1191, 1193). It is how
+# yschimke/compose-preview-server#448 and #450 both landed untested against each other: each was
+# green alone, their combination was never run, and the breakage surfaced two PRs later on #447,
+# which had nothing to do with either.
+#
+# So a push takes `github.run_id` — unique per run, therefore a group of one, therefore never
+# cancelled. A pull request keeps `github.ref`, where cancelling IS right: only the newest push to a
+# branch is worth testing. Same shape `no-agent-attribution.yml` already uses, and the same reason
+# `release.yml` gives a merged release PR its own slot.
+#
+# This does NOT prevent two PRs that are each green alone from conflicting once merged — that needs
+# every PR to be up to date with `main` before it merges, which is a ruleset setting rather than
+# anything a workflow file can express. What it does guarantee is that `main` always ends up with a
+# verdict, so such a conflict is reported against the commit that introduced it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The UI builder is a second project in this repository (docs/design/UI_BUILDER_PROJECT_BOUNDARY.md).
