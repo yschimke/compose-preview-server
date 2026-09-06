@@ -23,6 +23,29 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
+ * Multiplier on every poll budget in this file — see [ServeCatalogLiveHostTest.awaitOk] and
+ * [ServeCatalogLiveHostTest.awaitOptimization].
+ *
+ * Those budgets are wall-clock deadlines for work a BACKGROUND thread does: the theme-optimization
+ * pass taking a slice, draining a dirty key by rendering, parking at the quiet gate. The numbers at
+ * the call sites (2s, 5s, 10s) are generous on an idle machine and are not on a loaded one. In CI
+ * `:server:test` runs concurrently with `:ui-builder:wasmJsBrowserTest` and
+ * `:wasm-ui:wasmJsBrowserTest`, both of which spawn browsers, so the pass thread can simply not be
+ * scheduled inside a 5-second window. That is what failed `a marked render is regenerated through
+ * the daemon, not answered from the cache` on #449: not a wrong outcome, an unfinished one.
+ *
+ * Scaling here rather than at each of the thirteen call sites keeps their relative intent — a
+ * 10-second wait still says "this one is slower than the 2-second ones" — and keeps the next call
+ * site correct by default.
+ *
+ * A generous budget is close to free. Both helpers return the moment the condition holds, so the
+ * budget is spent only by a run that is genuinely failing; the cost is that such a run takes longer
+ * to report, not that a passing one takes longer. Nothing here weakens an assertion: every
+ * condition is still required to become true, and to become true by the same means.
+ */
+private const val POLL_BUDGET_FACTOR = 6
+
+/**
  * The catalog-id bridge: [ServeCatalogLiveHost] fronts the baked catalog with an opt-in daemon
  * stream. An override-free snapshot (or one replaying only the variant's own sticky theme) is the
  * baked PNG — browsing stays instant and never wakes the daemon. A snapshot carrying a
@@ -900,16 +923,20 @@ class ServeCatalogLiveHostTest {
     )
   }
 
-  /** Poll [block] until it returns non-null or [timeoutMs] elapses (for the async warm). */
+  /**
+   * Poll [block] until it returns non-null or [timeoutMs] (times [POLL_BUDGET_FACTOR]) elapses (for
+   * the async warm).
+   */
   private fun <T : Any> awaitOk(timeoutMs: Long, block: () -> T?): T {
-    val deadline = System.nanoTime() + timeoutMs * 1_000_000
+    val budgetMs = timeoutMs * POLL_BUDGET_FACTOR
+    val deadline = System.nanoTime() + budgetMs * 1_000_000
     while (System.nanoTime() < deadline) {
       block()?.let {
         return it
       }
       Thread.sleep(20)
     }
-    error("condition not met within ${timeoutMs}ms")
+    error("condition not met within ${budgetMs}ms")
   }
 
   @Test
@@ -2188,7 +2215,8 @@ class ServeCatalogLiveHostTest {
   }
 
   private fun awaitOptimization(host: ServeCatalogLiveHost): ThemeOptimizationSnapshot {
-    repeat(100) {
+    val slices = 100 * POLL_BUDGET_FACTOR
+    repeat(slices) {
       host
         .themeOptimizationSnapshot()
         ?.takeIf { it.fullyOptimized }
@@ -2197,7 +2225,9 @@ class ServeCatalogLiveHostTest {
         }
       Thread.sleep(25)
     }
-    error("theme optimization did not finish: ${host.themeOptimizationSnapshot()}")
+    error(
+      "theme optimization did not finish within ${slices * 25}ms: ${host.themeOptimizationSnapshot()}"
+    )
   }
 
   @Test
