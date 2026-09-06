@@ -752,6 +752,24 @@
       "svg": { "status": "verified", "fallback": "none", "blocksExport": false }
     },
     {
+      "componentId": "remote-compose/custom",
+      "displayName": "Custom component",
+      "role": "Container",
+      "traits": ["RemoteContent", "RemoteAuthorable", "OrderedContent"],
+      "slots": [
+        { "name": "content", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
+      ],
+      "properties": [
+        { "name": "name", "jsonType": "string", "required": true, "notes": "The custom-component config name the document writes and the host registers a renderer under. Namespaced by convention (slot:, rc:, or an application domain) so two documents composed together cannot collide." },
+        { "name": "widthDp", "jsonType": "number", "required": false, "notes": "The bounds the document reserves for host content it cannot measure. A player lays out a custom component from the document, not from the Compose content filling it." },
+        { "name": "heightDp", "jsonType": "number", "required": false, "notes": "See widthDp." }
+      ],
+      "modifierCapabilities": ["size", "fillMaxSize", "fillMaxWidth", "padding", "clip", "matchParentSize", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "fillMaxHeight", "align", "alignHorizontal", "alignVertical", "weight"],
+      "wasm": { "platformSupported": true, "adapterStatus": "supported", "notes": "Draws the ordinary Compose content in its own slot, which is what a registered renderer draws on a real player too. A preview only draws it if a custom component of this name is registered; an unregistered one is a player support issue rather than silently borrowed content. The code mapping names the registry rather than a composable, because the composable is whatever the host registers under this name." },
+      "code": { "symbol": "RcCustomComponentRegistry", "imports": ["ee.schimke.composeai.rcplayer.compose.RcCustomComponentRegistry"] },
+      "svg": { "status": "unsupported", "fallback": "none", "blocksExport": true, "notes": "Host content inside a Remote Compose document has no structured SVG answer." }
+    },
+    {
       "componentId": "remote-compose/document",
       "displayName": "Remote Compose document",
       "role": "Container",
@@ -783,23 +801,6 @@
       "wasm": { "platformSupported": true, "adapterStatus": "planned", "notes": "The subtree is drawn with the ordinary Compose stand-ins remote-m3 already uses, inside a marked frame. The canvas has no Remote Compose writer, so these are the shapes the generated @RemoteComposable body describes rather than the pixels a player produces; the Android lane is what renders it for real." },
       "code": { "symbol": "RemoteDocumentPlayer", "imports": ["androidx.compose.remote.creation.compose.capture.captureSingleRemoteDocument", "androidx.compose.remote.player.compose.RemoteDocumentPlayer"] },
       "svg": { "status": "unsupported", "fallback": "none", "blocksExport": true, "notes": "The subtree becomes a Remote Compose document at export; SVG export of one needs an explicit renderer, exactly as remote-compose/document does." }
-    },
-    {
-      "componentId": "remote-compose/custom",
-      "displayName": "Custom component",
-      "role": "Container",
-      "traits": ["RemoteContent", "RemoteAuthorable", "OrderedContent"],
-      "slots": [
-        { "name": "content", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
-      ],
-      "properties": [
-        { "name": "name", "jsonType": "string", "required": true, "notes": "The custom-component config name the document writes and the host registers a renderer under. Namespaced by convention (slot:, rc:, or an application domain) so two documents composed together cannot collide." },
-        { "name": "widthDp", "jsonType": "number", "required": false, "notes": "The bounds the document reserves for host content it cannot measure. A player lays out a custom component from the document, not from the Compose content filling it." },
-        { "name": "heightDp", "jsonType": "number", "required": false, "notes": "See widthDp." }
-      ],
-      "modifierCapabilities": ["size", "fillMaxSize", "fillMaxWidth", "padding", "clip", "matchParentSize", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "fillMaxHeight", "align", "alignHorizontal", "alignVertical", "weight"],
-      "wasm": { "platformSupported": true, "adapterStatus": "supported", "notes": "Draws the ordinary Compose content in its own slot, which is what a registered renderer draws on a real player too. A preview only draws it if a custom component of this name is registered; an unregistered one is a player support issue rather than silently borrowed content." },
-      "svg": { "status": "unsupported", "fallback": "none", "blocksExport": true, "notes": "Host content inside a Remote Compose document has no structured SVG answer." }
     },
     {
       "componentId": "shape/colour-dot",
