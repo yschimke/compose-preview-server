@@ -69,6 +69,21 @@
           </tr></thead>
           <tbody id="cp-admin-rows"></tbody>
         </table></div>
+
+        <h2 class="cp-head">From the projects</h2>
+        <p class="cp-sub">Designs the projects this host reads are working on, kept in
+          <code>ui-builder/designs/</code> in their own repository. Opening one copies it here to
+          carry on with; the file is untouched, editing here never writes back on its own, and
+          opening it again does nothing once it is here.</p>
+        <div class="cp-admin-bar">
+          <span id="cp-library-count" class="cp-muted"></span>
+          <button class="cp-doc-btn" id="cp-library-reload" type="button">Reload</button>
+        </div>
+        <div class="cp-doc-result" id="cp-library-status" hidden></div>
+        <div class="cp-status-scroll"><table class="cp-table cp-admin-table" id="cp-library-table">
+          <thead><tr><th>Design</th><th>Catalog</th><th>What it is</th><th></th></tr></thead>
+          <tbody id="cp-library-rows"></tbody>
+        </table></div>
         <script>(function () {
   var rows = document.getElementById("cp-admin-rows");
   var count = document.getElementById("cp-admin-count");
@@ -176,6 +191,94 @@
       .catch(function (e) { button.disabled = false; show(String(e.message || e), true); });
   }
   reload.addEventListener("click", load);
+  // Opening a design from a catalog's library adds a row to *this* table, so the library's
+  // script refreshes it through here rather than reaching into this one's state.
+  window.cpAdminReload = load;
+  load();
+})();</script>
+        <script>(function () {
+  var rows = document.getElementById("cp-library-rows");
+  var count = document.getElementById("cp-library-count");
+  var status = document.getElementById("cp-library-status");
+  var reload = document.getElementById("cp-library-reload");
+  var token = "demo-token-fixture";
+  var headers = token ? { "X-Compose-Preview-Admin-Token": token } : {};
+  var query = token ? "?token=" + encodeURIComponent(token) : "";
+  function show(text, isError) {
+    status.hidden = false;
+    status.className = "cp-doc-result" + (isError ? " cp-doc-error" : "");
+    status.textContent = text;
+  }
+  function cell(row, text, mono) {
+    var td = document.createElement("td");
+    if (mono) { var c = document.createElement("code"); c.textContent = text; td.appendChild(c); }
+    else td.textContent = text;
+    row.appendChild(td);
+    return td;
+  }
+  function empty(message) {
+    var tr = document.createElement("tr");
+    var td = cell(tr, message);
+    td.colSpan = 4; td.className = "cp-muted";
+    rows.appendChild(tr);
+  }
+  function render(body) {
+    rows.textContent = "";
+    var designs = body.designs || [];
+    var searched = body.catalogsSearched || [];
+    count.textContent = designs.length === 1 ? "1 design" : designs.length + " designs";
+    if (!designs.length) {
+      // The two empties mean different things and an operator has to be able to tell them
+      // apart: nothing to look in, versus looked and found nothing published.
+      empty(searched.length
+        ? "None of the " + searched.length + " projects here has a design."
+        : "No projects are configured here, so there is nothing to look in.");
+      return;
+    }
+    designs.forEach(function (d) {
+      var tr = document.createElement("tr");
+      cell(tr, d.designId, true);
+      cell(tr, d.system, true);
+      cell(tr, d.description || "");
+      var actions = document.createElement("td");
+      var open = document.createElement("button");
+      open.type = "button";
+      open.className = "cp-doc-btn";
+      open.textContent = "Open here";
+      open.addEventListener("click", function () { openDesign(d, open); });
+      actions.appendChild(open);
+      tr.appendChild(actions);
+      rows.appendChild(tr);
+    });
+  }
+  function openDesign(design, button) {
+    button.disabled = true;
+    var url = "/admin/ui-builder/library/" + encodeURIComponent(design.system) +
+      "/" + encodeURIComponent(design.designId);
+    fetch(url, { method: "POST", headers: headers }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.statusText); });
+      return r.json();
+    }).then(function (result) {
+      show(result.status === "opened"
+        ? design.designId + " is now a design on this host."
+        : design.designId + " was already open here.", false);
+      // The host's own list is what changed, so refresh that one rather than this one.
+      if (window.cpAdminReload) window.cpAdminReload();
+    }).catch(function (e) {
+      show("Could not open " + design.designId + ": " + e.message, true);
+    }).then(function () { button.disabled = false; });
+  }
+  function load() {
+    fetch("/admin/ui-builder/library", { headers: headers }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.statusText); });
+      return r.json();
+    }).then(render).catch(function (e) {
+      rows.textContent = "";
+      count.textContent = "";
+      show("Could not read the projects' designs: " + e.message, true);
+    });
+  }
+  reload.addEventListener("click", function () { status.hidden = true; load(); });
   load();
 })();</script>
         </main>
