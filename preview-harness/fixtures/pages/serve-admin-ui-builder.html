@@ -117,16 +117,16 @@
       var id = document.createElement("code");
       id.textContent = d.designId;
       title.appendChild(id);
-      // A quarantined design is listed rather than hidden — it is still on disk and still the
+      // An unusable design is listed rather than hidden — it is still on disk and still the
       // operator's to repair or retire — so the row has to say why it is not being served.
       // Reuses the viewer's warning badge so an operator reads it as the same kind of notice.
-      if (d.quarantineReason) {
+      if (d.unusableReason) {
         title.appendChild(document.createElement("br"));
-        var quarantine = document.createElement("span");
-        quarantine.className = "cp-badge cp-badge--unverified";
-        quarantine.title = d.quarantineReason;
-        quarantine.textContent = "\u26A0 quarantined: " + d.quarantineReason;
-        title.appendChild(quarantine);
+        var unusable = document.createElement("span");
+        unusable.className = "cp-badge cp-badge--unverified";
+        unusable.title = d.unusableReason;
+        unusable.textContent = "\u26A0 unusable: " + d.unusableReason;
+        title.appendChild(unusable);
       }
       cell(tr, d.catalogSystemId, true);
       cell(tr, d.ownerActorId + (d.collaborators ? " +" + d.collaborators : ""), true);

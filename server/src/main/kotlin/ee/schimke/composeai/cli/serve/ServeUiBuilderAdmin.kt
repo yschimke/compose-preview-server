@@ -34,8 +34,8 @@ class ServeUiBuilderAdmin(
   /** Every design on the host, oldest first. */
   fun list(): List<UiBuilderAdminDesignSummary> = service.adminListDesigns()
 
-  /** Designs this build refuses to serve, by id, each with the reason. */
-  fun quarantined(): Map<String, String> = service.adminQuarantinedDesigns()
+  /** Designs this build cannot serve, by id, each with the reason. */
+  fun unusable(): Map<String, String> = service.adminUnusableDesigns()
 
   fun delete(rawDesignId: String): Result {
     val designId = rawDesignId.trim()

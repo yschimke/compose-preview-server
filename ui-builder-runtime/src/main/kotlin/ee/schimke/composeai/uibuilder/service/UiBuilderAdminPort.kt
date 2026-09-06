@@ -43,11 +43,11 @@ public interface UiBuilderAdminPort {
   public fun adminDeleteDesign(designId: String): Boolean
 
   /**
-   * Stored designs this build refuses to serve, by id, each with the reason.
+   * Stored designs this build cannot serve, by id, each with the reason.
    *
-   * A quarantined design is stored intact and written back on every commit, but it has no runtime
-   * state and every request naming it is refused. Reported rather than hidden so an operator can
-   * see what the host is holding back and act on it — repair the catalog it pins and restart, or
+   * `diagnostics()` counts them; this names them. A count tells an operator that something is being
+   * held back and nothing about which design or why, which is the difference between knowing a host
+   * has a problem and being able to act on it — repair the catalog the design pins and restart, or
    * retire it with [adminDeleteDesign].
    *
    * Deliberately a method beside [adminListDesigns] rather than a field on
@@ -55,5 +55,5 @@ public interface UiBuilderAdminPort {
    * constructor parameter on a data class changes `copy` and every `componentN` — binary-breaking
    * for a consumer compiled against an earlier release. A defaulted method is additive.
    */
-  public fun adminQuarantinedDesigns(): Map<String, String> = emptyMap()
+  public fun adminUnusableDesigns(): Map<String, String> = emptyMap()
 }

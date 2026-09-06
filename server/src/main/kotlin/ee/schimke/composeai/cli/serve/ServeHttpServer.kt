@@ -14,7 +14,6 @@ import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.decodeNewDesignStates
-import ee.schimke.composeai.uibuilder.service.UiBuilderAdminPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.web.WebEscaping
@@ -4911,7 +4910,7 @@ class ServeHttpServer(
   /** `GET /admin/ui-builder/designs`: every UI-builder design on this host, oldest first. */
   private suspend fun RoutingContext.respondAdminUiBuilderDesigns(admin: ServeUiBuilderAdmin) {
     val designs = withContext(Dispatchers.IO) { admin.list() }
-    val quarantined = withContext(Dispatchers.IO) { admin.quarantined() }
+    val unusable = withContext(Dispatchers.IO) { admin.unusable() }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
       JSON.encodeToString(
@@ -4929,7 +4928,7 @@ class ServeHttpServer(
                 createdAtEpochMillis = it.createdAtEpochMillis,
                 updatedAtEpochMillis = it.updatedAtEpochMillis,
                 activeSubscribers = it.activeSubscribers,
-                quarantineReason = quarantined[it.designId],
+                unusableReason = unusable[it.designId],
               )
             }
         ),
@@ -7294,8 +7293,7 @@ class ServeHttpServer(
                 timedOutExports = it.timedOutExports,
                 activeMutationBuckets = it.activeMutationBuckets,
                 persistenceMigrations = it.persistenceMigrations,
-                quarantinedDesigns =
-                  (uiBuilderService as? UiBuilderAdminPort)?.adminQuarantinedDesigns()?.size ?: 0,
+                unusableDesigns = it.unusableDesigns,
               )
             },
         playground =
@@ -13665,7 +13663,7 @@ private data class UiBuilderDto(
   val timedOutExports: Long,
   val activeMutationBuckets: Int,
   val persistenceMigrations: Long,
-  val quarantinedDesigns: Int = 0,
+  val unusableDesigns: Int = 0,
 )
 
 @Serializable
@@ -14419,10 +14417,10 @@ private data class AdminUiBuilderDesignDto(
   val updatedAtEpochMillis: Long,
   val activeSubscribers: Int,
   /**
-   * Why the host refuses to serve this design, or null when it serves it normally. Additive to the
-   * v1 schema: a client that does not know the field sees exactly what it saw before.
+   * Why the host cannot serve this design, or null when it serves it normally. Additive to the v1
+   * schema: a client that does not know the field sees exactly what it saw before.
    */
-  val quarantineReason: String? = null,
+  val unusableReason: String? = null,
 )
 
 @Serializable
