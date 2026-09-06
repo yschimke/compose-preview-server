@@ -2347,8 +2347,13 @@ ${captureControlsHtml().prependIndent("          ")}
    * rules that live in the resolver; a clip guessed from any of them would be a circle in the wrong
    * place, which is worse than the square stage this feature replaced — that at least never hid
    * real pixels. Answering null puts such a render back on the un-clipped stage, honestly.
+   *
+   * Internal rather than private because [ServeRenderMatte] needs the same frame for the same
+   * reason [stageClipFor] does — it draws the clip into the bytes instead of into CSS — and two
+   * copies of "which frame did this actually render at" is exactly how the stage and the clip would
+   * come to disagree about one render.
    */
-  private fun effectiveDeviceFrame(
+  internal fun effectiveDeviceFrame(
     preview: ServePreview,
     overrides: Map<String, String>,
   ): ServeDeviceFrame? {

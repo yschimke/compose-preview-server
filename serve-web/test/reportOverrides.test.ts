@@ -94,9 +94,10 @@ describe("report locator overrides", () => {
             render: "https://preview.example/render/button.png?uiMode=dark",
             overrides: { uiMode: "dark" },
         });
+        // …with the stage appended, as `withStage` fills every render URL that reaches a body.
         assert.match(
             input.value,
-            /\[PNG at these settings\]\(https:\/\/preview\.example\/render\/button\.png\?uiMode=dark\)/,
+            /\[PNG at these settings\]\(https:\/\/preview\.example\/render\/button\.png\?uiMode=dark&bg=auto\)/,
         );
         assert.match(input.value, /\noverrides: \{"uiMode":"dark"\}\n/);
     });
