@@ -61,6 +61,14 @@ fun DesignNativeBothPreview() = DesignFixture("ui-builder-native-both")
 @Composable
 fun DesignMenusPreview() = DesignFixture("ui-builder-menus")
 
+@Preview(widthDp = 1280, heightDp = 900)
+@Composable
+fun DesignPacksDialogPreview() = DesignFixture("ui-builder-packs-dialog")
+
+@Preview(widthDp = 1600, heightDp = 900)
+@Composable
+fun DesignInsertPacksPreview() = DesignFixture("ui-builder-insert-packs")
+
 @Composable
 private fun DesignFixture(designId: String) {
   UiBuilderSurface(document = designFixtureDocument(designId), editorOverlay = false)

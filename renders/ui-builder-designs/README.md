@@ -21,6 +21,8 @@ the same file is what `DesignFixturesTest` replays, validates and exports on eve
 | `mobile.png` | the mobile workspace at 412 × 915 with the Layers panel raised |
 | `native-both.png` | render surface Both: the Wasm canvas beside the native render, menu open |
 | `menus.png` | the selection menu, the toolbar overflow and the hover editor |
+| `packs-dialog.png` | the Component packs dialog, one switch per pack the host admitted |
+| `insert-packs.png` | the Insert panel: the packs summary row, and a pack's own shelf |
 
 Where a chrome widget has no catalog entry — a segmented button, a navigation rail, a dropdown
 menu, a code editor — the design stands in a placeholder built from `m3/surface`, `layout/row`
