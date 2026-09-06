@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.7.0](https://github.com/yschimke/compose-preview-server/compare/v3.6.0...v3.7.0) (2026-09-06)
+
+
+### Features
+
+* admin screen to manage UI-builder designs, and a friendlier New design dialog ([#423](https://github.com/yschimke/compose-preview-server/issues/423)) ([27cd6f4](https://github.com/yschimke/compose-preview-server/commit/27cd6f49f4787c1071dfaba4814f4a744236e344))
+* **serve:** collapse the filed-issue panel on the viewer and parity pages ([#427](https://github.com/yschimke/compose-preview-server/issues/427)) ([85741ca](https://github.com/yschimke/compose-preview-server/commit/85741ca1d1191ca0db209ebd3652aa17baf04471))
+* **ui-builder:** export to Figma from the toolbar, with live SVG and PNG links ([#425](https://github.com/yschimke/compose-preview-server/issues/425)) ([39072e4](https://github.com/yschimke/compose-preview-server/commit/39072e4f22f268805957de85399e7cad0ba2bf5e))
+
+
+### Bug Fixes
+
+* **serve:** stop the OAuth client cap from becoming a lifetime quota ([#422](https://github.com/yschimke/compose-preview-server/issues/422)) ([0fac5b2](https://github.com/yschimke/compose-preview-server/commit/0fac5b2abc99c2da5e28fd3cdae6102b125af4e9))
+* **ui-builder:** require a slot's role and trait both, and widen the free slots to match ([#424](https://github.com/yschimke/compose-preview-server/issues/424)) ([b72e5b2](https://github.com/yschimke/compose-preview-server/commit/b72e5b295ccbe450543db242083a36b40df2bda5))
+
 ## [3.6.0](https://github.com/yschimke/compose-preview-server/compare/v3.5.0...v3.6.0) (2026-09-06)
 
 
