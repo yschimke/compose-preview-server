@@ -9,6 +9,7 @@ import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonIgnoreUnknownKeys
 
 /**
  * The OAuth 2.1 façade an MCP client speaks, layered over the agent-grant flow in
@@ -146,8 +147,19 @@ object ServeMcpOAuth {
     @SerialName("resource_indicators_supported") val resourceIndicatorsSupported: Boolean = true,
   )
 
-  /** RFC 7591 §2 registration request. Every field optional; unknown members are ignored. */
+  /**
+   * RFC 7591 §2 registration request. Every field optional; unknown members are ignored.
+   *
+   * The annotation is what makes that last clause true, and it is load-bearing rather than
+   * defensive. RFC 7591 §2 says a server MUST ignore metadata it does not understand, and real
+   * clients lean on it: the first one to reach this endpoint sent `application_type: "native"`,
+   * which is registered in RFC 7591 itself and simply not a field this server has any use for.
+   * Without this, that request was refused with `invalid_client_metadata` — a client rejected for
+   * being *more* spec-compliant than the server, and rejected at the one step that has to work
+   * before anything else can.
+   */
   @Serializable
+  @JsonIgnoreUnknownKeys
   data class ClientRegistrationRequest(
     @SerialName("redirect_uris") val redirectUris: List<String> = emptyList(),
     @SerialName("client_name") val clientName: String = "",
