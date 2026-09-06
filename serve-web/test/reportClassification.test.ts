@@ -111,9 +111,10 @@ describe("<cp-report-classification>", () => {
             field.value.includes(`${CLASSIFICATION_PREFIX}${UPSTREAM}`),
             field.value,
         );
+        // Filled through `withStage`, so what a reporter files is legible where it lands.
         assert.ok(
             field.value.includes(
-                "[PNG](https://preview.example/render/button.png)",
+                "[PNG](https://preview.example/render/button.png?bg=auto)",
             ),
             field.value,
         );

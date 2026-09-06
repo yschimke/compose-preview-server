@@ -10,6 +10,7 @@ import {
     rawScores,
     reportRenderUrl,
     resultLine,
+    withStage,
 } from "../src/annotate/report.js";
 import type { ComparisonResult } from "../src/compare/detail.js";
 
@@ -186,6 +187,53 @@ describe("fillReport", () => {
         assert.equal(
             fillReport(noRow, "https://preview.example/r.png", null),
             "| Preview | `plain.Button` |\n![render](https://preview.example/r.png)",
+        );
+    });
+});
+
+describe("withStage", () => {
+    // The mirror of `ServeIssueReport.withStage`. The two spellings have to agree: the server
+    // writes the body when the page has no script, this fills the same body from live state, and a
+    // report whose screenshot is legible or not depending on which path wrote it would be worse
+    // than either. `ServeIssueReportTest` asserts the same cases on the Kotlin side.
+    it("appends the stage to a render URL", () => {
+        assert.equal(
+            withStage("https://h/x/render/a.png"),
+            "https://h/x/render/a.png?bg=auto",
+        );
+        assert.equal(
+            withStage("https://h/x/render/a.png?uiMode=dark"),
+            "https://h/x/render/a.png?uiMode=dark&bg=auto",
+        );
+    });
+
+    it("keeps a stage the reporter already chose, including off", () => {
+        assert.equal(
+            withStage("https://h/x/render/a.png?bg=off"),
+            "https://h/x/render/a.png?bg=off",
+        );
+    });
+
+    it("does not mistake another parameter for the stage", () => {
+        assert.equal(
+            withStage("https://h/x/render/a.png?debug=1"),
+            "https://h/x/render/a.png?debug=1&bg=auto",
+        );
+    });
+
+    it("leaves anything that is not a render URL alone", () => {
+        assert.equal(
+            withStage("https://h/x/reference/a.png"),
+            "https://h/x/reference/a.png",
+        );
+        assert.equal(withStage("https://h/x/p/a"), "https://h/x/p/a");
+    });
+
+    it("is what fillReport puts in the body", () => {
+        const template = "![render]({{render}})";
+        assert.equal(
+            fillReport(template, "https://h/x/render/a.png?uiMode=dark", null),
+            "![render](https://h/x/render/a.png?uiMode=dark&bg=auto)",
         );
     });
 });
