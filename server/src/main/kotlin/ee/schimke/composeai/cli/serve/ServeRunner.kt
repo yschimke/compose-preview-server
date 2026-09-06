@@ -2600,6 +2600,18 @@ public class ServeRunner(
         catalogs = catalogs,
         exporter = exporter,
       )
+    // An unusable design is the one startup condition that is invisible by construction: the host
+    // comes up healthy and serves everything else, so without this line the only evidence is a
+    // diagnostics counter nobody reads until a design is reported missing. Named, not counted — the
+    // id and the reason are what an operator needs to decide between repairing the catalog and
+    // retiring the design, and a bare count sends them looking for which one.
+    service.adminUnusableDesigns().forEach { (designId, reason) ->
+      System.err.println(
+        "serve: WARNING UI-builder design $designId cannot be served: " +
+          "$reason — repair the catalog it pins and restart, or retire it through the " +
+          "UI-builder admin API"
+      )
+    }
     if (uiBuilderMigrateState) {
       try {
         val migration = service.migratePersistenceToLatest()

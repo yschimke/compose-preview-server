@@ -5031,6 +5031,7 @@ class ServeHttpServer(
   /** `GET /admin/ui-builder/designs`: every UI-builder design on this host, oldest first. */
   private suspend fun RoutingContext.respondAdminUiBuilderDesigns(admin: ServeUiBuilderAdmin) {
     val designs = withContext(Dispatchers.IO) { admin.list() }
+    val unusable = withContext(Dispatchers.IO) { admin.unusable() }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
       JSON.encodeToString(
@@ -5048,6 +5049,7 @@ class ServeHttpServer(
                 createdAtEpochMillis = it.createdAtEpochMillis,
                 updatedAtEpochMillis = it.updatedAtEpochMillis,
                 activeSubscribers = it.activeSubscribers,
+                unusableReason = unusable[it.designId],
               )
             }
         ),
@@ -7412,6 +7414,7 @@ class ServeHttpServer(
                 timedOutExports = it.timedOutExports,
                 activeMutationBuckets = it.activeMutationBuckets,
                 persistenceMigrations = it.persistenceMigrations,
+                unusableDesigns = it.unusableDesigns,
               )
             },
         playground =
@@ -13789,6 +13792,7 @@ private data class UiBuilderDto(
   val timedOutExports: Long,
   val activeMutationBuckets: Int,
   val persistenceMigrations: Long,
+  val unusableDesigns: Int = 0,
 )
 
 @Serializable
@@ -14541,6 +14545,11 @@ private data class AdminUiBuilderDesignDto(
   val createdAtEpochMillis: Long,
   val updatedAtEpochMillis: Long,
   val activeSubscribers: Int,
+  /**
+   * Why the host cannot serve this design, or null when it serves it normally. Additive to the v1
+   * schema: a client that does not know the field sees exactly what it saw before.
+   */
+  val unusableReason: String? = null,
 )
 
 @Serializable
