@@ -91,6 +91,7 @@ class ProductionUiBuilderRuntimeTest {
         "m3/surface",
         "m3/text",
         "remote-compose/document",
+        "remote-compose/custom",
         "shape/linear-gradient",
         "asset/image",
       ),

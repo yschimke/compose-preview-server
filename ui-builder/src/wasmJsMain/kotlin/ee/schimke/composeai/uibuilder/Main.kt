@@ -924,6 +924,12 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       resolveRemoteComposeDocument = { source ->
         fetchBase64(catalogAssetPath(config.catalogSystemId, "/render/${source.id}.rc"))
       },
+      // The same fetch, for a URL the *design* names rather than one the palette built. Which URLs
+      // are reachable is [sameOriginRequestUrl]'s rule and not a second policy written here: it
+      // resolves against the page and throws on anything that leaves this origin, so a design
+      // pointing at another host draws that refusal as its own diagnostic rather than quietly
+      // sending this page's token somewhere it does not belong.
+      resolveRemoteComposeUrl = { url -> fetchBase64(url) },
     )
     LaunchedEffect(loadedDocument.revision) { markReady() }
   }
