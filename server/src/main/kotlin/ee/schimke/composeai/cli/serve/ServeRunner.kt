@@ -2608,8 +2608,8 @@ public class ServeRunner(
     service.adminUnusableDesigns().forEach { (designId, reason) ->
       System.err.println(
         "serve: WARNING UI-builder design $designId cannot be served: " +
-          "$reason — repair the catalog it pins and restart, or retire it through the " +
-          "UI-builder admin API"
+          "$reason — repair the catalog it pins and restart, or take the design through " +
+          "/admin/ui-builder: download it, edit it to satisfy the rule, put it back, or retire it"
       )
     }
     if (uiBuilderMigrateState) {
