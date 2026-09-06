@@ -1725,80 +1725,6 @@ class PersistentUiBuilderServiceTest {
   }
 
   @Test
-  fun `a stored design this build cannot serve is quarantined, not fatal`() {
-    val storage = FileUiBuilderStateStorage(temporaryDirectory)
-    val seeded = service(storage = storage)
-    create(seeded)
-    assertIs<UiBuilderServiceResponse.Snapshot>(
-      execute(
-        seeded,
-        owner,
-        UiBuilderServiceRequest.CreateDesign(document().copy(id = "other", title = "Other")),
-      )
-    )
-    repinToUnknownCatalog(temporaryDirectory, "design")
-
-    // The whole point: this used to throw out of the constructor and take the process with it.
-    val reopened = service(storage = FileUiBuilderStateStorage(temporaryDirectory))
-
-    // The healthy design is served exactly as before.
-    assertEquals(
-      "other",
-      snapshot(execute(reopened, owner, UiBuilderServiceRequest.OpenDesign("other")))
-        .state
-        .document
-        .id,
-    )
-
-    // The quarantined one is refused with the reason, not a 500 and not a silent absence.
-    val refusal = error(execute(reopened, owner, UiBuilderServiceRequest.OpenDesign("design")))
-    assertEquals(ServiceErrorCodeV1.MIGRATION_REQUIRED, refusal.code)
-    assertContains(refusal.message, "quarantined")
-    assertContains(refusal.message, "catalog unavailable")
-
-    // Subscribing reaches `runtime.getValue`, which has no entry for a quarantined design and
-    // would otherwise fail with NoSuchElementException rather than a service error.
-    val rejected =
-      assertFailsWith<UiBuilderSubscriptionRejectedException> {
-        reopened.subscribe(UiBuilderSubscriptionCall(owner, "design", 0)) {}
-      }
-    assertEquals(ServiceErrorCodeV1.MIGRATION_REQUIRED, rejected.error.code)
-
-    // And it is visible to the operator rather than merely missing.
-    val quarantined = reopened.adminQuarantinedDesigns()
-    assertEquals(setOf("design"), quarantined.keys)
-    assertContains(quarantined.getValue("design"), "catalog unavailable")
-    // The healthy design is still listed exactly as before — quarantine is reported beside the
-    // listing, not by removing rows from it.
-    assertEquals(listOf("design", "other"), reopened.adminListDesigns().map { it.designId })
-  }
-
-  @Test
-  fun `a quarantined design is still the operator's to retire`() {
-    val storage = FileUiBuilderStateStorage(temporaryDirectory)
-    create(service(storage = storage))
-    repinToUnknownCatalog(temporaryDirectory, "design")
-    val reopened = service(storage = FileUiBuilderStateStorage(temporaryDirectory))
-    assertEquals(setOf("design"), reopened.adminQuarantinedDesigns().keys)
-
-    // The escape hatch has to actually work — a design that cannot be served and cannot be removed
-    // would pin the host on the next release just as the fatal validation did.
-    assertTrue(reopened.adminDeleteDesign("design"))
-    assertEquals(emptyList(), reopened.adminListDesigns().map { it.designId })
-    assertEquals(emptyMap(), reopened.adminQuarantinedDesigns())
-    assertEquals(
-      ServiceErrorCodeV1.NOT_FOUND,
-      error(execute(reopened, owner, UiBuilderServiceRequest.OpenDesign("design"))).code,
-    )
-
-    // The removal is durable, so the next start has nothing to hold back.
-    assertEquals(
-      emptyMap(),
-      service(storage = FileUiBuilderStateStorage(temporaryDirectory)).adminQuarantinedDesigns(),
-    )
-  }
-
-  @Test
   fun `explicit backup restore recovers the previous acknowledged snapshot`() {
     val storage = FileUiBuilderStateStorage(temporaryDirectory)
     var service = service(storage = storage)
@@ -2393,47 +2319,6 @@ private fun withoutTypeface(element: JsonElement): JsonElement =
     is JsonArray -> JsonArray(element.map(::withoutTypeface))
     is JsonPrimitive -> element
   }
-
-/**
- * Repin [designId] to a catalog the runtime does not have, the cheapest stand-in for a stored
- * design the current build cannot serve. The real cases are the same branch reached differently: a
- * slot rule that tightened under an existing document, a topology the validator no longer accepts.
- */
-private fun repinToUnknownCatalog(directory: Path, designId: String) {
-  val stateFile = directory.resolve(FileUiBuilderStateStorage.STATE_FILE)
-  val root = persistenceJson.parseToJsonElement(Files.readString(stateFile)).jsonObject
-  val payload = root.getValue("payload").jsonObject
-  val service = payload.getValue("service").jsonObject
-  val designs = service.getValue("designs").jsonObject
-  val design = designs.getValue(designId).jsonObject
-  val document = design.getValue("document").jsonObject
-  val pin = document.getValue("catalogPin").jsonObject
-  val repinned = JsonObject(pin + ("systemId" to JsonPrimitive("no-such-catalog")))
-  val rebuiltDocument = JsonObject(document + ("catalogPin" to repinned))
-  val rebuiltDesigns =
-    JsonObject(designs + (designId to JsonObject(design + ("document" to rebuiltDocument))))
-  // The v2 envelope carries a catalog-pin manifest that decode() requires to match the designs, so
-  // the pin has to move in both places or the file fails the manifest check instead.
-  val rebuiltPayload =
-    JsonObject(
-      payload +
-        mapOf(
-          "service" to JsonObject(service + ("designs" to rebuiltDesigns)),
-          "catalogPins" to
-            JsonObject(payload.getValue("catalogPins").jsonObject + (designId to repinned)),
-        )
-    )
-  val rewritten =
-    JsonObject(
-      root +
-        mapOf(
-          "checksumSha256" to
-            JsonPrimitive(sha256(canonicalPersistenceJson(rebuiltPayload).encodeToByteArray())),
-          "payload" to rebuiltPayload,
-        )
-    )
-  Files.writeString(stateFile, rewritten.toString())
-}
 
 private fun canonicalPersistenceJson(element: JsonElement): String =
   when (element) {

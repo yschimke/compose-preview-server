@@ -879,6 +879,7 @@ class ServeCatalogStore(
     writeParityFindings(base, staging)
     writeDesignPages(base, staging)
     writeKnownDifferences(base, staging)
+    writeComponentRecord(base, staging, catalog)
 
     // The staged catalog is usable — move it into place as this load's generation. Nothing serves
     // from `dir` yet (no host names it until [publishGeneration] below), so this is a rename onto a
@@ -1150,6 +1151,7 @@ class ServeCatalogStore(
             break
           }
           extractCatalogRcDocs(bundleFile, moduleAlias, dir)
+          extractComponentRecord(bundleFile, dir)
           val resources =
             when (
               val res = rehydrateExternalResources(bundleFile, base, descriptor.path, dir, safe)
@@ -1240,6 +1242,7 @@ class ServeCatalogStore(
         // can serve them. Done regardless of the rehydrate/daemon outcome below — the client-side
         // `.rc` lane needs no daemon, so it must survive a live-tier fallback.
         extractCatalogRcDocs(bundleFile, alias, dir)
+        extractComponentRecord(bundleFile, dir)
         // IR-backed previews have no class in app.jar by design. The bundle daemon replays them
         // from the extracted `ir/` document + bundle manifest, so they remain in this alias just
         // like class-backed previews and can expose Java / CMP Android renderer selection.
@@ -1498,6 +1501,162 @@ class ServeCatalogStore(
     target.parentFile?.mkdirs()
     target.writeBytes(bytes)
     return target
+  }
+
+  /**
+   * Stage the discovered component record a catalog declares, at `<staging>/components.json`.
+   *
+   * Fail-soft like every other staging writer: no declaration, an unfetchable file, or bytes that
+   * are not a component record simply serve the catalog without one — and a live bundle fetched
+   * later may still supply it through [extractComponentRecord]. Validation is structural only (a
+   * JSON object carrying `schemaVersion` and `components`): the reader that generates from it
+   * checks the version it understands and says so, and refusing an unknown future version here
+   * would report a newer producer's record as a malformed catalog.
+   */
+  private fun writeComponentRecord(base: String, staging: File, catalog: Catalog) {
+    val name = catalog.componentsFile?.trim('/')?.takeIf { it.isNotEmpty() } ?: return
+    if (".." in name.split("/")) return
+    val bytes = runCatching { fetchCatalogAsset("$base$name") }.getOrNull() ?: return
+    if (!looksLikeComponentRecord(bytes)) return
+    File(staging, COMPONENT_RECORD_FILE).writeBytes(bytes)
+  }
+
+  /**
+   * Lift `components.json` out of the fetched live [bundleFile] into `<dir>/components.json`,
+   * unless the branch already supplied one.
+   *
+   * The Gradle plugin writes the record into every bundle it packs, so a catalog that publishes a
+   * live bundle carries its record whether or not its producer thought to publish the file beside
+   * `catalog.json`. The branch's own copy wins where both exist: it is the one the producer
+   * addressed to readers, and a multi-module catalog's first bundle is only one module's record.
+   * Best-effort: a bundle without the entry, or one that will not read, leaves the catalog as it
+   * was.
+   */
+  private fun extractComponentRecord(bundleFile: File, dir: File) {
+    val target = File(dir, COMPONENT_RECORD_FILE)
+    if (target.isFile) return
+    val bytes = runCatching { componentRecordEntry(bundleFile) }.getOrNull() ?: return
+    target.parentFile?.mkdirs()
+    target.writeBytes(bytes)
+  }
+
+  /** The `components.json` entry of a packed bundle, or null when it carries none. */
+  private fun componentRecordEntry(bundleFile: File): ByteArray? {
+    val zipBytes = BundleReader.extractZipBytes(bundleFile)
+    ZipInputStream(ByteArrayInputStream(zipBytes)).use { zin ->
+      var entry = zin.nextEntry
+      while (entry != null) {
+        if (!entry.isDirectory && entry.name.replace('\\', '/') == COMPONENT_RECORD_FILE) {
+          val buf = ByteArrayOutputStream()
+          val chunk = ByteArray(64 * 1024)
+          var total = 0L
+          while (true) {
+            val n = zin.read(chunk)
+            if (n < 0) break
+            total += n
+            check(total <= MAX_COMPONENT_RECORD_BYTES) { "component record exceeds the cap" }
+            buf.write(chunk, 0, n)
+          }
+          val bytes = buf.toByteArray()
+          return bytes.takeIf(::looksLikeComponentRecord)
+        }
+        zin.closeEntry()
+        entry = zin.nextEntry
+      }
+    }
+    return null
+  }
+
+  private fun looksLikeComponentRecord(bytes: ByteArray): Boolean = runCatching {
+    val root = json.parseToJsonElement(bytes.decodeToString()) as? JsonObject ?: return false
+    root["schemaVersion"] is JsonPrimitive && root["components"] is JsonArray
+  }
+    .getOrDefault(false)
+
+  /**
+   * The discovered component record of [system]'s currently served generation, or null where the
+   * catalog has not published or carries none. The UI builder's export path reads this per request,
+   * so a refreshed catalog's record is the one in force.
+   */
+  fun componentRecord(system: String): File? =
+    liveDir(system)?.let { File(it, COMPONENT_RECORD_FILE) }?.takeIf { it.isFile }
+
+  /**
+   * Fetch [system]'s component record from its delivery branch **now**, without loading the
+   * catalog.
+   *
+   * For the one caller that cannot wait for a load: the UI builder derives a component pack from a
+   * served catalog's record at startup, and catalogs load afterwards, in the background, for
+   * minutes. A pack is a startup fact — the catalog it is merged into must not change shape under
+   * an open design — so the record is read here, once, from the branch head, by the same route
+   * [load] takes: the declared `componentsFile` where there is one, else the record inside the live
+   * bundle. Written under the store root rather than a generation directory, which the next load
+   * would sweep; the caller keeps the file.
+   *
+   * Best-effort: null with a line on stderr for anything that stops it — an unreachable branch, a
+   * catalog that declares neither file nor bundle, a bundle packed before records existed.
+   */
+  fun fetchComponentRecord(
+    system: String,
+    sourceRepo: String? = null,
+    sourceBranchPrefix: String? = null,
+  ): File? {
+    val safe = ServeBundleStore.sanitizeName(system) ?: return null
+    val repo = sourceRepo?.takeIf { it.isNotBlank() } ?: this.repo
+    val branchPrefix = sourceBranchPrefix?.takeIf { it.isNotBlank() } ?: this.branchPrefix
+    val branch = "$branchPrefix$system"
+    val deliveryCommit = fetchRevisions(repo, branch).firstOrNull()?.commit
+    val base =
+      deliveryCommit?.let { "https://raw.githubusercontent.com/$repo/$it/" }
+        ?: "https://raw.githubusercontent.com/$repo/$branch/"
+    fun stop(reason: String): File? {
+      System.err.println("serve: no component record for $system from $branch — $reason")
+      return null
+    }
+    val catalog =
+      runCatching {
+        fetchCatalogAsset(base + CATALOG_FILE)?.let {
+          json.decodeFromString(Catalog.serializer(), it.toString(Charsets.UTF_8))
+        }
+      }
+        .getOrNull() ?: return stop("could not read $base$CATALOG_FILE")
+    val recordDir = File(File(root, COMPONENT_RECORD_CACHE_DIR), safe)
+    val target = File(recordDir, COMPONENT_RECORD_FILE)
+    val declared = catalog.componentsFile?.trim('/')?.takeIf { it.isNotEmpty() }
+    if (declared != null && ".." !in declared.split("/")) {
+      val bytes = runCatching { fetchCatalogAsset("$base$declared") }.getOrNull()
+      if (bytes != null && looksLikeComponentRecord(bytes)) {
+        recordDir.mkdirs()
+        target.writeBytes(bytes)
+        return target
+      }
+    }
+    val bundle =
+      catalog.liveBundle
+        ?: catalog.liveBundles.firstOrNull { it.previewIdPrefix.isEmpty() }
+        ?: catalog.liveBundles.firstOrNull()
+        ?: return stop("the catalog declares neither a componentsFile nor a live bundle")
+    val name = bundle.file.trim('/')
+    if (name.isEmpty() || ".." in name.split("/")) return stop("the live bundle entry is invalid")
+    val prefix = bundle.path.trim('/')
+    val url = if (prefix.isEmpty()) "$base$name" else "$base$prefix/$name"
+    val bundleBytes =
+      runCatching { fetchExecutableBundle(url) }.getOrNull()
+        ?: return stop("the live bundle could not be fetched ($url)")
+    recordDir.mkdirs()
+    val bundleFile = File(recordDir, "bundle.tmp")
+    return try {
+      bundleFile.writeBytes(bundleBytes)
+      val bytes =
+        runCatching { componentRecordEntry(bundleFile) }.getOrNull()
+          ?: return stop(
+            "the live bundle carries no components.json (packed by ${catalog.renderer ?: "an older renderer"})"
+          )
+      target.writeBytes(bytes)
+      target
+    } finally {
+      bundleFile.delete()
+    }
   }
 
   /**
@@ -2842,6 +3001,16 @@ class ServeCatalogStore(
      * its own colours; absent for a catalog that publishes none.
      */
     val tokensFile: String? = null,
+    /**
+     * The branch-relative discovered component record (`components.json`) — the composables the
+     * catalog's previews render, with their recovered signatures — written by
+     * `generate-design-catalog.mjs` beside `catalog.json`. Staged by [writeComponentRecord] so the
+     * UI builder can offer this catalog's composables as a component pack and export against them.
+     * A catalog that declares none may still carry the record inside its live bundle, from which
+     * [extractComponentRecord] lifts it; absent from both, the catalog is browsable and not
+     * authorable from.
+     */
+    val componentsFile: String? = null,
     /** Optional in-browser render descriptor (the CMP-Wasm app carried in the branch). */
     val webRender: WebRender? = null,
     /** Optional buildable source for trusted server-side re-render (`--allow-render-trusted`). */
@@ -3381,6 +3550,23 @@ class ServeCatalogStore(
     private const val MAX_WASM_FILES = 64
     /** Local subdir a catalog's `liveBundle` file is fetched into (`<dir>/bundle/<file>`). */
     const val LIVE_BUNDLE_DIR = "bundle"
+
+    /**
+     * The discovered component record, at the generation root beside `previews/` — staged from the
+     * branch's declared `componentsFile` or lifted out of the live bundle. Read back by
+     * [componentRecord].
+     */
+    const val COMPONENT_RECORD_FILE = "components.json"
+
+    /**
+     * Where [fetchComponentRecord] keeps a record read ahead of any load: under the store root, per
+     * system, because a generation directory is swept by the next load and the UI builder keeps the
+     * file for the life of the process.
+     */
+    const val COMPONENT_RECORD_CACHE_DIR = "component-records"
+
+    /** A record is a couple of megabytes for a large catalog; this is a decompression guard. */
+    private const val MAX_COMPONENT_RECORD_BYTES = 32L * 1024 * 1024
 
     /**
      * Sibling of `previews/` holding the captured Remote Compose documents (`ir/<catalog-id>.rc`),

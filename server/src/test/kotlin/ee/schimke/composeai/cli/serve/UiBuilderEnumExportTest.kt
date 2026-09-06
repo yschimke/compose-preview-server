@@ -263,16 +263,17 @@ class UiBuilderEnumExportTest {
       "CircularProgressIndicator(" in
         (indicator("circular") as ScreenExportGate.Outcome.Emitted).source
     )
-    // The determinate overload takes `progress: () -> Float`, and no value here is a lambda. The
-    // refusal has to say that rather than "no parameter `progress`", which is true and misleading.
+    // The determinate overload takes `progress: () -> Float`, which was refused for as long as no
+    // value in this vocabulary was a lambda. `ScreenValue.Lambda` (compose-ai-tools#5219) ended
+    // that, and the overload is chosen the way Kotlin chooses it — by passing the argument.
     val determinate =
       (indicator(
           "linear",
           "progress" to ee.schimke.composeai.uibuilder.protocol.DecimalValueV1(0.4),
         )
-          as ScreenExportGate.Outcome.Refused)
-        .reasons
-    assertTrue(determinate.any { "no value in this vocabulary is a lambda" in it }, "$determinate")
+          as ScreenExportGate.Outcome.Emitted)
+        .source
+    assertTrue("progress = { 0.4f }" in determinate, determinate)
   }
 
   @Test

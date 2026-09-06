@@ -24,6 +24,7 @@ import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -2359,7 +2360,13 @@ public class ServeRunner(
     }
   }
 
-  private fun openUiBuilderService(appDirectory: File?): UiBuilderLane? {
+  private fun openUiBuilderService(
+    appDirectory: File?,
+    /** The served catalogs' store, for a pack's record and a served catalog's export record. */
+    catalogStore: ServeCatalogStore? = null,
+    /** Which repository each served catalog is fetched from, for the same reason. */
+    catalogLoads: CatalogLoadTracker? = null,
+  ): UiBuilderLane? {
     if (uiBuilderMigrateState && (appDirectory == null || uiBuilderStateDirFlag == "none")) {
       throw IllegalStateException(
         "--ui-builder-migrate-state requires an enabled UI-builder app and durable state"
@@ -2412,28 +2419,64 @@ public class ServeRunner(
     // forbids any compose-ai-tools module but the protocol on that module's classpath, and
     // `preview-discovery` is a compose-ai-tools module. `:server` is the first layer allowed to
     // hold both the record reader and the port.
-    val records = ComponentRecordSource(uiBuilderComponents)
+    // A served catalog's own record, for a pack derived at startup: fetched from its delivery
+    // branch now, because the catalog itself loads later in the background and a pack is a startup
+    // fact. Kept for the life of the process as the export's fallback until that catalog has
+    // published a generation of its own to read from.
+    val startupRecords = ConcurrentHashMap<String, File>()
+    val records =
+      ComponentRecordSource(uiBuilderComponents) { system ->
+        catalogStore?.componentRecord(system) ?: startupRecords[system]
+      }
+    if (catalogStore != null) {
+      uiBuilderPacks.keys
+        .filterNot { it in uiBuilderComponents }
+        .forEach { packId ->
+          val config = catalogLoads?.stateFor(packId)?.config
+          val fetched =
+            catalogStore.fetchComponentRecord(
+              system = packId,
+              sourceRepo = config?.repo,
+              sourceBranchPrefix = config?.branch?.removeSuffix(packId),
+            )
+          if (fetched != null) startupRecords[packId] = fetched
+        }
+    }
     // A pack is projected from its catalog's record once, at startup. Not on every request the way
     // the export re-reads a record, because the projection is what the builder lists as the
     // catalog's components and every open design validates against — a shelf that changed shape
     // under an author because a file on disk did would be a catalog that floats, which is the one
-    // thing the pin exists to rule out. A pack without a record is a startup failure naming the
-    // flag, not an empty shelf nobody can explain.
-    val packs = uiBuilderPacks.map { (packId, platform) ->
+    // thing the pin exists to rule out.
+    //
+    // A record the operator named and cannot be read is a startup failure: the typo is theirs to
+    // fix and nothing else will fix it. A served catalog that supplies none is a warning and an
+    // absent shelf: the catalog may not have republished since records existed, and a host that
+    // refused to start over it would be down until another repository's CI ran.
+    val packs = uiBuilderPacks.mapNotNull { (packId, platform) ->
       val record =
         when (val lookup = records.record(packId)) {
           is ComponentRecordSource.Lookup.Found -> lookup.record
-          ComponentRecordSource.Lookup.Unconfigured ->
-            throw IllegalArgumentException(
-              "--ui-builder-packs admits `$packId`, and no component record is configured for " +
-                "it; run a preview bundle for that catalog's module and pass it as " +
+          ComponentRecordSource.Lookup.Unconfigured -> {
+            System.err.println(
+              "serve: UI-builder pack $packId is not offered — no component record: the served " +
+                "catalog publishes none (or is not served here), and none was passed as " +
                 "`--ui-builder-components $packId=<components.json>`"
             )
+            return@mapNotNull null
+          }
           is ComponentRecordSource.Lookup.Unusable ->
-            throw IllegalArgumentException(
-              "--ui-builder-packs admits `$packId`, and its component record could not be " +
-                "loaded: ${lookup.reason}"
-            )
+            if (records.isConfigured(packId)) {
+              throw IllegalArgumentException(
+                "--ui-builder-packs admits `$packId`, and its component record could not be " +
+                  "loaded: ${lookup.reason}"
+              )
+            } else {
+              System.err.println(
+                "serve: UI-builder pack $packId is not offered — the served catalog's component " +
+                  "record could not be loaded: ${lookup.reason}"
+              )
+              return@mapNotNull null
+            }
         }
       val derived =
         ComponentRecordPacks.derive(
@@ -2769,7 +2812,8 @@ public class ServeRunner(
       )
       throw IllegalArgumentException("--catalog-mcp requires --agent-grants")
     }
-    val machineAuthorization = ServeMachineAuthorization(token, githubAuth, agentGrantStore)
+    val machineAuthorization =
+      ServeMachineAuthorization(token, githubAuth, agentGrantStore, isPublic = public)
     val playgroundLane =
       openPlaygroundService(docStore, registry, repoAccessGated = githubAuth != null)
     val catalogFeed =
@@ -2789,7 +2833,7 @@ public class ServeRunner(
         null
       }
     val uiBuilderAppDir = usableUiBuilderDir()
-    val uiBuilderLane = openUiBuilderService(uiBuilderAppDir)
+    val uiBuilderLane = openUiBuilderService(uiBuilderAppDir, catalogStore, catalogLoads)
     // Runtime UI-builder administration. Needs the admin token and a builder lane, nothing else:
     // it reads and removes designs through the service the routes already hold, so a host with
     // no builder has no such page, and one without --admin-token has no admin surface at all.
