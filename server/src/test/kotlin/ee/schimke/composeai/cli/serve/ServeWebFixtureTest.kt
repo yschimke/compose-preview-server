@@ -6765,6 +6765,46 @@ class ServeWebFixtureTest {
   }
 
   /**
+   * The eyedropper's readout may not change the LANE'S WIDTH, which is issue #464: hovering the
+   * comparison moved the preview down the screen, and moving off it moved the preview back.
+   *
+   * `.cp-spec-lane` is `inline-flex`, so it is shrink-to-fit — its width is whatever its contents
+   * need. `.cp-spec-pick` is `flex-basis: 100%`, which contributes nothing while the row is empty
+   * and takes the whole available width the moment it holds a reading. Measured on the reported
+   * page, `/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec`, at the
+   * reporter's own 1280x683: the lane sat at 1020px with the row reserved and empty, which left the
+   * SVG and 3D toggles beside it on the same line of `.cp-preview-primary` — itself `flex-wrap:
+   * wrap`. The first reading widened the lane to the full 1224px, those two toggles wrapped onto a
+   * line of their own, and the stage moved down 6px. On every hover, and back again on every leave.
+   *
+   * Reserving the row's HEIGHT — which the lane already did, and which is what
+   * `serve-web/renders/spec-lane-eyedropper` documents — never addressed this, because the shift
+   * came from the row's WIDTH. `width: 0` is the value the lane measures itself against, so a
+   * reading cannot move it; `min-width: 100%` resolves against the settled lane afterwards, so the
+   * row still spans it and `overflow-x` scrolls a reading too long for it.
+   *
+   * Held here rather than in a screenshot because the whole fault is a used width no capture
+   * states: both frames show a readout on its own row, 6px apart.
+   */
+  @Test
+  fun `the eyedropper's readout cannot resize the spec lane`() {
+    val css = assetText("serve.css")
+    assertTrue(
+      css.contains(".cp-spec-pick { flex-basis: 100%; width: 0; min-width: 100%;"),
+      "the readout is measured at zero width, so the lane's size does not follow the reading",
+    )
+    assertTrue(
+      css.contains(".cp-spec-lane { display: inline-flex;"),
+      "…which is only load-bearing because the lane is shrink-to-fit; if that changes, re-measure",
+    )
+    val pickRule = css.substringAfter(".cp-spec-pick { flex-basis: 100%;").substringBefore("}")
+    assertTrue(
+      pickRule.contains("overflow-x: auto;"),
+      "a reading wider than the lane scrolls in its row rather than widening it",
+    )
+  }
+
+  /**
    * The Theme dropdown's ROWS, which were unreadable on every dark page: on `/wear-m3/` — a
    * dark-first catalog whose declared themes all carry `data-theme-mode="dark"`, so every row
    * matched — the menu opened as six invisible labels on a near-black panel.

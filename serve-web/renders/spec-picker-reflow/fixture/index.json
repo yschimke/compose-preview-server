@@ -1,0 +1,118 @@
+{
+  "/favicon.svg": {
+    "file": "favicon.svg.2",
+    "type": "image/svg+xml"
+  },
+  "/wear-m3-catalog/api/daemons?mode=spec": {
+    "file": "wear-m3-catalog/api/daemons",
+    "type": "application/json"
+  },
+  "/wear-m3-catalog/api/presence?mode=spec": {
+    "file": "wear-m3-catalog/api/presence",
+    "type": "application/octet-stream"
+  },
+  "/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec": {
+    "file": "wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only",
+    "type": "text/html; charset=UTF-8"
+  },
+  "/wear-m3-catalog/reference/button-compact__ideal__filled-variant-icon-only.png?gen=a725bdaf6ed5f7c6cea3b69f3dab3cb641127883": {
+    "file": "wear-m3-catalog/reference/button-compact__ideal__filled-variant-icon-only.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/alertdialog__ideal__default__192dp.png?thumb=87c2c05a46b879c6": {
+    "file": "wear-m3-catalog/render/alertdialog__ideal__default__192dp.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/appcard__ideal__default.png?thumb=7036b561828cffe0": {
+    "file": "wear-m3-catalog/render/appcard__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/auth-guestmodebutton__ideal__default.png?thumb=c008e040dd8b4693": {
+    "file": "wear-m3-catalog/render/auth-guestmodebutton__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/auth-selectaccountscreen__ideal__default__192dp.png?thumb=728839e7f86356e4": {
+    "file": "wear-m3-catalog/render/auth-selectaccountscreen__ideal__default__192dp.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/auth-signedinconfirmationdialog__ideal__default__192dp.png?thumb=81d9cf283f463462": {
+    "file": "wear-m3-catalog/render/auth-signedinconfirmationdialog__ideal__default__192dp.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/auth-signinbutton__ideal__default.png?thumb=b7581013582132ff": {
+    "file": "wear-m3-catalog/render/auth-signinbutton__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/auth-signinplaceholderscreen__ideal__default__192dp.png?thumb=641f1c74b4093f5a": {
+    "file": "wear-m3-catalog/render/auth-signinplaceholderscreen__ideal__default__192dp.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/button-child__ideal__default.png?thumb=897d8cd922eaae22": {
+    "file": "wear-m3-catalog/render/button-child__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/button-compact__ideal__filled-variant-icon-only.png?gen=a725bdaf6ed5f7c6cea3b69f3dab3cb641127883": {
+    "file": "wear-m3-catalog/render/button-compact__ideal__filled-variant-icon-only.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/button-filled__ideal__default.png?thumb=79f9bd90e7ef67f5": {
+    "file": "wear-m3-catalog/render/button-filled__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/button-filledvariant__ideal__default.png?thumb=568b855be934c5c7": {
+    "file": "wear-m3-catalog/render/button-filledvariant__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/button-imagebackground__ideal__default.png?thumb=9315ce63f5deedb6": {
+    "file": "wear-m3-catalog/render/button-imagebackground__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/button-loading__ideal__default.png?thumb=61df734748484cf8": {
+    "file": "wear-m3-catalog/render/button-loading__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/button-outlined__ideal__default.png?thumb=0bb53dcd4059c980": {
+    "file": "wear-m3-catalog/render/button-outlined__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/button-tonal__ideal__default.png?thumb=9ed85fb1795f8c98": {
+    "file": "wear-m3-catalog/render/button-tonal__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/buttongroup__ideal__default.png?thumb=8bb21f03048653cb": {
+    "file": "wear-m3-catalog/render/buttongroup__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/card-outlined__ideal__default.png?thumb=33bec60dcfc77595": {
+    "file": "wear-m3-catalog/render/card-outlined__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/card__ideal__default.png?thumb=a2b769f942e248a7": {
+    "file": "wear-m3-catalog/render/card__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/confirmationdialog-failure__ideal__default__192dp.png?thumb=76c0b88ceed96a2f": {
+    "file": "wear-m3-catalog/render/confirmationdialog-failure__ideal__default__192dp.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/confirmationdialog-generic__ideal__default__192dp.png?thumb=538ddb09007499d8": {
+    "file": "wear-m3-catalog/render/confirmationdialog-generic__ideal__default__192dp.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/confirmationdialog-success__ideal__default__192dp.png?thumb=068180f73804cbc6": {
+    "file": "wear-m3-catalog/render/confirmationdialog-success__ideal__default__192dp.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/edgebutton__ideal__default.png?thumb=be79ab14ebacb143": {
+    "file": "wear-m3-catalog/render/edgebutton__ideal__default.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/openonphonedialog__ideal__default__192dp.png?thumb=cd6aa9717e76dbe1": {
+    "file": "wear-m3-catalog/render/openonphonedialog__ideal__default__192dp.png",
+    "type": "image/png"
+  },
+  "/wear-m3-catalog/render/titlecard__ideal__default.png?thumb=689443620854c893": {
+    "file": "wear-m3-catalog/render/titlecard__ideal__default.png",
+    "type": "image/png"
+  }
+}

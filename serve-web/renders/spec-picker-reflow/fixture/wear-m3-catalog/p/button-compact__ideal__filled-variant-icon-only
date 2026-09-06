@@ -1,0 +1,807 @@
+    <!doctype html>
+    <html lang="en" data-cp-theme-key="cp-theme:wear-m3-catalog">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+                <meta property="og:type" content="website">
+                <meta property="og:site_name" content="compose-preview">
+                <meta property="og:title" content="Button Compact">
+                <meta property="og:description" content="Compose preview for Button Compact">
+                <meta property="og:url" content="https://preview.coo.ee/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec">
+                            <meta property="og:image" content="https://preview.coo.ee/wear-m3-catalog/render/button-compact__ideal__filled-variant-icon-only.png?mode=spec&amp;gen=a725bdaf6ed5f7c6cea3b69f3dab3cb641127883">
+                    <meta property="og:image:type" content="image/png">
+                    <meta property="og:image:alt" content="Button Compact">
+        <meta property="og:image:width" content="104">
+        <meta property="og:image:height" content="96">
+                <meta name="twitter:card" content="summary">
+                <meta name="twitter:title" content="Button Compact">
+                <meta name="twitter:description" content="Compose preview for Button Compact">
+                <meta name="twitter:image" content="https://preview.coo.ee/wear-m3-catalog/render/button-compact__ideal__filled-variant-icon-only.png?mode=spec&amp;gen=a725bdaf6ed5f7c6cea3b69f3dab3cb641127883">
+        <meta name="twitter:image:alt" content="Button Compact">
+        <title>Button Compact — compose-preview</title>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+        <link rel="icon" href="/favicon.ico" sizes="32x32">
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <link rel="stylesheet" href="/assets/serve/50d12-06783acdff707cd3/serve.css">
+        <link rel="alternate" type="application/rss+xml" title="Catalog changes" href="/wear-m3-catalog/feed.xml">
+        <script>try{var s=localStorage.getItem("cp-interface-mode");if(s){localStorage.removeItem("cp-interface-mode");if((s==="catalog"||s==="dev")&&document.cookie.indexOf("cp_chrome=")<0){document.cookie="cp_chrome="+s+"; path=/; max-age=31536000; samesite=lax"+(location.protocol==="https:"?"; secure":"");if(document.cookie.indexOf("cp_chrome="+s)>=0&&!/[?&]chrome=/.test(location.search))location.reload();}}}catch(e){}</script>
+        <!-- Apply the Transparent choice before first paint (no checkerboard flash).
+             A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
+        <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
+        <script>try{var p=new URLSearchParams(location.search),m={"theme:ee.schimke.wearm3catalog.AndroidMakersTheme":"dark","theme:ee.schimke.wearm3catalog.ConfettiDefaultTheme":"dark","theme:ee.schimke.wearm3catalog.DevFestTheme":"dark","theme:ee.schimke.wearm3catalog.DroidconTheme":"dark","theme:ee.schimke.wearm3catalog.GoogleSansFlexTheme":"dark","theme:ee.schimke.wearm3catalog.KotlinConfTheme":"dark"},o={"dark":1,"theme:ee.schimke.wearm3catalog.AndroidMakersTheme":1,"theme:ee.schimke.wearm3catalog.ConfettiDefaultTheme":1,"theme:ee.schimke.wearm3catalog.DevFestTheme":1,"theme:ee.schimke.wearm3catalog.DroidconTheme":1,"theme:ee.schimke.wearm3catalog.GoogleSansFlexTheme":1,"theme:ee.schimke.wearm3catalog.KotlinConfTheme":1},r=function(t){return t&&o[t]?m[t]||t:((decodeURIComponent(location.pathname).split('/').pop()||"").match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1];},t=localStorage.getItem("cp-page-theme")==="system"?"":(p.get("theme")||(p.get("themeProvider")?"theme:"+p.get("themeProvider"):"")||p.get("uiMode")||r(sessionStorage.getItem("cp-theme:wear-m3-catalog")));t=m[t]||t;if(t==="light"||t==="dark")document.documentElement.classList.add("cp-scheme-"+t);}catch(e){}</script>
+      </head>
+      <body>
+        <script src="/assets/serve/3562-39c263d9667a18ad/serve-chrome.js"></script>
+        <header class="cp-site-header">
+  <div class="cp-site-lead">
+    <a class="cp-site-brand" href="/" aria-label="compose-preview home">
+      <span class="cp-site-mark" aria-hidden="true">◇</span>
+      <span class="cp-site-wordmark">compose-preview</span>
+    </a>
+    <span class="cp-site-catalog">M3 Wear OS Apps Design Kit</span>
+    <nav class="cp-breadcrumb" aria-label="Breadcrumb"><a href="/wear-m3-catalog/">M3 Wear OS Apps Design Kit</a><span class="cp-crumb-sep" aria-hidden="true">/</span><span class="cp-crumb-current">Component</span></nav>
+  </div>
+  <nav class="cp-site-nav" aria-label="Primary navigation">
+    <div class="cp-interface-mode" role="group" aria-label="Interface mode">
+      <button type="button" data-cp-interface-mode="catalog" aria-pressed="false">Catalog</button>
+      <button type="button" data-cp-interface-mode="dev" aria-pressed="true">Dev</button>
+    </div>
+    <details class="cp-site-menu" id="cp-site-menu">
+      <summary class="cp-site-menu-btn" title="Menu" aria-label="Menu"
+        aria-controls="cp-site-menu-panel"><span aria-hidden="true">⋮</span></summary>
+    </details>
+    <div class="cp-site-menu-panel" id="cp-site-menu-panel">
+      <a class="cp-site-status-link" id="cp-status-link" href="/status">Status<span
+        class="cp-daemon-status" id="cp-daemon-status" aria-hidden="true" hidden></span></a>
+      <details class="cp-settings">
+        <summary class="cp-settings-btn" title="Settings" aria-label="Settings">
+          <span aria-hidden="true">⚙</span><span class="cp-settings-btn-label">Settings</span>
+        </summary>
+        <div class="cp-settings-panel">
+          <fieldset class="cp-settings-group">
+                    <legend class="cp-settings-legend">Page theme</legend>
+                    <label class="cp-settings-option">
+                      <input type="radio" name="cp-page-theme" value="match" data-cp-page-theme checked>
+                      <span>Match the preview theme</span>
+                    </label>
+                    <label class="cp-settings-option">
+                      <input type="radio" name="cp-page-theme" value="system" data-cp-page-theme>
+                      <span>Follow my system</span>
+                    </label>
+                    <p class="cp-settings-hint">Selecting a Light or Dark preview theme paints this page to
+                      match. Choose Follow my system to keep the page on your operating system's setting.</p>
+                  </fieldset>
+          <fieldset class="cp-settings-group cp-settings-keyboard">
+            <legend class="cp-settings-legend">Keyboard</legend>
+            <label class="cp-settings-option">
+              <input type="checkbox" data-cp-keyboard-navigation>
+              <span>Power-user navigation</span>
+            </label>
+            <p class="cp-settings-hint">Jump between components, variants, modes, and overrides with
+              shortcuts and an on-screen command palette.</p>
+            <button type="button" class="cp-settings-tour" data-cp-keyboard-tour>
+              View keyboard tour
+            </button>
+          </fieldset>
+        </div>
+      </details>
+    </div>
+  </nav>
+</header>
+        <main class="cp-main">
+              <link rel="stylesheet" href="/assets/serve/2210-eb494ea972d2661e/codemirror.css">
+      <div class="cp-preview-head">
+        <h1 class="cp-head cp-preview-title">Button Compact</h1>
+        <code class="cp-preview-id" title="button-compact__ideal__filled-variant-icon-only">button-compact__ideal__filled-variant-icon-only</code>
+        <span class="cp-viewer-engage"><span data-cp-volatile>57 views</span></span>
+        <div class="cp-head-toggles"><button type="button" class="cp-drawer-toggle" id="cp-nav-toggle" aria-expanded="false" aria-controls="cp-nav">☰ Components</button><details class="cp-theme-menu">
+  <summary class="cp-drawer-toggle cp-axis-toggle" id="cp-theme-toggle" aria-controls="cp-theme-bar">
+    <span class="cp-toggle-label">Theme</span>
+    <span class="cp-toggle-value" id="cp-theme-toggle-value">Dark</span>
+    <span class="cp-theme-caret" aria-hidden="true">▾</span>
+  </summary>
+  <div class="cp-theme-menu-panel"><span class="cp-theme cp-theme-bar" id="cp-theme-bar" role="group" aria-label="Preview theme">
+    <button type="button" class="cp-theme-btn" data-theme-choice="dark">Dark</button>
+    <button type="button" class="cp-theme-btn" data-theme-choice="theme:ee.schimke.wearm3catalog.AndroidMakersTheme" data-theme-mode="dark" title="Confetti · AndroidMakers">AndroidMakers</button>
+    <button type="button" class="cp-theme-btn" data-theme-choice="theme:ee.schimke.wearm3catalog.ConfettiDefaultTheme" data-theme-mode="dark" title="Confetti · Confetti (default)">Confetti (default)</button>
+    <button type="button" class="cp-theme-btn" data-theme-choice="theme:ee.schimke.wearm3catalog.DevFestTheme" data-theme-mode="dark" title="Confetti · DevFest">DevFest</button>
+    <button type="button" class="cp-theme-btn" data-theme-choice="theme:ee.schimke.wearm3catalog.DroidconTheme" data-theme-mode="dark" title="Confetti · Droidcon">Droidcon</button>
+    <button type="button" class="cp-theme-btn" data-theme-choice="theme:ee.schimke.wearm3catalog.GoogleSansFlexTheme" data-theme-mode="dark" title="Wear M3 · Google Sans Flex">Google Sans Flex</button>
+    <button type="button" class="cp-theme-btn" data-theme-choice="theme:ee.schimke.wearm3catalog.KotlinConfTheme" data-theme-mode="dark" title="Confetti · KotlinConf">KotlinConf</button>
+  </span></div>
+</details><details class="cp-revisions">
+  <summary class="cp-revisions-btn">
+    <span class="cp-revision-tag">current</span>
+    <span class="cp-revisions-caret" aria-hidden="true">▾</span>
+  </summary>
+  <div class="cp-revisions-menu">
+    <cp-revision-runs data-runs-url="/wear-m3-catalog/api/render-runs/button-compact__ideal__filled-variant-icon-only" data-render-url="/wear-m3-catalog/render/button-compact__ideal__filled-variant-icon-only.png"></cp-revision-runs>
+
+    <nav class="cp-revision-list" aria-label="Published revisions">
+      <a class="cp-revision" rel="nofollow" href="/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only" aria-current="true" data-revision="a725bdaf6ed5f7c6cea3b69f3dab3cb641127883"><span class="cp-revision-date">2026-09-06 17:08 UTC</span><code class="cp-revision-sha">a725bdaf</code><span class="cp-revision-tag">current</span></a>
+      <a class="cp-revision" rel="nofollow" href="/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?at=421fa2369fbdc9c9fa9c929579ec02e47e355492" data-revision="421fa2369fbdc9c9fa9c929579ec02e47e355492"><span class="cp-revision-date">2026-09-06 16:37 UTC</span><code class="cp-revision-sha">421fa236</code></a>
+      <a class="cp-revision" rel="nofollow" href="/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?at=c2547ac1df2f084565b307ebe636ebf964e315a9" data-revision="c2547ac1df2f084565b307ebe636ebf964e315a9"><span class="cp-revision-date">2026-09-06 16:00 UTC</span><code class="cp-revision-sha">c2547ac1</code></a>
+      <a class="cp-revision" rel="nofollow" href="/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?at=488776774e4d829802da3ab25ce95df4d5559d5a" data-revision="488776774e4d829802da3ab25ce95df4d5559d5a"><span class="cp-revision-date">2026-08-29 05:47 UTC</span><code class="cp-revision-sha">23e8f161</code></a>
+      <a class="cp-revision" rel="nofollow" href="/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?at=38259ad82644ba4ef636ff4ffce6e48a1ef150ca" data-revision="38259ad82644ba4ef636ff4ffce6e48a1ef150ca"><span class="cp-revision-date">2026-08-28 14:59 UTC</span><code class="cp-revision-sha">ceb02b63</code></a>
+    </nav>
+    <p class="cp-revision-note">Every publish of this design system is a commit on its
+    delivery branch. Opening one pins this page — and the pixels on it — to that publish for
+    good.</p>
+  </div>
+</details>
+<cp-history-menu></cp-history-menu><button type="button" class="cp-drawer-toggle" id="cp-controls-toggle" aria-expanded="false" aria-controls="cp-controls">⚙ Overrides</button></div>
+      </div>
+      <p class="cp-preview-caption">A short button for a dense screen, with the kit&#39;s content and style axes folded in.</p>
+
+      <div class="cp-preview-primary" aria-label="Preview renderer">
+      <a id="cp-live-signin" class="cp-live-toggle cp-live-signin" href="/auth/github/start?return=%2Fwear-m3-catalog%2Fp%2Fbutton-compact__ideal__filled-variant-icon-only%3Fmode%3Dspec" title="Sign in with GitHub to enable Live preview. Any GitHub account works.">
+            <span class="cp-live-dot" aria-hidden="true"></span>
+            <span>Live preview — sign in</span>
+          </a>
+<button type="button" id="cp-spec-chip" class="cp-spec-chip" aria-pressed="false" data-spec-chip-label="Figma" data-spec-chip-name="Figma" data-spec-chip-tip="Put the imported Figma spec on the stage instead of the render" title="Put the imported Figma spec on the stage instead of the render">Figma</button>
+<button type="button" id="cp-source-chip" class="cp-spec-chip cp-source-chip" aria-pressed="false" aria-controls="cp-source-panel" data-source-chip-tip="Show the plain Compose that produces this render" data-usage-src="/wear-m3-catalog/usage/button-compact__ideal__filled-variant-icon-only?mode=spec" title="Show the plain Compose that produces this render">Source</button>
+<span class="cp-spec-lane" id="cp-spec-lane" data-spec-src="/wear-m3-catalog/reference/button-compact__ideal__filled-variant-icon-only.png?gen=a725bdaf6ed5f7c6cea3b69f3dab3cb641127883" data-spec-label="Figma"><span class="cp-spec-views" id="cp-spec-views" role="group" aria-label="Design comparison" hidden><button type="button" class="cp-spec-view" data-cp-spec-view="spec" aria-pressed="false" title="The imported design reference on its own">Spec</button><button type="button" class="cp-spec-view" data-cp-spec-view="diff" aria-pressed="false" title="Highlight every pixel where the render and the spec disagree">Diff</button><button type="button" class="cp-spec-view" data-cp-spec-view="triptych" aria-pressed="true" title="Spec, diff and render side by side">Triptych</button><button type="button" class="cp-spec-view" data-cp-spec-view="slider" aria-pressed="false" title="One frame, wiped between the spec and the render">Slider</button></span><span class="cp-spec-score" id="cp-spec-score" role="status" aria-live="polite" hidden></span><a class="cp-format-link cp-spec-diff" href="/wear-m3-catalog/compare/button-compact__ideal__filled-variant-icon-only?reference=button-compact__ideal__filled-variant-icon-only" title="Compare this render against the imported design spec — Button/Compact — figma">spec diff →</a><span class="cp-spec-pick" id="cp-spec-pick" hidden></span><span class="cp-spec-pick-live" id="cp-spec-pick-live" aria-live="polite"></span></span>
+<button type="button" id="cp-svg-toggle" class="cp-fmt-toggle" aria-pressed="false" title="Show the vector (SVG) render">SVG</button>
+<button type="button" id="cp-explode-toggle" class="cp-fmt-toggle" aria-pressed="false" title="Show how the visible drawing layers are composed">3D</button>
+<span id="cp-svg-match" class="cp-match" role="status" aria-live="polite" hidden></span><a id="cp-svg-diff" class="cp-format-link" href="/wear-m3-catalog/compare?format=svg&preview=button-compact__ideal__filled-variant-icon-only" hidden>view diff →</a>
+<cp-bg-toggle label="Show the transparent checkerboard behind the preview"></cp-bg-toggle>
+<button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false" title="Show the preview at full width instead of fitting it to the screen">Fit width</button>
+        <span class="cp-mode-hint" id="cp-mode-hint"></span>
+        <span class="cp-modes-inputs" aria-hidden="true">
+      <input type="radio" name="cp-mode" value="png" id="cp-mode-png" tabindex="-1" checked>
+<input type="radio" name="cp-mode" value="live" id="cp-live" tabindex="-1" disabled>
+<input type="radio" name="cp-mode" value="spec" id="cp-spec-toggle" tabindex="-1">
+<input type="radio" name="cp-mode" value="source" id="cp-source-toggle" tabindex="-1">
+        </span>
+      </div>
+
+      <div class="cp-viewer" data-bg-theme="dark" data-always-dark="1" data-replay-themes="1" data-preview-id="button-compact__ideal__filled-variant-icon-only" data-mode="snapshot" data-modes="snapshot" data-static-snapshot="true" data-can-render-overrides="true" data-snapshot-backend="Snapshot" data-live-backend="Live" data-render-density="2" data-fold-scope="wear-m3-catalog" data-history-url="https://raw.githubusercontent.com/yschimke/wear-m3-catalog/design-artifacts/wear-m3-catalog/history.json" data-history-repo="yschimke/wear-m3-catalog" data-generation="a725bdaf6ed5f7c6cea3b69f3dab3cb641127883">
+              <aside class="cp-nav" id="cp-nav" aria-label="Components">
+        <div class="cp-nav-head"><span>Components</span><button type="button" class="cp-nav-close" id="cp-nav-close" aria-label="Close component navigation">×</button></div>
+        <input type="search" class="cp-nav-search" id="cp-nav-search" placeholder="Filter components" autocomplete="off" aria-label="Filter components">
+        <div class="cp-nav-current"><nav class="cp-tree cp-axes-tree" aria-label="Component renders">
+  <ul class="cp-tree-list" role="tree">
+    <li role="none"><a class="cp-tree-component cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__default" aria-expanded="true" aria-owns="cp-axes-tree-variants"><span class="cp-tree-label">Button Compact</span><span class="cp-tree-count">9</span></a>
+      <ul class="cp-tree-children cp-tree-variants" id="cp-axes-tree-variants" role="group">
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__child">Child</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__disabled">Disabled</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__filled-variant">Filled variant</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only" aria-current="page">Filled variant icon only</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__icon-only">Icon only</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__outlined">Outlined</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__text-only">Text only</a></li>
+        <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/wear-m3-catalog/p/button-compact__ideal__tonal">Tonal</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+        <ul class="cp-nav-list" id="cp-nav-list">
+        <li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Horologist</span><span class="cp-tree-count">13</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Sign-in</span><span class="cp-tree-count">5</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/auth-signinbutton__ideal__default" title="The primary action of a sign-in prompt, with the account glyph Wear&#39;s flow expects." data-search="Auth Sign In Button auth-signinbutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/auth-signinbutton__ideal__default.png?thumb=b7581013582132ff"><span class="cp-nav-name">Auth Sign In Button</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/auth-guestmodebutton__ideal__default" title="The way past the sign-in prompt: continue without an account." data-search="Auth Guest Mode Button auth-guestmodebutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/auth-guestmodebutton__ideal__default.png?thumb=c008e040dd8b4693"><span class="cp-nav-name">Auth Guest Mode Button</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/auth-selectaccountscreen__ideal__default__192dp" title="Pick which account to sign in with — avatar, name and address per row." data-search="Auth Select Account Screen auth-selectaccountscreen__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/auth-selectaccountscreen__ideal__default__192dp.png?thumb=728839e7f86356e4"><span class="cp-nav-name">Auth Select Account Screen</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/auth-signinplaceholderscreen__ideal__default__192dp" title="What the sign-in flow shows while it is still deciding what to show." data-search="Auth Sign In Placeholder Screen auth-signinplaceholderscreen__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/auth-signinplaceholderscreen__ideal__default__192dp.png?thumb=641f1c74b4093f5a"><span class="cp-nav-name">Auth Sign In Placeholder Screen</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/auth-signedinconfirmationdialog__ideal__default__192dp" title="The end of the flow: who you signed in as, shown briefly and then dismissed." data-search="Auth Signed In Confirmation Dialog auth-signedinconfirmationdialog__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/auth-signedinconfirmationdialog__ideal__default__192dp.png?thumb=81d9cf283f463462"><span class="cp-nav-name">Auth Signed In Confirmation Dialog</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Actions</span><span class="cp-tree-count">15</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Buttons</span><span class="cp-tree-count">8</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/button-filled__ideal__default" title="Highest emphasis; the screen&#39;s primary action." data-search="Button Filled button-filled__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/button-filled__ideal__default.png?thumb=79f9bd90e7ef67f5"><span class="cp-nav-name">Button Filled</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/button-filledvariant__ideal__default" title="The kit&#39;s highlighted style — a filled button in the variant palette." data-search="Button Filled Variant button-filledvariant__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/button-filledvariant__ideal__default.png?thumb=568b855be934c5c7"><span class="cp-nav-name">Button Filled Variant</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/button-tonal__ideal__default" title="Medium emphasis, on a tonal container." data-search="Button Tonal button-tonal__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/button-tonal__ideal__default.png?thumb=9ed85fb1795f8c98"><span class="cp-nav-name">Button Tonal</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/button-outlined__ideal__default" title="Medium emphasis, drawn as an outline over the background." data-search="Button Outlined button-outlined__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/button-outlined__ideal__default.png?thumb=0bb53dcd4059c980"><span class="cp-nav-name">Button Outlined</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/button-child__ideal__default" title="Lowest emphasis; no container at all, for a button inside another surface." data-search="Button Child button-child__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/button-child__ideal__default.png?thumb=897d8cd922eaae22"><span class="cp-nav-name">Button Child</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/button-imagebackground__ideal__default" title="A button over an image, with the scrim that keeps its label legible." data-search="Button Image Background button-imagebackground__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/button-imagebackground__ideal__default.png?thumb=9315ce63f5deedb6"><span class="cp-nav-name">Button Image Background</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/button-loading__ideal__default" title="A button waiting on the work it started — the kit&#39;s loading pattern." data-search="Button Loading button-loading__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/button-loading__ideal__default.png?thumb=61df734748484cf8"><span class="cp-nav-name">Button Loading</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/buttongroup__ideal__default" title="Buttons that share a row and expand away from whichever one is pressed." data-search="Button Group buttongroup__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/buttongroup__ideal__default.png?thumb=8bb21f03048653cb"><span class="cp-nav-name">Button Group</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Containment</span><span class="cp-tree-count">11</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Cards</span><span class="cp-tree-count">4</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/card__ideal__default" title="The plain container: one content slot, tonal by default. A no-`onClick` overload presents the same card without the tap." data-search="Card card__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/card__ideal__default.png?thumb=a2b769f942e248a7"><span class="cp-nav-name">Card</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/card-outlined__ideal__default" title="The kit&#39;s outline style — the same container drawn as a border." data-search="Card Outlined card-outlined__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/card-outlined__ideal__default.png?thumb=33bec60dcfc77595"><span class="cp-nav-name">Card Outlined</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/titlecard__ideal__default" title="A card led by a title, with the kit&#39;s numbered layouts folded in as cells." data-search="Title Card titlecard__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/titlecard__ideal__default.png?thumb=689443620854c893"><span class="cp-nav-name">Title Card</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/appcard__ideal__default" title="A card that names the app it came from — the shape a notification takes." data-search="App Card appcard__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/appcard__ideal__default.png?thumb=7036b561828cffe0"><span class="cp-nav-name">App Card</span></a></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Dialogs</span><span class="cp-tree-count">5</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/alertdialog__ideal__default__192dp" title="Interrupts to ask for a decision; the kit&#39;s button arrangements fold in as cells." data-search="Alert Dialog alertdialog__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/alertdialog__ideal__default__192dp.png?thumb=87c2c05a46b879c6"><span class="cp-nav-name">Alert Dialog</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/openonphonedialog__ideal__default__192dp" title="Hands the task to the paired phone, with the progress the wait needs." data-search="Open On Phone Dialog openonphonedialog__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/openonphonedialog__ideal__default__192dp.png?thumb=cd6aa9717e76dbe1"><span class="cp-nav-name">Open On Phone Dialog</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/confirmationdialog-success__ideal__default__192dp" title="It worked: the check drawn on the theme&#39;s success container, over curved copy." data-search="Confirmation Dialog Success confirmationdialog-success__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/confirmationdialog-success__ideal__default__192dp.png?thumb=068180f73804cbc6"><span class="cp-nav-name">Confirmation Dialog Success</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/confirmationdialog-failure__ideal__default__192dp" title="It did not: the same overlay in the failure palette, with the library&#39;s own glyph." data-search="Confirmation Dialog Failure confirmationdialog-failure__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/confirmationdialog-failure__ideal__default__192dp.png?thumb=76c0b88ceed96a2f"><span class="cp-nav-name">Confirmation Dialog Failure</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/confirmationdialog-generic__ideal__default__192dp" title="The overlay an app brings its own glyph to, which is the icon slot this one takes." data-search="Confirmation Dialog Generic confirmationdialog-generic__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/confirmationdialog-generic__ideal__default__192dp.png?thumb=538ddb09007499d8"><span class="cp-nav-name">Confirmation Dialog Generic</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Actions</span><span class="cp-tree-count">15</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Edge-hugging buttons</span><span class="cp-tree-count">1</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/edgebutton__ideal__default" title="The screen-hugging confirm action, curved to the bottom edge of the display." data-search="Edge Button edgebutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/edgebutton__ideal__default.png?thumb=be79ab14ebacb143"><span class="cp-nav-name">Edge Button</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Horologist</span><span class="cp-tree-count">13</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Fast scrolling</span><span class="cp-tree-count">1</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/fastscrollingtransforminglazycolumn__ideal__default__192dp" title="A long list that skims by section when the rotating bezel is spun hard, instead of crawling." data-search="Fast Scrolling Transforming Lazy Column fastscrollingtransforminglazycolumn__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/fastscrollingtransforminglazycolumn__ideal__default__192dp.png?thumb=d8a2624d794c7842"><span class="cp-nav-name">Fast Scrolling Transforming Lazy Column</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Actions</span><span class="cp-tree-count">15</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Icon buttons</span><span class="cp-tree-count">6</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/iconbutton-filled__ideal__default" title="Highest emphasis; an icon-only action." data-search="Icon Button Filled iconbutton-filled__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/iconbutton-filled__ideal__default.png?thumb=08b11dacc3cf0ee4"><span class="cp-nav-name">Icon Button Filled</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/iconbutton-filledvariant__ideal__default" title="The kit&#39;s highlighted style — a filled icon button in the variant palette." data-search="Icon Button Filled Variant iconbutton-filledvariant__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/iconbutton-filledvariant__ideal__default.png?thumb=fe1b4ea75869e3b1"><span class="cp-nav-name">Icon Button Filled Variant</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/iconbutton-tonal__ideal__default" title="Medium emphasis, on a tonal container." data-search="Icon Button Tonal iconbutton-tonal__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/iconbutton-tonal__ideal__default.png?thumb=7b7acb1a7d5d6171"><span class="cp-nav-name">Icon Button Tonal</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/iconbutton-outlined__ideal__default" title="Medium emphasis, drawn as an outline over the background." data-search="Icon Button Outlined iconbutton-outlined__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/iconbutton-outlined__ideal__default.png?thumb=d7401c330bcf4464"><span class="cp-nav-name">Icon Button Outlined</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/iconbutton-standard__ideal__default" title="Lowest emphasis; the kit&#39;s child style, with no container at all." data-search="Icon Button Standard iconbutton-standard__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/iconbutton-standard__ideal__default.png?thumb=6449811e44bdc085"><span class="cp-nav-name">Icon Button Standard</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/textbutton__ideal__default" title="A short label as a round action, with the kit&#39;s style and size axes folded in." data-search="Text Button textbutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/textbutton__ideal__default.png?thumb=d4db4f6f86790f30"><span class="cp-nav-name">Text Button</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Navigation</span><span class="cp-tree-count">7</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Position indicators</span><span class="cp-tree-count">4</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/scrollindicator__ideal__default__192dp" title="Where the screen sits in a scroll, drawn against the right bezel." data-search="Scroll Indicator scrollindicator__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/scrollindicator__ideal__default__192dp.png?thumb=b20b485a84b264e0"><span class="cp-nav-name">Scroll Indicator</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/levelindicator__ideal__default__192dp" title="The value a rotating side button is setting, while it is being turned." data-search="Level Indicator levelindicator__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/levelindicator__ideal__default__192dp.png?thumb=70c6a1813d998234"><span class="cp-nav-name">Level Indicator</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/pageindicator-horizontal__ideal__default__192dp" title="Which page of a horizontal pager is showing, along the bottom of the display." data-search="Page Indicator Horizontal pageindicator-horizontal__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/pageindicator-horizontal__ideal__default__192dp.png?thumb=dd6af4d6b58c3ed3"><span class="cp-nav-name">Page Indicator Horizontal</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/pageindicator-vertical__ideal__default__192dp" title="The same indicator for a vertical pager, drawn against the right bezel." data-search="Page Indicator Vertical pageindicator-vertical__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/pageindicator-vertical__ideal__default__192dp.png?thumb=5fcda960a88b333f"><span class="cp-nav-name">Page Indicator Vertical</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Layout</span><span class="cp-tree-count">2</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Lists and screens</span><span class="cp-tree-count">2</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/transforminglazycolumn__ideal__default__192dp" title="The Wear list: rows scale and fade toward the edges of the round display." data-search="Transforming Lazy Column transforminglazycolumn__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/transforminglazycolumn__ideal__default__192dp.png?thumb=93151868a0063bdf"><span class="cp-nav-name">Transforming Lazy Column</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/scaffold__ideal__default__192dp" title="The screen frame: curved clock, scroll position, and the bottom action, in their places." data-search="Scaffold scaffold__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/scaffold__ideal__default__192dp.png?thumb=5fa27f390c2dc9eb"><span class="cp-nav-name">Scaffold</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Horologist</span><span class="cp-tree-count">13</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Media controls</span><span class="cp-tree-count">7</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/media-playerscreen__ideal__default__192dp" title="The media player, whole: track and artist above, transport controls across the middle, the output-device and overflow buttons below." data-search="Media Player Screen media-playerscreen__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/media-playerscreen__ideal__default__192dp.png?thumb=c03a0b4a73ef9f28"><span class="cp-nav-name">Media Player Screen</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/media-footerbuttons__ideal__default" title="The player&#39;s footer: the output-device button with its volume badge, and the overflow. Two 44×32 compact buttons in the kit&#39;s two 68dp sections." data-search="Media Footer Buttons media-footerbuttons__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/media-footerbuttons__ideal__default.png?thumb=fdccdbd3a036e1d3"><span class="cp-nav-name">Media Footer Buttons</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/media-controlbuttons__ideal__default" title="Previous, play/pause, next — the transport row. The track&#39;s progress ring is under the middle button&#39;s container rather than around it; see the note in this file." data-search="Media Control Buttons media-controlbuttons__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/media-controlbuttons__ideal__default.png?thumb=e1b7f6109ba0244a"><span class="cp-nav-name">Media Control Buttons</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/media-podcastcontrolbuttons__ideal__default" title="The spoken-word transport row: seek back and forward by a fixed increment." data-search="Media Podcast Control Buttons media-podcastcontrolbuttons__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/media-podcastcontrolbuttons__ideal__default.png?thumb=851a8797cf6c2e45"><span class="cp-nav-name">Media Podcast Control Buttons</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/media-playpauseprogressbutton__ideal__default" title="The middle button: play or pause. Its progress ring is drawn UNDER the filled container rather than around it, so the kit&#39;s `Progress=` does not read here — an upstream bug, not a seed. See the note in this file." data-search="Media Play Pause Progress Button media-playpauseprogressbutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/media-playpauseprogressbutton__ideal__default.png?thumb=fe36ac59e6a9b12a"><span class="cp-nav-name">Media Play Pause Progress Button</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/media-infodisplay__ideal__default" title="Track and artist, marquee-scrolled when the title outruns the screen." data-search="Media Info Display media-infodisplay__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/media-infodisplay__ideal__default.png?thumb=adf5aae70d9d390a"><span class="cp-nav-name">Media Info Display</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/media-showplaylistbutton__ideal__default" title="Jump to the playlist this track came from, with its artwork." data-search="Media Show Playlist Button media-showplaylistbutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/media-showplaylistbutton__ideal__default.png?thumb=5caa20883cbc4611"><span class="cp-nav-name">Media Show Playlist Button</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Communication</span><span class="cp-tree-count">11</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">One-handed gestures</span><span class="cp-tree-count">4</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/onehandedgestureclickindicator__ideal__default" title="A button announcing that a double pinch will press it: the label steps aside for the glyph." data-search="One Handed Gesture Click Indicator onehandedgestureclickindicator__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/onehandedgestureclickindicator__ideal__default.png?thumb=974ab9cbd653249f"><span class="cp-nav-name">One Handed Gesture Click Indicator</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/onehandedgesturescrollindicator__ideal__default__192dp" title="The scroll rail growing a glyph: a pinch scrolls the list without the other hand." data-search="One Handed Gesture Scroll Indicator onehandedgesturescrollindicator__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/onehandedgesturescrollindicator__ideal__default__192dp.png?thumb=df358560eecc27d7"><span class="cp-nav-name">One Handed Gesture Scroll Indicator</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/onehandedgesturepageindicator-horizontal__ideal__default__192dp" title="The page dots with the pinch that advances them, along the bottom of the display." data-search="One Handed Gesture Page Indicator Horizontal onehandedgesturepageindicator-horizontal__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/onehandedgesturepageindicator-horizontal__ideal__default__192dp.png?thumb=915f21109a2d3372"><span class="cp-nav-name">One Handed Gesture Page Indicator Horizontal</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/onehandedgesturepageindicator-vertical__ideal__default__192dp" title="The same pinch-to-advance affordance for a vertical pager, against the right bezel." data-search="One Handed Gesture Page Indicator Vertical onehandedgesturepageindicator-vertical__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/onehandedgesturepageindicator-vertical__ideal__default__192dp.png?thumb=a36e3cca6f64f679"><span class="cp-nav-name">One Handed Gesture Page Indicator Vertical</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Navigation</span><span class="cp-tree-count">7</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Pagers</span><span class="cp-tree-count">2</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/pager-horizontal__ideal__default__192dp" title="Screens paged side to side, with the page dots the scaffold places along the bottom." data-search="Pager Horizontal pager-horizontal__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/pager-horizontal__ideal__default__192dp.png?thumb=d4b99903bb2ddf3a"><span class="cp-nav-name">Pager Horizontal</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/pager-vertical__ideal__default__192dp" title="The same paging up and down, with the dots on the right bezel instead." data-search="Pager Vertical pager-vertical__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/pager-vertical__ideal__default__192dp.png?thumb=195176621f895816"><span class="cp-nav-name">Pager Vertical</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Selection</span><span class="cp-tree-count">11</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Pickers</span><span class="cp-tree-count">4</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/datepicker__ideal__default__192dp" title="Three wheels for a date, with the kit&#39;s field orderings folded in." data-search="Date Picker datepicker__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/datepicker__ideal__default__192dp.png?thumb=2cd624215992fac8"><span class="cp-nav-name">Date Picker</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/timepicker__ideal__default__192dp" title="Wheels for a time, pinned to midnight; the kit&#39;s clock formats fold in as cells." data-search="Time Picker timepicker__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/timepicker__ideal__default__192dp.png?thumb=1601f7465a72b863"><span class="cp-nav-name">Time Picker</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/picker__ideal__default__192dp" title="One wheel of options — the primitive the date and time pickers are built from." data-search="Picker picker__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/picker__ideal__default__192dp.png?thumb=1e6663ab925cbf72"><span class="cp-nav-name">Picker</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/pickergroup__ideal__default__192dp" title="Several wheels side by side, with the focused one centred on the screen." data-search="Picker Group pickergroup__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/pickergroup__ideal__default__192dp.png?thumb=8410657eec363432"><span class="cp-nav-name">Picker Group</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Communication</span><span class="cp-tree-count">11</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Placeholders</span><span class="cp-tree-count">3</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/placeholder-button__ideal__default" title="A button whose icon and labels have not arrived yet." data-search="Placeholder Button placeholder-button__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/placeholder-button__ideal__default.png?thumb=e3803f3fb713bf37"><span class="cp-nav-name">Placeholder Button</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/placeholder-iconbutton__ideal__default" title="An icon button whose icon has not arrived yet." data-search="Placeholder Icon Button placeholder-iconbutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/placeholder-iconbutton__ideal__default.png?thumb=1fb1c1140761a5a9"><span class="cp-nav-name">Placeholder Icon Button</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/placeholder-card__ideal__default" title="A card whose icon and text have not arrived yet." data-search="Placeholder Card placeholder-card__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/placeholder-card__ideal__default.png?thumb=f53fd7980eed9f47"><span class="cp-nav-name">Placeholder Card</span></a></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Progress indicators</span><span class="cp-tree-count">4</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/circularprogressindicator__ideal__default__192dp" title="A ring around the display edge, with the kit&#39;s progress and stroke axes folded in." data-search="Circular Progress Indicator circularprogressindicator__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/circularprogressindicator__ideal__default__192dp.png?thumb=26caf49769e91791"><span class="cp-nav-name">Circular Progress Indicator</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/segmentedcircularprogressindicator__ideal__default" title="The same ring cut into segments, for progress through a countable set of steps." data-search="Segmented Circular Progress Indicator segmentedcircularprogressindicator__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/segmentedcircularprogressindicator__ideal__default.png?thumb=e2e7fa3c2d6fe688"><span class="cp-nav-name">Segmented Circular Progress Indicator</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/arcprogressindicator__ideal__default" title="An indeterminate arc along the bezel, for a wait with no measurable progress." data-search="Arc Progress Indicator arcprogressindicator__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/arcprogressindicator__ideal__default.png?thumb=8e8bccf1d083b449"><span class="cp-nav-name">Arc Progress Indicator</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/linearprogressindicator__ideal__default" title="A straight track, for progress inside a component or a list row." data-search="Linear Progress Indicator linearprogressindicator__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/linearprogressindicator__ideal__default.png?thumb=6bf40715067732d6"><span class="cp-nav-name">Linear Progress Indicator</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Selection</span><span class="cp-tree-count">11</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Selection buttons</span><span class="cp-tree-count">3</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/checkboxbutton__ideal__default" title="A labelled row that toggles a checkbox; for a set where any number may be chosen." data-search="Checkbox Button checkboxbutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/checkboxbutton__ideal__default.png?thumb=ad30ecf8dc4795b9"><span class="cp-nav-name">Checkbox Button</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/switchbutton__ideal__default" title="A labelled row that flips a switch; for a setting that takes effect immediately." data-search="Switch Button switchbutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/switchbutton__ideal__default.png?thumb=704a82e9edc04bb1"><span class="cp-nav-name">Switch Button</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/radiobutton__ideal__default" title="A labelled row in a set where exactly one may be chosen." data-search="Radio Button radiobutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/radiobutton__ideal__default.png?thumb=217158d685cea324"><span class="cp-nav-name">Radio Button</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Styles</span><span class="cp-tree-count">1</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Shapes</span><span class="cp-tree-count">1</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/shape-materialshapes__ideal__default" title="The expressive shape library, with each named shape folded in as a variant." data-search="Shape Material Shapes shape-materialshapes__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/shape-materialshapes__ideal__default.png?thumb=f1eb92cde237351f"><span class="cp-nav-name">Shape Material Shapes</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Selection</span><span class="cp-tree-count">11</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Sliders and steppers</span><span class="cp-tree-count">2</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/slider__ideal__default" title="A value across a fixed number of steps, with the kit&#39;s levels folded in as cells." data-search="Slider slider__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/slider__ideal__default.png?thumb=6da036c9c3a3612f"><span class="cp-nav-name">Slider</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/stepper__ideal__default__192dp" title="A value moved a step at a time, between buttons at the top and bottom of the screen, with the level rail the kit draws beside them." data-search="Stepper stepper__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/stepper__ideal__default__192dp.png?thumb=e152800f85ab66dc"><span class="cp-nav-name">Stepper</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Navigation</span><span class="cp-tree-count">7</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Swipe to dismiss</span><span class="cp-tree-count">1</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/swipetodismissbox__ideal__default__192dp" title="Wear&#39;s back gesture: the screen slides off to the right and uncovers what is behind it — not `SwipeToReveal`, which uncovers an item&#39;s actions and springs back." data-search="Swipe To Dismiss Box swipetodismissbox__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/swipetodismissbox__ideal__default__192dp.png?thumb=d11b0b1eb51aafde"><span class="cp-nav-name">Swipe To Dismiss Box</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Containment</span><span class="cp-tree-count">11</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Swipe to reveal</span><span class="cp-tree-count">2</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/swipetoreveal-card__ideal__default__192dp" title="A card swiped aside to show its actions." data-search="Swipe To Reveal Card swipetoreveal-card__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/swipetoreveal-card__ideal__default__192dp.png?thumb=ad0d774eeeb2c5a2"><span class="cp-nav-name">Swipe To Reveal Card</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/swipetoreveal-button__ideal__default__192dp" title="The same gesture over a button rather than a card." data-search="Swipe To Reveal Button swipetoreveal-button__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/swipetoreveal-button__ideal__default__192dp.png?thumb=2b491401057ca9a2"><span class="cp-nav-name">Swipe To Reveal Button</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Text</span><span class="cp-tree-count">7</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Text</span><span class="cp-tree-count">7</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/listheader__ideal__default" title="Titles the screen a list belongs to; the first thing above the list." data-search="List Header listheader__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/listheader__ideal__default.png?thumb=77e0d41f3d70cfe1"><span class="cp-nav-name">List Header</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/listsubheader__ideal__default" title="Divides a long list into named runs, without leaving the screen&#39;s title behind." data-search="List Sub Header listsubheader__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/listsubheader__ideal__default.png?thumb=6f8eb2bdc95d138a"><span class="cp-nav-name">List Sub Header</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/text-body__ideal__default" title="Running text at the `bodyMedium` role of the Wear type scale." data-search="Text Body text-body__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/text-body__ideal__default.png?thumb=96bb374e8f03a1a7"><span class="cp-nav-name">Text Body</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/text-caption__ideal__default" title="Secondary text at the `labelSmall` role — a timestamp, a unit, a footnote." data-search="Text Caption text-caption__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/text-caption__ideal__default.png?thumb=58b47e4b0e5c12e1"><span class="cp-nav-name">Text Caption</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/timetext__ideal__default__192dp" title="The curved status strip every Wear screen carries, pinned to a fixed time." data-search="Time Text timetext__ideal__default__192dp"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/timetext__ideal__default__192dp.png?thumb=3cdd4a756aa5d4eb"><span class="cp-nav-name">Time Text</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/fadingexpandinglabel__ideal__default" title="A label that grows its container a line at a time, fading each new line in as it arrives." data-search="Fading Expanding Label fadingexpandinglabel__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/fadingexpandinglabel__ideal__default.png?thumb=3565653280acfcb4"><span class="cp-nav-name">Fading Expanding Label</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/animatedtext__ideal__default" title="A numeral animated along a variable font&#39;s weight axis and between two sizes; the still is one frame of it." data-search="Animated Text animatedtext__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/animatedtext__ideal__default.png?thumb=34290e89c2aa0fb8"><span class="cp-nav-name">Animated Text</span></a></li>
+<li class="cp-nav-head-row cp-nav-section-row"><span class="cp-nav-head-name">Selection</span><span class="cp-tree-count">11</span></li>
+<li class="cp-nav-head-row cp-nav-group-row"><span class="cp-nav-head-name">Toggle buttons</span><span class="cp-tree-count">2</span></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/icontogglebutton__ideal__default" title="An icon that holds an on/off state, with the kit&#39;s size and state axes folded in." data-search="Icon Toggle Button icontogglebutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/icontogglebutton__ideal__default.png?thumb=08b11dacc3cf0ee4"><span class="cp-nav-name">Icon Toggle Button</span></a></li>
+<li><a class="cp-nav-item" href="/wear-m3-catalog/p/texttogglebutton__ideal__default" title="A short label that holds an on/off state." data-search="Text Toggle Button texttogglebutton__ideal__default"><img class="cp-nav-thumb" loading="lazy" alt="" src="/wear-m3-catalog/render/texttogglebutton__ideal__default.png?thumb=d4db4f6f86790f30"><span class="cp-nav-name">Text Toggle Button</span></a></li>
+        </ul>
+        <p class="cp-nav-empty" id="cp-nav-empty" hidden>No components match.</p>
+      </aside>
+        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="Button Compact"><canvas id="cp-canvas" hidden></canvas><img id="cp-spec-img" class="cp-spec-img" hidden alt="Button Compact — design spec"><div class="cp-source-panel" id="cp-source-panel" role="region" aria-label="Usage source" hidden></div><div class="cp-spec-compare" id="cp-spec-compare" hidden data-view="triptych" data-reference="/wear-m3-catalog/reference/button-compact__ideal__filled-variant-icon-only.png?gen=a725bdaf6ed5f7c6cea3b69f3dab3cb641127883"><figure class="cp-spec-panel" data-cp-spec-panel="reference"><canvas id="cp-spec-reference" aria-label="Imported design spec"></canvas><figcaption>Spec</figcaption></figure><figure class="cp-spec-panel" data-cp-spec-panel="diff"><canvas id="cp-spec-diff" aria-label="Pixels where the render and the spec disagree"></canvas><figcaption>Diff</figcaption></figure><figure class="cp-spec-panel" data-cp-spec-panel="actual"><canvas id="cp-spec-actual" aria-label="This preview&#39;s Compose render"></canvas><figcaption>Render</figcaption></figure><div class="cp-spec-wipe"><canvas id="cp-spec-wipe-canvas" aria-label="Spec on the left of the seam, Compose render on the right"></canvas><label class="cp-spec-wipe-control"><span>Spec</span><input id="cp-spec-wipe-range" class="cp-spec-wipe-range" type="range" min="0" max="100" value="50" aria-label="Wipe between the design spec and the Compose render"><span>Render</span></label></div></div><script type="application/json" id="cp-spec-annotations">{"reference":[{"kind":"layout","bounds":{"x":0,"y":16,"width":104,"height":64},"label":"pad 6px/14px · gap 6px · r 26px","detail":{"padding.start":"14","padding.top":"6","padding.end":"14","padding.bottom":"6","gap":"6","cornerRadius":"26","unit":"px"}},{"kind":"layout","bounds":{"x":28,"y":24,"width":48,"height":48},"label":"≈pad 5px","role":"Icon","detail":{"padding.start":"5","padding.top":"5","padding.end":"5","padding.bottom":"5","unit":"px","spacingSource":"derived"}}]}</script><cp-spec-compare></cp-spec-compare><div class="cp-inspect-layer" id="cp-inspect-layer"></div><div class="cp-error" id="cp-error" role="alert" hidden></div></div>
+        <div class="cp-inspect-legend" id="cp-inspect-legend" role="region" aria-label="Inspection legend" hidden></div><cp-inspect-layers></cp-inspect-layers>
+        <div class="cp-controls" id="cp-controls">
+          <!-- No "Appearance" group. Its only ever-visible control was a Background select
+               offering "(default) / Clear (crisp outline)" — which read as a duplicate of the
+               viewer bar's **Transparent** toggle: same word, same apparent job, two places, one
+               of them buried behind a drawer. With that gone the group held nothing but the
+               visually-hidden Theme state below, so an empty collapsible card would have sat at
+               the top of every viewer's panel; the group goes with the control.
+
+               Neither affordance is lost. Transparent still shows a preview's real alpha on the
+               bar, and stripping a preview's *authored* background is still `background=clear` on
+               /render (and the VS Code extension's own override) — the authoring lane, which is
+               where it belongs, rather than the reading one.
+
+               The Theme select stays in the panel, outside any group: it is `aria-hidden` and out
+               of the tab order, but it is the Theme axis's single state holder — viewer.js reads
+               it on every render and Back/Forward hydration writes to it — so it has to remain in
+               the DOM. The visible Theme control is the chip row on the viewer bar. -->
+                  <span class="cp-modes-inputs" aria-hidden="true">
+          <select id="cp-theme" class="cp-knob-theme" data-theme-active="0" data-default-theme="dark" data-theme-storage-key="cp-theme:wear-m3-catalog" data-has-declared-themes="true" data-fixed-theme="false" tabindex="-1">
+            <option value="dark" selected>Dark (Default)</option>
+            <optgroup label="Confetti"><option value="theme:ee.schimke.wearm3catalog.AndroidMakersTheme" data-theme-mode="dark">AndroidMakers</option>
+<option value="theme:ee.schimke.wearm3catalog.ConfettiDefaultTheme" data-theme-mode="dark">Confetti (default)</option>
+<option value="theme:ee.schimke.wearm3catalog.DevFestTheme" data-theme-mode="dark">DevFest</option>
+<option value="theme:ee.schimke.wearm3catalog.DroidconTheme" data-theme-mode="dark">Droidcon</option>
+<option value="theme:ee.schimke.wearm3catalog.KotlinConfTheme" data-theme-mode="dark">KotlinConf</option></optgroup>
+<optgroup label="Wear M3"><option value="theme:ee.schimke.wearm3catalog.GoogleSansFlexTheme" data-theme-mode="dark">Google Sans Flex</option></optgroup>
+          </select>
+        </span>
+          <details class="cp-group" data-cp-group="size">
+            <summary>Size</summary>
+            <div class="cp-group-body">
+              <div class="cp-size">
+                <label>Size mode
+                  <select id="cp-sizeMode">
+                    <option value="">(default)</option>
+                    <option value="fixed">Fixed size</option>
+                    <option value="max">Max</option>
+                    <option value="min">Min</option>
+                    <option value="within">Within (min–max)</option>
+                  </select>
+                </label>
+                <div class="cp-size-row" id="cp-size-fixed" hidden>
+                  <label>Width (dp)<input id="cp-fixedW" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                  <label>Height (dp)<input id="cp-fixedH" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                </div>
+                <div class="cp-size-row" id="cp-size-min" hidden>
+                  <label>Min width (dp)<input id="cp-minW" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                  <label>Min height (dp)<input id="cp-minH" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                </div>
+                <div class="cp-size-row" id="cp-size-max" hidden>
+                  <label>Max width (dp)<input id="cp-maxW" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                  <label>Max height (dp)<input id="cp-maxH" type="number" min="1" step="1" inputmode="numeric" placeholder="auto" autocomplete="off"></label>
+                </div>
+              </div>
+            </div>
+          </details>
+          <details class="cp-group" data-cp-group="explode">
+  <summary>Exploded 3D</summary>
+  <div class="cp-group-body">
+    <label class="cp-explode-row" title="How far the layers lean away from you; 0 is face-on">Lean
+      <input id="cp-explode-tilt" class="cp-explode-knob" type="range" min="0" max="75"
+        step="1" value="28" data-cp-default="28" data-cp-unit="°" disabled>
+      <output id="cp-explode-tilt-value" class="cp-explode-value">28°</output>
+    </label>
+    <label class="cp-explode-row" title="How far the layers are turned in their own plane">Spin
+      <input id="cp-explode-spin" class="cp-explode-knob" type="range" min="-80" max="80"
+        step="1" value="-16" data-cp-default="-16" data-cp-unit="°" disabled>
+      <output id="cp-explode-spin-value" class="cp-explode-value">-16°</output>
+    </label>
+    <label class="cp-explode-row" title="Distance between layers; 0 derives one from the preview's size">Separation
+      <input id="cp-explode-gap" class="cp-explode-knob" type="range" min="0" max="600"
+        step="5" value="0" data-cp-default="0" data-cp-unit="" disabled>
+      <output id="cp-explode-gap-value" class="cp-explode-value">0</output>
+    </label>
+    <label class="cp-explode-row" title="Composables nested deeper than this fold into the last layer">Layers
+      <input id="cp-explode-depth" class="cp-explode-knob" type="range" min="1" max="16"
+        step="1" value="6" data-cp-default="6" data-cp-unit="" disabled>
+      <output id="cp-explode-depth-value" class="cp-explode-value">6</output>
+    </label>
+    <div class="cp-knobs-head">One sheet per visible drawing level. Structural-only
+      composables are kept in the next sheet's breadcrumb. Rides the SVG link and download.</div>
+  </div>
+</details>
+          <details class="cp-group" data-cp-group="locale">
+            <summary>Locale &amp; text</summary>
+            <div class="cp-group-body">
+              <label>Locale
+                <input id="cp-localeTag" type="text" list="cp-localeTag-list" placeholder="e.g. en-GB, zh-Hant-TW" autocomplete="off">
+                <!-- A datalist, not a fixed <select>: the presets (pseudolocales, RTL, common
+                     tags) drop down for quick picking, but any valid BCP-47 tag the server
+                     accepts can still be typed in — so this is the OPEN form of the same value
+                     set an author declares with `previewOverrideChoice`, rendered through the
+                     same helper rather than hand-written twice. -->
+                <datalist id="cp-localeTag-list">
+                  <option value="en-XA" label="Accented (pseudo)"></option>
+                  <option value="ar-XB" label="Bidi / RTL (pseudo)"></option>
+                  <option value="ar" label="Arabic (RTL)"></option>
+                  <option value="he" label="Hebrew (RTL)"></option>
+                  <option value="fa" label="Persian (RTL)"></option>
+                  <option value="en-US"></option>
+                  <option value="en-GB"></option>
+                  <option value="de-DE"></option>
+                  <option value="fr-FR"></option>
+                  <option value="es-ES"></option>
+                  <option value="pt-BR"></option>
+                  <option value="ru-RU"></option>
+                  <option value="ja-JP"></option>
+                  <option value="ko-KR"></option>
+                  <option value="zh-CN"></option>
+                  <option value="zh-Hant-TW"></option>
+                  <option value="hi-IN"></option>
+                  <option value="th-TH"></option>
+                </datalist>
+              </label>
+              <label>Font scale: <span id="cp-fontScale-val">default</span>
+                <input id="cp-fontScale" type="range" min="0.5" max="2.0" step="0.1" value="1.0">
+              </label>
+            </div>
+          </details>
+                  <details class="cp-group" data-cp-group="overlays">
+          <summary>Overlays</summary>
+          <div class="cp-group-body">
+            <div class="cp-overlays">
+  <div class="cp-overlays-head">Inspect</div>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-a11y" data-cp-inspect="a11y" type="checkbox"> Accessibility</label>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-typography" data-cp-inspect="typography" type="checkbox"> Typography</label>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-theme" data-cp-inspect="theme" type="checkbox"> Theme attributes</label>
+  <label class="cp-live-row"><input class="cp-inspect" id="cp-inspect-layout" data-cp-inspect="layout" type="checkbox"> Layout boxes</label>
+</div>
+            <div class="cp-overlays">
+  <div class="cp-overlays-head">Overlays (Live Compose)</div>
+  <label class="cp-live-row"><input class="cp-overlay" id="cp-touchOverlay" type="checkbox" disabled> Show touches</label>
+</div>
+          </div>
+        </details>
+
+                <details class="cp-group" data-cp-group="overrides">
+        <summary>Overrides</summary>
+        <div class="cp-group-body">
+          <div class="cp-knobs">
+            <div class="cp-knobs-head">Declared overrides — edit a value to re-render.</div>
+            <label class="cp-live-row"><input type="checkbox" class="cp-knob" data-knob-key="enabled" data-knob-kind="bool" data-knob-initial="true" data-knob-default="true" checked> enabled</label>
+          <label>content
+            <select class="cp-knob" data-knob-key="content" data-knob-kind="string" data-knob-initial="icon" data-knob-default="icon+text">
+          <option value="icon+text">icon+text</option>
+<option value="icon" selected>icon</option>
+<option value="text">text</option>
+            </select>
+          </label>
+          <label>style
+            <select class="cp-knob" data-knob-key="style" data-knob-kind="string" data-knob-initial="filled-variant" data-knob-default="filled">
+          <option value="filled">filled</option>
+<option value="filled-variant" selected>filled-variant</option>
+<option value="tonal">tonal</option>
+<option value="outlined">outlined</option>
+<option value="child">child</option>
+            </select>
+          </label>
+<label>label
+  <input type="text" class="cp-knob" data-knob-key="label" data-knob-kind="string" data-knob-initial="Primary label" data-knob-default="Primary label" value="Primary label">
+</label>
+          </div>
+        </div>
+      </details>
+
+          <div class="cp-status" id="cp-status"></div>
+        </div>
+      </div>
+      <!-- Export remains below the workspace; renderer selection is kept beside the preview
+           heading so it is visible before a tall stage. The export bar is a SIBLING of the note
+           column rather than a child: the note is prose and reads better at `.cp-below`'s measure,
+           while the bar has to run the full content width to stay on one line. -->
+      <div class="cp-below">
+
+      </div>
+      <div class="cp-preview-links">
+      <p class="cp-source"><a class="cp-source-link" href="https://github.com/yschimke/wear-m3-catalog/blob/main/catalog/src/main/kotlin/ee/schimke/wearm3catalog/sections/Buttons.kt" title="src/main/kotlin/ee/schimke/wearm3catalog/sections/Buttons.kt"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> source</a></p>
+      <p class="cp-source"><a class="cp-source-link" href="/playground?from=wear-m3-catalog/button-compact__ideal__filled-variant-icon-only" title="Open this preview's source in the playground">▶ playground</a></p>
+      <details class="cp-report" id="cp-report" data-cp-repo="yschimke/wear-m3-catalog" data-cp-subject="this preview"><summary class="cp-report-link" title="Something wrong with this preview — files against yschimke/wear-m3-catalog"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> report a catalog issue</summary>
+        <div class="cp-report-panel"><form class="cp-report-form" method="get" target="_blank" rel="noopener" action="https://github.com/yschimke/wear-m3-catalog/issues/new"><label class="cp-report-summary">Summary<input class="cp-report-summary-input" type="text" name="title" required autocomplete="off" placeholder="Briefly describe what is wrong"></label><cp-report-scope class="cp-report-class"><label class="cp-report-class-label">Show this issue on<select class="cp-report-class-input"><option value="component" selected>This component</option><option value="variant" disabled hidden>This component + variant</option></select></label><span class="cp-report-class-note">Component issues appear on every preview variant; variant issues appear only on the preview you are reporting.</span></cp-report-scope><cp-report-classification class="cp-report-class"><label class="cp-report-class-label">Where does it belong?<select class="cp-report-class-input" name="labels"><option value="parity:upstream" data-cp-sentence="Upstream: the framework or design system this catalog is built on, not the catalog itself.">Upstream — not this catalog</option><option value="parity:catalog" data-cp-sentence="A catalog bug: the code in this repository draws it wrongly.">A catalog bug — this repository</option><option value="parity:verification-needed" data-cp-sentence="Needs investigating: the reporter could not tell whether this is ours or upstream." selected>Needs investigating — not sure yet</option></select></label><span class="cp-report-class-note">Applied as a <code>parity:</code> label, so the catalog&rsquo;s issue index can tell a difference that is ours from one that is not. Leave it on <em>needs investigating</em> if you are not sure — that is what it is for.</span></cp-report-classification><input type="hidden" name="body" id="cp-report-body" value="### What&#39;s wrong
+
+&lt;!-- What did you expect to see, and what did you get? --&gt;
+
+
+**Where it belongs:** as labelled on this issue
+
+### Screenshot
+
+![button-compact__ideal__filled-variant-icon-only](https://preview.coo.ee/wear-m3-catalog/render/button-compact__ideal__filled-variant-icon-only.png?mode=spec&amp;gen=a725bdaf6ed5f7c6cea3b69f3dab3cb641127883)
+
+&lt;!-- That image is a LIVE render: it re-renders if the catalog changes, so it may stop showing what you saw. GitHub displays it through Camo, but Camo proxies the source URL; it does not make a versioned snapshot. For a copy that stays put, use Copy PNG in the viewer&#39;s &quot;Export &amp; direct links&quot; panel and paste it here — GitHub then hosts the pixels itself. --&gt;
+
+
+### Which preview
+
+| | |
+| --- | --- |
+| Design system | `wear-m3-catalog` |
+| Preview | `button-compact__ideal__filled-variant-icon-only` |
+| Source | https://github.com/yschimke/wear-m3-catalog/blob/main/catalog/src/main/kotlin/ee/schimke/wearm3catalog/sections/Buttons.kt |
+| Catalog | `yschimke/wear-m3-catalog@design-artifacts/wear-m3-catalog` |
+| Rendered by | compose-ai-tools 2.0.0 |
+
+[Open this preview](https://preview.coo.ee/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec)
+
+```compose-parity-locator/v1
+repository: yschimke/wear-m3-catalog
+system: wear-m3-catalog
+component: Button/Compact
+preview: button-compact__ideal__filled-variant-icon-only
+reference: button-compact__ideal__filled-variant-icon-only
+variant: ideal/filled-variant-icon-only
+overrides: {}
+revision: yschimke/wear-m3-catalog@design-artifacts/wear-m3-catalog
+```
+" data-report-template="### What&#39;s wrong
+
+&lt;!-- What did you expect to see, and what did you get? --&gt;
+
+
+**Where it belongs:** as labelled on this issue
+
+### Screenshot
+
+![button-compact__ideal__filled-variant-icon-only]({{render}})
+
+&lt;!-- That image is a LIVE render: it re-renders if the catalog changes, so it may stop showing what you saw. GitHub displays it through Camo, but Camo proxies the source URL; it does not make a versioned snapshot. For a copy that stays put, use Copy PNG in the viewer&#39;s &quot;Export &amp; direct links&quot; panel and paste it here — GitHub then hosts the pixels itself. --&gt;
+
+
+### Which preview
+
+| | |
+| --- | --- |
+| Design system | `wear-m3-catalog` |
+| Preview | `button-compact__ideal__filled-variant-icon-only` |
+| Source | https://github.com/yschimke/wear-m3-catalog/blob/main/catalog/src/main/kotlin/ee/schimke/wearm3catalog/sections/Buttons.kt |
+| Catalog | `yschimke/wear-m3-catalog@design-artifacts/wear-m3-catalog` |
+| Rendered by | compose-ai-tools 2.0.0 |
+
+[Open this preview](https://preview.coo.ee/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec)
+
+```compose-parity-locator/v1
+repository: yschimke/wear-m3-catalog
+system: wear-m3-catalog
+component: Button/Compact
+preview: button-compact__ideal__filled-variant-icon-only
+reference: button-compact__ideal__filled-variant-icon-only
+variant: ideal/filled-variant-icon-only
+overrides: {{overrides}}
+revision: yschimke/wear-m3-catalog@design-artifacts/wear-m3-catalog
+```
+"><button type="submit" class="cp-report-submit"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> Open a prefilled issue</button><span class="cp-report-note">Files against <code>yschimke/wear-m3-catalog</code> — the project whose code declares this preview, <em>not</em> the preview server. The rest of the report — what you were looking at, which build, the links — is filled in for you on GitHub.</span></form></div></details>
+      <p class="cp-figma"><a class="cp-figma-link" href="https://www.figma.com/design/B24oss2tTeXAFykyeyusz0?node-id=44993-154009" target="_blank" rel="noopener noreferrer" title="Open the Figma node this preview is specified by — Button/Compact — figma"><svg class="cp-gh cp-figma-mark" viewBox="0 0 38 57" aria-hidden="true" fill="currentColor"><path d="M19 28.5a9.5 9.5 0 1 1 19 0 9.5 9.5 0 0 1-19 0z"/><path d="M0 47.5A9.5 9.5 0 0 1 9.5 38H19v9.5a9.5 9.5 0 0 1-19 0z"/><path d="M19 0v19h9.5a9.5 9.5 0 1 0 0-19H19z"/><path d="M0 9.5A9.5 9.5 0 0 0 9.5 19H19V0H9.5A9.5 9.5 0 0 0 0 9.5z"/><path d="M0 28.5A9.5 9.5 0 0 0 9.5 38H19V19H9.5A9.5 9.5 0 0 0 0 28.5z"/></svg> figma spec</a></p>
+      </div>
+            <div class="cp-export" aria-label="Export the current view">
+        <span class="cp-export-head" id="cp-export-head">Export</span>
+        <span class="cp-link-group">
+  <span class="cp-link-kind">PNG</span>
+  <button type="button" class="cp-copyurl" data-copyurl-target="cp-url-png"
+    title="Copy the PNG URL of the current view (overrides applied)">Copy link</button>
+  <button type="button" class="cp-copyimg" data-copyimg-target="cp-url-png"
+    data-copyimg-ext=".png" title="Copy the PNG itself to the clipboard">Copy PNG</button>
+  <a id="cp-dl-png" class="cp-dl" download title="Save the PNG to a file">Download</a>
+  <input id="cp-url-png" class="cp-url" type="text" readonly tabindex="-1"
+    aria-label="PNG URL">
+</span>
+<span class="cp-link-group">
+  <span class="cp-link-kind">SVG</span>
+  <button type="button" class="cp-copyurl" data-copyurl-target="cp-url-svg"
+    title="Copy the SVG URL of the current view (overrides applied)">Copy link</button>
+  <button type="button" class="cp-copyimg" data-copyimg-target="cp-url-svg"
+    data-copyimg-ext=".svg" title="Copy the SVG itself to the clipboard">Copy SVG</button>
+  <a id="cp-dl-svg" class="cp-dl" download title="Save the SVG to a file">Download</a>
+  <input id="cp-url-svg" class="cp-url" type="text" readonly tabindex="-1"
+    aria-label="SVG URL">
+</span>
+      </div>
+      <!-- Backdrop shown behind an open drawer on mobile (drawers become bottom sheets there);
+           tapping it dismisses the sheet. Inert on desktop. -->
+      <div class="cp-scrim" id="cp-scrim" aria-hidden="true"></div>
+      <!-- Remembers which control drawers this visitor left open (`cp-grp.<id>` per
+           `details.cp-group[data-cp-group]`). Renders nothing; `serve.css` hides the tag. -->
+      <cp-group-memory></cp-group-memory>
+      <!-- Resolve a deep-linked or remembered theme and publish the design-score baseline before
+           the component bundle upgrades the comparison control. -->
+      <script>(function () {
+  var el = document.getElementById("cp-theme");
+  if (!el) return;
+  // Runs before viewer.js' initial render.
+  var root = document.querySelector(".cp-viewer");
+  // The page's own URL outranks the remembered choice: `?themeProvider=` / `?uiMode=` is there
+  // because someone picked it (or was handed the link), so a bookmarked viewer opens on the
+  // theme it was bookmarked in — including on an explicit __light/__dark preview.
+  var params = new URLSearchParams(location.search);
+  var provider = params.get("themeProvider");
+  var uiMode = params.get("uiMode");
+  var urlChoice = provider ? "theme:" + provider
+    : (uiMode === "light" || uiMode === "dark" ? uiMode : "");
+  var urlOption = null;
+  Array.prototype.forEach.call(el.options, function (o) { if (urlChoice && o.value === urlChoice) urlOption = o; });
+  // A choice that merely names the preview's baked theme is DISPLAYED but not marked active:
+  // it asks for nothing, so it must not read as a pinned override. `?uiMode=light` on a
+  // light-baked preview is the case that mattered — the light/dark toggle leaves the parameter
+  // behind on the way back to light, and treating it as a pin suppressed the Figma comparison
+  // for a visitor who had made no net choice. Mirrors `pinsTheme` in viewer/themeChoice.ts.
+  var bakedTheme = el.getAttribute("data-default-theme") || "";
+  function pinsTheme(choice) { return !!choice && choice !== bakedTheme; }
+  if (urlOption) {
+    el.value = urlChoice;
+    if (pinsTheme(urlChoice)) el.setAttribute("data-theme-active", "1");
+  }
+  try {
+    // Per-tab (see the KDoc): this reads back only what someone picked in THIS tab, so applying
+    // it on every preview of the catalog is continuity rather than a stale global preference.
+    var stored = sessionStorage.getItem("cp-theme:wear-m3-catalog");
+    var declared = stored && stored.indexOf("theme:") === 0;
+    var option = null;
+    Array.prototype.forEach.call(el.options, function (o) { if (o.value === stored) option = o; });
+    // `!el.disabled` as well as `!option.disabled`, and they are not the same test: a static
+    // bundle (or a fixed-theme specimen) disables the SELECT while its built-in light/dark
+    // options stay enabled, so an option check alone let a remembered choice through onto a
+    // page that cannot re-render. Nothing downstream honours it there — `syncBg` and
+    // `activeThemeChoice` both fold on `el.disabled` — but the chip read as pressed and the
+    // chrome followed it, framing an unchanged light snapshot in dark page colours.
+    if (!urlOption && !el.disabled && option && !option.disabled && (declared || stored === "light" || stored === "dark")) {
+      el.value = stored;
+      if (pinsTheme(stored)) el.setAttribute("data-theme-active", "1");
+    }
+  } catch (e) {}
+  // Publish the design-score baseline before the component bundle upgrades the comparison
+  // control. A chosen theme changes the rendered side of the comparison, so the
+  // server-baked score is already stale on the first paint. viewer.js keeps this attribute in
+  // sync after controls change; this early write makes the element's initial read authoritative.
+  if (root) {
+    var atSpecBaseline = el.disabled || el.getAttribute("data-theme-active") !== "1";
+    root.setAttribute("data-spec-baseline", atSpecBaseline ? "1" : "0");
+  }
+  // Keep the stage backing colour in step with the CHOSEN theme, so a re-render in the opposite
+  // uiMode never lands a transparent sticker on a clashing surface. The server seeds
+  // data-bg-theme from the baked variant (or the dark-first default); a light/dark Theme choice
+  // overrides it, and clearing it reverts to that default.
+  var bgDefault = (root && root.getAttribute("data-bg-theme")) || "";
+  function syncBg() {
+    if (!root) return;
+    // Only let the Theme choice drive the stage backing when the control can actually re-render
+    // (daemon or Wasm). On a static bundle the select is disabled but the seeding above may still
+    // have copied a remembered value into el.value — honoring it would tint the
+    // stage while ServeBundleHost keeps returning the UNCHANGED baked PNG. Keep bgDefault there.
+    var selectedOption = el.options[el.selectedIndex];
+    var chosen = !el.disabled && selectedOption
+      ? selectedOption.getAttribute("data-theme-mode") ||
+        (el.value === "light" || el.value === "dark" ? el.value : "") : "";
+    var m = chosen || bgDefault;
+    if (m) root.setAttribute("data-bg-theme", m);
+    else root.removeAttribute("data-bg-theme");
+  }
+  // Round-trip every unified choice, including `theme:<provider>`, to the catalog page.
+  el.addEventListener("change", function () {
+    el.setAttribute("data-theme-active", "1");
+    try { sessionStorage.setItem("cp-theme:wear-m3-catalog", el.value); } catch (e) {}
+    syncBg();
+    // …and the page around the stage, when the Page theme setting says to follow the choice.
+    if (window.cpPageTheme) window.cpPageTheme.follow(el.value);
+  });
+  syncBg();
+})();</script>
+      <script src="/assets/serve/cc1b-2d6b517f015a4dc2/vue-runtime.js"></script>
+<script src="/assets/serve/101c8-e0f1220407fc46f0/viewer-components.js"></script>
+      <!-- The viewer's drawers, the phone row order, the theme toggle's value and the component
+           filter. Renders nothing; `serve.css` hides the tag. -->
+      <cp-viewer-drawers></cp-viewer-drawers>
+
+      <script>(function () {
+
+        var presenceUrl = "/wear-m3-catalog/api/presence?mode=spec";
+        function ping() {
+          if (document.visibilityState !== "visible") return;
+          fetch(presenceUrl, { method: "POST", credentials: "same-origin", keepalive: true })
+            .catch(function () {});
+        }
+        setInterval(ping, 240 * 1000);
+        document.addEventListener("visibilitychange", ping);
+        // Fired on arrival, not only every interval. Catalogs are no longer warmed at boot (see
+        // ServeCatalogLiveHost.eagerWarmOnOpen), so this ping is what gets a daemon ready for the
+        // catalog the visitor actually opened — while they read the grid, rather than when they
+        // first click a theme and wait out a cold start.
+        ping();
+
+        // Render-server badge. Catalogs open their daemon on first real use, so whether one is up is
+        // now a genuine question with a visible answer — a theme switch is instant against a warm
+        // daemon and pays a cold start against none. Same URL family as the presence ping, and the
+        // endpoint reads through `peekHost`, so polling it never wakes what it is reporting on.
+        // The badge lives INSIDE the header's Status link (see ServeWeb.siteHeader) — the count and
+        // that link answer the same question, so they are one control: the number is the summary and
+        // the link is where the detail is. It is server-rendered and hidden, so filling it never
+        // moves the brand or the nav.
+        //
+        // That slot is also the feature switch. Catalog mode's header carries no nav, so it has
+        // neither the Status link nor the slot, and a catalog visitor has no `/status` page to read a
+        // count against — a number with nothing to link to is not a summary of anything. This used to
+        // create the span and append it to `<header>` when the slot was missing, which made it a third
+        // item in that two-column grid: it landed in an implicit second row, stretched across the
+        // `1fr` track, and painted the count as a full-width bar under the brand. So absence of the
+        // slot now disables the badge outright rather than inventing somewhere to put it — which also
+        // stops Catalog mode polling every 20s for an answer it does not display.
+        var daemonUrl = presenceUrl.replace("/api/presence", "/api/daemons");
+        // Read synchronously rather than on first paint: this script is emitted deep in the body, long
+        // after the header, so the slot either exists now or is not on this page at all.
+        var daemonBadge = document.getElementById("cp-daemon-status");
+        function paintDaemonStatus(state) {
+          var el = daemonBadge;
+          if (!el) return;
+          if (!state) { el.hidden = true; return; }
+          el.hidden = false;
+          // "not running" is a normal resting state, not a fault — a catalog nobody has rendered on
+          // simply has no process yet. Word it so it doesn't read as an error.
+          var count = state.instances || 0;
+          var catalogDetail = state.running
+            ? count + (count === 1 ? " instance" : " instances") +
+              ", " + (state.activeStreams || 0) + " live"
+            : "not running (starts on demand)";
+          if (state.poolCapacity > 0)
+            catalogDetail += ", pool " + state.pooled + "/" + state.poolCapacity;
+          var overallDetail = (state.overallRunning || 0) + " catalogs running, " +
+            (state.overallActiveStreams || 0) + " live streams";
+          if (state.liveSeatsTotal > 0)
+            overallDetail += ", " + (state.liveSeatsTotal - state.liveSeatsAvailable) + "/" +
+              state.liveSeatsTotal + " seats used";
+          el.innerHTML = '<span class="cp-daemon-dot" aria-hidden="true"></span>' + count;
+          el.setAttribute("data-cp-daemon-running", state.running ? "1" : "0");
+          // The badge itself is decoration on a link, so it says nothing to a screen reader: an
+          // `aria-label` here would be appended to the LINK's accessible name, renaming "Status" to
+          // a sentence about instance counts — and renaming it again on every poll. The name stays
+          // "Status"; the detail rides on the link's own title (and behind it, the page it opens),
+          // which is the same place a sighted visitor reads it from.
+          var host = el.closest("a") || el;
+          host.title = "Render servers — this catalog: " + catalogDetail +
+            "\nOverall server: " + overallDetail;
+        }
+        function pollDaemons() {
+          if (!daemonUrl || !daemonBadge || document.visibilityState !== "visible") return;
+          fetch(daemonUrl, { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(paintDaemonStatus)
+            .catch(function () {});
+        }
+        setInterval(pollDaemons, 20000);
+        document.addEventListener("visibilitychange", pollDaemons);
+        pollDaemons();
+        // A theme switch is exactly when the daemon comes up, so refresh the badge shortly after one.
+        document.addEventListener("click", function (e) {
+          if (e.target && e.target.closest && e.target.closest(".cp-theme-btn")) {
+            setTimeout(pollDaemons, 1500);
+          }
+        });
+      })();</script>
+      <script src="/assets/serve/27f5-c1f114d545428968/format-compare.js" data-cp-scorer-worker="/assets/serve/672-ebb555279d891c5c/compare-scorer.js"></script>
+      <script src="/assets/serve/6b581-d6e9c9379c1c3b8b/codemirror.js"></script>
+      <script src="/assets/serve/f5e9-f02fa648bc1839e3/viewer.js"></script>
+        </main>
+        <footer class="cp-site-footer">
+          <div class="cp-site-footer-links">
+            <a href="/wear-m3-catalog/feed.xml" class="cp-changelog-link" title="What changed in this design system, newest first (RSS)"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><circle cx="3" cy="13" r="2"/><path d="M1 8.5a6.5 6.5 0 016.5 6.5h-2A4.5 4.5 0 001 10.5v-2z"/><path d="M1 3a12 12 0 0112 12h-2A10 10 0 001 5V3z"/></svg> Changelog</a> ·
+            <a href="https://github.com/yschimke/compose-ai-tools"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a> ·
+            <form class="cp-report-bug" method="get" action="/report-bug"><input type="hidden" name="from" value=""><input type="hidden" name="token" value=""><input type="hidden" name="scheme" value=""><button type="submit" class="cp-report-bug-link" title="Report a bug in the preview server itself — not in a preview"><svg class="cp-gh" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> report a server bug</button></form> ·
+            <a href="/version">/version</a> · <span class="cp-about-ver" title="running preview-server build">server v3.9.0</span>
+          </div>
+        </footer>
+        <div class="cp-fab" data-cp-capture-src="/assets/serve/4d13-90462cb5824a1764/report-capture.js">
+          <details class="cp-fab-menu">
+            <summary class="cp-fab-btn" title="Report a problem" aria-label="Report a problem"
+              ><svg class="cp-fab-mark" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12.4a7.7 7.7 0 0 1-8.3 7.6c-.7 0-1.4-.1-2-.3L4 21l1.4-3.9a7.3 7.3 0 0 1-1.9-4.9 7.7 7.7 0 0 1 8.5-7.6 7.8 7.8 0 0 1 8.5 7.8z"/><path d="M12 8.4v4"/><path d="M12 15.4h.01"/></svg></summary>
+            <div class="cp-fab-panel">
+              <p class="cp-fab-head">Report a problem</p>
+              <p class="cp-fab-sub">Two trackers &mdash; pick whichever owns the thing that is
+                wrong.</p>
+              <a class="cp-fab-choice cp-fab-catalog" href="#cp-report" hidden>
+                <span class="cp-fab-what">Something is wrong with this <strong>preview</strong></span>
+                <span class="cp-fab-who">wrong colours, wrong spec, a state that is missing</span>
+              </a>
+              <form class="cp-report-bug" method="get" action="/report-bug"><input type="hidden" name="from" value=""><input type="hidden" name="token" value=""><input type="hidden" name="scheme" value=""><button type="submit" class="cp-fab-choice"><span class="cp-fab-what">Something is wrong with the <strong>preview server</strong></span><span class="cp-fab-who">the page, a control, a render that failed &mdash; goes to <code>yschimke/compose-preview-server</code></span></button></form>
+              <div class="cp-shot" hidden>
+                <p class="cp-shot-head">Capture what you can see</p>
+                <p class="cp-fab-who">The report embeds the plain render. Anything the browser composes
+                  &mdash; the spec triptych, a wipe, an overlay, an error &mdash; only reaches the issue as a
+                  picture you take.</p>
+                <div class="cp-shot-modes">
+                  <button type="button" class="cp-shot-mode" data-cp-capture="view"
+                    title="The whole browser viewport, as it is now">Whole view</button>
+                  <button type="button" class="cp-shot-mode" data-cp-capture="region"
+                    title="Drag a box around the part that is wrong">Region</button>
+                  <button type="button" class="cp-shot-mode" data-cp-capture="element"
+                    title="Point at one element — a render, a table, a single cell">Element</button>
+                </div>
+                <p class="cp-shot-note" role="status"></p>
+                <ul class="cp-shot-list"></ul>
+              </div>
+            </div>
+          </details>
+        </div>
+        <script>(function(){var key="cp_chrome";document.querySelectorAll("[data-cp-interface-mode]").forEach(function(b){b.addEventListener("click",function(){var mode=b.getAttribute("data-cp-interface-mode");if(mode!=="catalog"&&mode!=="dev")return;try{document.cookie=key+"="+mode+"; path=/; max-age=31536000; samesite=lax"+(location.protocol==="https:"?"; secure":"");}catch(e){}var u=new URL(location.href);u.searchParams.delete("chrome");if(document.cookie.indexOf(key+"="+mode)<0)u.searchParams.set("chrome",mode);var q=u.searchParams.toString();location.assign(u.pathname+(q?"?"+q:"")+u.hash);});});})();</script>
+        <script src="/assets/serve/3e4a-61b78884b7319c7e/keyboard-navigation.js"></script>
+      </body>
+    </html>
