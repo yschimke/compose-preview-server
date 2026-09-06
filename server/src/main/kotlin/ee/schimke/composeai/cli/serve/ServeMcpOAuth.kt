@@ -47,13 +47,23 @@ import kotlinx.serialization.json.JsonIgnoreUnknownKeys
  * There is no new credential type, no new lifetime, no new revocation path, and nothing here can
  * grant what an approver could not grant on the page.
  *
- * ## What is not implemented, and why that is allowed
+ * ## Refresh, and the line it does not cross
  *
- * No refresh tokens: a grant is short-lived by design and re-authorization is a human decision, so
- * a silent renewal would launder exactly the property the grants doc is built around. No client
- * secrets: every MCP client here is a public client, so RFC 7591 registration returns an id only
- * and the token endpoint is `none`-authenticated with PKCE carrying the proof — `S256` only, never
- * `plain`.
+ * Refresh tokens exist and are **session-scoped**: one renews an access token within the lifetime
+ * an approver already chose, and dies with the grant — on its deadline, or the instant it is
+ * revoked. Nothing here lengthens a decision, which is what lets it sit inside a design whose
+ * promise is that no credential outlives one.
+ *
+ * The case it answers is real and previously had no answer: a client that lost its access token
+ * mid-session had to interrupt a person for permission it had already been given, and a headless or
+ * cloud client — with no browser to be interrupted in — simply stopped there. Rotation on every use
+ * follows RFC 9700 §4.14.2, because a public client has nothing standing behind a leaked token.
+ *
+ * ## What is still not implemented
+ *
+ * No client secrets: every MCP client here is a public client, so RFC 7591 registration returns an
+ * id only and the token endpoint is `none`-authenticated with PKCE carrying the proof — `S256`
+ * only, never `plain`.
  */
 object ServeMcpOAuth {
 
@@ -153,7 +163,7 @@ object ServeMcpOAuth {
     @SerialName("response_types_supported")
     val responseTypesSupported: List<String> = listOf("code"),
     @SerialName("grant_types_supported")
-    val grantTypesSupported: List<String> = listOf("authorization_code"),
+    val grantTypesSupported: List<String> = listOf("authorization_code", "refresh_token"),
     @SerialName("code_challenge_methods_supported")
     val codeChallengeMethodsSupported: List<String> = listOf(CODE_CHALLENGE_S256),
     @SerialName("token_endpoint_auth_methods_supported")
@@ -207,6 +217,19 @@ object ServeMcpOAuth {
     @SerialName("token_type") val tokenType: String = "Bearer",
     @SerialName("expires_in") val expiresIn: Long,
     val scope: String,
+    /**
+     * Session-scoped, and that is the whole design: this renews an access token **within** the
+     * lifetime the approver already chose, and can never reach past it. It dies exactly when the
+     * grant does — on its deadline, or the moment the grant is revoked — so refreshing is a way to
+     * recover a lost or rotated token during an approved session, not a way to extend one.
+     *
+     * That distinction is what makes it safe to add to a design built on "no credential outlives a
+     * human decision" ([docs/design/AGENT_ACCESS_GRANTS.md]). Nothing here lengthens a decision;
+     * without it, a client that lost its access token mid-session had to interrupt a person to get
+     * back something they had already granted — and a headless or cloud client, with no browser to
+     * be interrupted in, simply stopped.
+     */
+    @SerialName("refresh_token") val refreshToken: String? = null,
   )
 
   /** RFC 6749 §5.2 / RFC 7591 §3.2.2 error body. */
@@ -252,6 +275,19 @@ object ServeMcpOAuth {
       nowMillis - createdAtMillis > AUTHORIZATION_TTL_SECONDS * 1000
   }
 
+  /**
+   * A refresh token, bound to the grant it renews and the client it was issued to.
+   *
+   * There is no expiry field, and that is deliberate rather than an omission: the binding's
+   * lifetime *is* the grant's. [ServeAgentGrantStore] is asked whether the grant is still live on
+   * every use, so a revoked or lapsed grant takes its refresh tokens with it in the same instant,
+   * with nothing here to keep in step.
+   */
+  data class RefreshBinding(val token: String, val grantId: String, val clientId: String)
+
+  /** Bound on the refresh map, like the other two. */
+  const val MAX_REFRESH_TOKENS = 512
+
   // ----------------------------------------------------------------- store
 
   /**
@@ -266,6 +302,7 @@ object ServeMcpOAuth {
   class Store(private val clock: () -> Long = System::currentTimeMillis) {
 
     private val clients = ConcurrentHashMap<String, RegisteredClient>()
+    private val refreshTokens = ConcurrentHashMap<String, RefreshBinding>()
     private val pending = ConcurrentHashMap<String, PendingAuthorization>()
     /** Request id → code, so the decision handler can find the return leg by what it holds. */
     private val byRequest = ConcurrentHashMap<String, String>()
@@ -347,10 +384,43 @@ object ServeMcpOAuth {
       clients.entries.removeIf { (_, client) -> client.isExpired(now) }
     }
 
+    /**
+     * Mint a refresh token for [grantId]. Called once per authorization-code exchange and again on
+     * every rotation.
+     */
+    fun issueRefresh(grantId: String, clientId: String): String? {
+      if (refreshTokens.size >= MAX_REFRESH_TOKENS) return null
+      val binding = RefreshBinding(randomId(), grantId, clientId)
+      refreshTokens[binding.token] = binding
+      return binding.token
+    }
+
+    /**
+     * Consume [token] and hand back what it was bound to.
+     *
+     * Rotated rather than reused — the presented token is removed whatever happens next, so a
+     * replay finds nothing even if this attempt goes on to fail its client check. That is
+     * [RFC 9700](https://datatracker.ietf.org/doc/html/rfc9700) §4.14.2 for public clients, which
+     * cannot authenticate themselves and so have nothing else standing behind a leaked token.
+     */
+    fun redeemRefresh(token: String?, clientId: String?): RefreshBinding? {
+      val key = token ?: return null
+      val binding = refreshTokens.remove(key) ?: return null
+      return binding.takeIf { it.clientId == clientId }
+    }
+
+    /** Drop every refresh token bound to [grantId] — used when its grant is gone. */
+    fun forgetRefreshFor(grantId: String) {
+      refreshTokens.entries.removeIf { (_, binding) -> binding.grantId == grantId }
+    }
+
+    fun refreshCount(): Int = refreshTokens.size
+
     fun clear() {
       clients.clear()
       pending.clear()
       byRequest.clear()
+      refreshTokens.clear()
     }
 
     fun pendingCount(): Int = pending.size

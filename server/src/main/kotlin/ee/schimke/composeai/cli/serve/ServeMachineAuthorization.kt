@@ -17,6 +17,21 @@ class ServeMachineAuthorization(
   private val serverToken: String,
   private val githubAuth: ServeGithubAuth?,
   private val agentGrants: ServeAgentGrantStore?,
+  /**
+   * Whether this box serves its published catalogs token-free — `--public`.
+   *
+   * It decides one thing here: whether `preview` scope is satisfied by presenting nothing. On a
+   * public box it is, because that is already what `--public` means everywhere else on the server —
+   * `GET /api/previews` answers an anonymous caller with the whole preview listing, and the viewer
+   * is a page anyone can open. Demanding a grant for the *same* reads over MCP protected nothing;
+   * it only meant an agent had to ask a human for permission to see what any passer-by can already
+   * see, and — because the refusal arrives during the handshake, on `resources/list` — that a
+   * client showed the whole server as needing authorization rather than as connected.
+   *
+   * A token-gated box is unchanged. There `preview` still requires the operator token, a GitHub
+   * session, or a grant, exactly as before.
+   */
+  private val isPublic: Boolean = false,
 ) {
   sealed interface Decision {
     data class Authorized(val actorId: String) : Decision
@@ -40,7 +55,16 @@ class ServeMachineAuthorization(
       }
     }
 
-    val login = githubAuth?.currentLogin(call) ?: return Decision.Missing
+    val login = githubAuth?.currentLogin(call)
+    if (login == null) {
+      // Nothing was presented. On a public box the bottom rung is still open, because the same
+      // bytes are already served to anyone over HTTP; anything above it needs a real credential.
+      return if (isPublic && required == AgentGrantScope.PREVIEW) {
+        Decision.Authorized("anonymous")
+      } else {
+        Decision.Missing
+      }
+    }
     val allowed =
       when (required) {
         AgentGrantScope.PREVIEW,

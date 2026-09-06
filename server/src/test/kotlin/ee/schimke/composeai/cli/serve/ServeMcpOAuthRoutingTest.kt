@@ -394,11 +394,94 @@ class ServeMcpOAuthRoutingTest {
   }
 
   @Test
-  fun `refresh tokens are refused rather than silently renewing a human decision`() {
+  fun `a refresh token renews within the approved session`() {
+    val clientId = registerClient()
+    val authorizationCode = approvedCode(clientId)
     val (code, body, _) =
       post(
         ServeMcpOAuth.TOKEN_PATH,
-        "grant_type=refresh_token&refresh_token=whatever",
+        "grant_type=authorization_code&code=$authorizationCode&client_id=$clientId" +
+          "&redirect_uri=$redirectUri&code_verifier=$verifier",
+        contentType = "application/x-www-form-urlencoded",
+      )
+    assertEquals(200, code, body)
+    val refresh = str(body, "refresh_token")
+    assertTrue(refresh.isNotEmpty())
+
+    val (refreshed, refreshedBody, _) =
+      post(
+        ServeMcpOAuth.TOKEN_PATH,
+        "grant_type=refresh_token&refresh_token=$refresh&client_id=$clientId",
+        contentType = "application/x-www-form-urlencoded",
+      )
+    assertEquals(200, refreshed, refreshedBody)
+    // The same session, not a new one: the bearer is the grant's, and the scope is unchanged.
+    assertEquals(str(body, "access_token"), str(refreshedBody, "access_token"))
+    assertEquals(str(body, "scope"), str(refreshedBody, "scope"))
+    // Rotated (RFC 9700 4.14.2): the presented token is spent.
+    assertTrue(str(refreshedBody, "refresh_token") != refresh)
+
+    val (replayed, _, _) =
+      post(
+        ServeMcpOAuth.TOKEN_PATH,
+        "grant_type=refresh_token&refresh_token=$refresh&client_id=$clientId",
+        contentType = "application/x-www-form-urlencoded",
+      )
+    assertEquals(400, replayed)
+  }
+
+  @Test
+  fun `a refresh token is refused once its grant is revoked`() {
+    // The bound that makes refresh safe to have at all: it renews within a decision, never past it.
+    val clientId = registerClient()
+    val authorizationCode = approvedCode(clientId)
+    val (_, body, _) =
+      post(
+        ServeMcpOAuth.TOKEN_PATH,
+        "grant_type=authorization_code&code=$authorizationCode&client_id=$clientId" +
+          "&redirect_uri=$redirectUri&code_verifier=$verifier",
+        contentType = "application/x-www-form-urlencoded",
+      )
+    val refresh = str(body, "refresh_token")
+    assertTrue(grants.revokeToken(str(body, "access_token"), by = "test"))
+
+    val (code, refusal, _) =
+      post(
+        ServeMcpOAuth.TOKEN_PATH,
+        "grant_type=refresh_token&refresh_token=$refresh&client_id=$clientId",
+        contentType = "application/x-www-form-urlencoded",
+      )
+    assertEquals(400, code)
+    assertEquals("invalid_grant", str(refusal, "error"))
+  }
+
+  @Test
+  fun `a refresh token issued to one client is refused to another`() {
+    val clientId = registerClient()
+    val other = registerClient()
+    val authorizationCode = approvedCode(clientId)
+    val (_, body, _) =
+      post(
+        ServeMcpOAuth.TOKEN_PATH,
+        "grant_type=authorization_code&code=$authorizationCode&client_id=$clientId" +
+          "&redirect_uri=$redirectUri&code_verifier=$verifier",
+        contentType = "application/x-www-form-urlencoded",
+      )
+    val (code, _, _) =
+      post(
+        ServeMcpOAuth.TOKEN_PATH,
+        "grant_type=refresh_token&refresh_token=${str(body, "refresh_token")}&client_id=$other",
+        contentType = "application/x-www-form-urlencoded",
+      )
+    assertEquals(400, code)
+  }
+
+  @Test
+  fun `an unknown grant type is still refused`() {
+    val (code, body, _) =
+      post(
+        ServeMcpOAuth.TOKEN_PATH,
+        "grant_type=client_credentials&whatever=1",
         contentType = "application/x-www-form-urlencoded",
       )
     assertEquals(400, code)
