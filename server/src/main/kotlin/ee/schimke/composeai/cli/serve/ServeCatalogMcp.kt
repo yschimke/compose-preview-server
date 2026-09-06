@@ -2,7 +2,6 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
-import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.web.WebEscaping
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -1700,8 +1699,7 @@ class ServeCatalogMcp(
     val capability = builder.capabilityFor(name) ?: return null
     val actor =
       when (val decision = authorize(capability, presentedToken)) {
-        is UiBuilderAuthorizationDecision.Authorized ->
-          AuthenticatedUiBuilderActor(decision.actorId)
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing ->
           return toolError(
             "this tool needs a UI-builder ${capability.name.lowercase()} grant; none was " +

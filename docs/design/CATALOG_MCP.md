@@ -150,6 +150,8 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
+| `ui_builder_design_access` | `ui-builder-read` | Who can open a design — its owner, and everyone it has been shared with |
+| `ui_builder_share_design` | `ui-builder-write` | Share a design with another actor as `viewer` or `editor`, or take that back |
 | `ui_builder_list_comments`, `ui_builder_await_comments` | `ui-builder-read` | Read a design's discussion, and **wait** for the next thing said in it |
 | `ui_builder_post_comment`, `ui_builder_resolve_comment_thread` | `ui-builder-write` | Say something on a design, and close a thread once it is answered |
 

@@ -14,8 +14,17 @@ import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.decodeNewDesignStates
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
+import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
+import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
+import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
+import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.web.WebEscaping
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -1112,6 +1121,11 @@ class ServeHttpServer(
         // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
         // is the whole reason creation is not a navigation to a `?create=1` URL any more.
         post("/ui-builder/{catalog}") { handleUiBuilderCreate() }
+        // Sharing one design, as a page rather than a hand-written protocol POST. Registered
+        // before the asset catch-all; a literal `access` segment outranks `{path...}`, so the
+        // editor shell is still what every other path under a design serves.
+        get("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccess() }
+        post("/ui-builder/{catalog}/{designId}/access") { handleUiBuilderAccessUpdate() }
         // A runtime id is an exact immutable pin. There is deliberately no unversioned or
         // `latest` route: an unavailable pin has to surface as an explicit migration decision.
         get("/ui-builder/runtime/{runtimeId}/{path...}") { handleUiBuilderRuntimeAsset() }
@@ -5076,7 +5090,7 @@ class ServeHttpServer(
     val outcome =
       withContext(Dispatchers.IO) {
         ServeUiBuilderCreate(uiBuilderService!!, uiBuilderDir!!)
-          .install(actorId = ADMIN_LIBRARY_ACTOR, document = document)
+          .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     when (outcome) {
@@ -11789,32 +11803,13 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    // A form POST is the one request shape a hostile page can aim at this server with the reader's
-    // credentials attached, so it is refused unless the browser says it came from here. Both
-    // headers are absent on a non-browser client (curl, a script), which is not a cross-site
-    // request and is left alone; a browser that omits `Origin` on a same-origin POST still sends
-    // `Sec-Fetch-Site: same-origin`.
-    val fetchSite = call.request.headers["Sec-Fetch-Site"]
-    val origin = call.request.headers[HttpHeaders.Origin]
-    val sameOrigin =
-      when {
-        fetchSite != null -> fetchSite == "same-origin" || fetchSite == "none"
-        origin != null ->
-          // `Origin` is scheme://host[:port]; `Host` is the host[:port] this request was addressed
-          // to. Comparing the authorities is what "did this form come from this server?" means
-          // behind a proxy that terminates TLS, where the schemes legitimately differ.
-          call.request.headers[HttpHeaders.Host]?.let {
-            origin.substringAfter("://").equals(it, ignoreCase = true)
-          } == true
-        else -> true
-      }
-    if (!sameOrigin) {
+    if (!isSameOriginFormSubmission()) {
       call.respondText("cross-site design creation is refused", status = HttpStatusCode.Forbidden)
       return
     }
-    val actorId =
+    val actor =
       when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
-        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing -> {
           // The header is for the script; the body is for whoever submitted the form. A browser
           // that followed a `<form method="post">` here renders whatever comes back, so a bare
@@ -11869,7 +11864,7 @@ class ServeHttpServer(
       withContext(Dispatchers.IO) {
         ServeUiBuilderCreate(service, dir)
           .create(
-            actorId = actorId,
+            actor = actor,
             catalogSystemId = catalog,
             designId = designId,
             templateId = template,
@@ -11890,6 +11885,224 @@ class ServeHttpServer(
       }
       is ServeUiBuilderCreate.Outcome.Refused ->
         call.respondText(outcome.reason, status = HttpStatusCode.fromValue(outcome.status))
+    }
+  }
+
+  /**
+   * `GET /ui-builder/{catalog}/{designId}/access` — the sharing page for one design.
+   *
+   * Owner-only, and that is the service's decision rather than this route's: `GetDesignAccess` is
+   * refused for anyone else, so a visitor who merely has the design open is told the same thing a
+   * stranger is. What the route adds is the part a person needs — their own actor id, so they can
+   * see which identity the answer was given to, and a form.
+   */
+  private suspend fun RoutingContext.handleUiBuilderAccess() {
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.READ) ?: return
+    val service = uiBuilderService ?: return
+    val access =
+      when (val response = service.executeMapped(GetDesignAccessRequestV1(designId), actor)) {
+        is UiBuilderServiceResponse.DesignAccess -> response.access
+        else -> {
+          respondUiBuilderDenied(
+            HttpStatusCode.Forbidden,
+            "only a design's owner can see or change who else may open it",
+            "Only the owner of $designId can share it. Ask them to add " +
+              "${actor.actorId} from the design's own share page.",
+          )
+          return
+        }
+      }
+    respondUiBuilderAccessPage(designId, actor, access, notice = "")
+  }
+
+  /**
+   * `POST /ui-builder/{catalog}/{designId}/access` — share it, or take the sharing back.
+   *
+   * Answers with the page again rather than a redirect: the outcome worth showing is the new access
+   * list, and re-rendering it puts the confirmation and the state it describes in one response.
+   * Nothing here is a navigation a reload would repeat harmfully — a re-submitted grant of the same
+   * role to the same actor is the state that already holds.
+   */
+  private suspend fun RoutingContext.handleUiBuilderAccessUpdate() {
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site sharing is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
+    val service = uiBuilderService ?: return
+    val form = call.receiveParameters()
+    val target = form["actorId"].orEmpty().trim()
+    val revoking = form["action"] == "revoke"
+    val current =
+      when (val response = service.executeMapped(GetDesignAccessRequestV1(designId), actor)) {
+        is UiBuilderServiceResponse.DesignAccess -> response.access
+        else -> {
+          respondUiBuilderDenied(
+            HttpStatusCode.Forbidden,
+            "only a design's owner can see or change who else may open it",
+            "Only the owner of $designId can share it.",
+          )
+          return
+        }
+      }
+    if (target.isBlank() || target == current.ownerActorId) {
+      respondUiBuilderAccessPage(
+        designId,
+        actor,
+        current,
+        notice =
+          if (target.isBlank()) "Nothing was shared: no actor id was given."
+          else "That is the owner's own id, and an owner's access is not a grant to add or remove.",
+      )
+      return
+    }
+    val role =
+      if (form["role"] == "editor") DesignAccessRoleV1.EDITOR else DesignAccessRoleV1.VIEWER
+    val mutation =
+      if (revoking) RevokeActorAccessMutationV1(target)
+      else
+        GrantActorAccessMutationV1(
+          target,
+          role,
+          if (role == DesignAccessRoleV1.EDITOR)
+            listOf(
+              DesignAccessActionV1.READ,
+              DesignAccessActionV1.WRITE,
+              DesignAccessActionV1.EXPORT,
+            )
+          // A viewer exports too: the exported Kotlin is a rendering of the design they are
+          // already looking at, and withholding it makes a shared design useless to the one
+          // audience it was shared with. Neither role carries `manageAccess` or `delete`, so
+          // being shared with never becomes the power to share on.
+          else listOf(DesignAccessActionV1.READ, DesignAccessActionV1.EXPORT),
+        )
+    val updated =
+      service.executeMapped(
+        UpdateDesignAccessRequestV1(designId, current.accessRevision, listOf(mutation)),
+        actor,
+      )
+    when (updated) {
+      is UiBuilderServiceResponse.DesignAccess ->
+        respondUiBuilderAccessPage(
+          designId,
+          actor,
+          updated.access,
+          notice =
+            if (revoking) "$target can no longer open this design."
+            else "$target can now open this design as ${role.name.lowercase()}.",
+        )
+      is UiBuilderServiceResponse.Error ->
+        respondUiBuilderAccessPage(designId, actor, current, notice = updated.error.message)
+      else -> respondUiBuilderAccessPage(designId, actor, current, notice = "nothing changed")
+    }
+  }
+
+  /**
+   * The two things both access routes need: who is asking, and which design — or null once the
+   * refusal has been written.
+   */
+  private suspend fun RoutingContext.uiBuilderAccessTarget(
+    capability: UiBuilderRouteCapability
+  ): Pair<AuthenticatedUiBuilderActor, String>? {
+    val service = uiBuilderService
+    val authorization = uiBuilderAuthorization
+    if (service == null || authorization == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return null
+    }
+    if (call.parameters["catalog"] !in uiBuilderCatalogs) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return null
+    }
+    val designId = call.parameters["designId"].orEmpty()
+    if (!isUiBuilderDesignSegment(designId)) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return null
+    }
+    val actor =
+      when (val decision = authorization.authorize(call, capability)) {
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+        UiBuilderAuthorizationDecision.Missing -> {
+          call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+          respondUiBuilderDenied(
+            HttpStatusCode.Unauthorized,
+            "authentication is required",
+            uiBuilderDeniedReason(githubAuth?.currentLogin(call)),
+          )
+          return null
+        }
+        UiBuilderAuthorizationDecision.Forbidden -> {
+          respondUiBuilderDenied(
+            HttpStatusCode.Forbidden,
+            "UI-builder access required",
+            uiBuilderDeniedReason(githubAuth?.currentLogin(call)),
+          )
+          return null
+        }
+      }
+    return actor to designId
+  }
+
+  private suspend fun RoutingContext.respondUiBuilderAccessPage(
+    designId: String,
+    actor: AuthenticatedUiBuilderActor,
+    access: DesignAccessControlV1,
+    notice: String,
+  ) {
+    val catalog = call.parameters["catalog"].orEmpty()
+    val skin = call.siteSkin()
+    markGeneration("static-page", "no-store")
+    call.respondText(
+      ServeWeb.uiBuilderAccessPage(
+        designId = designId,
+        designHref = uiBuilderPermalink(catalog, designId, call.request.queryParameters),
+        formAction =
+          uiBuilderPermalink(catalog, designId, call.request.queryParameters).let { permalink ->
+            val (path, query) = permalink.substringBefore("?") to permalink.substringAfter("?", "")
+            "$path/access" + if (query.isEmpty()) "" else "?$query"
+          },
+        ownerActorId = access.ownerActorId,
+        grants =
+          access.actorGrants.map { grant ->
+            ServeWeb.UiBuilderAccessRow(
+              actorId = grant.actorId,
+              role = grant.role.name.lowercase(),
+              allowed = grant.allowedActions.joinToString(", ") { it.name.lowercase() },
+            )
+          },
+        viewerActorId = actor.actorId,
+        notice = notice,
+        navSuffix = agentGrantTokenQuery(),
+        version = SERVE_VERSION,
+        siteName = skin.first,
+        themeCss = skin.second,
+      ),
+      ContentType.Text.Html,
+    )
+  }
+
+  /**
+   * Whether a form POST came from a page this server served.
+   *
+   * A form POST is the one request shape a hostile page can aim at this server with the reader's
+   * credentials attached, so the mutating form routes refuse unless the browser says it came from
+   * here. Both headers are absent on a non-browser client (curl, a script), which is not a
+   * cross-site request and is left alone; a browser that omits `Origin` on a same-origin POST still
+   * sends `Sec-Fetch-Site: same-origin`.
+   */
+  private fun RoutingContext.isSameOriginFormSubmission(): Boolean {
+    val fetchSite = call.request.headers["Sec-Fetch-Site"]
+    val origin = call.request.headers[HttpHeaders.Origin]
+    return when {
+      fetchSite != null -> fetchSite == "same-origin" || fetchSite == "none"
+      origin != null ->
+        // `Origin` is scheme://host[:port]; `Host` is the host[:port] this request was addressed
+        // to. Comparing the authorities is what "did this form come from this server?" means
+        // behind a proxy that terminates TLS, where the schemes legitimately differ.
+        call.request.headers[HttpHeaders.Host]?.let {
+          origin.substringAfter("://").equals(it, ignoreCase = true)
+        } == true
+      else -> true
     }
   }
 
@@ -12301,6 +12514,8 @@ class ServeHttpServer(
           approvedBy = grant.approvedBy,
           label = grant.label,
           fingerprint = grant.fingerprint,
+          actorId = ServeAgentGrants.agentActorId(grant.fingerprint),
+          onBehalfOfActorId = grant.approvedByActorId.takeIf { it.isNotBlank() },
         )
     call.respondText(
       JSON.encodeToString(ServeAgentGrants.WhoamiResponse.serializer(), response),
@@ -12547,7 +12762,15 @@ class ServeHttpServer(
     val ttl =
       form["ttl"]?.firstOrNull()?.let { AgentGrantProtocol.parseDurationSeconds(it) }
         ?: ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS
-    val grant = store.approve(requestId, approver.name, chosen, ttl, chosenCapabilities)
+    val grant =
+      store.approve(
+        requestId,
+        approver.name,
+        chosen,
+        ttl,
+        chosenCapabilities,
+        approver.actorId,
+      )
     if (grant == null) {
       respondAgentGrantNotice(
         heading = "Nothing to approve",

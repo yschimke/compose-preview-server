@@ -161,12 +161,12 @@ internal fun Route.installUiBuilderCommentRoutes(
       return@webSocket
     }
     val decision = authorization.authorize(call, UiBuilderRouteCapability.READ)
-    val actorId = (decision as? UiBuilderAuthorizationDecision.Authorized)?.actorId
-    if (actorId == null) {
+    val actor = (decision as? UiBuilderAuthorizationDecision.Authorized)?.actor
+    if (actor == null) {
       close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "UI-builder read access required"))
       return@webSocket
     }
-    if (!service.canRead(designId, actorId)) {
+    if (!service.canRead(designId, actor)) {
       close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "no such design"))
       return@webSocket
     }
@@ -219,11 +219,14 @@ private data class CommentActor(val actorId: String, val designId: String)
  * The socket cannot use [authorizedCommentDesign] — that one writes an HTTP refusal — so the check
  * is here in the shape both can use.
  */
-private suspend fun UiBuilderServicePort.canRead(designId: String, actorId: String): Boolean {
+private suspend fun UiBuilderServicePort.canRead(
+  designId: String,
+  actor: AuthenticatedUiBuilderActor,
+): Boolean {
   if (designId.isBlank()) return false
   val mapping =
     UiBuilderProtocolMapper.toServiceCall(
-      AuthenticatedUiBuilderActor(actorId),
+      actor,
       GetSnapshotRequestV1(designId = designId, revision = null),
     )
   val response = (mapping as? ProtocolRequestMapping.Mapped)?.let { execute(it.call) }
@@ -243,9 +246,9 @@ private suspend fun ApplicationCall.authorizedCommentActor(
   capability: UiBuilderRouteCapability,
 ): CommentActor? {
   response.headers.append(HttpHeaders.CacheControl, "no-store")
-  val actorId =
+  val actor =
     when (val decision = authorization.authorize(this, capability)) {
-      is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
       UiBuilderAuthorizationDecision.Missing -> {
         response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
         respondCommentError(HttpStatusCode.Unauthorized, "authentication is required")
@@ -261,11 +264,13 @@ private suspend fun ApplicationCall.authorizedCommentActor(
     respondCommentError(HttpStatusCode.BadRequest, "a design id is required")
     return null
   }
-  if (!service.canRead(designId, actorId)) {
+  if (!service.canRead(designId, actor)) {
     respondCommentError(HttpStatusCode.NotFound, "no such design")
     return null
   }
-  return CommentActor(actorId = actorId, designId = designId)
+  // Authored under the agent's own id even when its authority came from the human who approved its
+  // grant: a comment says who wrote it, and delegation decides what may be read, never who spoke.
+  return CommentActor(actorId = actor.actorId, designId = designId)
 }
 
 private suspend fun <T> ApplicationCall.receiveCommentBody(

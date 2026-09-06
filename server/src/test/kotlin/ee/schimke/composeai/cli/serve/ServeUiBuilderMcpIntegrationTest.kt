@@ -3,6 +3,9 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessResponseV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
@@ -138,6 +141,60 @@ class ServeUiBuilderMcpIntegrationTest {
     assertTrue(artifact.content.contains("""Text(text = "Opening keynote""""), artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Two sessions today""""), artifact.content)
     assertTrue(artifact.content.contains("Column("), artifact.content)
+  }
+
+  @Test
+  fun `an agent shares a design with somebody else and takes it back`() {
+    val server = start()
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"shared-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document().copy(id = "shared-screen"))}}""",
+    )
+
+    // Nobody but the owner, to begin with. The owner here is `operator`, because that is the
+    // identity the token this test presents resolves to.
+    val before =
+      assertIs<DesignAccessResponseV1>(
+        response(
+          envelope(server, ServeUiBuilderMcp.DESIGN_ACCESS, """{"designId":"shared-screen"}""")
+        )
+      )
+    assertEquals("operator", before.access.ownerActorId)
+    assertEquals(emptyList(), before.access.actorGrants)
+
+    // The access revision is deliberately NOT an argument: the tool reads it, so an agent asked to
+    // "share this with @colleague" can do exactly that in one call.
+    val shared =
+      assertIs<DesignAccessResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.SHARE_DESIGN,
+            """{"designId":"shared-screen","actorId":"github:colleague","role":"editor"}""",
+          )
+        )
+      )
+    val grant = shared.access.actorGrants.single()
+    assertEquals("github:colleague", grant.actorId)
+    assertEquals(DesignAccessRoleV1.EDITOR, grant.role)
+    assertEquals(
+      listOf(DesignAccessActionV1.READ, DesignAccessActionV1.WRITE, DesignAccessActionV1.EXPORT),
+      grant.allowedActions,
+      "an editor may not manage access: being shared with is not the power to share on",
+    )
+
+    val revoked =
+      assertIs<DesignAccessResponseV1>(
+        response(
+          envelope(
+            server,
+            ServeUiBuilderMcp.SHARE_DESIGN,
+            """{"designId":"shared-screen","actorId":"github:colleague","revoke":true}""",
+          )
+        )
+      )
+    assertEquals(emptyList(), revoked.access.actorGrants)
   }
 
   @Test

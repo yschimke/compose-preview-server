@@ -176,6 +176,19 @@ object ServeAgentGrants {
     /** SHA-256 prefix, so a caller can match its grant to a `/status` row without disclosing it. */
     val fingerprint: String? = null,
     /**
+     * How the rest of the server names this grant's holder — `agent:<fingerprint>`.
+     *
+     * Here because an agent has to be able to *say* who it is: sharing a design names the other
+     * party by actor id, so an agent asked "which id should I grant?" can answer with this rather
+     * than with a shrug.
+     */
+    val actorId: String? = null,
+    /**
+     * The approver's own actor id — the human this grant delegates for, and the identity a design
+     * this agent creates is owned by. Absent on a grant minted before the server recorded one.
+     */
+    val onBehalfOfActorId: String? = null,
+    /**
      * Why this is not a live grant ([ServeAgentGrantStore.TokenState] wire name), absent when
      * [active]. An inactive answer used to carry no fields at all, which left an agent unable to
      * choose between retrying, re-running the approval flow, and stopping because a human revoked
@@ -202,6 +215,17 @@ object ServeAgentGrants {
   data class Approver(
     /** Display name, and what the audit line records: a GitHub login, or `operator (token)`. */
     val name: String,
+    /**
+     * The same person as [name], spelled the way the rest of the server spells an identity —
+     * `github:<login>` or `operator`, exactly what [ServeMachineAuthorization] hands a route as its
+     * actor id.
+     *
+     * It is carried onto the minted grant so an agent acting under it can be recognised as acting
+     * *for this person*: the UI builder owns a design by actor id, and a grant that could not name
+     * its approver produced designs owned by a short-lived `agent:…` id that nobody — the approver
+     * included — could open afterwards.
+     */
+    val actorId: String,
     val ceiling: AgentGrantScope,
     /**
      * The capabilities this approver may pass on — the same "never grant what you do not hold"
@@ -220,7 +244,7 @@ object ServeAgentGrants {
       fun operator(
         storeCeiling: AgentGrantScope,
         storeCapabilities: Set<AgentGrantCapability> = emptySet(),
-      ): Approver = Approver("operator (token)", storeCeiling, storeCapabilities)
+      ): Approver = Approver("operator (token)", OPERATOR_ACTOR_ID, storeCeiling, storeCapabilities)
 
       /**
        * @param repositoryAccess access to the sign-in repository (`--github-auth-repo`) — the bit
@@ -242,6 +266,7 @@ object ServeAgentGrants {
       ) =
         Approver(
           name = "@$login",
+          actorId = githubActorId(login),
           ceiling =
             if (repositoryAccess) storeCeiling else minOf(storeCeiling, AgentGrantScope.LIVE),
           capabilityCeiling =
@@ -258,6 +283,15 @@ object ServeAgentGrants {
         )
     }
   }
+
+  /** How [ServeMachineAuthorization] names the holder of `--token`. */
+  const val OPERATOR_ACTOR_ID: String = "operator"
+
+  /** How [ServeMachineAuthorization] names a signed-in GitHub visitor. */
+  fun githubActorId(login: String): String = "github:$login"
+
+  /** How [ServeMachineAuthorization] names the holder of a minted grant. */
+  fun agentActorId(fingerprint: String): String = "agent:$fingerprint"
 
   // ------------------------------------------------------------------- CSRF
 

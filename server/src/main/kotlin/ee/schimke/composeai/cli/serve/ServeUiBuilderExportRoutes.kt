@@ -4,7 +4,6 @@ import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
-import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
@@ -74,9 +73,9 @@ private suspend fun ApplicationCall.serveLiveExport(
   format: ExportFormatV1,
 ) {
   response.headers.append(HttpHeaders.CacheControl, "no-store")
-  val actorId =
+  val actor =
     when (val decision = authorization.authorize(this, UiBuilderRouteCapability.EXPORT)) {
-      is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
       UiBuilderAuthorizationDecision.Missing -> {
         response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
         respondText("authentication is required", status = HttpStatusCode.Unauthorized)
@@ -101,7 +100,7 @@ private suspend fun ApplicationCall.serveLiveExport(
   val outcome =
     service.executeMapped(
       ExportDesignRequestV1(designId = designId, revision = revision, format = format),
-      AuthenticatedUiBuilderActor(actorId),
+      actor,
     )
   val artifact =
     when (outcome) {
