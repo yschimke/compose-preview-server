@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.NewDesignState
 import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
@@ -94,6 +95,46 @@ internal class ServeUiBuilderCreate(
         // The service reports "already exists" as a bad request, and the existence check above
         // already passed, so a bad request here is the race between two creates of one id: the
         // design exists, which is the outcome the caller wanted anyway.
+        if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST) Outcome.AlreadyExists
+        else Outcome.Refused(created.httpStatusValue(), created.error.message)
+      else -> Outcome.Created
+    }
+  }
+
+  /**
+   * Create a design from a whole document somebody else authored — a catalog project's published
+   * design, opened here.
+   *
+   * The same two guards as [create] and for the same reasons: a design that already exists is left
+   * alone rather than overwritten, and a document is refused unless this server actually authors
+   * the catalog it pins, because a pin naming a catalog we do not serve produces a design that
+   * cannot render, export or be opened. What is deliberately *not* re-checked is the document's
+   * shape: the service validates every node against the catalog it resolves, and duplicating that
+   * here would be a second opinion that can disagree with the one that counts.
+   */
+  suspend fun install(actorId: String, document: DesignDocumentV1): Outcome {
+    val actor = AuthenticatedUiBuilderActor(actorId)
+    when (val existing = service.executeMapped(OpenDesignRequestV1(document.id), actor)) {
+      is UiBuilderServiceResponse.Error ->
+        if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
+          return Outcome.Refused(existing.httpStatusValue(), existing.error.message)
+        }
+      else -> return Outcome.AlreadyExists
+    }
+    val catalogSystemId = document.catalogPin.systemId
+    when (val listed = service.executeMapped(ListCatalogsRequestV1, actor)) {
+      is UiBuilderServiceResponse.Catalogs ->
+        listed.catalogs.map { it.benchmark }.singleOrNull { it.catalogSystemId == catalogSystemId }
+          ?: return Outcome.Refused(
+            409,
+            "$catalogSystemId is not a catalog this server authors, so its designs cannot be opened here",
+          )
+      is UiBuilderServiceResponse.Error ->
+        return Outcome.Refused(listed.httpStatusValue(), listed.error.message)
+      else -> return Outcome.Refused(500, "the design service did not list its catalogs")
+    }
+    return when (val created = service.executeMapped(CreateDesignRequestV1(document), actor)) {
+      is UiBuilderServiceResponse.Error ->
         if (created.error.code == ServiceErrorCodeV1.BAD_REQUEST) Outcome.AlreadyExists
         else Outcome.Refused(created.httpStatusValue(), created.error.message)
       else -> Outcome.Created

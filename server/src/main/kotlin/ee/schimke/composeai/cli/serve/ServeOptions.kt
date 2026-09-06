@@ -633,6 +633,16 @@ public interface ServeOptions {
    * signatures, so they export with nothing configured here and are never named as missing one.
    */
   public val uiBuilderComponents: Map<String, File>
+
+  /**
+   * Where each project keeps the designs it is working on: `[<catalog>=]<dir>`.
+   *
+   * The prototyping half of the design library. A team pointing this at their own checkout sees a
+   * design the moment it is exported into the repository, with no publish step and no commit — the
+   * loop a screen is actually designed in. The published half needs no flag at all: a served
+   * catalog's designs are read from its own delivery branch.
+   */
+  public val uiBuilderDesigns: Map<String, File>
     get() = emptyMap()
 
   /**

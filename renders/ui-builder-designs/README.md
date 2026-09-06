@@ -21,6 +21,14 @@ the same file is what `DesignFixturesTest` replays, validates and exports on eve
 | `mobile.png` | the mobile workspace at 412 × 915 with the Layers panel raised |
 | `native-both.png` | render surface Both: the Wasm canvas beside the native render, menu open |
 | `menus.png` | the selection menu, the toolbar overflow and the hover editor |
+| `packs-dialog.png` | the Component packs dialog, one switch per pack the host admitted |
+| `insert-packs.png` | the Insert panel: the packs summary row, and a pack's own shelf |
+
+Each frame is declared as a device spec restating that design's own `environment` — its dp size, and
+its density as `dpi`. `UiBuilderRenderer` composes a document at the density the document names, so
+a frame at a different one captures the design in a corner of the image: these were 4200x2363 with
+1600x900 of content and the rest empty, which cost the visual-diff bot most of its comparison area.
+`DesignFixturesTest` now holds the spec and the environment together, so the two cannot drift.
 
 Where a chrome widget has no catalog entry — a segmented button, a navigation rail, a dropdown
 menu, a code editor — the design stands in a placeholder built from `m3/surface`, `layout/row`
