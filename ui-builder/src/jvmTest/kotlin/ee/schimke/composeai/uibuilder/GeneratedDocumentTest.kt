@@ -1,6 +1,7 @@
 package ee.schimke.composeai.uibuilder
 
 import ee.schimke.composeai.uibuilder.capability.CapabilityCatalogParser
+import ee.schimke.composeai.uibuilder.capability.CapabilityIssueCode
 import ee.schimke.composeai.uibuilder.capability.CapabilityValidator
 import ee.schimke.composeai.uibuilder.capability.accepts
 import kotlin.test.Test
@@ -39,6 +40,14 @@ class GeneratedDocumentTest {
       .document
   private val blank =
     blankUiBuilderDocument("generated", jetcaster.catalogPin, jetcaster.environment)
+
+  /** A generated document that contains at least one `m3/button`. */
+  private val valid: UiBuilderDocument by lazy {
+    val box = blank.nodes.values.first { it.componentId == "layout/box" }.id
+    val state = reducer.reduce(reducer.initial(blank), UiBuilderEditorEvent.SelectNode(box))
+    val target = checkNotNull(reducer.dropTarget(state, "m3/button"))
+    reducer.reduce(state, UiBuilderEditorEvent.InsertComponent("m3/button", target)).document
+  }
 
   /**
    * Every offer the palette makes is one the reducer takes, and one that leaves a valid document.
@@ -132,36 +141,74 @@ class GeneratedDocumentTest {
   }
 
   /**
-   * The slots Add cannot reach, pinned.
+   * Every slot in the catalog can be filled by pressing Add.
    *
    * `findDestination` takes the **first** slot that accepts the component and has room, so a slot
-   * sitting behind an unbounded slot that accepts the same thing never comes up: the unbounded one
-   * never fills. A button's `leadingIcon` sits behind its unbounded `content`, which accepts an
-   * icon too, so the icon always lands in `content` and the slot stays empty however long somebody
-   * presses Add. Dragging into the named slot is the only way in.
+   * sitting behind an unbounded slot that accepts the same thing would never come up — the
+   * unbounded one never fills. One slot was in exactly that position: `m3/button.leadingIcon` sat
+   * behind the button's unbounded `content`, which accepts an icon too, so the icon always landed
+   * in `content` and the slot stayed empty however long somebody pressed Add.
    *
-   * It is the same slot the Compose export cannot write, and for the same underlying reason —
-   * Material's `Button` has one content lambda and no leading-icon parameter, so an icon belongs
-   * *in* the content beside the label. Both halves are yschimke/compose-preview-server#430.
-   *
-   * Pinned rather than fixed here, because whether the slot should exist at all is a catalog
-   * decision with existing documents behind it. This is what keeps the list from growing quietly,
-   * and what will fail — correctly, asking to be updated — the day it shrinks.
+   * It was also the one slot the Compose export could not write, and for the same underlying
+   * reason: Material's `Button` takes one content lambda and has no leading-icon parameter, so an
+   * icon goes *inside* the content beside the label. The slot is gone
+   * (yschimke/compose-preview-server#430) and this is what keeps another from appearing — a new
+   * slot ordered behind an unbounded one that accepts the same components fails here.
    */
   @Test
-  fun `the only slot Add cannot reach is a button's leading icon`() {
+  fun `every slot in the catalog can be filled from the palette`() {
     val unreachable =
       catalog.components
         .filter { it.slots.isNotEmpty() }
         .flatMap { generator.slotsAddCannotReach(it.componentId, blank) }
         .sorted()
 
-    assertEquals(listOf("m3/button.leadingIcon"), unreachable)
+    assertEquals(emptyList(), unreachable)
+  }
+
+  /**
+   * A slot entry the catalog no longer declares, carrying nothing, is not a finding.
+   *
+   * The editor writes an entry for every slot the catalog declares at the moment of the insert, so
+   * those keys outlive the declaration: every button inserted before `m3/button.leadingIcon` was
+   * withdrawn still carries an empty one, in every design anybody saved. Refusing them would mean a
+   * catalog could never drop a slot without invalidating documents that never used it — and the
+   * persisted store is validated on load, so "invalid" there means the service does not start.
+   *
+   * A child in an undeclared slot is still refused, because that child would be silently dropped.
+   */
+  @Test
+  fun `a stored button still carrying an empty leading icon is valid and exports`() {
+    val button = valid.nodes.values.first { it.componentId == "m3/button" }
+    val stored =
+      valid.copy(
+        nodes =
+          valid.nodes +
+            (button.id to button.copy(slots = button.slots + ("leadingIcon" to emptyList())))
+      )
+
+    assertEquals(emptyList(), validator.validate(stored).issues)
+    assertEquals(emptyList(), validateDocumentForExport(stored, catalog))
+
+    val withChild =
+      valid.copy(
+        nodes =
+          valid.nodes +
+            ("stray-icon" to UiBuilderNode(id = "stray-icon", componentId = "m3/icon")) +
+            (button.id to
+              button.copy(slots = button.slots + ("leadingIcon" to listOf("stray-icon"))))
+      )
+    assertTrue(
+      validator.validate(withChild).issues.any {
+        it.code == CapabilityIssueCode.UNKNOWN_SLOT && it.nodeId == button.id
+      },
+      "a child in a withdrawn slot must still be refused",
+    )
   }
 
   /**
    * A component the record covers, inserted from the palette with the defaults the palette gives
-   * it, produces a document that exports to Kotlin. Two do not, and both are bugs in what the
+   * it, produces a document that exports to Kotlin. One does not, and it is a bug in what the
    * insert writes — see [PALETTE_INSERTS_THAT_DO_NOT_EXPORT].
    *
    * This is the test the checked-in goldens cannot be: they replay hand-authored operation lists,
@@ -169,7 +216,7 @@ class GeneratedDocumentTest {
    * everything the catalog declares.
    */
   @Test
-  fun `a palette insert of a recorded component exports, except the two known bugs`() {
+  fun `a palette insert of a recorded component exports, except the one known bug`() {
     val box = blank.nodes.values.first { it.componentId == "layout/box" }.id
     val refused =
       catalog.components
@@ -257,19 +304,22 @@ class GeneratedDocumentTest {
      * Both are bugs in what the insert writes rather than in the exporter, and both are
      * yschimke/compose-preview-server#430:
      *
-     * - `m3/button` arrives carrying an empty `leadingIcon`, because the insert writes an entry for
-     *   every slot the catalog declares, and Material's `Button` has no such parameter — so the
-     *   export refuses on the key being *present*, empty or not. Every design holding a button is
-     *   unexportable, dialogs included, since a dialog is seeded with two of them.
-     * - `m3/progress-indicator` arrives determinate, carrying a `progress` number, and a
-     *   determinate indicator takes `progress: () -> Float` — a lambda no value in the document
-     *   vocabulary can be. The indeterminate form is the one that exports.
+     * `m3/progress-indicator` arrives determinate, carrying a `progress` number, and a determinate
+     * indicator takes `progress: () -> Float` — a lambda no value in the document vocabulary can
+     * be. The indeterminate form is the one that exports, and is what an insert should default to
+     * (yschimke/compose-preview-server#430).
      *
-     * Neither is caught by the checked-in goldens, which are hand-authored operation lists rather
+     * `m3/button` was the other, and is fixed: it arrived carrying an empty `leadingIcon`, because
+     * the insert writes an entry for every slot the catalog declares and Material's `Button` has no
+     * such parameter, so the export refused on the key being *present*, empty or not. That made
+     * every design holding a button unexportable, dialogs included, since a dialog is seeded with
+     * two of them. The slot is gone from the catalog.
+     *
+     * Neither was caught by the checked-in goldens, which are hand-authored operation lists rather
      * than the editor's own inserts: the Jetcaster fixture exports three buttons happily because
      * none of them carries the key the editor would have written.
      */
-    val PALETTE_INSERTS_THAT_DO_NOT_EXPORT = setOf("m3/button", "m3/progress-indicator")
+    val PALETTE_INSERTS_THAT_DO_NOT_EXPORT = setOf("m3/progress-indicator")
 
     /**
      * Fixed rather than drawn from the clock: a generative test that cannot be re-run on the seed

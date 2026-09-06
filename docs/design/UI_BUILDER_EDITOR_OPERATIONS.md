@@ -104,21 +104,41 @@ directly on purpose — the question there is what the *validator* does with a b
 arrived, and the editor's own doors are asked separately, where being refused is not enough and the
 document has to come back unchanged.
 
-Three things they found, each pinned by the test that found it so the list cannot grow quietly:
+What they found, each pinned by the test that found it so the list cannot grow quietly:
 
-- **`m3/button.leadingIcon` is unreachable from Add.** `findDestination` takes the first slot that
-  accepts and has room, and that slot sits behind an unbounded `content` which accepts an icon too.
-  Dragging into the named slot is the only way in
+- **`m3/button.leadingIcon` was a slot nothing could use.** Add could never reach it —
+  `findDestination` takes the first slot that accepts and has room, and this one sat behind an
+  unbounded `content` that accepts an icon too — the renderer never drew it, neither exporter ever
+  wrote it, and no fixture used it. Meanwhile its mere presence made every design holding a button
+  unexportable, because an insert writes an entry for every slot the catalog declares and the
+  shipped record's `Button` has no such parameter, so the export refused on the key being *present*,
+  empty or not. Dialogs refused three times over, being seeded with two buttons. The slot is gone:
+  Material's `Button` takes one content lambda and an icon goes inside it, beside the label
   ([#430](https://github.com/yschimke/compose-preview-server/issues/430)).
-- **A button or a progress indicator inserted from the palette cannot be exported.** An insert
-  writes an entry for every slot the catalog declares, so every button carries an empty
-  `leadingIcon`, which the record has no parameter for and the export refuses on the key being
-  present. A progress indicator arrives determinate, and a determinate one takes a lambda the
-  document vocabulary cannot express. The checked-in goldens are hand-authored operation lists that
-  write only what somebody meant to write, which is why the Jetcaster fixture exports three buttons
-  happily and nothing caught either of these (same issue).
+- **A progress indicator inserted from the palette still cannot be exported.** It arrives
+  determinate, and a determinate one takes `progress: () -> Float`, a lambda no value in the
+  document vocabulary can be. The indeterminate form is what exports, and is what the insert should
+  default to (same issue).
 - **Nothing bounds the root count before export**, so a design with zero or two roots can be stored
   and never exported ([#429](https://github.com/yschimke/compose-preview-server/issues/429)).
+
+Neither of the first two was caught by the checked-in goldens, and the reason is worth keeping in
+mind when adding one: the goldens replay **hand-authored operation lists**, which write only the
+slots and properties somebody meant to write, where an insert writes everything the catalog
+declares. The Jetcaster fixture exports three buttons happily because none of them carries the key
+the editor would have written.
+
+### An empty slot entry outlives its declaration
+
+Withdrawing `m3/button.leadingIcon` would have invalidated every design anybody had saved, because
+every button the editor ever inserted carries an empty `leadingIcon` key — and the persisted store
+is validated on load, so "invalid" there means the service does not start.
+
+So an entry with **no children** for a slot the catalog does not declare is not a finding, in
+`CapabilityValidator` and in the server's catalog validation alike. It says nothing is in that slot,
+which is exactly what leaving the key out says, and it lets the catalog drop a slot without
+invalidating documents that never used one. A child in an undeclared slot is still `UNKNOWN_SLOT`,
+because that child would otherwise be silently dropped.
 
 ## Starter content
 

@@ -114,15 +114,34 @@ class MutatedDocumentTest {
     assertRefused(mutated, CapabilityIssueCode.UNKNOWN_CHILD, box.id)
   }
 
+  /**
+   * A child in a slot the component does not declare is refused; an entry with nothing in it is
+   * not.
+   *
+   * The empty half is deliberate and is what lets the catalog withdraw a slot without invalidating
+   * every stored document that never used it — the editor writes a key for every slot declared at
+   * the moment of the insert, so those keys outlive the declaration. `m3/button.leadingIcon` is the
+   * one that has been withdrawn, and `GeneratedDocumentTest` holds that case end to end.
+   */
   @Test
-  fun `a slot the component does not declare is refused`() {
+  fun `a child in a slot the component does not declare is refused`() {
     val box = valid.nodes.values.first { it.componentId == "layout/box" }
+    val stray = UiBuilderNode(id = "stray", componentId = "m3/icon")
     val mutated =
       valid.copy(
-        nodes = valid.nodes + (box.id to box.copy(slots = box.slots + ("nope" to emptyList())))
+        nodes =
+          valid.nodes +
+            (stray.id to stray) +
+            (box.id to box.copy(slots = box.slots + ("nope" to listOf(stray.id))))
       )
 
     assertRefused(mutated, CapabilityIssueCode.UNKNOWN_SLOT, box.id)
+
+    val empty =
+      valid.copy(
+        nodes = valid.nodes + (box.id to box.copy(slots = box.slots + ("nope" to emptyList())))
+      )
+    assertEquals(emptyList(), validator.validate(empty).issues)
   }
 
   @Test
