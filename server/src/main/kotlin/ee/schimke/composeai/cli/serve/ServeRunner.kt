@@ -1870,6 +1870,9 @@ public class ServeRunner(
       health = health,
       captureNodeBounds = captureNodeBounds,
       catalogBackend = { id -> catalogTargets?.targets()?.firstOrNull { it.id == id }?.backend },
+      remoteComposeCatalog = {
+        catalogTargets?.targets()?.firstOrNull { PlaygroundMode.REMOTE_COMPOSE in it.modes }?.id
+      },
     )
   }
 
@@ -2012,6 +2015,21 @@ public class ServeRunner(
      * map captured here would be empty for the life of the process.
      */
     val catalogBackend: (String) -> String? = { null },
+    /**
+     * A served catalog this host can compile a `@RemoteComposable` body against, or null.
+     *
+     * The first target the selector offers `remote-compose` on, which is already the intersection
+     * of "the bundle is an Android one" with "this host wired the capture and the document store"
+     * ([PlaygroundCatalogTargets]). Any of them is correct: an inline body is written in the Remote
+     * Compose vocabulary rather than in a catalog's own components, so what it needs from a bundle
+     * is the creation library, not a particular design system. Read fresh for the reason
+     * [catalogBackend] is.
+     *
+     * Null on a host running only `--playground-bundle` pins, which offer no selectable catalog id
+     * to name — and a UI-builder capture must name one, because the compile lane deliberately never
+     * falls back from a named catalog to a pinned default.
+     */
+    val remoteComposeCatalog: () -> String? = { null },
   )
 
   /**
@@ -3046,6 +3064,25 @@ public class ServeRunner(
                   adapter.compile(generated, isSecurityChecked = true)
                 },
                 captureNodeBounds = playground.captureNodeBounds,
+              )
+            }
+          },
+        // The same two halves as the native lane and the same guard: a capture needs the generator
+        // (to write the body) and the playground (to compile and run it). It needs no catalog
+        // mapping of its own — an inline body is Remote Compose rather than a design system, so the
+        // bundle it compiles against is whichever one this host offers `remote-compose` on.
+        uiBuilderInlineCapture =
+          uiBuilderLane?.let {
+            playgroundLane?.let { playground ->
+              val captureAdapter = UiBuilderGeneratedPreviewAdapter(playground.compile)
+              ServeUiBuilderInlineCapture(
+                compile = { generated ->
+                  // `true` for the reason the native lane's is: downstream of the route's
+                  // `ui-builder-export` check, and the source is the emitter's rather than the
+                  // caller's.
+                  captureAdapter.compile(generated, isSecurityChecked = true)
+                },
+                captureCatalog = playground.remoteComposeCatalog,
               )
             }
           },

@@ -460,6 +460,12 @@ class ServeHttpServer(
    */
   private val uiBuilderNativePreview: UiBuilderNativePreviewLane? = null,
   /**
+   * Captures one design's inline Remote Compose content into the document it describes. Non-null on
+   * the same hosts [uiBuilderNativePreview] is, and for the same reason: it needs the generator and
+   * the compile lane both.
+   */
+  private val uiBuilderInlineCapture: UiBuilderInlineCaptureLane? = null,
+  /**
    * Per-design reference overlays. Null leaves the reference routes unregistered, which is the
    * honest answer on a host with no durable UI-builder state: an overlay that cannot outlive the
    * session is not the feature, and a route that always forgets is worse than one that is absent.
@@ -946,7 +952,12 @@ class ServeHttpServer(
       }
       routing {
         if (uiBuilderService != null && uiBuilderAuthorization != null) {
-          installUiBuilderRoutes(uiBuilderService, uiBuilderAuthorization, uiBuilderNativePreview)
+          installUiBuilderRoutes(
+            uiBuilderService,
+            uiBuilderAuthorization,
+            uiBuilderNativePreview,
+            uiBuilderInlineCapture,
+          )
           if (uiBuilderReferenceStore != null) {
             installUiBuilderReferenceRoutes(
               uiBuilderService,
