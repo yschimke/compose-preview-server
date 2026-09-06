@@ -818,9 +818,8 @@ tasks.named("check") { dependsOn("checkServeModuleBoundary") }
  *
  * It is a real risk and not a theoretical one, in both directions. `:ui-builder` now compiles at
  * `java-ui-builder` (21) and sits one `implementation(project(...))` away from this classpath;
- * `dev.snipme:highlights` 1.1.0, which the catalog holds back, is 65 in a third-party jar. A
- * positive allowlist of *artifacts* sees neither: both are allowed coordinates carrying disallowed
- * bytes.
+ * `dev.snipme:highlights` 1.1.0, which `:ui-builder` takes, is 65 in a third-party jar. A positive
+ * allowlist of *artifacts* sees neither: both are allowed coordinates carrying disallowed bytes.
  *
  * Scanned over the resolved `runtimeClasspath`, which is what the distribution ships and what a
  * consumer's POM resolves, rather than over this module's own output — the output is the half that
