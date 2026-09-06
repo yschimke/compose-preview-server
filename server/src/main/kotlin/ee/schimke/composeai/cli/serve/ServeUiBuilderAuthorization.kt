@@ -22,9 +22,15 @@ sealed interface UiBuilderAuthorizationDecision {
 }
 
 fun interface ServeUiBuilderAuthorization {
+  /**
+   * [presentedToken] is a grant token that arrived in the request body rather than on the call —
+   * the MCP lane's [ServeCatalogMcp.TOKEN_ARGUMENT], which exists because an MCP client cannot
+   * change its request headers mid-session. Null everywhere a route reads the call itself.
+   */
   fun authorize(
     call: ApplicationCall,
     capability: UiBuilderRouteCapability,
+    presentedToken: String?,
   ): UiBuilderAuthorizationDecision
 
   companion object {
@@ -37,9 +43,10 @@ fun interface ServeUiBuilderAuthorization {
 
     fun fromMachineAuthorization(
       authorization: ServeMachineAuthorization
-    ): ServeUiBuilderAuthorization = ServeUiBuilderAuthorization { call, capability ->
+    ): ServeUiBuilderAuthorization = ServeUiBuilderAuthorization { call, capability, presented ->
       when (
-        val decision = authorization.authorizeCapability(call, capability.agentGrantCapability())
+        val decision =
+          authorization.authorizeCapability(call, capability.agentGrantCapability(), presented)
       ) {
         is ServeMachineAuthorization.Decision.Authorized ->
           UiBuilderAuthorizationDecision.Authorized(decision.actorId)
@@ -50,9 +57,16 @@ fun interface ServeUiBuilderAuthorization {
   }
 }
 
-private fun UiBuilderRouteCapability.agentGrantCapability(): AgentGrantCapability =
+/** How a UI-builder route's capability names itself in a grant. */
+internal fun UiBuilderRouteCapability.agentGrantCapability(): AgentGrantCapability =
   when (this) {
     UiBuilderRouteCapability.READ -> AgentGrantCapability.UI_BUILDER_READ
     UiBuilderRouteCapability.WRITE -> AgentGrantCapability.UI_BUILDER_WRITE
     UiBuilderRouteCapability.EXPORT -> AgentGrantCapability.UI_BUILDER_EXPORT
   }
+
+/** The ordinary call-only form: routes that read the credential off the request present nothing. */
+fun ServeUiBuilderAuthorization.authorize(
+  call: ApplicationCall,
+  capability: UiBuilderRouteCapability,
+): UiBuilderAuthorizationDecision = authorize(call, capability, presentedToken = null)

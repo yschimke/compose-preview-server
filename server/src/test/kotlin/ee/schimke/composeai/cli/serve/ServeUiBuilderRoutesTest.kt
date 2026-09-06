@@ -77,7 +77,7 @@ class ServeUiBuilderRoutesTest {
         }
       }
     }
-  private val authorization = ServeUiBuilderAuthorization { call, capability ->
+  private val authorization = ServeUiBuilderAuthorization { call, capability, _ ->
     capabilities += capability
     when (val actor = call.request.headers[ACTOR_HEADER]) {
       null -> UiBuilderAuthorizationDecision.Missing

@@ -89,6 +89,33 @@ a catalog still does. The gate is per message, not per endpoint, because a clien
 for exactly the agent the grant flow exists to serve. Anything the server does not recognise is
 gated: a tool added later is closed until someone deliberately opens it.
 
+### …and use it without setting a header
+
+A token is normally presented as `X-Compose-Preview-Token` (or `Authorization: Bearer`, or
+`?token=`), and where you control your own headers that is still the right place: it keeps the
+credential off the message a model reasons over.
+
+An MCP client does not control them. It fixes its request headers when it connects, from static
+configuration, and nothing it learns afterwards can change them. So an agent that walks the flow
+above receives its token in the one place it cannot use — a tool result, mid-session — and every
+gated tool goes on refusing it until a human edits an `mcp.json` and restarts the session. The flow
+worked and the session it was for was already over.
+
+Every gated tool therefore also accepts the token as a **`token` argument**:
+
+```json
+{"name": "ui_builder_list_catalogs", "arguments": {"token": "cpat_…"}}
+```
+
+It is resolved by the same `ServeMachineAuthorization`, against the same store, for the same short
+lifetime — no new authority, a second door into the one that exists. `request_access` and
+`poll_access` do not offer the argument: they are what you call when you have no token yet.
+
+Two limits are deliberate. The **operator token** is never read from a message — it is a standing
+credential and belongs on a call, not in a transcript. And `resources/list` and `resources/read`
+carry no arguments to put a token in; a client that needs those on a token-gated box still needs a
+header, or the OAuth flow below.
+
 This is also the recovery path when a token stops working mid-task. Grants live in memory
 (`ServeAgentGrantStore`: *"a restart drops every request and every grant"*), so a redeploy of the
 host invalidates every bearer regardless of its remaining TTL. A client that meets a sudden 401 asks

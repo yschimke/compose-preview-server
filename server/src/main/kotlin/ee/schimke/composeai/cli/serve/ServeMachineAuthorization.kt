@@ -41,10 +41,14 @@ class ServeMachineAuthorization(
     data class Forbidden(val message: String) : Decision
   }
 
-  fun authorizeScope(call: ApplicationCall, required: AgentGrantScope): Decision {
+  fun authorizeScope(
+    call: ApplicationCall,
+    required: AgentGrantScope,
+    presentedToken: String? = null,
+  ): Decision {
     if (hasOperatorToken(call)) return Decision.Authorized("operator")
 
-    presentedGrant(call)?.let { grant ->
+    presentedGrant(call, presentedToken)?.let { grant ->
       return if (grant.allows(required)) {
         Decision.Authorized("agent:${grant.fingerprint}")
       } else {
@@ -75,7 +79,11 @@ class ServeMachineAuthorization(
     else Decision.Forbidden("Repository access is required for '${required.wire}'.")
   }
 
-  fun authorizeCapability(call: ApplicationCall, required: AgentGrantCapability): Decision {
+  fun authorizeCapability(
+    call: ApplicationCall,
+    required: AgentGrantCapability,
+    presentedToken: String? = null,
+  ): Decision {
     if (hasOperatorToken(call)) return Decision.Authorized("operator")
 
     val login = githubAuth?.currentLogin(call)
@@ -83,7 +91,7 @@ class ServeMachineAuthorization(
       return Decision.Authorized("github:$login")
     }
 
-    presentedGrant(call)?.let { grant ->
+    presentedGrant(call, presentedToken)?.let { grant ->
       return if (grant.allows(required)) {
         Decision.Authorized("agent:${grant.fingerprint}")
       } else {
@@ -93,7 +101,20 @@ class ServeMachineAuthorization(
     return Decision.Missing
   }
 
-  fun presentedGrant(call: ApplicationCall): ServeAgentGrantStore.Grant? {
+  /**
+   * The grant behind this call, if any.
+   *
+   * [presentedToken] is a credential that arrived in the request *body* rather than on the call.
+   * Only the MCP lane has one ([ServeCatalogMcp.TOKEN_ARGUMENT]), and only because an MCP client
+   * fixes its headers when it connects: an agent handed a token by `poll_access` mid-session has no
+   * other way to use it. It is looked up in the same store as every other token and is tried LAST,
+   * so a call that already carries a credential keeps it — a body cannot quietly re-identify a
+   * request that the transport already spoke for.
+   */
+  fun presentedGrant(
+    call: ApplicationCall,
+    presentedToken: String? = null,
+  ): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
     val bearer =
       call.request.headers[HttpHeaders.Authorization]
@@ -104,10 +125,19 @@ class ServeMachineAuthorization(
         call.request.headers[ServeHttpServer.TOKEN_HEADER],
         bearer,
         call.request.queryParameters["token"],
+        presentedToken,
       )
       .firstNotNullOfOrNull(store::grantForToken)
   }
 
+  /**
+   * The long-lived operator token, and only ever off the call.
+   *
+   * Deliberately not read from a request body: the in-band door exists for a short-lived grant a
+   * human just approved, and widening it to the box's own standing credential would let one leak
+   * into a place it was never meant to travel — a tool argument, in a transcript, chosen by a
+   * model. An operator who can set a header has no need of it.
+   */
   private fun hasOperatorToken(call: ApplicationCall): Boolean {
     if (serverToken.isBlank()) return false
     return sequenceOf(

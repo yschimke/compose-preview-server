@@ -8157,8 +8157,16 @@ class ServeHttpServer(
     // either. Discovery and the two access tools are open ([ServeCatalogMcp.requiresGrant] owns
     // the list, beside the tools themselves); everything that reads a catalog is gated exactly as
     // before, and an unrecognised method is gated by default.
+    // A grant may also ride the message rather than the call — see
+    // [ServeCatalogMcp.TOKEN_ARGUMENT].
+    // Read once here so the gate in front of the endpoint and the tool behind it judge the same
+    // credential; a token good enough for `preview` at the door is good enough for `live` inside.
+    val presentedToken = ServeCatalogMcp.presentedToken(request)
+
     if (ServeCatalogMcp.requiresGrant(request)) {
-      when (val decision = authorization.authorizeScope(call, AgentGrantScope.PREVIEW)) {
+      when (
+        val decision = authorization.authorizeScope(call, AgentGrantScope.PREVIEW, presentedToken)
+      ) {
         is ServeMachineAuthorization.Decision.Authorized -> Unit
         ServeMachineAuthorization.Decision.Missing -> {
           respondCatalogMcpAuthorization(
@@ -8180,12 +8188,12 @@ class ServeHttpServer(
         agentGrants?.let { catalogMcpAgentAccess(it) },
         // Asked per capability, off the same call the credential arrived on, so an MCP client
         // reaches the builder through exactly the door the browser does.
-        { capability ->
-          uiBuilderAuthorization?.authorize(call, capability)
+        { capability, presented ->
+          uiBuilderAuthorization?.authorize(call, capability, presented)
             ?: UiBuilderAuthorizationDecision.Missing
         },
-      ) {
-        authorization.authorizeScope(call, AgentGrantScope.LIVE)
+      ) { presented ->
+        authorization.authorizeScope(call, AgentGrantScope.LIVE, presented)
       }
     if (reply.accepted) {
       call.respond(HttpStatusCode.Accepted)

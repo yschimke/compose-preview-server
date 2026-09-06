@@ -73,7 +73,7 @@ class ServeUiBuilderCreateRoutesTest {
       ): Closeable = Closeable {}
     }
 
-  private val authorization = ServeUiBuilderAuthorization { call, _ ->
+  private val authorization = ServeUiBuilderAuthorization { call, _, _ ->
     when (val actor = call.request.headers["X-Test-Actor"]) {
       null -> UiBuilderAuthorizationDecision.Missing
       "forbidden" -> UiBuilderAuthorizationDecision.Forbidden
