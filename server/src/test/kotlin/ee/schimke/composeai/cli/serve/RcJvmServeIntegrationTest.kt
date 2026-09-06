@@ -32,9 +32,15 @@ class RcJvmServeIntegrationTest {
 
   /**
    * A bundle with a baked `previews/Foo.png` of the given size, optionally an `ir/Foo.rc` doc and a
-   * `previews.json` declaring [density].
+   * `previews.json` declaring [density] and/or [device].
    */
-  private fun bundle(width: Int, height: Int, density: Float?, withDoc: Boolean = true): File {
+  private fun bundle(
+    width: Int,
+    height: Int,
+    density: Float?,
+    withDoc: Boolean = true,
+    device: String? = null,
+  ): File {
     val dir =
       java.nio.file.Files.createTempDirectory("rcjvm-bundle").toFile().also { it.deleteOnExit() }
     File(dir, "previews").mkdirs()
@@ -43,12 +49,18 @@ class RcJvmServeIntegrationTest {
       File(dir, "ir").mkdirs()
       File(dir, "ir/Foo.rc").writeBytes(byteArrayOf(1, 2, 3))
     }
-    if (density != null) {
+    if (density != null || device != null) {
+      val params =
+        listOfNotNull(
+            density?.let { "\"density\":$it" },
+            device?.let { "\"device\":\"$it\"" },
+          )
+          .joinToString(",")
       File(dir, "previews.json")
         .writeText(
           """
           {"module":":m","variant":"debug","previews":[
-            {"id":"Foo","functionName":"Foo","className":"FooKt","params":{"density":$density}}]}
+            {"id":"Foo","functionName":"Foo","className":"FooKt","params":{$params}}]}
           """
             .trimIndent()
         )
@@ -68,13 +80,49 @@ class RcJvmServeIntegrationTest {
     assertEquals(RcJvmRenderSpec(120, 80, 3.0f), host.remoteComposeRenderSpec("Foo"))
   }
 
+  /**
+   * The replay's density comes from the DEVICE before it comes from the renderer's default.
+   *
+   * The default is 2.625 — a phone number, and the desktop renderer's own. This lane is
+   * form-factor-shaped and that number is not: every Wear id in the device catalog is 2.0, so a
+   * watch document replayed at the default was scaled by 1.31 against the very baked PNG the spec
+   * sizes it to, which is the two lanes of one preview disagreeing about how big a dp is.
+   */
   @Test
-  fun `render spec falls back to the default density when the manifest declares none`() {
+  fun `render spec takes the density from the device when the manifest states none`() {
+    val watch =
+      ServeBundleHost(
+        bundle(width = 120, height = 80, density = null, device = "id:wearos_large_round"),
+        label = "b",
+      )
+    assertEquals(2.0f, watch.remoteComposeRenderSpec("Foo")?.density, "a watch is 2.0, not 2.625")
+
+    val phone =
+      ServeBundleHost(
+        bundle(width = 120, height = 80, density = null, device = "id:pixel_5"),
+        label = "b",
+      )
+    assertEquals(2.75f, phone.remoteComposeRenderSpec("Foo")?.density, "and a phone is its own")
+  }
+
+  @Test
+  fun `an explicit manifest density still outranks the device it names`() {
+    val host =
+      ServeBundleHost(
+        bundle(width = 120, height = 80, density = 3.0f, device = "id:wearos_large_round"),
+        label = "b",
+      )
+    assertEquals(3.0f, host.remoteComposeRenderSpec("Foo")?.density)
+  }
+
+  @Test
+  fun `render spec falls back to the default density when neither density nor device is stated`() {
     val host = ServeBundleHost(bundle(width = 120, height = 80, density = null), label = "b")
     val spec = host.remoteComposeRenderSpec("Foo")
     assertEquals(120, spec?.widthPx)
     assertEquals(80, spec?.heightPx)
-    // ServeBundleHost.DEFAULT_RENDER_DENSITY — the desktop renderer's own default.
+    // ServeBundleHost.DEFAULT_RENDER_DENSITY — the desktop renderer's own default, and the only
+    // thing left to say when nothing in the manifest speaks for this preview.
     assertEquals(2.625f, spec?.density)
   }
 
