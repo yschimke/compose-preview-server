@@ -12540,14 +12540,20 @@ class ServeHttpServer(
     val permit = acquireAgentGrantPermit() ?: return
     try {
       val form = call.receiveFormParameters()
-      if (form["grant_type"]?.firstOrNull() != "authorization_code") {
-        respondOAuthError(
-          HttpStatusCode.BadRequest,
-          "unsupported_grant_type",
-          "Only grant_type=authorization_code is supported; this server issues no refresh tokens " +
-            "because re-authorization is a human decision.",
-        )
-        return
+      when (form["grant_type"]?.firstOrNull()) {
+        "authorization_code" -> Unit
+        "refresh_token" -> {
+          refreshOAuthToken(store, form)
+          return
+        }
+        else -> {
+          respondOAuthError(
+            HttpStatusCode.BadRequest,
+            "unsupported_grant_type",
+            "Only grant_type=authorization_code and grant_type=refresh_token are supported.",
+          )
+          return
+        }
       }
       // Redeemed before anything is checked, so a replay cannot find the entry twice even while
       // the first attempt is in flight (RFC 6749 §10.5).
@@ -12617,6 +12623,7 @@ class ServeHttpServer(
             accessToken = grant.token,
             expiresIn = grant.secondsUntilExpiry(System.currentTimeMillis()),
             scope = ServeMcpOAuth.formatScope(grant),
+            refreshToken = mcpOAuth.issueRefresh(grant.id, authorization.clientId),
           ),
         ),
         ContentType.Application.Json,
@@ -12624,6 +12631,62 @@ class ServeHttpServer(
     } finally {
       permit.release()
     }
+  }
+
+  /**
+   * `grant_type=refresh_token` — renew **within** the session a human already approved.
+   *
+   * The bound is the grant itself, which is what makes this safe to have at all in a design whose
+   * central promise is that no credential outlives a decision. This mints nothing and extends
+   * nothing: it looks the grant up, and if it is still live it hands back the same bearer with
+   * whatever life it has left. A revoked or lapsed grant refuses here in the same instant it
+   * refuses everywhere else, and takes its refresh tokens with it.
+   *
+   * What it buys is the case that had no answer before: a client that lost its access token
+   * mid-session — a restart, a rotation, a dropped cache — had to interrupt a person for permission
+   * it had already been given, and a headless or cloud client with no browser to be interrupted in
+   * simply stopped there.
+   */
+  private suspend fun RoutingContext.refreshOAuthToken(
+    store: ServeAgentGrantStore,
+    form: Map<String, List<String>>,
+  ) {
+    val clientId = form["client_id"]?.firstOrNull()
+    // Consumed before anything is checked, so a replay finds nothing even if this attempt fails.
+    val binding = mcpOAuth.redeemRefresh(form["refresh_token"]?.firstOrNull(), clientId)
+    if (binding == null) {
+      respondOAuthError(
+        HttpStatusCode.BadRequest,
+        "invalid_grant",
+        "Unknown, already-used, or wrong-client refresh token.",
+      )
+      return
+    }
+    val grant = store.grant(binding.grantId)
+    if (grant == null) {
+      // The grant is gone, so every token bound to it is too — including any sibling this
+      // rotation has not seen.
+      mcpOAuth.forgetRefreshFor(binding.grantId)
+      respondOAuthError(
+        HttpStatusCode.BadRequest,
+        "invalid_grant",
+        "The session this refresh token belonged to has expired or been revoked. Start a new " +
+          "authorization request.",
+      )
+      return
+    }
+    call.respondText(
+      JSON.encodeToString(
+        ServeMcpOAuth.TokenResponse.serializer(),
+        ServeMcpOAuth.TokenResponse(
+          accessToken = grant.token,
+          expiresIn = grant.secondsUntilExpiry(System.currentTimeMillis()),
+          scope = ServeMcpOAuth.formatScope(grant),
+          refreshToken = mcpOAuth.issueRefresh(grant.id, binding.clientId),
+        ),
+      ),
+      ContentType.Application.Json,
+    )
   }
 
   private suspend fun RoutingContext.respondOAuthError(

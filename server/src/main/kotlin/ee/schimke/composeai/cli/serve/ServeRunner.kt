@@ -2715,7 +2715,8 @@ public class ServeRunner(
       )
       throw IllegalArgumentException("--catalog-mcp requires --agent-grants")
     }
-    val machineAuthorization = ServeMachineAuthorization(token, githubAuth, agentGrantStore)
+    val machineAuthorization =
+      ServeMachineAuthorization(token, githubAuth, agentGrantStore, isPublic = public)
     val playgroundLane =
       openPlaygroundService(docStore, registry, repoAccessGated = githubAuth != null)
     val catalogFeed =
