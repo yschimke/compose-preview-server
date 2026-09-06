@@ -83,9 +83,32 @@ internal class ServeUiBuilderNativePreview(
   private val nativeTarget: (String) -> UiBuilderNativeTarget? = {
     UiBuilderNativeTarget(catalog = it, confType = UiBuilderGeneratedCompose.COMPOSE_CMP)
   },
+  /**
+   * The component packs this host admits, by id — the same set the export executor holds.
+   *
+   * A design that uses a pack's components is compiled against the **pack's** bundle rather than
+   * its catalog's: `confetti-mobile`'s classpath carries Material 3 and Confetti, and
+   * `m3-catalog`'s carries only the first, so the pack's is the one that can resolve every import.
+   * Two packs in one design have no such bundle and are refused with [MIXED_PACKS].
+   */
+  private val packs: Set<String> = emptySet(),
 ) : UiBuilderNativePreviewLane {
 
   override fun render(document: DesignDocumentV1): UiBuilderNativePreviewOutcome {
+    // Asked before anything is generated: a design drawing on two packs has no bundle to compile
+    // against whatever its Kotlin says, and this is a sentence about the design rather than about
+    // a record, so it should not be pre-empted by a missing record for the second pack.
+    val usedPacks = ScreenGeneratorComposeExportExecutor.packsUsedBy(document, packs)
+    if (usedPacks.size > 1) {
+      return UiBuilderNativePreviewOutcome.Refused(
+        MIXED_PACKS,
+        listOf(
+          "this design uses components from ${usedPacks.size} packs " +
+            "(${usedPacks.joinToString(", ") { "`$it`" }}), and no served bundle carries all of " +
+            "them; a native render can draw a design against one pack's bundle at a time"
+        ),
+      )
+    }
     val generated =
       when (val outcome = executor.generate(document, tagNodes = true)) {
         is ScreenGeneratorComposeExportExecutor.Generated.Emitted -> outcome
@@ -97,7 +120,10 @@ internal class ServeUiBuilderNativePreview(
     // the compile rather than after, and by name: "this host has no bundle for `wear-m3`" is an
     // operator's line of configuration, where a compiler error about an unresolved
     // `androidx.wear.compose.material3.ScreenScaffold` reads like a bug in the design.
-    val catalogSystemId = document.catalogPin.systemId
+    // A design using a pack is compiled against the pack's bundle, which carries both the pack's
+    // classes and the Material 3 its catalog names; the catalog's own bundle carries only the
+    // latter. Otherwise the design's own catalog, exactly as before there were packs.
+    val catalogSystemId = usedPacks.singleOrNull() ?: document.catalogPin.systemId
     val target =
       nativeTarget(catalogSystemId)
         ?: return UiBuilderNativePreviewOutcome.Refused(
@@ -146,6 +172,12 @@ internal class ServeUiBuilderNativePreview(
      * served a Wear bundle is the wrong half of the system to send them to.
      */
     const val NO_NATIVE_CATALOG = "NO_NATIVE_CATALOG"
+
+    /**
+     * The design draws on more than one component pack, and no single served bundle links them all.
+     * A thing to change about the design, unlike [NO_NATIVE_CATALOG].
+     */
+    const val MIXED_PACKS = "MIXED_PACKS"
   }
 }
 

@@ -97,6 +97,7 @@ import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -234,6 +235,8 @@ data class UiBuilderNewDesignCatalog(
   val systemId: String,
   val label: String,
   val templates: List<UiBuilderNewDesignTemplate>,
+  /** Which kind of screen it authors; the chooser groups catalogs by it. */
+  val platform: UiBuilderCatalogPlatform = UiBuilderCatalogPlatform.MOBILE,
 )
 
 /**
@@ -298,6 +301,12 @@ fun UiBuilderEditor(
   initialInspectorMode: EditorInspectorMode = EditorInspectorMode.Properties,
   initialPreviewMode: Boolean = false,
   initialCodePaneVisible: Boolean = false,
+  /**
+   * The component packs switched on when the design opens, by id — what the host remembered from
+   * the last time this catalog's settings were changed. Ids the catalog has no pack for are
+   * ignored, so a remembered pack an operator has since withdrawn does nothing.
+   */
+  initialEnabledPacks: Set<String> = emptySet(),
   /**
    * Which panels the editor starts with open: the components, the layers, the inspector.
    *
@@ -439,6 +448,8 @@ fun UiBuilderEditor(
             inspectorMode = initialInspectorMode,
             previewMode = initialPreviewMode,
             codePaneVisible = initialCodePaneVisible,
+            enabledPacks =
+              initialEnabledPacks.filterTo(mutableSetOf()) { catalog.componentPacks[it] != null },
             // A catalog whose canvas is only a stand-in opens on the host's renderer instead, where
             // the host has one. Not a preference — on `wear-m3` the canvas draws Material 3
             // lookalikes because a Wasm build cannot link `androidx.wear.compose:compose-material3`
@@ -520,6 +531,11 @@ fun UiBuilderEditor(
     }
   var inspectorOpen by remember(document.id) { mutableStateOf(initialInspectorOpen) }
   var showNewDesign by remember(document.id) { mutableStateOf(false) }
+  var showPacks by remember(document.id) { mutableStateOf(false) }
+  // Offered only where there is something to switch: a settings entry over an empty list is a
+  // control that teaches nothing.
+  val onComponentPacks: (() -> Unit)? =
+    if (catalog.componentPacks.isEmpty) null else ({ showPacks = true })
   // The source whose document is being fetched, or null. One at a time on purpose: the palette is a
   // list of 476 rows on the Remote M3 catalog, and a double-click that started two fetches would
   // insert the same component twice — the second insert lands against a document the first already
@@ -660,6 +676,8 @@ fun UiBuilderEditor(
         catalogSystemId = catalog.benchmark.catalogSystemId,
         catalogRows = reducer.catalogRows(state),
         totalCatalogComponents = catalog.components.size,
+        packs = catalog.componentPacks,
+        onManagePacks = onComponentPacks,
         thumbnailOf = reducer::previewDocument,
         layerRows = layerRows,
         collaborators = collaborators,
@@ -959,276 +977,291 @@ fun UiBuilderEditor(
     },
   )
 
-  MaterialTheme(colorScheme = EditorColors) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-      val compact = maxWidth < 840.dp
-      Column(
-        Modifier.fillMaxSize()
-          .background(MaterialTheme.colorScheme.background)
-          .focusRequester(editorFocusRequester)
-          .focusable()
-          .onPreviewKeyEvent { event ->
-            editorShortcut(
-              event,
-              enabled = !textInputFocused,
-              previewing = state.previewMode,
+  // Provided once here rather than at each surface: the canvas, every palette thumbnail and the
+  // preview frame all draw a pack component, and all of them should draw its placeholder.
+  CompositionLocalProvider(LocalUiBuilderNativeOnly provides catalog.nativeOnlyComponentIds) {
+    MaterialTheme(colorScheme = EditorColors) {
+      BoxWithConstraints(Modifier.fillMaxSize()) {
+        val compact = maxWidth < 840.dp
+        Column(
+          Modifier.fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .focusRequester(editorFocusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+              editorShortcut(
+                event,
+                enabled = !textInputFocused,
+                previewing = state.previewMode,
+                dispatch = ::dispatch,
+              )
+            }
+        ) {
+          if (compact) {
+            MobileEditorToolbar(
+              state = state,
+              canDelete = reducer.canDeleteSelected(state),
+              canDuplicate = reducer.canDuplicateSelected(state),
+              canCopy = reducer.canCopySelected(state),
+              canCut = reducer.canCutSelected(state),
+              canPaste = reducer.canPaste(state),
+              wrapCandidates = reducer.wrapCandidates(state),
+              canUnwrap = reducer.canUnwrapSelected(state),
+              canUndo = reducer.canUndo(state),
+              canRedo = reducer.canRedo(state),
+              onNewDesign =
+                if (newDesignCatalogs.isNotEmpty() && onCreateDesign != null) {
+                  { showNewDesign = true }
+                } else null,
+              onReconnect = onReconnect,
+              onHelp = onHelp,
+              onComponentPacks = onComponentPacks,
+              dispatch = ::dispatch,
+            )
+          } else {
+            EditorToolbar(
+              state = state,
+              canUndo = reducer.canUndo(state),
+              canRedo = reducer.canRedo(state),
+              collaborators = collaborators,
+              onNewDesign =
+                if (newDesignCatalogs.isNotEmpty() && onCreateDesign != null) {
+                  { showNewDesign = true }
+                } else null,
+              onReconnect = onReconnect,
+              onHelp = onHelp,
+              onComponentPacks = onComponentPacks,
+              // Absent where the host cannot draw: a project with no compile lane has exactly one
+              // renderer, and offering a choice between it and nothing is not a choice.
+              previewSurface = if (onRequestNativeRender == null) null else state.previewSurface,
+              previewSurfaces = catalog.previewSurfaces,
+              nativeAvailable = onRequestNativeRender != null,
               dispatch = ::dispatch,
             )
           }
-      ) {
-        if (compact) {
-          MobileEditorToolbar(
-            state = state,
-            canDelete = reducer.canDeleteSelected(state),
-            canDuplicate = reducer.canDuplicateSelected(state),
-            canCopy = reducer.canCopySelected(state),
-            canCut = reducer.canCutSelected(state),
-            canPaste = reducer.canPaste(state),
-            wrapCandidates = reducer.wrapCandidates(state),
-            canUnwrap = reducer.canUnwrapSelected(state),
-            canUndo = reducer.canUndo(state),
-            canRedo = reducer.canRedo(state),
-            onNewDesign =
-              if (newDesignCatalogs.isNotEmpty() && onCreateDesign != null) {
-                { showNewDesign = true }
-              } else null,
-            onReconnect = onReconnect,
-            onHelp = onHelp,
-            dispatch = ::dispatch,
-          )
-        } else {
-          EditorToolbar(
-            state = state,
-            canUndo = reducer.canUndo(state),
-            canRedo = reducer.canRedo(state),
-            collaborators = collaborators,
-            onNewDesign =
-              if (newDesignCatalogs.isNotEmpty() && onCreateDesign != null) {
-                { showNewDesign = true }
-              } else null,
-            onReconnect = onReconnect,
-            onHelp = onHelp,
-            // Absent where the host cannot draw: a project with no compile lane has exactly one
-            // renderer, and offering a choice between it and nothing is not a choice.
-            previewSurface = if (onRequestNativeRender == null) null else state.previewSurface,
-            previewSurfaces = catalog.previewSurfaces,
-            nativeAvailable = onRequestNativeRender != null,
-            dispatch = ::dispatch,
-          )
-        }
-        Box(Modifier.fillMaxSize()) {
-          if (!compact) {
-            // Which dock is showing, derived rather than stored: the code pane and the inspector
-            // are one slot, and two flags that could both say yes is a layout bug waiting.
-            val dock =
-              when {
-                state.codePaneVisible -> EditorDock.Code
-                inspectorOpen ->
-                  EditorDock.entries.first { it.inspectorMode() == state.inspectorMode }
-                else -> null
-              }
-            Row(Modifier.fillMaxSize()) {
-              EditorRail(
-                NavigatorTab.entries.map { entry ->
-                  EditorRailItem(
-                    label = entry.label,
-                    icon = entry.icon(),
-                    selected = navigatorTab == entry,
-                    onClick = {
-                      focusEditor()
-                      navigatorTab = if (navigatorTab == entry) null else entry
-                    },
+          Box(Modifier.fillMaxSize()) {
+            if (!compact) {
+              // Which dock is showing, derived rather than stored: the code pane and the inspector
+              // are one slot, and two flags that could both say yes is a layout bug waiting.
+              val dock =
+                when {
+                  state.codePaneVisible -> EditorDock.Code
+                  inspectorOpen ->
+                    EditorDock.entries.first { it.inspectorMode() == state.inspectorMode }
+                  else -> null
+                }
+              Row(Modifier.fillMaxSize()) {
+                EditorRail(
+                  NavigatorTab.entries.map { entry ->
+                    EditorRailItem(
+                      label = entry.label,
+                      icon = entry.icon(),
+                      selected = navigatorTab == entry,
+                      onClick = {
+                        focusEditor()
+                        navigatorTab = if (navigatorTab == entry) null else entry
+                      },
+                    )
+                  }
+                )
+                navigatorTab?.let { open ->
+                  navigator(Modifier.width(NAVIGATOR_WIDTH).fillMaxHeight(), open, false) {
+                    navigatorTab = null
+                  }
+                }
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                  // Above the canvas and only with a selection, so the verbs that act on a layer
+                  // arrive with it rather than sitting greyed in the top bar all session.
+                  if (state.selection.isNotEmpty()) {
+                    SelectionActionBar(
+                      selectionLabel = selectionLabel,
+                      // The way to the properties of the thing you just selected, from beside the
+                      // thing you just selected — offered only while they are not already showing.
+                      onOpenProperties =
+                        if (dock == EditorDock.Properties) null
+                        else {
+                          {
+                            focusEditor()
+                            if (state.codePaneVisible) {
+                              dispatch(UiBuilderEditorEvent.ToggleCodePane)
+                            }
+                            dispatch(
+                              UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Properties)
+                            )
+                            inspectorOpen = true
+                          }
+                        },
+                      selectionMenu = selectionMenu,
+                    )
+                  }
+                  Row(Modifier.fillMaxWidth().weight(1f)) {
+                    // One renderer or the other, normally. A CMP project that targets Wasm is best
+                    // previewed in the browser; a project that targets only Android or desktop has
+                    // no browser renderer at all, and the host's is not an extra pane but the whole
+                    // preview. `Both` is the deliberate third case — comparing them — rather than
+                    // the layout everything else is squeezed into.
+                    if (state.previewSurface != EditorPreviewSurface.Native || !nativeRequested) {
+                      canvas(
+                        Modifier.weight(1f)
+                          .fillMaxHeight()
+                          .background(Color(0xff0d0e11))
+                          .padding(24.dp),
+                        // Centred now that the canvas has the window rather than the strip between
+                        // two nailed-open panels. A design pinned to the top-left of a workspace it
+                        // does not fill reads as a page that failed to load.
+                        Alignment.Center,
+                      )
+                    }
+                    if (nativeRequested) {
+                      NativeRenderPane(
+                        render = nativeRender,
+                        pending = nativePending,
+                        selectedNodeId = state.selectedNodeId,
+                        onNodeSelected = {
+                          focusEditor()
+                          dispatch(UiBuilderEditorEvent.SelectNode(it))
+                        },
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                      )
+                    }
+                  }
+                  CanvasStatusBar(
+                    state = state,
+                    sessionLabel = sessionLabel,
+                    dropTargetLabel =
+                      reducer.dropTargetLabel(state, draggedComponentId ?: "m3/text"),
+                    dragging = draggedComponentId != null,
                   )
                 }
-              )
-              navigatorTab?.let { open ->
-                navigator(Modifier.width(NAVIGATOR_WIDTH).fillMaxHeight(), open, false) {
-                  navigatorTab = null
+                when (dock) {
+                  null -> Unit
+                  EditorDock.Code ->
+                    if (generatedCode != null) {
+                      Surface(
+                        Modifier.width(CODE_DOCK_WIDTH).fillMaxHeight(),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 2.dp,
+                      ) {
+                        Column(Modifier.fillMaxSize()) {
+                          DockHeading(
+                            title = "Code",
+                            supporting = generatedCodeCaption,
+                            onClose = { dispatch(UiBuilderEditorEvent.ToggleCodePane) },
+                          )
+                          GeneratedCodePane(
+                            generatedCode,
+                            generatedCodeCaption,
+                            Modifier.fillMaxSize(),
+                          )
+                        }
+                      }
+                    }
+                  else -> inspector(Modifier.width(INSPECTOR_WIDTH).fillMaxHeight())
                 }
-              }
-              Column(Modifier.weight(1f).fillMaxHeight()) {
-                // Above the canvas and only with a selection, so the verbs that act on a layer
-                // arrive with it rather than sitting greyed in the top bar all session.
-                if (state.selection.isNotEmpty()) {
-                  SelectionActionBar(
-                    selectionLabel = selectionLabel,
-                    // The way to the properties of the thing you just selected, from beside the
-                    // thing you just selected — offered only while they are not already showing.
-                    onOpenProperties =
-                      if (dock == EditorDock.Properties) null
-                      else {
-                        {
-                          focusEditor()
+                EditorRail(
+                  EditorDock.entries.map { entry ->
+                    EditorRailItem(
+                      label = entry.label,
+                      icon = entry.icon(),
+                      selected = dock == entry,
+                      // Two docks carry a count, and both answer the same question from the rail:
+                      // how much is waiting behind this icon. Counted rather than dotted, because a
+                      // bare dot makes somebody open the panel to find out whether it is one or
+                      // twenty.
+                      badge =
+                        when (entry) {
+                          EditorDock.Issues -> problems.size
+                          EditorDock.Comments -> comments.openThreads.size
+                          else -> 0
+                        },
+                      onClick = {
+                        focusEditor()
+                        val mode = entry.inspectorMode()
+                        if (mode == null) {
+                          dispatch(UiBuilderEditorEvent.ToggleCodePane)
+                        } else {
                           if (state.codePaneVisible) {
                             dispatch(UiBuilderEditorEvent.ToggleCodePane)
                           }
-                          dispatch(
-                            UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Properties)
-                          )
-                          inspectorOpen = true
+                          inspectorOpen = dock != entry
+                          if (inspectorOpen) dispatch(UiBuilderEditorEvent.ShowInspector(mode))
                         }
                       },
-                    selectionMenu = selectionMenu,
-                  )
-                }
-                Row(Modifier.fillMaxWidth().weight(1f)) {
-                  // One renderer or the other, normally. A CMP project that targets Wasm is best
-                  // previewed in the browser; a project that targets only Android or desktop has
-                  // no browser renderer at all, and the host's is not an extra pane but the whole
-                  // preview. `Both` is the deliberate third case — comparing them — rather than
-                  // the layout everything else is squeezed into.
-                  if (state.previewSurface != EditorPreviewSurface.Native || !nativeRequested) {
-                    canvas(
-                      Modifier.weight(1f)
-                        .fillMaxHeight()
-                        .background(Color(0xff0d0e11))
-                        .padding(24.dp),
-                      // Centred now that the canvas has the window rather than the strip between
-                      // two nailed-open panels. A design pinned to the top-left of a workspace it
-                      // does not fill reads as a page that failed to load.
-                      Alignment.Center,
                     )
                   }
-                  if (nativeRequested) {
-                    NativeRenderPane(
-                      render = nativeRender,
-                      pending = nativePending,
-                      selectedNodeId = state.selectedNodeId,
-                      onNodeSelected = {
-                        focusEditor()
-                        dispatch(UiBuilderEditorEvent.SelectNode(it))
-                      },
-                      modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                  }
-                }
-                CanvasStatusBar(
-                  state = state,
-                  sessionLabel = sessionLabel,
-                  dropTargetLabel = reducer.dropTargetLabel(state, draggedComponentId ?: "m3/text"),
-                  dragging = draggedComponentId != null,
                 )
               }
-              when (dock) {
-                null -> Unit
-                EditorDock.Code ->
-                  if (generatedCode != null) {
-                    Surface(
-                      Modifier.width(CODE_DOCK_WIDTH).fillMaxHeight(),
-                      color = MaterialTheme.colorScheme.surface,
-                      tonalElevation = 2.dp,
-                    ) {
-                      Column(Modifier.fillMaxSize()) {
-                        DockHeading(
-                          title = "Code",
-                          supporting = generatedCodeCaption,
-                          onClose = { dispatch(UiBuilderEditorEvent.ToggleCodePane) },
-                        )
-                        GeneratedCodePane(
-                          generatedCode,
-                          generatedCodeCaption,
-                          Modifier.fillMaxSize(),
-                        )
-                      }
-                    }
-                  }
-                else -> inspector(Modifier.width(INSPECTOR_WIDTH).fillMaxHeight())
-              }
-              EditorRail(
-                EditorDock.entries.map { entry ->
-                  EditorRailItem(
-                    label = entry.label,
-                    icon = entry.icon(),
-                    selected = dock == entry,
-                    // Two docks carry a count, and both answer the same question from the rail:
-                    // how much is waiting behind this icon. Counted rather than dotted, because a
-                    // bare dot makes somebody open the panel to find out whether it is one or
-                    // twenty.
-                    badge =
-                      when (entry) {
-                        EditorDock.Issues -> problems.size
-                        EditorDock.Comments -> comments.openThreads.size
-                        else -> 0
-                      },
-                    onClick = {
-                      focusEditor()
-                      val mode = entry.inspectorMode()
-                      if (mode == null) {
-                        dispatch(UiBuilderEditorEvent.ToggleCodePane)
-                      } else {
-                        if (state.codePaneVisible) {
-                          dispatch(UiBuilderEditorEvent.ToggleCodePane)
-                        }
-                        inspectorOpen = dock != entry
-                        if (inspectorOpen) dispatch(UiBuilderEditorEvent.ShowInspector(mode))
-                      }
-                    },
-                  )
+            } else {
+              canvas(
+                Modifier.fillMaxSize()
+                  .background(Color(0xff0d0e11))
+                  .padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 64.dp),
+                Alignment.Center,
+              )
+              val mobileNavigatorTab =
+                when (mobilePanel) {
+                  MobileEditorPanel.Components -> NavigatorTab.Insert
+                  MobileEditorPanel.Layers -> NavigatorTab.Layers
+                  else -> null
                 }
-              )
-            }
-          } else {
-            canvas(
-              Modifier.fillMaxSize()
-                .background(Color(0xff0d0e11))
-                .padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 64.dp),
-              Alignment.Center,
-            )
-            val mobileNavigatorTab =
-              when (mobilePanel) {
-                MobileEditorPanel.Components -> NavigatorTab.Insert
-                MobileEditorPanel.Layers -> NavigatorTab.Layers
-                else -> null
+              mobileNavigatorTab?.let { open ->
+                navigator(
+                  Modifier.align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.72f)
+                    .padding(bottom = 56.dp),
+                  open,
+                  true,
+                ) {
+                  mobilePanel = MobileEditorPanel.None
+                }
               }
-            mobileNavigatorTab?.let { open ->
-              navigator(
-                Modifier.align(Alignment.BottomCenter)
-                  .fillMaxWidth()
-                  .fillMaxHeight(0.72f)
-                  .padding(bottom = 56.dp),
-                open,
-                true,
-              ) {
-                mobilePanel = MobileEditorPanel.None
+              if (mobilePanel == MobileEditorPanel.Properties) {
+                inspector(
+                  Modifier.align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.72f)
+                    .padding(bottom = 56.dp)
+                )
               }
-            }
-            if (mobilePanel == MobileEditorPanel.Properties) {
-              inspector(
-                Modifier.align(Alignment.BottomCenter)
-                  .fillMaxWidth()
-                  .fillMaxHeight(0.72f)
-                  .padding(bottom = 56.dp)
+              if (mobilePanel == MobileEditorPanel.Code && generatedCode != null) {
+                GeneratedCodePane(
+                  generatedCode,
+                  generatedCodeCaption,
+                  Modifier.align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.72f)
+                    .padding(bottom = 56.dp),
+                )
+              }
+              MobilePanelDock(
+                panel = mobilePanel,
+                onPanelChanged = {
+                  mobilePanel = if (mobilePanel == it) MobileEditorPanel.None else it
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
               )
             }
-            if (mobilePanel == MobileEditorPanel.Code && generatedCode != null) {
-              GeneratedCodePane(
-                generatedCode,
-                generatedCodeCaption,
-                Modifier.align(Alignment.BottomCenter)
-                  .fillMaxWidth()
-                  .fillMaxHeight(0.72f)
-                  .padding(bottom = 56.dp),
-              )
-            }
-            MobilePanelDock(
-              panel = mobilePanel,
-              onPanelChanged = {
-                mobilePanel = if (mobilePanel == it) MobileEditorPanel.None else it
-              },
-              modifier = Modifier.align(Alignment.BottomCenter),
-            )
           }
         }
-      }
-      if (showNewDesign && onCreateDesign != null) {
-        NewDesignDialog(
-          catalogs = newDesignCatalogs,
-          initialCatalogSystemId =
-            document.catalogPin["systemId"]?.jsonPrimitive?.contentOrNull
-              ?: newDesignCatalogs.first().systemId,
-          onDismiss = { showNewDesign = false },
-          onCreate = onCreateDesign,
-        )
+        if (showPacks) {
+          ComponentPacksDialog(
+            packs = catalog.componentPacks,
+            enabledPacks = state.enabledPacks,
+            onToggle = { dispatch(UiBuilderEditorEvent.TogglePack(it)) },
+            onDismiss = { showPacks = false },
+          )
+        }
+        if (showNewDesign && onCreateDesign != null) {
+          NewDesignDialog(
+            catalogs = newDesignCatalogs,
+            initialCatalogSystemId =
+              document.catalogPin["systemId"]?.jsonPrimitive?.contentOrNull
+                ?: newDesignCatalogs.first().systemId,
+            onDismiss = { showNewDesign = false },
+            onCreate = onCreateDesign,
+          )
+        }
       }
     }
   }
@@ -1272,18 +1305,33 @@ private fun NewDesignDialog(
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Catalog", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          catalogs.forEach { catalog ->
-            FilterChip(
-              selected = catalog.systemId == selectedCatalogId,
-              onClick = {
-                selectedCatalogId = catalog.systemId
-                selectedTemplateId = catalog.templates.first().id
-              },
-              label = { Text(catalog.label) },
-            )
+        // Grouped by platform once there is more than one: a phone screen, a watch screen and a
+        // Remote Compose widget are not three flavours of one thing, and a row of chips that put
+        // them side by side said they were. One platform keeps the single row it always had.
+        val byPlatform = catalogs.groupBy { it.platform }
+        byPlatform.entries
+          .sortedBy { it.key.ordinal }
+          .forEach { (platform, platformCatalogs) ->
+            if (byPlatform.size > 1) {
+              Text(
+                platform.label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelMedium,
+              )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              platformCatalogs.forEach { catalog ->
+                FilterChip(
+                  selected = catalog.systemId == selectedCatalogId,
+                  onClick = {
+                    selectedCatalogId = catalog.systemId
+                    selectedTemplateId = catalog.templates.first().id
+                  },
+                  label = { Text(catalog.label) },
+                )
+              }
+            }
           }
-        }
         Text("Starting point", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           selectedCatalog.templates.forEach { template ->
@@ -1430,6 +1478,7 @@ private fun MobileEditorToolbar(
   onNewDesign: (() -> Unit)?,
   onReconnect: (() -> Unit)?,
   onHelp: (() -> Unit)?,
+  onComponentPacks: (() -> Unit)? = null,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
   var expanded by remember { mutableStateOf(false) }
@@ -1507,6 +1556,15 @@ private fun MobileEditorToolbar(
               },
             )
           }
+          if (onComponentPacks != null) {
+            DropdownMenuItem(
+              text = { Text("Component packs…") },
+              onClick = {
+                expanded = false
+                onComponentPacks()
+              },
+            )
+          }
           if (onHelp != null) {
             DropdownMenuItem(
               text = { Text("Help") },
@@ -1580,6 +1638,8 @@ private fun EditorToolbar(
   onNewDesign: (() -> Unit)?,
   onReconnect: (() -> Unit)?,
   onHelp: (() -> Unit)?,
+  /** Opens the component-pack settings, or null where the catalog offers no pack. */
+  onComponentPacks: (() -> Unit)? = null,
   /**
    * The surface in use, or null where the host cannot compile — a project with one renderer is not
    * offered a choice between it and nothing.
@@ -1673,6 +1733,16 @@ private fun EditorToolbar(
               onClick = {
                 overflowOpen = false
                 onReconnect()
+              },
+            )
+          }
+          if (onComponentPacks != null) {
+            DropdownMenuItem(
+              text = { Text("Component packs…") },
+              leadingIcon = { Icon(Icons.Filled.Widgets, contentDescription = null) },
+              onClick = {
+                overflowOpen = false
+                onComponentPacks()
               },
             )
           }
@@ -2270,6 +2340,80 @@ private fun EditorAction(
   }
 }
 
+/**
+ * The component-pack settings: one switch per pack the catalog carries.
+ *
+ * A dialog rather than a panel because it is a *setting* — a decision about what the palette
+ * offers, made once per catalog and remembered by the host — and not a thing to look at while
+ * designing. The components of a pack that is off stay in the catalog: switching a pack off after
+ * dropping one of its components hides the shelf, not the node.
+ */
+@Composable
+private fun ComponentPacksDialog(
+  packs: UiBuilderComponentPacks,
+  enabledPacks: Set<String>,
+  onToggle: (String) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Component packs") },
+    text = { ComponentPacksPanel(packs, enabledPacks, onToggle) },
+    confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+  )
+}
+
+/** The switch list, separate from the dialog so it can be previewed on its own. */
+@Composable
+internal fun ComponentPacksPanel(
+  packs: UiBuilderComponentPacks,
+  enabledPacks: Set<String>,
+  onToggle: (String) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Column(
+    modifier.width(460.dp).verticalScroll(rememberScrollState()),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
+  ) {
+    Text(
+      "Other catalogs' components, offered on a shelf of their own. A pack component is drawn on " +
+        "the canvas as a named placeholder and rendered as itself by the host's native preview, " +
+        "which compiles the design against that catalog's bundle.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.bodySmall,
+    )
+    packs.packs.forEach { pack ->
+      val enabled = pack.id in enabledPacks
+      Row(
+        Modifier.fillMaxWidth()
+          .clip(RoundedCornerShape(8.dp))
+          .clickable { onToggle(pack.id) }
+          .padding(horizontal = 8.dp, vertical = 6.dp)
+          .semantics { contentDescription = "${pack.label} pack" },
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text(pack.label, style = MaterialTheme.typography.bodyLarge)
+          Text(
+            "${pack.componentIds.size} components · ${pack.platform.label}" +
+              (pack.nativeCatalog?.let { " · renders against $it" } ?: ""),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+          )
+          if (pack.notes.isNotEmpty()) {
+            Text(
+              pack.notes,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+        }
+        Switch(checked = enabled, onCheckedChange = { onToggle(pack.id) })
+      }
+    }
+  }
+}
+
 @Composable
 private fun EditorShortcutsDialog(onDismiss: () -> Unit) {
   AlertDialog(
@@ -2559,6 +2703,10 @@ private fun EditorNavigator(
   catalogSystemId: String,
   catalogRows: List<EditorCatalogRow>,
   totalCatalogComponents: Int,
+  /** The packs the catalog carries, for the palette's own summary row. */
+  packs: UiBuilderComponentPacks = UiBuilderComponentPacks.NONE,
+  /** Opens the pack settings, or null where there is nothing to switch. */
+  onManagePacks: (() -> Unit)? = null,
   thumbnailOf: (String, EditorCatalogVariant?) -> UiBuilderDocument?,
   layerRows: List<EditorLayerRow>,
   collaborators: List<UiBuilderCollaborator>,
@@ -2593,6 +2741,8 @@ private fun EditorNavigator(
             state = state,
             catalogRows = catalogRows,
             totalCatalogComponents = totalCatalogComponents,
+            packs = packs,
+            onManagePacks = onManagePacks,
             thumbnailOf = thumbnailOf,
             dropTarget = dropTarget,
             onCatalogDrag = onCatalogDrag,
@@ -2638,6 +2788,10 @@ private fun InsertPanel(
    * Every component the catalog has, which is what the All row counts — not what survived a filter.
    */
   totalCatalogComponents: Int,
+  /** The packs the catalog carries, for the palette's own summary row. */
+  packs: UiBuilderComponentPacks = UiBuilderComponentPacks.NONE,
+  /** Opens the pack settings, or null where there is nothing to switch. */
+  onManagePacks: (() -> Unit)? = null,
   /** The document a row's picture draws, from the reducer that would perform the insert. */
   thumbnailOf: (String, EditorCatalogVariant?) -> UiBuilderDocument?,
   dropTarget: ParentSlot?,
@@ -2677,6 +2831,9 @@ private fun InsertPanel(
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
     )
+    if (!packs.isEmpty && onManagePacks != null) {
+      PacksSummaryRow(packs, state.enabledPacks, onManagePacks)
+    }
     LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
       item {
         CatalogAllRow(totalCatalogComponents) {
@@ -3505,6 +3662,42 @@ private fun RemoteComposeSourceRow(
  * there has to be something to press to get back out. Pressing it clears the search and opens every
  * shelf.
  */
+/**
+ * How many packs are on, and the way to the switch — said in the palette, because the palette is
+ * where somebody notices a component they expected is not there.
+ */
+@Composable
+private fun PacksSummaryRow(
+  packs: UiBuilderComponentPacks,
+  enabledPacks: Set<String>,
+  onManagePacks: () -> Unit,
+) {
+  val on = packs.packs.count { it.id in enabledPacks }
+  Row(
+    Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      when {
+        on == 0 ->
+          "${packs.packs.size} component ${if (packs.packs.size == 1) "pack" else "packs"} off"
+        else -> "$on of ${packs.packs.size} component packs on"
+      },
+      Modifier.weight(1f),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    TextButton(
+      onClick = onManagePacks,
+      modifier = Modifier.semantics { contentDescription = "Manage component packs" },
+    ) {
+      Text("Packs…", style = MaterialTheme.typography.labelMedium)
+    }
+  }
+}
+
 @Composable
 private fun CatalogAllRow(total: Int, onShowAll: () -> Unit) {
   Surface(

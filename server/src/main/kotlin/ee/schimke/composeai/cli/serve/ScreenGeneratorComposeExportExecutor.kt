@@ -56,6 +56,17 @@ internal class ScreenGeneratorComposeExportExecutor(
    * golden test would not have caught it — it passes a package explicitly.
    */
   private val packageName: String = ScreenExportGate.PACKAGE_NAME,
+  /**
+   * The component packs this host admits, by id.
+   *
+   * A design pinned to `m3-catalog` may hold `confetti-mobile/session-card`, and that node's call
+   * site is proven by `confetti-mobile`'s record, not `m3-catalog`'s. So the record a document is
+   * generated from is its catalog's plus, for every pack the document actually uses, that pack's
+   * record with the pack's ids written onto it as aliases ([ComponentRecordPacks.aliasedRecord]).
+   * Only the packs used, so a document that draws on none is generated from exactly the record it
+   * always was.
+   */
+  private val packs: Set<String> = emptySet(),
 ) : UiBuilderExportExecutor {
 
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
@@ -219,6 +230,47 @@ internal class ScreenGeneratorComposeExportExecutor(
         ),
       )
     }
+    val usedPacks = packsUsedBy(document, packs)
+    val packRecords = usedPacks.map { pack ->
+      when (val lookup = components(pack)) {
+        is ComponentRecordSource.Lookup.Found ->
+          ComponentRecordPacks.aliasedRecord(pack, lookup.record).also {
+            if (!generatesFrom(it)) {
+              return Generated.Refused(
+                NO_COMPONENT_RECORD,
+                listOf(
+                  "the component record for pack `$pack` is schema ${it.schemaVersion}, and " +
+                    "this build generates from $COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to " +
+                    "$COMPONENT_RECORD_SCHEMA_VERSION; re-run discovery against a matching " +
+                    "plugin version"
+                ),
+              )
+            }
+          }
+        // The same two sentences the catalog's own record gets, naming the pack: this design
+        // holds a component of `$pack`'s, and this host cannot prove how to call it.
+        ComponentRecordSource.Lookup.Unconfigured ->
+          return Generated.Refused(
+            NO_COMPONENT_RECORD,
+            listOf(
+              "this design uses components from the `$pack` pack, and this host has no " +
+                "discovered component record for it; run a preview bundle for that catalog's " +
+                "module and pass it as `--ui-builder-components $pack=<components.json>`"
+            ),
+          )
+        is ComponentRecordSource.Lookup.Unusable ->
+          return Generated.Refused(
+            NO_COMPONENT_RECORD,
+            listOf(
+              "the component record configured for the `$pack` pack could not be loaded: " +
+                lookup.reason
+            ),
+          )
+      }
+    }
+    val merged =
+      if (packRecords.isEmpty()) record
+      else record.copy(components = record.components + packRecords.flatMap { it.components })
     val screenName = ScreenDocumentProjection.screenNameFor(document)
     val projected =
       when (val projection = ScreenDocumentProjection.project(document, screenName, tagNodes)) {
@@ -227,7 +279,7 @@ internal class ScreenGeneratorComposeExportExecutor(
           return Generated.Refused(UNEXPRESSIBLE_DOCUMENT, projection.reasons)
       }
     return when (
-      val generated = ScreenGenerator.generate(projected, record, packageName, EXPRESSION_PACKAGES)
+      val generated = ScreenGenerator.generate(projected, merged, packageName, EXPRESSION_PACKAGES)
     ) {
       is ScreenGenerator.Result.Refused -> Generated.Refused(UNPROVEN_CALL_SITE, generated.reasons)
       is ScreenGenerator.Result.Emitted -> Generated.Emitted(generated.source, screenName)
@@ -311,6 +363,23 @@ internal class ScreenGeneratorComposeExportExecutor(
     }
 
   companion object {
+    /**
+     * The packs [document] draws on, in a stable order.
+     *
+     * By id prefix, because that is what a pack component id is: `<pack>/<component>`, the same
+     * shape `RecordFreeExport.CATALOG_SYSTEM_IDS` reads a catalog off. Only ids in [packs] count —
+     * `m3/text` has a prefix too, and it is not a pack.
+     */
+    internal fun packsUsedBy(
+      document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
+      packs: Set<String>,
+    ): List<String> =
+      document.nodes.values
+        .map { it.componentId.substringBefore('/') }
+        .filter { it in packs }
+        .distinct()
+        .sorted()
+
     /**
      * The only packages a generated screen may call.
      *

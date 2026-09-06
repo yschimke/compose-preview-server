@@ -263,6 +263,13 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # A catalog absent from the map compiles against a served catalog of its own name, which is what
   # `m3-catalog` has always done and why it is not listed.
   args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
+  # Served catalogs offered as COMPONENT PACKS inside the builder's catalogs: `confetti-mobile=mobile`
+  # puts Confetti's own composables on a shelf of their own in every Material 3 design, drawn as
+  # placeholders on the canvas and rendered natively against the confetti-mobile bundle. Off by
+  # default, because a pack needs that catalog's component record beside it (a second
+  # `--ui-builder-components` entry, `<pack>=<components.json>`), and the image ships only
+  # m3-catalog's. See docs/design/UI_BUILDER_COMPONENT_PACKS.md.
+  [[ -n "${SERVE_UI_BUILDER_PACKS:-}" ]] && args+=(--ui-builder-packs "${SERVE_UI_BUILDER_PACKS}")
 fi
 # Explicit per-catalog apps remain additive and take precedence over the packaged fallback.
 [[ -n "${SERVE_WASM_DIR:-}" ]] && args+=(--wasm-dir "${SERVE_WASM_DIR}")

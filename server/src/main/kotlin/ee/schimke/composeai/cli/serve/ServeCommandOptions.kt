@@ -772,6 +772,43 @@ public class ServeCommandOptions(
       }
       ?.toMap() ?: emptyMap()
 
+  /**
+   * Which served catalogs are offered as component packs, and to which platform's catalogs.
+   *
+   * `<pack>=<platform>` rather than a bare id, because the platform is the one fact the record
+   * cannot say about itself: a `components.json` lists composables and their signatures, and
+   * nothing in it says whether they are a phone screen's or a watch's. The word is checked here
+   * against the three the builder knows so a typo fails at startup rather than admitting a pack no
+   * catalog ever receives.
+   */
+  override val uiBuilderPacks: Map<String, String> =
+    args
+      .flagValue("--ui-builder-packs")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.map { entry ->
+        val pack = entry.substringBefore('=', missingDelimiterValue = "").trim()
+        val platform = entry.substringAfter('=', missingDelimiterValue = "").trim().lowercase()
+        require(pack.isNotEmpty() && platform.isNotEmpty()) {
+          "--ui-builder-packs entries must be <served catalog>=<platform>, got `$entry`"
+        }
+        require(UI_BUILDER_CATALOG_ID.matches(pack)) {
+          "--ui-builder-packs names an invalid catalog id `$pack`"
+        }
+        require(platform in UI_BUILDER_PLATFORMS) {
+          "--ui-builder-packs names an unknown platform `$platform` for `$pack`; " +
+            "expected one of ${UI_BUILDER_PLATFORMS.joinToString(", ")}"
+        }
+        pack to platform
+      }
+      ?.also { pairs ->
+        require(pairs.map { it.first }.distinct().size == pairs.size) {
+          "--ui-builder-packs names a catalog twice"
+        }
+      }
+      ?.toMap() ?: emptyMap()
+
   /** Exact, retained renderer bundles; unlike the builder shell these paths are immutable pins. */
   override val uiBuilderRuntimeDirs: Map<String, File> =
     args
@@ -1225,6 +1262,15 @@ public class ServeCommandOptions(
                           composeCode = false so the export is not offered. remote-m3 and wear-m3
                           need no record: their designs are written by their own emitters, and both
                           export without one.
+        --ui-builder-packs <catalog>=<platform>[,<catalog>=<platform>…]
+                          Served catalogs offered as component packs inside every builder catalog
+                          of the named platform (mobile, wear or remote-compose): confetti-mobile
+                          =mobile puts Confetti's own composables on a shelf of their own in every
+                          Material 3 design, drawn as placeholders on the canvas and rendered
+                          natively against the confetti-mobile bundle. A pack's components come
+                          from its discovered component record, so each pack also needs a
+                          --ui-builder-components entry. Authors switch a pack on from the
+                          editor's settings; admitting one here only makes it available.
         --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]
                           Retained immutable native renderer bundles. Each directory must contain
                           runtime-manifest.json. Runtime ids are exact pins; there is no latest
@@ -1256,6 +1302,12 @@ public class ServeCommandOptions(
 
   private companion object {
     val UI_BUILDER_CATALOG_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+
+    /**
+     * The platform words `--ui-builder-packs` accepts, as `UiBuilderCatalogPlatform` spells them.
+     */
+    val UI_BUILDER_PLATFORMS =
+      ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform.entries.map { it.wireValue }.toSet()
   }
 
   override fun previewIdMatchesRequest(
