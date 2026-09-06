@@ -152,6 +152,214 @@ describe("<cp-spec-compare>", () => {
         assert.equal(pick().textContent, "", "reserved, not filled");
     });
 
+    // ---- Freezing a reading (issue #464) -------------------------------------------------------
+    //
+    // The picker's one gesture is "hold what I am looking at". It was not holding that: the click
+    // took its OWN reading, and a click's coordinates are not the pointer's — Chromium rounds
+    // `MouseEvent.clientX/clientY` to whole CSS pixels while `pointermove` carries fractions. On a
+    // panel scaled down to fit its box that whole pixel is several pixels of the normalised space,
+    // so the row swapped to a neighbouring pixel, and to its verdict, at the moment of freezing.
+    // Measured on the triptych at devicePixelRatio 2, pointer held still:
+    // `146,122 · … · Δ 22` on screen, `146,121 · … · identical` frozen.
+
+    /**
+     * A pair whose two sides hand back real pixels, so a reading can actually be taken.
+     *
+     * The reference alternates by ROW against a uniform candidate, which is what makes a
+     * one-pixel-off reading visible as a different LINE rather than the same one: row 3 matches
+     * the candidate exactly, row 2 is its opposite.
+     */
+    const readablePair = (size = 8) => {
+        const buffer = (
+            paint: (row: number) => [number, number, number, number],
+        ) => {
+            const data = new Uint8ClampedArray(size * size * 4);
+            for (let y = 0; y < size; y++)
+                for (let x = 0; x < size; x++)
+                    data.set(paint(y), (y * size + x) * 4);
+            return {
+                width: size,
+                height: size,
+                getContext: () => ({ getImageData: () => ({ data }) }),
+            } as never;
+        };
+        return {
+            reference: buffer((row) =>
+                row === 2 ? [255, 255, 255, 255] : [0, 0, 0, 255],
+            ),
+            candidate: buffer(() => [0, 0, 0, 255]),
+            images: [{}, {}] as [unknown, unknown],
+            width: size,
+            height: size,
+            boxes: {
+                reference: { x: 0, y: 0, width: size, height: size },
+                candidate: { x: 0, y: 0, width: size, height: size },
+            },
+        };
+    };
+
+    /**
+     * The lane open on a readable pair, with the render panel laid out at HALF the pair's height.
+     *
+     * The scale is the point: two rows of the normalised space per CSS pixel is what turns the
+     * click's rounding into a different reading, and it is the ordinary case — a panel is the
+     * raster fitted into its box, not shown at its intrinsic size.
+     */
+    async function openReadableLane(): Promise<HTMLCanvasElement> {
+        const pair = readablePair();
+        window.ComposePreviewCompare = {
+            scoreImageUrls: async () => ({ percent: 98.4, geometry: 0 }),
+            normaliseImageUrls: async () => pair as never,
+            diffCanvases: () => 12,
+            scoreImages: async () => ({ percent: 98.4, geometry: 0 }),
+        };
+        await mount();
+        lane().open("/render/Button.png");
+        for (let i = 0; i < 5; i++) await flush();
+        const actual = document.getElementById(
+            "cp-spec-actual",
+        ) as HTMLCanvasElement;
+        actual.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 8,
+                bottom: 4,
+                width: 8,
+                height: 4,
+            }) as DOMRect;
+        return actual;
+    }
+
+    /** A pointer move over a panel, at the sub-pixel coordinates a real one carries. */
+    const movePointer = (panel: HTMLElement, x: number, y: number) =>
+        panel.dispatchEvent(
+            new MouseEvent("pointermove", {
+                clientX: x,
+                clientY: y,
+                bubbles: true,
+            }),
+        );
+
+    /** A click, with the whole-CSS-pixel coordinates the browser rounds it to. */
+    const clickPanel = (panel: HTMLElement, x: number, y: number) =>
+        panel.dispatchEvent(
+            new MouseEvent("click", {
+                clientX: Math.round(x),
+                clientY: Math.round(y),
+                bubbles: true,
+            }),
+        );
+
+    it("freezes the reading on screen, not the click's own pixel", async () => {
+        const actual = await openReadableLane();
+        // y 1.9 of a panel at half scale is row 3 — the row that matches. The click that follows
+        // carries y 2, which is row 4... and row 2 either side of it: whatever it reads, it must
+        // not be what the row is made to say.
+        movePointer(actual, 4.4, 1.9);
+        const onScreen = pick().textContent;
+        assert.match(onScreen ?? "", /^4,3 /, "the pointer is on row 3");
+
+        clickPanel(actual, 4.4, 1.9);
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), true);
+        assert.equal(
+            pick().textContent,
+            onScreen,
+            "the frozen line is the line that was being read",
+        );
+        assert.equal(pickLive().textContent, "Frozen reading. " + onScreen);
+    });
+
+    it("ignores the pointer while frozen", async () => {
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        const held = pick().textContent;
+        clickPanel(actual, 4.4, 1.9);
+
+        movePointer(actual, 4.4, 1.1);
+        assert.equal(pick().textContent, held, "the latch holds the row still");
+    });
+
+    it("hands the row back to the pointer when a second click releases it", async () => {
+        // Escape blanked the row and a second click did not, so releasing by click left the
+        // latched line up — unstyled, and therefore reading as a LIVE reading of whatever the
+        // cursor had moved onto in the meantime.
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        const held = pick().textContent;
+        clickPanel(actual, 4.4, 1.9);
+        movePointer(actual, 4.4, 1.1);
+
+        clickPanel(actual, 4.4, 1.1);
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), false);
+        assert.equal(pickLive().textContent, "");
+        assert.notEqual(
+            pick().textContent,
+            held,
+            "not the line the latch held",
+        );
+        assert.match(
+            pick().textContent ?? "",
+            /^4,2 /,
+            "the pixel the pointer is actually on",
+        );
+    });
+
+    it("hands the row back to the pointer when Escape releases it", async () => {
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        clickPanel(actual, 4.4, 1.9);
+        movePointer(actual, 4.4, 1.1);
+
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), false);
+        assert.match(pick().textContent ?? "", /^4,2 /);
+    });
+
+    it("empties the row when a release finds the pointer gone", async () => {
+        // The latch survives the pointer leaving the comparison — that is what makes a reading
+        // readable and copyable. Releasing then has nothing under the cursor to describe.
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        clickPanel(actual, 4.4, 1.9);
+        panel().dispatchEvent(
+            new MouseEvent("pointerleave", { bubbles: false }),
+        );
+        assert.notEqual(
+            pick().textContent,
+            "",
+            "the latch holds through a leave",
+        );
+
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+        assert.equal(pick().textContent, "");
+        assert.equal(pick().hidden, false, "the row itself is still reserved");
+    });
+
+    it("has nothing to freeze in the gutter between two panels", async () => {
+        const actual = await openReadableLane();
+        movePointer(actual, 4.4, 1.9);
+        panel().dispatchEvent(
+            new MouseEvent("pointermove", {
+                clientX: 4.4,
+                clientY: 1.9,
+                bubbles: true,
+            }),
+        );
+        assert.equal(pick().textContent, "", "no panel under the pointer");
+
+        clickPanel(panel(), 4.4, 1.9);
+        assert.equal(
+            pick().classList.contains("cp-spec-pick--frozen"),
+            false,
+            "an empty row does not latch",
+        );
+    });
+
     it("lets a frozen reading go when the view changes", async () => {
         // The view decides which panels exist, so a reading outliving a switch describes a surface
         // that may not be on screen. Carried into Slider it is also a trap: moves are latched, and
