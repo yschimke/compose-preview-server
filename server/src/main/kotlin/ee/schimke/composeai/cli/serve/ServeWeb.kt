@@ -89,6 +89,40 @@ object ServeWeb {
   }
 
   /**
+   * What the front door may say about the **UI builder**, and — when the visitor may not use it —
+   * why not.
+   *
+   * The builder is where a design system stops being a gallery and starts being a tool: a signed-in
+   * visitor can start a document from any catalog the builder runs for. Until this it was reachable
+   * only by knowing the URL, so the whole surface was invisible from `/`.
+   *
+   * The invite carries the **decision**, not the credential. The front-door handler asks the same
+   * [ServeUiBuilderAuthorization] the create route will ask ([UiBuilderRouteCapability.WRITE]), so
+   * the card offers exactly what a click would be allowed to do — the page never advertises an
+   * action the POST behind it refuses, and never hides one it would have allowed.
+   *
+   * [deniedReason] is the other half of that, and the reason this is a data class rather than a
+   * boolean. A signed-in visitor whose account lacks the repository access the write capability
+   * gates on used to get nothing at all: no chip, no explanation, and no way to find out that the
+   * builder exists or what would let them in. Refusing in silence is the failure mode; the card
+   * says what is missing instead.
+   */
+  data class UiBuilderInvite(
+    /** The catalogs this host actually runs the builder for; every other card offers nothing. */
+    val systems: Set<String>,
+    /**
+     * Whether anybody is signed in. The action is offered to signed-in visitors only — creating a
+     * document is a write, and an anonymous visitor's only honest next step is the sign-in control
+     * the header already carries.
+     */
+    val signedIn: Boolean,
+    /** Whether this visitor's credential actually carries the builder's write capability. */
+    val permitted: Boolean,
+    /** Plain-language explanation, shown in place of the action when [permitted] is false. */
+    val deniedReason: String = "",
+  )
+
+  /**
    * Absolute URLs advertised to link unfurlers for a browser-facing page. [imageUrl] is the thing
    * that page represents (a featured catalog hero, catalog component, or exact viewer render);
    * utility/error pages leave it null and get an honest text-only card. Kept explicit rather than
@@ -1028,6 +1062,12 @@ ${captureControlsHtml().prependIndent("          ")}
     showPreviewThemeSetting: Boolean = false,
     /** [githubSessionSettings]' output, rendered inside the Settings menu. Empty on most pages. */
     sessionSettings: String = "",
+    /**
+     * A collapsed search control for the bar ([headerSearchControl]). Empty on every page but the
+     * front door, whose grid it filters — the bar is where a visitor looks for a site's search, and
+     * collapsed to an icon it costs the layout nothing on the pages that do have one.
+     */
+    search: String = "",
   ): String {
     val actionHtml = action.takeIf { it.isNotBlank() }?.let { "\n          $it" } ?: ""
     val crumb = breadcrumb.takeIf { it.isNotBlank() }?.let { "\n          $it" } ?: ""
@@ -1046,6 +1086,8 @@ ${captureControlsHtml().prependIndent("          ")}
         .trimIndent()
     val modeToggleHtml =
       if (showInterfaceMode) "\n" + modeToggle.prependIndent("          ") else ""
+    val searchHtml =
+      search.takeIf { it.isNotBlank() }?.let { "\n" + it.prependIndent("          ") } ?: ""
     if (componentBrowser) {
       return """
         <header class="cp-site-header">
@@ -1054,7 +1096,7 @@ ${captureControlsHtml().prependIndent("          ")}
               <span class="cp-site-mark" aria-hidden="true">◇</span>
               <span class="cp-site-wordmark">compose-preview</span>
             </a>$name$crumb
-          </div>$modeToggleHtml
+          </div>$searchHtml$modeToggleHtml
         </header>
         """
         .trimIndent()
@@ -1067,7 +1109,7 @@ ${captureControlsHtml().prependIndent("          ")}
             <span class="cp-site-wordmark">compose-preview</span>
           </a>$name$crumb
         </div>
-        <nav class="cp-site-nav" aria-label="Primary navigation">$modeToggleHtml
+        <nav class="cp-site-nav" aria-label="Primary navigation">$searchHtml$modeToggleHtml
           <details class="cp-site-menu" id="cp-site-menu">
             <summary class="cp-site-menu-btn" title="Menu" aria-label="Menu"
               aria-controls="cp-site-menu-panel"><span aria-hidden="true">⋮</span></summary>
@@ -5981,6 +6023,11 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Absolute page + representative hero URLs for Open Graph/Twitter link previews. */
     unfurl: UnfurlMetadata? = null,
     githubAuth: GitHubAuthStatus? = null,
+    /**
+     * What this visitor may do with the UI builder — see [UiBuilderInvite]. Null on a host that
+     * does not run the builder at all, which renders no builder action anywhere on the page.
+     */
+    uiBuilder: UiBuilderInvite? = null,
     componentBrowser: Boolean = false,
   ): String {
     val headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth)
@@ -6035,9 +6082,65 @@ ${captureControlsHtml().prependIndent("          ")}
         s.designToolLabel?.takeIf { it.isNotBlank() }?.let { "compare to $it" }
           ?: "compare to design references"
       val described = WebEscaping.htmlEscape("${s.title}: $label")
-      return "\n            <p class=\"cp-sys-actions\">" +
-        "<a class=\"cp-action-chip\" href=\"$href\" aria-label=\"$described\">" +
-        "${WebEscaping.htmlEscape(label)}</a></p>"
+      return "<a class=\"cp-action-chip\" href=\"$href\" aria-label=\"$described\">" +
+        "${WebEscaping.htmlEscape(label)}</a>"
+    }
+
+    /**
+     * The card's **UI Builder** action: start a document in this catalog's builder.
+     *
+     * Offered only where all three are true — the host runs the builder for this catalog, somebody
+     * is signed in, and this is not the component-browser mode (which is for browsing components,
+     * not authoring against them, and drops the compare action beside it for the same reason).
+     *
+     * The link goes to `/ui-builder/<catalog>/`, which is the builder's **New design** chooser: the
+     * shell reads the design out of `location.pathname`, finds none, and opens the create screen.
+     * Deliberately a plain `GET` link rather than a form that posts a creation: the design does not
+     * exist until its id and template are chosen, and a chip that silently minted `untitled-3` on
+     * every stray click is not a front door.
+     *
+     * **A refusal is explained rather than hidden.** A visitor whose sign-in does not carry the
+     * builder's write capability gets the chip as a disclosure: the same label, visibly locked, and
+     * one sentence naming what is missing ([UiBuilderInvite.deniedReason]) when they open it. The
+     * alternative — showing nothing — is what the surface did before, and it is indistinguishable
+     * from the builder not existing. A `<details>` because the explanation must be reachable
+     * without script and by keyboard, and must not steal the card's own click.
+     */
+    fun builderAction(s: HomeSystem, sysSeg: String): String {
+      val invite = uiBuilder ?: return ""
+      if (componentBrowser || !invite.signedIn || s.system !in invite.systems) return ""
+      if (!invite.permitted) {
+        val described = WebEscaping.htmlEscape("${s.title}: UI Builder is unavailable — why")
+        val why =
+          WebEscaping.htmlEscape(
+            invite.deniedReason.takeIf { it.isNotBlank() }
+              ?: "Your account does not carry the access creating a design needs."
+          )
+        return "<details class=\"cp-action-note\">" +
+          "<summary class=\"cp-action-chip cp-action-chip--locked\" aria-label=\"$described\">" +
+          "UI Builder<span class=\"cp-action-chip-hint\" aria-hidden=\"true\">why?</span></summary>" +
+          "<span class=\"cp-action-note-body\">$why</span></details>"
+      }
+      val href = WebEscaping.htmlEscape("/ui-builder/$sysSeg/$suffix")
+      val described = WebEscaping.htmlEscape("${s.title}: open the UI Builder")
+      return "<a class=\"cp-action-chip cp-action-chip--primary\" href=\"$href\" " +
+        "aria-label=\"$described\">" +
+        "<span class=\"cp-action-chip-icon\" aria-hidden=\"true\">\u270e</span>UI Builder</a>"
+    }
+
+    /**
+     * The card's action row, or nothing at all when this card has no actions.
+     *
+     * A `<div>` rather than the `<p>` it used to be: the locked builder chip is a `<details>`,
+     * which is flow content and cannot live inside a paragraph — a browser would close the `<p>`
+     * before it and leave the explanation dangling outside the row. Nothing else about the row
+     * changes; `.cp-sys-actions` still passes pointer events through to the tile link underneath.
+     */
+    fun cardActions(s: HomeSystem, sysSeg: String): String {
+      val chips =
+        listOf(builderAction(s, sysSeg), compareAction(s, sysSeg)).filter { it.isNotEmpty() }
+      if (chips.isEmpty()) return ""
+      return "\n            <div class=\"cp-sys-actions\">" + chips.joinToString("") + "</div>"
     }
     fun card(s: HomeSystem): String {
       val sysSeg = WebEscaping.urlEncodeSegment(s.system)
@@ -6102,11 +6205,15 @@ ${captureControlsHtml().prependIndent("          ")}
       val bg = if (s.darkStage) " data-bg-theme=\"dark\"" else ""
       val searchAttr =
         " data-browser-search=\"${WebEscaping.htmlEscape("${s.title} ${s.system} ${s.subtitle.orEmpty()} ${s.sourceRepo.orEmpty()}").lowercase()}\""
+      // The catalog id as data, not as prose: the search matches a component to the card that
+      // publishes it, and `.cp-id` is absent in component-browser mode (and is display text either
+      // way).
+      val systemAttr = " data-cp-system=\"$sysId\""
       return """
-      <div class="cp-card cp-sys"$bg$searchAttr>
+      <div class="cp-card cp-sys"$bg$searchAttr$systemAttr>
         <div class="cp-imgwrap">$img</div>
         <div class="cp-meta">
-          <div class="cp-sys-title"><a class="cp-sys-open" href="/$sysSeg/$suffix">$title</a>${homeTrustBadge(s.trust)}</div>$technicalId$desc$importedBadge$provenance${compareAction(s, sysSeg)}$totals
+          <div class="cp-sys-title"><a class="cp-sys-open" href="/$sysSeg/$suffix">$title</a>${homeTrustBadge(s.trust)}</div>$technicalId$desc$importedBadge$provenance${cardActions(s, sysSeg)}$totals
         </div>
       </div>
       """
@@ -6160,23 +6267,32 @@ ${captureControlsHtml().prependIndent("          ")}
       return "<div class=\"cp-section-band\">\n$units\n</div>"
     }
     val sections = homeSections(systems)
+    /**
+     * The front door's search, in **two halves**: a `⌕` button in the header bar that expands a
+     * field, and the results the field drives down in the page.
+     *
+     * It used to be a full-width sticky bar pinned under the header, spending a band of every
+     * visitor's screen on a control most of them never touch — on the one page whose whole job is
+     * to show catalogs, the search sat between the reader and the first row of them. The bar is
+     * where a site's search lives; collapsed to its icon it costs the layout nothing, and one click
+     * (or the `/` the palette already binds) gets the field.
+     *
+     * The field is emitted by [siteHeader] via [headerSearchControl]. Everything below is what it
+     * drives: the empty-state line, the component results, and the script that ties the two
+     * together. They stay in the BODY because that is where the results belong — a header popover
+     * would have to re-implement the grid the page already has.
+     */
     val catalogSearch =
       if (systems.isEmpty()) ""
       else
         """
-        <div class="cp-browser-home-tools">
-          <label class="cp-browser-search">
-            <span class="cp-browser-search-icon" aria-hidden="true">⌕</span>
-            <input id="cp-browser-catalog-search" class="cp-browser-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search catalogs" aria-label="Search catalogs">
-          </label>
+        <div id="cp-home-components" class="cp-home-components" hidden>
+          <h2 class="cp-home-components-head">Components</h2>
+          <ul class="cp-home-component-list"></ul>
         </div>
-        <p id="cp-browser-catalog-empty" class="cp-empty" hidden>No catalogs match your search.</p>
+        <p id="cp-browser-catalog-empty" class="cp-empty" hidden>Nothing matches your search.</p>
         """
-          .trimIndent() +
-          """
-          <script>(function(){var q=document.getElementById("cp-browser-catalog-search"),e=document.getElementById("cp-browser-catalog-empty");if(!q)return;q.addEventListener("input",function(){var n=q.value.trim().toLowerCase(),shown=0;document.querySelectorAll(".cp-sys").forEach(function(c){var hit=!n||(c.getAttribute("data-browser-search")||"").indexOf(n)>=0;c.hidden=!hit;if(hit)shown++;});document.querySelectorAll(".cp-section-title").forEach(function(h){var g=h.nextElementSibling;h.hidden=!!g&&!Array.prototype.some.call(g.children,function(c){return !c.hidden;});});document.querySelectorAll(".cp-section-unit").forEach(function(u){u.hidden=!u.querySelector(".cp-sys:not([hidden])");});if(e)e.hidden=shown!==0;});})();</script>
-          """
-            .trimIndent()
+          .trimIndent() + "\n" + homeSearchScript()
     val body =
       if (systems.isEmpty()) {
         "<h1 class=\"cp-head\">Design Systems</h1>\n" +
@@ -6213,12 +6329,141 @@ ${captureControlsHtml().prependIndent("          ")}
       navSuffix = suffix,
       headerAction = headerAction,
       headerSessionSettings = headerSessionSettings,
+      headerSearch = if (systems.isEmpty()) "" else headerSearchControl(),
       version = version,
       body = body + if (globalComponents.isEmpty()) "" else "\n$globalComponents",
       componentBrowser = componentBrowser,
       interfaceModeControl = true,
     )
   }
+
+  /**
+   * The header bar's collapsed search: a `⌕` button, and the field it expands beside it.
+   *
+   * The field is rendered up front and `hidden` rather than created on click, so it exists for the
+   * script, for a `find in page`, and for a browser with JavaScript off — where the button does
+   * nothing and the field, being `hidden`, at least does not lie about being usable.
+   * `aria-expanded` on the button and `aria-controls` pointing at the field are what make the
+   * disclosure legible to a screen reader; the input keeps the id the page's script has always
+   * looked it up by.
+   */
+  private fun headerSearchControl(): String =
+    """
+    <div class="cp-site-search">
+      <button type="button" class="cp-site-search-btn" id="cp-site-search-toggle"
+        aria-expanded="false" aria-controls="cp-site-search-field"
+        title="Search catalogs and components"
+        aria-label="Search catalogs and components"><span aria-hidden="true">⌕</span></button>
+      <div class="cp-site-search-field" id="cp-site-search-field" hidden>
+        <input id="cp-browser-catalog-search" class="cp-site-search-input" type="search"
+          autocomplete="off" spellcheck="false" placeholder="Search catalogs and components"
+          aria-label="Search catalogs and components">
+      </div>
+    </div>
+    """
+      .trimIndent()
+
+  /**
+   * The front door's filter, and the one piece of it that is not a filter at all.
+   *
+   * **Catalogs** are matched in the DOM, against the `data-browser-search` blob each card already
+   * carries — the cheap half, and the half that works before anything is fetched.
+   *
+   * **Components** are matched against `/api/components`, the same cross-catalog index the command
+   * palette reads (`data-cp-global-components`), fetched once on the first keystroke and kept for
+   * the life of the page. The element carrying that URL is looked up *when the fetch is made*, not
+   * when the script runs: it is emitted at the very end of the body, so at parse time — this script
+   * is inside `<main>` — it does not exist yet, and a lookup taken then finds nothing for ever. It
+   * answers the question the old box could not: a visitor who wants a *Slider* does not know which
+   * of a dozen catalogs publishes one, and typing "slider" used to empty the page. Now the matching
+   * components are listed by name, each a link straight to its preview, and a card stays visible
+   * when one of ITS components matched even though nothing in its own title did.
+   *
+   * The list is built with `createElement`/`textContent`, never `innerHTML`: every field in that
+   * JSON — a component's label and keywords especially — comes from a catalog's own export, which
+   * is not this page's to trust with markup.
+   *
+   * A failed or missing fetch degrades to catalog-only matching rather than breaking the box; the
+   * index is set to an empty list so the request is not retried on every keystroke.
+   */
+  private fun homeSearchScript(): String =
+    "<script>" +
+      """
+      (function(){
+      var q=document.getElementById("cp-browser-catalog-search"),
+      e=document.getElementById("cp-browser-catalog-empty"),
+      t=document.getElementById("cp-site-search-toggle"),
+      f=document.getElementById("cp-site-search-field"),
+      r=document.getElementById("cp-home-components"),
+      l=r&&r.querySelector(".cp-home-component-list"),
+      index=null,pending=false;
+      if(!q)return;
+      function expand(open){
+      if(!t||!f)return;
+      t.setAttribute("aria-expanded",open?"true":"false");
+      f.hidden=!open;
+      if(open){q.focus();}else{q.value="";apply();}
+      }
+      if(t&&f){
+      t.addEventListener("click",function(){expand(f.hidden);});
+      q.addEventListener("keydown",function(ev){if(ev.key==="Escape"){expand(false);t.focus();}});
+      }
+      function sourceUrl(){
+      var s=document.querySelector("[data-cp-global-components]");
+      return s&&s.getAttribute("data-cp-global-components");
+      }
+      function load(){
+      if(index||pending)return;
+      var url=sourceUrl();
+      if(!url)return;
+      pending=true;
+      fetch(url,{headers:{Accept:"application/json"}}).then(function(res){
+      if(!res.ok)throw new Error("HTTP "+res.status);
+      return res.json();
+      }).then(function(body){index=(body&&body.components)||[];apply();},function(){index=[];})
+      .then(function(){pending=false;});
+      }
+      function hitsFor(n){
+      if(!index||!n)return [];
+      return index.filter(function(c){
+      return ((c.label||"")+" "+(c.keywords||"")).toLowerCase().indexOf(n)>=0;
+      });
+      }
+      function apply(){
+      var n=q.value.trim().toLowerCase(),hits=hitsFor(n),owners={},shown=0;
+      hits.forEach(function(c){owners[c.catalog]=true;});
+      document.querySelectorAll(".cp-sys").forEach(function(c){
+      var hit=!n||(c.getAttribute("data-browser-search")||"").indexOf(n)>=0||
+      owners[c.getAttribute("data-cp-system")]===true;
+      c.hidden=!hit;if(hit)shown++;
+      });
+      document.querySelectorAll(".cp-section-title").forEach(function(h){
+      var g=h.nextElementSibling;
+      h.hidden=!!g&&!Array.prototype.some.call(g.children,function(c){return !c.hidden;});
+      });
+      document.querySelectorAll(".cp-section-unit").forEach(function(u){
+      u.hidden=!u.querySelector(".cp-sys:not([hidden])");
+      });
+      if(r&&l){
+      l.textContent="";
+      hits.slice(0,24).forEach(function(c){
+      var li=document.createElement("li"),a=document.createElement("a"),
+      name=document.createElement("span"),from=document.createElement("span");
+      a.className="cp-home-component";a.href=c.href;
+      name.className="cp-home-component-name";name.textContent=c.label;
+      from.className="cp-home-component-catalog";from.textContent=c.catalogTitle||c.catalog;
+      a.appendChild(name);a.appendChild(from);li.appendChild(a);l.appendChild(li);
+      });
+      r.hidden=hits.length===0;
+      }
+      if(e)e.hidden=!(n&&shown===0&&hits.length===0);
+      }
+      q.addEventListener("input",function(){load();apply();});
+      })();
+      """
+        .trimIndent()
+        .replace("\n", "") +
+      "</script>"
 
   /**
    * What the front door calls itself, in its `<title>`, its `og:title` and the headline of its
@@ -6458,6 +6703,56 @@ ${captureControlsHtml().prependIndent("          ")}
           // On a site there is no index of systems to go back to — `/` is this catalog.
           if (siteName.isBlank()) "← All design systems" else "← Back"
         }</a>
+        """
+          .trimIndent(),
+    )
+  }
+
+  /**
+   * A styled **explanation** for a browser that reached a surface its credential does not open —
+   * today, `POST /ui-builder/<catalog>` refusing to create a design.
+   *
+   * The route answers a script with `text/plain` and the right status, which is correct for a
+   * script and useless to a person: a form submission that lands on a bare "UI-builder write access
+   * required" is a dead end with no back link, no sign-in, and no statement of what access is
+   * actually missing. A person following a form gets this instead — the same status code, the
+   * site's own chrome, the reason in a sentence, and the two things they can do about it.
+   *
+   * [message] is the reason, already in the visitor's terms; [signInHref] adds the one action that
+   * can change the answer for a visitor who is not signed in, and is omitted when a sign-in would
+   * not help (they are signed in already, or this host cannot round-trip OAuth).
+   */
+  fun accessDeniedPage(
+    message: String,
+    token: String,
+    isPublic: Boolean,
+    signInHref: String? = null,
+    version: String? = null,
+    githubAuth: GitHubAuthStatus? = null,
+    componentBrowser: Boolean = false,
+  ): String {
+    val suffix = querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
+    val signIn =
+      signInHref
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+          "\n        <p><a class=\"cp-action-chip cp-action-chip--primary\" " +
+            "href=\"${WebEscaping.htmlEscape(it)}\">$GITHUB_ICON Sign in with GitHub</a></p>"
+        } ?: ""
+    return document(
+      title = "Access needed — compose-preview",
+      unfurlDescription = message,
+      version = version,
+      navSuffix = suffix,
+      componentBrowser = componentBrowser,
+      interfaceModeControl = true,
+      headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth),
+      headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth),
+      body =
+        """
+        <h1 class="cp-head">Access needed</h1>
+        <p class="cp-sub">${WebEscaping.htmlEscape(message)}</p>$signIn
+        <a class="cp-back" href="/$suffix">← All design systems</a>
         """
           .trimIndent(),
     )
@@ -15965,6 +16260,11 @@ ${scriptTag("known-differences.js")}
      */
     headerSessionSettings: String = "",
     /**
+     * The header bar's collapsed search control ([headerSearchControl]), empty on every page that
+     * has nothing to search. See [siteHeader]'s `search`.
+     */
+    headerSearch: String = "",
+    /**
      * The page's breadcrumb / back link, rendered in the header's brand slot by [siteHeader] rather
      * than as the body's first line — see that function for why. Empty (the front door, which is
      * already home) renders nothing.
@@ -16191,7 +16491,7 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
       </head>
       <body${bodyClassAttr}>
         ${scriptTag("serve-chrome.js")}
-        ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl, headerSessionSettings)}
+        ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl, headerSessionSettings, headerSearch)}
         <main class="cp-main">
         $body
         </main>$footerBlock$launcherBlock$interfaceModeControls

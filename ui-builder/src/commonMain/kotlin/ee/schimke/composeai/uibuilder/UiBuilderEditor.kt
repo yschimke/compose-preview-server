@@ -457,6 +457,16 @@ fun UiBuilderEditor(
    * a host that cannot fetch: the node is not broken, it is unresolved.
    */
   resolveRemoteComposeUrl: (suspend (String) -> String)? = null,
+  /**
+   * Fetches a Lottie animation's JSON from the URL a `remote-m3/lottie` element carries, or throws.
+   *
+   * Host-owned like [resolveRemoteComposeDocument], and for a sharper reason than "the network is
+   * not a reducer's": the browser host resolves every request it makes against the page's own
+   * origin and refuses the rest, so which animations are reachable is that host's rule to state,
+   * not this composable's. Null simply leaves a URL unresolved, which the canvas already draws as
+   * the unfinished thing it is.
+   */
+  loadLottieAnimation: (suspend (String) -> String)? = null,
 ) {
   val reducer =
     remember(catalog, actorId, clientId, operationIdPrefix) {
@@ -953,6 +963,37 @@ fun UiBuilderEditor(
           Result.failure(failure)
         }
     }
+  }
+  // The URL half of a Lottie element, resolved into the JSON half exactly once.
+  //
+  // Once, because the two halves are one source: `url` says which animation this is and `json` is
+  // what the export compiles, and re-fetching a resolved element would overwrite an animation an
+  // author may have edited by hand with whatever that URL serves today. A failed fetch is not
+  // retried either — [attemptedLottieUrls] remembers the attempt, so a 404 is one message rather
+  // than a loop hammering the host for as long as the design is open.
+  val attemptedLottieUrls = remember(document.id) { mutableSetOf<String>() }
+  val unresolvedLottie =
+    state.document.nodes.values.firstOrNull { node ->
+      node.componentId == LOTTIE_COMPONENT_ID &&
+        node.propertyText("url").isNotEmpty() &&
+        node.propertyText("json").isEmpty()
+    }
+  LaunchedEffect(unresolvedLottie?.id, unresolvedLottie?.propertyText("url")) {
+    val node = unresolvedLottie ?: return@LaunchedEffect
+    val load = loadLottieAnimation ?: return@LaunchedEffect
+    val url = node.propertyText("url")
+    if (!attemptedLottieUrls.add("${node.id}\u0000$url")) return@LaunchedEffect
+    val json =
+      try {
+        load(url)
+      } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+        throw cancelled
+      } catch (failure: Throwable) {
+        remoteSourceFailure = "$url: ${failure.message ?: "could not be fetched"}"
+        return@LaunchedEffect
+      }
+    remoteSourceFailure = null
+    dispatch(UiBuilderEditorEvent.CommitProperty(node.id, "json", json))
   }
   val generatedCode =
     if (state.codePaneVisible || mobilePanel == MobileEditorPanel.Code) {
@@ -6272,3 +6313,15 @@ private fun ThemeField(
       MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
   )
 }
+
+/**
+ * One string property's literal, or empty.
+ *
+ * A third copy of a two-line read, and deliberately not a shared one: `UiBuilderRenderer` and
+ * `UiBuilderEditorState` each keep their own because the alternative — an internal helper on the
+ * node type — is a vocabulary every caller in this module then reaches for, and a property is not
+ * always a literal. This one is used only where the answer being empty is itself the signal: a
+ * Lottie element that has a URL and no animation yet.
+ */
+private fun UiBuilderNode.propertyText(name: String): String =
+  (properties[name] as? JsonObject)?.get("value")?.jsonPrimitive?.contentOrNull.orEmpty()
