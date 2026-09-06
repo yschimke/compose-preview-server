@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA
 import ee.schimke.composeai.discovery.COMPONENT_RECORD_SCHEMA_VERSION
+import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.RecordFreeExport
@@ -87,14 +88,32 @@ internal class ScreenGeneratorComposeExportExecutor(
     //
     // With [packageName], where the pane passes none. A pane is a snippet to paste into a file that
     // already has one; an artifact somebody writes to disk is that file.
-    RecordFreeExport.generate(request.document, packageName)?.let { recordFree ->
-      return when (recordFree) {
-        is RecordFreeExport.Generated.Emitted -> emitted(provenance(request) + recordFree.source)
-        // The document's own fault and named node by node, which is what this code means. There is
-        // no record involved to blame and no call site left unproven — the emitter reached a node
-        // it cannot write.
-        is RecordFreeExport.Generated.Refused -> refused(UNEXPRESSIBLE_DOCUMENT, recordFree.reasons)
-      }
+    //
+    // And with the packs the design uses: a Wear screen may hold a `confetti-wear/…` node, whose
+    // call the Wear emitter writes from that pack's record. Resolved only when the design is
+    // record-free and only for the packs it names, so a plain Wear screen still touches no record.
+    if (RecordFreeExport.applies(request.document)) {
+      val packRecords =
+        when (val packs = packRecordsFor(request.document)) {
+          is PackRecords.Refused -> return refused(packs.code, packs.reasons)
+          is PackRecords.Found -> packs.records
+        }
+      RecordFreeExport.generate(
+          request.document,
+          packageName,
+          packComponents = packRecords.byComponentId(),
+        )
+        ?.let { recordFree ->
+          return when (recordFree) {
+            is RecordFreeExport.Generated.Emitted ->
+              emitted(provenance(request) + recordFree.source)
+            // The document's own fault and named node by node, which is what this code means.
+            // There is no record involved to blame and no call site left unproven — the emitter
+            // reached a node it cannot write.
+            is RecordFreeExport.Generated.Refused ->
+              refused(UNEXPRESSIBLE_DOCUMENT, recordFree.reasons)
+          }
+        }
     }
 
     return when (val generated = generate(request.document)) {
@@ -166,7 +185,20 @@ internal class ScreenGeneratorComposeExportExecutor(
           ),
         )
       }
-      return when (val recordFree = RecordFreeExport.generate(document, packageName, tagNodes)) {
+      val packRecords =
+        when (val packs = packRecordsFor(document)) {
+          is PackRecords.Refused -> return Generated.Refused(packs.code, packs.reasons)
+          is PackRecords.Found -> packs.records
+        }
+      return when (
+        val recordFree =
+          RecordFreeExport.generate(
+            document,
+            packageName,
+            tagNodes,
+            packComponents = packRecords.byComponentId(),
+          )
+      ) {
         // Unreachable: `applies` was true, so the emitter owns this document. Reported as a
         // refusal rather than asserted, because a null here would otherwise fall through to the
         // record-driven generator and come back as `NO_COMPONENT_RECORD` — advice about a
@@ -230,44 +262,11 @@ internal class ScreenGeneratorComposeExportExecutor(
         ),
       )
     }
-    val usedPacks = packsUsedBy(document, packs)
-    val packRecords = usedPacks.map { pack ->
-      when (val lookup = components(pack)) {
-        is ComponentRecordSource.Lookup.Found ->
-          ComponentRecordPacks.aliasedRecord(pack, lookup.record).also {
-            if (!generatesFrom(it)) {
-              return Generated.Refused(
-                NO_COMPONENT_RECORD,
-                listOf(
-                  "the component record for pack `$pack` is schema ${it.schemaVersion}, and " +
-                    "this build generates from $COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to " +
-                    "$COMPONENT_RECORD_SCHEMA_VERSION; re-run discovery against a matching " +
-                    "plugin version"
-                ),
-              )
-            }
-          }
-        // The same two sentences the catalog's own record gets, naming the pack: this design
-        // holds a component of `$pack`'s, and this host cannot prove how to call it.
-        ComponentRecordSource.Lookup.Unconfigured ->
-          return Generated.Refused(
-            NO_COMPONENT_RECORD,
-            listOf(
-              "this design uses components from the `$pack` pack, and this host has no " +
-                "discovered component record for it; run a preview bundle for that catalog's " +
-                "module and pass it as `--ui-builder-components $pack=<components.json>`"
-            ),
-          )
-        is ComponentRecordSource.Lookup.Unusable ->
-          return Generated.Refused(
-            NO_COMPONENT_RECORD,
-            listOf(
-              "the component record configured for the `$pack` pack could not be loaded: " +
-                lookup.reason
-            ),
-          )
+    val packRecords =
+      when (val packs = packRecordsFor(document)) {
+        is PackRecords.Refused -> return Generated.Refused(packs.code, packs.reasons)
+        is PackRecords.Found -> packs.records
       }
-    }
     val merged =
       if (packRecords.isEmpty()) record
       else record.copy(components = record.components + packRecords.flatMap { it.components })
@@ -285,6 +284,73 @@ internal class ScreenGeneratorComposeExportExecutor(
       is ScreenGenerator.Result.Emitted -> Generated.Emitted(generated.source, screenName)
     }
   }
+
+  /** The records of the packs a design uses, aliased to the pack's ids, or why there are none. */
+  private sealed interface PackRecords {
+    data class Found(val records: List<ComponentRecordFile>) : PackRecords
+
+    data class Refused(val code: String, val reasons: List<String>) : PackRecords
+  }
+
+  /**
+   * Every pack [document] draws on, as that pack's record with the pack's ids written onto it as
+   * aliases ([ComponentRecordPacks.aliasedRecord]) — the shape both generators resolve a node by.
+   *
+   * Only the packs used, so a document that draws on none looks nothing up: a Wear screen that
+   * holds no pack node must not touch a record, because `wear-m3` deliberately has none. A pack
+   * whose record this host lacks, or will not load, or is a schema this build does not generate
+   * from, refuses with the same two sentences the catalog's own record gets — naming the pack.
+   */
+  private fun packRecordsFor(
+    document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+  ): PackRecords {
+    val records =
+      packsUsedBy(document, packs).map { pack ->
+        when (val lookup = components(pack)) {
+          is ComponentRecordSource.Lookup.Found -> {
+            val aliased = ComponentRecordPacks.aliasedRecord(pack, lookup.record)
+            if (!generatesFrom(aliased)) {
+              return PackRecords.Refused(
+                NO_COMPONENT_RECORD,
+                listOf(
+                  "the component record for pack `$pack` is schema ${aliased.schemaVersion}, and " +
+                    "this build generates from $COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to " +
+                    "$COMPONENT_RECORD_SCHEMA_VERSION; re-run discovery against a matching " +
+                    "plugin version"
+                ),
+              )
+            }
+            aliased
+          }
+          // This design holds a component of `$pack`'s, and this host cannot prove how to call it.
+          ComponentRecordSource.Lookup.Unconfigured ->
+            return PackRecords.Refused(
+              NO_COMPONENT_RECORD,
+              listOf(
+                "this design uses components from the `$pack` pack, and this host has no " +
+                  "discovered component record for it; run a preview bundle for that catalog's " +
+                  "module and pass it as `--ui-builder-components $pack=<components.json>`"
+              ),
+            )
+          is ComponentRecordSource.Lookup.Unusable ->
+            return PackRecords.Refused(
+              NO_COMPONENT_RECORD,
+              listOf(
+                "the component record configured for the `$pack` pack could not be loaded: " +
+                  lookup.reason
+              ),
+            )
+        }
+      }
+    return PackRecords.Found(records)
+  }
+
+  /** Each pack component under the id the design refers to it by, for the record-free emitter. */
+  private fun List<ComponentRecordFile>.byComponentId(): Map<String, ComponentRecord> =
+    flatMap { file ->
+      file.components.flatMap { record -> record.componentIds.map { it to record } }
+    }
+    .toMap()
 
   /**
    * Where this artifact came from, as comments the compiler ignores.

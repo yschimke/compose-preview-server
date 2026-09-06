@@ -89,6 +89,50 @@ class ComponentRecordPacksTest {
     )
   }
 
+  /**
+   * Confetti's Wear module as its record actually reads, projected onto a `wear` pack.
+   *
+   * The signatures and call sites are the real ones — current discovery run over the published
+   * `confetti-wear` bundle's classes. `SectionHeader` and `ScreenHeader` take a `String`;
+   * `PlaceholderButton` is fully defaulted; `SessionCard` takes a *nullable* `SessionDetails`, so
+   * its proven call site passes `null` and draws the card's own loading skeleton. All four are
+   * offered. `SessionSpeakerChip` takes a non-null domain object for which no placeholder can be
+   * written, so it is left out by name. That is what a Wear pack of Confetti is worth, and the
+   * number is the finding rather than a disappointment: a pack is the record's proven subset.
+   */
+  @Test
+  fun `a wear record projects its proven components onto a wear pack and names the rest`() {
+    val derived =
+      ComponentRecordPacks.derive("confetti-wear", UiBuilderCatalogPlatform.WEAR, wearRecord())
+
+    assertEquals(
+      listOf(
+        "confetti-wear/section-header",
+        "confetti-wear/screen-header",
+        "confetti-wear/placeholder-button",
+        "confetti-wear/session-card",
+      ),
+      derived.source.components.map { it.componentId },
+    )
+    assertEquals("wear", derived.source.platform)
+    assertEquals("confetti-wear", derived.source.nativeCatalog)
+    assertEquals(
+      listOf(
+        "confetti-wear/session-speaker-chip — no call site: no placeholder can be written for " +
+          "required parameter `speaker: SessionSpeakerDetails`"
+      ),
+      derived.skipped,
+    )
+    val header =
+      derived.source.components.first { it.componentId == "confetti-wear/section-header" }
+    assertEquals("Leaf", header.role)
+    assertEquals(listOf("text"), header.properties.map { it.name })
+    assertEquals("dev.johnoreilly.confetti.wear.components.SectionHeader", header.code?.symbol)
+    // `session` is a domain type: not a property, and the export writes the record's `null` for it.
+    val card = derived.source.components.first { it.componentId == "confetti-wear/session-card" }
+    assertEquals(listOf("isBookmarked"), card.properties.map { it.name })
+  }
+
   @Test
   fun `a label is spelled from the pack id`() {
     assertEquals("Confetti Wear", ComponentRecordPacks.labelFor("confetti-wear"))
@@ -97,6 +141,121 @@ class ComponentRecordPacksTest {
   }
 
   companion object {
+    /** Confetti's Wear record, as far as a pack reads it; see the Wear projection test above. */
+    fun wearRecord(): ComponentRecordFile =
+      ComponentRecordFile(
+        module = "wearApp",
+        variant = "debug",
+        components =
+          listOf(
+            wear(
+              "SectionHeader",
+              parameters = stringHeader("text"),
+              call = "SectionHeader(text = \"\")",
+            ),
+            wear(
+              "ScreenHeader",
+              owner = "dev.johnoreilly.confetti.wear.components.SectionHeaderKt",
+              parameters = stringHeader("text"),
+              call = "ScreenHeader(text = \"\")",
+            ),
+            wear(
+              "PlaceholderButton",
+              parameters =
+                listOf(
+                  modifier(),
+                  TargetParameter(name = "onClick", type = "() -> Unit", hasDefault = true),
+                  TargetParameter(
+                    name = "enabled",
+                    type = "Boolean",
+                    typeFqn = "kotlin.Boolean",
+                    hasDefault = true,
+                  ),
+                  transformation(),
+                ),
+              call = "PlaceholderButton()",
+            ),
+            wear(
+              "SessionCard",
+              parameters =
+                listOf(
+                  TargetParameter(
+                    name = "session",
+                    type = "SessionDetails?",
+                    typeFqn = "dev.johnoreilly.confetti.fragment.SessionDetails",
+                    nullable = true,
+                  ),
+                  TargetParameter(name = "sessionSelected", type = "(String) -> Unit"),
+                  TargetParameter(
+                    name = "isBookmarked",
+                    type = "Boolean",
+                    typeFqn = "kotlin.Boolean",
+                  ),
+                  modifier(),
+                  transformation(),
+                ),
+              call = "SessionCard(session = null, sessionSelected = {}, isBookmarked = false)",
+            ),
+            wear(
+              "SessionSpeakerChip",
+              parameters =
+                listOf(
+                  modifier(),
+                  TargetParameter(
+                    name = "speaker",
+                    type = "SessionSpeakerDetails",
+                    typeFqn = "dev.johnoreilly.confetti.fragment.SessionSpeakerDetails",
+                  ),
+                  TargetParameter(name = "navigateToSpeaker", type = "(String) -> Unit"),
+                  transformation(),
+                ),
+              call = null,
+              refusedReason =
+                "no placeholder can be written for required parameter " +
+                  "`speaker: SessionSpeakerDetails`",
+            ),
+          ),
+      )
+
+    private fun stringHeader(name: String): List<TargetParameter> =
+      listOf(
+        TargetParameter(name = name, type = "String", typeFqn = "kotlin.String"),
+        modifier(),
+        transformation(),
+      )
+
+    private fun modifier(): TargetParameter =
+      TargetParameter(
+        name = "modifier",
+        type = "Modifier",
+        typeFqn = "androidx.compose.ui.Modifier",
+        hasDefault = true,
+      )
+
+    private fun transformation(): TargetParameter =
+      TargetParameter(
+        name = "transformation",
+        type = "SurfaceTransformation?",
+        typeFqn = "androidx.wear.compose.material3.SurfaceTransformation",
+        hasDefault = true,
+        nullable = true,
+      )
+
+    private fun wear(
+      name: String,
+      owner: String = "dev.johnoreilly.confetti.wear.components.${name}Kt",
+      parameters: List<TargetParameter>,
+      call: String?,
+      refusedReason: String? = null,
+    ): ComponentRecord =
+      project(
+        name,
+        owner = owner,
+        parameters = parameters,
+        call = call,
+        refusedReason = refusedReason,
+      )
+
     fun record(): ComponentRecordFile =
       ComponentRecordFile(
         module = "confetti",

@@ -125,8 +125,9 @@ authenticated. GitHub collaborators use the existing OAuth session; agents use s
 with independent `ui-builder-read`, `ui-builder-write` and `ui-builder-export` capabilities. The
 authoritative state defaults to `/config/ui-builder-state` on the persistent `preview_config`
 volume, and `SERVE_UI_BUILDER_STATE_DIR=none` is the explicit static-only opt-out.
-`SERVE_UI_BUILDER_PACKS` (`<catalog>=<platform>[,…]`, e.g. `confetti-mobile=mobile`) offers served
-catalogs as **component packs** inside every builder catalog of that platform — their own composables
+`SERVE_UI_BUILDER_PACKS` (`<catalog>=<platform>[,…]`, e.g.
+`confetti-mobile=mobile,confetti-wear=wear`) offers served catalogs as **component packs** inside
+every builder catalog of that platform — their own composables
 on a shelf an author switches on from the editor's settings. A pack's component record is read from
 the served catalog's delivery branch, so nothing else needs configuring. See
 [`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](../../docs/design/UI_BUILDER_COMPONENT_PACKS.md).

@@ -156,8 +156,8 @@ compose-preview-server ui --module app
 ```
 
 A served catalog's own composables can also be offered *inside* the builder's catalogs as a
-component pack (`--ui-builder-packs confetti-mobile=mobile`), switched on by an author from the
-editor's settings; see
+component pack (`--ui-builder-packs confetti-mobile=mobile,confetti-wear=wear`), switched on by an
+author from the editor's settings; see
 [`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](docs/design/UI_BUILDER_COMPONENT_PACKS.md).
 
 Releases publish that distribution beside the Maven library, then build the production
