@@ -89,11 +89,15 @@ class ServeCatalogMcp(
      * The UI-builder capability check for this particular request, asked of the transport because
      * only it holds the call the credential arrived on. Defaults to refusing, so a caller that
      * forgets to pass one cannot accidentally open the builder to an unauthenticated agent.
+     *
+     * The second argument is the token this message presented in-band ([TOKEN_ARGUMENT]), which the
+     * transport cannot see for itself — it is inside the body this class parses.
      */
-    uiBuilderAuthorization: (UiBuilderRouteCapability) -> UiBuilderAuthorizationDecision = {
-      UiBuilderAuthorizationDecision.Missing
-    },
-    liveAuthorization: () -> ServeMachineAuthorization.Decision,
+    uiBuilderAuthorization: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision =
+      { _, _ ->
+        UiBuilderAuthorizationDecision.Missing
+      },
+    liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
   ): Reply {
     val id = request["id"]
     if ((request["jsonrpc"] as? JsonPrimitive)?.contentOrNull != "2.0") {
@@ -160,8 +164,11 @@ class ServeCatalogMcp(
           "discover catalog ids. Reading published previews needs preview access; made-to-order " +
           "renders and data products need live access. With no credential, call request_access, " +
           "show the human its approveUrl and userCode, then poll_access (which waits for the " +
-          "decision) until it answers approved; send the token it returns as the " +
-          "X-Compose-Preview-Token header.",
+          "decision) until it answers approved. Send the token it returns as the " +
+          "X-Compose-Preview-Token header if you control your own headers; if you cannot set " +
+          "them — an MCP client fixes its headers when it connects — pass the token as the " +
+          "'token' argument of each gated tool instead, and access approved during this session " +
+          "works in it.",
       )
     }
   }
@@ -190,8 +197,11 @@ class ServeCatalogMcp(
             "instead of a dozen, since each poll here costs a whole round trip through you. It " +
             "waits 8 seconds by default; pass waitSeconds (up to 30) if your client tolerates a " +
             "longer call. A wait that times out answers status=pending, and you simply call " +
-            "again. Then approved (with the token) or denied/expired. Send the " +
-            "token as the X-Compose-Preview-Token header on every later call.",
+            "again. Then approved (with the token) or denied/expired. Use the token on every " +
+            "later call: as the X-Compose-Preview-Token header where you control headers, and " +
+            "otherwise as each gated tool's 'token' argument — which is what an MCP client " +
+            "reaching this flow mid-session needs, since its headers were fixed when it " +
+            "connected.",
           """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"},"waitSeconds":{"type":"integer","minimum":0,"maximum":30}},"required":["requestId","deviceSecret"]}""",
         )
       )
@@ -334,13 +344,18 @@ class ServeCatalogMcp(
 
   private suspend fun callTool(
     params: JsonObject,
-    liveAuthorization: () -> ServeMachineAuthorization.Decision,
+    authorizeLive: (String?) -> ServeMachineAuthorization.Decision,
     access: AgentAccess?,
-    uiBuilderAuthorization: (UiBuilderRouteCapability) -> UiBuilderAuthorizationDecision,
+    uiBuilderAuthorization: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision,
   ): JsonObject {
     val name = params.requiredString("name")
-    val args = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
-    uiBuilderTool(name, args, uiBuilderAuthorization)?.let {
+    val rawArgs = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+    // Stripped before dispatch: the credential is how this call was authorized, never an input to
+    // what it does, and a tool that forwards its arguments must not forward a token with them.
+    val presented = tokenArgument(rawArgs)
+    val args = if (TOKEN_ARGUMENT in rawArgs) JsonObject(rawArgs - TOKEN_ARGUMENT) else rawArgs
+    val liveAuthorization = { authorizeLive(presented) }
+    uiBuilderTool(name, args, presented, uiBuilderAuthorization)?.let {
       return it
     }
     return when (name) {
@@ -1669,24 +1684,30 @@ class ServeCatalogMcp(
    * One UI-builder tool, or null when the name belongs to the catalog surface.
    *
    * The capability check happens here rather than inside [ServeUiBuilderMcp] because the credential
-   * lives on the transport's call, not in the JSON-RPC message — the same reason the HTTP routes
-   * authorize before they map. A missing grant is a tool error rather than a transport status: the
-   * agent asked a question this surface understands and is being told it may not.
+   * is normally a property of the transport's call, not of the JSON-RPC message — the same reason
+   * the HTTP routes authorize before they map. [TOKEN_ARGUMENT] is the one exception, and it is
+   * resolved by the same authorization the call is: what arrives here either way is a decision. A
+   * missing grant is a tool error rather than a transport status: the agent asked a question this
+   * surface understands and is being told it may not.
    */
   private suspend fun uiBuilderTool(
     name: String,
     args: JsonObject,
-    authorize: (UiBuilderRouteCapability) -> UiBuilderAuthorizationDecision,
+    presentedToken: String?,
+    authorize: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision,
   ): JsonObject? {
     val builder = uiBuilder ?: return null
     val capability = builder.capabilityFor(name) ?: return null
     val actor =
-      when (val decision = authorize(capability)) {
+      when (val decision = authorize(capability, presentedToken)) {
         is UiBuilderAuthorizationDecision.Authorized ->
           AuthenticatedUiBuilderActor(decision.actorId)
         UiBuilderAuthorizationDecision.Missing ->
           return toolError(
-            "this tool needs a UI-builder ${capability.name.lowercase()} grant; none was presented"
+            "this tool needs a UI-builder ${capability.name.lowercase()} grant; none was " +
+              "presented. Call request_access with capability " +
+              "'${capability.agentGrantCapability().wire}', have a human approve it, then pass the " +
+              "token poll_access returns as this tool's '$TOKEN_ARGUMENT' argument."
           )
         UiBuilderAuthorizationDecision.Forbidden ->
           return toolError(
@@ -1700,8 +1721,34 @@ class ServeCatalogMcp(
     buildJsonObject {
       put("name", name)
       put("description", description)
-      put("inputSchema", JSON.parseToJsonElement(schema))
+      put("inputSchema", withTokenArgument(name, JSON.parseToJsonElement(schema).jsonObject))
     }
+
+  /**
+   * Adds the in-band credential to a gated tool's input schema.
+   *
+   * Declared rather than merely tolerated because several of these schemas set
+   * `additionalProperties: false`, and because a model only passes an argument it can see. The two
+   * access tools are skipped: they are the ones a caller reaches *without* a credential, and
+   * offering to carry one there would only invite a token that does not exist yet.
+   */
+  private fun withTokenArgument(name: String, schema: JsonObject): JsonObject {
+    if (name in UNGATED_TOOLS) return schema
+    val properties = schema[PROPERTIES] as? JsonObject ?: JsonObject(emptyMap())
+    if (TOKEN_ARGUMENT in properties) return schema
+    return JsonObject(
+      schema +
+        (PROPERTIES to
+          JsonObject(
+            properties +
+              (TOKEN_ARGUMENT to
+                buildJsonObject {
+                  put("type", "string")
+                  put("description", TOKEN_ARGUMENT_DESCRIPTION)
+                })
+          ))
+    )
+  }
 
   private fun textResult(text: String): JsonObject = buildJsonObject {
     put(
@@ -1859,6 +1906,53 @@ class ServeCatalogMcp(
      * answers about this host's catalogs and needs at least `preview` scope.
      */
     private val UNGATED_TOOLS = setOf("request_access", "poll_access")
+
+    private const val PROPERTIES = "properties"
+
+    /**
+     * The argument a gated tool call carries its grant token in.
+     *
+     * ### Why the credential may also ride the message
+     *
+     * Everywhere else on this server the credential is a property of the HTTP call, and that is
+     * still the preferred place: it is where a browser session, an operator token and an OAuth
+     * bearer all live, and it keeps a secret out of the transcript a model reasons over.
+     *
+     * It is unreachable for one caller, and that caller is the whole point of `request_access`. An
+     * MCP client fixes its request headers when it connects; an agent that completes the device
+     * flow *mid-session* receives the token as a tool result, in a place from which it cannot reach
+     * its own transport. Before this, such an agent could ask for access, watch a human approve it,
+     * hold a valid token — and still be refused by every gated tool until someone edited an
+     * `mcp.json` and restarted the session. The flow worked and was useless, which is the failure
+     * [docs/design/AGENT_ACCESS_GRANTS.md] means when it says nothing is configured client-side.
+     *
+     * So a gated tool accepts the token as an argument too. It buys exactly one thing the header
+     * cannot: escalation inside the session that asked for it, on any MCP client, without waiting
+     * for one to grow mid-session re-authentication. It is checked by the same
+     * [ServeMachineAuthorization], against the same grant store, for the same short lifetime — no
+     * new authority, only a second door into the one that exists.
+     */
+    const val TOKEN_ARGUMENT = "token"
+
+    private const val TOKEN_ARGUMENT_DESCRIPTION =
+      "A grant token from poll_access, when you cannot set the X-Compose-Preview-Token header " +
+        "yourself — an MCP client fixes its headers at connect time, so this is how a token " +
+        "approved during this session is used in it. Prefer the header where you control it."
+
+    /**
+     * The grant token this message presents in-band, if any.
+     *
+     * Read by the transport as well as by [callTool], so the gate in front of the endpoint and the
+     * tool behind it agree about what was presented. Blank is treated as absent: a client
+     * templating an unset environment variable sends `""`, and that is nothing, not a bad token.
+     */
+    fun presentedToken(request: JsonObject): String? {
+      val params = request["params"] as? JsonObject ?: return null
+      return tokenArgument(params["arguments"] as? JsonObject ?: return null)
+    }
+
+    internal fun tokenArgument(arguments: JsonObject): String? =
+      (arguments[TOKEN_ARGUMENT] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 
     /**
      * Whether this message must present a grant before it is handled.

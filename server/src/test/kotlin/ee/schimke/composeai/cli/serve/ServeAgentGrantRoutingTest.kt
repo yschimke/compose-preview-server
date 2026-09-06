@@ -294,6 +294,55 @@ class ServeAgentGrantRoutingTest {
     assertTrue(json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray.isNotEmpty())
   }
 
+  /**
+   * The other half of bootstrapping: an agent that cannot set a header still uses what it was
+   * granted.
+   *
+   * `request_access` gave a client with no credential somewhere to start, and left it somewhere it
+   * could not finish. An MCP client fixes its request headers when it connects, so a token handed
+   * back by `poll_access` — mid-session, as a tool result — had nowhere to go: the agent held a
+   * live grant a human had just approved and every gated tool went on refusing it until somebody
+   * edited a config file and restarted the session. Here the token goes back in the way it arrived,
+   * as an argument, and the same call that answered 401 answers.
+   */
+  @Test
+  fun `a token obtained in this session is usable in it without a header`() {
+    val listProjects = { arguments: String ->
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":$arguments}}"""
+      )
+    }
+    assertEquals(401, listProjects("{}").first)
+
+    val token = grantedToken(scope = "live")
+
+    val presented = listProjects("""{"token":"$token"}""")
+    assertEquals(200, presented.first, presented.second)
+    assertEquals(null, json(presented.second)["result"]!!.jsonObject["isError"])
+
+    // Live scope too, not merely the `preview` rung the transport gate asks for: the token the door
+    // accepted is the token the tool behind it is authorized against, or escalation stops at the
+    // door.
+    val rendered =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"render_preview","arguments":{"catalog":"none","previewId":"none","token":"$token"}}}"""
+      )
+    assertEquals(200, rendered.first, rendered.second)
+    // The catalog does not exist here; what matters is that the refusal is about the catalog rather
+    // than about `live grant scope is required`.
+    assertFalse(toolText(rendered.second).contains("live grant scope"), rendered.second)
+  }
+
+  /** A bad token in the argument is no token, not a way past the gate. */
+  @Test
+  fun `an unknown token argument is refused like none at all`() {
+    val (code, body) =
+      mcpAnonymous(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":{"token":"cpat_not-a-real-grant"}}}"""
+      )
+    assertEquals(401, code, body)
+  }
+
   /** A wrong device secret is not a way to collect somebody else's token. */
   @Test
   fun `poll_access refuses a request it cannot prove it opened`() {

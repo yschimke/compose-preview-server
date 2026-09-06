@@ -106,6 +106,9 @@ start, not a misconfiguration. Recover it through the server's own device-code f
 `request_access` with the scope and capabilities the task needs (`ui-builder-read`,
 `ui-builder-write`, `ui-builder-export` are separate from the `preview -> live -> playground`
 compute ladder), show the human the `approveUrl` and `userCode` it returns, then `poll_access` until
-it answers `approved`. A server restart drops every grant, so a token that stopped working is asked
-for again the same way. Designs are private to their owner and collaborators, so a grant reads only
+it answers `approved`. Then **pass that token as each gated tool's `token` argument**: your MCP
+client fixed its headers when it connected, so a token approved mid-session cannot be put on one,
+and the argument is what makes access you just obtained usable in the session that obtained it.
+Setting `$COMPOSE_PREVIEW_TOKEN` before the session starts remains the way to skip the flow. A
+server restart drops every grant, so a token that stopped working is asked for again the same way. Designs are private to their owner and collaborators, so a grant reads only
 what its actor has been given an ACL for.

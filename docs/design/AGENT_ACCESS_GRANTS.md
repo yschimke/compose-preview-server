@@ -285,6 +285,31 @@ above — so a redeployed host invalidates every live bearer at once, and an age
 401 with plenty of TTL left on a token that no longer exists. Asking again is the whole remedy, and
 now it costs no out-of-band tooling.
 
+## Using it without a header
+
+A grant is presented on the call: `X-Compose-Preview-Token`, `Authorization: Bearer`, or `?token=`.
+That is the right default — it keeps a secret out of the message body, and it is where an operator
+token, a browser session and an OAuth bearer already live.
+
+It assumes the caller can choose its own headers, and the caller this whole section exists for
+cannot. An MCP client fixes its request headers when it connects, from static configuration; a
+token it is handed *afterwards*, as the result of `poll_access`, reaches it in a place from which
+it cannot reach its own transport. Before this, an agent could ask for access, watch a human
+approve it, hold a valid token with an hour of TTL on it — and be refused by every gated tool for
+the rest of the session, with no remedy inside the protocol. `request_access` gave it somewhere to
+start and nowhere to finish.
+
+So a gated MCP tool also accepts the token as a `token` argument (`ServeCatalogMcp.TOKEN_ARGUMENT`),
+declared in each tool's input schema because a model only passes an argument it can see. It is
+looked up in the same store as every other token, tried **last** so a call that already carries a
+credential keeps it, and grants nothing the header does not. What it buys is the one thing the
+header cannot: escalation inside the session that asked for it, on any client, without waiting for
+one to grow mid-session re-authentication.
+
+The two access tools do not offer the argument — there is no token to carry when you call them —
+and the operator token is never accepted this way: a standing credential should not travel as a
+tool argument chosen by a model. `resources/*` have no arguments and so keep the header.
+
 ## Asking without being told to ask
 
 The two legs above are reachable from MCP, but only by a client that knows they exist. A general
