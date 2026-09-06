@@ -333,10 +333,11 @@ object ScreenDocumentProjection {
      * grid with `span = full` is a row that crosses every column, and the old exporter wrote it as
      * `item(span = { GridItemSpan(maxLineSpan) })` — an argument to the **wrapper**, computed from
      * a lambda whose receiver supplies `maxLineSpan`. Two separate things put that out of reach: a
-     * [SlotItem] is one wrapper for a whole slot rather than one per child, and `ScreenValue.Lambda`
-     * returns a value the document already holds — it cannot read a receiver, which is the whole of
-     * what `maxLineSpan` is. Dropped instead, a full-width row would silently export as a single cell — a
-     * different design that compiles, which is the failure this projection exists to prevent.
+     * [SlotItem] is one wrapper for a whole slot rather than one per child, and
+     * `ScreenValue.Lambda` returns a value the document already holds — it cannot read a receiver,
+     * which is the whole of what `maxLineSpan` is. Dropped instead, a full-width row would silently
+     * export as a single cell — a different design that compiles, which is the failure this
+     * projection exists to prevent.
      */
     private fun unplaceable(property: String, node: DesignNodeV1): Boolean {
       if (property != SPAN) return false

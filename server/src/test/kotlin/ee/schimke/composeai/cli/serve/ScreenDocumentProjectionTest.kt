@@ -871,12 +871,14 @@ class ScreenDocumentProjectionTest {
   fun `a grid span is refused, because dropping it would export a full-width row as one cell`() {
     // The counter-example to the one above. `span` reads like more bookkeeping and is a layout
     // instruction: the old exporter wrote it as `item(span = { GridItemSpan(maxLineSpan) })`, an
-    // argument to the wrapper computed by a lambda, and this vocabulary has neither.
+    // argument to the wrapper read off the grid's own scope. `ScreenValue.Lambda` did not change
+    // this — it returns a value the document holds, and `maxLineSpan` is exactly what it cannot
+    // reach.
     assertEquals(
       listOf(
         "node `list`.`span` is the span this node takes in its parent grid, which is " +
           "`item(span = { GridItemSpan(…) })` on the wrapper around it — an argument to another " +
-          "node, computed by a lambda, and this vocabulary has neither"
+          "node, computed from the grid's own scope, and this vocabulary has neither"
       ),
       refusal(
         document(
@@ -906,7 +908,6 @@ class ScreenDocumentProjectionTest {
     )
   }
 
-
   private fun indicator(vararg properties: Pair<String, UiValueV1>) =
     DesignNodeV1(
       id = "bar",
@@ -933,8 +934,7 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `an absent progress is still the indeterminate indicator, with no argument invented`() {
-    val arguments =
-      projected(document(indicator(), roots = listOf("bar"))).root.arguments
+    val arguments = projected(document(indicator(), roots = listOf("bar"))).root.arguments
 
     assertFalse("progress" in arguments, arguments.keys.toString())
   }
@@ -963,9 +963,7 @@ class ScreenDocumentProjectionTest {
         "node `bar` is not indeterminate and sets no `progress`; the determinate indicator is " +
           "chosen by passing one, and there is nothing here to pass"
       ),
-      refusal(
-        document(indicator("indeterminate" to BooleanValueV1(false)), roots = listOf("bar"))
-      ),
+      refusal(document(indicator("indeterminate" to BooleanValueV1(false)), roots = listOf("bar"))),
     )
   }
 
