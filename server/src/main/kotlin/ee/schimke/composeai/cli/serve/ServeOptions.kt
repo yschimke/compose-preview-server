@@ -655,6 +655,23 @@ public interface ServeOptions {
     get() = emptyMap()
 
   /**
+   * Served catalogs admitted as **component packs** for the UI builder (`--ui-builder-packs <served
+   * catalog>=<platform>[,…]`), by id, each naming the platform whose authoring catalogs receive it:
+   * `mobile`, `wear` or `remote-compose`.
+   *
+   * A pack is another catalog's components offered inside the builder's own — a `confetti-mobile`
+   * design system's `SessionCard` beside `m3/card` in a Material 3 screen. Its components are
+   * projected from that catalog's discovered component record, so a pack needs the same
+   * `--ui-builder-components <pack>=<components.json>` entry a builder catalog's export does, and a
+   * host that admits a pack without one refuses to start rather than offering an empty shelf.
+   *
+   * Empty by default: admitting a pack is the operator saying that catalog's components may appear
+   * in another catalog's designs, which is not something a served catalog opts into by existing.
+   */
+  public val uiBuilderPacks: Map<String, String>
+    get() = emptyMap()
+
+  /**
    * Retained native renderer bundles (`runtimeId` to directory). Each directory contains a verified
    * `runtime-manifest.json`; ids are exact pins and never aliases for a latest runtime.
    */
