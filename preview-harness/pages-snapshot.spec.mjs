@@ -1185,6 +1185,51 @@ const FIXTURE_STATES = [
     },
   },
   {
+    // The viewer's filed-issue panel OPENED. Collapsed it is one line above the preview, which the
+    // fixture's base capture already carries; the rows, their classifications and the `index as of`
+    // line only exist behind the click. This panel is where a reader lands from the wall, so it is
+    // the one that has to keep saying what date its `closed` is true as of.
+    fixture: "serve-viewer",
+    suffix: "issues-open",
+    parkPointer: true,
+    apply: async (page) => {
+      await page.addStyleTag({
+        content:
+          "*, *::before, *::after { transition-duration: 0ms !important; }",
+      });
+      // States run in order against the SAME page, and the report states above this one leave the
+      // launcher open — over exactly the panel this shot is of.
+      await page.evaluate(() =>
+        document.querySelector(".cp-fab-menu")?.removeAttribute("open"),
+      );
+      await page.waitForSelector(".cp-fab-menu[open]", { state: "detached" });
+      await page.click(".cp-parity-issues-sum");
+      await expect(
+        page.locator(".cp-parity-issues[open] .cp-parity-issues-asof"),
+      ).toBeVisible();
+    },
+  },
+  {
+    // The dashboard's per-component band OPENED. The collapsed line is one per component — which is
+    // this page's body on a catalog with thirty of them — so both halves are worth a baseline: the
+    // base capture holds the collapsed list, this holds one component's reports.
+    fixture: "serve-parity",
+    suffix: "issues-open",
+    parkPointer: true,
+    apply: async (page) => {
+      await page.addStyleTag({
+        content:
+          "*, *::before, *::after { transition-duration: 0ms !important; }",
+      });
+      const band = page.locator(".cp-parity-issue-group .cp-parity-issues-sum").first();
+      await band.scrollIntoViewIfNeeded();
+      await band.click();
+      await expect(
+        page.locator(".cp-parity-issues[open] .cp-parity-issues-asof").first(),
+      ).toBeVisible();
+    },
+  },
+  {
     // The Bugs column OPENED. Collapsed it is a line of numbers, which the `picked` shot above
     // already carries; what only exists behind a click is the panel — the titles, the closed
     // reports the collapsed line only marks, the `parity:` classification, and the line saying
