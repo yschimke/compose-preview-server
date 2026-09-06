@@ -156,6 +156,7 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `ui_builder_share_design` | `ui-builder-write` | Share a design with another actor as `viewer` or `editor`, or take that back |
 | `ui_builder_list_comments`, `ui_builder_await_comments` | `ui-builder-read` | Read a design's discussion, and **wait** for the next thing said in it |
 | `ui_builder_post_comment`, `ui_builder_resolve_comment_thread` | `ui-builder-write` | Say something on a design, and close a thread once it is answered |
+| `ui_builder_acknowledge_comment`, `ui_builder_react_to_comment` | `ui-builder-write` | Say you have **read** a thread — which is not resolving it — or react to one comment with an emoji |
 
 The `ui_builder_*` tools appear in `tools/list` only on a box that actually serves a UI builder
 (`--ui-builder-dir`). A box without one does not advertise them, because listed-and-failing tells an
@@ -215,6 +216,16 @@ past a `sequence` you quote. Both return the moment a designer in the browser or
 something, and answer a `timedOut` reply when nothing happens within `waitSeconds`, which you act on
 by calling again with the same cursor. `ui_builder_await_design` replies with the released
 `DesignUpdateEnvelopeV1` — the identical frame the browser's own `/updates` socket receives.
+
+**And why waiting is no longer the only way to find out.** A design's replies carry the discussion
+with them: `ui_builder_get_design`, `ui_builder_apply`, `ui_builder_export`,
+`ui_builder_render_native`, `ui_builder_put_asset` and `ui_builder_await_design` grow a `comments`
+block — a count, the cursor and up to three quoted excerpts naming the node each is pinned to —
+whenever somebody has said something you have not acknowledged. Clear it with
+`ui_builder_acknowledge_comment`, which claims only that you have read the thread, or with
+`ui_builder_react_to_comment`, which is the lightest way to say the same thing; neither claims the
+question is settled, which is what `ui_builder_resolve_comment_thread` is for.
+[`UI_BUILDER_COMMENTS.md`](UI_BUILDER_COMMENTS.md) has the three acts and why they are separate.
 
 **Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, and this
 endpoint deliberately cannot send one: `/mcp` is stateless JSON-RPC, `GET /mcp` — the

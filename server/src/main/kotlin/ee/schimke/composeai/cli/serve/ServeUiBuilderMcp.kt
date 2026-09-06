@@ -145,7 +145,12 @@ class ServeUiBuilderMcp(
       LIST_COMMENTS,
       AWAIT_COMMENTS -> if (comments == null) null else UiBuilderRouteCapability.READ
       POST_COMMENT,
-      RESOLVE_COMMENT_THREAD -> if (comments == null) null else UiBuilderRouteCapability.WRITE
+      RESOLVE_COMMENT_THREAD,
+      // Acknowledging and reacting write to the board, so they are gated as writes — and an
+      // acknowledgement is the thing that clears the notice an agent is being shown, which only
+      // an actor that may write the discussion should be able to do on its own behalf.
+      ACKNOWLEDGE_COMMENT,
+      REACT_TO_COMMENT -> if (comments == null) null else UiBuilderRouteCapability.WRITE
       CREATE_DESIGN,
       APPLY,
       RENAME_DESIGN,
@@ -172,6 +177,13 @@ class ServeUiBuilderMcp(
    * needs to tell two replies apart, and inventing an id here would defeat that.
    */
   suspend fun call(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String = withCommentNotice(tool, args, actor, run(tool, args, actor, callId))
+
+  private suspend fun run(
     tool: String,
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
@@ -208,7 +220,9 @@ class ServeUiBuilderMcp(
         LIST_COMMENTS,
         AWAIT_COMMENTS,
         POST_COMMENT,
-        RESOLVE_COMMENT_THREAD -> return commentTool(tool, args, actor)
+        RESOLVE_COMMENT_THREAD,
+        ACKNOWLEDGE_COMMENT,
+        REACT_TO_COMMENT -> return commentTool(tool, args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
@@ -621,9 +635,80 @@ class ServeUiBuilderMcp(
               args["resolved"]?.jsonPrimitive?.booleanOrNull ?: true,
             )
             .orThrow()
+        // An omitted `threadId` acknowledges the whole board, which is what an agent that has just
+        // read the discussion means and what stops catching up costing a call per thread.
+        ACKNOWLEDGE_COMMENT ->
+          store.acknowledge(designId, actor.actorId, args.text("threadId")).orThrow()
+        REACT_TO_COMMENT ->
+          store
+            .react(
+              designId,
+              actor.actorId,
+              args.requiredText("commentId"),
+              args.requiredText("reaction"),
+              args["on"]?.jsonPrimitive?.booleanOrNull ?: true,
+            )
+            .orThrow()
         else -> throw McpRequestException("unknown UI-builder comment tool '$tool'")
       }
     return UI_BUILDER_JSON.encodeToString(StoredCommentBoard.serializer(), board)
+  }
+
+  /**
+   * The reply, plus what this actor has not been told, when there is any.
+   *
+   * ## Why it is spliced onto the reply rather than left to the agent to ask for
+   *
+   * Because the agent does not ask. The tools to find a comment have existed since the discussion
+   * did, and the failure they were built for still happened: an agent kept applying mutations and
+   * exporting while a designer's "The play icon looks like a cross" sat unread, because noticing
+   * was opt-in and nothing an agent already read said a word about it. This converts "the agent
+   * must think to ask" into "the agent cannot help but see" — see [CommentNoticeV1].
+   *
+   * ## What it costs
+   *
+   * One board read per reply on the tools in [COMMENT_NOTICE_TOOLS], and nothing at all on a host
+   * that keeps no discussions. The reply is re-parsed only when there is something to add, so a
+   * design nobody has commented on — the common case, and the one where a native render's base64
+   * frame would be expensive to walk — pays a stat call and hands the original string back
+   * untouched.
+   *
+   * A reply that is not a JSON object is handed back as it is: a notice is worth having, and never
+   * worth mangling the answer the agent asked for.
+   */
+  private fun withCommentNotice(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    reply: String,
+  ): String {
+    val store = comments ?: return reply
+    if (tool !in COMMENT_NOTICE_TOOLS) return reply
+    val designId = args.text("designId") ?: return reply
+    // The design was read as this actor by the call that produced `reply`, so the access check has
+    // already happened; a reply that never reached the design carries no notice because the board
+    // of a design nobody may read is never consulted here — the tool refused before this point.
+    val notice =
+      try {
+        store.readOrEmpty(designId).noticeFor(actor.actorId)
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        // A discussion this host cannot read must never cost the agent the answer it asked for.
+        null
+      } ?: return reply
+    val parsed =
+      try {
+        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+      } catch (_: SerializationException) {
+        return reply
+      }
+    return JsonObject(
+        parsed +
+          (COMMENTS_NOTICE_KEY to
+            UI_BUILDER_JSON.encodeToJsonElement(CommentNoticeV1.serializer(), notice))
+      )
+      .toString()
   }
 
   private fun CommentWriteResult.orThrow(): StoredCommentBoard =
@@ -851,6 +936,8 @@ class ServeUiBuilderMcp(
     const val POST_COMMENT = "ui_builder_post_comment"
     const val RESOLVE_COMMENT_THREAD = "ui_builder_resolve_comment_thread"
     const val AWAIT_COMMENTS = "ui_builder_await_comments"
+    const val ACKNOWLEDGE_COMMENT = "ui_builder_acknowledge_comment"
+    const val REACT_TO_COMMENT = "ui_builder_react_to_comment"
     const val AWAIT_DESIGN = "ui_builder_await_design"
     const val DESIGN_ACCESS = "ui_builder_design_access"
     const val SHARE_DESIGN = "ui_builder_share_design"
@@ -916,7 +1003,25 @@ class ServeUiBuilderMcp(
 
     /** Separate because they exist only where the host keeps a discussion. */
     val COMMENT_TOOL_NAMES =
-      listOf(LIST_COMMENTS, POST_COMMENT, RESOLVE_COMMENT_THREAD, AWAIT_COMMENTS)
+      listOf(
+        LIST_COMMENTS,
+        POST_COMMENT,
+        ACKNOWLEDGE_COMMENT,
+        REACT_TO_COMMENT,
+        RESOLVE_COMMENT_THREAD,
+        AWAIT_COMMENTS,
+      )
+
+    /**
+     * The replies that carry [CommentNoticeV1] when the actor has a thread waiting on them.
+     *
+     * Every one of them is a moment where an agent is demonstrably reading or writing this design's
+     * state, which is exactly when a comment about it is worth knowing. The comment tools
+     * themselves are left out: they answer with the board, so a notice beside it would be the same
+     * news twice.
+     */
+    val COMMENT_NOTICE_TOOLS =
+      setOf(GET_DESIGN, APPLY, EXPORT, RENDER_NATIVE, PUT_ASSET, AWAIT_DESIGN)
 
     private const val DEFAULT_DESIGN_PAGE = 50
 
@@ -925,6 +1030,9 @@ class ServeUiBuilderMcp(
 
     private const val MAX_DESIGN_WAIT_SECONDS = 120L
     private const val MCP_CLIENT_ID = "mcp"
+
+    /** The key [CommentNoticeV1] is spliced onto a reply under. */
+    internal const val COMMENTS_NOTICE_KEY = "comments"
 
     /**
      * Tool declarations, built with the caller's own `tool` helper so this list has the same shape
@@ -1023,10 +1131,13 @@ class ServeUiBuilderMcp(
           "Apply design mutations — insertNode, setProperty, deleteNode, moveNode and the rest of " +
             "DesignMutationV1 — as one operation. `baseRevision` is the revision you read, and a " +
             "mismatch is reported rather than merged, so a concurrent edit cannot be lost. This " +
-            "is how an agent adds a scaffold, fills its slots and sets modifiers. A setProperty " +
-            "whose value is `{\"type\":\"null\"}` unsets the property — the way back after " +
-            "trying one — and is refused, naming the node and the field, when the catalog " +
-            "requires it.",
+            "is how an agent adds a scaffold, fills its slots and sets modifiers. " +
+            "`removeNodeProperty` (or a setProperty whose value is `{\"type\":\"null\"}`) " +
+            "unsets the property — the way back after trying one — and is refused, naming the " +
+            "node and the field, when the catalog requires it. When somebody has commented on " +
+            "the design and you have not acknowledged it, the outcome carries a `comments` " +
+            "block naming the threads waiting on you; read it, because it is somebody talking " +
+            "about what you are editing.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
@@ -1140,7 +1251,9 @@ class ServeUiBuilderMcp(
               "stroke, a design node, or a point on the frame — whether it is resolved, and every " +
               "reply under it. `sequence` rises on each change and is the cursor to quote to " +
               "$AWAIT_COMMENTS. Comments are kept beside the design and are never part of it: no " +
-              "node holds them and no export sees them.",
+              "node holds them and no export sees them. Each thread carries `acknowledgedBy`, so " +
+              "you can see what you have already caught up with; say you have read the rest with " +
+              "$ACKNOWLEDGE_COMMENT.",
             """
             {"type":"object","properties":{
               "designId":{"type":"string"}
@@ -1181,6 +1294,44 @@ class ServeUiBuilderMcp(
               "threadId":{"type":"string"},
               "resolved":{"type":"boolean","description":"Defaults to true."}
             },"required":["designId","threadId"],"additionalProperties":false}
+            """,
+          ),
+        if (!comments) null
+        else
+          tool(
+            ACKNOWLEDGE_COMMENT,
+            "Say that you have read a comment thread — which is **not** the same as resolving it. " +
+              "Resolving claims the question is settled; acknowledging claims only that you have " +
+              "seen it, which is the honest thing to say while you are still working on what it " +
+              "asked for. Omit `threadId` to acknowledge the whole discussion, which is what you " +
+              "mean after reading it with $LIST_COMMENTS. Acknowledgement is per actor, so a " +
+              "thread you have read is still waiting for the other people in the design, and it " +
+              "is what clears the `comments` block the server puts on your $APPLY, $GET_DESIGN, " +
+              "$EXPORT and $PUT_ASSET replies.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "threadId":{"type":"string","description":"One thread. Omit for every thread on the design."}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
+        if (!comments) null
+        else
+          tool(
+            REACT_TO_COMMENT,
+            "React to one comment with an emoji, or take the reaction back with `on: false`. The " +
+              "lightest thing you can say: 👀 on a comment you have just picked up, 👍 on a fix " +
+              "somebody made, where a reply would be noise in a thread a person has to read. " +
+              "`commentId` is the `id` of a comment inside a thread, from $LIST_COMMENTS. " +
+              "Reacting also acknowledges that thread for you, so it counts as the lightest " +
+              "acknowledgement; it says nothing about whether the question is settled.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "commentId":{"type":"string","description":"The comment to react to, from its thread's `comments`."},
+              "reaction":{"type":"string","description":"One emoji, at most $MAX_COMMENT_REACTION characters."},
+              "on":{"type":"boolean","description":"False takes your reaction back. Defaults to true."}
+            },"required":["designId","commentId","reaction"],"additionalProperties":false}
             """,
           ),
         if (!comments) null

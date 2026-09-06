@@ -76,6 +76,21 @@ A design has one URL, and it names the catalog and the design:
 Opening it opens the design. It does not create one: a `GET` never writes, so a mistyped link
 reports a design that is not there rather than quietly making it.
 
+**Both segments are required.** `/ui-builder/<designId>`, with the catalog left out, is not a
+shorter spelling of the same link — it is not a design URL at all, and the server answers `404`.
+The routing reads the first segment as a catalog name, so a single segment that names no catalog
+falls through to the static bundle and is looked up as a file; that is what keeps a genuinely
+missing asset a `404` instead of silently rendering the app shell. Nothing on the page can say
+"you meant the other form", because the request never reaches the app.
+
+The trap is that the design's *API* resource below **is** catalog-free — `/api/ui-builder/v1/designs/<designId>`
+names a design with its id alone, because the server reads the catalog out of the stored document's
+`catalogPin`. The browser URL cannot: the app reads the catalog back out of `location.pathname`
+before it has fetched anything. So an id that works against the API is not a browser link, and
+pasting one produces a `404` that looks like a deleted design. Whether the short form should
+redirect to the canonical one is
+[#509](https://github.com/yschimke/compose-preview-server/issues/509).
+
 Creating is a `POST`. The New design dialog opens on a form factor — Mobile, Wear, RemoteCompose
 — with a generated id already filled in (a `cheeky-raccoon`, reshuffled or overwritten as you
 like) and its state variables folded away until asked for. It submits an ordinary form to
@@ -694,8 +709,9 @@ the line is "the canvas cannot draw it" rather than "the export cannot write it"
 [`design/UI_BUILDER_VALUE_SEMANTICS.md`](design/UI_BUILDER_VALUE_SEMANTICS.md).
 
 An optional property can be **unset** again, so the component's own default applies: the editor's
-`removeNodeProperty` operation names the node and the field, and on the wire a `setProperty` whose
-value is `{"type": "null"}` means the same thing. A required property cannot be unset — the
+`removeNodeProperty` operation names the node and the field, and on the wire
+`removeNodeProperty` is its own mutation (a `setProperty` whose value is `{"type": "null"}` still
+means the same thing). A required property cannot be unset — the
 refusal names it — and unsetting a property the node does not hold is accepted as the no-op it is.
 Undo puts the value back.
 
@@ -741,7 +757,7 @@ with the same bearer. One tool per protocol request, plus the ones the contract 
 | `ui_builder_get_design` | `ui-builder-read` | One whole document, and the revision to quote next; the pinned catalog only with `includeCatalog: true` |
 | `ui_builder_await_design` | `ui-builder-read` | Waits for somebody else to change the design, and returns what they changed |
 | `ui_builder_create_design` | `ui-builder-write` | A design, from a document or copied from one |
-| `ui_builder_apply` | `ui-builder-write` | `DesignMutationV1` operations — insert, set (a null value unsets), delete, move |
+| `ui_builder_apply` | `ui-builder-write` | `DesignMutationV1` operations — insert, set, removeNodeProperty (a null set unsets too), delete, move |
 | `ui_builder_export` | `ui-builder-export` | The generator's Kotlin, or its refusals |
 | `ui_builder_put_asset` | `ui-builder-write` | A picture behind an `assetKey`, for an `asset/image` node to draw |
 | `ui_builder_design_access` | `ui-builder-read` | Who can open the design: its owner, and everyone it is shared with |
@@ -752,6 +768,8 @@ with the same bearer. One tool per protocol request, plus the ones the contract 
 | `ui_builder_list_comments` | `ui-builder-read` | The discussion on a design, and the cursor to wait from |
 | `ui_builder_await_comments` | `ui-builder-read` | Waits for the next thing anybody says about the design |
 | `ui_builder_post_comment` | `ui-builder-write` | A reply, or a new thread pinned to a mark, a node or a point |
+| `ui_builder_acknowledge_comment` | `ui-builder-write` | Says you have **read** a thread, or the whole discussion — not that it is settled |
+| `ui_builder_react_to_comment` | `ui-builder-write` | An emoji on one comment, or `on: false` to take it back; the lightest acknowledgement |
 | `ui_builder_resolve_comment_thread` | `ui-builder-write` | Closes a thread once it is answered, or reopens one |
 
 They are absent from `tools/list` on a box that serves no builder, and `ui_builder_render_native` is
