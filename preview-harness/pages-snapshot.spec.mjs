@@ -355,6 +355,9 @@ const TAG_INDEX_PAYLOAD = {
 // the catalog-palette pair exists to show a served design system re-theming the chrome from its own
 // `tokens.dtcg.json`, which is invisible without the stylesheet the palette overrides.
 const STYLED_FIXTURES = new Set([
+  // The UI-builder admin screen. Its whole claim is a table the page's own script fills from
+  // `/admin/ui-builder/designs`, so it needs the stylesheet for the table and the delete button.
+  "serve-admin-ui-builder",
   "serve-component-browser-home",
   "serve-component-browser-catalog",
   "serve-component-browser-component",
@@ -897,7 +900,68 @@ async function settleScroll(page) {
     .catch(() => {});
 }
 
+// What `/admin/ui-builder/designs` answers under the admin fixture: the committed HTML carries an
+// empty table (the rows are fetched, never baked in), so this is the only way the capture shows
+// the surface people actually see — a row per design with its owner and a delete.
+const ADMIN_UI_BUILDER_DESIGNS = {
+  schema: "compose-preview-serve/admin-ui-builder-designs/v1",
+  designs: [
+    {
+      designId: "cheeky-raccoon",
+      title: "Discover",
+      revision: 42,
+      catalogSystemId: "m3-catalog",
+      ownerActorId: "github:yschimke",
+      collaborators: 2,
+      createdAtEpochMillis: 1756684800000,
+      updatedAtEpochMillis: 1757116800000,
+      activeSubscribers: 1,
+    },
+    {
+      designId: "shady-goose",
+      title: "Activity list",
+      revision: 7,
+      catalogSystemId: "wear-m3",
+      ownerActorId: "operator",
+      collaborators: 0,
+      createdAtEpochMillis: 1756944000000,
+      updatedAtEpochMillis: 1756944000000,
+      activeSubscribers: 0,
+    },
+    {
+      designId: "feral-pickle",
+      title: "",
+      revision: 0,
+      catalogSystemId: "remote-m3",
+      ownerActorId: "agent:3f9c1a",
+      collaborators: 0,
+      createdAtEpochMillis: 1757030400000,
+      updatedAtEpochMillis: 1757030400000,
+      activeSubscribers: 0,
+    },
+  ],
+};
+
 const FIXTURE_STATES = [
+  {
+    // The admin screen with its designs loaded. The default capture of this fixture shows the
+    // page after the fetch FAILED (no server behind the harness), which is a real state — the
+    // token-less hint — but not the one the screen exists for.
+    fixture: "serve-admin-ui-builder",
+    suffix: "designs",
+    apply: async (page) => {
+      await page.route("**/admin/ui-builder/designs", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(ADMIN_UI_BUILDER_DESIGNS),
+        }),
+      );
+      await page.click("#cp-admin-reload");
+      await expect(page.locator("#cp-admin-rows tr")).toHaveCount(3);
+      await expect(page.locator("#cp-admin-count")).toHaveText("3 designs");
+    },
+  },
   {
     // The locator scope is inside the catalog report disclosure, so every resting page capture
     // hides it. Keep one focused-comparison state open: this is where component-wide versus exact
@@ -1182,6 +1246,86 @@ const FIXTURE_STATES = [
           ),
         )
         .toBe(true);
+    },
+  },
+  {
+    // The viewer's filed-issue panel OPENED. Collapsed it is one line above the preview, which the
+    // fixture's base capture already carries; the rows, their classifications and the `index as of`
+    // line only exist behind the click. This panel is where a reader lands from the wall, so it is
+    // the one that has to keep saying what date its `closed` is true as of.
+    fixture: "serve-viewer",
+    suffix: "issues-open",
+    parkPointer: true,
+    apply: async (page) => {
+      await page.addStyleTag({
+        content:
+          "*, *::before, *::after { transition-duration: 0ms !important; }",
+      });
+      // States run in order against the SAME page, and the report states above this one leave the
+      // launcher open — over exactly the panel this shot is of.
+      await page.evaluate(() =>
+        document.querySelector(".cp-fab-menu")?.removeAttribute("open"),
+      );
+      await page.waitForSelector(".cp-fab-menu[open]", { state: "detached" });
+      await page.click(".cp-parity-issues-sum");
+      await expect(
+        page.locator(".cp-parity-issues[open] .cp-parity-issues-asof"),
+      ).toBeVisible();
+    },
+  },
+  {
+    // The dashboard's per-component band OPENED. The collapsed line is one per component — which is
+    // this page's body on a catalog with thirty of them — so both halves are worth a baseline: the
+    // base capture holds the collapsed list, this holds one component's reports.
+    fixture: "serve-parity",
+    suffix: "issues-open",
+    parkPointer: true,
+    apply: async (page) => {
+      await page.addStyleTag({
+        content:
+          "*, *::before, *::after { transition-duration: 0ms !important; }",
+      });
+      const band = page.locator(".cp-parity-issue-group .cp-parity-issues-sum").first();
+      await band.scrollIntoViewIfNeeded();
+      await band.click();
+      await expect(
+        page.locator(".cp-parity-issues[open] .cp-parity-issues-asof").first(),
+      ).toBeVisible();
+    },
+  },
+  {
+    // The Bugs column OPENED. Collapsed it is a line of numbers, which the `picked` shot above
+    // already carries; what only exists behind a click is the panel — the titles, the closed
+    // reports the collapsed line only marks, the `parity:` classification, and the line saying
+    // what date the whole thing is a snapshot of. That last one is the reason this is a shot and
+    // not a note: a panel that quietly stopped saying "as of" would still look correct, and the
+    // wall's whole claim is that a `closed` here is a snapshot rather than live GitHub state.
+    //
+    // Runs after `picked`, so it inherits the 1280 viewport that state restores from — the width
+    // the reference lane's three panels need. `parkPointer` because opening a disclosure moves
+    // the rows below it under the resting pointer.
+    fixture: "serve-format-compare",
+    suffix: "bugs-open",
+    viewport: { width: 1280, height: 900 },
+    parkPointer: true,
+    apply: async (page) => {
+      await page.addStyleTag({
+        content:
+          "*, *::before, *::after { transition-duration: 0ms !important; }",
+      });
+      const summary = page
+        .locator(".cp-compare-row:not([hidden]) .cp-compare-bug-summary")
+        .first();
+      await summary.click();
+      // The panel, not merely the `open` attribute: `:has()` hides the whole disclosure when every
+      // entry inside it is hidden for the theme on screen, and a shot of a collapsed row would
+      // pass an `[open]` assertion while showing nothing this state exists to show.
+      await expect(
+        page.locator(".cp-compare-bug-disclosure[open] .cp-compare-bug-list"),
+      ).toBeVisible();
+      await expect(
+        page.locator(".cp-compare-bug-disclosure[open] .cp-compare-bug-asof"),
+      ).toBeVisible();
     },
   },
   {

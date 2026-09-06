@@ -40,6 +40,7 @@ fun UiBuilderEditorChromePreview() {
     // and [UiBuilderCanvasForwardPreview] is the one that diffs the default.
     initialComponentsOpen = true,
     initialInspectorOpen = true,
+    exportHost = PREVIEW_EXPORT_HOST,
   )
 }
 
@@ -57,6 +58,9 @@ fun UiBuilderCanvasForwardPreview() {
     document = editorChromePreviewDocument,
     catalog = editorChromePreviewCatalog,
     initialSelectedNodeId = EDITOR_CHROME_PREVIEW_SELECTION,
+    // The toolbar as a served catalog shows it: every production catalog renders PNG, so the
+    // Export button is part of the default chrome rather than an exception to it.
+    exportHost = PREVIEW_EXPORT_HOST,
   )
 }
 
@@ -199,7 +203,7 @@ fun UiBuilderNewDesignPreview() {
       listOf(
         UiBuilderNewDesignCatalog(
           systemId = "m3-catalog",
-          label = "Material 3",
+          label = "Mobile",
           templates =
             listOf(
               UiBuilderNewDesignTemplate("blank", "Blank", "A scaffold and an empty container."),
@@ -209,7 +213,31 @@ fun UiBuilderNewDesignPreview() {
                 "The frozen discover screen, as a starting point.",
               ),
             ),
-        )
+        ),
+        UiBuilderNewDesignCatalog(
+          systemId = "wear-m3",
+          label = "Wear",
+          templates =
+            listOf(
+              UiBuilderNewDesignTemplate(
+                "wear-screen",
+                "Wear screen",
+                "A ScreenScaffold with its clock and scroll indicator, over an empty list.",
+              )
+            ),
+        ),
+        UiBuilderNewDesignCatalog(
+          systemId = "remote-m3",
+          label = "RemoteCompose",
+          templates =
+            listOf(
+              UiBuilderNewDesignTemplate(
+                "wear-widget-small",
+                "Small widget",
+                "216×76dp host with a single content slot.",
+              )
+            ),
+        ),
       ),
     initialCatalogSystemId = "m3-catalog",
     onCreate = { _, _, _, _ -> },

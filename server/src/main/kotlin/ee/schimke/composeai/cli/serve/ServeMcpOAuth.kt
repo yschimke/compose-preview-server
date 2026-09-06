@@ -9,6 +9,7 @@ import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonIgnoreUnknownKeys
 
 /**
  * The OAuth 2.1 façade an MCP client speaks, layered over the agent-grant flow in
@@ -88,18 +89,37 @@ object ServeMcpOAuth {
   const val MCP_RESOURCE_PATH = "/mcp"
 
   /**
-   * How long an issued code may sit unredeemed. RFC 6749 §4.1.2 says a code SHOULD be short-lived
-   * and recommends a maximum of ten minutes; the exchange here happens on the client's own redirect
-   * handler within a second or two, so a minute is generous and bounds the map.
-   */
-  const val CODE_TTL_SECONDS = 60L
-
-  /**
-   * How long an authorization may wait for the human between `/oauth/authorize` and the decision.
-   * Matched to the grant request's own window rather than the code's — the person has to read the
-   * page, and the request they are reading expires on the store's schedule regardless.
+   * How long an authorization lives, from `/oauth/authorize` to the redeemed code.
+   *
+   * One window covers both legs, and it has to: the code is minted at authorize time, before the
+   * human has decided, so its age includes however long they spent reading the approval page. A
+   * tighter bound measured from the same instant would expire codes for the only reason anyone is
+   * on that page — thinking about it.
+   *
+   * That is not the loose end it looks like. RFC 6749 §4.1.2 asks for a short-lived code because a
+   * code is a bearer of authorization; this one is not *disclosed* until the redirect that follows
+   * approval, so the window that actually matters — issue to redemption, on the client's own
+   * redirect handler — is a second or two regardless of how long the human took. Ten minutes is the
+   * maximum §4.1.2 names, single use is enforced in [Store.redeem], and PKCE means a stolen code is
+   * inert without its verifier.
    */
   const val AUTHORIZATION_TTL_SECONDS = 600L
+
+  /**
+   * How long a dynamic registration survives.
+   *
+   * A TTL rather than "forever", and the reason is availability rather than tidiness. Registration
+   * is anonymous and [MAX_REGISTERED_CLIENTS] is a hard cap, so without expiry the cap is a
+   * countdown that *ordinary use* runs down: every client that ever registers holds its slot for
+   * the life of the process, and once 256 have accumulated `/oauth/register` answers `429` forever
+   * — telling every future caller to "try again shortly" when nothing will ever free a slot.
+   *
+   * A day is far longer than any exchange needs and comfortably outlasts the longest grant this
+   * server will mint, so a client re-authorizing after its token expires still finds its
+   * registration. One that has genuinely aged out is told to register again, which costs it one
+   * request.
+   */
+  const val CLIENT_TTL_SECONDS = 86_400L
 
   /** Bound on both maps. Anonymous callers drive registration and authorization alike. */
   const val MAX_PENDING_AUTHORIZATIONS = 256
@@ -146,8 +166,19 @@ object ServeMcpOAuth {
     @SerialName("resource_indicators_supported") val resourceIndicatorsSupported: Boolean = true,
   )
 
-  /** RFC 7591 §2 registration request. Every field optional; unknown members are ignored. */
+  /**
+   * RFC 7591 §2 registration request. Every field optional; unknown members are ignored.
+   *
+   * The annotation is what makes that last clause true, and it is load-bearing rather than
+   * defensive. RFC 7591 §2 says a server MUST ignore metadata it does not understand, and real
+   * clients lean on it: the first one to reach this endpoint sent `application_type: "native"`,
+   * which is registered in RFC 7591 itself and simply not a field this server has any use for.
+   * Without this, that request was refused with `invalid_client_metadata` — a client rejected for
+   * being *more* spec-compliant than the server, and rejected at the one step that has to work
+   * before anything else can.
+   */
   @Serializable
+  @JsonIgnoreUnknownKeys
   data class ClientRegistrationRequest(
     @SerialName("redirect_uris") val redirectUris: List<String> = emptyList(),
     @SerialName("client_name") val clientName: String = "",
@@ -193,7 +224,9 @@ object ServeMcpOAuth {
     val clientName: String,
     val redirectUris: List<String>,
     val issuedAtMillis: Long,
-  )
+  ) {
+    fun isExpired(nowMillis: Long): Boolean = nowMillis - issuedAtMillis > CLIENT_TTL_SECONDS * 1000
+  }
 
   /**
    * An authorization waiting on a human, bound to the grant request whose approval page they were
@@ -251,7 +284,8 @@ object ServeMcpOAuth {
       return client
     }
 
-    fun client(clientId: String?): RegisteredClient? = clientId?.let { clients[it] }
+    fun client(clientId: String?): RegisteredClient? =
+      clientId?.let { clients[it] }?.takeIf { !it.isExpired(clock()) }
 
     fun open(
       requestId: String,
@@ -295,9 +329,10 @@ object ServeMcpOAuth {
       val authorization = pending.remove(key) ?: return null
       byRequest.remove(authorization.requestId, key)
       val now = clock()
-      // The code's own short window, not the authorization's: the human may have taken ten minutes
-      // to decide, but the client redeems on its redirect handler immediately afterwards.
-      return authorization.takeIf { now - it.createdAtMillis <= AUTHORIZATION_TTL_SECONDS * 1000 }
+      // One window, measured from authorize — not a shorter post-approval one. The code is minted
+      // before the human decides, so anything tighter would expire on their deliberation rather
+      // than on any real exposure; see AUTHORIZATION_TTL_SECONDS for why that is sound.
+      return authorization.takeIf { !it.isExpired(now) }
     }
 
     fun purge() {
@@ -307,6 +342,9 @@ object ServeMcpOAuth {
           if (it) byRequest.remove(authorization.requestId, code)
         }
       }
+      // Sweeping this map is what keeps MAX_REGISTERED_CLIENTS a bound on concurrent use rather
+      // than a lifetime quota; see CLIENT_TTL_SECONDS.
+      clients.entries.removeIf { (_, client) -> client.isExpired(now) }
     }
 
     fun clear() {

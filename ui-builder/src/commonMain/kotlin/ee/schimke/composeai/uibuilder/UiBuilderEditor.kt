@@ -57,11 +57,14 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -103,6 +106,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -162,6 +166,8 @@ import androidx.compose.ui.unit.dp
 import ee.schimke.composeai.uibuilder.capability.CapabilityCatalog
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -235,7 +241,7 @@ data class UiBuilderNewDesignCatalog(
   val systemId: String,
   val label: String,
   val templates: List<UiBuilderNewDesignTemplate>,
-  /** Which kind of screen it authors; the chooser groups catalogs by it. */
+  /** Which kind of screen it authors; the chooser orders and groups catalogs by it. */
   val platform: UiBuilderCatalogPlatform = UiBuilderCatalogPlatform.MOBILE,
 )
 
@@ -410,6 +416,13 @@ fun UiBuilderEditor(
     ) -> Unit)? =
     null,
   onHelp: (() -> Unit)? = null,
+  /**
+   * Copies, links and downloads the rendered design, or null where the host cannot.
+   *
+   * Null in every preview and test, where the toolbar then carries no Export menu rather than one
+   * whose every row fails — see [UiBuilderExportHost].
+   */
+  exportHost: UiBuilderExportHost? = null,
   /**
    * The published Remote Compose documents the pinned catalog offers as content, if any.
    *
@@ -1015,6 +1028,7 @@ fun UiBuilderEditor(
                 } else null,
               onReconnect = onReconnect,
               onHelp = onHelp,
+              exportHost = exportHost,
               onComponentPacks = onComponentPacks,
               dispatch = ::dispatch,
             )
@@ -1030,6 +1044,7 @@ fun UiBuilderEditor(
                 } else null,
               onReconnect = onReconnect,
               onHelp = onHelp,
+              exportHost = exportHost,
               onComponentPacks = onComponentPacks,
               // Absent where the host cannot draw: a project with no compile lane has exactly one
               // renderer, and offering a choice between it and nothing is not a choice.
@@ -1286,13 +1301,18 @@ private fun NewDesignDialog(
   var selectedTemplateId by remember {
     mutableStateOf(initialCatalog.templates.firstOrNull()?.id.orEmpty())
   }
-  var designId by remember { mutableStateOf("") }
+  // Pre-filled, so a design can be created in one click; a person who wants their own name
+  // overwrites it, and one who wants another roll asks for it.
+  var designId by remember { mutableStateOf(NewDesignNames.random()) }
   val selectedCatalog = catalogs.first { it.systemId == selectedCatalogId }
   val selectedTemplate =
     selectedCatalog.templates.firstOrNull { it.id == selectedTemplateId }
       ?: selectedCatalog.templates.first()
   val designIdValid = designId.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]*"))
   var declared by remember { mutableStateOf(listOf<NewDesignState>()) }
+  // Folded away until asked for: most new designs declare no state at all, and the three
+  // controls it takes to add one made the dialog read as a form with a required last section.
+  var stateExpanded by remember { mutableStateOf(false) }
   var variableName by remember { mutableStateOf("") }
   var variableKind by remember { mutableStateOf(NewDesignStateType.Flag) }
   var variableInitial by remember { mutableStateOf("") }
@@ -1305,33 +1325,32 @@ private fun NewDesignDialog(
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Catalog", style = MaterialTheme.typography.labelLarge)
-        // Grouped by platform once there is more than one: a phone screen, a watch screen and a
-        // Remote Compose widget are not three flavours of one thing, and a row of chips that put
-        // them side by side said they were. One platform keeps the single row it always had.
-        val byPlatform = catalogs.groupBy { it.platform }
-        byPlatform.entries
-          .sortedBy { it.key.ordinal }
-          .forEach { (platform, platformCatalogs) ->
-            if (byPlatform.size > 1) {
-              Text(
-                platform.label,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+        // In platform order — phone, watch, Remote Compose widget — and grouped under a platform
+        // heading only where a platform has more than one catalog to choose between. With one
+        // catalog per platform the chip already says which platform it is, and a heading over a
+        // single chip would say it twice.
+        val byPlatform = catalogs.groupBy { it.platform }.entries.sortedBy { it.key.ordinal }
+        byPlatform.forEach { (platform, platformCatalogs) ->
+          if (platformCatalogs.size > 1) {
+            Text(
+              platform.label,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.labelMedium,
+            )
+          }
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            platformCatalogs.forEach { catalog ->
+              FilterChip(
+                selected = catalog.systemId == selectedCatalogId,
+                onClick = {
+                  selectedCatalogId = catalog.systemId
+                  selectedTemplateId = catalog.templates.first().id
+                },
+                label = { Text(catalog.label) },
               )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              platformCatalogs.forEach { catalog ->
-                FilterChip(
-                  selected = catalog.systemId == selectedCatalogId,
-                  onClick = {
-                    selectedCatalogId = catalog.systemId
-                    selectedTemplateId = catalog.templates.first().id
-                  },
-                  label = { Text(catalog.label) },
-                )
-              }
-            }
           }
+        }
         Text("Starting point", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           selectedCatalog.templates.forEach { template ->
@@ -1353,6 +1372,14 @@ private fun NewDesignDialog(
           onValueChange = { designId = it },
           modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Design ID" },
           placeholder = { Text("my-widget") },
+          trailingIcon = {
+            TextButton(
+              onClick = { designId = NewDesignNames.random() },
+              modifier = Modifier.semantics { contentDescription = "Suggest another name" },
+            ) {
+              Text("Shuffle")
+            }
+          },
           supportingText = {
             Text(
               if (designId.isEmpty() || designIdValid) {
@@ -1368,60 +1395,70 @@ private fun NewDesignDialog(
         // State is declared here because `CreateDesign` carries a whole document and no released
         // mutation reaches `stateVariables` afterwards. Until one does, this is the only moment a
         // design can be given the variables the inspector then binds properties to.
-        Text("State", style = MaterialTheme.typography.labelLarge)
-        Text(
-          "Variables this screen reacts to. A property can be bound to one once the design exists.",
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          style = MaterialTheme.typography.bodySmall,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          NewDesignStateType.entries.forEach { kind ->
-            FilterChip(
-              selected = kind == variableKind,
-              onClick = { variableKind = kind },
-              label = { Text(kind.label) },
-            )
-          }
-        }
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          OutlinedTextField(
-            value = variableName,
-            onValueChange = { variableName = it },
-            modifier = Modifier.weight(1f).semantics { contentDescription = "State name" },
-            placeholder = { Text("expanded") },
-            isError = variableName.isNotEmpty() && !variableNameValid,
-            singleLine = true,
-          )
-          OutlinedTextField(
-            value = variableInitial,
-            onValueChange = { variableInitial = it },
-            modifier = Modifier.weight(1f).semantics { contentDescription = "State initial value" },
-            placeholder = { Text(variableKind.placeholder) },
-            singleLine = true,
-          )
+        if (!stateExpanded && declared.isEmpty()) {
           TextButton(
-            onClick = {
-              declared +=
-                NewDesignState(variableName, variableKind, variableKind.parse(variableInitial))
-              variableName = ""
-              variableInitial = ""
-            },
-            enabled = variableNameValid,
+            onClick = { stateExpanded = true },
+            modifier = Modifier.semantics { contentDescription = "Add state variables" },
           ) {
-            Text("Add")
+            Text("Add state variables…")
           }
-        }
-        if (declared.isNotEmpty()) {
+        } else {
+          Text("State", style = MaterialTheme.typography.labelLarge)
+          Text(
+            "Variables this screen reacts to. A property can be bound to one once the design exists.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+          )
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            declared.forEach { variable ->
+            NewDesignStateType.entries.forEach { kind ->
               FilterChip(
-                selected = false,
-                onClick = { declared = declared - variable },
-                label = { Text("${variable.name} · ${variable.type.label}") },
+                selected = kind == variableKind,
+                onClick = { variableKind = kind },
+                label = { Text(kind.label) },
               )
+            }
+          }
+          Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            OutlinedTextField(
+              value = variableName,
+              onValueChange = { variableName = it },
+              modifier = Modifier.weight(1f).semantics { contentDescription = "State name" },
+              placeholder = { Text("expanded") },
+              isError = variableName.isNotEmpty() && !variableNameValid,
+              singleLine = true,
+            )
+            OutlinedTextField(
+              value = variableInitial,
+              onValueChange = { variableInitial = it },
+              modifier =
+                Modifier.weight(1f).semantics { contentDescription = "State initial value" },
+              placeholder = { Text(variableKind.placeholder) },
+              singleLine = true,
+            )
+            TextButton(
+              onClick = {
+                declared +=
+                  NewDesignState(variableName, variableKind, variableKind.parse(variableInitial))
+                variableName = ""
+                variableInitial = ""
+              },
+              enabled = variableNameValid,
+            ) {
+              Text("Add")
+            }
+          }
+          if (declared.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              declared.forEach { variable ->
+                FilterChip(
+                  selected = false,
+                  onClick = { declared = declared - variable },
+                  label = { Text("${variable.name} · ${variable.type.label}") },
+                )
+              }
             }
           }
         }
@@ -1478,6 +1515,7 @@ private fun MobileEditorToolbar(
   onNewDesign: (() -> Unit)?,
   onReconnect: (() -> Unit)?,
   onHelp: (() -> Unit)?,
+  exportHost: UiBuilderExportHost?,
   onComponentPacks: (() -> Unit)? = null,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -1490,6 +1528,7 @@ private fun MobileEditorToolbar(
       Text("UI Builder", Modifier.weight(1f), fontWeight = FontWeight.Bold)
       EditorAction("Undo", "Ctrl/⌘+Z", canUndo) { dispatch(UiBuilderEditorEvent.Undo) }
       EditorAction("Redo", "Ctrl/⌘+Shift+Z", canRedo) { dispatch(UiBuilderEditorEvent.Redo) }
+      if (exportHost != null) ExportMenu(exportHost, showStatus = false)
       Box {
         TextButton(
           onClick = { expanded = true },
@@ -1638,6 +1677,8 @@ private fun EditorToolbar(
   onNewDesign: (() -> Unit)?,
   onReconnect: (() -> Unit)?,
   onHelp: (() -> Unit)?,
+  /** Copies, links and downloads the render, or null where the host cannot; hides the menu. */
+  exportHost: UiBuilderExportHost?,
   /** Opens the component-pack settings, or null where the catalog offers no pack. */
   onComponentPacks: (() -> Unit)? = null,
   /**
@@ -1702,6 +1743,9 @@ private fun EditorToolbar(
       ) {
         dispatch(UiBuilderEditorEvent.ToggleCodePane)
       }
+      // Beside Code, because they are the two answers to "how do I get this out": the Kotlin the
+      // design is, and the picture it draws. Absent where the host cannot render one.
+      if (exportHost != null) ExportMenu(exportHost)
       if (previewSurface != null) {
         RenderSurfaceMenu(previewSurface, previewSurfaces, dispatch)
       }
@@ -1763,6 +1807,108 @@ private fun EditorToolbar(
     }
   }
 }
+
+/**
+ * The Export menu: the design as a picture, out of the builder and into Figma, a link or a file.
+ *
+ * One button, because the catalog viewer's preview page has one row and this toolbar has no room
+ * for six; the rows are [exportMenuEntries], grouped by verb. Each row hands its work to the host
+ * and shows the sentence the host answers with beside the button for a moment — "SVG copied", or
+ * why it was not — since a clipboard write that says nothing is indistinguishable from one that
+ * failed. The button stays enabled while a row runs: a second press while an export renders is a
+ * second export, which is harmless, and a disabled button reads as a broken one.
+ */
+@Composable
+private fun ExportMenu(host: UiBuilderExportHost, showStatus: Boolean = true) {
+  val groups = remember(host.formats) { exportMenuEntries(host.formats) }
+  if (groups.isEmpty()) return
+  var open by remember { mutableStateOf(false) }
+  var status by remember { mutableStateOf<String?>(null) }
+  var statusGeneration by remember { mutableStateOf(0) }
+  val scope = rememberCoroutineScope()
+  LaunchedEffect(statusGeneration) {
+    if (status == null) return@LaunchedEffect
+    delay(EXPORT_STATUS_MILLIS)
+    status = null
+  }
+  Row(verticalAlignment = Alignment.CenterVertically) {
+    val shown = status
+    if (showStatus && shown != null) {
+      Text(
+        shown,
+        Modifier.widthIn(max = 260.dp).semantics { contentDescription = "Export status" },
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelMedium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+    Box {
+      ToolbarIconAction("Export", "", Icons.Filled.IosShare, true) { open = true }
+      DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ExportMenuRows(groups) { entry ->
+          open = false
+          scope.launch {
+            status =
+              try {
+                host.perform(entry)
+              } catch (failure: Exception) {
+                "${entry.label} failed: ${failure.message ?: "unknown error"}"
+              }
+            statusGeneration++
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * The rows of the Export menu, without the popup around them.
+ *
+ * Separate from [ExportMenu] so a preview can draw them: a `DropdownMenu` is a popup window, which
+ * a static render does not capture, and rows nobody can diff are rows that drift. The verb groups
+ * are divided, and every row carries its second line, because "Copy SVG" alone does not say that it
+ * is the Figma route.
+ */
+@Composable
+internal fun ExportMenuRows(
+  groups: List<List<EditorExportMenuEntry>>,
+  onPick: (EditorExportMenuEntry) -> Unit,
+) {
+  groups.forEachIndexed { index, group ->
+    if (index > 0) HorizontalDivider()
+    group.forEach { entry ->
+      DropdownMenuItem(
+        text = {
+          Column {
+            Text(entry.label)
+            Text(
+              entry.detail,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+        },
+        leadingIcon = {
+          Icon(
+            when (entry) {
+              is EditorExportMenuEntry.CopyPicture -> Icons.Filled.ContentCopy
+              is EditorExportMenuEntry.CopyLink -> Icons.Filled.Link
+              is EditorExportMenuEntry.Download -> Icons.Filled.Download
+            },
+            contentDescription = null,
+          )
+        },
+        modifier = Modifier.semantics { contentDescription = entry.label },
+        onClick = { onPick(entry) },
+      )
+    }
+  }
+}
+
+/** How long an export's answer stays beside the button. */
+private const val EXPORT_STATUS_MILLIS = 4_000L
 
 /** The file, the way a design tool names one: a mark, the title, and what it is pinned to. */
 @Composable

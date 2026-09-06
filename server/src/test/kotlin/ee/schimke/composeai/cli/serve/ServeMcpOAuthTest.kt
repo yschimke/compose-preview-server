@@ -197,6 +197,37 @@ class ServeMcpOAuthTest {
     assertNull(store.register("one too many", listOf("https://good.example/cb")))
   }
 
+  @Test
+  fun `the client cap bounds concurrent use, not the lifetime of the process`() {
+    // The bug this pins down: with no expiry, MAX_REGISTERED_CLIENTS was a countdown that ORDINARY
+    // use ran down. Every client that ever registered held its slot forever, so after 256 of them
+    // `/oauth/register` answered 429 for good — telling callers to "try again shortly" when
+    // nothing would ever free a slot.
+    var now = 0L
+    val store = ServeMcpOAuth.Store { now }
+    repeat(ServeMcpOAuth.MAX_REGISTERED_CLIENTS) {
+      assertNotNull(store.register("client $it", listOf("https://good.example/cb")))
+    }
+    assertNull(store.register("blocked", listOf("https://good.example/cb")))
+
+    now += (ServeMcpOAuth.CLIENT_TTL_SECONDS + 1) * 1000
+    assertNotNull(
+      store.register("after the aged-out ones are swept", listOf("https://good.example/cb"))
+    )
+  }
+
+  @Test
+  fun `an aged-out registration no longer resolves`() {
+    var now = 0L
+    val store = ServeMcpOAuth.Store { now }
+    val client = assertNotNull(store.register("c", listOf("https://good.example/cb")))
+    assertNotNull(store.client(client.clientId))
+    now += (ServeMcpOAuth.CLIENT_TTL_SECONDS + 1) * 1000
+    // Refused rather than silently honoured: validateAuthorize turns this into the
+    // "register again" message, which is the one thing the client can act on.
+    assertNull(store.client(client.clientId))
+  }
+
   // ------------------------------------------------------------- redirects
 
   @Test

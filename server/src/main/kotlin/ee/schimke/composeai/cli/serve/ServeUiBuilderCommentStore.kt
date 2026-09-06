@@ -327,6 +327,19 @@ class ServeUiBuilderCommentStore(
     }
   }
 
+  /**
+   * Drop a design's whole board. For the administrator removing the design itself, so the
+   * discussion does not outlive what it was about. False when there was nothing to remove.
+   */
+  fun delete(designId: String): Boolean =
+    synchronized(lockFor(designId)) {
+      try {
+        Files.deleteIfExists(fileFor(designId))
+      } catch (_: IOException) {
+        false
+      }
+    }
+
   private fun storedDesigns(): Int =
     try {
       Files.list(root)

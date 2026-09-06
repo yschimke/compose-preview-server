@@ -265,6 +265,26 @@ registry that is unreachable, absent or malformed costs its catalogs for that pa
 unaffected: a registry catalog badges `unverified` until its producer is added with
 `POST /admin/trust`, exactly like a hand-published one.
 
+### Managing UI-builder designs (`/admin/ui-builder`)
+
+A box with a UI-builder lane and `SERVE_ADMIN_TOKEN` set serves an operator's screen over every
+design it holds, whoever owns it, at `/admin/ui-builder?token=<admin token>`. Each row names the
+design, its catalog, its owner, how many editors have it open, and carries a **Delete** — the only
+way a design leaves a host. A delete is durable, closes any open editor on the design, and drops
+its reference overlay and comment threads with it; there is no undo.
+
+The page drives two JSON routes that a script can use directly, gated by the same header as the
+other admin routes and absent (404, not 401) without it:
+
+```bash
+curl -sH "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" https://<host>/admin/ui-builder/designs
+curl -sX DELETE -H "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" \
+  https://<host>/admin/ui-builder/designs/<designId>
+```
+
+No `ui-builder-read` / `ui-builder-write` grant reaches either route: the actor-scoped API can
+list only what its actor owns or was granted, and has no delete at all.
+
 ### Serving a catalog on its own hostname
 
 A published catalog can additionally be served on a hostname of its own, where it presents as the

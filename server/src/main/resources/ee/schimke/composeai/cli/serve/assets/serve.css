@@ -2831,49 +2831,88 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
 .cp-compare-picked-clear:hover { border-color: currentColor; }
 
 /* The Bugs column: what is already filed against this row, and the way to file more.
-   STACKED rather than run along the row, and that is a width decision, not a style one: this table
-   already carries three picture panels, and a row with four issues laid out horizontally would push
-   `Match` — the column the wall is sorted by and read for — past the scroll edge at 1024px. One
-   pill per line makes the column as wide as its widest pill and no wider; the rows are 220px tall
-   already, so the extra lines cost nothing.
 
-   The pill now carries the issue TITLE beside its number, which is the fact the column is actually
-   read for — `#77` alone cannot tell a reader whether the thing already filed is the difference
-   they are looking at. Everything below exists to let it do that without taking the width back:
-   the title is capped at the column's `max-width`, ellipsised on one line rather than wrapped (a
-   wrapped title would set the row's height from text on a wall whose rows are pictures), and it
-   drops out entirely at the width where the pictures start to lose. The tooltip is unchanged and
-   still holds the untruncated title, so the ellipsis hides nothing that was reachable before. */
-.cp-compare-bugs { text-align: right; }
-.cp-compare-bug, .cp-compare-bug-new { display: block; width: fit-content; margin: 4px 0 0 auto;
-  padding: 1px 6px; white-space: nowrap;
-  border-radius: 999px; font-size: .72rem; font-variant-numeric: tabular-nums;
-  text-decoration: none; border: 1px solid var(--cp-border); }
-.cp-compare-bug { color: light-dark(#8a1c1c, #ef9292);
-  display: flex; gap: .45em; align-items: baseline; max-width: 22ch; }
+   ONE LINE when closed, and as little of it as the numbers need. Every issue used to be a
+   full-width pill on its own line carrying its title, so a row with four reports spent four lines
+   and 350px of a table that already carries three picture panels — and the catalog this column was
+   built for has 690 pills over 620 rows. Collapsed it is now the open issue NUMBERS, the marker,
+   and "+ file", all on one line: bare text rather than pills, because a border around a five-
+   character number is most of the width of the number.
+
+   The titles are not gone, they are behind the disclosure, together with the closed reports the
+   collapsed line only marks, the `parity:` classification, and the date the whole thing is a
+   snapshot of.
+
+   The panel is LIFTED OUT OF FLOW and opens leftward over the row's own pictures. In flow it would
+   set the column's width while open and shove three picture panels sideways on a click — the exact
+   reflow the stacked pills were capped at 22ch to avoid. Absolute means the collapsed line can be
+   as narrow as it likes without the open state having to fit in it. `.cp-compare-table-wrap`
+   scrolls on X, so its Y overflow is `auto` rather than `hidden`: a panel taller than the row
+   scrolls the table instead of being clipped, and `max-height` keeps it from getting there. */
+.cp-compare-bugs { text-align: right; white-space: nowrap; }
+.cp-compare-bug-disclosure { position: relative; display: inline-block; vertical-align: middle; }
+/* The UA's own triangle is dropped for a marker at the END of the numbers: this column is
+   right-aligned, and a leading triangle would put the one glyph that is not information at the
+   ragged edge the eye scans down. */
+.cp-compare-bug-summary { display: inline-flex; align-items: baseline; gap: 6px; cursor: pointer;
+  list-style: none; font-size: .72rem; font-variant-numeric: tabular-nums; }
+.cp-compare-bug-summary::-webkit-details-marker { display: none; }
+.cp-compare-bug-summary::after { content: "⌄"; color: var(--cp-fg-muted); font-size: .9em; }
+.cp-compare-bug-disclosure[open] .cp-compare-bug-summary::after { content: "⌃"; }
+.cp-compare-bug-chip { color: light-dark(#8a1c1c, #ef9292); }
+.cp-compare-bug-summary:hover .cp-compare-bug-chip { text-decoration: underline; }
+/* No number on it, deliberately: `CompareWall` hides and shows variant-scoped entries as the theme
+   swaps, so a count the server printed is a count the browser can invalidate. */
+.cp-compare-bug-chip--closed { color: var(--cp-fg-faint); font-variant-numeric: normal; }
+/* A whole row's worth of issues can be variant-scoped and hidden for the theme on screen. The
+   disclosure then has nothing to disclose, and a lone marker beside "+ file" reads as a control
+   that does nothing — so the whole thing goes when every entry inside it is hidden. */
+.cp-compare-bug-disclosure:not(:has(.cp-compare-bug-chip:not([hidden]))) { display: none; }
+.cp-compare-bug-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 3;
+  width: 26ch; max-height: 360px; overflow-y: auto; padding: 8px 10px; text-align: left;
+  white-space: normal; border: 1px solid var(--cp-border);
+  border-radius: var(--md-sys-shape-corner-medium, 10px);
+  background: light-dark(var(--cp-bg), var(--cp-surface));
+  box-shadow: 0 6px 20px light-dark(rgb(0 0 0 / .12), rgb(0 0 0 / .5)); }
+/* Room for the LAST row's panel, and only when it is open. Every other row opens over the rows
+   below it; the final one has nothing below, and the wrap scrolls on X — which makes its Y overflow
+   `auto` — so the panel would put a second, nested scrollbar on the table for the sake of one card.
+   Opening it upward instead was tried and is worse: it lands under the sticky header. So the wrap
+   grows, by the panel's own maximum, exactly while that one disclosure is open. */
+.cp-compare-table-wrap:has(tbody tr:last-child .cp-compare-bug-disclosure[open]) {
+  padding-bottom: 372px; }
+.cp-compare-bug-list { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px; }
+.cp-compare-bug-item[hidden] { display: none; }
+.cp-compare-bug { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4em;
+  font-size: .72rem; font-variant-numeric: tabular-nums; text-decoration: none;
+  color: light-dark(#8a1c1c, #ef9292); }
+.cp-compare-bug:hover { text-decoration: underline; }
 .cp-compare-bug-num { flex: none; }
-/* `min-width: 0` is what makes the ellipsis work at all: a flex item's automatic minimum size is
-   its content, so without this the title refuses to shrink and the pill overflows the cap instead
-   of truncating. Muted against the number, which is the part that is a link you might quote. */
-.cp-compare-bug-title { min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  color: var(--cp-fg-muted); font-variant-numeric: normal; }
-.cp-compare-bug--closed { color: var(--cp-fg-faint); }
-.cp-compare-bug--closed .cp-compare-bug-title { color: inherit; }
-.cp-compare-bug-new { color: var(--cp-fg-muted); border-style: dashed; }
-.cp-compare-bug:hover, .cp-compare-bug-new:hover { border-color: currentColor; }
-/* Below this the three picture panels are what the wall is for and there is no room left beside
-   them; the pill falls back to the number it was, tooltip and all.
-   The threshold is ABOVE the 1024px the note further up measures `Match` at, and that is measured
-   rather than chosen: three 190px panels, the preview column, `Match` and the pills already come to
-   within about 10px of the content width at 1024, so ANY title there pushes the column past the
-   scroll edge — the exact failure the stacked layout exists to avoid. So the titles are a
-   wider-than-1024 affordance, and the preview-harness captures them at one: the
-   `format-compare-picked` state shoots this wall at 1280 so the diff bot sees the column the way a
-   reader with the room does, and the default 1024 shot keeps proving the fallback. That is a deliberate trade — a horizontally
-   stacked column grew without bound, this one cannot — and it keeps the titles inside the width the
-   preview-harness captures at (`HARNESS_WIDTH`, 1024), so the visual-diff bot sees this column the
-   way a reader does instead of diffing a row of bare numbers. */
-@media (max-width: 1100px) { .cp-compare-bug-title { display: none; } }
+.cp-compare-bug-state, .cp-compare-bug-tag { flex: none; padding: 0 5px; border-radius: 999px;
+  border: 1px solid var(--cp-border); color: var(--cp-fg-muted); font-size: .68rem;
+  font-variant-numeric: normal; }
+/* Two lines and then an ellipsis. A title is one sentence of someone else's prose in a panel over a
+   picture wall, so it is clamped rather than wrapped without bound — the `title` attribute carries
+   the whole of it, and the link opens the issue. */
+.cp-compare-bug-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  line-clamp: 2; overflow: hidden; margin-top: 2px; color: var(--cp-fg-muted); font-size: .72rem;
+  line-height: 1.35; }
+.cp-compare-bug-item--closed .cp-compare-bug,
+.cp-compare-bug-item--closed .cp-compare-bug-title { color: var(--cp-fg-faint); }
+/* What the panel is as of. The entries above are a snapshot of `parity/issues.json` taken when this
+   page was rendered, and a `closed` with no date invites more trust than it can carry — so it is
+   STICKY rather than merely last: the panel scrolls once a row carries four or five reports, and a
+   date the reader has to scroll to find is a date most readers never see. */
+.cp-compare-bug-asof { position: sticky; bottom: -8px; margin: 8px -10px -8px; padding: 4px 10px;
+  color: var(--cp-fg-faint); font-size: .66rem;
+  background: light-dark(var(--cp-bg), var(--cp-surface)); }
+/* On the same line as the numbers, not under them: it is one word, and a row with nothing filed
+   should cost one line rather than two. */
+.cp-compare-bug-new { display: inline-block; vertical-align: middle; margin-left: 8px;
+  padding: 1px 6px; white-space: nowrap; border-radius: 999px; font-size: .72rem;
+  text-decoration: none; border: 1px dashed var(--cp-border); color: var(--cp-fg-muted); }
+.cp-compare-bug-new:hover { border-color: currentColor; }
 /* The comparison column's header names its lane in the DOM, not in a `::after`. It used to be a
    `font-size: 0` `<th>` with three `content:` rules keyed off `data-format` — which worked, but
    could only ever say the generic "Design reference", because CSS has no way to reach the catalog's
@@ -2965,16 +3004,38 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
   border-radius: 6px; }
 .cp-rc-px { color: var(--cp-fg-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
 .cp-reference-meta { margin: 12px 0 20px; color: var(--cp-fg-muted); font-size: 0.82rem; }
+/* The filed-issue list, on the viewer, the focused comparison and the parity dashboard.
+
+   A DISCLOSURE, for the reason the wall's Bugs column is one: this panel used to open at full
+   height between the viewer's title and the picture the page is for, so a component with four
+   reports pushed its own preview toward the fold — and the dashboard repeats the same block once
+   per component, which is that page's entire body. Collapsed it is the label and the open numbers;
+   in flow rather than floated, because these pages have the width the wall does not.
+
+   The rows themselves are unchanged. This is where they are, not what they are. */
 .cp-parity-issues { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 12px; background: var(--md-sys-color-surface-container); }
-.cp-parity-issues ul { list-style: none; margin: 7px 0 0; padding: 0; display: grid; gap: 6px; }
+.cp-parity-issues-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  cursor: pointer; list-style: none; }
+.cp-parity-issues-sum::-webkit-details-marker { display: none; }
+/* Last, after the numbers, and pushed to the end of the line: a leading triangle would sit between
+   the label and the numbers, which are the two things being read together. */
+.cp-parity-issues-sum::after { content: "⌄"; margin-left: auto; color: var(--cp-fg-muted); }
+.cp-parity-issues[open] .cp-parity-issues-sum::after { content: "⌃"; }
+.cp-parity-issue-chip { color: light-dark(#8a1c1c, #ef9292); font-size: .78rem;
+  font-variant-numeric: tabular-nums; }
+.cp-parity-issues-sum:hover .cp-parity-issue-chip { text-decoration: underline; }
+/* No number on it, for the reason the wall's marker carries none: one rule, spelled once. */
+.cp-parity-issue-chip--closed { color: var(--cp-fg-faint); font-variant-numeric: normal; }
+.cp-parity-issues ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .cp-parity-issue { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
 .cp-parity-issue > span { color: var(--cp-fg-muted); font-size: .75rem; white-space: nowrap; }
 .cp-parity-issue.closed { opacity: .58; }
+/* What the panel is as of — the same claim the wall's panel closes with, and the same reason. */
+.cp-parity-issues-asof { margin: 10px 0 0; color: var(--cp-fg-faint); font-size: .7rem; }
 .cp-issue-badge { display: inline-flex; width: fit-content; margin-top: 5px; padding: 2px 7px;
   border-radius: 999px; background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container);
   font-size: .68rem; font-weight: 650; }
-.cp-parity-issue-group h3 { margin-bottom: 0; }
 .cp-reference-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   margin: 14px 0 10px; color: var(--cp-fg-muted); font-size: 0.8rem; }
 .cp-reference-picker > span { margin-right: 2px; font-weight: 650; }
@@ -3467,6 +3528,18 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   word-break: break-word; border-radius: var(--md-sys-shape-corner-medium);
   background: var(--md-sys-color-surface-container-low);
   font-size: var(--md-sys-typescale-body-small-size); }
+/* The admin UI-builder designs page (GET /admin/ui-builder): a count + reload bar above the
+   status-page table, and a per-row delete that reads as destructive rather than primary. */
+.cp-admin-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  max-width: 860px; margin: 0 0 12px; }
+.cp-admin-table { max-width: none; }
+.cp-admin-table td { vertical-align: middle; white-space: nowrap; }
+.cp-admin-table td:last-child { padding-right: 0; text-align: right; }
+.cp-admin-table td:first-child { white-space: normal; min-width: 220px; }
+.cp-doc-btn.cp-admin-delete { min-height: 32px; padding: 6px 16px;
+  background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
+.cp-doc-btn.cp-admin-delete:hover { background: var(--md-sys-color-error); }
+.cp-doc-btn.cp-admin-delete:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
 .cp-doc-result { max-width: 720px; margin: 18px 0 0; padding: 16px 20px;
   border-radius: var(--md-sys-shape-corner-medium); border: 0;
   background: var(--md-sys-color-surface-container-low);

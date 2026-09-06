@@ -836,6 +836,33 @@ class ServeWebFixtureTest {
           previewIds =
             listOf("com.example.ProfileScreenPreview", "button-filled__ideal__default__light"),
         ),
+        // Two more open reports on the same component, so the fixture row carries the case the
+        // collapsed line exists for: one issue proves the markup, a run of them proves the height.
+        // A row like this used to stand five lines tall.
+        ParityIssue(
+          repository = "yschimke/m3-catalog",
+          number = 57,
+          title = "Container radius is 12dp where the kit's Shape page says 16dp",
+          url = "https://github.com/yschimke/m3-catalog/issues/57",
+          state = "open",
+          area = "spec",
+          parity = "regression",
+          component = "IconButton/Tonal",
+          previewIds =
+            listOf("com.example.ProfileScreenPreview", "button-filled__ideal__default__light"),
+        ),
+        ParityIssue(
+          repository = "yschimke/m3-catalog",
+          number = 63,
+          title = "Upstream: the tonal container ignores the theme's secondary container role",
+          url = "https://github.com/yschimke/m3-catalog/issues/63",
+          state = "open",
+          area = "renderer",
+          parity = "upstream",
+          component = "IconButton/Tonal",
+          previewIds =
+            listOf("com.example.ProfileScreenPreview", "button-filled__ideal__default__light"),
+        ),
       )
 
     // Render the fixtures with a producer-trust badge so the visual-diff harness captures it: a
@@ -1118,6 +1145,7 @@ class ServeWebFixtureTest {
         // lands, so a change to its rhythm shows up here.
         playgroundHref = "/playground?from=compose-m3/com.example.ProfileScreenPreview",
         parityIssues = parityIssues,
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
     val spatialViewer =
       ServeWeb.viewerPage(
@@ -1767,6 +1795,9 @@ class ServeWebFixtureTest {
         },
         reportIssue = fixtureWallReportIssue(),
         parityIssues = parityIssues,
+        // The wall's Bugs column is a disclosure, and a snapshot that says so — the harness has to
+        // capture the line it collapses to AND the date under the panel, or neither is diffed.
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
     // The Remote Compose PLAYER WALL: the same compare page in `?format=rc`, backed by a catalog's
     // published `rc-compare` manifest instead of by an in-browser render. Only the rc format is
@@ -1956,6 +1987,7 @@ class ServeWebFixtureTest {
         // comparison table is captured with the same wording as the link that leads here.
         designToolLabel = "Figma",
         parityIssues = parityIssues,
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
     val referenceComparison =
       ServeWeb.referenceComparisonPage(
@@ -2210,6 +2242,7 @@ class ServeWebFixtureTest {
             )
           ),
         parityIssues = parityIssues,
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
     // The same comparison, PINNED to an older publish (issue #3723) — the state a shared permalink
     // opens in. Captured because it is where the feature is visible: the banner naming the
@@ -3294,6 +3327,10 @@ class ServeWebFixtureTest {
         urlUploadAllowed = true,
         version = version,
       )
+    // The UI-builder admin screen (`GET /admin/ui-builder`): the operator's list of every design
+    // with a delete per row. The rows are fetched by the page's script, so the fixture is the
+    // chrome around an empty table; the harness stubs the JSON route to fill it.
+    val uiBuilderAdmin = ServeWeb.uiBuilderAdminPage(adminToken = token, version = version)
     // The playground Stage-1 editor (`GET /playground`): the code box, mode selector, and result
     // pane. Always token-gated (the lane runs user code, refused under `--public`), so the fixture
     // renders the non-public form the server actually serves.
@@ -4062,6 +4099,7 @@ class ServeWebFixtureTest {
         "serve-agent-access-capabilities.html" to agentAccessCapabilities,
         "serve-agent-access-granted.html" to agentAccessGranted,
         "serve-docs-upload.html" to docUpload,
+        "serve-admin-ui-builder.html" to uiBuilderAdmin,
         "serve-playground.html" to playground,
         "serve-playground-uncompilable.html" to playgroundUncompilable,
         "serve-doc-lottie.html" to docLottie,

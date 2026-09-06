@@ -245,6 +245,60 @@ class ScreenDocumentProjectionTest {
     )
   }
 
+  private fun styledButton(style: String, vararg properties: Pair<String, UiValueV1>) =
+    projected(
+        document(
+          DesignNodeV1(
+            id = "button",
+            componentId = "m3/button",
+            properties = mapOf("style" to EnumValueV1(style)) + properties,
+            slots = mapOf("content" to listOf("text")),
+          ),
+          text(),
+          roots = listOf("button"),
+        )
+      )
+      .root
+
+  @Test
+  fun `a container colour follows the style to its own ButtonDefaults factory`() {
+    // All four factories return a `ButtonColors`, so `buttonColors` compiles on a `TextButton` and
+    // hands it the filled button's content and disabled colours for every role the design did not
+    // set. A wrong colour that compiles is the failure this projection exists to refuse, so the
+    // factory tracks the component actually being emitted.
+    fun factoryFor(style: String): String {
+      val colors =
+        assertIs<ScreenValue.Construct>(
+          styledButton(style, "containerColor" to ColorValueV1("#FF0000")).arguments["colors"]
+        )
+      assertEquals("androidx.compose.material3.ButtonColors", colors.typeFqn)
+      assertEquals(setOf("containerColor"), colors.named.keys)
+      return colors.callableFqn
+    }
+
+    assertEquals("androidx.compose.material3.ButtonDefaults.buttonColors", factoryFor("filled"))
+    assertEquals(
+      "androidx.compose.material3.ButtonDefaults.filledTonalButtonColors",
+      factoryFor("filledTonal"),
+    )
+    assertEquals(
+      "androidx.compose.material3.ButtonDefaults.textButtonColors",
+      factoryFor("text"),
+    )
+  }
+
+  @Test
+  fun `a fab takes the colour on its own parameter, not in a bundle`() {
+    // The case that needed a new axis rather than another table row (#393).
+    // `FloatingActionButton` declares `containerColor: Color` directly, so the property lands on a
+    // different parameter holding a different shape — and no choice of defaults factory says that.
+    val arguments = styledButton("fab", "containerColor" to ColorValueV1("#FF0000")).arguments
+
+    assertFalse("colors" in arguments, arguments.keys.toString())
+    val color = assertIs<ScreenValue.Construct>(arguments.getValue("containerColor"))
+    assertEquals("androidx.compose.ui.graphics.Color", color.typeFqn)
+  }
+
   @Test
   fun `an enum value the table does not carry is refused, and names the ones it does`() {
     // The half worth keeping from the behaviour before the table: a value with no member behind it

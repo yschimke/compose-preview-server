@@ -539,6 +539,10 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   // the store behind them all. Rebuilt only when the design changes, because it is addressed to
   // one design.
   val references = remember(config.designId) { BrowserReferenceHost(config.designId, http) }
+  // Built once the catalog is known, because what the menu offers is what the catalog's renderer
+  // can draw; null until then, which is a toolbar without an Export button rather than one that
+  // promises formats it has not checked.
+  var exportHost by remember(config.designId) { mutableStateOf<UiBuilderExportHost?>(null) }
   var restoredReference by remember(config.designId) { mutableStateOf<RestoredReference?>(null) }
   var referenceStatus by remember(config.designId) { mutableStateOf<String?>(null) }
   // What was last written, so a settings drag can take the cheap route and a new picture cannot.
@@ -629,7 +633,12 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
 
   LaunchedEffect(config) {
     val availableCatalogs = loadLiveCatalogs(http)
-    newDesignCatalogs = availableCatalogs.mapNotNull(::newDesignCatalog)
+    // Form-factor order — Mobile, Wear, RemoteCompose — however the host lists them: the chooser
+    // is a "what am I making" question, not a catalog registry.
+    newDesignCatalogs =
+      availableCatalogs.mapNotNull(::newDesignCatalog).sortedBy {
+        NEW_DESIGN_CATALOG_ORDER.indexOf(it.systemId)
+      }
     if (config.startWithNewDesign) return@LaunchedEffect
     val selectedCatalog =
       availableCatalogs.singleOrNull { it.benchmark.catalogSystemId == config.catalogSystemId }
@@ -637,6 +646,15 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
     catalog =
       CapabilityCatalogParser.parse(
         Json.encodeToJsonElement(CatalogCapabilityV1.serializer(), selectedCatalog)
+      )
+    exportHost =
+      BrowserExportHost(
+        designId = config.designId,
+        formats =
+          exportFormatsFor(
+            svg = selectedCatalog.exportCapabilities.svg,
+            png = selectedCatalog.exportCapabilities.png,
+          ),
       )
     val openResult = UiBuilderLiveSessionApi(config.designId, http).open()
     when (val result = openResult) {
@@ -869,6 +887,7 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
         navigateToNewDesign(catalogSystemId, designId, templateId, encodeNewDesignStates(state))
       },
       onHelp = ::openUiBuilderGuide,
+      exportHost = exportHost,
       restoredReference = restoredReference,
       onPickReference = { references.pickFile() },
       onSnapshotDesign = { references.snapshotDesign() },
@@ -1489,12 +1508,20 @@ private suspend fun loadLiveCatalogs(http: UiBuilderProtocolHttpClient): List<Ca
     is UiBuilderHttpResult.SnapshotRequired -> error(result.error.message)
   }
 
+/** The chooser's order. Anything not named here (there is nothing today) sorts first. */
+private val NEW_DESIGN_CATALOG_ORDER = listOf("m3-catalog", "wear-m3", "remote-m3")
+
+/**
+ * Labelled by what a person is making — a phone screen, a watch screen, a RemoteCompose widget —
+ * rather than by the catalog that draws it. "Material 3" and "Wear Material 3" told an M3 reader
+ * the truth and everyone else nothing about which chip to press.
+ */
 private fun newDesignCatalog(catalog: CatalogCapabilityV1): UiBuilderNewDesignCatalog? =
   when (catalog.benchmark.catalogSystemId) {
     "m3-catalog" ->
       UiBuilderNewDesignCatalog(
         systemId = "m3-catalog",
-        label = "Material 3",
+        label = "Mobile",
         platform = UiBuilderCatalogPlatform.from(catalog.statusSemantics),
         templates =
           listOf(
@@ -1508,7 +1535,7 @@ private fun newDesignCatalog(catalog: CatalogCapabilityV1): UiBuilderNewDesignCa
     "remote-m3" ->
       UiBuilderNewDesignCatalog(
         systemId = "remote-m3",
-        label = "Remote Material 3",
+        label = "RemoteCompose",
         platform = UiBuilderCatalogPlatform.from(catalog.statusSemantics),
         templates =
           listOf(
@@ -1537,7 +1564,7 @@ private fun newDesignCatalog(catalog: CatalogCapabilityV1): UiBuilderNewDesignCa
     "wear-m3" ->
       UiBuilderNewDesignCatalog(
         systemId = "wear-m3",
-        label = "Wear Material 3",
+        label = "Wear",
         platform = UiBuilderCatalogPlatform.from(catalog.statusSemantics),
         templates =
           listOf(

@@ -2778,6 +2778,19 @@ public class ServeRunner(
       }
     val uiBuilderAppDir = usableUiBuilderDir()
     val uiBuilderLane = openUiBuilderService(uiBuilderAppDir)
+    // Runtime UI-builder administration. Needs the admin token and a builder lane, nothing else:
+    // it reads and removes designs through the service the routes already hold, so a host with
+    // no builder has no such page, and one without --admin-token has no admin surface at all.
+    val uiBuilderAdmin =
+      if (adminToken != null && uiBuilderLane != null) {
+        ServeUiBuilderAdmin(
+          service = uiBuilderLane.service,
+          references = uiBuilderLane.references,
+          comments = uiBuilderLane.comments,
+        )
+      } else {
+        null
+      }
     val server =
       ServeHttpServer(
         host = host,
@@ -2815,6 +2828,7 @@ public class ServeRunner(
         onboarding = onboarding,
         sourceOnboarding = sourceOnboarding,
         siteAdmin = siteAdmin,
+        uiBuilderAdmin = uiBuilderAdmin,
         trustAdmin = trustAdmin,
         adminToken = adminToken,
         docStore = docStore,
@@ -2951,6 +2965,9 @@ public class ServeRunner(
           (catalogsFile?.let { " (persisting to ${it.displayPath})" }
             ?: " (runtime only — pass --catalogs-file to persist)")
       )
+    }
+    if (uiBuilderAdmin != null) {
+      System.err.println("serve: UI-builder admin page enabled at /admin/ui-builder")
     }
     if (siteAdmin != null) {
       System.err.println(

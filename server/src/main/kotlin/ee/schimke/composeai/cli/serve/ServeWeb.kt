@@ -1522,7 +1522,37 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /** Render catalog-published GitHub issues. Every href has already been rebuilt by the store. */
-  private fun parityIssueRowsHtml(issues: List<ParityIssue>): String {
+  /**
+   * The filed-issue list, as a **disclosure**: one line of the open numbers, and the issues
+   * themselves behind it.
+   *
+   * The same trade the wall's Bugs column makes ([compareBugsCellHtml]), for the same reason and on
+   * the three pages that carry this list. On the viewer it was the worst of the three: a full-width
+   * panel between the preview's title and the preview, four issues tall, so a catalog with a few
+   * reports against a component pushed the picture the page exists for below the fold. On the
+   * parity dashboard the same block repeats per component, which is the page's whole body.
+   *
+   * [label] is what the summary reads before the numbers — "Issues" on the viewer and the focused
+   * comparison, the component's name on the dashboard, where the heading and the list were two
+   * elements saying one thing. Blank drops it, for a band whose own `<h2>` already says what these
+   * are. [openByDefault] is for the one list whose page is *about* it and whose reader arrived to
+   * read it, rather than to look at a picture with it beside them.
+   *
+   * The panel closes with the index's [generatedAt] wherever the caller can supply one, for the
+   * reason [compareBugsCellHtml] gives: these rows are a snapshot taken when the page was rendered,
+   * nothing re-checks GitHub, and a `closed` with no date invites more trust than that can carry.
+   *
+   * No counts, again: the summary lists the open numbers and marks the closed ones without saying
+   * how many. Unlike the wall there is no theme swap to invalidate a count here — but two spellings
+   * of one rule is how the two drift, and "closed" is not less informative than "1 closed" when the
+   * numbers themselves are one click away.
+   */
+  private fun parityIssueRowsHtml(
+    issues: List<ParityIssue>,
+    generatedAt: String? = null,
+    label: String = "Issues",
+    openByDefault: Boolean = false,
+  ): String {
     if (issues.isEmpty()) return ""
     val rows =
       issues.joinToString("\n") { issue ->
@@ -1535,7 +1565,38 @@ ${captureControlsHtml().prependIndent("          ")}
           "rel=\"noopener\">#${issue.number} ${WebEscaping.htmlEscape(issue.title)}</a>" +
           "<span>${WebEscaping.htmlEscape(meta)}</span></li>"
       }
-    return "<aside class=\"cp-parity-issues\"><strong>Issues</strong><ul>$rows</ul></aside>"
+    val open = issues.filter { it.state == "open" }
+    val numbers =
+      open.joinToString("") { "<span class=\"cp-parity-issue-chip\">#${it.number}</span>" }
+    // With nothing open, the numbers ARE the closed ones — dimmed, and in place of the marker. The
+    // marker's whole job is "there is more behind this line"; on a list with nothing else to show
+    // it would be the line, and `closed` alone says less than `#41` does for the same width. The
+    // dashboard's closed band is exactly this case, and so is a wall row whose reports all landed.
+    val closedMark =
+      when {
+        issues.none { it.state == "closed" } -> ""
+        open.isEmpty() ->
+          issues.joinToString("") {
+            "<span class=\"cp-parity-issue-chip cp-parity-issue-chip--closed\">#${it.number}</span>"
+          }
+        else -> "<span class=\"cp-parity-issue-chip cp-parity-issue-chip--closed\">closed</span>"
+      }
+    val asOf =
+      generatedAt
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+          "<p class=\"cp-parity-issues-asof\">index as of " +
+            "${WebEscaping.htmlEscape(prettyDate(it))}</p>"
+        }
+        .orEmpty()
+    val heading =
+      label
+        .takeIf { it.isNotBlank() }
+        ?.let { "<strong>${WebEscaping.htmlEscape(it)}</strong>" }
+        .orEmpty()
+    return "<details class=\"cp-parity-issues\"${if (openByDefault) " open" else ""}>" +
+      "<summary class=\"cp-parity-issues-sum\">$heading$numbers$closedMark</summary>" +
+      "<ul>$rows</ul>$asOf</details>"
   }
 
   /** Compact, non-link form safe to place inside a card whose whole body is already an anchor. */
@@ -1796,61 +1857,132 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The wall's **Bugs** cell: what is already filed against this row, and one link to file more.
+   * The wall's **Bugs** cell: one line saying what is already filed against this row, a disclosure
+   * carrying the detail, and one link to file more.
    *
-   * The pill carries the issue's **title** beside its number. It used to be the number alone, with
-   * the title on the tooltip, and that was a width decision — a wall already carrying three picture
-   * panels cannot afford a column that grows with whatever someone typed into GitHub. What it cost
-   * was the column's whole purpose: "does someone already know?" is not answered by `#77`, so every
-   * row with a number on it had to be hovered, or opened, before the reader learned whether the
-   * filed issue was even about the difference they were looking at.
+   * Collapsed, the cell is ONE line: the OPEN issue numbers, the closed marker, and "+ file". That
+   * is a width decision as much as a height one, and this column was spending both — every issue
+   * was a full-width pill on its own line carrying its title, so a row with four reports stood four
+   * lines tall and 350px wide on a wall whose other three columns are pictures, and the wear
+   * catalog's wall carries 690 pills over 620 rows. Bare numbers cost 5 characters each and the
+   * whole line now measures ~130px.
    *
-   * The width promise is kept in CSS instead of by omission: the title is one line, ellipsised at
-   * the column's cap, and dropped entirely below the width the pictures need (see `serve.css`). The
-   * tooltip still carries state, number and the untruncated title, so nothing that was reachable
-   * before has moved out of reach.
+   * What the pill's title was there for is not lost, it moves behind the disclosure: the open
+   * issues with their titles, the CLOSED ones — which are worth having and worth not spending a
+   * line each on, since "someone already looked at this and closed it" is a weaker answer than an
+   * open report — and the classification the index carries. A reader scanning for "does anyone know
+   * about this?" is answered by the collapsed line; a reader who wants to know *what* they know
+   * opens one row.
+   *
+   * **A snapshot, and it says so.** The panel closes with the index's own `generatedAt`, because
+   * the state on screen is whatever `parity/issues.json` said when this page was rendered. The
+   * index is regenerated on every issue event, so it is rarely more than a tick behind — but
+   * "rarely" is not "never", and a row that says `closed` without saying *as of when* invites the
+   * reader to trust it further than it can carry. Nothing here re-checks GitHub: that would put an
+   * outbound call on a public server's render path for a fact this column does not need to be live
+   * about.
+   *
+   * No counts anywhere, deliberately. Variant-scoped rows are hidden and shown by `CompareWall` as
+   * the theme swaps ([scopeAttrs] rides on both the collapsed number and its panel entry), so any
+   * number the server printed would be a number the browser could invalidate. The closed marker
+   * therefore says `closed` and not `2 closed`, and each panel entry carries its own state word.
    *
    * "+ file" is always offered, including on a row with nothing filed, because that row is the
-   * point: a bad score with no issue against it is the one a reader is scanning for. [detailHref]
-   * is the focused comparison for the served pair — the report that names the exact preview AND
-   * reference — and [fallbackHref] the viewer's own report, for a row with no reference to focus.
+   * point: a bad score with no issue against it is the one a reader is scanning for. It stays
+   * OUTSIDE the disclosure for the same reason — a row with nothing filed has no disclosure at all
+   * — and beside the numbers rather than under them, so that row costs one line and not two.
+   * [detailHref] is the focused comparison for the served pair — the report that names the exact
+   * preview AND reference — and [fallbackHref] the viewer's own report, for a row with no reference
+   * to focus.
    */
   private fun compareBugsCellHtml(
     issues: List<ParityIssue>,
     activePreviewId: String,
     detailHref: String?,
     fallbackHref: String,
+    generatedAt: String?,
   ): String {
-    val links =
-      issues.joinToString("") { issue ->
-        val closed = if (issue.state == "closed") " cp-compare-bug--closed" else ""
-        val title = issue.title.trim()
-        // An untitled issue cannot happen through the index — `parity-issues.mjs` refuses one — but
-        // the pill is rendered from catalog-published data, so the empty case renders the number
-        // alone rather than a stray separator and an empty span.
-        val tip =
-          if (title.isEmpty()) "${issue.state} · #${issue.number}"
-          else "${issue.state} · #${issue.number} $title"
-        val titleHtml =
-          if (title.isEmpty()) ""
-          else "<span class=\"cp-compare-bug-title\">${WebEscaping.htmlEscape(title)}</span>"
-        val scopeAttrs =
-          if (issue.scope != "variant") " data-bug-scope=\"component\""
-          else {
-            val previewIds = issue.previewIds.joinToString(" ")
-            val hidden = if (activePreviewId in issue.previewIds) "" else " hidden"
-            " data-bug-scope=\"variant\" data-bug-preview-ids=\"${WebEscaping.htmlEscape(previewIds)}\"$hidden"
-          }
-        "<a class=\"cp-compare-bug$closed\"$scopeAttrs href=\"${WebEscaping.htmlEscape(issue.url)}\" " +
-          "rel=\"noopener\" title=\"${WebEscaping.htmlEscape(tip)}\">" +
-          "<span class=\"cp-compare-bug-num\">#${issue.number}</span>$titleHtml</a>"
-      }
     val file =
       "<a class=\"cp-compare-bug-new\" " +
         "href=\"${WebEscaping.htmlEscape(detailHref ?: fallbackHref)}\" " +
         "data-bug-fallback=\"${WebEscaping.htmlEscape(fallbackHref)}\" " +
         "title=\"Report what is wrong with this comparison\">+&#8202;file</a>"
-    return "\n            <td class=\"cp-compare-bugs\">$links$file</td>"
+    if (issues.isEmpty()) return "\n            <td class=\"cp-compare-bugs\">$file</td>"
+
+    // The contract `CompareWall` toggles on, unchanged and now carried TWICE per issue — on the
+    // collapsed number and on its panel entry — because both are the same claim about the same
+    // preview and the browser hides them together.
+    fun scopeAttrs(issue: ParityIssue): String =
+      if (issue.scope != "variant") " data-bug-scope=\"component\""
+      else {
+        val previewIds = issue.previewIds.joinToString(" ")
+        val hidden = if (activePreviewId in issue.previewIds) "" else " hidden"
+        " data-bug-scope=\"variant\" data-bug-preview-ids=\"${WebEscaping.htmlEscape(previewIds)}\"$hidden"
+      }
+
+    val open = issues.filter { it.state == "open" }
+    val numbers =
+      open.joinToString("") { issue ->
+        "<span class=\"cp-compare-bug-chip\"${scopeAttrs(issue)}>#${issue.number}</span>"
+      }
+    // A row whose every report is closed still says so on the collapsed line — otherwise the only
+    // thing distinguishing it from a row nobody has ever looked at is a disclosure marker. And with
+    // nothing open, the numbers ARE the closed ones: the marker's job is "there is more behind this
+    // line", so on a line with nothing else it would BE the line, and `closed` says less than `#41`
+    // for the same width. Same rule as [parityIssueRowsHtml], spelled the same way.
+    val closedMark =
+      when {
+        issues.none { it.state == "closed" } -> ""
+        open.isEmpty() ->
+          issues.joinToString("") { issue ->
+            "<span class=\"cp-compare-bug-chip cp-compare-bug-chip--closed\"" +
+              "${scopeAttrs(issue)}>#${issue.number}</span>"
+          }
+        else -> "<span class=\"cp-compare-bug-chip cp-compare-bug-chip--closed\">closed</span>"
+      }
+    val entries =
+      issues.joinToString("") { issue ->
+        val closed = issue.state == "closed"
+        val title = issue.title.trim()
+        // An untitled issue cannot happen through the index — `parity-issues.mjs` refuses one — but
+        // the entry is rendered from catalog-published data, so the empty case renders the number
+        // alone rather than a stray empty line.
+        val titleHtml =
+          if (title.isEmpty()) ""
+          else
+            "<span class=\"cp-compare-bug-title\" title=\"${WebEscaping.htmlEscape(title)}\">" +
+              "${WebEscaping.htmlEscape(title)}</span>"
+        // The classification the reporter chose, when the issue carries one. It is the difference
+        // between "we know and we disagree with the kit" and "nobody has verified this yet", which
+        // is most of what a reader opening this panel is trying to learn.
+        val tag =
+          issue.parity
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "<span class=\"cp-compare-bug-tag\">${WebEscaping.htmlEscape(it)}</span>" }
+            .orEmpty()
+        val state = if (closed) "<span class=\"cp-compare-bug-state\">closed</span>" else ""
+        "<li class=\"cp-compare-bug-item${if (closed) " cp-compare-bug-item--closed" else ""}\"" +
+          "${scopeAttrs(issue)}>" +
+          "<a class=\"cp-compare-bug\" href=\"${WebEscaping.htmlEscape(issue.url)}\" " +
+          "rel=\"noopener\"><span class=\"cp-compare-bug-num\">#${issue.number}</span>" +
+          "$state$tag</a>$titleHtml</li>"
+      }
+    val asOf =
+      generatedAt
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+          "<p class=\"cp-compare-bug-asof\">index as of " +
+            "${WebEscaping.htmlEscape(prettyDate(it))}</p>"
+        }
+        .orEmpty()
+    // The panel is ONE element so it can be lifted out of flow: an open row must not push the
+    // wall's picture columns sideways, and `<details>` gives its children no common box.
+    return "\n            <td class=\"cp-compare-bugs\">" +
+      "<details class=\"cp-compare-bug-disclosure\">" +
+      "<summary class=\"cp-compare-bug-summary\" title=\"What is already filed here\">" +
+      "$numbers$closedMark</summary>" +
+      "<div class=\"cp-compare-bug-panel\">" +
+      "<ul class=\"cp-compare-bug-list\">$entries</ul>$asOf</div></details>$file</td>"
   }
 
   /**
@@ -7580,6 +7712,153 @@ ${captureControlsHtml().prependIndent("          ")}
     )
   }
 
+  /**
+   * `GET /admin/ui-builder`: the operator's screen over every UI-builder design on the host.
+   *
+   * The list and the delete both go through the JSON routes under `/admin/ui-builder/designs`,
+   * carrying the admin token in the
+   * [ee.schimke.composeai.cli.serve.ServeHttpServer.ADMIN_TOKEN_HEADER] header — the page only ever
+   * sees the token a browser opened it with (`?token=`), and re-sends that. No token in the URL
+   * means the page renders but every call answers 404, which the script says in place rather than
+   * showing an empty host.
+   *
+   * Delete is a confirm-then-DELETE: there is no soft delete and no undo on the service, so the
+   * prompt names the design and its owner before the request is made.
+   */
+  fun uiBuilderAdminPage(adminToken: String?, version: String? = null): String {
+    val suffix = querySuffix(adminToken?.let { "token=" + WebEscaping.urlEncodeSegment(it) } ?: "")
+    return document(
+      title = "UI-builder designs — admin — compose-preview",
+      version = version,
+      navSuffix = suffix,
+      body =
+        """
+        <h1 class="cp-head">UI-builder designs</h1>
+        <p class="cp-sub">Every design this host holds, whoever owns it. Deleting one removes its
+          history, its reference overlay and its comments, and closes any editor that has it open.
+          There is no undo.</p>
+        <div class="cp-admin-bar">
+          <span id="cp-admin-count" class="cp-muted"></span>
+          <button class="cp-doc-btn" id="cp-admin-reload" type="button">Reload</button>
+        </div>
+        <div class="cp-doc-result" id="cp-admin-status" hidden></div>
+        <div class="cp-status-scroll"><table class="cp-table cp-admin-table" id="cp-admin-table">
+          <thead><tr>
+            <th>Design</th><th>Catalog</th><th>Owner</th><th>Rev</th><th>Open</th>
+            <th>Created</th><th>Updated</th><th></th>
+          </tr></thead>
+          <tbody id="cp-admin-rows"></tbody>
+        </table></div>
+        <script>${uiBuilderAdminScript(adminToken)}</script>
+        """
+          .trimIndent(),
+    )
+  }
+
+  /** Drives the admin page: fetch the design list, render rows, confirm-then-DELETE a design. */
+  private fun uiBuilderAdminScript(adminToken: String?): String =
+    """
+    (function () {
+      var rows = document.getElementById("cp-admin-rows");
+      var count = document.getElementById("cp-admin-count");
+      var status = document.getElementById("cp-admin-status");
+      var reload = document.getElementById("cp-admin-reload");
+      var token = ${jsString(adminToken.orEmpty())};
+      var headers = token ? { "X-Compose-Preview-Admin-Token": token } : {};
+      function show(text, isError) {
+        status.hidden = false;
+        status.className = "cp-doc-result" + (isError ? " cp-doc-error" : "");
+        status.textContent = text;
+      }
+      function hide() { status.hidden = true; }
+      function cell(row, text, mono) {
+        var td = document.createElement("td");
+        if (mono) { var c = document.createElement("code"); c.textContent = text; td.appendChild(c); }
+        else td.textContent = text;
+        row.appendChild(td);
+        return td;
+      }
+      function when(ms) {
+        if (!ms) return "";
+        var d = new Date(ms);
+        var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+        return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+          " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+      }
+      function render(designs) {
+        rows.textContent = "";
+        count.textContent = designs.length === 1 ? "1 design" : designs.length + " designs";
+        if (!designs.length) {
+          var empty = document.createElement("tr");
+          var td = cell(empty, "No designs on this host.");
+          td.colSpan = 8; td.className = "cp-muted";
+          rows.appendChild(empty);
+          return;
+        }
+        designs.forEach(function (d) {
+          var tr = document.createElement("tr");
+          tr.setAttribute("data-design-id", d.designId);
+          var title = cell(tr, "");
+          var strong = document.createElement("strong");
+          strong.textContent = d.title || "(untitled)";
+          title.appendChild(strong);
+          title.appendChild(document.createElement("br"));
+          var id = document.createElement("code");
+          id.textContent = d.designId;
+          title.appendChild(id);
+          cell(tr, d.catalogSystemId, true);
+          cell(tr, d.ownerActorId + (d.collaborators ? " +" + d.collaborators : ""), true);
+          cell(tr, String(d.revision));
+          cell(tr, String(d.activeSubscribers));
+          cell(tr, when(d.createdAtEpochMillis));
+          cell(tr, when(d.updatedAtEpochMillis));
+          var actions = cell(tr, "");
+          var del = document.createElement("button");
+          del.type = "button";
+          del.className = "cp-doc-btn cp-admin-delete";
+          del.textContent = "Delete";
+          del.addEventListener("click", function () { remove(d, del); });
+          actions.appendChild(del);
+          rows.appendChild(tr);
+        });
+      }
+      function failure(response) {
+        if (response.status === 404 && !token) {
+          return "This page needs the admin token: open it as /admin/ui-builder?token=…";
+        }
+        return response.text().then(function (t) {
+          return "HTTP " + response.status + (t ? ": " + t : "");
+        });
+      }
+      function load() {
+        hide();
+        count.textContent = "Loading…";
+        fetch("/admin/ui-builder/designs", { headers: headers, cache: "no-store" })
+          .then(function (r) {
+            if (!r.ok) return Promise.resolve(failure(r)).then(function (m) { throw new Error(m); });
+            return r.json();
+          })
+          .then(function (body) { render(body.designs || []); })
+          .catch(function (e) { count.textContent = ""; rows.textContent = ""; show(String(e.message || e), true); });
+      }
+      function remove(d, button) {
+        var label = (d.title || "(untitled)") + " (" + d.designId + ", owned by " + d.ownerActorId + ")";
+        if (!window.confirm("Delete " + label + "?\n\nThis removes its history, overlay and comments. There is no undo.")) return;
+        button.disabled = true;
+        fetch("/admin/ui-builder/designs/" + encodeURIComponent(d.designId), { method: "DELETE", headers: headers })
+          .then(function (r) {
+            if (!r.ok) return Promise.resolve(failure(r)).then(function (m) { throw new Error(m); });
+            show("Deleted " + label + ".", false);
+            load();
+          })
+          .catch(function (e) { button.disabled = false; show(String(e.message || e), true); });
+      }
+      reload.addEventListener("click", load);
+      load();
+    })();
+    """
+      .trimIndent()
+
   /** Drives the upload page: POST the picked/dropped/linked document, then show its permalink. */
   private fun docUploadScript(querySuffix: String): String =
     """
@@ -9826,6 +10105,12 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     parityIssues: List<ParityIssue> = emptyList(),
     /**
+     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
+     * at the foot of an opened Bugs panel. Null on an index that declares none, which simply omits
+     * the line — the panel is still a snapshot, it just cannot say of when.
+     */
+    parityIssuesGeneratedAt: String? = null,
+    /**
      * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
      * span.
      */
@@ -10125,7 +10410,14 @@ ${captureControlsHtml().prependIndent("          ")}
               referencesFor(preview.id).firstOrNull()?.let { detailHref(preview, it) }
             }
         val bugCell =
-          if (showBugs) compareBugsCellHtml(bugs, current.id, servedDetail, "$viewer#cp-report")
+          if (showBugs)
+            compareBugsCellHtml(
+              bugs,
+              current.id,
+              servedDetail,
+              "$viewer#cp-report",
+              parityIssuesGeneratedAt,
+            )
           else ""
         // The row's component identity, which a locator has to name and the wall's picker cannot
         // derive: `ServeIssueReport.componentIdFor` reads the catalog's own id where there is one
@@ -10853,6 +11145,12 @@ $rows
     knownDifferences: KnownDifferenceScope? = null,
     parityIssues: List<ParityIssue> = emptyList(),
     /**
+     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
+     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
+     * the line — the panel is still a snapshot, it just cannot say of when.
+     */
+    parityIssuesGeneratedAt: String? = null,
+    /**
      * The complete issue index used to resolve acceptance lifecycle state. [parityIssues] remains
      * the comparison-filtered list rendered in the Issues panel; an acceptance can legitimately
      * refer to an issue whose independently published preview/reference locators are stale, so the
@@ -11121,7 +11419,7 @@ ${scriptTag("known-differences.js")}
       withPin("$basePath/compare/${WebEscaping.urlEncodeSegment(preview.id)}?$query", pin)
     }
     val revisionsBlock = revisionsHtml(revisions) { pin -> pageHref(pin, reference.id) }
-    val issueRows = parityIssueRowsHtml(parityIssues)
+    val issueRows = parityIssueRowsHtml(parityIssues, generatedAt = parityIssuesGeneratedAt)
     val referencePicker =
       if (referenceChoices.size <= 1) ""
       else {
@@ -12067,6 +12365,12 @@ $cards
     hasReferenceFor: (String) -> Boolean = { false },
     parityIssues: List<ParityIssue> = emptyList(),
     /**
+     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
+     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
+     * the line — the panel is still a snapshot, it just cannot say of when.
+     */
+    parityIssuesGeneratedAt: String? = null,
+    /**
      * The complete issue index used to resolve acceptance lifecycle state, exactly as
      * [referenceComparisonPage] takes it. [parityIssues] is the list this catalog *displays* —
      * scoped to its own design system by [issuesForSystem] — and the lifecycle join must not
@@ -12374,9 +12678,16 @@ $cards
         val open = parityIssues.filter { it.state == "open" }
         val closed = parityIssues.filter { it.state == "closed" }
         val groups = open.groupBy { it.component ?: "Unscoped" }
+        // The component's name IS the disclosure's label. It used to be an `<h3>` above the panel
+        // and the panel said "Issues" underneath it — two elements for one fact, and on a catalog
+        // with thirty mapped components that is thirty headings each followed by an open list.
+        // Collapsed, this band becomes what a dashboard band should be: one line per component,
+        // scannable, with the reports one click away.
         val summary =
           groups.entries.joinToString("\n") { (component, rows) ->
-            "<section class=\"cp-parity-issue-group\"><h3>${esc(component)} (${rows.size})</h3>${parityIssueRowsHtml(rows)}</section>"
+            "<section class=\"cp-parity-issue-group\">" +
+              "${parityIssueRowsHtml(rows, generatedAt = parityIssuesGeneratedAt, label = component)}" +
+              "</section>"
           }
         // The heading counts *components*, and `open` is rows: an umbrella issue contributes one
         // row per component it names, so counting rows here would report three components with an
@@ -12393,7 +12704,14 @@ $cards
         val closedBand =
           if (closedIssues.isEmpty()) ""
           else
-            "<h2 class=\"cp-status-sec\">Closed issues (${closedIssues.size})</h2>${parityIssueRowsHtml(closedIssues)}"
+            "<h2 class=\"cp-status-sec\">Closed issues (${closedIssues.size})</h2>" +
+              parityIssueRowsHtml(
+                closedIssues,
+                generatedAt = parityIssuesGeneratedAt,
+                // No label: the `<h2>` above it already says "Closed issues", and everything in
+                // here is closed, so the summary is the numbers themselves.
+                label = "",
+              )
         openBand + closedBand
       }
     val issueBand =
@@ -13030,6 +13348,12 @@ ${scriptTag("known-differences.js")}
      */
     sessionInOrigin: Boolean = false,
     parityIssues: List<ParityIssue> = emptyList(),
+    /**
+     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
+     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
+     * the line — the panel is still a snapshot, it just cannot say of when.
+     */
+    parityIssuesGeneratedAt: String? = null,
     componentBrowser: Boolean = false,
     /**
      * The catalog change feed the footer offers as **Changelog** and the head declares as this
@@ -13149,7 +13473,9 @@ ${scriptTag("known-differences.js")}
     val navSuffix =
       querySuffix(if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token))
     val displayName = previewDisplayName(preview)
-    val issueRows = if (componentBrowser) "" else parityIssueRowsHtml(parityIssues)
+    val issueRows =
+      if (componentBrowser) ""
+      else parityIssueRowsHtml(parityIssues, generatedAt = parityIssuesGeneratedAt)
     val label = WebEscaping.htmlEscape(displayName)
     val idText = WebEscaping.htmlEscape(preview.id)
     val modes = preview.modes.joinToString(",") { it.wire }

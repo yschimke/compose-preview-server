@@ -229,6 +229,26 @@ class ServeMcpOAuthRoutingTest {
   }
 
   @Test
+  fun `registration ignores metadata this server has no use for`() {
+    // The real regression. RFC 7591 §2 requires a server to ignore metadata it does not
+    // understand, and the first client to reach this endpoint sent `application_type: "native"` —
+    // a field registered in RFC 7591 itself. Refusing it rejected a client for being more
+    // spec-compliant than the server, at the one step that must work before anything else can.
+    val body = buildString {
+      append("{")
+      append(""""client_name":"Test MCP client",""")
+      append(""""redirect_uris":["$redirectUri"],""")
+      append(""""token_endpoint_auth_method":"none",""")
+      append(""""application_type":"native",""")
+      append(""""not_a_real_field_at_all":{"nested":[1,2,3]}""")
+      append("}")
+    }
+    val (code, response, _) = post(ServeMcpOAuth.REGISTER_PATH, body)
+    assertEquals(201, code, response)
+    assertTrue(str(response, "client_id").isNotEmpty())
+  }
+
+  @Test
   fun `registration without a redirect URI is refused`() {
     val (code, body, _) = post(ServeMcpOAuth.REGISTER_PATH, """{"client_name":"no callback"}""")
     assertEquals(400, code)

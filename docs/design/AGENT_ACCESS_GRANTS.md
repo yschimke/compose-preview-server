@@ -234,7 +234,9 @@ internet mint itself credentials.
   (`images`, above) it does so **as itself** — the audit line and `uploadedBy` name the grant and its
   approver, never a GitHub account — and it confers nothing anywhere else that a login would.
 - **Not admin.** `--admin-token` routes are outside every scope. Nothing an agent can be granted
-  reconfigures the box.
+  reconfigures the box — and nothing it can be granted reaches `/admin/ui-builder`, the operator's
+  list-and-delete over every design on the host: a `ui-builder-*` grant lists what its actor owns
+  or was given, and has no delete at all.
 
 ## Waiting for the decision
 
