@@ -2284,7 +2284,29 @@ cp-history-menu { display: contents; }
   height: auto; border-radius: var(--md-sys-shape-corner-small); }
 /* Three-up: equal columns (`min-width: 0` so a wide frame shrinks rather than overflowing). */
 .cp-spec-compare[data-view="triptych"] .cp-spec-panel { flex: 1 1 0; }
-.cp-spec-compare[data-view="triptych"] .cp-spec-panel canvas { max-height: 52vh; }
+/* …and the frame FILLS its column here, which the base rule above cannot do: `max-*` against auto
+   dimensions only ever shrinks a replaced element, so a small raster sat at its intrinsic size in
+   a column nearly four times its width. On the Wear catalogs that is the normal case, not an edge
+   one — `button-compact__ideal__filled-variant-icon-only` is 104x66 in a 387px column, so the
+   picture was 19% of the stage it appeared to occupy and the other 81% was inert: nothing to see,
+   and nothing for the eyedropper to read. Measured on that page, a pointer sweep across the
+   triptych read nothing for 73% of its travel. Filling the column takes that to 2%.
+
+   `object-fit: contain` is what keeps this honest when the height budget binds instead. `width`
+   is definite here, so a raster taller than it is wide would otherwise be SQUASHED to `max-height`
+   — a distorted spec comparison, which is worse than a small one — and every Wear screen preview
+   (192x192) is exactly that case. With `contain` the frame letterboxes inside its box instead,
+   and `readingFor` maps through the drawn rectangle rather than the element's, so the eyedropper
+   still names the pixel under the cursor and reads nothing over the bars. */
+.cp-spec-compare[data-view="triptych"] .cp-spec-panel canvas { max-height: 52vh;
+  width: 100%; height: auto; object-fit: contain; }
+/* Nearest-neighbour, but only where the frame is actually being ENLARGED — `<cp-spec-compare>`
+   puts this class on after each paint and on resize. Upscaled, it is the honest rendering for a
+   pixel comparison: the reading says `#f6edff` at a point, and the picture shows the pixel that
+   colour belongs to rather than a smoothed average of it and its neighbours. Downscaled it is the
+   opposite — nearest-neighbour drops rows of a 1000px app screen on the way to 387px and invents
+   aliasing the render does not have — which is why it is not simply set on the rule above. */
+.cp-spec-panel canvas.cp-spec-canvas--upscaled { image-rendering: pixelated; }
 /* The diff map is magenta-on-transparent, so it needs a ground of its own to read against —
    without one it inherits whatever the stage (or the Transparent checkerboard) is showing. */
 .cp-spec-panel[data-cp-spec-panel="diff"] canvas {

@@ -393,7 +393,10 @@ export class SpecCompare extends ControllerElement {
         if (range) this.on(range, "input", () => this.drawWipe());
         this.bindDrag();
         this.bindPick();
-        this.on(window, "resize", () => this.placeTypography());
+        this.on(window, "resize", () => {
+            this.placeTypography();
+            this.markScaling();
+        });
         this.on(
             window,
             "cp-inspect-change",
@@ -539,12 +542,17 @@ export class SpecCompare extends ControllerElement {
         if (!panel) return "";
         const pixels = this.pickBuffers(pair);
         if (!pixels) return "";
-        const rect = panel.getBoundingClientRect();
-        if (!(rect.width > 0 && rect.height > 0)) return "";
+        const drawn = this.drawnRect(panel, pair);
+        if (!drawn) return "";
         // The panel is the normalised space scaled to fit its box, so the mapping is that scale
         // and nothing else — no per-side offset, because both sides already share this origin.
-        const x = ((point.x - rect.left) * pair.width) / rect.width;
-        const y = ((point.y - rect.top) * pair.height) / rect.height;
+        const x = (point.x - drawn.left) / drawn.scale;
+        const y = (point.y - drawn.top) / drawn.scale;
+        // Outside the drawn frame is the letterbox, not the picture: the triptych stretches its
+        // columns and `object-fit: contain` bars a frame taller than its column. Nothing is there,
+        // and `sampleAt` would answer "outside this frame" — a reading, for a point that is not on
+        // the picture at all. The row stays empty, exactly as it does off a panel.
+        if (x < 0 || y < 0 || x >= pair.width || y >= pair.height) return "";
         return summarise(
             readingAt(
                 pixels.reference,
@@ -557,6 +565,53 @@ export class SpecCompare extends ControllerElement {
             this.sourceLabel || "Spec",
             "Render",
         );
+    }
+
+    /**
+     * Where a panel actually DRAWS the pair, in client coordinates, and at what scale.
+     *
+     * The element's own box was the mapping until the triptych began stretching its columns: a
+     * panel is `object-fit: contain` there, so a frame whose ratio does not match its column is
+     * letterboxed inside the box and the two rectangles stop being the same thing. Reading through
+     * the element's box then slides every reading toward the centre by half the bar — silently,
+     * and by more the squarer the frame is. `contain`'s own arithmetic is one `Math.min`, and it
+     * is exact for the unletterboxed case too, so there is one path rather than a special case.
+     */
+    private drawnRect(
+        panel: HTMLCanvasElement,
+        pair: NormalisedPair,
+    ): { left: number; top: number; scale: number } | null {
+        const rect = panel.getBoundingClientRect();
+        if (!(rect.width > 0 && rect.height > 0)) return null;
+        if (!(pair.width > 0 && pair.height > 0)) return null;
+        const scale = Math.min(
+            rect.width / pair.width,
+            rect.height / pair.height,
+        );
+        return {
+            left: rect.left + (rect.width - pair.width * scale) / 2,
+            top: rect.top + (rect.height - pair.height * scale) / 2,
+            scale,
+        };
+    }
+
+    /**
+     * Mark the panels the browser is ENLARGING, so only those get nearest-neighbour.
+     *
+     * Upscaled, `image-rendering: pixelated` is what makes a reading checkable — the row names a
+     * colour and the picture shows the pixel it belongs to, rather than a smoothed average of it
+     * and its neighbours. Downscaled it is a lie of a different kind, dropping rows of a large
+     * render and inventing aliasing, so the class comes off. Which one applies is a layout fact,
+     * not a catalog one, so it is settled here after each paint and again on resize.
+     */
+    private markScaling(): void {
+        for (const canvas of this.pickPanels()) {
+            const rect = canvas.getBoundingClientRect();
+            canvas.classList.toggle(
+                "cp-spec-canvas--upscaled",
+                canvas.width > 0 && rect.width > canvas.width,
+            );
+        }
     }
 
     /**
@@ -807,6 +862,9 @@ export class SpecCompare extends ControllerElement {
             this.generation++;
             this.pickSettled = true;
             this.drawWipe();
+            // The view may have changed under the same pair — triptych stretches its columns and
+            // diff does not — so which panels are enlarged is re-decided even when nothing repaints.
+            this.markScaling();
             // The readout still holds this pair's live numbers, so the chip has to come back to the
             // same ones. Without this an override-bearing page re-entering the lane showed the
             // PUBLISHED score beside the live readout — two numbers for one comparison.
@@ -839,6 +897,7 @@ export class SpecCompare extends ControllerElement {
                 ? api.diffCanvases(next.reference, next.candidate, diff)
                 : 0;
             this.drawWipe();
+            this.markScaling();
             const changedPercent = changedPercentOf(
                 changed,
                 next.width,

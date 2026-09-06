@@ -6805,6 +6805,59 @@ class ServeWebFixtureTest {
   }
 
   /**
+   * The triptych's frames FILL their columns, and `object-fit` is what keeps that honest.
+   *
+   * The base panel rule sizes a frame with `max-width`/`max-height` against `auto` dimensions,
+   * which only ever SHRINKS a replaced element. In the triptych the columns are stretched (`flex: 1
+   * 1 0`), so a small raster sat at its intrinsic size in a column nearly four times its width:
+   * `button-compact__ideal__filled-variant-icon-only` is 104x66 in a 387px column. Measured on that
+   * page, the picture was 19% of the stage it appeared to occupy, and a pointer sweep across the
+   * triptych read nothing for 73% of its travel — the other 81% of the stage being inert background
+   * with no pixel for the eyedropper to name. Filling the column takes the sweep to 4%.
+   *
+   * `object-fit: contain` is the load-bearing half. `width` is definite once the frame fills its
+   * column, so a raster taller than it is wide would be SQUASHED to `max-height` — and every Wear
+   * screen preview (192x192) is exactly that case. A distorted spec comparison is worse than a
+   * small one. With `contain` the frame letterboxes instead: measured at 1280x400, the same frame
+   * draws 327.8x208 inside a 386.7x208 box, and 327.8/208 is 104/66 to three decimals.
+   *
+   * `SpecCompare.drawnRect` maps the eyedropper through that drawn rectangle rather than the
+   * element's box, which is why the two must not drift apart; `specCompare.test.ts` pins that half.
+   */
+  @Test
+  fun `a triptych frame fills its column without being distorted`() {
+    val css = assetText("serve.css")
+    val triptych =
+      css
+        .substringAfter(".cp-spec-compare[data-view=\"triptych\"] .cp-spec-panel canvas {")
+        .substringBefore("}")
+    assertTrue(
+      triptych.contains("width: 100%;") && triptych.contains("height: auto;"),
+      "the frame fills its stretched column instead of sitting at its intrinsic size",
+    )
+    assertTrue(
+      triptych.contains("object-fit: contain;"),
+      "…and letterboxes rather than squashing when the height budget binds",
+    )
+    assertTrue(
+      triptych.contains("max-height: 52vh;"),
+      "the height budget itself stays — a tall app screen must not push the stage past the fold",
+    )
+    // Nearest-neighbour is applied by class, never by the rule above: upscaled it shows the pixel
+    // a reading names, but downscaling a 1000px app screen that way invents aliasing.
+    assertFalse(
+      triptych.contains("image-rendering"),
+      "the rule itself does not pin an interpolation for every frame in the triptych",
+    )
+    assertTrue(
+      css.contains(
+        ".cp-spec-panel canvas.cp-spec-canvas--upscaled { image-rendering: pixelated; }"
+      ),
+      "only a frame the component marked as enlarged gets nearest-neighbour",
+    )
+  }
+
+  /**
    * The Theme dropdown's ROWS, which were unreadable on every dark page: on `/wear-m3/` — a
    * dark-first catalog whose declared themes all carry `data-theme-mode="dark"`, so every row
    * matched — the menu opened as six invisible labels on a near-black panel.
