@@ -661,9 +661,11 @@ public interface ServeOptions {
    *
    * A pack is another catalog's components offered inside the builder's own — a `confetti-mobile`
    * design system's `SessionCard` beside `m3/card` in a Material 3 screen. Its components are
-   * projected from that catalog's discovered component record, so a pack needs the same
-   * `--ui-builder-components <pack>=<components.json>` entry a builder catalog's export does, and a
-   * host that admits a pack without one refuses to start rather than offering an empty shelf.
+   * projected from that catalog's discovered component record, read from the served catalog's own
+   * delivery branch (`ServeCatalogStore.fetchComponentRecord`); a `--ui-builder-components
+   * <pack>=<components.json>` entry overrides it. A served catalog that supplies no record — one
+   * rendered before records existed — is logged and its pack not offered, rather than refusing to
+   * start over another repository's publish cadence.
    *
    * Empty by default: admitting a pack is the operator saying that catalog's components may appear
    * in another catalog's designs, which is not something a served catalog opts into by existing.

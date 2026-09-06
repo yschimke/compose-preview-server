@@ -315,8 +315,8 @@ services:
       # canvas cannot link, so the compiled Android render is that catalog's only faithful surface.
       # An empty value keeps the entrypoint's default.
       SERVE_UI_BUILDER_NATIVE_CATALOGS: "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-}"
-      # Served catalogs offered as component packs (`<catalog>=<platform>[,…]`); each needs a
-      # record in SERVE_UI_BUILDER_COMPONENTS. Unset means no packs.
+      # Served catalogs offered as component packs (`<catalog>=<platform>[,…]`); the record
+      # comes from each catalog's own delivery branch. Unset means no packs.
       SERVE_UI_BUILDER_PACKS: "${SERVE_UI_BUILDER_PACKS:-}"
       # Naming this turns the image lane on (see SERVE_ACCEPT_IMAGES above): the repository an
       # uploader's GitHub token must have access to. Write access on a public repo, any grant on a

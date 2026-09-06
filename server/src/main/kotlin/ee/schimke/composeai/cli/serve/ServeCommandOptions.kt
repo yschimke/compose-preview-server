@@ -1268,9 +1268,10 @@ public class ServeCommandOptions(
                           =mobile puts Confetti's own composables on a shelf of their own in every
                           Material 3 design, drawn as placeholders on the canvas and rendered
                           natively against the confetti-mobile bundle. A pack's components come
-                          from its discovered component record, so each pack also needs a
-                          --ui-builder-components entry. Authors switch a pack on from the
-                          editor's settings; admitting one here only makes it available.
+                          from the served catalog's own component record, read from its delivery
+                          branch; a --ui-builder-components entry overrides it. Authors switch a
+                          pack on from the editor's settings; admitting one here only makes it
+                          available.
         --ui-builder-runtime-dir <runtimeId>=<dir>[,<runtimeId>=<dir>…]
                           Retained immutable native renderer bundles. Each directory must contain
                           runtime-manifest.json. Runtime ids are exact pins; there is no latest
