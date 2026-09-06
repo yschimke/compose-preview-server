@@ -292,6 +292,19 @@ already has a trust boundary with tests:
 - **Failure posture** fail-soft. A missing file, a wrong schema token, a malformed record: drop that
   record or the whole index and serve the catalog normally. Issue badges are an enhancement; they
   must never cost a catalog its grid.
+- **The index is per repository; the pages are per system.** A locator names the design system it
+  was filed against, and one repository may declare several — `yschimke/wear-m3-catalog` publishes
+  `:catalog` as `wear-m3-catalog` and `:remote-catalog` as `remote-m3`, and `parity-issues.yml`
+  reads that repository's issues once and pushes the *identical* file onto both delivery branches.
+  That is the intended arrangement, and it is also why every display join has to be scoped: the
+  joins match on component id and preview id, and two catalogs built from one repository share both
+  vocabularies. Unscoped, 527 of the 690 issue pills on the wear catalog's comparison wall were the
+  remote catalog's, headed by an issue whose title says it is fixed on the very catalog it was drawn
+  on. `ServeWeb.issuesForSystem` scopes the **display** lists at each handler that reads the host's
+  index; a row naming no system is kept, since the field is optional on the wire and absence is not
+  evidence. The **acceptance lifecycle join keeps the whole index** — it resolves an issue by URL,
+  and an acceptance may cite one filed against a sibling system, so scoping it would answer
+  `unknown` where the index says `closed` and a stale acceptance would stop being reported.
 - **An absent locator is not a failure.** A repository is mostly ordinary issues — a dependency
   dashboard, a docs nit — and none of them carry a locator block. The producer skips those silently
   and reserves its non-zero exit for a locator that is *present and broken*. Conflating the two made

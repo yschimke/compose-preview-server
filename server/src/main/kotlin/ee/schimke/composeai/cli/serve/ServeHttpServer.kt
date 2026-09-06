@@ -3311,7 +3311,14 @@ class ServeHttpServer(
               renderHost.parityIssues() != null ||
               renderHost.knownDifferences() != null ||
               renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
-          parityIssues = renderHost.parityIssues()?.issues.orEmpty(),
+          // Scoped to the system being served: one repository may publish several catalogs and
+          // the index producer pushes the identical file onto each delivery branch. See
+          // [ServeWeb.issuesForSystem].
+          parityIssues =
+            ServeWeb.issuesForSystem(
+              renderHost.parityIssues()?.issues.orEmpty(),
+              selectedSessionId,
+            ),
           // Same count `handleMotionIndex` gates on, so the chip never leads to that route's 404.
           motionCaptureCount = renderHost.previews.sumOf { it.motion.size },
           // Same condition `handleDesignPageIndex` serves on, for the same reason. Listed by name
@@ -3602,9 +3609,13 @@ class ServeHttpServer(
           unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
           reportIssue = reportIssue,
           generation = catalogGeneration(renderHost),
-          // The whole index, unfiltered: the wall joins it to every row itself, which is a join it
-          // has to do per row anyway and one this handler cannot do for it.
-          parityIssues = renderHost.parityIssues()?.issues.orEmpty(),
+          // Every row of THIS catalog's index, otherwise unfiltered: the wall joins it to each row
+          // itself, which is a join it has to do per row anyway and one this handler cannot do for
+          // it. The system scope is the exception, because it is the one filter the wall's own join
+          // cannot express — it matches on component and preview id, and a sibling catalog built
+          // from the same repository shares both. See [ServeWeb.issuesForSystem].
+          parityIssues =
+            ServeWeb.issuesForSystem(renderHost.parityIssues()?.issues.orEmpty(), sessionId),
           version = SERVE_VERSION,
           displayTitle = catalogBundleHost(renderHost)?.title,
           // A top-level site's pages carry their session in the ORIGIN, so same-session links
@@ -3646,6 +3657,9 @@ class ServeHttpServer(
       val hasReference = { id: String -> renderHost.designReferencesFor(id).isNotEmpty() }
       val mapped = renderHost.previews.any { hasReference(it.id) }
       val issues = renderHost.parityIssues()?.issues.orEmpty()
+      // The bands this catalog draws, scoped to the system on the mount; `issues` stays whole for
+      // the acceptance walk's lifecycle join. See [ServeWeb.issuesForSystem].
+      val systemIssues = ServeWeb.issuesForSystem(issues, sessionId)
       // A published known-difference document keeps the page reachable on its own, alongside the
       // three lanes that already do. It is the one lane whose *interesting* state is a catalog with
       // nothing else left: every acceptance in it may name a preview or reference this session no
@@ -3661,7 +3675,10 @@ class ServeHttpServer(
       // schema, which reads as "this catalog is fine" to exactly the CI check that shape exists
       // for.
       val accepts = renderHost.knownDifferences() != null
-      if (activity == null && !mapped && issues.isEmpty() && (json || !accepts)) {
+      // The gate reads the SCOPED list, not the whole index: a catalog whose only rows were filed
+      // against a sibling system has nothing of its own to say here, and serving it the bands of a
+      // catalog it is not is the same wrong answer this page would have given, one route later.
+      if (activity == null && !mapped && systemIssues.isEmpty() && (json || !accepts)) {
         if (json) call.respond(HttpStatusCode.NotFound)
         else
           respondNotFoundHtml(
@@ -3679,7 +3696,10 @@ class ServeHttpServer(
       if (json) {
         markGeneration("parity", pageCacheControl())
         call.respondText(
-          JSON.encodeToString(ParityResponse.serializer(), ParityResponse.of(dashboard, issues)),
+          JSON.encodeToString(
+            ParityResponse.serializer(),
+            ParityResponse.of(dashboard, systemIssues),
+          ),
           ContentType.Application.Json,
         )
         return@withLeasedSession
@@ -3713,7 +3733,11 @@ class ServeHttpServer(
           version = SERVE_VERSION,
           displayTitle = catalogBundleHost(renderHost)?.title,
           hasReferenceFor = hasReference,
-          parityIssues = issues,
+          parityIssues = systemIssues,
+          // Unscoped, and deliberately: an acceptance committed by this catalog may cite an issue
+          // filed against a sibling system published from the same repository, and the join reads
+          // state by URL. See [ServeWeb.issuesForSystem].
+          acceptanceIssues = issues,
           generation = catalogGeneration(renderHost),
           // The catalog-wide acceptance walk, offered only to a catalog that publishes a
           // known-difference document. This is the walk's target set, and every field is spelled
@@ -4356,6 +4380,9 @@ class ServeHttpServer(
           else -> null
         }
       val allParityIssues = renderHost.parityIssues()?.issues.orEmpty()
+      // The display half, scoped to the system on the mount. `allParityIssues` stays whole for the
+      // acceptance lifecycle join below. See [ServeWeb.issuesForSystem].
+      val systemParityIssues = ServeWeb.issuesForSystem(allParityIssues, sessionId)
       markGeneration("static-page", pageCacheControl())
       call.respondText(
         ServeWeb.referenceComparisonPage(
@@ -4502,7 +4529,7 @@ class ServeHttpServer(
                 )
               },
           parityIssues =
-            allParityIssues.filter { issue ->
+            systemParityIssues.filter { issue ->
               preview.id in issue.previewIds ||
                 reference.id in issue.referenceIds ||
                 (issue.scope == "component" && issue.component == reportContext.componentId)
@@ -9096,12 +9123,13 @@ class ServeHttpServer(
                 "${WebEscaping.urlEncodeSegment(key)}=${WebEscaping.urlEncodeSegment(value)}"
               },
           parityIssues =
-            renderHost.parityIssues()?.issues.orEmpty().filter { issue ->
-              preview.id in issue.previewIds ||
-                (issue.scope == "component" &&
-                  preview.componentId != null &&
-                  issue.component == preview.componentId)
-            },
+            ServeWeb.issuesForSystem(renderHost.parityIssues()?.issues.orEmpty(), sessionId)
+              .filter { issue ->
+                preview.id in issue.previewIds ||
+                  (issue.scope == "component" &&
+                    preview.componentId != null &&
+                    issue.component == preview.componentId)
+              },
           // A top-level site's pages carry their session in the ORIGIN, so same-session links
           // drop the `?session=` the rooted legacy form would add. See [ServeSites].
           sessionInOrigin = siteSystem() != null,
