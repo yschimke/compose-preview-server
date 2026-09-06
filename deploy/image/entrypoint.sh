@@ -265,7 +265,8 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
   # Served catalogs offered as COMPONENT PACKS inside the builder's catalogs: `confetti-mobile=mobile`
   # puts Confetti's own composables on a shelf of their own in every Material 3 design, drawn as
-  # placeholders on the canvas and rendered natively against the confetti-mobile bundle. The pack's
+  # placeholders on the canvas and rendered natively against the confetti-mobile bundle, and
+  # `confetti-wear=wear` does the same for Wear screens against the confetti-wear bundle. The pack's
   # component record is read from the served catalog's own delivery branch (the published
   # components.json, or the one inside its live bundle), so nothing else needs configuring; a
   # catalog whose bundle predates records is logged as not offered until it republishes. Off by
