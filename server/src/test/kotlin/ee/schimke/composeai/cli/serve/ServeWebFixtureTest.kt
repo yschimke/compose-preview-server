@@ -1145,6 +1145,7 @@ class ServeWebFixtureTest {
         // lands, so a change to its rhythm shows up here.
         playgroundHref = "/playground?from=compose-m3/com.example.ProfileScreenPreview",
         parityIssues = parityIssues,
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
     val spatialViewer =
       ServeWeb.viewerPage(
@@ -1986,6 +1987,7 @@ class ServeWebFixtureTest {
         // comparison table is captured with the same wording as the link that leads here.
         designToolLabel = "Figma",
         parityIssues = parityIssues,
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
     val referenceComparison =
       ServeWeb.referenceComparisonPage(
@@ -2240,6 +2242,7 @@ class ServeWebFixtureTest {
             )
           ),
         parityIssues = parityIssues,
+        parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
     // The same comparison, PINNED to an older publish (issue #3723) — the state a shared permalink
     // opens in. Captured because it is where the feature is visible: the banner naming the

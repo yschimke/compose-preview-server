@@ -3737,6 +3737,7 @@ class ServeHttpServer(
           displayTitle = catalogBundleHost(renderHost)?.title,
           hasReferenceFor = hasReference,
           parityIssues = systemIssues,
+          parityIssuesGeneratedAt = renderHost.parityIssues()?.generatedAt,
           // Unscoped, and deliberately: an acceptance committed by this catalog may cite an issue
           // filed against a sibling system published from the same repository, and the join reads
           // state by URL. See [ServeWeb.issuesForSystem].
@@ -4537,6 +4538,7 @@ class ServeHttpServer(
                 reference.id in issue.referenceIds ||
                 (issue.scope == "component" && issue.component == reportContext.componentId)
             },
+          parityIssuesGeneratedAt = renderHost.parityIssues()?.generatedAt,
           acceptanceIssues = allParityIssues,
           revisions = revisions,
           overrides = overrideParams,
@@ -9133,6 +9135,7 @@ class ServeHttpServer(
                     preview.componentId != null &&
                     issue.component == preview.componentId)
               },
+          parityIssuesGeneratedAt = renderHost.parityIssues()?.generatedAt,
           // A top-level site's pages carry their session in the ORIGIN, so same-session links
           // drop the `?session=` the rooted legacy form would add. See [ServeSites].
           sessionInOrigin = siteSystem() != null,
