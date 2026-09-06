@@ -738,6 +738,39 @@ public class ServeCommandOptions(
       ?.toMap() ?: emptyMap()
 
   /**
+   * Where each project keeps the designs it is working on (`--ui-builder-designs`).
+   *
+   * `<catalog>=<dir>` like its neighbours, and for the same reason: a host serving several builder
+   * catalogs has several answers. A bare `<dir>` is allowed and means the default catalog, because
+   * the common case is one team, one app, one checkout.
+   */
+  override val uiBuilderDesigns: Map<String, File> =
+    args
+      .flagValue("--ui-builder-designs")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.map { entry ->
+        val hasSystem = entry.contains('=')
+        val system =
+          if (hasSystem) entry.substringBefore('=').trim() else LocalUiBuilder.DEFAULT_CATALOG
+        val path = (if (hasSystem) entry.substringAfter('=') else entry).trim()
+        require(path.isNotEmpty()) {
+          "--ui-builder-designs entries must be [<catalog>=]<dir>, got `$entry`"
+        }
+        require(UI_BUILDER_CATALOG_ID.matches(system)) {
+          "--ui-builder-designs names an invalid catalog id `$system`"
+        }
+        system to File(path)
+      }
+      ?.also { pairs ->
+        require(pairs.map { it.first }.distinct().size == pairs.size) {
+          "--ui-builder-designs names a catalog twice"
+        }
+      }
+      ?.toMap() ?: emptyMap()
+
+  /**
    * Which served catalog compiles each UI-builder catalog's designs for the native preview lane.
    *
    * Same `<key>=<value>` shape as `--ui-builder-components` and for the same reason: a host serving

@@ -333,6 +333,21 @@ class ServeHttpServer(
    */
   private val uiBuilderAdmin: ServeUiBuilderAdmin? = null,
   /**
+   * The designs catalog projects publish ([ServeUiBuilderDesignLibrary]), browsable and openable
+   * from the same admin screen. Gated by the same [adminToken] and the same null-means-absent rule
+   * as [uiBuilderAdmin]; opening one writes a design, which is why it sits behind admin rather than
+   * beside the public browse routes.
+   */
+  private val uiBuilderDesignLibrary: ServeUiBuilderDesignLibrary? = null,
+  /**
+   * Which catalogs to look in, read at request time rather than captured: the set changes when a
+   * catalog is registered at runtime or its branch head moves, and a library that answered from a
+   * snapshot taken at boot would keep offering a retired catalog's designs.
+   */
+  private val uiBuilderDesignCatalogs: () -> List<ServeUiBuilderDesignLibrary.Coordinate> = {
+    emptyList()
+  },
+  /**
    * Shared secret for the `/admin/catalogs` routes (`--admin-token`). Separate from the browsing
    * [token] on purpose: a public box hands its browse URL to everyone, so admin needs its own
    * credential and must stay gated even when [isPublic] is set. Null/blank ⇒ no admin routes, so a
@@ -709,6 +724,13 @@ class ServeHttpServer(
    * As [adminEnabled], for the `/admin/ui-builder` routes. Same token, separately supplied admin.
    */
   private val uiBuilderAdminEnabled: Boolean = uiBuilderAdmin != null && !adminToken.isNullOrBlank()
+
+  /** As [uiBuilderAdminEnabled], for the `/admin/ui-builder/library` routes. */
+  private val uiBuilderDesignLibraryEnabled: Boolean =
+    uiBuilderDesignLibrary != null &&
+      uiBuilderService != null &&
+      uiBuilderDir != null &&
+      !adminToken.isNullOrBlank()
 
   /** As [adminEnabled], for `POST /admin/onboard`. Same token, separately supplied onboarder. */
   private val onboardingEnabled: Boolean = onboarding != null && !adminToken.isNullOrBlank()
@@ -1589,6 +1611,25 @@ class ServeHttpServer(
             if (rejectBadAdminToken()) return@delete
             val designId = call.parameters["designId"].orEmpty()
             respondAdminUiBuilderResult(withContext(Dispatchers.IO) { admin.delete(designId) })
+          }
+        }
+
+        // The designs catalog projects publish. Read-only until somebody opens one, which is an
+        // ordinary create against the same service the editor writes through — so the same
+        // admin token gates both, and a host with no library simply has no routes.
+        if (uiBuilderDesignLibraryEnabled) {
+          val library = uiBuilderDesignLibrary!!
+          get("/admin/ui-builder/library") {
+            if (rejectBadAdminToken()) return@get
+            respondAdminUiBuilderLibrary(library)
+          }
+          post("/admin/ui-builder/library/{system}/{designId}") {
+            if (rejectBadAdminToken()) return@post
+            respondAdminUiBuilderLibraryOpen(
+              library = library,
+              system = call.parameters["system"].orEmpty(),
+              designId = call.parameters["designId"].orEmpty(),
+            )
           }
         }
 
@@ -4904,6 +4945,86 @@ class ServeHttpServer(
         call.respondText(result.reason, status = HttpStatusCode.BadRequest)
       is ServeSiteAdmin.Result.Conflict ->
         call.respondText(result.reason, status = HttpStatusCode.Conflict)
+    }
+  }
+
+  /**
+   * `GET /admin/ui-builder/library`: every design the catalogs this host serves publish.
+   *
+   * On the IO dispatcher because a cold index is an HTTP round trip per catalog, and best-effort
+   * per catalog inside the library itself: one project's unreachable branch must not empty the
+   * screen for the rest.
+   */
+  private suspend fun RoutingContext.respondAdminUiBuilderLibrary(
+    library: ServeUiBuilderDesignLibrary
+  ) {
+    val catalogs = uiBuilderDesignCatalogs()
+    val entries = withContext(Dispatchers.IO) { library.list(catalogs) }
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.respondText(
+      JSON.encodeToString(
+        AdminUiBuilderLibraryResponse.serializer(),
+        AdminUiBuilderLibraryResponse(
+          catalogsSearched = catalogs.map { it.system },
+          designs =
+            entries.map {
+              AdminUiBuilderLibraryDto(
+                system = it.system,
+                designId = it.designId,
+                title = it.title,
+                description = it.description,
+              )
+            },
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /** `POST /admin/ui-builder/library/{system}/{designId}`: open one published design here. */
+  private suspend fun RoutingContext.respondAdminUiBuilderLibraryOpen(
+    library: ServeUiBuilderDesignLibrary,
+    system: String,
+    designId: String,
+  ) {
+    val catalog = uiBuilderDesignCatalogs().firstOrNull { it.system == system }
+    if (catalog == null) {
+      call.respondText(
+        "$system is not a catalog this host serves",
+        status = HttpStatusCode.NotFound,
+      )
+      return
+    }
+    val document = withContext(Dispatchers.IO) { library.document(catalog, designId) }
+    if (document == null) {
+      call.respondText(
+        "$system publishes no design called $designId",
+        status = HttpStatusCode.NotFound,
+      )
+      return
+    }
+    val outcome =
+      withContext(Dispatchers.IO) {
+        ServeUiBuilderCreate(uiBuilderService!!, uiBuilderDir!!)
+          .install(actorId = ADMIN_LIBRARY_ACTOR, document = document)
+      }
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    when (outcome) {
+      is ServeUiBuilderCreate.Outcome.Created,
+      is ServeUiBuilderCreate.Outcome.AlreadyExists ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminUiBuilderLibraryOpenResult.serializer(),
+            AdminUiBuilderLibraryOpenResult(
+              designId = document.id,
+              status =
+                if (outcome is ServeUiBuilderCreate.Outcome.Created) "opened" else "alreadyOpen",
+            ),
+          ),
+          ContentType.Application.Json,
+        )
+      is ServeUiBuilderCreate.Outcome.Refused ->
+        call.respondText(outcome.reason, status = HttpStatusCode.fromValue(outcome.status))
     }
   }
 
@@ -14356,6 +14477,40 @@ private data class AdminUiBuilderDesignsResponse(
   val schema: String = "compose-preview-serve/admin-ui-builder-designs/v1",
   val designs: List<AdminUiBuilderDesignDto> = emptyList(),
 )
+
+/**
+ * The actor a design opened from a catalog's library is created as.
+ *
+ * A fixed operator identity rather than the admin's own: opening a published design is an act of
+ * the host, and the design's owner should read as the host for everyone who then collaborates on
+ * it, not as whichever operator happened to press the button.
+ */
+private const val ADMIN_LIBRARY_ACTOR: String = "operator:library"
+
+/** One published design on `GET /admin/ui-builder/library`. */
+@Serializable
+private data class AdminUiBuilderLibraryDto(
+  val system: String,
+  val designId: String,
+  val title: String,
+  val description: String? = null,
+)
+
+@Serializable
+private data class AdminUiBuilderLibraryResponse(
+  val schema: String = "compose-preview-serve/admin-ui-builder-library/v1",
+  /**
+   * Which catalogs were looked in, so an empty list is legible: no catalogs searched is a host
+   * serving none, while catalogs searched and no designs found is a host whose projects publish
+   * none.
+   */
+  val catalogsSearched: List<String> = emptyList(),
+  val designs: List<AdminUiBuilderLibraryDto> = emptyList(),
+)
+
+/** The result of `POST /admin/ui-builder/library/{system}/{designId}`. */
+@Serializable
+private data class AdminUiBuilderLibraryOpenResult(val designId: String, val status: String)
 
 /** The result of `DELETE /admin/ui-builder/designs/{designId}`. */
 @Serializable

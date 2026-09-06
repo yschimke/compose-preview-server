@@ -711,6 +711,47 @@ public class ServeRunner(
   private fun fetchRegistryDocument(url: String, maxBytes: Long): ByteArray? =
     ServeCatalogStore.httpFetchOutcome(url, maxBytes).bytesOrNull
 
+  /**
+   * Where to look for published designs: every catalog this host has configured, available or not.
+   *
+   * Configured rather than available on purpose — the same reason the home index is built from the
+   * configured set. A catalog that failed its last load still publishes the designs it publishes,
+   * and dropping it here would make the browse list flicker with the load state of catalogs whose
+   * branches are perfectly readable.
+   *
+   * `lastAttemptEpochMillis` is the generation marker: it moves when the refresher re-fetches a
+   * catalog, which is exactly when a project's design index may have changed.
+   */
+  /**
+   * The app's own checkouts, from `--ui-builder-designs`, ahead of any catalog's published set.
+   *
+   * First because it is the half of the loop a team is in while a screen is still being designed:
+   * when a local directory and a catalog both offer a design of the same name, the one on this
+   * machine is the one being worked on.
+   */
+  private fun uiBuilderDesignDirectories(): List<ServeUiBuilderDesignLibrary.Coordinate> =
+    uiBuilderDesigns.map { (system, dir) ->
+      ServeUiBuilderDesignLibrary.Coordinate(
+        system = system,
+        source = ServeUiBuilderDesignLibrary.Source.Directory(dir),
+      )
+    }
+
+  private fun uiBuilderDesignCatalogCoordinates(
+    catalogLoads: CatalogLoadTracker?
+  ): List<ServeUiBuilderDesignLibrary.Coordinate> =
+    catalogLoads?.snapshot().orEmpty().map { state ->
+      ServeUiBuilderDesignLibrary.Coordinate(
+        system = state.config.system,
+        source =
+          ServeUiBuilderDesignLibrary.Source.Branch(
+            repo = state.config.repo,
+            branch = state.config.branch,
+          ),
+        generation = state.lastAttemptEpochMillis?.toString(),
+      )
+    }
+
   /** The registry-contributed entries as refs, in registry order. */
   private fun registryCatalogRefs(): List<CatalogRef> =
     catalogRegistryContributions.flatMap { contribution ->
@@ -2791,6 +2832,18 @@ public class ServeRunner(
       } else {
         null
       }
+    // The designs the served catalogs publish. Same two conditions as the admin above — it writes
+    // through the builder lane and is gated by the admin token — plus the fetcher every other
+    // branch read already goes through, so a library read is counted and throttled like the rest.
+    val uiBuilderDesignLibrary =
+      if (uiBuilderAdmin != null) {
+        ServeUiBuilderDesignLibrary(
+          fetch = ::fetchRegistryDocument,
+          onLog = { System.err.println(it) },
+        )
+      } else {
+        null
+      }
     val server =
       ServeHttpServer(
         host = host,
@@ -2829,6 +2882,10 @@ public class ServeRunner(
         sourceOnboarding = sourceOnboarding,
         siteAdmin = siteAdmin,
         uiBuilderAdmin = uiBuilderAdmin,
+        uiBuilderDesignLibrary = uiBuilderDesignLibrary,
+        uiBuilderDesignCatalogs = {
+          uiBuilderDesignDirectories() + uiBuilderDesignCatalogCoordinates(catalogLoads)
+        },
         trustAdmin = trustAdmin,
         adminToken = adminToken,
         docStore = docStore,
