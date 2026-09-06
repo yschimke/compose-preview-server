@@ -15,6 +15,7 @@ import ee.schimke.composeai.previewdata.PreviewModule
 import ee.schimke.composeai.render.session.RenderSessionException
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
@@ -2412,7 +2413,47 @@ public class ServeRunner(
     // `preview-discovery` is a compose-ai-tools module. `:server` is the first layer allowed to
     // hold both the record reader and the port.
     val records = ComponentRecordSource(uiBuilderComponents)
-    val compose = ScreenGeneratorComposeExportExecutor(records::record)
+    // A pack is projected from its catalog's record once, at startup. Not on every request the way
+    // the export re-reads a record, because the projection is what the builder lists as the
+    // catalog's components and every open design validates against — a shelf that changed shape
+    // under an author because a file on disk did would be a catalog that floats, which is the one
+    // thing the pin exists to rule out. A pack without a record is a startup failure naming the
+    // flag, not an empty shelf nobody can explain.
+    val packs = uiBuilderPacks.map { (packId, platform) ->
+      val record =
+        when (val lookup = records.record(packId)) {
+          is ComponentRecordSource.Lookup.Found -> lookup.record
+          ComponentRecordSource.Lookup.Unconfigured ->
+            throw IllegalArgumentException(
+              "--ui-builder-packs admits `$packId`, and no component record is configured for " +
+                "it; run a preview bundle for that catalog's module and pass it as " +
+                "`--ui-builder-components $packId=<components.json>`"
+            )
+          is ComponentRecordSource.Lookup.Unusable ->
+            throw IllegalArgumentException(
+              "--ui-builder-packs admits `$packId`, and its component record could not be " +
+                "loaded: ${lookup.reason}"
+            )
+        }
+      val derived =
+        ComponentRecordPacks.derive(
+          packId = packId,
+          platform =
+            requireNotNull(UiBuilderCatalogPlatform.fromWord(platform)) {
+              "--ui-builder-packs names an unknown platform `$platform` for `$packId`"
+            },
+          record = record,
+        )
+      System.err.println(
+        "serve: UI-builder pack $packId offers ${derived.source.components.size} " +
+          "components to $platform designs" +
+          if (derived.skipped.isEmpty()) ""
+          else " (${derived.skipped.size} left out: ${derived.skipped.joinToString("; ")})"
+      )
+      derived.source
+    }
+    val compose =
+      ScreenGeneratorComposeExportExecutor(records::record, packs = packs.map { it.id }.toSet())
     val exporter = renderer?.let { ProductionUiBuilderExportExecutor(it, compose) } ?: compose
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
@@ -2462,6 +2503,7 @@ public class ServeRunner(
         composeExportFor = { systemId ->
           systemId in uiBuilderComponents.keys || systemId in RecordFreeExport.CATALOG_SYSTEM_IDS
         },
+        packs = packs,
       )
     val nativeBackends =
       catalogs.listCatalogs().associate { catalog ->
@@ -2856,7 +2898,15 @@ public class ServeRunner(
                 // host did before this.
                 nativeTarget = { builderCatalog ->
                   val served = uiBuilderNativeCatalogs[builderCatalog] ?: builderCatalog
-                  val backend = lane.nativeBackends[builderCatalog]
+                  // A pack is asked for by its own id and declares no backend of its own — its
+                  // bundle is a served catalog's, and that bundle's manifest says which daemon it
+                  // runs on. So a pack takes the served backend where a catalog would take its
+                  // declaration, and an unmapped pack on a desktop bundle compiles on Skiko.
+                  val backend =
+                    lane.nativeBackends[builderCatalog]
+                      ?: playground.catalogBackend(served)?.takeIf {
+                        builderCatalog in uiBuilderPacks
+                      }
                   // A catalog that declares the Android daemon, mapped at a bundle this host serves
                   // as a desktop one, is refused rather than sent to Skiko. That combination is a
                   // real deployment mistake — the operator mapped `wear-m3` at the wrong catalog,
@@ -2875,6 +2925,7 @@ public class ServeRunner(
                     else -> UiBuilderNativeTarget(served, UiBuilderGeneratedCompose.COMPOSE_CMP)
                   }
                 },
+                packs = uiBuilderPacks.keys,
                 compile = { generated ->
                   // `true` here, and only here: this call site is downstream of the route's
                   // `ui-builder-export` capability check, and the source it submits came from

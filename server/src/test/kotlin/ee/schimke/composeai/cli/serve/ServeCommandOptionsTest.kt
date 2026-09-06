@@ -125,6 +125,29 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `component packs are keyed by served catalog and name a platform the builder knows`() {
+    assertEquals(
+      mapOf("confetti-mobile" to "mobile", "confetti-wear" to "wear"),
+      options(listOf("--ui-builder-packs", "confetti-mobile=Mobile, confetti-wear=wear"))
+        .uiBuilderPacks,
+    )
+    assertEquals(emptyMap(), options(emptyList()).uiBuilderPacks)
+    // A bare id says nothing about which catalogs receive the pack, and the record cannot.
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-packs", "confetti-mobile"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-packs", "confetti-mobile=desktop"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-packs", "not/a/catalog=mobile"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-packs", "confetti-mobile=mobile,confetti-mobile=wear"))
+    }
+  }
+
+  @Test
   fun `UI builder catalog allowlist rejects duplicates and unsafe ids`() {
     assertFailsWith<IllegalArgumentException> {
       options(listOf("--ui-builder-catalogs", "remote-m3,remote-m3"))
