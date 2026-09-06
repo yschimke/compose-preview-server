@@ -1474,14 +1474,18 @@ class ServeBundleHost(
 
   // The cmp-jvm render is sized to the baked PNG's exact pixel dimensions — so the desktop-player
   // PNG lands at the same size the viewer shows the baked / View-player lane at — with the density
-  // the capture used (from `previews.json`, else the renderer default). Null when the preview has
-  // no
-  // captured doc or no baked PNG to size against.
+  // the capture used. Null when the preview has no captured doc or no baked PNG to size against.
   override fun remoteComposeRenderSpec(previewId: String): RcJvmRenderSpec? {
     if (!hasRemoteComposeDoc(previewId)) return null
     // Sized against the baked PNG, so a declared-but-not-yet-local preview fills first.
     val (widthPx, heightPx) = readPngSize(bakedPngFile(previewId) ?: return null) ?: return null
-    val density = previewParamsById[previewId]?.density ?: DEFAULT_RENDER_DENSITY
+    // The DEVICE before the renderer's default, because this lane is form-factor-shaped and the
+    // default is not: 2.625 is a phone number (a 200dp preview bakes to 525px on the desktop
+    // renderer), and every Wear id in the device catalog is 2.0. Replaying a watch document at
+    // 2.625 scales it by 1.31 against the baked PNG it is sized to — the two lanes of one preview
+    // disagreeing about how big a dp is. `renderDensityFor` is the same resolution the viewer's
+    // own dp→px conversion uses, so the replay and the size overrides cannot drift apart.
+    val density = renderDensityFor(previewId) ?: DEFAULT_RENDER_DENSITY
     return RcJvmRenderSpec(widthPx, heightPx, density)
   }
 
@@ -1637,19 +1641,9 @@ class ServeBundleHost(
    * that said 2 converted every dp box the reader typed by 0.73 of what it meant. The Wear ids are
    * all 2.0, so the Wear catalogs were right by luck; the phone ones were not.
    */
-  fun renderDensityFor(previewId: String): Float? {
-    // A manifest may state anything; a non-positive density is no answer, so it falls through to
-    // the device rather than suppressing it.
-    previewParamsById[previewId]
-      ?.density
-      ?.takeIf { it > 0f }
-      ?.let {
-        return it
-      }
-    val device =
-      variantMeta[previewId]?.previewParams?.device?.takeIf { it.isNotBlank() } ?: return null
-    return runCatching { DeviceDimensions.resolve(device).density }.getOrNull()?.takeIf { it > 0f }
-  }
+  fun renderDensityFor(previewId: String): Float? =
+    previewParamsById[previewId]?.declaredDensity()
+      ?: deviceDensity(variantMeta[previewId]?.previewParams?.device)
 
   /**
    * The `@CaptureGutter` this preview declared, in render pixels, from whichever manifest this
@@ -1838,11 +1832,37 @@ class ServeBundleHost(
   }
 }
 
-// Fallback render density for a cmp-jvm render when `previews.json` declares none — the desktop
-// renderer's own default (a 200dp preview bakes to 525px), so an unspecified preview still renders
-// at the density its baked PNG was captured with. File-level rather than on the companion because
-// the params→meta mapping below resolves a capture gutter's dp against it too.
+// Last-resort render density for a cmp-jvm render, when neither the manifest nor the device it
+// names says — the desktop renderer's own default (a 200dp preview bakes to 525px). It is a PHONE
+// number, which is why nothing reaches it until [deviceDensity] has been asked: every Wear id in
+// the device catalog is 2.0, and 42 of the 56 ids are not 2.0 at all. File-level rather than on the
+// companion because the params→meta mapping below resolves a capture gutter's dp against it too.
 private const val DEFAULT_RENDER_DENSITY = 2.625f
+
+/**
+ * The density a `@Preview(device = …)` renders at, or null when it names none this build knows.
+ *
+ * The device catalog is the renderer's own source for this — `PreviewManifestRouter` resolves
+ * `density ?: params.density ?: deviceDims.density` — so reading it here is not a second opinion,
+ * it is the same one. An unknown id answers null rather than throwing: a manifest may name a device
+ * this build's catalog has not learned, and a render sized by the fallback beats a page that 500s.
+ */
+private fun deviceDensity(device: String?): Float? =
+  device
+    ?.takeIf { it.isNotBlank() }
+    ?.let { runCatching { DeviceDimensions.resolve(it).density }.getOrNull() }
+    ?.takeIf { it > 0f }
+
+/**
+ * What this manifest entry says its render density is: the stated one, else its device's.
+ *
+ * Null is "this entry does not say", which is not the same claim as any particular number — the
+ * callers differ on what to do about it, and each states its own fallback. A stated but
+ * non-positive density is no answer either, so it falls through to the device rather than
+ * suppressing it.
+ */
+private fun ee.schimke.composeai.previewdata.PreviewParams.declaredDensity(): Float? =
+  density?.takeIf { it > 0f } ?: deviceDensity(device)
 
 /**
  * Whether a `@Preview(locale = …)` render was composed right-to-left — the direction the renderer
@@ -1883,7 +1903,7 @@ private fun ee.schimke.composeai.previewdata.PreviewParams.asPreviewParamsMeta()
     // per edge, rounded on its own, which is what the renderer did when it grew the canvas.
     captureGutter =
       captureGutter?.let { gutter ->
-        val scale = density?.takeIf { it > 0f } ?: DEFAULT_RENDER_DENSITY
+        val scale = declaredDensity() ?: DEFAULT_RENDER_DENSITY
         fun px(dp: Int) = (dp.coerceAtLeast(0) * scale).roundToInt()
         // Leading/trailing → left/right against the direction this render was composed in — the
         // same resolution the renderer performed when it placed the component inset.
