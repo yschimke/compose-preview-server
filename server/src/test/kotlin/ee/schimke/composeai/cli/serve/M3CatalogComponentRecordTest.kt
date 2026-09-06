@@ -144,6 +144,10 @@ class M3CatalogComponentRecordTest {
       "m3/time-picker" to
         "takes a TimePickerState from rememberTimePickerState, which no ScreenValue expresses",
       "remote-compose/document" to "typed embed, kept out of the Compose exporter by design",
+      "remote-compose/inline" to
+        "the vocabulary switch: its subtree is @RemoteComposable and InlineRemoteContentExporter writes it, not the Compose exporter",
+      "remote-compose/custom" to
+        "a Remote Compose custom operation naming a host renderer; no published creation API writes one, so no record could back it",
       "shape/colour-dot" to "a Box with a background, not a Material component",
       "shape/linear-gradient" to "a Modifier, not a component",
       "shape/radial-gradient" to "a Modifier, not a component",
