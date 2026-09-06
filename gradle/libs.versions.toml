@@ -80,7 +80,7 @@ jmdns = "3.6.3"
 # the render evidence comes from. Read the two floors at the top of this file before taking it —
 # the constraint that remains is that it must not reach `java-server`'s lane, and
 # `:server:checkServerJvmFloor` is what says so rather than a comment.
-snipme-highlights = "1.0.0"
+snipme-highlights = "1.1.0"
 
 [libraries]
 composeai-common-web-escaping = { module = "ee.schimke.composeai:common-web-escaping", version.ref = "composeai-tools" }
