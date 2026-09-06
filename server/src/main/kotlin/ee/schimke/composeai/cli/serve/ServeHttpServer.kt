@@ -19,11 +19,14 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
+import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetPort
+import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceDiagnosticsSource
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
@@ -11639,6 +11642,49 @@ class ServeHttpServer(
   }
 
   /**
+   * `/ui-builder/<designId>` → `/ui-builder/<catalog>/<designId>`, when this caller may open it.
+   *
+   * Gated on a **READ authorization and the store's own answer**, which is what keeps the redirect
+   * from being an existence oracle. Designs are private to their owner and collaborators, so a
+   * redirect that fired for any id that exists would tell an unauthenticated stranger both that a
+   * `cheeky-raccoon` id is taken and which catalog it pins — the leak the issue weighs this option
+   * against. Asking the service as the caller means the answer is exactly the one the design API
+   * would already give them: whoever cannot open the design gets the same `404` they got before,
+   * and whoever can gets the URL they were looking for.
+   *
+   * @return true once a redirect has been written, false to leave the request to the static lane —
+   *   which is what keeps a genuinely missing asset a 404 rather than a silent app shell.
+   */
+  private suspend fun RoutingContext.respondUiBuilderDesignRedirect(designId: String): Boolean {
+    val service = uiBuilderService ?: return false
+    val authorization = uiBuilderAuthorization ?: return false
+    val actor =
+      (authorization.authorize(call, UiBuilderRouteCapability.READ)
+          as? UiBuilderAuthorizationDecision.Authorized)
+        ?.actor ?: return false
+    val mapping =
+      UiBuilderProtocolMapper.toServiceCall(
+        actor,
+        GetSnapshotRequestV1(designId = designId, revision = null),
+      )
+    val response =
+      (mapping as? ProtocolRequestMapping.Mapped)?.let {
+        withContext(Dispatchers.IO) { service.execute(it.call) }
+      }
+    val catalog =
+      (response as? UiBuilderServiceResponse.Snapshot)
+        ?.snapshot
+        ?.state
+        ?.document
+        ?.catalogPin
+        ?.systemId ?: return false
+    // 302 rather than 301: a design can be migrated to another catalog, and a permanent redirect
+    // is one a browser keeps long after the answer has changed.
+    call.respondRedirect("/ui-builder/$catalog/$designId")
+    return true
+  }
+
+  /**
    * Whether a path segment can name a design rather than an asset.
    *
    * The same path-safe shape the New design dialog validates, which allows a `.`, minus anything
@@ -11730,6 +11776,15 @@ class ServeHttpServer(
           return
         }
         respondUiBuilderShell(dir, File(dir, "index.html"))
+        return
+      }
+    } else if (assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])) {
+      // A design named without its catalog. `PUT /api/ui-builder/v1/designs/{id}` is catalog-free
+      // — the server reads the catalog out of the stored document — so anything holding only a
+      // design id builds `/ui-builder/<designId>` and gets a bare 404 that reads like a deletion
+      // (yschimke/compose-preview-server#509). The catalog the URL is missing is
+      // `catalogPin.systemId`, which the store already knows.
+      if (!File(dir, assetSegments[0]).isFile && respondUiBuilderDesignRedirect(assetSegments[0])) {
         return
       }
     }
