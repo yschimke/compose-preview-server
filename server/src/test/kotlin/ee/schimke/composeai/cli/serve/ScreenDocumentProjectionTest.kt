@@ -157,6 +157,20 @@ class ScreenDocumentProjectionTest {
   }
 
   @Test
+  fun `a colour written as a string is refused as a colour, not as a Text`() {
+    // Left to the generator this was "`Text`.`color` is androidx.compose.ui.graphics.Color, which
+    // Text is not" — a sentence about a type the author never wrote (#476). The property gets the
+    // words the `background` modifier already had.
+    assertEquals(
+      listOf(
+        "node `text`.`color` is a colour, which is written as a `#RRGGBB` literal or as a theme " +
+          "role and not as StringValueV1"
+      ),
+      refusal(document(text("color" to StringValueV1("#5F6368")))),
+    )
+  }
+
+  @Test
   fun `a colour that is not hex is refused with the value quoted`() {
     assertEquals(
       listOf(
