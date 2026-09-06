@@ -293,7 +293,11 @@ somebody — `onBehalfOfActorId`.
 - **Not admin.** `--admin-token` routes are outside every scope. Nothing an agent can be granted
   reconfigures the box — and nothing it can be granted reaches `/admin/ui-builder`, the operator's
   list-and-delete over every design on the host: a `ui-builder-*` grant lists what its actor owns
-  or was given, and has no delete at all.
+  or was given. The one delete it does reach, `ui_builder_delete_design`, is the design's
+  **owner's** and nobody else's — not a grantee's whatever its role, and not a write grant's over
+  somebody else's design — so a session can remove the probes it made and cannot wipe anybody's
+  work. A design whose owner no longer exists (one created under a pre-3.10 grant, which owned it
+  as the agent rather than as the approver) is therefore still only the operator's to remove.
 
 ## Waiting for the decision
 

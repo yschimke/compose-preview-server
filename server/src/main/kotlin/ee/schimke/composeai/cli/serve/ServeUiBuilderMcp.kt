@@ -1,13 +1,18 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
+import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommandV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignUpdateEnvelopeV1
+import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
@@ -16,14 +21,18 @@ import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.McpResponseEnvelopeV1
+import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.RevokeActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
+import ee.schimke.composeai.uibuilder.protocol.SlotCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
@@ -32,11 +41,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -87,6 +101,16 @@ class ServeUiBuilderMcp(
    * and an agent waiting on a tool call learn about a comment at the same moment.
    */
   private val comments: ServeUiBuilderCommentStore? = null,
+  /**
+   * The reference overlays kept beside designs, on a host that keeps them.
+   *
+   * Read by nothing here; held so that [DELETE_DESIGN] removes what the operator's own delete
+   * removes. A design's overlay and its discussion are stored beside the design rather than in it,
+   * so the service deleting the design leaves them behind unless somebody sweeps — the admin page
+   * does, and this door must not do less.
+   */
+  private val references: ServeUiBuilderReferenceStore? = null,
+  private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
 
   /** Whether this host keeps design discussions, and so whether the comment tools exist. */
@@ -109,8 +133,12 @@ class ServeUiBuilderMcp(
       RESOLVE_COMMENT_THREAD -> if (comments == null) null else UiBuilderRouteCapability.WRITE
       CREATE_DESIGN,
       APPLY,
+      RENAME_DESIGN,
       // Sharing writes to the design's access control, and the service admits only its owner.
-      SHARE_DESIGN -> UiBuilderRouteCapability.WRITE
+      SHARE_DESIGN,
+      // Gated at the door as a write; the service then admits only the design's owner. There is
+      // no `delete` capability to hand out on purpose — see [DELETE_DESIGN].
+      DELETE_DESIGN -> UiBuilderRouteCapability.WRITE
       EXPORT -> UiBuilderRouteCapability.EXPORT
       // The same capability as an export, and for the same reason: a native render compiles and
       // runs the Kotlin an export hands back, so an actor who may not read that source may not
@@ -133,7 +161,7 @@ class ServeUiBuilderMcp(
   ): String {
     val request =
       when (tool) {
-        LIST_CATALOGS -> ListCatalogsRequestV1
+        LIST_CATALOGS -> return listCatalogs(args, actor, callId)
         LIST_DESIGNS ->
           ListDesignsRequestV1(
             cursor = args.text("cursor"),
@@ -145,6 +173,8 @@ class ServeUiBuilderMcp(
             revision = args.number("revision"),
           )
         CREATE_DESIGN -> createDesign(args, actor)
+        RENAME_DESIGN,
+        DELETE_DESIGN -> return manageDesign(tool, args, actor, callId)
         DESIGN_ACCESS -> GetDesignAccessRequestV1(designId = args.requiredText("designId"))
         SHARE_DESIGN -> share(args, actor)
         APPLY -> apply(args, actor)
@@ -162,7 +192,161 @@ class ServeUiBuilderMcp(
         RESOLVE_COMMENT_THREAD -> return commentTool(tool, args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
-    return envelope(callId, execute(request, actor))
+    return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
+  }
+
+  /**
+   * The catalogs a design may pin to, as a summary unless the whole capability is asked for.
+   *
+   * The released [CatalogsResponseV1] is the entire `CatalogCapabilityV1` of every catalog — each
+   * component's Wasm adapter status, SVG parity, export notes and menu shelving beside the
+   * parameters — and on the hosted deployment that is about 72 KB, spent from an agent's context on
+   * every call to the tool whose description says "start here". Authoring needs a fraction of it:
+   * which components exist, what slots they have, which properties they take and which of those are
+   * required — and the pin, which the capability does not even spell, so a client used to guess the
+   * digest. That is [CatalogSummaryReplyV1], a few KB, and it is the default. `full: true` returns
+   * the released envelope for the export lane and anybody comparing parity, and `componentIds`
+   * narrows either to the components a call is about.
+   */
+  private suspend fun listCatalogs(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String {
+    val full = args[FULL_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true
+    val componentIds =
+      (args[COMPONENT_IDS_ARGUMENT] as? JsonArray)
+        ?.map {
+          it.jsonPrimitive.contentOrNull
+            ?: throw McpRequestException("`$COMPONENT_IDS_ARGUMENT` must hold component ids")
+        }
+        ?.toSet()
+    val listed =
+      when (val response = execute(ListCatalogsRequestV1, actor)) {
+        is UiBuilderServiceResponse.Catalogs -> response
+        else -> return envelope(callId, response)
+      }
+    val catalogs =
+      listed.catalogs.map { catalog ->
+        if (componentIds == null) catalog
+        else catalog.copy(components = catalog.components.filter { it.componentId in componentIds })
+      }
+    if (full) {
+      return envelope(callId, UiBuilderServiceResponse.Catalogs(catalogs, listed.pins))
+    }
+    return SUMMARY_JSON.encodeToString(
+      CatalogSummaryReplyV1.serializer(),
+      CatalogSummaryReplyV1(
+        callId = callId,
+        catalogs =
+          catalogs.map { catalog ->
+            val systemId = catalog.benchmark.catalogSystemId
+            CatalogSummaryV1(
+              systemId = systemId,
+              platform = catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull,
+              catalogPin = listed.pins[systemId],
+              exportCapabilities = catalog.exportCapabilities,
+              modifiers = catalog.components.flatMap { it.modifierCapabilities }.distinct(),
+              components = catalog.components.map(::summarize),
+            )
+          },
+      ),
+    )
+  }
+
+  /**
+   * One component as a few short strings. Measured on the packaged M3 catalog: the same facts as
+   * JSON objects came to 29 KB against the capability's 58, which is not the difference the summary
+   * exists to make; as strings the whole summary comes to about 12.
+   */
+  private fun summarize(component: ComponentCapabilityV1): ComponentSummaryV1 =
+    ComponentSummaryV1(
+      id = component.componentId,
+      role = component.role,
+      traits = component.traits,
+      slots = component.slots.map(::summarize),
+      properties = component.properties.map(::summarize),
+    )
+
+  /**
+   * The slot's name, its cardinality in square brackets as `min..max`, then `:` and the roles and
+   * traits it accepts, `|`-separated.
+   */
+  private fun summarize(slot: SlotCapabilityV1): String {
+    val accepted = (slot.acceptedRoles + slot.acceptedTraits).joinToString("|")
+    val cardinality = "${slot.cardinality.min}..${slot.cardinality.max ?: "*"}"
+    return "${slot.name}[$cardinality]" + if (accepted.isEmpty()) "" else ":$accepted"
+  }
+
+  /** `name:type`, `!` when required, then `=` and the allowed values `|`-separated. */
+  private fun summarize(property: PropertyCapabilityV1): String {
+    val type =
+      when (val jsonType = property.jsonType) {
+        is JsonArray -> jsonType.joinToString("|") { it.jsonPrimitive.content }
+        else -> jsonType.jsonPrimitive.content
+      }
+    val allowed = property.allowedValues.joinToString("|") { it.jsonPrimitive.content }
+    return "${property.name}:$type" +
+      (if (property.required) "!" else "") +
+      (if (allowed.isEmpty()) "" else "=$allowed")
+  }
+
+  /**
+   * Rename or delete a design: the two things a session could not do to its own work.
+   *
+   * Neither has a request type in the released contract, so — like a native render and the comment
+   * tools — the reply is a shape of this surface's own rather than an [McpResponseEnvelopeV1]
+   * pretending to be one. A refusal is still the service's own, in the released error envelope, so
+   * "not the owner" reads the same here as everywhere else.
+   *
+   * Deleting sweeps the overlay and the discussion kept beside the design, as the operator's admin
+   * page does; a failure there is logged rather than reported, because the design is already gone
+   * and telling the caller otherwise would invite a retry of something that cannot be retried.
+   */
+  private suspend fun manageDesign(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String {
+    val designId = args.requiredText("designId")
+    val request =
+      when (tool) {
+        RENAME_DESIGN -> UiBuilderServiceRequest.RenameDesign(designId, args.requiredText("title"))
+        else -> UiBuilderServiceRequest.DeleteDesign(designId)
+      }
+    val response =
+      try {
+        service.execute(UiBuilderServiceCall(actor, request))
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        UiBuilderServiceResponse.Error(
+          ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
+            ServiceErrorCodeV1.INTERNAL,
+            "UI-builder service failed",
+            retryable = true,
+          )
+        )
+      }
+    return when (response) {
+      is UiBuilderServiceResponse.DesignRenamed ->
+        UI_BUILDER_JSON.encodeToString(
+          DesignRenamedV1.serializer(),
+          DesignRenamedV1(callId = callId, design = response.design),
+        )
+      is UiBuilderServiceResponse.DesignDeleted -> {
+        runCatching { references?.delete(designId) }
+          .onFailure { onLog("serve: reference overlay for $designId not removed (${it.message})") }
+        runCatching { comments?.delete(designId) }
+          .onFailure { onLog("serve: comment board for $designId not removed (${it.message})") }
+        UI_BUILDER_JSON.encodeToString(
+          DesignDeletedV1.serializer(),
+          DesignDeletedV1(callId = callId, designId = designId),
+        )
+      }
+      else -> envelope(callId, response)
+    }
   }
 
   /**
@@ -333,10 +517,14 @@ class ServeUiBuilderMcp(
       } finally {
         subscription.close()
       }
-    return UI_BUILDER_JSON.encodeToString(
-      DesignUpdateEnvelopeV1.serializer(),
-      UiBuilderProtocolMapper.toProtocolUpdate(designId, update),
-    )
+    val envelope =
+      UI_BUILDER_JSON.encodeToJsonElement(
+        DesignUpdateEnvelopeV1.serializer(),
+        UiBuilderProtocolMapper.toProtocolUpdate(designId, update),
+      )
+    // A resync answers with a whole snapshot, catalog included; the same argument as on
+    // [GET_DESIGN] keeps it to the document.
+    return (if (args.includeCatalog()) envelope else envelope.withoutCatalog()).toString()
   }
 
   /**
@@ -518,14 +706,36 @@ class ServeUiBuilderMcp(
       is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
     }
 
-  private fun envelope(callId: String, response: UiBuilderServiceResponse): String =
-    UI_BUILDER_JSON.encodeToString(
-      McpResponseEnvelopeV1.serializer(),
-      McpResponseEnvelopeV1(
-        callId = callId,
-        response = UiBuilderProtocolMapper.toProtocolResponse(response),
-      ),
-    )
+  /**
+   * The released reply envelope, and — unless the caller asked otherwise — without the catalog a
+   * snapshot embeds.
+   *
+   * A `ServiceSnapshotV1` carries the whole `CatalogCapabilityV1` of the catalog the design pins,
+   * which is right for a browser (one fetch, kept for the session, and the palette needs it) and
+   * wrong for an agent, for whom every byte is conversation context spent per call: on the hosted
+   * deployment a 600-byte document came back as 60 KB. The document's `catalogPin` names the
+   * catalog exactly and [LIST_CATALOGS] serves it, so nothing is lost by leaving it out; the field
+   * is dropped from the JSON rather than blanked, so a reader sees an absence and not an empty
+   * catalog. `includeCatalog: true` restores the released shape byte for byte.
+   */
+  private fun envelope(
+    callId: String,
+    response: UiBuilderServiceResponse,
+    includeCatalog: Boolean = true,
+  ): String {
+    val envelope =
+      UI_BUILDER_JSON.encodeToJsonElement(
+        McpResponseEnvelopeV1.serializer(),
+        McpResponseEnvelopeV1(
+          callId = callId,
+          response = UiBuilderProtocolMapper.toProtocolResponse(response),
+        ),
+      )
+    return (if (includeCatalog) envelope else envelope.withoutCatalog()).toString()
+  }
+
+  private fun JsonObject.includeCatalog(): Boolean =
+    this[INCLUDE_CATALOG_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true
 
   private fun JsonObject.text(name: String): String? =
     this[name]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
@@ -578,8 +788,26 @@ class ServeUiBuilderMcp(
     const val AWAIT_DESIGN = "ui_builder_await_design"
     const val DESIGN_ACCESS = "ui_builder_design_access"
     const val SHARE_DESIGN = "ui_builder_share_design"
+    const val RENAME_DESIGN = "ui_builder_rename_design"
+    const val DELETE_DESIGN = "ui_builder_delete_design"
 
     private const val REVOKE_ARGUMENT = "revoke"
+    private const val INCLUDE_CATALOG_ARGUMENT = "includeCatalog"
+    private const val FULL_ARGUMENT = "full"
+    private const val COMPONENT_IDS_ARGUMENT = "componentIds"
+
+    /** The `statusSemantics` key a catalog declares its platform under; the runtime's own. */
+    private const val PLATFORM_KEY = "platform"
+
+    /**
+     * Compact on purpose: an absent list and an absent pin are left out rather than written as `[]`
+     * and `null`, since the summary exists to be small. `schema` is kept so a reader can tell the
+     * shape apart from the released envelope.
+     */
+    private val SUMMARY_JSON = Json {
+      encodeDefaults = false
+      explicitNulls = false
+    }
 
     /**
      * What a shared role may do.
@@ -610,6 +838,8 @@ class ServeUiBuilderMcp(
         EXPORT,
         DESIGN_ACCESS,
         SHARE_DESIGN,
+        RENAME_DESIGN,
+        DELETE_DESIGN,
       )
 
     /** Separate because it exists only where the host can compile. */
@@ -639,10 +869,22 @@ class ServeUiBuilderMcp(
       listOfNotNull(
         tool(
           LIST_CATALOGS,
-          "List the component catalogs a UI-builder design can pin to, with each catalog's " +
-            "components, their properties and slots, and which export formats it supports. Start " +
-            "here: a design's `catalogPin` must name a revision this server actually serves.",
-          """{"type":"object","properties":{},"additionalProperties":false}""",
+          "List the component catalogs a UI-builder design can pin to. Start here: a design's " +
+            "`catalogPin` must name a revision this server actually serves, and each catalog's " +
+            "`catalogPin` here is exactly that. By default a summary of what authoring needs, a " +
+            "few KB rather than the whole capability: per component its id, role, traits, " +
+            "`slots` as `name[min..max]:accepted|roles` and `properties` as `name:type`, with " +
+            "`!` when required and `=a|b` listing the allowed values; per catalog its export " +
+            "formats and the modifier vocabulary. `full: true` returns the released " +
+            "CatalogsResponseV1 envelope with adapter status, parity and export notes per " +
+            "component; `$COMPONENT_IDS_ARGUMENT` narrows either to the components you are " +
+            "about to use.",
+          """
+          {"type":"object","properties":{
+            "$FULL_ARGUMENT":{"type":"boolean","description":"The whole CatalogCapabilityV1 per catalog, as the released envelope. Defaults to false."},
+            "$COMPONENT_IDS_ARGUMENT":{"type":"array","items":{"type":"string"},"description":"Only these components. Omit for all of them."}
+          },"additionalProperties":false}
+          """,
         ),
         tool(
           LIST_DESIGNS,
@@ -658,11 +900,14 @@ class ServeUiBuilderMcp(
           GET_DESIGN,
           "Read one design: its whole document — nodes, slots, properties, modifiers, state " +
             "variables and catalog pin — plus the revision to quote as `baseRevision` when " +
-            "editing it.",
+            "editing it. The catalog the design pins is left out unless `$INCLUDE_CATALOG_ARGUMENT` " +
+            "is true: it is the same for every design on the pin, $LIST_CATALOGS serves it, and " +
+            "it is most of the bytes.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
-            "revision":{"type":"integer","description":"A past revision. Omit for the current one."}
+            "revision":{"type":"integer","description":"A past revision. Omit for the current one."},
+            "$INCLUDE_CATALOG_ARGUMENT":{"type":"boolean","description":"Embed the pinned catalog's whole CatalogCapabilityV1 in the snapshot, as the released shape does. Defaults to false."}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
@@ -683,7 +928,8 @@ class ServeUiBuilderMcp(
           {"type":"object","properties":{
             "designId":{"type":"string"},
             "afterSequence":{"type":"integer","description":"The `lastSequence` you last saw, from $GET_DESIGN or a previous wait."},
-            "waitSeconds":{"type":"integer","description":"Up to $MAX_DESIGN_WAIT_SECONDS. Defaults to $DEFAULT_DESIGN_WAIT_SECONDS."}
+            "waitSeconds":{"type":"integer","description":"Up to $MAX_DESIGN_WAIT_SECONDS. Defaults to $DEFAULT_DESIGN_WAIT_SECONDS."},
+            "$INCLUDE_CATALOG_ARGUMENT":{"type":"boolean","description":"When the reply is a whole snapshot, embed the pinned catalog in it. Defaults to false."}
           },"required":["designId","afterSequence"],"additionalProperties":false}
           """,
         ),
@@ -697,7 +943,8 @@ class ServeUiBuilderMcp(
             "designId":{"type":"string","description":"The id for the new design."},
             "title":{"type":"string"},
             "document":{"type":"object","description":"A whole DesignDocumentV1."},
-            "fromDesignId":{"type":"string","description":"Copy this design's document instead."}
+            "fromDesignId":{"type":"string","description":"Copy this design's document instead."},
+            "$INCLUDE_CATALOG_ARGUMENT":{"type":"boolean","description":"Embed the pinned catalog in the returned snapshot. Defaults to false."}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
@@ -706,7 +953,10 @@ class ServeUiBuilderMcp(
           "Apply design mutations — insertNode, setProperty, deleteNode, moveNode and the rest of " +
             "DesignMutationV1 — as one operation. `baseRevision` is the revision you read, and a " +
             "mismatch is reported rather than merged, so a concurrent edit cannot be lost. This " +
-            "is how an agent adds a scaffold, fills its slots and sets modifiers.",
+            "is how an agent adds a scaffold, fills its slots and sets modifiers. A setProperty " +
+            "whose value is `{\"type\":\"null\"}` unsets the property — the way back after " +
+            "trying one — and is refused, naming the node and the field, when the catalog " +
+            "requires it.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
@@ -759,6 +1009,35 @@ class ServeUiBuilderMcp(
             "role":{"type":"string","description":"editor or viewer. Defaults to viewer."},
             "$REVOKE_ARGUMENT":{"type":"boolean","description":"Take this actor's access away instead."}
           },"required":["designId","actorId"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          RENAME_DESIGN,
+          "Give a design a new title. The title is the one thing about a design nothing else " +
+            "could change: it is set at creation, shown in every listing and the editor, and not " +
+            "part of any mutation. Anybody who may write the design may rename it. The revision " +
+            "does not move — a title is not design content — so `baseRevision` is not needed and " +
+            "an edit in flight is unaffected. Not the released envelope: the contract has no " +
+            "rename, so the reply is the design's listing entry with its new title.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "title":{"type":"string"}
+          },"required":["designId","title"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          DELETE_DESIGN,
+          "Delete a design you own, with its history, access list, overlay and discussion. Only " +
+            "the owner may — not an editor, not a viewer, and not anybody merely holding a write " +
+            "grant on this server — so a session can clean up the designs it made and cannot " +
+            "reach anybody else's; an agent acting under an approved grant owns what it created " +
+            "as the person who approved it. There is no undo. Not the released envelope: the " +
+            "contract has no delete, so the reply names the design that is gone.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"}
+          },"required":["designId"],"additionalProperties":false}
           """,
         ),
         if (!comments) null
@@ -850,6 +1129,99 @@ class ServeUiBuilderMcp(
       )
   }
 }
+
+/**
+ * A design's title, changed. The listing entry rather than a snapshot: it carries the new title,
+ * the unmoved revision and what the caller may do here, and is a few hundred bytes.
+ */
+@kotlinx.serialization.Serializable
+internal data class DesignRenamedV1(
+  val schema: String = "compose-preview/ui-builder-design-renamed/v1",
+  val callId: String,
+  val design: DesignListItemV1,
+)
+
+/** A design, gone: its id and nothing else, because there is nothing else left to say about it. */
+@kotlinx.serialization.Serializable
+internal data class DesignDeletedV1(
+  val schema: String = "compose-preview/ui-builder-design-deleted/v1",
+  val callId: String,
+  val designId: String,
+  val deleted: Boolean = true,
+)
+
+/**
+ * What authoring needs to know about the catalogs on this host, and no more.
+ *
+ * The projection [ServeUiBuilderMcp.LIST_CATALOGS] answers with by default. Everything here is read
+ * off the released `CatalogCapabilityV1`; what is left out — adapter status, SVG parity, export
+ * notes, menu shelving — matters to the export lane and to nobody composing a screen, and is one
+ * `full: true` away.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@kotlinx.serialization.Serializable
+internal data class CatalogSummaryReplyV1(
+  @EncodeDefault val schema: String = "compose-preview/ui-builder-catalog-summary/v1",
+  val callId: String,
+  val catalogs: List<CatalogSummaryV1>,
+)
+
+@kotlinx.serialization.Serializable
+internal data class CatalogSummaryV1(
+  val systemId: String,
+  val platform: String? = null,
+  /**
+   * The exact pin a document must carry to resolve to this catalog. Absent if the host cannot say.
+   */
+  val catalogPin: CatalogReferenceV1? = null,
+  val exportCapabilities: ExportCapabilitiesV1 = ExportCapabilitiesV1(),
+  /**
+   * Every modifier type some component here accepts, once. Which component accepts which is in the
+   * whole capability; nearly every component accepts nearly all of them, listing the set per
+   * component was most of the summary's bytes, and a modifier a component does not accept is
+   * refused by name when applied.
+   */
+  val modifiers: List<String> = emptyList(),
+  val components: List<ComponentSummaryV1> = emptyList(),
+)
+
+/**
+ * A component in the space of a table row. [properties] are `name:type`, with `!` appended when the
+ * property is required and `=a|b|c` when the catalog restricts its values; [slots] are the slot's
+ * name, its cardinality in square brackets as `min..max` with `*` for unbounded, then
+ * `:role|trait|…` naming what the slot accepts.
+ */
+@kotlinx.serialization.Serializable
+internal data class ComponentSummaryV1(
+  val id: String,
+  val role: String,
+  val traits: List<String> = emptyList(),
+  val slots: List<String> = emptyList(),
+  val properties: List<String> = emptyList(),
+)
+
+/**
+ * The same JSON with every embedded `ServiceSnapshotV1`'s `catalog` removed.
+ *
+ * A snapshot is recognised by the three fields it always has beside the catalog — `designId`,
+ * `state` and `retainedFromSequence` — so the walk removes the field from a snapshot wherever the
+ * envelope puts one (a response, a pushed update) and from nothing else: a node property that
+ * happens to be called `catalog` is not a snapshot's.
+ */
+private fun JsonElement.withoutCatalog(): JsonElement =
+  when (this) {
+    is JsonObject -> {
+      val isSnapshot =
+        "catalog" in this && "designId" in this && "state" in this && "retainedFromSequence" in this
+      JsonObject(
+        entries
+          .filterNot { (key, _) -> isSnapshot && key == "catalog" }
+          .associate { (key, value) -> key to value.withoutCatalog() }
+      )
+    }
+    is JsonArray -> JsonArray(map { it.withoutCatalog() })
+    else -> this
+  }
 
 /**
  * Nothing was said within the wait.

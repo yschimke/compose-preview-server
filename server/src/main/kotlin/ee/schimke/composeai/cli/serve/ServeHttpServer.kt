@@ -655,7 +655,12 @@ class ServeHttpServer(
         projectHistory = projectHistory,
         uiBuilder =
           uiBuilderService?.let {
-            ServeUiBuilderMcp(it, uiBuilderNativePreview, uiBuilderCommentStore)
+            ServeUiBuilderMcp(
+              it,
+              uiBuilderNativePreview,
+              uiBuilderCommentStore,
+              references = uiBuilderReferenceStore,
+            )
           },
         uiBuilderNative = uiBuilderNativePreview != null,
       )
