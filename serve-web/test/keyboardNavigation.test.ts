@@ -173,7 +173,7 @@ describe("power-user keyboard navigation", () => {
           <div class="cp-card cp-sys">
             <span class="cp-sys-title"><a class="cp-sys-open" href="/compose-m3/">Compose Material 3</a></span>
             <span class="cp-id">compose-m3</span>
-            <p class="cp-sys-actions"><a class="cp-action-chip" href="/compose-m3/compare?format=reference">compare to Figma</a></p>
+            <div class="cp-sys-actions"><a class="cp-action-chip" href="/compose-m3/compare?format=reference">compare to Figma</a></div>
           </div>
           <div class="cp-card cp-sys">
             <span class="cp-sys-title"><a class="cp-sys-open" href="/wear-m3/">Wear Material 3</a></span>
