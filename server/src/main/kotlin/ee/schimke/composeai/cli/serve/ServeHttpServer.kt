@@ -42,6 +42,7 @@ import io.ktor.server.request.path
 import io.ktor.server.request.queryString
 import io.ktor.server.request.receiveParameters
 import io.ktor.server.request.receiveStream
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.ApplicationSendPipeline
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
@@ -51,6 +52,7 @@ import io.ktor.server.routing.RoutingContext
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.WebSockets
@@ -90,6 +92,9 @@ private val UI_BUILDER_IDENTITY_QUERY =
 
 /** A `/ui-builder/<catalog>/<designId>` design segment: the New design dialog's own id shape. */
 private val UI_BUILDER_DESIGN_SEGMENT = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+
+/** Everything a design id may hold that a `Content-Disposition` filename may not. */
+private val UNSAFE_FILENAME_CHARACTER = Regex("[^A-Za-z0-9._-]")
 
 /** Extensions that belong to the builder's static distribution rather than to a design id. */
 private val UI_BUILDER_ASSET_EXTENSIONS =
@@ -1606,6 +1611,24 @@ class ServeHttpServer(
           get("/admin/ui-builder/designs") {
             if (rejectBadAdminToken()) return@get
             respondAdminUiBuilderDesigns(admin)
+          }
+          // Copy a design out before deciding what to do with it. The one route here that is
+          // meant to work on a design the host cannot serve — an unusable design's document is
+          // exactly what an operator needs in hand to repair it, and deleting is the only other
+          // move available on one.
+          get("/admin/ui-builder/designs/{designId}/document") {
+            if (rejectBadAdminToken()) return@get
+            respondAdminUiBuilderDocument(admin, call.parameters["designId"].orEmpty())
+          }
+          // The return leg of the download above: a repaired document goes back in place of the
+          // one the host cannot serve, and the design is served again without a restart.
+          put("/admin/ui-builder/designs/{designId}/document") {
+            if (rejectBadAdminToken()) return@put
+            val designId = call.parameters["designId"].orEmpty()
+            val body = call.receiveText()
+            respondAdminUiBuilderResult(
+              withContext(Dispatchers.IO) { admin.repair(designId, body) }
+            )
           }
           delete("/admin/ui-builder/designs/{designId}") {
             if (rejectBadAdminToken()) return@delete
@@ -5058,11 +5081,55 @@ class ServeHttpServer(
     )
   }
 
+  /**
+   * `GET /admin/ui-builder/designs/{designId}/document`: one stored design document, as JSON.
+   *
+   * Served as an attachment so the browser saves it rather than rendering it — the operator wants
+   * the file, and the admin screen links straight here.
+   */
+  private suspend fun RoutingContext.respondAdminUiBuilderDocument(
+    admin: ServeUiBuilderAdmin,
+    rawDesignId: String,
+  ) {
+    val designId = rawDesignId.trim()
+    if (designId.isEmpty()) {
+      call.respondText("design id is required", status = HttpStatusCode.BadRequest)
+      return
+    }
+    val document = withContext(Dispatchers.IO) { admin.document(designId) }
+    if (document == null) {
+      call.respondText("no such design: $designId", status = HttpStatusCode.NotFound)
+      return
+    }
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    // The id came off the wire, so it is reduced to a safe filename rather than trusted in a header
+    // built by concatenation. The body is the record of which design this is; the filename is only
+    // a convenience.
+    val filename = designId.replace(UNSAFE_FILENAME_CHARACTER, "_")
+    call.response.headers.append(
+      HttpHeaders.ContentDisposition,
+      "attachment; filename=\"$filename.json\"",
+    )
+    call.respondText(document, ContentType.Application.Json)
+  }
+
   /** Map a [ServeUiBuilderAdmin.Result] onto its HTTP status + JSON body. */
   private suspend fun RoutingContext.respondAdminUiBuilderResult(
     result: ServeUiBuilderAdmin.Result
   ) {
     when (result) {
+      is ServeUiBuilderAdmin.Result.Repaired ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminUiBuilderRepairResult.serializer(),
+            AdminUiBuilderRepairResult(
+              designId = result.designId,
+              status = "repaired",
+              revision = result.revision,
+            ),
+          ),
+          ContentType.Application.Json,
+        )
       is ServeUiBuilderAdmin.Result.Deleted ->
         call.respondText(
           JSON.encodeToString(
@@ -14595,6 +14662,20 @@ private data class AdminUiBuilderLibraryOpenResult(val designId: String, val sta
 /** The result of `DELETE /admin/ui-builder/designs/{designId}`. */
 @Serializable
 private data class AdminUiBuilderDesignResult(val designId: String, val status: String)
+
+/**
+ * The result of a repairing `PUT /admin/ui-builder/designs/{designId}/document`.
+ *
+ * Its own shape rather than a nullable field on [AdminUiBuilderDesignResult]: an optional
+ * `"revision": null` would appear on every delete response too, changing bytes a client already
+ * parses for the sake of a field only a repair ever fills in.
+ */
+@Serializable
+private data class AdminUiBuilderRepairResult(
+  val designId: String,
+  val status: String,
+  val revision: Long,
+)
 
 /** One configured hostname on `GET /admin/sites`. */
 @Serializable private data class AdminSiteDto(val host: String, val system: String)

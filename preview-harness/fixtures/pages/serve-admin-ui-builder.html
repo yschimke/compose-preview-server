@@ -150,6 +150,26 @@
       cell(tr, when(d.createdAtEpochMillis));
       cell(tr, when(d.updatedAtEpochMillis));
       var actions = cell(tr, "");
+      // Offered on every row, and the only action that works on an unusable one: a design the
+      // host cannot serve can still be copied out, repaired against the current rules and
+      // created again. Without it, Delete is the operator's only move and the document is lost.
+      var save = document.createElement("button");
+      save.type = "button";
+      save.className = "cp-doc-btn cp-admin-download";
+      save.textContent = "Download JSON";
+      save.addEventListener("click", function () { download(d, save); });
+      actions.appendChild(save);
+      // Only offered where it applies. A design the host serves is edited in the editor, with
+      // an actor and a sequence; this is the door that exists because that one is closed to a
+      // design the host will not load.
+      if (d.unusableReason) {
+        var fix = document.createElement("button");
+        fix.type = "button";
+        fix.className = "cp-doc-btn cp-admin-repair";
+        fix.textContent = "Repair from file…";
+        fix.addEventListener("click", function () { repair(d, fix); });
+        actions.appendChild(fix);
+      }
       var del = document.createElement("button");
       del.type = "button";
       del.className = "cp-doc-btn cp-admin-delete";
@@ -177,6 +197,56 @@
       })
       .then(function (body) { render(body.designs || []); })
       .catch(function (e) { count.textContent = ""; rows.textContent = ""; show(String(e.message || e), true); });
+  }
+  // Fetched rather than linked so the admin token travels in the header, as it does for every
+  // other call on this page, instead of ending up in a URL the browser keeps in history.
+  function download(d, button) {
+    button.disabled = true;
+    fetch("/admin/ui-builder/designs/" + encodeURIComponent(d.designId) + "/document",
+          { headers: headers, cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) return Promise.resolve(failure(r)).then(function (m) { throw new Error(m); });
+        return r.text();
+      })
+      .then(function (text) {
+        var url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = d.designId + ".json";
+        a.click();
+        URL.revokeObjectURL(url);
+        button.disabled = false;
+        hide();
+      })
+      .catch(function (e) { button.disabled = false; show(String(e.message || e), true); });
+  }
+  // Download, edit until it satisfies the rule that changed, put it back. The server checks the
+  // candidate against exactly what held the original back, so a file that does not repair the
+  // design comes back with what is still wrong rather than replacing it.
+  function repair(d, button) {
+    var picker = document.createElement("input");
+    picker.type = "file";
+    picker.accept = "application/json,.json";
+    picker.addEventListener("change", function () {
+      var file = picker.files && picker.files[0];
+      if (!file) return;
+      button.disabled = true;
+      file.text().then(function (text) {
+        return fetch("/admin/ui-builder/designs/" + encodeURIComponent(d.designId) + "/document",
+                     { method: "PUT", headers: headers, body: text });
+      })
+        .then(function (r) {
+          if (!r.ok) return Promise.resolve(failure(r)).then(function (m) { throw new Error(m); });
+          return r.json();
+        })
+        .then(function (body) {
+          show("Repaired " + d.designId + " at revision " + body.revision + ".", false);
+          button.disabled = false;
+          load();
+        })
+        .catch(function (e) { button.disabled = false; show(String(e.message || e), true); });
+    });
+    picker.click();
   }
   function remove(d, button) {
     var label = (d.title || "(untitled)") + " (" + d.designId + ", owned by " + d.ownerActorId + ")";

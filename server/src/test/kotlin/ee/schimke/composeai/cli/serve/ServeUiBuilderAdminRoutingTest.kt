@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.service.UiBuilderAdminDesignSummary
 import ee.schimke.composeai.uibuilder.service.UiBuilderAdminPort
+import ee.schimke.composeai.uibuilder.service.UiBuilderAdminRepair
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,8 +13,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * `/admin/ui-builder`: the operator's screen over every design, gated by the admin token alone.
@@ -23,6 +26,7 @@ import okhttp3.Request
  * `--admin-token`.
  */
 class ServeUiBuilderAdminRoutingTest {
+  private val jsonMediaType = "application/json".toMediaType()
   private val adminToken = "admin-secret"
   private val designs =
     linkedMapOf(
@@ -30,6 +34,7 @@ class ServeUiBuilderAdminRoutingTest {
       "shady-goose" to summary("shady-goose", "Watch face", "github:someone"),
     )
   private val deleted = mutableListOf<String>()
+  private val repaired = mutableListOf<Pair<String, String>>()
   private val port =
     object : UiBuilderAdminPort {
       override fun adminListDesigns() = designs.values.toList()
@@ -38,6 +43,26 @@ class ServeUiBuilderAdminRoutingTest {
         deleted += designId
         return designs.remove(designId) != null
       }
+
+      override fun adminUnusableDesigns(): Map<String, String> =
+        mapOf("shady-goose" to "catalog unavailable for stored design shady-goose")
+
+      override fun adminDesignDocument(designId: String): String? =
+        designs[designId]?.let { """{"id":"${it.designId}"}""" }
+
+      override fun adminRepairDesign(
+        designId: String,
+        documentJson: String,
+      ): UiBuilderAdminRepair =
+        when {
+          designId !in designs -> UiBuilderAdminRepair.NotFound(designId)
+          documentJson.contains("still-broken") ->
+            UiBuilderAdminRepair.Rejected("stored node count exceeds configured limit")
+          else -> {
+            repaired += designId to documentJson
+            UiBuilderAdminRepair.Repaired(designId, revision = 3, previousReason = "catalog gone")
+          }
+        }
     }
   private val registry = ServeSessionRegistry(open = { null })
 
@@ -67,6 +92,7 @@ class ServeUiBuilderAdminRoutingTest {
     path: String,
     method: String = "GET",
     token: String? = adminToken,
+    body: String? = null,
   ): Pair<Int, String> {
     val request =
       Request.Builder()
@@ -74,6 +100,7 @@ class ServeUiBuilderAdminRoutingTest {
         .apply {
           if (token != null) header(ServeHttpServer.ADMIN_TOKEN_HEADER, token)
           if (method == "DELETE") delete()
+          if (method == "PUT") put(body.orEmpty().toRequestBody(jsonMediaType))
         }
         .build()
     client.newCall(request).execute().use {
@@ -149,6 +176,63 @@ class ServeUiBuilderAdminRoutingTest {
 
     assertEquals(404, send("/admin/ui-builder/designs/shady-goose", "DELETE").first)
     assertEquals(400, send("/admin/ui-builder/designs/%20", "DELETE").first)
+  }
+
+  @Test
+  fun `a design's document can be copied out, including one the host cannot serve`() {
+    server = server(ServeUiBuilderAdmin(port, onLog = {}))
+
+    // `shady-goose` is quarantined: the list says why, and the document route still answers for it.
+    // That combination is the point — without it, deleting is the only thing left to do with a
+    // design a rule change invalidated, and the document goes with it.
+    val listed =
+      Json.parseToJsonElement(send("/admin/ui-builder/designs").second)
+        .jsonObject
+        .getValue("designs")
+        .jsonArray
+        .map { it.jsonObject }
+    assertEquals(
+      "catalog unavailable for stored design shady-goose",
+      listed.last().getValue("unusableReason").jsonPrimitive.content,
+    )
+
+    val (code, body) = send("/admin/ui-builder/designs/shady-goose/document")
+    assertEquals(200, code)
+    assertEquals("""{"id":"shady-goose"}""", body)
+
+    assertEquals(404, send("/admin/ui-builder/designs/no-such-design/document").first)
+    assertEquals(400, send("/admin/ui-builder/designs/%20/document").first)
+    // Reading a document is as much the operator's alone as deleting one.
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/shady-goose/document", token = null).first,
+    )
+  }
+
+  @Test
+  fun `a repaired document goes back the way it came, and one that is not is refused`() {
+    server = server(ServeUiBuilderAdmin(port, onLog = {}))
+    val path = "/admin/ui-builder/designs/shady-goose/document"
+
+    val (code, body) = send(path, "PUT", body = """{"id":"shady-goose"}""")
+    assertEquals(200, code)
+    assertEquals("""{"designId":"shady-goose","status":"repaired","revision":3}""", body)
+    assertEquals(listOf("shady-goose" to """{"id":"shady-goose"}"""), repaired)
+
+    // A candidate that does not repair the design comes back with what is still wrong, so the
+    // operator can edit and try again rather than guess.
+    val (rejectedCode, rejected) = send(path, "PUT", body = """{"id":"still-broken"}""")
+    assertEquals(400, rejectedCode)
+    assertTrue(rejected.contains("node count"), rejected)
+
+    assertEquals(400, send(path, "PUT", body = "").first)
+    assertEquals(
+      404,
+      send("/admin/ui-builder/designs/no-such-design/document", "PUT", body = "{}").first,
+    )
+    // Writing a design is as much the operator's alone as reading or deleting one.
+    assertEquals(404, send(path, "PUT", token = null, body = "{}").first)
+    assertEquals(1, repaired.size, "no repair slipped past the token or the checks")
   }
 
   private fun summary(id: String, title: String, owner: String) =

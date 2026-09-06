@@ -2,7 +2,8 @@
 
 Committed evidence for `GET /admin/ui-builder` — `ServeWeb.uiBuilderAdminPage` in
 [`ServeWeb.kt`](../../server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeWeb.kt) — the
-operator's list of every design on the host with a delete per row.
+operator's list of every design on the host, with a download and a delete per row and a repair on
+any row the host cannot serve.
 
 | file | what it is |
 | --- | --- |
