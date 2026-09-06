@@ -120,8 +120,9 @@ class DesignModifierExportTest {
     // Two claims in one loop, because they are the same claim from either side. Nothing reaches
     // the `else` branch — that is the regression this file exists for — and what does refuse at
     // the root refuses for a *reason about placement*: `weight`, the three `align`s and
-    // `matchParentSize` are members of a slot's receiver, and the two scrolls need a
-    // `rememberScrollState()` no value in this vocabulary is.
+    // `matchParentSize` are members of a slot's receiver. The two scrolls used to be on this list
+    // as well, for a `rememberScrollState()` the vocabulary supposedly could not hold; it can,
+    // inline, and they export now (#481).
     val refused = mutableListOf<String>()
     for (modifier in EVERY_MODIFIER) {
       val reasons = reasonsFor(document(text(modifier)))
@@ -137,9 +138,7 @@ class DesignModifierExportTest {
         "AlignHorizontalModifierV1",
         "AlignModifierV1",
         "AlignVerticalModifierV1",
-        "HorizontalScrollModifierV1",
         "MatchParentSizeModifierV1",
-        "VerticalScrollModifierV1",
         "WeightModifierV1",
       ),
       refused.sorted(),
@@ -147,11 +146,12 @@ class DesignModifierExportTest {
   }
 
   @Test
-  fun `a scroll is refused as the remembered state it needs, not as an unknown modifier`() {
-    // The one pair that stays refused on purpose. `verticalScroll` takes a `ScrollState`, which is
-    // produced by `rememberScrollState()` — a `remember { … }` preamble, and no `ScreenValue` is
-    // one. Naming that is the difference between a designer knowing to lay the screen out another
-    // way and a designer filing a bug about a missing table entry.
+  fun `a scroll remembers its state inline, at the call, rather than refusing`() {
+    // The pair that was refused on purpose for several rounds — "a `remember { … }` preamble this
+    // projection does not emit" — and the diagnosis was wrong about where the state lives.
+    // `rememberScrollState()` is a `@Composable` call with every parameter defaulted, legal exactly
+    // where the modifier is written, which is how a person writes it: one modifier on a feed
+    // column cost the whole file (#481), and now it costs one link.
     for ((modifier, name) in
       listOf(
         VerticalScrollModifierV1 to "verticalScroll",
@@ -159,10 +159,18 @@ class DesignModifierExportTest {
       )) {
       assertEquals(
         listOf(
-          "node `text` uses `$name`, which takes a `ScrollState` from `rememberScrollState()` — " +
-            "a `remember { … }` preamble this projection does not emit"
+          ChainLink(
+            "androidx.compose.foundation.$name",
+            positional =
+              listOf(
+                ScreenValue.Construct(
+                  "androidx.compose.foundation.rememberScrollState",
+                  typeFqn = "androidx.compose.foundation.ScrollState",
+                )
+              ),
+          )
         ),
-        reasonsFor(document(text(modifier))),
+        links(modifier),
       )
     }
   }
