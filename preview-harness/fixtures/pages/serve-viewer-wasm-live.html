@@ -96,8 +96,8 @@
             <span class="cp-live-toggle-verb" id="cp-live-toggle-verb" aria-hidden="true">▸ Live</span>
           </button>
 <select id="cp-lane-select" class="cp-lane-select" aria-label="Switch renderer" title="Draw this preview with a different renderer" data-default="png" data-rc-default=""><option value="" selected>Switch renderer…</option><option value="png">Snapshot</option><option value="wasm">In browser (Wasm)</option></select>
-<cp-bg-toggle label="Show the transparent checkerboard behind the preview"></cp-bg-toggle>
-<button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false" title="Show the preview at full width instead of fitting it to the screen">Fit width</button>
+<span class="cp-view-group" role="group" aria-label="How the preview is shown"><span class="cp-view-group-label" aria-hidden="true">View</span><cp-bg-toggle label="Show the transparent checkerboard behind the preview"></cp-bg-toggle>
+<button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false" title="Show the preview at full width instead of fitting it to the screen">Fit width</button></span>
         <span class="cp-mode-hint" id="cp-mode-hint"></span>
         <span class="cp-modes-inputs" aria-hidden="true">
       <input type="radio" name="cp-mode" value="png" id="cp-mode-png" tabindex="-1" checked>

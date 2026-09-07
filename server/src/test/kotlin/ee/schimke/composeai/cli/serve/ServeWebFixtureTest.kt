@@ -1394,6 +1394,35 @@ class ServeWebFixtureTest {
         siblings = previews,
         figmaSpec = fixtureFigmaSpec,
         designReference = fixtureDesignReference,
+        // The compare strip under the render: every variant of the component on the stage, against
+        // the same baseline (`docs/design/COMPARE_NAVIGATION.md`, §3.1). Shaped like the real
+        // thing — a scored variant, a worse one, and one the design file has nothing mapped to, so
+        // the golden pins all three states the strip can draw rather than a run of green rows.
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__default__light",
+              variant = "default · light",
+              referenceId = "contact-chat-figma",
+              matchPercent = 96.4,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__default__dark",
+              variant = "default · dark",
+              referenceId = "contact-chat-figma-dark",
+              matchPercent = 88.1,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__no-avatar__light",
+              variant = "no avatar",
+              referenceId = "contact-chat-figma-no-avatar",
+              matchPercent = 71.9,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__long-name__light",
+              variant = "long name",
+            ),
+          ),
       )
     // A **Remote Compose** viewer, the shape preview.coo.ee serves for `remote-m3`: the same
     // captured `.rc` document is drawable by five different players, so this is the page the
