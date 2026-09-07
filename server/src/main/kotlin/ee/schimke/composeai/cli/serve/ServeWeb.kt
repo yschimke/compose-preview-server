@@ -11217,11 +11217,24 @@ ${captureControlsHtml().prependIndent("          ")}
         val label = if (variant.isEmpty()) component else "$component — $variant"
         val viewer = "$basePath/p/${WebEscaping.urlEncodeSegment(current.id)}$q"
         val cardKey = comparisonCardKey(current)
+        // Claimed once per card, exactly as before — the fold's whole point is that an id with no
+        // row of its own selects ONE row rather than all of its card's. What changed is only WHERE
+        // the list is written: into the document's one alias table, instead of into this row.
         val folded =
           if (aliasesClaimed.add(cardKey))
             previewIdsByCard[cardKey].orEmpty().filterNot { it in rowPreviewIds }
           else emptyList()
-        val ids = (variants.map { it.id } + folded).distinct().joinToString(" ")
+        // …and the row points at it by key. Only the row that claimed the card carries the
+        // attribute, so the aliases still resolve onto exactly one row.
+        val aliasAttr =
+          if (folded.isEmpty()) "" else " data-alias-card=\"${WebEscaping.htmlEscape(cardKey)}\""
+        // The row's OWN variants stay on the row: three ids at most, and they are what the pictures
+        // and the report are about. The FOLDED aliases — every sibling id this card stands for —
+        // move to the document's one alias table ([comparisonAliasTableHtml]). They used to be
+        // written per row, and on `remote-m3` that was 19,188 mentions of 538 ids: 967 KB of an
+        // attribute whose whole content is 26 KB of distinct text.
+        // See `docs/design/COMPARE_NAVIGATION.md`, F2.
+        val ids = variants.map { it.id }.distinct().joinToString(" ")
         val previewAttrs =
           listOf("light" to card.light, "dark" to card.dark, "neutral" to card.neutral)
             .mapNotNull { (variant, preview) ->
@@ -11282,8 +11295,12 @@ ${captureControlsHtml().prependIndent("          ")}
         // is about. Their TITLES join it too, and follow from the pill showing them: a filter box
         // over a table has to match what the table says, or typing a phrase the reader can see in
         // front of them empties the wall.
+        // …and the haystack carries neither. It used to repeat the same id list a second time —
+        // the two attributes measured almost identically because they held the same bytes — and
+        // `keepRow` now matches a typed id against the resolved alias list instead, which is the
+        // same search over text written once.
         val hay =
-          (listOf(label, ids) + bugs.flatMap { listOf("#${it.number}", it.title.trim()) })
+          (listOf(label) + bugs.flatMap { listOf("#${it.number}", it.title.trim()) })
             .filter { it.isNotEmpty() }
             .joinToString(" ")
             .lowercase()
@@ -11323,7 +11340,7 @@ ${captureControlsHtml().prependIndent("          ")}
             .joinToString("")
         """
           <tr class="cp-compare-row" data-label="${WebEscaping.htmlEscape(label)}"
-            data-hay="${WebEscaping.htmlEscape(hay)}" data-preview-ids="${WebEscaping.htmlEscape(ids)}"$componentIdAttr$previewAttrs$pngAttrs$svgAttrs$rcAttrs$referenceAttrs$parallelDataAttrs$declaredBgAttrs>
+            data-hay="${WebEscaping.htmlEscape(hay)}" data-preview-ids="${WebEscaping.htmlEscape(ids)}"$aliasAttr$componentIdAttr$previewAttrs$pngAttrs$svgAttrs$rcAttrs$referenceAttrs$parallelDataAttrs$declaredBgAttrs>
             <th scope="row">$pickCell<a href="$viewer">${WebEscaping.htmlEscape(component)}${
             if (variant.isEmpty()) ""
             else "<span class=\"cp-compare-variant\">${WebEscaping.htmlEscape(variant)}</span>"
@@ -11497,6 +11514,7 @@ ${captureControlsHtml().prependIndent("          ")}
             <span id="cp-compare-count" class="cp-count" role="status"></span>
           </div>$pickedBar$reportRow
           <div id="cp-compare-formats">$empty</div>
+          ${comparisonAliasTableHtml(previewIdsByCard, rowPreviewIds)}
           ${rcLanes.orEmpty()}
         </div>
         <!-- The components bundle is UNCONDITIONAL here now: `<cp-compare-wall>` is the wall
@@ -11572,6 +11590,53 @@ ${captureControlsHtml().prependIndent("          ")}
    * mirror of the published `rc-compare.html` (`render-rc-compare-html.mjs`), which is built from
    * the same data.
    */
+  /**
+   * The comparison page's **alias table**: every preview id the wall can be narrowed by, written
+   * once.
+   *
+   * ## Why this exists
+   *
+   * Both tables on this page fold a component's variants into one row, and both let a `?preview=`
+   * naming a folded-away sibling select the row that stands for it. Each row used to carry that
+   * whole list itself, and the haystack carried it a second time. On `remote-m3` that came to
+   * **19,188 mentions of 538 distinct ids** — 967 KB of `data-preview-ids` and most of another 1.08
+   * MB of `data-hay`, on a 6.4 MB page that took two minutes to arrive. The ids are 26 KB. See
+   * `docs/design/COMPARE_NAVIGATION.md`, F2.
+   *
+   * ## What it carries, and why both halves
+   *
+   * `cards` is each comparison card's full id list. `rowed` is every id that has a row of its own.
+   *
+   * The two consumers want different slices and the difference is a RULE, not a preference: a
+   * design reference names one exact state/props mapping, so that variant is kept out of the fold
+   * and gets its own row — which means it must not also alias onto its siblings' rows, or filtering
+   * by it would match the lot. The wall subtracts `rowed`; the Remote Compose lane wall, whose rows
+   * are one per preview and not per mapping, does not. Publishing both facts once and naming the
+   * rule here is what keeps the browser from re-deriving it — the failure that comment at
+   * `rowPreviewIds` records having already happened once.
+   *
+   * Empty ⇒ no element at all, so a catalog that folds nothing pays nothing.
+   */
+  private fun comparisonAliasTableHtml(
+    previewIdsByCard: Map<String, List<String>>,
+    rowPreviewIds: Set<String>,
+  ): String {
+    val cards = previewIdsByCard.filterValues { it.size > 1 }
+    if (cards.isEmpty()) return ""
+    val entries =
+      cards.entries.joinToString(",") { (key, ids) ->
+        "${WebEscaping.jsString(key)}:${WebEscaping.jsString(ids.joinToString(" "))}"
+      }
+    // A JSON `<script>`, not a data attribute on the root: it is one string of several tens of
+    // kilobytes, and an attribute would have to escape every quote in it. The type is not one the
+    // browser executes, and [WebEscaping.jsString] escapes `<`, `>` and `&`, so no id can close
+    // the element early — the one way a JSON island turns into script injection.
+    return "<script type=\"application/json\" id=\"cp-compare-aliases\">" +
+      "{\"cards\":{$entries}," +
+      "\"rowed\":${WebEscaping.jsString(rowPreviewIds.joinToString(" "))}}" +
+      "</script>"
+  }
+
   private fun rcLanesSection(
     manifest: RcCompareManifest,
     previews: List<ServePreview>,
@@ -11710,12 +11775,18 @@ ${captureControlsHtml().prependIndent("          ")}
       ordered.withIndex().joinToString("\n") { (index, entry) ->
         val (row, label) = entry
         val preview = previewsById[row.previewId]
-        val ids =
-          preview
-            ?.let { previewIdsByCard[comparisonCardKey(it)] }
+        // The card this lane row belongs to, by KEY. Every row here used to carry its card's whole
+        // id list — with no claim-once rule, so a 66-variant card wrote 66 copies of the same 66
+        // ids — and then wrote them a second time into the haystack. That was the bulk of the two
+        // largest attributes on the page (`docs/design/COMPARE_NAVIGATION.md`, F2); the ids are now
+        // written once, in the shared alias table, and looked up from this key.
+        val cardKey = preview?.let(::comparisonCardKey)
+        val aliasAttr =
+          cardKey
+            ?.takeIf { previewIdsByCard[it].orEmpty().isNotEmpty() }
+            ?.let { " data-alias-card=\"${WebEscaping.htmlEscape(it)}\"" }
             .orEmpty()
-            .ifEmpty { listOf(row.previewId) }
-        val hay = (label + " " + ids.joinToString(" ")).lowercase()
+        val hay = label.lowercase()
         val viewer = "$basePath/p/${WebEscaping.urlEncodeSegment(row.previewId)}$q"
         val dims = if (row.width > 0 && row.height > 0) "${row.width}×${row.height}" else ""
         val cells =
@@ -11745,8 +11816,8 @@ ${captureControlsHtml().prependIndent("          ")}
               .trimIndent()
           }
         """
-        <tr class="cp-rc-row" data-row="$index" data-hay="${WebEscaping.htmlEscape(hay)}"
-          data-preview-ids="${WebEscaping.htmlEscape(ids.joinToString(" "))}">
+        <tr class="cp-rc-row" data-row="$index" data-hay="${WebEscaping.htmlEscape(hay)}"$aliasAttr
+          data-preview-ids="${WebEscaping.htmlEscape(row.previewId)}">
           <th scope="row">
             <a href="$viewer">${WebEscaping.htmlEscape(label)}</a>
             ${if (dims.isNotEmpty()) "<div class=\"cp-rc-dims\">$dims</div>" else ""}

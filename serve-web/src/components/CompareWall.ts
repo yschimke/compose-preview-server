@@ -27,6 +27,11 @@ import {
 } from "../compare/pairing.js";
 import { specLeadsColumns, targetHeadLabel } from "../compare/columns.js";
 import {
+    aliasesFor,
+    readAliasTable,
+    type AliasTable,
+} from "../compare/aliases.js";
+import {
     locatorBlocks,
     locatorForRow,
     type PickFacts,
@@ -89,6 +94,8 @@ export class CompareWall extends ControllerElement {
     private targetHead: HTMLElement | null = null;
     /** The middle column's header, which rides between the pair wherever the pair goes. */
     private diffHead: HTMLElement | null = null;
+    /** The page's alias table, read on the first filter pass. See `compare/aliases.ts`. */
+    private aliases: AliasTable | null = null;
     /** The wall's own table, which carries `data-picking` for the row checkboxes' visibility. */
     private table: HTMLElement | null = null;
     /** The page-scoped report's hidden body field, when this wall can write locators into it. */
@@ -661,6 +668,8 @@ export class CompareWall extends ControllerElement {
         const params = new URLSearchParams(location.search);
         const preview = params.get("preview") ?? "";
         const component = params.get("component") ?? "";
+        // Parsed once per filter pass, not once per row: it is one JSON island for the whole page.
+        const aliases = (this.aliases ??= readAliasTable(document));
         let visible = 0;
         for (const row of this.rows) {
             const hasFormat = Boolean(
@@ -684,7 +693,14 @@ export class CompareWall extends ControllerElement {
             const keep = keepRow(
                 {
                     hay: row.getAttribute("data-hay") ?? "",
-                    previewIds: row.getAttribute("data-preview-ids") ?? "",
+                    // The wall subtracts the ids that have rows of their own — see
+                    // `compare/aliases.ts` for why that rule lives on this side of the pair.
+                    previewIds: aliasesFor(
+                        aliases,
+                        row.getAttribute("data-preview-ids") ?? "",
+                        row.getAttribute("data-alias-card"),
+                        true,
+                    ).join(" "),
                     componentId: row.getAttribute("data-component-id") ?? "",
                     hasFormat,
                 },

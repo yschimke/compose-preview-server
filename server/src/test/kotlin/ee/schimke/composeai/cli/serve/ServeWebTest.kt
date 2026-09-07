@@ -2196,14 +2196,28 @@ class ServeWebTest {
     val ids =
       Regex("data-preview-ids=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
     assertEquals(2, ids.size, "two referenced states, two rows: $html")
+    // The row carries its OWN ids and a KEY into the page's alias table; the folded sibling is
+    // written once, there. Only the row that claimed the card carries the key, which is what still
+    // aliases the fold onto exactly one row.
+    assertTrue(ids.none { it.contains("direction-rtl") }, "no fold on the row itself: $html")
+    val keys =
+      Regex("data-alias-card=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
+    assertEquals(
+      listOf("button-elevated__ideal"),
+      keys,
+      "exactly one row claims the card whose fold it stands for: $html",
+    )
+    val table = html.substringAfter("id=\"cp-compare-aliases\">").substringBefore("</script>")
     assertTrue(
-      ids[0].contains("button-elevated__ideal__default__direction-rtl"),
-      "the folded variant aliases onto the first row of its card: $html",
+      table.contains("button-elevated__ideal__default__direction-rtl"),
+      "and the folded id is published once, in the table: $table",
     )
-    assertFalse(
-      ids[1].contains("direction-rtl"),
-      "and onto that row only: $html",
-    )
+    // `rowed` is what the wall subtracts, so the two states that have rows of their own do not
+    // alias onto each other's.
+    val rowed = table.substringAfter("\"rowed\":\"").substringBefore("\"")
+    assertTrue(rowed.contains("button-elevated__ideal__default"), table)
+    assertTrue(rowed.contains("button-elevated__ideal__pressed"), table)
+    assertFalse(rowed.contains("direction-rtl"), "a folded id has no row: $table")
   }
 
   @Test
@@ -2335,6 +2349,77 @@ class ServeWebTest {
     for (control in listOf("cp-bg-btn cp-zoom-toggle", "Transparent")) {
       assertTrue(group.contains(control), "$control belongs to the view group: $html")
     }
+  }
+
+  @Test
+  fun `the wall writes every folded preview id once, in one table`() {
+    // Each row used to carry its comparison card's whole id list, and the haystack carried it a
+    // second time. On `remote-m3` that was 19,188 mentions of 538 distinct ids — 967 KB of
+    // `data-preview-ids` and most of another 1.08 MB of `data-hay`, on a 6.4 MB page that took two
+    // minutes to arrive. See `docs/design/COMPARE_NAVIGATION.md`, F2.
+    val previews =
+      listOf(
+        ServePreview("button__ideal__default", "Default", state = "default"),
+        ServePreview("button__ideal__pressed", "Pressed", state = "pressed"),
+      ) +
+        (1..4).map {
+          ServePreview(
+            "button__ideal__default__variant-$it",
+            "Variant $it",
+            state = "default",
+            props = jsonProps("variant" to "$it"),
+          )
+        }
+    val html =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        previews,
+        token = "t",
+        referencesFor = { id ->
+          if (id.contains("variant-")) emptyList() else listOf(referenceFor(id))
+        },
+      )
+    // Every folded id — one with no row of its own — appears exactly once on the whole page.
+    for (n in 1..4) {
+      assertEquals(
+        1,
+        Regex(Regex.escape("button__ideal__default__variant-$n")).findAll(html).count(),
+        "a folded id is written once: $html",
+      )
+    }
+    // …and the haystack repeats none of it.
+    val hay = Regex("data-hay=\"([^\"]*)\"").findAll(html).map { it.groupValues[1] }.toList()
+    assertTrue(hay.isNotEmpty(), html)
+    assertTrue(hay.none { it.contains("__ideal__") }, "no ids in the haystack: $hay")
+  }
+
+  @Test
+  fun `the alias table names both facts, because the two walls apply different rules`() {
+    // `rowed` is what the comparison wall subtracts: a design reference names one exact
+    // state/props mapping, so that variant gets a row of its own and must not also alias onto its
+    // siblings' rows. The Remote Compose lane wall, whose rows are one per preview, does not
+    // subtract it. Publishing both facts once and letting each caller pick is what keeps the
+    // browser from re-deriving a rule with one right answer.
+    val html =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(
+          ServePreview("button__ideal__default", "Default", state = "default"),
+          ServePreview(
+            "button__ideal__default__rtl",
+            "RTL",
+            state = "default",
+            props = jsonProps("direction" to "rtl"),
+          ),
+        ),
+        token = "t",
+        referencesFor = { id -> if (id.endsWith("rtl")) emptyList() else listOf(referenceFor(id)) },
+      )
+    val table = html.substringAfter("id=\"cp-compare-aliases\">").substringBefore("</script>")
+    assertTrue(table.contains("\"cards\":{"), table)
+    assertTrue(table.contains("\"rowed\":"), table)
+    // Nothing in it can close the element early — the one way a JSON island becomes an injection.
+    assertFalse(table.contains("</"), table)
   }
 
   @Test
@@ -2633,9 +2718,14 @@ class ServeWebTest {
     // The numbers join the haystack, so `#40` narrows the wall to the rows a report names — and so
     // do the titles, because the pill now shows them and a filter has to match what the reader can
     // see.
+    // The haystack is the row's LABEL and the issues filed against it. The preview ids used to be
+    // copied in here as well — the same list the row already carried in `data-preview-ids`, and
+    // the single biggest thing on a real wall. They are written once in the page's alias table
+    // now, and `keepRow` matches a typed id against the resolved list.
+    // See `docs/design/COMPARE_NAVIGATION.md`, F2.
     assertTrue(
       html.contains(
-        "data-hay=\"button button #40 glyph colour is darker than the design token " +
+        "data-hay=\"button #40 glyph colour is darker than the design token " +
           "#41 verified after the token update\""
       ),
       html,

@@ -4867,10 +4867,13 @@ class ServeWebFixtureTest {
         sessionId = "compose-m3",
         hasSvgFor = { true },
       )
-    val variantComparisonIds =
-      variantComparison.substringAfter("data-preview-ids=\"").substringBefore('"')
+    // The fold is published in the page's ONE alias table now, not copied onto every row that
+    // stands for it — see `docs/design/COMPARE_NAVIGATION.md`, F2. The claim is unchanged: a
+    // deep link naming a folded-away variant still selects the row that stands for it.
+    val variantAliases =
+      variantComparison.substringAfter("id=\"cp-compare-aliases\">").substringBefore("</script>")
     assertTrue(
-      variantComparisonIds.contains("button-filled__ideal__default__light__direction-rtl"),
+      variantAliases.contains("button-filled__ideal__default__light__direction-rtl"),
       "a folded non-default variant deep-link aliases to its included component comparison row",
     )
     val sizedVariantPreviews =
@@ -4911,19 +4914,39 @@ class ServeWebFixtureTest {
         .map { it.groupValues[1] }
         .toList()
     assertEquals(2, sizedComparisonIds.size)
+    // The claim is about the FOLD, which the page now publishes once in its alias table keyed by
+    // comparison card rather than copying onto each row (`docs/design/COMPARE_NAVIGATION.md`, F2).
+    // Read there: the compact card folds its own state and props variants and nothing from the
+    // expanded one — a breakpoint is a different comparison, not a variant of this one.
+    val sizedTable =
+      sizedVariantComparison
+        .substringAfter("id=\"cp-compare-aliases\">")
+        .substringBefore("</script>")
+    val compactCard =
+      Regex("\"([^\"]*compact[^\"]*)\":\"([^\"]*)\"")
+        .find(sizedTable)
+        ?.groupValues
+        ?.get(2)
+        .orEmpty()
     assertTrue(
-      sizedComparisonIds[0].contains("__compact") &&
-        sizedComparisonIds[0].contains("__pressed__light__compact") &&
-        sizedComparisonIds[0].contains("__compact__direction-rtl") &&
-        !sizedComparisonIds[0].contains("__expanded"),
-      "compact aliases fold state and props without selecting the expanded comparison row",
+      compactCard.contains("__pressed__light__compact") &&
+        compactCard.contains("__compact__direction-rtl") &&
+        !compactCard.contains("__expanded"),
+      "compact aliases fold state and props without selecting the expanded comparison row: " +
+        sizedTable,
     )
+    val expandedCard =
+      Regex("\"([^\"]*expanded[^\"]*)\":\"([^\"]*)\"")
+        .find(sizedTable)
+        ?.groupValues
+        ?.get(2)
+        .orEmpty()
     assertTrue(
-      sizedComparisonIds[1].contains("__expanded") &&
-        sizedComparisonIds[1].contains("__pressed__light__expanded") &&
-        sizedComparisonIds[1].contains("__expanded__direction-rtl") &&
-        !sizedComparisonIds[1].contains("__compact"),
-      "expanded aliases fold state and props without selecting the compact comparison row",
+      expandedCard.contains("__pressed__light__expanded") &&
+        expandedCard.contains("__expanded__direction-rtl") &&
+        !expandedCard.contains("__compact"),
+      "expanded aliases fold state and props without selecting the compact comparison row: " +
+        sizedTable,
     )
     // Long-press a card and its preview streams from the daemon in place. The page carries the
     // gesture's configuration — each card's streamable ids, emitted in document order rather than
