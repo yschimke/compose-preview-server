@@ -137,7 +137,15 @@ uploader a daemon-starter, so it is a **set** beside the scope
 ([`ServeAgentGrantCapability`](../../cli/serve/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeAgentGrantCapability.kt))
 rather than a value on it, with its own operator ceiling (`--agent-grant-capabilities`, default
 empty) and its own checkbox on the approval page. Radios for the ladder, checkboxes for the set:
-independent boxes describe independent permissions honestly, and nothing is pre-ticked.
+independent boxes describe independent permissions honestly.
+
+Those checkboxes **open ticked**, like the scope radio opens on the highest offered rung. A row only
+appears once the request has been narrowed by the approver's ceiling and the box's, so every box on
+the page is something the agent asked for and this approver may give; making the human re-enter that
+ask one click at a time bought no safety and cost the clicks the page was already asking for. The
+act of consent is pressing Approve, not re-typing the request: unticking a row is one click, the
+POST honours exactly what comes back, and an approval with a row unticked confers nothing —
+`asking is not granting` is a test, not a default.
 
 What the image lane then accepts is a grant carrying `images` **instead of** a GitHub credential,
 and the argument is that a grant says something stronger than the credential it replaces. The lane's

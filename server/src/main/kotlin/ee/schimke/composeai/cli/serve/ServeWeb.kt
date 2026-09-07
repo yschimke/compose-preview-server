@@ -7116,14 +7116,21 @@ ${captureControlsHtml().prependIndent("          ")}
     // implies nothing and is implied by nothing, so it is its own yes/no — and unticking one says
     // exactly what it looks like it says.
     //
-    // Nothing is pre-ticked. An extra permission should be an act, not a default someone clicks
-    // past: the agent asking for it is not the human agreeing to it, and this page exists to keep
-    // those two separate.
+    // **Every box here starts ticked**, for the same reason the scope radio opens on the highest
+    // offered rung: [selectableCapabilities] has already been narrowed to what the agent asked for
+    // (`ServeAgentGrants.selectableCapabilities` intersects the request with the approver's and the
+    // box's ceilings), so a row on this page is by construction a request this approver may grant.
+    // The page's job is to make the ask legible, not to charge a click for agreeing with it — an
+    // approver who read the row and wants it anyway had to tick every one of them by hand, and a
+    // default that has to be re-entered every time is one people learn to click past rather than
+    // read. Consent is still an act: the form is not submitted until Approve is pressed, unticking
+    // a row is one click, and the POST honours exactly what comes back — an approval with a row
+    // unticked confers nothing, which is the property the page is really protecting.
     val capabilityRows =
       selectableCapabilities.joinToString("\n") { capability ->
         """
         <label class="cp-grant-scope">
-          <input type="checkbox" name="capability" value="${esc(capability.wire)}">
+          <input type="checkbox" name="capability" value="${esc(capability.wire)}" checked>
           <span class="cp-grant-scope-name">${esc(capability.wire)}</span>
           <span class="cp-grant-scope-what">${esc(capability.humanDescription)}</span>
         </label>
