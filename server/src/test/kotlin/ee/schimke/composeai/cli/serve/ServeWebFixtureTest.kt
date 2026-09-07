@@ -5474,7 +5474,7 @@ class ServeWebFixtureTest {
     // means the chip is the only route, so it stays.
     assertTrue(
       !landingPublic.contains("cp-tree-pages") &&
-        landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 pages</a>"),
+        landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 design pages</a>"),
       "a catalog with no tree keeps the header chip, or its pages would be unreachable",
     )
     // `reflectTree` walks every expandable row on every open/close; the Pages branch is expandable
