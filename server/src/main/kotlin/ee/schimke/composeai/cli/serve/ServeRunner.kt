@@ -3,17 +3,14 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
-import ee.schimke.composeai.bundle.AndroidBundleLaunch
 import ee.schimke.composeai.bundle.BundleReader
 import ee.schimke.composeai.bundle.BundleVerifier
 import ee.schimke.composeai.bundle.TrustStore
-import ee.schimke.composeai.bundle.locateBundleSidecarJars
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.previewdata.PreviewInfo
 import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
 import ee.schimke.composeai.render.session.RenderSessionException
-import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
@@ -2110,138 +2107,30 @@ public class ServeRunner(
       }
 
   /**
-   * Resolve the Android/Robolectric daemon opener shared by the playground's Android render lanes —
-   * the `lib-daemon-android` sidecar + `android.jar` on the daemon classpath, the Robolectric
-   * jvmArgs/sysprops, and a subprocess `openBundleDaemon`. Mirrors [ServeBundleDaemon]'s
-   * `androidBundleDaemonLaunch`. Returns null (logging why) when the sidecar or `android.jar` is
-   * missing — both Android lanes then report unavailable rather than compiling to a dead end.
+   * The playground's Android/Robolectric daemon opener — [PlaygroundDaemonOpeners.android], with
+   * this host's wording on the way out. Returns null (logging why) when the sidecar or
+   * `android.jar` is missing; both Android lanes then report unavailable rather than compiling to a
+   * dead end.
    */
   private fun buildPlaygroundAndroidDaemonOpener(
     sandbox: PlaygroundSandbox
-  ): PlaygroundAndroidSessionOpener? {
-    val daemonJars = locateBundleSidecarJars("lib-daemon-android")
-    if (daemonJars.isEmpty()) {
-      System.err.println(
-        "serve: playground Android modes need the Android daemon sidecar " +
-          "(lib-daemon-android/), which ships separately as " +
-          "compose-preview-android-daemon-<version>.zip; unpack it and set " +
-          "-Dcomposeai.cli.libDaemonAndroidDir=<dir>/lib-daemon-android. Android modes disabled."
-      )
-      return null
+  ): PlaygroundAndroidSessionOpener? =
+    PlaygroundDaemonOpeners.android(sandbox) {
+      System.err.println("serve: playground Android modes disabled — $it")
     }
-    val androidJar =
-      AndroidBundleLaunch.resolveAndroidJar(localPropertiesFile = null)
-        ?: run {
-          System.err.println(
-            "serve: playground Android modes need android.jar — set ANDROID_HOME / " +
-              "ANDROID_SDK_ROOT. Android modes disabled."
-          )
-          return null
-        }
-    val launch = AndroidBundleLaunch()
-    val daemonClasspath = (daemonJars + listOf(androidJar)).map { it.absolutePath }
-    val jvmArgs = launch.jvmArgs()
-    val sysprops = sandbox.robolectricSystemProperties(launch.robolectricSystemProperties())
-    return { classesDir, previewsJson, workspaceRoot, userClasspath ->
-      openPlaygroundFirstFrameDaemon(
-        daemonClasspath,
-        jvmArgs,
-        sysprops,
-        classesDir,
-        previewsJson,
-        workspaceRoot,
-        userClasspath,
-        sandbox,
-      )
-    }
-  }
 
   /**
-   * Open a bundle-less daemon for a first-frame render, partitioning the snippet's [userClasspath]
-   * the way the live path ([ServeBundleDaemon.materializePlaygroundSnippet]) does: jars in the
-   * namespaces `UserClassLoaderHolder` delegates to the parent (`androidx.*`, `kotlinx-coroutines`,
-   * `kotlinx-io`) must precede the [sidecarClasspath] on the daemon (parent) `-cp`, or the daemon
-   * loads its own sidecar versions and a snippet built against the catalog's newer shared ABI fails
-   * with `NoSuchMethodError`/`NoSuchFieldError` (and the render service then silently returns no
-   * image). The snippet's own classes stay isolated on the child (user) loader.
-   */
-  private fun openPlaygroundFirstFrameDaemon(
-    sidecarClasspath: List<String>,
-    jvmArgs: List<String>,
-    extraSystemProperties: Map<String, String>,
-    classesDir: java.io.File,
-    previewsJson: java.io.File,
-    workspaceRoot: java.io.File,
-    userClasspath: List<String>,
-    sandbox: PlaygroundSandbox,
-  ) =
-    SubprocessRenderSessions.openBundleDaemon(
-      daemonClasspath =
-        userClasspath.filter { ServeBundleDaemon.jarPrecedesDaemonSidecar(java.io.File(it)) } +
-          sidecarClasspath,
-      classesDir = classesDir,
-      previewsJson = previewsJson,
-      workspaceRoot = workspaceRoot,
-      modulePath = ":playground",
-      // The sandbox's JVM caps come last so they win over the backend defaults.
-      jvmArgs = jvmArgs + sandbox.jvmArgs(workspaceRoot),
-      extraSystemProperties = extraSystemProperties,
-      userClasspath =
-        userClasspath.filterNot { ServeBundleDaemon.jarPrecedesDaemonSidecar(java.io.File(it)) },
-      // Stage-1's first frame and the RC capture run a stranger's snippet exactly as the live lane
-      // does, so they are jailed identically — one JVM per snippet, killed at the hard TTL.
-      jailCommand =
-        sandbox.command(
-          PlaygroundSandbox.Paths(
-            workDir = workspaceRoot,
-            readOnly =
-              (sidecarClasspath + userClasspath).map { java.io.File(it) }.distinct() +
-                classesDir +
-                previewsJson,
-            javaHome = java.io.File(System.getProperty("java.home")),
-          )
-        ),
-      hardTtlSeconds = sandbox.ttlSeconds.takeIf { sandbox.isActive },
-    )
-
-  /**
-   * The desktop (CMP/Skiko) daemon opener for the playground's CMP first-frame render — the
-   * `lib-daemon-desktop` + `lib-renderer` sidecar on the daemon classpath and the desktop jvmArgs,
-   * over a subprocess `openBundleDaemon`. Mirrors [ServeBundleDaemon]'s `desktopBundleDaemonLaunch`
-   * (the desktop twin of [buildPlaygroundAndroidDaemonOpener]). Returns null (logging why) when the
-   * sidecar jars are absent — CMP then simply carries no still first frame while its live `/pg/`
-   * redemption keeps rendering on demand.
+   * The desktop (CMP/Skiko) daemon opener for the playground's CMP first-frame render —
+   * [PlaygroundDaemonOpeners.desktop]. Null (logging why) when the sidecar jars are absent: CMP
+   * then simply carries no still first frame while its live `/pg/` redemption keeps rendering on
+   * demand.
    */
   private fun buildPlaygroundDesktopDaemonOpener(
     sandbox: PlaygroundSandbox
-  ): PlaygroundAndroidSessionOpener? {
-    val daemonJars = locateBundleSidecarJars("lib-daemon-desktop")
-    val rendererJars = locateBundleSidecarJars("lib-renderer")
-    if (daemonJars.isEmpty() || rendererJars.isEmpty()) {
-      System.err.println(
-        "serve: playground CMP first-frame needs the desktop daemon sidecar (lib-daemon-desktop/ + " +
-          "lib-renderer/) from an installed distribution; CMP renders no still frame (its live " +
-          "preview still works)."
-      )
-      return null
+  ): PlaygroundAndroidSessionOpener? =
+    PlaygroundDaemonOpeners.desktop(sandbox) {
+      System.err.println("serve: playground CMP first-frame unavailable — $it")
     }
-    val daemonClasspath = (daemonJars + rendererJars).map { it.absolutePath }
-    // -Dapple.awt.UIElement=true keeps the desktop JVM a macOS background agent (no Dock/focus
-    // steal); mirrors desktopBundleDaemonLaunch. No Robolectric sysprops on the desktop backend.
-    val jvmArgs = listOf("--enable-native-access=ALL-UNNAMED", "-Dapple.awt.UIElement=true")
-    return { classesDir, previewsJson, workspaceRoot, userClasspath ->
-      openPlaygroundFirstFrameDaemon(
-        daemonClasspath,
-        jvmArgs,
-        emptyMap(),
-        classesDir,
-        previewsJson,
-        workspaceRoot,
-        userClasspath,
-        sandbox,
-      )
-    }
-  }
 
   /**
    * The playground's first-frame render backend: renders a compiled snippet on the shared [opener]
