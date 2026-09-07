@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.15.0](https://github.com/yschimke/compose-preview-server/compare/v3.14.0...v3.15.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* **ui-builder:** handle the BUNDLE export format the contracts bump added ([#542](https://github.com/yschimke/compose-preview-server/issues/542)) ([d1c4637](https://github.com/yschimke/compose-preview-server/commit/d1c46373eedca77b928a840e3ca52c1b35fc604a))
+
 ## [3.14.0](https://github.com/yschimke/compose-preview-server/compare/v3.13.0...v3.14.0) (2026-09-07)
 
 
