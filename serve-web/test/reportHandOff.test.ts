@@ -579,3 +579,100 @@ describe("embedding hosted captures in the form actually being submitted", () =>
         );
     });
 });
+
+describe("saying the capture will have to be pasted", () => {
+    beforeEach(resetDom);
+
+    /** The Screenshot section as `ServeBugReport.body` writes it, plus what follows it. */
+    const TEMPLATE =
+        "### What went wrong\n\n<!-- What were you doing? -->\n\n\n" +
+        "### Screenshot\n\n<!-- Paste your capture of the page here. -->\n\n\n" +
+        "### Base render\n\n![render](https://example.test/r.png)\n";
+
+    /** A capture this host already hosts, so nothing needs pasting. */
+    function hosted(id: string, label: string): Capture {
+        return {
+            ...capture(id, label),
+            uploadedUrl: `${location.origin}/i/${id}.png`,
+        };
+    }
+
+    function bugBody(): string {
+        return document.querySelector<HTMLInputElement>("#cp-bug-body")!.value;
+    }
+
+    function withTemplate(): void {
+        document.querySelector<HTMLInputElement>("#cp-bug-body")!.value =
+            TEMPLATE;
+    }
+
+    it("warns on the report page, before the issue is opened", async () => {
+        // The submit-time note lands on a page the reporter leaves in the same gesture — the issue
+        // form is `target="_blank"` — so on a host that cannot embed anything, the only warning
+        // there has ever been was one nobody was looking at. Issue #556.
+        stubBrowser([capture("shot-1", "Region")]);
+        reportPage();
+        installCapture();
+        await settled();
+        assert.match(note(), /can't host captures/);
+        assert.match(note(), /Screenshot section/);
+    });
+
+    it("stays quiet when every capture is already hosted", async () => {
+        // Nothing needs pasting, so an instruction to paste is the same page misleading its
+        // reporter in the opposite direction.
+        stubBrowser([hosted("shot-1", "Region")]);
+        reportPage();
+        installCapture();
+        await settled();
+        assert.equal(note(), "");
+    });
+
+    it("stays quiet about a capture belonging to another page", async () => {
+        stubBrowser([capture("shot-1", "Region", "/catalog/p/elsewhere")]);
+        reportPage();
+        installCapture();
+        await settled();
+        assert.equal(note(), "");
+    });
+
+    it("marks the paste spot in the body GitHub actually receives", async () => {
+        stubBrowser([capture("shot-1", "Region")]);
+        reportPage();
+        withTemplate();
+        installCapture();
+        submitReport();
+        // Written synchronously: the form's entry list is built as the handler returns, so a body
+        // set from the clipboard promise would arrive after the issue had already opened.
+        assert.match(bugBody(), /on the clipboard/);
+        assert.doesNotMatch(bugBody(), /Paste your capture of the page here/);
+        // In the Screenshot section, not appended to the end of the report.
+        assert.match(
+            bugBody(),
+            /### Screenshot\n\n<!-- Paste your capture here[^]*?-->\n\n\n### Base render/,
+        );
+        await settled();
+    });
+
+    it("names the captures the clipboard could not take", async () => {
+        stubBrowser([capture("shot-1", "Region"), capture("shot-2", "Table")]);
+        reportPage();
+        withTemplate();
+        installCapture();
+        submitReport();
+        assert.match(bugBody(), /The other 1 are there as well\./);
+        await settled();
+    });
+
+    it("leaves the paste slot alone when the report embeds the capture", async () => {
+        stubBrowser([hosted("shot-1", "Region")]);
+        reportPage();
+        withTemplate();
+        installCapture();
+        submitReport();
+        await settled();
+        assert.match(bugBody(), /!\[Region\]\(\S*\/i\/shot-1\.png\)/);
+        assert.match(bugBody(), /Paste your capture of the page here/);
+        assert.doesNotMatch(bugBody(), /on the clipboard/);
+    });
+});
