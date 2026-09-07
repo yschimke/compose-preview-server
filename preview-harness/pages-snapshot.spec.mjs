@@ -1106,9 +1106,13 @@ const FIXTURE_STATES = [
       );
       await page.waitForSelector(".cp-fab-menu[open]", { state: "detached" });
       await page.click('[data-compare-format="parallel"]');
-      await expect(page.locator(".cp-compare-target-head")).toHaveText(
-        "Wear M3",
-      );
+      // The NAME node, not the whole `<th>`: #553 gave each header a second line saying which half
+      // of the pair the column is ("baseline" / "ours"), and `orderColumns` writes the lane's label
+      // into `.cp-compare-head-name` for exactly that reason. Asserting the `<th>` now reads
+      // "Wear M3baseline".
+      await expect(
+        page.locator(".cp-compare-target-head .cp-compare-head-name"),
+      ).toHaveText("Wear M3");
       await expect(page.locator(".cp-compare-diff-head")).toBeVisible();
       await page.waitForFunction(() =>
         Array.from(
@@ -1159,13 +1163,20 @@ const FIXTURE_STATES = [
       await page.click('[data-compare-format="reference"]');
       // The header names the lane and moves with its column — assert both rather than trusting the
       // pixels, so a reordered table with a stale header fails loudly here.
-      await expect(page.locator(".cp-compare-target-head")).toHaveText("Figma");
-      // …and assert the text is the text the READER sees. `serve.css` used to hide this `<th>`
+      await expect(
+        page.locator(".cp-compare-target-head .cp-compare-head-name"),
+      ).toHaveText("Figma");
+      // …and assert the text is the text the READER sees. `serve.css` used to hide this header
       // with `font-size: 0` and paint a `::after` whose content was the generic "Design reference"
       // on every reference lane, so a DOM-text assertion passed while the page said something
       // else. This is the only layer with real CSS, so it is the only one that can catch that.
+      //
+      // Probed on the name node for the same reason the assertion above moved to it: that is where
+      // the lane's label lives now, so that is where hiding it would hide it.
       const painted = await page.evaluate(() => {
-        const th = document.querySelector(".cp-compare-target-head");
+        const th = document.querySelector(
+          ".cp-compare-target-head .cp-compare-head-name",
+        );
         const style = getComputedStyle(th);
         return {
           fontSize: parseFloat(style.fontSize),
@@ -3985,14 +3996,29 @@ for (const fixture of listPageFixtures()) {
 
       // Comparison scores are asynchronous (fetch + decode + SSIM). Capture the settled
       // fidelity state, not the initial "waiting…" skeleton.
+      //
+      // VISIBLE rows only, and bounded. A row the current lane has nothing to compare is hidden by
+      // `applySearch`, and a hidden row is never dressed and never scored — so its cell keeps the
+      // server-rendered "waiting…" for the life of the page. Asking every cell to settle became
+      // unsatisfiable the moment this fixture's default lane moved to `reference` (#553): the
+      // `switch-on` row carries no `data-reference-*`, so it is hidden from the first pass on.
+      // With no `timeout` this wait never rejects either, so the `.catch` below could not do what
+      // it is for and the whole 60s test budget went to it instead — the capture then died on the
+      // next call, reported against `page.screenshot`. Bounded like the image wait above, so an
+      // unsettleable predicate degrades to "shoot what is on screen" rather than to no shot at all.
       if (fixture === "serve-format-compare") {
         await page
-          .waitForFunction(() =>
-            Array.from(document.querySelectorAll(".cp-compare-score")).every(
-              (cell) =>
-                cell.textContent !== "waiting…" &&
-                cell.textContent !== "comparing…",
-            ),
+          .waitForFunction(
+            () =>
+              Array.from(
+                document.querySelectorAll("tr:not([hidden]) .cp-compare-score"),
+              ).every(
+                (cell) =>
+                  cell.textContent !== "waiting…" &&
+                  cell.textContent !== "comparing…",
+              ),
+            null,
+            { timeout: 15_000 },
           )
           .catch(() => {});
       }
