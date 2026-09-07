@@ -200,9 +200,29 @@ internal class ScreenGeneratorComposeExportExecutor(
        * The pictures the source stands in for; see [ScreenDocumentProjection.Outcome.Projected].
        */
       val assetPlaceholders: List<ScreenDocumentProjection.AssetPlaceholder> = emptyList(),
+      /**
+       * The container this source is a **Wear widget** for, or null for a screen.
+       *
+       * Present rather than inferred from the catalog id, because it is what the preview entry the
+       * server synthesizes has to switch on: a widget's source declares no screen to call, it
+       * declares a body, a brush and a container spec, and it is drawn inside the Glance Wear
+       * container rather than composed at the design's own frame. [screenName] is then the base
+       * identifier the three are declared under.
+       */
+      val widgetFrame: WidgetFrame? = null,
     ) : Generated
 
     data class Refused(val code: String, val reasons: List<String>) : Generated
+
+    /**
+     * A widget container's whole frame — its content box plus the padding the design authored — in
+     * dp.
+     *
+     * The design's `environment` is not this. A widget design is authored at a container footprint
+     * and the environment is a screen's, so rendering at it would letterbox the container inside a
+     * watch face or crop it, and the frame the canvas draws beside it would be a different size.
+     */
+    data class WidgetFrame(val widthDp: Int, val heightDp: Int)
   }
 
   /**
@@ -230,24 +250,37 @@ internal class ScreenGeneratorComposeExportExecutor(
     // which left the one catalog that most needs a native render as the one catalog that could not
     // ask for one.
     //
-    // A **Wear widget** still refuses, but not for want of a `@Preview`: the generated file has
-    // one, and it compiles and renders in a Glance Wear module — `:samples:wear-widget` in
-    // yschimke/compose-ai-tools is the fixture that does it. What this lane cannot drive is its
-    // *shape*. A widget preview takes a `WearWidgetParams` from a preview-params provider rather
-    // than a screen, and this lane is built around one screen spec, so it has nowhere to put a
-    // canvas that is a container footprint (yschimke/compose-preview-server#522).
-    if (RecordFreeExport.applies(document)) {
-      if (!RecordFreeExport.composeCompilable(document)) {
-        return Generated.Refused(
-          RECORD_FREE_DESIGN,
-          listOf(
-            "this design generates a Remote Compose document; its generated `@Preview` takes a " +
-              "`WearWidgetParams` from a preview-params provider rather than a screen, which " +
-              "this lane does not drive. Export it and render it in a Glance Wear module, or " +
-              "preview it on the canvas"
-          ),
-        )
+    // A **Wear widget** is Remote Compose — recorded into a `WearWidgetDocument` and played by the
+    // host, never composed — so there is no screen here for this lane to call. It reaches the same
+    // compiler by a third road: `RecordFreeExport.nativePreview` writes the body, the widget's own
+    // `WearWidgetBrush` and the `WearWidgetParams` its scaffold describes, and the preview entry
+    // draws them inside the Glance Wear container. Not the file `export` hands a designer, and
+    // deliberately — that one asks for its pictures as parameters nothing here could pass, and may
+    // only name the container specs upstream publishes, where this host builds the design's own
+    // (yschimke/compose-preview-server#522).
+    if (RecordFreeExport.isWearWidget(document)) {
+      return when (
+        val preview =
+          RecordFreeExport.nativePreview(document, packageName, document.widgetAssetBytes())
+      ) {
+        // Unreachable: `isWearWidget` was true, so the widget emitter owns this document. Reported
+        // rather than asserted, for the reason the screen branch below reports its own null.
+        null ->
+          Generated.Refused(
+            RECORD_FREE_DESIGN,
+            listOf("no record-free emitter claimed this design"),
+          )
+        is RecordFreeExport.NativePreview.Refused ->
+          Generated.Refused(UNEXPRESSIBLE_DOCUMENT, preview.reasons)
+        is RecordFreeExport.NativePreview.Emitted ->
+          Generated.Emitted(
+            preview.source,
+            preview.name,
+            widgetFrame = Generated.WidgetFrame(preview.widthDp, preview.heightDp),
+          )
       }
+    }
+    if (RecordFreeExport.applies(document)) {
       val packRecords =
         when (val packs = packRecordsFor(document)) {
           is PackRecords.Refused -> return Generated.Refused(packs.code, packs.reasons)

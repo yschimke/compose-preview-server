@@ -42,6 +42,21 @@ data class UiBuilderGeneratedCompose(
    * saying so explicitly is what keeps the entry generator from guessing.
    */
   val remoteCapture: Boolean = false,
+  /**
+   * True when [composableName] names a **Wear widget**'s three declarations rather than a screen.
+   *
+   * A widget's generated source declares `<name>Content` (a `@RemoteComposable` body),
+   * `<name>Background` (its `WearWidgetBrush`) and `<name>Params` (the container spec its scaffold
+   * describes). There is no screen in it to call, so the entry composes none: it hands the three to
+   * `androidx.glance.wear.tooling.preview.WearWidgetPreview`, which draws the host's squircle
+   * container around the body exactly as the launcher does — the frame the builder's canvas draws
+   * beside it.
+   *
+   * Exclusive with [remoteCapture] in practice and not asserted so: that mode wraps a body in
+   * `RemoteOverridablePreview` to publish a document, and a widget is drawn rather than published.
+   * A caller setting both would get the widget entry, which is the one that can draw.
+   */
+  val wearWidget: Boolean = false,
 ) {
   companion object {
     /** The Skiko desktop daemon — every catalog whose components are Compose Multiplatform. */
@@ -96,6 +111,7 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
                 widthDp = generated.widthDp,
                 heightDp = generated.heightDp,
                 remoteCapture = generated.remoteCapture,
+                wearWidget = generated.wearWidget,
               ),
             ),
           ),
@@ -120,8 +136,10 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
       widthDp: Int,
       heightDp: Int,
       remoteCapture: Boolean = false,
+      wearWidget: Boolean = false,
     ): String =
-      if (remoteCapture) remoteCaptureEntry(composableName, widthDp, heightDp)
+      if (wearWidget) wearWidgetEntry(composableName, widthDp, heightDp)
+      else if (remoteCapture) remoteCaptureEntry(composableName, widthDp, heightDp)
       else
         """
         package generated.uibuilder.preview
@@ -167,6 +185,50 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
       @Composable
       fun UiBuilderGeneratedPreview() {
         RemoteOverridablePreview(profile = RcPlatformProfiles.ANDROIDX) { GeneratedRemoteContent() }
+      }
+      """
+        .trimIndent() + "\n"
+
+    /**
+     * The entry for a **Wear widget**, drawn inside the container its host draws.
+     *
+     * `WearWidgetPreview` is upstream's own tooling wrapper
+     * (`androidx.glance.wear:wear-tooling-preview`): it builds the `WearWidgetDocument` from the
+     * brush and the body, runs it through the same `WearWidgetContainer` the real widget pipeline
+     * does — the rounded background, the host padding, the content inset inside it — and rasters
+     * the result. Naming it rather than composing the body directly is the difference between a
+     * render of the widget and a render of its contents floating on nothing.
+     *
+     * Not `CapturingWearWidgetPreview`, the compose-ai-tools wrapper that additionally offers the
+     * encoded document to the render harness's `.rc` sidecar. This lane wants a **frame**; a
+     * document is what the inline-capture lane exists to produce, and naming the wrapper here would
+     * put `ee.schimke.composeai:wear-preview-runtime` on the list of things a bundle must carry
+     * before a widget design can be previewed against it, to publish bytes nobody reads.
+     *
+     * The `@Preview` canvas is the container's whole frame — content plus the padding the design
+     * authored — because that is what the wrapper sizes itself to and what the builder's canvas
+     * draws. The design's `environment` is a screen's and is deliberately not used here.
+     */
+    private fun wearWidgetEntry(name: String, widthDp: Int, heightDp: Int): String =
+      """
+      package generated.uibuilder.preview
+
+      import androidx.compose.runtime.Composable
+      import androidx.compose.ui.tooling.preview.Preview
+      import androidx.glance.wear.tooling.preview.WearWidgetPreview
+      import generated.uibuilder.${name}Background as generatedWidgetBackground
+      import generated.uibuilder.${name}Content as GeneratedWidgetContent
+      import generated.uibuilder.${name}Params as generatedWidgetParams
+
+      @Preview(widthDp = $widthDp, heightDp = $heightDp)
+      @Composable
+      fun UiBuilderGeneratedPreview() {
+        WearWidgetPreview(
+          params = generatedWidgetParams(),
+          background = generatedWidgetBackground(),
+        ) {
+          GeneratedWidgetContent()
+        }
       }
       """
         .trimIndent() + "\n"

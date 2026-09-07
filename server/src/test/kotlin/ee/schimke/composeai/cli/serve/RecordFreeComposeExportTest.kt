@@ -106,14 +106,52 @@ class RecordFreeComposeExportTest {
   }
 
   @Test
-  fun `the same design refuses only as a native preview, and says why`() {
-    // The export lane serves it; the compile lane cannot, and the reason it gives is the design's
-    // language rather than a missing record an operator would go and configure for nothing.
-    val refused =
-      executor.generate(widget()) as ScreenGeneratorComposeExportExecutor.Generated.Refused
+  fun `the same design generates different source for the native preview lane`() {
+    // Two files for two readers, from one design. The export above is what a designer pastes into
+    // their own module — a widget class, a provider-driven preview — and this is what the host
+    // compiles to draw the thing: the body, the brush and the container spec, with no
+    // `GlanceWearWidget` in it for anything to construct.
+    val generated =
+      executor.generate(widget()) as ScreenGeneratorComposeExportExecutor.Generated.Emitted
 
-    assertEquals(ScreenGeneratorComposeExportExecutor.RECORD_FREE_DESIGN, refused.code)
-    assertTrue(refused.reasons.single().contains("Remote Compose"), refused.reasons.toString())
+    assertEquals("HelloWidget", generated.screenName)
+    assertTrue("fun HelloWidgetContent() {" in generated.source, generated.source)
+    assertTrue(
+      "fun HelloWidgetBackground(): WearWidgetBrush {" in generated.source,
+      generated.source,
+    )
+    assertTrue("fun HelloWidgetParams(): WearWidgetParams =" in generated.source, generated.source)
+    assertFalse("GlanceWearWidget" in generated.source, generated.source)
+    assertFalse("WearWidgetPreviewParams" in generated.source, generated.source)
+    // The Small container's own frame — 200×60dp of content inside 8dp of host padding — rather
+    // than the design environment, which describes a watch screen.
+    assertEquals(
+      ScreenGeneratorComposeExportExecutor.Generated.WidgetFrame(216, 76),
+      generated.widgetFrame,
+    )
+  }
+
+  @Test
+  fun `a widget the export refuses for its padding still renders natively`() {
+    // The export's refusal is true of a *pasteable file*: only the shipped providers can be named
+    // in one, and they carry 8dp. This host constructs the params itself, so the design gets the
+    // padding it authored and a picture of it.
+    val artifact = export(widget(horizontalPaddingDp = 20.0))
+    assertEquals(
+      listOf(ScreenGeneratorComposeExportExecutor.UNEXPRESSIBLE_DOCUMENT),
+      artifact.diagnostics.map { it.code },
+    )
+
+    val generated =
+      executor.generate(widget(horizontalPaddingDp = 20.0))
+        as ScreenGeneratorComposeExportExecutor.Generated.Emitted
+
+    assertTrue("horizontalPaddingDp = 20f" in generated.source, generated.source)
+    // 200dp of content between 20dp of padding on each edge.
+    assertEquals(
+      ScreenGeneratorComposeExportExecutor.Generated.WidgetFrame(240, 76),
+      generated.widgetFrame,
+    )
   }
 
   @Test

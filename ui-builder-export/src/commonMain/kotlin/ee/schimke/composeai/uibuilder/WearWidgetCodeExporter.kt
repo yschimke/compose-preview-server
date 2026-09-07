@@ -37,7 +37,7 @@ object WearWidgetCodeExporter {
     data class Refused(val reasons: List<String>) : Result
   }
 
-  /** What a design bundles, or why it does not. [Result] with the archive's other files. */
+  /** What a design bundles, or why it does not: [Result] with the archive's other files. */
   sealed interface BundleResult {
     data class Emitted(val bundle: WidgetBundle) : BundleResult
 
@@ -124,6 +124,7 @@ object WearWidgetCodeExporter {
         )
 
     val refusals = mutableListOf<String>()
+
     // The host owns these, and only the shipped providers can be named in a `@Preview`. A design
     // that moved them would generate a preview drawing a frame the design does not have, which is
     // exactly the silent disagreement this generator exists to avoid.
@@ -152,7 +153,7 @@ object WearWidgetCodeExporter {
     // refusals are dropped, the real emitter below being the one that reports them.
     val depth =
       if (
-        RemoteContentEmitter(document, mutableListOf(), assets, bundled).let { probe ->
+        RemoteContentEmitter(document, mutableListOf(), assets, bundled = bundled).let { probe ->
           probe.background(root)
           contentIds.singleOrNull()?.let { probe.emit(it, depth = 1) }
           probe.usesTheme
@@ -161,7 +162,7 @@ object WearWidgetCodeExporter {
         2
       else 1
 
-    val emitter = RemoteContentEmitter(document, refusals, assets, bundled)
+    val emitter = RemoteContentEmitter(document, refusals, assets, bundled = bundled)
     val background = emitter.background(root)
     val body =
       when (contentIds.size) {
@@ -184,7 +185,9 @@ object WearWidgetCodeExporter {
         appendLine("package $packageName")
         appendLine()
       }
-      emitter.imports(size.previewParamsProvider).forEach { appendLine("import $it") }
+      emitter.imports(WidgetSourceShape.Exported(size.previewParamsProvider)).forEach {
+        appendLine("import $it")
+      }
       appendLine()
       appendLine("@RemoteComposable")
       appendLine("@Composable")
@@ -232,7 +235,7 @@ object WearWidgetCodeExporter {
       // The inlined pictures sit below the preview for the same reason the declarations do:
       // a base64 PNG is thousands of columns, and a reader who has to scroll past it to reach
       // the widget has been handed a worse file than one who can stop reading at the preview.
-      inlineBitmaps(emitter.inlineBitmaps).forEach {
+      inlineBitmapDeclarations(emitter.inlineBitmaps).forEach {
         appendLine()
         appendLine(it)
       }
@@ -274,7 +277,8 @@ object WearWidgetCodeExporter {
    * A background is unconditional — the design draws that picture and no application supplies it. A
    * content picture is the application's, so its local keeps the parameter and falls back: to the
    * design's own artwork where the archive carries it, and to the blank bitmap the inlining lane
-   * uses where it does not.
+   * uses where it does not. Every parameter gets a line, not only the ones the archive can answer:
+   * in this lane they are all nullable, and the content function takes bitmaps that are not.
    */
   private fun bundledLocals(
     bundled: Boolean,
@@ -282,10 +286,6 @@ object WearWidgetCodeExporter {
     parameters: List<RemoteContentEmitter.ImageParameter>,
   ): List<String> {
     if (!bundled) return emptyList()
-    // Every parameter, not only the ones the archive can answer: in this lane they are all
-    // nullable, and the content function takes bitmaps that are not. A parameter whose picture is
-    // missing therefore still needs its line — the blank bitmap, which is what the inlining lane
-    // defaults to in the constructor.
     return backgrounds.map { "val ${it.identifier} = context.bundledBitmap(\"${it.path}\")" } +
       parameters.map { parameter ->
         val fallback =
@@ -327,8 +327,7 @@ object WearWidgetCodeExporter {
       appendLine()
       outcome.files.forEach { appendLine("- `${it.path}` (`${it.mediaType}`)") }
     }
-    val application = outcome.parameters
-    if (application.isNotEmpty()) {
+    if (outcome.parameters.isNotEmpty()) {
       appendLine()
       appendLine("## What your application passes")
       appendLine()
@@ -336,63 +335,13 @@ object WearWidgetCodeExporter {
       appendLine("the artwork the design was drawn with, so the `@Preview` shows the design; pass")
       appendLine("your own to draw real data:")
       appendLine()
-      application.forEach {
+      outcome.parameters.forEach {
         val default =
           if (it.bundled != null) "the design's `${it.assetKey}` artwork"
           else "a blank bitmap — the design's `${it.assetKey}` is not in this archive"
         appendLine("- `${it.identifier}` — $default")
       }
     }
-  }
-
-  /**
-   * The `val`s a background picture becomes: its bytes, and the decode that turns them into one.
-   *
-   * Chunked into a list of literals joined at runtime rather than one long `const val`, because a
-   * JVM string constant is capped at 65535 **bytes** of modified UTF-8 and a photograph passes that
-   * easily. Concatenating literals with `+` would not help — the compiler folds those into the
-   * single constant the cap applies to — so the chunks are joined by code instead, and a picture of
-   * any size compiles.
-   *
-   * One decoder per file, not per picture, and `NO_WRAP` because the encoder above emits no line
-   * breaks.
-   */
-  private fun inlineBitmaps(assets: List<RemoteContentEmitter.InlineAsset>): List<String> {
-    if (assets.isEmpty()) return emptyList()
-    val blocks = mutableListOf<String>()
-    assets.forEach { asset ->
-      // The bytes first: a top-level `val` is initialised in declaration order, so a decode that
-      // read its constant from above it would compile to "must be initialized".
-      blocks += buildString {
-        appendLine("/** The design's `${asset.assetKey.escapeComment()}` asset, inlined. */")
-        appendLine("private val ${asset.identifier.uppercaseConstant()}: String =")
-        appendLine("${INDENT}listOf(")
-        asset.base64.chunked(BASE64_CHUNK).forEach { appendLine("$INDENT$INDENT\"$it\",") }
-        appendLine("$INDENT)")
-        append("$INDENT${INDENT}.joinToString(\"\")")
-      }
-      blocks +=
-        "private val ${asset.identifier}: RemoteImageBitmap =\n" +
-          "${INDENT}decodeInlineBitmap(${asset.identifier.uppercaseConstant()})"
-    }
-    blocks += buildString {
-      appendLine("private fun decodeInlineBitmap(encoded: String): RemoteImageBitmap {")
-      appendLine("${INDENT}val bytes = Base64.decode(encoded, Base64.NO_WRAP)")
-      appendLine("${INDENT}return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)")
-      appendLine("$INDENT$INDENT.asImageBitmap()")
-      appendLine("$INDENT$INDENT.rb")
-      append("}")
-    }
-    return blocks
-  }
-
-  /** `coverWide` becomes `COVER_WIDE_PNG`, the constant beside it. */
-  private fun String.uppercaseConstant(): String = buildString {
-    this@uppercaseConstant.forEach {
-      if (it.isUpperCase() && isNotEmpty()) append('_')
-      append(it.uppercaseChar())
-    }
-    append("_PNG")
   }
 
   /** `albumArt: RemoteImageBitmap`, once per picture the body draws, or nothing at all. */
@@ -493,9 +442,6 @@ object WearWidgetCodeExporter {
 
   private const val INDENT = "    "
 
-  /** ktfmt's own default, as [RemoteContentEmitter] keeps for the body. */
-  private const val BASE64_CHUNK = 96
-
   private const val MAX_LINE = 100
 
   internal const val WEAR_WIDGET_SPEC_PADDING_DP = 8f
@@ -522,7 +468,7 @@ private val WearWidgetScaffoldSize.previewParamsProvider: String
     }
 
 /** `Hello widget · Small (216×76dp)` becomes `HelloWidget`. */
-private fun UiBuilderDocument.widgetIdentifier(): String {
+internal fun UiBuilderDocument.widgetIdentifier(): String {
   val words =
     title
       .substringBefore('·')
