@@ -127,8 +127,15 @@ object PlaygroundCatalogClasspath {
    * Absent, it is left out rather than failing the whole classpath. A host with no SDK has already
    * had its Android render lanes disabled by the opener above, and a `desktop` bundle is unaffected
    * either way — refusing here would take the CMP catalogs down with it.
+   *
+   * What that costs is worth naming: on such a host this returns nothing and the compile fails
+   * exactly as it did before, with an `Unresolved reference 'android'` that says nothing about the
+   * SDK — the log line above is the only thing that does. The resolver is the same call
+   * `ServeRunner.buildPlaygroundAndroidDaemonOpener` makes, so in practice a host that answers null
+   * here has already reported the Android modes as disabled and offers none of the catalogs that
+   * could reach this.
    */
-  private fun androidPlatformJars(
+  internal fun androidPlatformJars(
     system: String,
     backend: String?,
     resolveAndroidJar: () -> File?,
