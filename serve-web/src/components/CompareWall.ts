@@ -663,18 +663,30 @@ export class CompareWall extends ControllerElement {
         const component = params.get("component") ?? "";
         let visible = 0;
         for (const row of this.rows) {
+            const hasFormat = Boolean(
+                variantFor(
+                    this.sourcesOf(row),
+                    this.state.format,
+                    this.state.theme,
+                ),
+            );
+            // A row this lane cannot pair is not merely hidden — it is unscoreable, and its cell
+            // has to stop claiming otherwise. The server renders every cell "waiting…", and a row
+            // filtered out here is never dressed and never scored, so without this it keeps that
+            // word for the life of the page: a promise of a number that is not coming. Invisible
+            // while the row is hidden, and wrong the moment a lane switch or a cleared filter
+            // reveals it.
+            //
+            // It also hangs anything that waits for the wall to settle by reading every cell — the
+            // page-capture harness does exactly that, and spent its whole budget waiting on a row
+            // it was never going to photograph.
+            if (!hasFormat) this.markUnpairable(row);
             const keep = keepRow(
                 {
                     hay: row.getAttribute("data-hay") ?? "",
                     previewIds: row.getAttribute("data-preview-ids") ?? "",
                     componentId: row.getAttribute("data-component-id") ?? "",
-                    hasFormat: Boolean(
-                        variantFor(
-                            this.sourcesOf(row),
-                            this.state.format,
-                            this.state.theme,
-                        ),
-                    ),
+                    hasFormat,
                 },
                 query,
                 preview,
@@ -694,6 +706,25 @@ export class CompareWall extends ControllerElement {
         // {@link dressRow} has just re-pointed at the pair this lane is showing, so recomputing the
         // picked set any earlier would write the previous lane's comparisons into the report.
         this.syncPicks();
+    }
+
+    /**
+     * Blank the score of a row the current lane has no pair for.
+     *
+     * `—` rather than "waiting…" or a zero: nothing is coming and nothing was measured, which is a
+     * third state from both "being measured" and "measured badly". It borrows the `--na` band the
+     * scorer already uses for a pair it could not read, because it is the same answer.
+     */
+    private markUnpairable(row: HTMLElement): void {
+        // Unconditional and idempotent, deliberately: a "have I already done this?" flag would
+        // have to be cleared by every path that writes a real score, and one that forgot would
+        // leave a row that HAS a pair on this lane unable to say it has none on the next.
+        const score = row.querySelector<HTMLElement>(".cp-compare-score");
+        if (!score) return;
+        score.textContent = "—";
+        score.className = "cp-compare-score cp-compare-score--na";
+        score.removeAttribute("data-score-source");
+        score.title = "This lane has nothing to compare this preview against";
     }
 
     /**

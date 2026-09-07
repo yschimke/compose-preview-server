@@ -2243,6 +2243,101 @@ class ServeWebTest {
   }
 
   @Test
+  fun `the viewer compares every variant of the component on its stage`() {
+    // The viewer could put ONE baseline behind ONE variant. Asking "is this component wrong, or is
+    // this STATE of it wrong?" meant leaving for a wall of the whole catalog and narrowing by hand
+    // — from a page that already knew which component you were looking at.
+    // See `docs/design/COMPARE_NAVIGATION.md`, F4 and §3.1.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("card__ideal__default__light", "Card", componentId = "Card"),
+        token = "t",
+        basePath = "/m3",
+        catalogName = "Material 3",
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__default__light",
+              variant = "default · light",
+              referenceId = "card-figma",
+              matchPercent = 96.4,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__outlined__light",
+              variant = "outlined",
+              referenceId = "card-outlined-figma",
+              matchPercent = 71.9,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__long__light",
+              variant = "long text",
+            ),
+          ),
+      )
+    assertTrue(html.contains("id=\"cp-compare-strip\""), html)
+    // Every variant, including the one on the stage — which is marked and deliberately NOT a link,
+    // because a link that reloads the page you are on reads as a control that does nothing.
+    assertTrue(html.contains("aria-current=\"true\""), html)
+    assertFalse(html.contains("href=\"/m3/p/card__ideal__default__light?"), html)
+    assertTrue(html.contains("href=\"/m3/p/card__ideal__outlined__light?"), html)
+    // Baseline left, ours right — the same order the wall and the triptych read in.
+    assertTrue(
+      html.indexOf("/m3/reference/card-figma.png") <
+        html.indexOf("/m3/render/card__ideal__default__light.png"),
+      "the baseline picture leads the pair: $html",
+    )
+    // The published score, banded the way the design-spec chip bands it, so one number does not
+    // change colour between the chip above the stage and the row below it.
+    assertTrue(html.contains("data-spec-match=\"match\">96.4%"), html)
+    assertTrue(html.contains("data-spec-match=\"off\">71.9%"), html)
+    // A variant nothing in the design file is mapped to says so, rather than showing a score it
+    // does not have or vanishing from a strip that claims to list every variant.
+    assertTrue(html.contains("not scored"), html)
+    // And the way out to the full instruments, scoped so it opens on this component.
+    assertTrue(html.contains("/m3/compare?format=reference&amp;component=Card"), html)
+  }
+
+  @Test
+  fun `the viewer draws no compare strip for a component with one unmapped variant`() {
+    // Nothing to compare and nothing to navigate between. An empty panel under every one-off
+    // preview is worse than no panel.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("card__ideal__default__light", "Card"),
+        token = "t",
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(previewId = "card__ideal__default__light", variant = "")
+          ),
+      )
+    assertFalse(html.contains("cp-compare-strip"), html)
+    // …and a viewer told about no variants at all is byte-identical to one that never had the
+    // feature, which is what keeps a plain module's page unchanged.
+    val plain =
+      ServeWeb.viewerPage(ServePreview("card__ideal__default__light", "Card"), token = "t")
+    assertFalse(plain.contains("cp-compare-strip"), plain)
+  }
+
+  @Test
+  fun `the viewer bar keeps its view controls in one group`() {
+    // Loose in the bar, `SVG` / `3D` / `Transparent` / `Fit width` were sorted by nothing, and the
+    // line each landed on depended on how wide the design-spec lane beside them happened to be —
+    // a lane that grows when it is entered. Pressing the spec chip rearranged controls that have
+    // nothing to do with it. See `docs/design/COMPARE_NAVIGATION.md`, F1.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("card__ideal__default__light", "Card"),
+        token = "t",
+        hasSvgExport = true,
+      )
+    assertTrue(html.contains("class=\"cp-view-group\""), html)
+    val group = html.substringAfter("class=\"cp-view-group\"").substringBefore("</span></div>")
+    for (control in listOf("cp-bg-btn cp-zoom-toggle", "Transparent")) {
+      assertTrue(group.contains(control), "$control belongs to the view group: $html")
+    }
+  }
+
+  @Test
   fun `the baseline leads the pair on every lane`() {
     // ONE order, every lane: baseline · diff · ours. The viewer's spec lane says it three ways
     // already (the Spec / Diff / Render triptych, the wipe's seam, the focused Reference / Diff /

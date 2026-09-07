@@ -238,9 +238,21 @@ confusion §1 records.
 | **4d** | Catalog index cards carry their worst match against the baseline | F0 | `ServeWeb` landing grid — *not yet* |
 | **4e** | `/pages` index carries catalog-wide coverage | F0 | `ServeWeb` pages index — *not yet* |
 | **5** | Design pages: hover / hold diffs | F5 | `design/lanes.ts`, `DesignPage.ts`, `serve.css` |
-| **6** | Viewer: Compare panel under the stage with the variant strip | F1, F4 | `SpecCompare.ts`, `ServeWeb` viewer |
+| **6** | Viewer: compare strip under the stage, and the toolbar's `View` group | F1, F4 | `ServeWeb.comparisonStripHtml`, `ServeHttpServer` viewer handler |
 | **7** | Wall: one baseline per document, haystack diet | F2 | `ServeWeb.comparisonPage` |
 
-1–5 are self-contained and land first. 6 and 7 are the structural ones: 6 needs the wall's row
-builder factored out so the panel and the wall draw the same rows, and 7 changes the page's
-caching shape, so both are staged behind the vocabulary landing first.
+1–6 have landed. 7 is the remaining structural one: it changes the page's caching shape.
+
+**§3.1 landed smaller than it was drawn, deliberately.** The strip is server-rendered HTML with no
+JavaScript at all: it shows the design reference opposite each variant and the score the delivery
+branch published, rather than a live-scored pair behind a baseline picker. Two reasons, and the
+second is the binding one.
+
+The viewer bundle is within two kilobytes of its budget
+(`serve-web/scripts/check-bundle-budgets.mjs`), so reusing `<cp-compare-wall>` here — the obvious
+way to "draw the same rows" — would charge every viewer page the wall's whole machinery. And it
+would charge it to re-derive numbers the delivery branch has already published for these exact
+pixels. A variant with no published score says `not scored` and links to the focused comparison,
+which measures live; the lane's own source picker still puts the paired catalog or the SVG export
+on the stage. A baseline picker over the strip is the natural next increment and needs a scorer on
+the page to be worth having.
