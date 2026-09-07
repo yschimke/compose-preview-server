@@ -21,8 +21,17 @@ import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
  * Every other command this binary has — `serve`, `ui`, `playground` — starts a server and stays up.
  * This one runs against a server that is already up (`--server`) and exits, which is how anyone
  * would use it against `preview.coo.ee` and keeps every *serving* command in [ServerCommands] a
- * serving command. The cost is named rather than hidden: with no server there is nothing to render
- * against, and a design cannot be rendered straight from a file.
+ * serving command.
+ *
+ * ## …except with `--local`, which is a compiler
+ *
+ * The cost above used to be paid rather than fixed: with no server there was nothing to render
+ * against, and a design could not be rendered straight from a file — so when the render lane itself
+ * misbehaved, the only surface that could reproduce it was the misbehaving server, whose reply is
+ * deliberately lossy. `--local` compiles and renders here instead, off a `--document` on disk or a
+ * design a server merely *read* out for it, and says why a frame is missing rather than only that
+ * it is ([#551](https://github.com/yschimke/compose-preview-server/issues/551), [DesignLocalLane]).
+ * It is still a client: nothing is served, and the process exits.
  *
  * ## Parsing is separated from doing
  *
@@ -41,6 +50,15 @@ internal object DesignCommand {
 
   /** Every verb, in the order [usage] lists them. */
   val VERBS: List<String> = listOf(LIST, GET, RENDER, EXPORT)
+
+  /**
+   * The verbs `--local` has an answer for.
+   *
+   * `list` and `get` read a server's design state, and this process holds no copy of it — a local
+   * `list` could only ever be empty, and a local `get` would be `cat`. Refused by name rather than
+   * quietly ignoring the flag.
+   */
+  val LOCAL_VERBS: List<String> = listOf(RENDER, EXPORT)
 
   /**
    * The credential, from the environment and never from a flag.
@@ -86,6 +104,31 @@ internal object DesignCommand {
     /** Whether a missing or expired credential may start the device-code flow. */
     val authorize: Boolean,
     val timeoutSeconds: Long,
+    /**
+     * Compile and render in this process instead of asking a server.
+     *
+     * The half of this command
+     * [#529](https://github.com/yschimke/compose-preview-server/issues/529) left outstanding: with
+     * `--local` the design's pixels are produced by the same generator, compiler and daemon a
+     * server would drive, in a process a debugger can attach to and with the reason for a missing
+     * frame on stderr rather than in somebody else's log
+     * ([#551](https://github.com/yschimke/compose-preview-server/issues/551)).
+     */
+    val local: Boolean = false,
+    /**
+     * A design document read straight off disk, instead of from a server.
+     *
+     * This is what makes a broken host reproducible: `design get` captures the document from it — a
+     * read, not the render lane under suspicion — and the file then replays against a known-good
+     * tree, or against yesterday's bundle, or under a debugger.
+     */
+    val document: String? = null,
+    /** The catalog bundle a `--local` render compiles against. */
+    val catalog: String? = null,
+    /** Uploaded asset bytes by `storageKey`, for the widget lane that inlines them. */
+    val assets: String? = null,
+    /** `<catalog>=<components.json>`, as `serve --ui-builder-components` takes. */
+    val components: Map<String, String> = emptyMap(),
   ) {
 
     /**
@@ -97,9 +140,12 @@ internal object DesignCommand {
      */
     val capabilities: List<AgentGrantCapability>
       get() =
-        when (verb) {
-          RENDER,
-          EXPORT -> listOf(AgentGrantCapability.UI_BUILDER_EXPORT)
+        when {
+          // A `--local` run asks a server for nothing but the document, and reading one is a
+          // read. Asking for `ui-builder-export` here would have an approver grant the capability
+          // to make the server produce artifacts for a run that never asks it to.
+          local -> listOf(AgentGrantCapability.UI_BUILDER_READ)
+          verb == RENDER || verb == EXPORT -> listOf(AgentGrantCapability.UI_BUILDER_EXPORT)
           else -> listOf(AgentGrantCapability.UI_BUILDER_READ)
         }
 
@@ -108,11 +154,21 @@ internal object DesignCommand {
      * else reads what is already committed and asks for `preview`.
      */
     val scope: AgentGrantScope
-      get() = if (verb == RENDER) AgentGrantScope.LIVE else AgentGrantScope.PREVIEW
+      get() = if (verb == RENDER && !local) AgentGrantScope.LIVE else AgentGrantScope.PREVIEW
 
     /** Where the artifact goes when the caller named no `--out`. */
     val destination: String
-      get() = out ?: defaultOut(verb, designId, format)
+      get() = out ?: defaultOut(verb, designId.ifBlank { documentName() }, format)
+
+    /**
+     * The name a `--document` file stands in for, so `--out` still has a sensible default.
+     *
+     * `design render --document broken.json --local` writes `broken.png` beside it, which is what
+     * anyone comparing a replay against the original wants — and never the document itself.
+     */
+    private fun documentName(): String =
+      document?.let { java.io.File(it).name.substringBeforeLast('.') }?.takeIf { it.isNotBlank() }
+        ?: "design"
   }
 
   sealed interface Parsed {
@@ -148,6 +204,11 @@ internal object DesignCommand {
     var server: String? = null
     var authorize = true
     var timeout = DEFAULT_TIMEOUT_SECONDS
+    var local = false
+    var document: String? = null
+    var catalog: String? = null
+    var assets: String? = null
+    val components = linkedMapOf<String, String>()
 
     var index = 0
     while (index < rest.size) {
@@ -193,6 +254,31 @@ internal object DesignCommand {
               )
           index++
         }
+        argument == "--local" -> local = true
+        argument == "--document" -> {
+          document = value() ?: return missingValue(argument)
+          index++
+        }
+        argument == "--catalog" -> {
+          catalog = value() ?: return missingValue(argument)
+          index++
+        }
+        argument == "--assets" -> {
+          assets = value() ?: return missingValue(argument)
+          index++
+        }
+        argument == "--components" -> {
+          val raw = value() ?: return missingValue(argument)
+          val catalogId = raw.substringBefore('=', "")
+          val file = raw.substringAfter('=', "")
+          if (catalogId.isBlank() || file.isBlank()) {
+            return Parsed.Invalid(
+              "design: --components takes <catalog>=<components.json>, not '$raw'"
+            )
+          }
+          components[catalogId] = file
+          index++
+        }
         argument == "--no-authorize" -> authorize = false
         argument == "--token" ->
           // Named explicitly rather than falling through to "unknown flag", because the reason it
@@ -213,8 +299,44 @@ internal object DesignCommand {
     if (verb == LIST && designId != null) {
       return Parsed.Invalid("design list: takes no design id")
     }
-    if (verb != LIST && designId.isNullOrBlank()) {
+    // A document read off disk IS the design, so it stands in for the id every other spelling
+    // needs — including for `--out`, whose default is derived from one below.
+    if (verb != LIST && designId.isNullOrBlank() && document == null) {
       return Parsed.Invalid("design $verb: a design id is required")
+    }
+    if (designId != null && document != null) {
+      return Parsed.Invalid(
+        "design $verb: --document names the design, so a design id would name a second one"
+      )
+    }
+    if (local && verb !in LOCAL_VERBS) {
+      return Parsed.Invalid(
+        "design $verb: --local applies to ${LOCAL_VERBS.joinToString(" and ")} only — the other " +
+          "verbs read a server's state, which is not something this process holds a copy of"
+      )
+    }
+    if (document != null && !local) {
+      return Parsed.Invalid(
+        "design $verb: --document is a local input — a server renders its own copy of a design, " +
+          "not one from this disk. Add --local."
+      )
+    }
+    if (local && verb == RENDER && catalog == null) {
+      return Parsed.Invalid(
+        "design render --local: --catalog <bundle> names the classpath to compile against; " +
+          "there is no server here to have one configured"
+      )
+    }
+    if (!local && (catalog != null || assets != null || components.isNotEmpty())) {
+      return Parsed.Invalid(
+        "design $verb: --catalog, --assets and --components configure the local compile lane. " +
+          "Add --local, or drop them and let the server use its own."
+      )
+    }
+    if (document != null && revision != null) {
+      return Parsed.Invalid(
+        "design $verb: --revision pins which revision a server hands over; a file is already one"
+      )
     }
 
     val resolvedFormat =
@@ -226,6 +348,12 @@ internal object DesignCommand {
             return Parsed.Invalid("design $verb: --format applies to render and export only")
           } else null
       }
+    if (local && resolvedFormat == ExportFormatV1.SVG) {
+      return Parsed.Invalid(
+        "design render --local: only png. SVG is drawn by the server's own exporter rather than " +
+          "by the compile-and-render lane this mode reproduces."
+      )
+    }
     if (resolvedFormat == null && verb in setOf(RENDER, EXPORT)) {
       val allowed = if (verb == RENDER) RENDER_FORMATS else EXPORT_FORMATS
       return Parsed.Invalid(
@@ -244,6 +372,11 @@ internal object DesignCommand {
         server = server ?: env(SERVER_ENV)?.takeIf { it.isNotBlank() } ?: defaultServer(),
         authorize = authorize,
         timeoutSeconds = timeout,
+        local = local,
+        document = document,
+        catalog = catalog,
+        assets = assets,
+        components = components,
       )
     )
   }
@@ -279,6 +412,24 @@ internal object DesignCommand {
       export <designId>         The generated source (Kotlin), with its diagnostics.
 
     Options:
+      --local                   Compile and render in this process instead of asking a server.
+                                render and export only. Needs --catalog to compile against, and
+                                the daemon sidecars of an installed distribution to draw with:
+                                without them the compile still runs and the render says so
+                                instead of coming back silently empty. Prints the classpath it
+                                resolved, the daemon it opened and the reason for a missing frame,
+                                which is the whole point of the mode.
+      --document <file>         Read the design from this file instead of from a server (--local
+                                only). `design get <id> -o doc.json` against the suspect host
+                                captures one; this replays it anywhere.
+      --catalog <bundle>        --local: the catalog bundle to compile against. A path to a
+                                `.bundle`; its manifest picks the daemon (android or desktop).
+      --assets <dir>            --local: uploaded asset bytes by storage key, as `serve` keeps
+                                them under its `assets/` directory. A widget that inlines a
+                                picture needs them; nothing else does.
+      --components <c>=<file>   --local: a catalog's components.json, the record the generator
+                                proves each call site against. Repeatable. A record-free catalog
+                                (wear-m3, remote-m3) needs none.
       --server <url>            The server to ask (default ${defaultServer()}, or ${'$'}$SERVER_ENV).
       --out, -o <path>          Where to write it; `-` is stdout. Text verbs default to stdout,
                                 a render defaults to <designId>.<png|svg>.
@@ -296,6 +447,14 @@ internal object DesignCommand {
 
     Diagnostics from a refused export are printed to stderr and the exit code is non-zero, so a
     refusal fails a pipeline instead of writing an empty file into it.
+
+    Examples:
+      design render w --local --catalog m3.bundle          Render design `w`, whose document this
+                                                           command reads from --server, in this
+                                                           process.
+      design render --document doc.json --local \
+        --catalog m3.bundle --assets ./assets              No server at all: a captured document,
+                                                           replayed here.
     """
       .trimIndent()
 

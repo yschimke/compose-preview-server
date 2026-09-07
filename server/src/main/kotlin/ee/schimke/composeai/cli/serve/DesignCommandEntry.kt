@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import java.io.File
 import java.time.Duration
+import kotlinx.serialization.json.jsonObject
 
 /**
  * `design`, wired to a real process: argv in, files and exit codes out.
@@ -52,17 +53,38 @@ internal object DesignCommandEntry {
         token = { token },
         timeout = Duration.ofSeconds(options.timeoutSeconds),
       )
-    val runner =
-      DesignCommandRunner(
-        options = options,
-        transport = transport,
-        emit = err::println,
-        write = { destination, bytes -> destination.receive(bytes, out) },
-      )
+    val write: (String, ByteArray) -> Unit = { destination, bytes ->
+      destination.receive(bytes, out)
+    }
+    // One callable either way, so the authorize-and-retry below stays the only thing this object
+    // does. A `--local` run still reaches it: unless it was given a `--document`, it asks the
+    // server to READ the design out, and a read needs a grant like any other.
+    val runner: () -> Int =
+      if (options.local) {
+        val lane = localLane(options, err)
+        val runner =
+          DesignLocalRunner(
+            options = options,
+            document = { options.designDocument(transport) },
+            lane = lane,
+            emit = err::println,
+            write = write,
+          )
+        runner::run
+      } else {
+        val runner =
+          DesignCommandRunner(
+            options = options,
+            transport = transport,
+            emit = err::println,
+            write = write,
+          )
+        runner::run
+      }
 
     return try {
       try {
-        runner.run()
+        runner()
       } catch (refused: DesignAuthorizationRequired) {
         if (!options.authorize) {
           err.println(refused.message)
@@ -94,7 +116,7 @@ internal object DesignCommandEntry {
         // out of one is a grant anybody who can read the log holds. It lasts for this invocation;
         // a shell that wants to keep it sets $COMPOSE_PREVIEW_TOKEN from the approval page.
         err.println("design: the grant is held for this run only, and is not printed.")
-        runner.run()
+        runner()
       }
     } catch (refused: DesignAuthorizationRequired) {
       // A second refusal after a fresh grant is not a credential problem: the approver ticked less
@@ -111,6 +133,72 @@ internal object DesignCommandEntry {
       DesignCommandRunner.EXIT_FAILURE
     }
   }
+
+  /**
+   * The local compile lane this invocation described on the command line.
+   *
+   * Built before anything is asked of it and resolved lazily inside, so a design that never reaches
+   * a compiler — a refused export — costs no bundle extraction, while a render that fails can still
+   * say what the lane came out as.
+   */
+  private fun localLane(
+    options: DesignCommand.Options,
+    err: java.io.PrintStream,
+  ): DesignLocalLane {
+    val log: (String) -> Unit = { err.println("design --local: $it") }
+    val workRoot = java.nio.file.Files.createTempDirectory("design-local").toFile()
+    // Kept on a clean run as well as a failed one: a local render exists to be looked at
+    // afterwards — the staged Kotlin, the extracted bundle, the daemon's work dir — and a mode
+    // that deleted its own evidence would be the server again. Named so it can be found and
+    // removed.
+    Runtime.getRuntime()
+      .addShutdownHook(Thread { err.println("design --local: work dir ${workRoot.absolutePath}") })
+    return DesignLocalCompileLane(
+      bundleFile = File(options.catalog.orEmpty()),
+      componentRecords = options.components.mapValues { File(it.value) },
+      assets = DesignLocalCompileLane.assetStore(options.assets?.let(::File), log),
+      workRoot = workRoot,
+      log = log,
+    )
+  }
+
+  /**
+   * The design this run compiles: a file when `--document` named one, otherwise a server's copy.
+   *
+   * A server is asked to READ, never to render — that lane is the one under suspicion — so a broken
+   * host can still hand over the document that reproduces its own failure here.
+   */
+  private fun DesignCommand.Options.designDocument(
+    transport: DesignMcpTransport
+  ): ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1 {
+    val json =
+      document?.let { path ->
+        val file = File(path)
+        if (!file.isFile) {
+          throw DesignCommandFailure("design: --document $path is not a readable file")
+        }
+        runCatching { LENIENT.parseToJsonElement(file.readText()).jsonObject }
+          .getOrElse { throw DesignCommandFailure("design: $path is not JSON — ${it.message}") }
+      } ?: transport.designDocument(designId, revision)
+    return runCatching {
+      LENIENT.decodeFromJsonElement(
+        ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1.serializer(),
+        json,
+      )
+    }
+      .getOrElse {
+        throw DesignCommandFailure(
+          "design: that document is not one this build understands — ${it.message}"
+        )
+      }
+  }
+
+  /**
+   * Unknown keys are ignored on purpose: a document captured from a **newer** host is exactly the
+   * thing this mode is for, and refusing to read one because it carries a field this binary has not
+   * heard of would turn the debugging tool into a second version check.
+   */
+  private val LENIENT = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
   /** `-` is stdout; anything else is a file, with its parent directory made if it is missing. */
   private fun String.receive(bytes: ByteArray, out: java.io.PrintStream) {

@@ -177,6 +177,24 @@ own device-code flow: it prints an approval link and a code, waits for a human, 
 A refused export prints the generator's own diagnostics to stderr and exits non-zero, writing
 nothing, so it composes in CI.
 
+`--local` is the half of that command which needs no server at all: it runs the same generator,
+compiler and render daemon a server would, **here**, against a catalog bundle on disk — and says
+why a frame is missing rather than only that it is, which the wire reply cannot
+([#551](https://github.com/yschimke/compose-preview-server/issues/551)). That is what makes a
+broken host debuggable: `design get` captures its document (a read, not the render lane under
+suspicion) and the file replays anywhere.
+
+```shell
+compose-preview-server design get spotify-wear-widget --server https://preview.coo.ee > doc.json
+compose-preview-server design render --document doc.json --local \
+  --catalog wear-m3.bundle --assets ./assets -o replay.png
+compose-preview-server design export --document doc.json --local   # the generated Kotlin, no server
+```
+
+A local render prints the classpath it resolved, the daemon opener it built and the compiler's own
+diagnostics; `--components <catalog>=<components.json>` names the record a record-driven catalog's
+call sites are proven against, exactly as `serve --ui-builder-components` does.
+
 A served catalog's own composables can also be offered *inside* the builder's catalogs as a
 component pack (`--ui-builder-packs confetti-mobile=mobile,confetti-wear=wear`), switched on by an
 author from the editor's settings; see

@@ -16,6 +16,29 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
+ * The design document a server holds, as JSON.
+ *
+ * Shared by `design get`, which writes it out, and by `--local`, which compiles it here — so the
+ * two cannot disagree about which part of an `ui_builder_get_design` reply *is* the design. The
+ * reply is a snapshot; the document is what anyone asking for a design means by it, and the catalog
+ * beside it is 70 KB of something else.
+ */
+internal fun DesignMcpTransport.designDocument(designId: String, revision: Long?): JsonObject =
+  call(
+      ServeUiBuilderMcp.GET_DESIGN,
+      buildJsonObject {
+        put("designId", designId)
+        revision?.let { put("revision", it) }
+      },
+    )["snapshot"]
+    ?.jsonObject
+    ?.get("state")
+    ?.jsonObject
+    ?.get("document")
+    ?.jsonObject
+    ?: throw DesignCommandFailure("design get: the reply carried no document for $designId")
+
+/**
  * What each `design` verb does with a reply, and what it costs when the reply is a refusal.
  *
  * The whole point of the command is here rather than in the transport: **diagnostics are not
@@ -84,21 +107,7 @@ internal class DesignCommandRunner(
   }
 
   private fun get(): Int {
-    val response =
-      transport.call(
-        ServeUiBuilderMcp.GET_DESIGN,
-        buildJsonObject {
-          put("designId", options.designId)
-          options.revision?.let { put("revision", it) }
-        },
-      )
-    // `ui_builder_get_design` answers a snapshot; the document is what anyone asking for a design
-    // means by it, and the catalog beside it is 70 KB of something else.
-    val document =
-      response["snapshot"]?.jsonObject?.get("state")?.jsonObject?.get("document")?.jsonObject
-        ?: throw DesignCommandFailure(
-          "design get: the reply carried no document for ${options.designId}"
-        )
+    val document = transport.designDocument(options.designId, options.revision)
     val revision = document["revision"]?.jsonPrimitive?.longOrNull
     write(
       options.destination,
