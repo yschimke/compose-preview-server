@@ -893,12 +893,11 @@ describe("<cp-compare-wall>", () => {
         (window as Record<string, unknown>).cpRcFonts = priorFonts;
     });
 
-    it("moves the design spec to the left when the Figma lane is picked", async () => {
-        // The server renders the table in the order its own default format wants (`svg` here, so
-        // render first). Pressing the design-spec button changes which question the two columns
-        // answer, so the columns and their headers follow — spec left, render right, the same way
-        // the viewer's spec lane, its wipe seam and the focused Reference / Diff / Actual page all
-        // draw the pair. Leaving the lane puts them back.
+    it("keeps the baseline on the left on every lane, and only renames the header", async () => {
+        // ONE order, every lane: baseline · diff · ours. Handed a document written the other way
+        // round (the shape the server emitted before `COMPARE_NAVIGATION.md` F3), the wall
+        // normalises it on arrival and leaves it there — pressing a baseline button changes what
+        // the left column IS, never where to look for it.
         stubScorer({ "/a/Button-reference-light": 80 });
         document.body.innerHTML = `
           <cp-compare-wall></cp-compare-wall>
@@ -941,28 +940,25 @@ describe("<cp-compare-wall>", () => {
         const headText = () =>
             document.querySelector(".cp-compare-target-head")?.textContent;
 
-        assert.deepEqual(headOrder(), [
-            "cp-compare-render-head",
+        const baselineFirstHeads = [
             "cp-compare-target-head",
-        ]);
-        assert.deepEqual(cellOrder(), [
-            "cp-compare-render-cell",
+            "cp-compare-render-head",
+        ];
+        const baselineFirstCells = [
             "cp-compare-target-cell",
-        ]);
+            "cp-compare-render-cell",
+        ];
+
+        assert.deepEqual(headOrder(), baselineFirstHeads);
+        assert.deepEqual(cellOrder(), baselineFirstCells);
         assert.equal(headText(), "SVG");
 
         document
             .querySelector<HTMLElement>('[data-compare-format="reference"]')!
             .click();
         await settle();
-        assert.deepEqual(headOrder(), [
-            "cp-compare-target-head",
-            "cp-compare-render-head",
-        ]);
-        assert.deepEqual(cellOrder(), [
-            "cp-compare-target-cell",
-            "cp-compare-render-cell",
-        ]);
+        assert.deepEqual(headOrder(), baselineFirstHeads);
+        assert.deepEqual(cellOrder(), baselineFirstCells);
         // Named for the lane it is showing — a header still reading "SVG" over the Figma column
         // would say the pair is the other way round.
         assert.equal(headText(), "Figma");
@@ -971,18 +967,16 @@ describe("<cp-compare-wall>", () => {
             .querySelector<HTMLElement>('[data-compare-format="svg"]')!
             .click();
         await settle();
-        assert.deepEqual(cellOrder(), [
-            "cp-compare-render-cell",
-            "cp-compare-target-cell",
-        ]);
+        assert.deepEqual(headOrder(), baselineFirstHeads);
+        assert.deepEqual(cellOrder(), baselineFirstCells);
         assert.equal(headText(), "SVG");
     });
 
     it("keeps the delta map between the pair when the columns swap", async () => {
-        // The map is only a diff OF the two pictures if it sits between them. The pair swaps sides
-        // at runtime, and a swap that reasoned about the pair alone would shunt whatever was parked
-        // in the middle to the end of the row — leaving the wall claiming a middle column while
-        // drawing a trailing one.
+        // The map is only a diff OF the two pictures if it sits between them. The pair is
+        // normalised on arrival, and a normalisation that reasoned about the pair alone would shunt
+        // whatever was parked in the middle to the end of the row — leaving the wall claiming a
+        // middle column while drawing a trailing one.
         stubScorer({ "/a/Button-reference-light": 80 });
         document.body.innerHTML = `
           <cp-compare-wall></cp-compare-wall>
@@ -1021,41 +1015,33 @@ describe("<cp-compare-wall>", () => {
         const heads = () => pictures("thead th");
         const cells = () => pictures(".cp-compare-row td");
 
-        assert.deepEqual(heads(), [
-            "cp-compare-render-head",
-            "cp-compare-diff-head",
+        const orderedHeads = [
             "cp-compare-target-head",
-        ]);
-        assert.deepEqual(cells(), [
-            "cp-compare-render-cell",
-            "cp-compare-diff-cell",
+            "cp-compare-diff-head",
+            "cp-compare-render-head",
+        ];
+        const orderedCells = [
             "cp-compare-target-cell",
-        ]);
+            "cp-compare-diff-cell",
+            "cp-compare-render-cell",
+        ];
+
+        assert.deepEqual(heads(), orderedHeads);
+        assert.deepEqual(cells(), orderedCells);
 
         document
             .querySelector<HTMLElement>('[data-compare-format="reference"]')!
             .click();
         await settle();
-        assert.deepEqual(heads(), [
-            "cp-compare-target-head",
-            "cp-compare-diff-head",
-            "cp-compare-render-head",
-        ]);
-        assert.deepEqual(cells(), [
-            "cp-compare-target-cell",
-            "cp-compare-diff-cell",
-            "cp-compare-render-cell",
-        ]);
+        assert.deepEqual(heads(), orderedHeads);
+        assert.deepEqual(cells(), orderedCells);
 
         document
             .querySelector<HTMLElement>('[data-compare-format="svg"]')!
             .click();
         await settle();
-        assert.deepEqual(cells(), [
-            "cp-compare-render-cell",
-            "cp-compare-diff-cell",
-            "cp-compare-target-cell",
-        ]);
+        assert.deepEqual(heads(), orderedHeads);
+        assert.deepEqual(cells(), orderedCells);
     });
 
     it("paints every row's pictures before it has scored any of them", async () => {

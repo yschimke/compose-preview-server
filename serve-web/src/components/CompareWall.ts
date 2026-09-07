@@ -577,7 +577,14 @@ export class CompareWall extends ControllerElement {
     private orderColumns(): void {
         const specFirst = specLeadsColumns(this.state.format);
         if (this.targetHead) {
-            this.targetHead.textContent = targetHeadLabel(
+            // The NAME node, never the whole cell: the header also carries a `cp-compare-head-role`
+            // line saying which half of the pair this column is, and that line does not change with
+            // the lane. Writing `textContent` on the `<th>` would take it out on the first switch.
+            const name =
+                this.targetHead.querySelector<HTMLElement>(
+                    ".cp-compare-head-name",
+                ) ?? this.targetHead;
+            name.textContent = targetHeadLabel(
                 this.state.format,
                 this.root.getAttribute("data-reference-label") ?? "",
                 this.root.getAttribute("data-parallel-label") ?? "",
@@ -753,6 +760,7 @@ export class CompareWall extends ControllerElement {
         );
         png.src = pngUrl;
         png.alt = `${row.getAttribute("data-label")} rendered PNG`;
+        stampSize(row, "png", png);
         this.seedScore(row, score);
 
         const format = this.state.format;
@@ -795,6 +803,7 @@ export class CompareWall extends ControllerElement {
             vector.hidden = false;
             canvas.hidden = true;
             vector.src = candidateUrl;
+            stampSize(row, "target", vector);
             vector.alt = `${row.getAttribute("data-label")}${
                 format === "svg"
                     ? " SVG"
@@ -808,6 +817,10 @@ export class CompareWall extends ControllerElement {
         } else {
             vector.hidden = true;
             canvas.hidden = false;
+            // The Remote Compose lane paints a canvas rather than loading a raster, and its size is
+            // the document's rather than a file's — nothing to report, so the caption is cleared
+            // instead of being left with the previous lane's numbers under a different picture.
+            stampSize(row, "target", null);
         }
         if (diff) {
             // Blanked before the run, not just repainted after it: the map is only redrawn when the
@@ -1065,6 +1078,42 @@ declare global {
 }
 
 /** A row's picture cell, by its own class — position is what we are about to change. */
+/**
+ * Say what a picture's own pixel size is, under the box it was fitted into.
+ *
+ * The two panels are one fixed frame each (`serve.css`, `.cp-compare-shot`), so a baseline exported
+ * at a different scale no longer *looks* bigger than the render — which removes a false finding and
+ * introduces a fair question, "how big are these actually?". This answers it from the decoded
+ * raster rather than from anything the server printed, because the wall chooses which theme variant
+ * of the pair is on screen.
+ *
+ * `null` clears the caption: a lane that paints a canvas has no file size to report, and leaving
+ * the previous lane's numbers under a different picture would be a wrong answer rather than a
+ * missing one.
+ */
+function stampSize(
+    row: HTMLElement,
+    which: "png" | "target",
+    image: HTMLImageElement | null,
+): void {
+    const cell = row.querySelector<HTMLElement>(
+        `.cp-compare-dim[data-dim-for="${which}"]`,
+    );
+    if (!cell) return;
+    if (!image) {
+        cell.textContent = "";
+        return;
+    }
+    const write = () => {
+        const w = image.naturalWidth;
+        const h = image.naturalHeight;
+        cell.textContent = w && h ? `${w} × ${h}` : "";
+    };
+    cell.textContent = "";
+    if (image.complete) write();
+    else image.addEventListener("load", write, { once: true });
+}
+
 function cellOf(row: HTMLElement, selector: string): HTMLElement | null {
     return row.querySelector<HTMLElement>(selector);
 }

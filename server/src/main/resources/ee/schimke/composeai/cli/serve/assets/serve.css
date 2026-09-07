@@ -958,6 +958,17 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
   align-items: stretch; gap: 2px; }
 .cp-actions-panel .cp-action-chip, .cp-actions-panel .cp-bg-btn {
   width: 100%; min-height: 40px; justify-content: flex-start; text-align: left; }
+/* The menu's destinations, in NAMED GROUPS. It used to be one undifferentiated column of seven
+   rows — four comparisons, a dashboard, two browsers and a toggle — all of them verbs, so telling
+   "compare RC players" from "design parity" meant reading every row. A group heading answers "which
+   of these is the kind of thing I want?" once, and lets the chips inside it drop the verb they were
+   all repeating: under `Compare against`, `Figma` is a complete label.
+   See `docs/design/COMPARE_NAVIGATION.md`, §3.3. */
+.cp-actions-group { display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
+.cp-actions-group + .cp-actions-group { margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--cp-border); }
+.cp-actions-group-label { padding: 2px 12px; font-size: 0.68rem; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--cp-fg-faint); }
 .cp-catalog-download { margin: 30px 0 0; }
 /* One chip, three weights. M3 calls this an assist chip and draws it as a PILL — which is what the
    rest of this chrome already does with a small interactive target (the nav actions, the interface
@@ -2955,12 +2966,31 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
    the component name, but on its own line where it cannot be mistaken for part of it. */
 .cp-compare-variant { display: block; font-weight: 400; font-size: 0.78rem;
   color: var(--cp-fg-muted); }
+/* ONE BOX FOR BOTH PICTURES.
+   The panel used to size itself to whatever the picture inside it happened to be — `width: auto`
+   under a `max-width`/`max-height` pair — so a design export rasterised at a different scale than
+   the render sat in a visibly larger frame than the render it is compared against, and the reader's
+   first question about the pair was about the exporter rather than about the drawing
+   (`docs/design/COMPARE_NAVIGATION.md`, F3). A fixed 5:3 box with `object-fit: contain` fits both
+   halves into the same frame, so "smaller" on this page always means *drawn* smaller. The pixel
+   size of each is said out loud underneath instead — see `.cp-compare-dim`. */
 .cp-compare-shot { display: grid; place-items: center; width: min(260px, 30vw); min-width: 150px;
-  min-height: 92px; padding: 8px; border-radius: 8px; overflow: hidden;
+  aspect-ratio: 5 / 3; min-height: 92px; padding: 8px; border-radius: 8px; overflow: hidden;
+  box-sizing: border-box;
   background: repeating-conic-gradient(var(--cp-surface-2) 0% 25%, var(--cp-surface) 0% 50%) 50% / 14px 14px; }
 .cp-compare-row[data-bg-theme="dark"] .cp-compare-shot { background: #111113; }
-.cp-compare-shot img, .cp-compare-shot canvas { display: block; max-width: 100%; max-height: 220px;
-  width: auto; height: auto; object-fit: contain; }
+.cp-compare-shot img, .cp-compare-shot canvas { display: block; width: 100%; height: 100%;
+  max-width: 100%; max-height: 100%; object-fit: contain; }
+/* What that box is fitting, in the picture's own pixels — the answer to "why is one smaller than
+   the other", which the equal frames above would otherwise leave the reader to guess at. Written
+   by `<cp-compare-wall>` once it has decoded the pair; empty and invisible until then. */
+.cp-compare-dim { display: block; margin-top: 4px; text-align: center; font-size: 0.68rem;
+  color: var(--cp-fg-faint); font-variant-numeric: tabular-nums; min-height: 1em; }
+/* Which half of the pair a column is. The names above it are a design tool and a catalog, and
+   neither says by itself which one is the yardstick. */
+.cp-compare-head-name { display: block; }
+.cp-compare-head-role { display: block; font-weight: 400; text-transform: none;
+  color: var(--cp-fg-faint); }
 .cp-compare-shot [hidden] { display: none; }
 .cp-compare-score { min-width: 88px; text-align: right; white-space: nowrap; color: var(--cp-fg-muted);
   font-variant-numeric: tabular-nums; }
@@ -4270,11 +4300,19 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
    A number and not a diff map, deliberately — thirty-eight magenta thumbnails at slot size is the
    annotated sheet this page was rescued from. The map is one click away at a readable size. */
 .cp-page-score { display: none; }
+/* …AND ONE AT A TIME.
+   The lane used to paint every badge the moment it was entered, which on a specimen sheet is forty
+   red pills over the drawing being judged: the lane answers "which node is worst" by destroying
+   "what does that node look like", and the reader has to leave it to see what the number is about
+   (`docs/design/COMPARE_NAVIGATION.md`, F5).
+   So the resting state of the lane is the sheet, and a badge appears where the reader is looking —
+   pointer, keyboard focus, or the node they clicked to keep lit. Every badge at once is still one
+   gesture away: hold the `Diff %` control (`.cp-page-diff-all`, armed by `<cp-design-page>`), and
+   the sheet goes back to being readable the moment it is released. */
 .cp-page-diff-on .cp-page-score {
   position: absolute;
   right: 2px;
   bottom: 2px;
-  display: block;
   padding: 0.05rem 0.3rem;
   border-radius: 999px;
   background: var(--cp-score-bg, #6e7781);
@@ -4286,6 +4324,15 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
 }
 /* Three bands, not a gradient: the reader is triaging, and "does this need looking at" is a
    decision rather than a measurement. */
+/* Where a badge is actually drawn. Split from the property block above so the lane can be entered
+   without painting anything: every rule up there describes what a badge LOOKS like, and this one
+   alone decides whether there is one on screen. */
+.cp-page-diff-on.cp-page-diff-all .cp-page-score,
+.cp-page-diff-on .cp-page-node:hover > .cp-page-score,
+.cp-page-diff-on .cp-page-node:focus-visible > .cp-page-score,
+.cp-page-diff-on .cp-page-node:focus-within > .cp-page-score,
+.cp-page-diff-on .cp-page-node.cp-page-active > .cp-page-score,
+.cp-page-diff-on .cp-page-node.cp-page-selected > .cp-page-score { display: block; }
 .cp-page-score[data-cp-score="close"] { --cp-score-bg: #1a7f37; }
 .cp-page-score[data-cp-score="drifting"] { --cp-score-bg: #9a6700; }
 .cp-page-score[data-cp-score="far"] { --cp-score-bg: #cf222e; }

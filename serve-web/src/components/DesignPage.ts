@@ -34,11 +34,13 @@ import {
 } from "../design/geometry.js";
 import { fitInk, inkFrom, sampleSize, type InkBounds } from "../design/ink.js";
 import {
+    DIFF_ALL_CLASS,
     isInert,
     laneOf,
     laneState,
     needsRenders,
     outlinesAfterUnlinked,
+    showsEveryBadge,
     type Lane,
 } from "../design/lanes.js";
 import { badgeFor } from "../design/score.js";
@@ -101,6 +103,8 @@ export class DesignPage extends ControllerElement {
     private zoomLayer!: HTMLElement;
 
     private lanes: HTMLInputElement[] = [];
+    /** Whether the `Diff %` control is being held down right now. See {@link showsEveryBadge}. */
+    private diffHeld = false;
     private outlinesToggle: HTMLInputElement | null = null;
     private unlinkedToggle: HTMLInputElement | null = null;
     private legend: HTMLElement | null = null;
@@ -390,7 +394,24 @@ export class DesignPage extends ControllerElement {
         for (const [name, on] of Object.entries(laneState(lane))) {
             this.stage.classList.toggle(name, on);
         }
+        this.stage.classList.toggle(
+            DIFF_ALL_CLASS,
+            showsEveryBadge(lane, this.diffHeld),
+        );
         if (lane === "diff") this.score();
+    }
+
+    /**
+     * Hold the `Diff %` control to see every badge; let go to get the sheet back.
+     *
+     * Re-entered through {@link applyLane} rather than toggling the class here, so the lane gate is
+     * stated once and a release that arrives after the reader has already left the lane cannot
+     * leave the class behind.
+     */
+    private holdDiff(held: boolean): void {
+        if (this.diffHeld === held) return;
+        this.diffHeld = held;
+        this.applyLane();
     }
 
     /**
@@ -844,6 +865,26 @@ export class DesignPage extends ControllerElement {
             this.on(this.unlinkedToggle, "change", () => this.applyUnlinked());
         for (const input of this.lanes) {
             this.on(input, "change", () => this.applyLane());
+        }
+        // The hold, on the diff lane's own control. Its label is the hit target a pointer actually
+        // lands on (the radio itself is visually replaced), while the keyboard reaches the input —
+        // so the press is taken from both and the release from `window`, which is the only place
+        // that hears a pointer let go outside the control it went down on. Without that last one a
+        // drag off the button would latch the sheet on, which is the exact failure mode a
+        // press-and-hold has to not have.
+        const diffLane = this.lanes.find((input) => input.value === "diff");
+        const grip = diffLane?.closest("label") ?? diffLane;
+        if (diffLane && grip) {
+            this.on(grip, "pointerdown", () => this.holdDiff(true));
+            this.on(window, "pointerup", () => this.holdDiff(false));
+            this.on(window, "pointercancel", () => this.holdDiff(false));
+            this.on(diffLane, "keydown", (event) => {
+                const key = (event as KeyboardEvent).key;
+                if (key === " " || key === "Enter") this.holdDiff(true);
+            });
+            this.on(diffLane, "keyup", () => this.holdDiff(false));
+            // A control that is only held loses its lane when focus leaves mid-press.
+            this.on(diffLane, "blur", () => this.holdDiff(false));
         }
         // Opening the audit list changes nothing about the sheet, but it does change how tall the
         // stage's container is on a short viewport, and every overlay is placed off a measured box.
