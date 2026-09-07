@@ -6,6 +6,7 @@ import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
@@ -16,8 +17,10 @@ import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor
 import java.security.MessageDigest
+import java.util.Base64
 
 /**
  * Compose-source export driven by the **discovered component record** rather than by a guess.
@@ -59,6 +62,16 @@ internal class ScreenGeneratorComposeExportExecutor(
    * golden test would not have caught it — it passes a package explicitly.
    */
   private val packageName: String = ScreenExportGate.PACKAGE_NAME,
+  /**
+   * Where a design's uploaded asset bytes are, for the one lane that has to **inline** them.
+   *
+   * A Wear widget's background is drawn by the system host, out of the app's process and without
+   * its resources, so a picture there cannot be a name the drawing side resolves — the pixels
+   * travel inside the document and therefore inside the generated source. Null leaves a widget with
+   * an image background refusing by name, which is what a host with no asset store can honestly
+   * say.
+   */
+  private val assetStore: UiBuilderAssetStore? = null,
   /**
    * The component packs this host admits, by id.
    *
@@ -104,6 +117,7 @@ internal class ScreenGeneratorComposeExportExecutor(
           request.document,
           packageName,
           packComponents = packRecords.byComponentId(),
+          assets = request.document.widgetAssetBytes(),
         )
         ?.let { recordFree ->
           return when (recordFree) {
@@ -595,5 +609,27 @@ internal class ScreenGeneratorComposeExportExecutor(
      * [generate] produces it — [export] serves these designs rather than refusing them.
      */
     const val RECORD_FREE_DESIGN = "RECORD_FREE_DESIGN"
+  }
+
+  /**
+   * The design's own asset registry, as the bytes an inlining lane can carry.
+   *
+   * An **embedded** binding already is base64 and is handed over unchanged; an **uploaded** one is
+   * content-addressed, so its bytes are joined here from the store beside the design state rather
+   * than in the emitter, which has no filesystem and no business acquiring one. A catalog binding
+   * has no bytes on this host and answers null, which the export turns into a refusal naming the
+   * node instead of a picture it does not have.
+   */
+  private fun ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1.widgetAssetBytes():
+    WidgetAssetBytes {
+    val bindings = assets
+    return WidgetAssetBytes { key ->
+      when (val source = bindings[key]?.source) {
+        is ee.schimke.composeai.uibuilder.protocol.EmbeddedAssetSourceV1 -> source.base64
+        is ee.schimke.composeai.uibuilder.protocol.UploadedAssetSourceV1 ->
+          assetStore?.read(source.storageKey)?.let(Base64.getEncoder()::encodeToString)
+        else -> null
+      }
+    }
   }
 }

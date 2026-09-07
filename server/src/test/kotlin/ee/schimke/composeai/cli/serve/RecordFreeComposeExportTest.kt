@@ -83,8 +83,12 @@ class RecordFreeComposeExportTest {
         artifact.content,
       artifact.content,
     )
-    // And its size picks the preview params provider rather than being emitted as a dimension.
-    assertTrue("SquircleSmallWidgetPreviewParams::class" in artifact.content, artifact.content)
+    // And its size picks the preview params provider rather than being emitted as a dimension —
+    // one footprint from it rather than a preview unrolled per value.
+    assertTrue(
+      "SquircleSmallWidgetPreviewParams().values.maxBy { it.widthDp }" in artifact.content,
+      artifact.content,
+    )
     // The provenance names the revision and catalog the artifact was pinned to, as the
     // record-driven
     // export does; a file on somebody's disk is traceable either way.
