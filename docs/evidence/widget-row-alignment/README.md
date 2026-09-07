@@ -21,7 +21,12 @@ Neither render has album artwork: a generated widget takes its content bitmaps a
 `RemoteImageBitmap` parameters and the generated `@Preview` supplies `ImageBitmap(1, 1)`
 placeholders. The 52dp gap on the left is that placeholder occupying its slot.
 
-The "before" render is the one captured for
-[`docs/evidence/widget-color-alpha/`](../widget-color-alpha/README.md), which is why its play
-button sits differently: that design was later resized to fit both shipped footprints. The
-vertical position is the comparison this pair is making.
+The two differ in exactly one line of generated source. The "before" is the same file with
+
+```kotlin
+verticalAlignment = RemoteAlignment.CenterVertically,
+```
+
+removed from its `RemoteRow`, which is what the generator emitted before this change. Everything
+else — the design, the compile, the preview, the footprint — is identical, so the vertical position
+is the only variable.
