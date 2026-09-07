@@ -7,6 +7,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonIgnoreUnknownKeys
@@ -187,6 +188,7 @@ object ServeMcpOAuth {
    * being *more* spec-compliant than the server, and rejected at the one step that has to work
    * before anything else can.
    */
+  @OptIn(ExperimentalSerializationApi::class)
   @Serializable
   @JsonIgnoreUnknownKeys
   data class ClientRegistrationRequest(

@@ -10,6 +10,7 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -172,6 +173,8 @@ class ServeCatalogMcp(
     }
   }
 
+  // `JsonArrayBuilder.addAll` is still experimental; the UI-builder block below is the only caller.
+  @OptIn(ExperimentalSerializationApi::class)
   private fun tools(accessEnabled: Boolean): JsonArray = buildJsonArray {
     if (accessEnabled) {
       // First in the list on purpose: a client with no credential can call only these two, and a
