@@ -577,7 +577,14 @@ export class CompareWall extends ControllerElement {
     private orderColumns(): void {
         const specFirst = specLeadsColumns(this.state.format);
         if (this.targetHead) {
-            this.targetHead.textContent = targetHeadLabel(
+            // The NAME node, never the whole cell: the header also carries a `cp-compare-head-role`
+            // line saying which half of the pair this column is, and that line does not change with
+            // the lane. Writing `textContent` on the `<th>` would take it out on the first switch.
+            const name =
+                this.targetHead.querySelector<HTMLElement>(
+                    ".cp-compare-head-name",
+                ) ?? this.targetHead;
+            name.textContent = targetHeadLabel(
                 this.state.format,
                 this.root.getAttribute("data-reference-label") ?? "",
                 this.root.getAttribute("data-parallel-label") ?? "",
@@ -651,14 +658,16 @@ export class CompareWall extends ControllerElement {
         }
         // Re-read per pass rather than resolved once at load: the viewer links in with `?preview=`,
         // and a Back to such an entry has to re-narrow.
-        const preview =
-            new URLSearchParams(location.search).get("preview") ?? "";
+        const params = new URLSearchParams(location.search);
+        const preview = params.get("preview") ?? "";
+        const component = params.get("component") ?? "";
         let visible = 0;
         for (const row of this.rows) {
             const keep = keepRow(
                 {
                     hay: row.getAttribute("data-hay") ?? "",
                     previewIds: row.getAttribute("data-preview-ids") ?? "",
+                    componentId: row.getAttribute("data-component-id") ?? "",
                     hasFormat: Boolean(
                         variantFor(
                             this.sourcesOf(row),
@@ -669,6 +678,7 @@ export class CompareWall extends ControllerElement {
                 },
                 query,
                 preview,
+                component,
             );
             // Dressed HERE, and only when it is going to be seen — see {@link run}. `ensureDressed`
             // is also what keeps a row revealed by a later filter change (the search input clearing,
@@ -679,10 +689,52 @@ export class CompareWall extends ControllerElement {
         }
         if (this.count) this.count.textContent = countLabel(visible);
         if (this.empty) this.empty.hidden = visible !== 0;
+        this.showScope(component || preview, visible);
         // After the dressing, never before it: a row's locator is read off the "+ file" href that
         // {@link dressRow} has just re-pointed at the pair this lane is showing, so recomputing the
         // picked set any earlier would write the previous lane's comparisons into the report.
         this.syncPicks();
+    }
+
+    /**
+     * Say out loud that the wall is scoped, and offer the way out.
+     *
+     * A `?component=` or `?preview=` link opens the wall showing three rows out of four hundred,
+     * and nothing on the page said why: the search box is empty, the count says "3 comparisons",
+     * and the reader's own conclusion is that this catalog compares three things. The chip names
+     * the scope in the catalog's own words and links to the same view without it.
+     *
+     * Server-rendered `hidden` and revealed from here, like every other control that means nothing
+     * without a script — the "clear" is a link the browser can follow either way, but a chip
+     * claiming a scope on a page whose script never ran would be claiming a filter nobody applied.
+     */
+    private showScope(scope: string, visible: number): void {
+        const bar = this.root.querySelector<HTMLElement>("#cp-compare-scope");
+        if (!bar) return;
+        if (!scope) {
+            bar.hidden = true;
+            return;
+        }
+        const kept = this.rows.find((row) => !row.hidden);
+        const name =
+            kept?.getAttribute("data-component-label")?.trim() ||
+            kept?.getAttribute("data-label")?.trim() ||
+            scope;
+        const text = bar.querySelector<HTMLElement>(".cp-compare-scope-text");
+        if (text) {
+            text.textContent = `${name} · ${countLabel(visible)} of ${this.rows.length}`;
+        }
+        const clear = bar.querySelector<HTMLAnchorElement>(
+            ".cp-compare-scope-clear",
+        );
+        if (clear) {
+            const params = new URLSearchParams(location.search);
+            params.delete("component");
+            params.delete("preview");
+            const query = params.toString();
+            clear.href = location.pathname + (query ? `?${query}` : "");
+        }
+        bar.hidden = false;
     }
 
     // ---- one row -------------------------------------------------------------
@@ -753,6 +805,7 @@ export class CompareWall extends ControllerElement {
         );
         png.src = pngUrl;
         png.alt = `${row.getAttribute("data-label")} rendered PNG`;
+        stampSize(row, "png", png);
         this.seedScore(row, score);
 
         const format = this.state.format;
@@ -795,6 +848,7 @@ export class CompareWall extends ControllerElement {
             vector.hidden = false;
             canvas.hidden = true;
             vector.src = candidateUrl;
+            stampSize(row, "target", vector);
             vector.alt = `${row.getAttribute("data-label")}${
                 format === "svg"
                     ? " SVG"
@@ -808,6 +862,10 @@ export class CompareWall extends ControllerElement {
         } else {
             vector.hidden = true;
             canvas.hidden = false;
+            // The Remote Compose lane paints a canvas rather than loading a raster, and its size is
+            // the document's rather than a file's — nothing to report, so the caption is cleared
+            // instead of being left with the previous lane's numbers under a different picture.
+            stampSize(row, "target", null);
         }
         if (diff) {
             // Blanked before the run, not just repainted after it: the map is only redrawn when the
@@ -1065,6 +1123,42 @@ declare global {
 }
 
 /** A row's picture cell, by its own class — position is what we are about to change. */
+/**
+ * Say what a picture's own pixel size is, under the box it was fitted into.
+ *
+ * The two panels are one fixed frame each (`serve.css`, `.cp-compare-shot`), so a baseline exported
+ * at a different scale no longer *looks* bigger than the render — which removes a false finding and
+ * introduces a fair question, "how big are these actually?". This answers it from the decoded
+ * raster rather than from anything the server printed, because the wall chooses which theme variant
+ * of the pair is on screen.
+ *
+ * `null` clears the caption: a lane that paints a canvas has no file size to report, and leaving
+ * the previous lane's numbers under a different picture would be a wrong answer rather than a
+ * missing one.
+ */
+function stampSize(
+    row: HTMLElement,
+    which: "png" | "target",
+    image: HTMLImageElement | null,
+): void {
+    const cell = row.querySelector<HTMLElement>(
+        `.cp-compare-dim[data-dim-for="${which}"]`,
+    );
+    if (!cell) return;
+    if (!image) {
+        cell.textContent = "";
+        return;
+    }
+    const write = () => {
+        const w = image.naturalWidth;
+        const h = image.naturalHeight;
+        cell.textContent = w && h ? `${w} × ${h}` : "";
+    };
+    cell.textContent = "";
+    if (image.complete) write();
+    else image.addEventListener("load", write, { once: true });
+}
+
 function cellOf(row: HTMLElement, selector: string): HTMLElement | null {
     return row.querySelector<HTMLElement>(selector);
 }

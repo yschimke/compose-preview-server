@@ -4349,31 +4349,32 @@ class ServeWebFixtureTest {
         "the $name page carries the palette",
       )
     }
-    // One assist chip per comparable format, each deep-linking the format it names, rather than a
-    // single "compare formats" text link that hid what this catalog can actually compare.
+    // One assist chip per BASELINE this catalog can compare against, under one group heading that
+    // carries the verb they all used to repeat — so a chip is the name of the thing on the other
+    // side of the comparison and nothing else. See `docs/design/COMPARE_NAVIGATION.md`, §3.3.
     assertTrue(
-      landingThemed.contains(
-        "<a class=\"cp-action-chip\" href=\"/compare?format=svg&amp;session=compose-m3\">" +
-          "compare SVG</a>"
-      ) &&
+      landingThemed.contains("<span class=\"cp-actions-group-label\">Compare against</span>") &&
+        landingThemed.contains(
+          "<a class=\"cp-action-chip\" href=\"/compare?format=svg&amp;session=compose-m3\">SVG</a>"
+        ) &&
         landingThemed.contains(
           "<a class=\"cp-action-chip\" href=\"/compare?format=rc&amp;session=compose-m3\">" +
-            "compare RC players</a>"
+            "Remote Compose players</a>"
         ),
       "a catalog with alternate formats links each one separately: $landingThemed",
     )
     // …and the reference comparison is one of them, named after the tool it compares against and
-    // deep-linking the same comparison page as its siblings — not the parity dashboard, which is a
-    // different question and keeps its own name.
+    // deep-linking the same comparison page as its siblings. The parity index is NOT one of them:
+    // it is the list that says which comparisons are worth opening, so it sits under `Reports`.
     assertTrue(
       landingPath.contains(
-        "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">" +
-          "compare to Figma</a>"
+        "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">Figma</a>"
       ) &&
         landingPath.contains(
-          "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/parity\">design parity</a>"
+          "<div class=\"cp-actions-group\"><span class=\"cp-actions-group-label\">Reports</span>" +
+            "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/parity\">design parity</a></div>"
         ),
-      "a Figma-specified catalog compares against Figma and links the parity dashboard separately",
+      "a Figma-specified catalog compares against Figma and links the parity index separately",
     )
     assertTrue(
       formatComparison.contains("data-compare-format=\"svg\"") &&

@@ -64,3 +64,28 @@ export function outlinesAfterUnlinked(
 export function isInert(unlinkedOnly: boolean, hasGap: boolean): boolean {
     return unlinkedOnly && !hasGap;
 }
+
+/**
+ * The class that puts EVERY diff badge on the sheet at once.
+ *
+ * The diff lane's resting state is one badge — wherever the reader is pointing or focused — because
+ * forty red pills over a specimen sheet hide the drawing they are judging
+ * (`docs/design/COMPARE_NAVIGATION.md`, F5). This is the deliberate look at all of them, and it is
+ * held rather than latched: it is the gesture for "which one is worst?", which is a question you
+ * ask for a second and then go back to reading.
+ *
+ * `serve.css` owns what it does; `<cp-design-page>` owns when it is on.
+ */
+export const DIFF_ALL_CLASS = "cp-page-diff-all";
+
+/**
+ * Whether the sheet is showing every badge.
+ *
+ * Gated on the lane as well as on the gesture: the control is only held-able while it is the lane's
+ * own control, and a stuck `held` outside the diff lane would otherwise arm a class that paints
+ * badges the moment the lane is re-entered — a sheet that opens covered in pills for no reason the
+ * reader can connect to anything they did.
+ */
+export function showsEveryBadge(lane: Lane, held: boolean): boolean {
+    return lane === "diff" && held;
+}

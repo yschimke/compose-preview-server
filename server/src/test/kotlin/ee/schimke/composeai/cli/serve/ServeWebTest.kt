@@ -2243,12 +2243,74 @@ class ServeWebTest {
   }
 
   @Test
-  fun `the design spec leads the pair, and the render follows`() {
-    // The house rule everywhere the two are shown together: an imported design spec is drawn to
-    // the LEFT of the render it is compared against. The viewer's spec lane says it three ways
+  fun `the baseline leads the pair on every lane`() {
+    // ONE order, every lane: baseline · diff · ours. The viewer's spec lane says it three ways
     // already (the Spec / Diff / Render triptych, the wipe's seam, the focused Reference / Diff /
-    // Actual page); this wall — the page the catalog's own "compare to Figma" action opens — used
-    // to read the other way round, so the two frames swapped sides between one click and the next.
+    // Actual page). The wall's `svg` and `rc` lanes used to read the other way round, so pressing
+    // a baseline button swapped both pictures' sides as well as relabelling both headers — the one
+    // control that changes the question also moved the answer.
+    // See `docs/design/COMPARE_NAVIGATION.md`, F3.
+    val reference =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(ServePreview(id = "button", label = "Button")),
+        token = "t",
+        referencesFor = { listOf(referenceFor(it)) },
+      )
+    val svg =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(ServePreview(id = "button", label = "Button")),
+        token = "t",
+        hasSvgFor = { true },
+      )
+    for ((lane, html) in listOf("reference" to reference, "svg" to svg)) {
+      assertTrue(
+        html.indexOf("cp-compare-target-cell") < html.indexOf("cp-compare-render-cell"),
+        "the baseline's cell comes first on the $lane lane: $html",
+      )
+      assertTrue(
+        html.indexOf("cp-compare-target-head") < html.indexOf("cp-compare-render-head"),
+        "and its header moves with it on the $lane lane: $html",
+      )
+    }
+    // Named for the lane it is showing, not the constant `SVG` this head used to be — a header
+    // reading `SVG` over the Figma column would state the pair backwards.
+    assertTrue(reference.contains(">Figma</span>"), reference)
+    assertTrue(svg.contains(">SVG</span>"), svg)
+    // The button that enters the lane names the pair in the order the columns stand.
+    assertTrue(reference.contains(">Figma ↔ PNG</button>"), reference)
+  }
+
+  @Test
+  fun `the render column is named after the catalog, and each column says which half it is`() {
+    // "Rendered PNG" named a FILE FORMAT where the reader wanted to know whose picture this is,
+    // and it was the odd one out in a row whose other header is a design tool's name.
+    val html =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(ServePreview(id = "button", label = "Button")),
+        token = "t",
+        displayTitle = "Material 3",
+        referencesFor = { listOf(referenceFor(it)) },
+      )
+    assertFalse(html.contains("Rendered PNG"), html)
+    assertTrue(
+      html.contains(
+        "<th class=\"cp-compare-render-head\"><span class=\"cp-compare-head-name\">" +
+          "Material 3</span><span class=\"cp-compare-head-role\">ours</span></th>"
+      ),
+      html,
+    )
+    assertTrue(html.contains("<span class=\"cp-compare-head-role\">baseline</span>"), html)
+  }
+
+  @Test
+  fun `each picture cell carries an empty caption for its own pixel size`() {
+    // The two panels are one fixed frame each now, so a baseline exported at a different scale no
+    // longer looks bigger than the render. `<cp-compare-wall>` fills these from the DECODED raster
+    // — the wall chooses which theme variant is on screen, so a size printed here by the server
+    // would be describing a picture the reader may not be looking at.
     val html =
       ServeWeb.comparisonPage(
         "m3-catalog",
@@ -2256,42 +2318,11 @@ class ServeWebTest {
         token = "t",
         referencesFor = { listOf(referenceFor(it)) },
       )
+    assertTrue(html.contains("<span class=\"cp-compare-dim\" data-dim-for=\"png\"></span>"), html)
     assertTrue(
-      html.indexOf("cp-compare-target-cell") < html.indexOf("cp-compare-render-cell"),
-      "the design spec's cell comes first on the reference lane: $html",
+      html.contains("<span class=\"cp-compare-dim\" data-dim-for=\"target\"></span>"),
+      html,
     )
-    assertTrue(
-      html.indexOf("cp-compare-target-head") < html.indexOf("cp-compare-render-head"),
-      "and its header moves with it: $html",
-    )
-    // Named for the lane it is showing, not the constant `SVG` this head used to be — a header
-    // reading `SVG` over the Figma column would state the pair backwards.
-    assertTrue(html.contains("<th class=\"cp-compare-target-head\">Figma</th>"), html)
-    // The button that enters the lane names the pair in the order the columns stand.
-    assertTrue(html.contains(">Figma ↔ PNG</button>"), html)
-  }
-
-  @Test
-  fun `the render leads the lanes that compare it against its own export`() {
-    // `svg` and `rc` are a different question: they pit a render against an export OF that render,
-    // where the render is the source of truth and the export is the thing on trial. So they keep
-    // the render first — only the design-spec lane leads with the spec.
-    val html =
-      ServeWeb.comparisonPage(
-        "m3-catalog",
-        listOf(ServePreview(id = "button", label = "Button")),
-        token = "t",
-        hasSvgFor = { true },
-      )
-    assertTrue(
-      html.indexOf("cp-compare-render-cell") < html.indexOf("cp-compare-target-cell"),
-      "the render's cell comes first on the SVG lane: $html",
-    )
-    assertTrue(
-      html.indexOf("cp-compare-render-head") < html.indexOf("cp-compare-target-head"),
-      "and its header with it: $html",
-    )
-    assertTrue(html.contains("<th class=\"cp-compare-target-head\">SVG</th>"), html)
   }
 
   @Test
@@ -2365,8 +2396,38 @@ class ServeWebTest {
   fun `the vector lanes keep catalog order rather than borrowing the design lane's`() {
     // `svg` and `rc` publish no score of their own, and re-ordering their rows by a number about a
     // different comparison is worse than the order the catalog chose.
+    //
+    // A catalog with NO references, because that is the only one the vector lane is served as the
+    // default for now (see the lane-order test below). The gate in `orderedCards` is what keeps the
+    // rule true for the pages that still reach it.
     val previews = listOf("alpha", "beta").map { ServePreview(id = it, label = it) }
-    val html =
+    val html = ServeWeb.comparisonPage("m3-catalog", previews, token = "t", hasSvgFor = { true })
+    val labels = Regex("data-label=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
+    assertEquals(listOf("alpha", "beta"), labels, html)
+  }
+
+  @Test
+  fun `the wall opens on a raster pair, not on the SVG lane`() {
+    // `svg` led because it was the first lane this page had. It is the slowest pair to put on
+    // screen — a vector document laid out and rasterised per row, against a PNG the decoder hands
+    // back whole — and the only one that can be wrong through no fault of the renderer: an SVG
+    // resolves its own typefaces at paint time, so a face the visitor's browser cannot get draws
+    // TOFU, on the page whose whole job is to say what looks wrong.
+    // See `docs/design/COMPARE_NAVIGATION.md`, §3.2.
+    val previews = listOf("alpha", "beta").map { ServePreview(id = it, label = it) }
+    val withReference =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        previews,
+        token = "t",
+        hasSvgFor = { true },
+        referencesFor = { listOf(referenceFor(it)) },
+      )
+    assertTrue(withReference.contains("data-default-format=\"reference\""), withReference)
+
+    // …and with a reference lane to lead with, the served order is worst-first, which the vector
+    // default used to withhold from exactly the catalogs that publish scores.
+    val scored =
       ServeWeb.comparisonPage(
         "m3-catalog",
         previews,
@@ -2374,8 +2435,13 @@ class ServeWebTest {
         hasSvgFor = { true },
         referencesFor = { id -> listOf(scoredReferenceFor(id, if (id == "alpha") 99.0 else 12.0)) },
       )
-    val labels = Regex("data-label=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
-    assertEquals(listOf("alpha", "beta"), labels, html)
+    val labels = Regex("data-label=\"([^\"]+)\"").findAll(scored).map { it.groupValues[1] }.toList()
+    assertEquals(listOf("beta", "alpha"), labels, scored)
+
+    // A catalog with only an SVG export still opens on it — the order is a preference among the
+    // lanes a catalog HAS, not a refusal to serve the one it has.
+    val svgOnly = ServeWeb.comparisonPage("m3-catalog", previews, token = "t", hasSvgFor = { true })
+    assertTrue(svgOnly.contains("data-default-format=\"svg\""), svgOnly)
   }
 
   @Test

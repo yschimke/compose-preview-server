@@ -9773,12 +9773,23 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     hasReferenceComparison: Boolean = false,
     /**
-     * Whether this catalog has a design-parity view to link to — it maps at least one preview to a
-     * design reference, or it publishes a `parity/activity.json` feed. False (the default) omits
-     * the link entirely rather than offering a page of zeroes, so a plain module / an unmapped
-     * catalog's landing is unchanged.
+     * Whether this catalog has a parity index to link to — it maps at least one preview to a design
+     * reference, or it publishes a `parity/activity.json` feed. False (the default) omits the link
+     * entirely rather than offering a page of zeroes, so a plain module / an unmapped catalog's
+     * landing is unchanged.
      */
     hasParityView: Boolean = false,
+    /**
+     * What this catalog's PAIRED implementation is called ("M3 Wear OS Apps Design Kit"), when it
+     * declares one — the `parallel` baseline, and the comparison a Remote Compose catalog is most
+     * often opened for. Null or blank (the default) omits the chip, so a catalog that declares no
+     * `compareWith` pairing keeps exactly the actions it had.
+     *
+     * It had no chip at all until now: the landing offered `svg`, `rc` and `reference` and left the
+     * one comparison against a sibling catalog reachable only by switching format on the wall. See
+     * `docs/design/COMPARE_NAVIGATION.md`, §1.
+     */
+    parallelComparisonLabel: String? = null,
     /**
      * How many motion captures this catalog publishes, across every preview — the count behind the
      * "motion" action, and the gate on whether it appears at all. Zero (the default) omits it, so a
@@ -9973,6 +9984,7 @@ ${captureControlsHtml().prependIndent("          ")}
     @Suppress("NAME_SHADOWING") val hasRcComparison = hasRcComparison && !componentBrowser
     @Suppress("NAME_SHADOWING")
     val hasReferenceComparison = hasReferenceComparison && !componentBrowser
+    val hasParallelComparison = !parallelComparisonLabel.isNullOrBlank() && !componentBrowser
     @Suppress("NAME_SHADOWING") val hasParityView = hasParityView && !componentBrowser
     // Suppressed in Catalog mode with the other destinations, and it is a close call rather than
     // an obvious one. The motion browser is browsing surface, not tooling — it is the collection
@@ -10477,48 +10489,80 @@ ${captureControlsHtml().prependIndent("          ")}
           .joinToString("&")
       return actionChip("$basePath/compare?$query", label)
     }
-    val actionChips =
+    // The chips, in NAMED GROUPS rather than one run-on line.
+    //
+    // The panel used to read `compare SVG · compare RC players · compare to Figma · design parity ·
+    // 325 motion captures · try in playground · Transparent` — seven destinations of four different
+    // kinds, each repeating the verb, and a reader looking for "how does this differ from the Wear
+    // implementation?" had to find out that the answer was spelled `design parity` (it was not) or
+    // that it was on the comparison wall behind a format switch (it was, and unlinked from here).
+    //
+    // Two groups, each answering one question. Every baseline this catalog can compare against is
+    // in the first, named by what it IS — the same words the wall's own Baseline group and the
+    // viewer's Compare-against group use, so the chip you press and the button you land on agree.
+    // See `docs/design/COMPARE_NAVIGATION.md`, §2 and §3.3.
+    fun chipGroup(label: String, chips: List<String>): String =
+      if (chips.isEmpty()) ""
+      else
+        "<div class=\"cp-actions-group\">" +
+          "<span class=\"cp-actions-group-label\">${WebEscaping.htmlEscape(label)}</span>" +
+          chips.joinToString("") +
+          "</div>"
+
+    val compareChips =
       listOfNotNull(
-          compareChip("svg", "compare SVG").takeIf { hasSvgComparison },
-          compareChip("rc", "compare RC players").takeIf { hasRcComparison },
-          // Named after the design tool it compares against when the catalog identifies one, since
-          // "compare to Figma" says what you get where "compare reference" would name the format
-          // slug. It sits with the other compare chips because it goes where they go — the same
-          // comparison page, deep-linked to its own format — rather than to a different page.
-          compareChip(
-              "reference",
-              designToolLabel?.let { tool -> "compare to $tool" } ?: "compare to design references",
+        // Named after the design tool it compares against when the catalog identifies one, since
+        // "Figma" says what you get where "reference" would name the format slug.
+        compareChip("reference", designToolLabel ?: "design references").takeIf {
+          hasReferenceComparison
+        },
+        parallelComparisonLabel
+          ?.takeIf { hasParallelComparison }
+          ?.let { compareChip("parallel", it) },
+        compareChip("svg", "SVG").takeIf { hasSvgComparison },
+        compareChip("rc", "Remote Compose players").takeIf { hasRcComparison },
+      )
+    // The parity index, in a group of its own: it is not a comparison, it is the list that says
+    // which comparisons are worth opening. Under `Compare against` it read as a fifth baseline —
+    // "design parity" beside "Figma" and "SVG" — which is exactly the confusion §1 records.
+    val reportChips =
+      listOfNotNull(actionChip("$basePath/parity$q", "design parity").takeIf { hasParityView })
+    val exploreChips =
+      listOfNotNull(
+        // Pages live in the navigation tree, which is where this catalog's other *places* are.
+        // This chip is the fallback for a catalog too small to have a tree at all: without it
+        // the pages would be published and unreachable. The count is in the label because one
+        // page and thirty are different offers.
+        //
+        // It also now carries what `design parity` used to: coverage is "N of M components
+        // implemented", said against the sheet a reader can see. See §3.4 of the design note.
+        designPages
+          .takeIf { it.isNotEmpty() && !hasTree }
+          ?.let {
+            actionChip(
+              "$basePath/pages$q",
+              "${it.size} design ${if (it.size == 1) "page" else "pages"}",
             )
-            .takeIf { hasReferenceComparison },
-          // The parity dashboard is a different question from the side-by-side: how the code and
-          // the design file have *moved*, and how far apart they are — so it keeps its own name
-          // rather than borrowing the comparison's.
-          actionChip("$basePath/parity$q", "design parity").takeIf { hasParityView },
-          // The motion browser. A destination like the comparisons and the parity view — captures
-          // are scattered one-per-component and invisible until you open the component that has
-          // one, so this is the only place a visitor can find out the catalog records anything at
-          // all. It is NOT gated on having a tree the way the pages chip is: there is no tree
-          // listing to fall back on, so without the chip the page would be published and
-          // unreachable on every catalog.
-          motionCaptureCount
-            .takeIf { it > 0 }
-            ?.let {
-              actionChip(
-                "$basePath/motion$q",
-                "$it motion ${if (it == 1) "capture" else "captures"}",
-              )
-            },
-          // Pages live in the navigation tree, which is where this catalog's other *places* are.
-          // This chip is the fallback for a catalog too small to have a tree at all: without it
-          // the pages would be published and unreachable. The count is in the label because one
-          // page and thirty are different offers.
-          designPages
-            .takeIf { it.isNotEmpty() && !hasTree }
-            ?.let {
-              actionChip("$basePath/pages$q", "${it.size} ${if (it.size == 1) "page" else "pages"}")
-            },
-          playgroundHref?.takeIf { it.isNotBlank() }?.let { actionChip(it, "try in playground") },
+          },
+        // The motion browser. Captures are scattered one-per-component and invisible until you
+        // open the component that has one, so this is the only place a visitor can find out the
+        // catalog records anything at all. It is NOT gated on having a tree the way the pages chip
+        // is: there is no tree listing to fall back on, so without the chip the page would be
+        // published and unreachable on every catalog.
+        motionCaptureCount
+          .takeIf { it > 0 }
+          ?.let {
+            actionChip("$basePath/motion$q", "$it motion ${if (it == 1) "capture" else "captures"}")
+          },
+        playgroundHref?.takeIf { it.isNotBlank() }?.let { actionChip(it, "try in playground") },
+      )
+    val actionChips =
+      listOf(
+          chipGroup("Compare against", compareChips),
+          chipGroup("Reports", reportChips),
+          chipGroup("Explore", exploreChips),
         )
+        .filter { it.isNotBlank() }
         .joinToString("\n          ")
     val transparentAction =
       if (hasPreviews && !componentBrowser)
@@ -10809,16 +10853,34 @@ ${captureControlsHtml().prependIndent("          ")}
     val parallelLabel =
       comparablePreviews.firstNotNullOfOrNull { parallelSources[it]?.label }
         ?: "Parallel implementation"
+    // WHICH BASELINE THE WALL OPENS ON, and it used to open on the worst one.
+    //
+    // `svg` led because it was the first lane this page ever had. Two things are wrong with that
+    // now. It is the slowest pair to put on screen — the browser lays out and rasterises a vector
+    // document per row, against a PNG the decoder hands back whole — and it is the one lane that
+    // can be wrong in a way that is not the renderer's fault: an SVG resolves its own typefaces at
+    // paint time, so a face the visitor's browser cannot get draws tofu, and a wall of tofu is the
+    // first thing a reader sees on the page whose whole job is to say what looks wrong.
+    //
+    // So the raster pairs lead, in the order a reader wants them: the imported design reference
+    // first — the comparison the catalog's parity work is actually about — then the paired sibling
+    // catalog, and the two export lanes last. Both sides of the leading pair are PNGs.
+    // See `docs/design/COMPARE_NAVIGATION.md`, §3.2.
     val defaultFormat =
-      if (hasSvg) "svg" else if (hasRc) "rc" else if (hasReference) "reference" else "parallel"
-    // An imported design spec is always drawn to the LEFT of the render it is compared against —
-    // the same order the viewer's spec lane states three ways (the Spec / Diff / Render triptych,
-    // the wipe's seam, and the focused Reference / Diff / Actual page). This wall's `reference`
-    // lane is that comparison at catalog scale, so it leads with the spec; `svg` and `rc` pit a
-    // render against an export OF that render, which is a different question and keeps the render
-    // first. `compare/columns.ts` owns the rule, and `<cp-compare-wall>` re-asserts it whenever the
-    // visitor switches lane — this only has to be right for the format the page is SERVED on.
-    val specLeadsColumns = defaultFormat == "reference" || defaultFormat == "parallel"
+      if (hasReference) "reference"
+      else if (hasParallel) "parallel" else if (hasSvg) "svg" else if (hasRc) "rc" else "parallel"
+    // ONE order, every lane: **baseline · diff · ours**. The same order the viewer's spec lane
+    // states three ways (the Spec / Diff / Render triptych, the wipe's seam, and the focused
+    // Reference / Diff / Actual page), so a reader who steps from the wall into the viewer finds
+    // the two frames on the sides they were already on.
+    //
+    // The `svg` and `rc` lanes used to lead with the render, on the reasoning that an export is on
+    // trial against the render that produced it. Sound, and still wrong to read: pressing a
+    // baseline button then swapped both pictures' sides as well as relabelling both headers, so
+    // the one control that changes the question also moved the answer
+    // (`docs/design/COMPARE_NAVIGATION.md`, F3). `compare/columns.ts` owns the rule and
+    // `<cp-compare-wall>` re-asserts it on arrival, which is what normalises a page cached in the
+    // old shape.
     // `loading="lazy"` on both pictures, and it applies however late the `src` arrives: the wall
     // assigns them from `<cp-compare-wall>` rather than serving them, and a catalog of several
     // hundred rows was asking the browser for that many full-resolution pairs at once for a reader
@@ -10827,7 +10889,11 @@ ${captureControlsHtml().prependIndent("          ")}
     // moment instead of one flooding ahead of the other.
     val renderCell =
       "<td class=\"cp-compare-render-cell\"><div class=\"cp-compare-shot\">" +
-        "<img loading=\"lazy\" class=\"cp-compare-png\" alt=\"\"></div></td>"
+        "<img loading=\"lazy\" class=\"cp-compare-png\" alt=\"\"></div>" +
+        // Empty, and filled by `<cp-compare-wall>` from the decoded raster rather than served: the
+        // wall chooses which theme variant of the pair is on screen, so a size printed here would
+        // be describing a picture the reader may not be looking at.
+        "<span class=\"cp-compare-dim\" data-dim-for=\"png\"></span></td>"
     // The Remote Compose canvas is CLASSED because a row now holds two of them — this one and the
     // delta map below — and `<cp-compare-wall>` has to tell the one it plays into from the one it
     // paints.
@@ -10835,7 +10901,7 @@ ${captureControlsHtml().prependIndent("          ")}
       "<td class=\"cp-compare-target-cell\"><div class=\"cp-compare-shot\">" +
         "<img loading=\"lazy\" class=\"cp-compare-vector\" alt=\"\">" +
         "<canvas class=\"cp-compare-rc\" hidden></canvas>" +
-        "</div></td>"
+        "</div><span class=\"cp-compare-dim\" data-dim-for=\"target\"></span></td>"
     // The delta map, and it belongs BETWEEN the pair wherever the pair ends up — the reference lane
     // leads with the spec, the vector lanes lead with the render, and either way the middle column
     // is what moved between the two beside it. That is the detail page's triptych at catalog scale.
@@ -10847,10 +10913,7 @@ ${captureControlsHtml().prependIndent("          ")}
       "<td class=\"cp-compare-diff-cell\"><div class=\"cp-compare-shot\">" +
         "<canvas class=\"cp-compare-diff\" aria-label=\"Highlighted pixel difference\"></canvas>" +
         "</div></td>"
-    val pictureCells =
-      (if (specLeadsColumns) listOf(targetCell, diffCell, renderCell)
-        else listOf(renderCell, diffCell, targetCell))
-        .joinToString("\n            ")
+    val pictureCells = listOf(targetCell, diffCell, renderCell).joinToString("\n            ")
     val darkFirst = isDarkFirstSystem(basePath, sessionId, declaredSurface)
     // A viewer deep-link may name a non-default state/props variant that is intentionally folded
     // out of this gallery. Keep every sibling id as an alias on the included component row so the
@@ -11043,7 +11106,12 @@ ${captureControlsHtml().prependIndent("          ")}
         // and falls back to a route id parsed out of the preview id, and reproducing that fallback
         // in the browser would be a second implementation of a rule with one right answer.
         val componentIdAttr =
-          " data-component-id=\"${WebEscaping.htmlEscape(ServeIssueReport.componentIdFor(current))}\""
+          " data-component-id=\"${WebEscaping.htmlEscape(ServeIssueReport.componentIdFor(current))}\"" +
+            // …and what to CALL it, for the scope chip a `?component=` link arrives with. The id is
+            // a route slug (`AppCard`) and the name is prose ("App Card"); a chip that named the
+            // slug would be the one thing on the page speaking the URL's language rather than the
+            // reader's.
+            " data-component-label=\"${WebEscaping.htmlEscape(component)}\""
         // The multi-row picker, next to the row's own name because that is what it selects. Emitted
         // on every row and hidden by `serve.css` until `<cp-compare-wall>` marks the wall pickable
         // — the tick does nothing without a script to turn it into a locator, and a checkbox that
@@ -11166,13 +11234,19 @@ ${captureControlsHtml().prependIndent("          ")}
         "rc" -> "Remote Compose"
         else -> "SVG"
       }
-    val renderHeadHtml = "<th class=\"cp-compare-render-head\">Rendered PNG</th>"
-    val targetHeadHtml =
-      "<th class=\"cp-compare-target-head\">${WebEscaping.htmlEscape(targetHead)}</th>"
+    // "Rendered PNG" named a FILE FORMAT where the reader wanted to know WHOSE picture this is,
+    // and it was the odd one out in a row whose other header is a design tool's name. The catalog's
+    // own title answers it, and the two `cp-compare-head-role` lines under the names say which of
+    // the pair is the yardstick and which is on trial — so neither header depends on the reader
+    // remembering which side means what.
+    fun headHtml(cls: String, name: String, role: String): String =
+      "<th class=\"$cls\"><span class=\"cp-compare-head-name\">" +
+        "${WebEscaping.htmlEscape(name)}</span>" +
+        "<span class=\"cp-compare-head-role\">$role</span></th>"
+    val renderHeadHtml = headHtml("cp-compare-render-head", heading, "ours")
+    val targetHeadHtml = headHtml("cp-compare-target-head", targetHead, "baseline")
     val diffHeadHtml = "<th class=\"cp-compare-diff-head\">Diff</th>"
-    val pictureHeads =
-      if (specLeadsColumns) targetHeadHtml + diffHeadHtml + renderHeadHtml
-      else renderHeadHtml + diffHeadHtml + targetHeadHtml
+    val pictureHeads = targetHeadHtml + diffHeadHtml + renderHeadHtml
     val empty =
       if (rows.isEmpty())
         "<p class=\"cp-empty\">No previews in this session carry a comparable format.</p>"
@@ -11260,6 +11334,9 @@ ${captureControlsHtml().prependIndent("          ")}
             <span class="cp-theme" role="group" aria-label="Comparison format">$formatControls</span>
             $themeControls
           </div>
+          <p id="cp-compare-scope" class="cp-compare-scope" role="status" hidden>
+            <span class="cp-compare-scope-text"></span>
+            <a class="cp-compare-scope-clear" href="#">compare every component</a></p>
           <div class="cp-searchbar cp-compare-searchbar">
             <input id="cp-compare-search" class="cp-search" type="search" placeholder="Filter comparisons…" aria-label="Filter comparisons">
             <span id="cp-compare-count" class="cp-count" role="status"></span>
@@ -12896,7 +12973,8 @@ $cards
                 <span>Our renders</span></label>
               <label><input type="radio" name="cp-page-lane" value="design" data-cp-page-lane>
                 <span>Design spec</span></label>
-              <label><input type="radio" name="cp-page-lane" value="diff" data-cp-page-lane>
+              <label title="Show how far each node is from the design — hold to light every node at once">
+                <input type="radio" name="cp-page-lane" value="diff" data-cp-page-lane>
                 <span>Diff %</span></label>
             </div>
             <label class="cp-page-opt"><input type="checkbox" data-cp-page-outlines> Outline every component</label>
@@ -13206,7 +13284,17 @@ $cards
                 "${esc(label)}</button>"
             }
         """
-        <h2 class="cp-status-sec">Activity</h2>
+        <!-- Behind a disclosure, closed. The feed is a list of commits with dates — a CHANGELOG,
+             which this catalog already publishes with an RSS feed — and it was the tallest thing
+             on a page whose job is to point at components. Kept rather than dropped because it is
+             the one changelog joined to the design file's own history, and folded because a
+             reader who wants that asks for it. See `docs/design/COMPARE_NAVIGATION.md`, §3.4. -->
+        <details class="cp-parity-activity cp-disclosure">
+          <summary>
+            <span class="cp-parity-comparisons-title">Activity</span>
+            <span class="cp-disclosure-hint">How the code and the design file have moved</span>
+          </summary>
+          <div class="cp-disclosure-body">
         <div class="cp-states" role="group" aria-label="Filter activity by lane">
         $filters
         </div>
@@ -13214,6 +13302,8 @@ $cards
         $items
         </ul>
         <p class="cp-muted" id="cp-parity-feed-empty" hidden>No activity in this lane.</p>
+          </div>
+        </details>
         <!-- Wires the lane buttons above to the feed. Renders nothing, and the feed is fully
              readable without it; `serve.css` hides the tag. -->
         <cp-parity-lanes></cp-parity-lanes>
@@ -13392,14 +13482,34 @@ $cards
               if (component.referenceId != null)
                 "<span class=\"cp-parity-score cp-muted\">Checking…</span>"
               else "—"
-            "<tr$scoring><td>${esc(component.name)}</td><td>$render</td><td>$design</td>" +
+            // The component's name is the way IN, not a label. This table is the page's index —
+            // the reader is here to find out which components are worth opening — and the thing
+            // worth opening is every variant of one component side by side, which is exactly what
+            // the wall does when it is handed a `?component=`. A row that only named the component
+            // left the reader to find it again by hand on a page of four hundred.
+            val scopedCompare =
+              if (component.componentId.isEmpty()) esc(component.name)
+              else {
+                val scopedQuery =
+                  listOf(
+                      "format=reference",
+                      "component=${WebEscaping.urlEncodeSegment(component.componentId)}",
+                      linkQuery(token, linkSessionId, basePath, isPublic),
+                    )
+                    .filter { it.isNotEmpty() }
+                    .joinToString("&")
+                "<a href=\"$basePath/compare?$scopedQuery\" " +
+                  "title=\"Compare every ${esc(component.name)} variant against the design\">" +
+                  "${esc(component.name)}</a>"
+              }
+            "<tr$scoring><td>$scopedCompare</td><td>$render</td><td>$design</td>" +
               "<td>$score</td><td>$review</td></tr>"
           }
         """
-        <details class="cp-parity-comparisons cp-disclosure">
+        <details class="cp-parity-comparisons cp-disclosure" open>
           <summary>
             <span class="cp-parity-comparisons-title">All comparisons (${dashboard.comparisons.size})</span>
-            <span class="cp-disclosure-hint">Browse every code component and its design mapping</span>
+            <span class="cp-disclosure-hint">Open a component to compare every variant of it</span>
           </summary>
           <div class="cp-disclosure-body cp-status-scroll">
             <table class="cp-table">

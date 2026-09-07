@@ -3374,12 +3374,12 @@ class ServeHttpRoutingTest {
     // design-tool one, and no "compare SVG" leading to a dead tab.
     val landing = get("/compose-m3/").second
     assertTrue(
-      landing.contains("href=\"/compose-m3/compare?format=rc\">compare RC players</a>") &&
-        !landing.contains("compare SVG"),
+      landing.contains("href=\"/compose-m3/compare?format=rc\">Remote Compose players</a>") &&
+        !landing.contains("format=svg"),
       "the catalog landing links the comparison formats it carries: $landing",
     )
     assertTrue(
-      landing.contains("href=\"/compose-m3/compare?format=reference\">compare to Figma</a>") &&
+      landing.contains("href=\"/compose-m3/compare?format=reference\">Figma</a>") &&
         landing.contains("href=\"/compose-m3/parity\">design parity</a>"),
       "the catalog landing compares against the design tool its references come from: $landing",
     )

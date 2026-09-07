@@ -3500,13 +3500,17 @@ class ServeHttpServer(
             renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
           // Same condition `handleParity` serves on, so the link never leads to that route's 404 —
           // and, since the acceptance lane was added there, so the page it made reachable is not
-          // reachable only by typing the URL. An orphan-only catalog is precisely the one whose
-          // dashboard has something to say and whose landing would otherwise offer no way in.
+          // reachable only by typing the URL.
           hasParityView =
             renderHost.parityActivity() != null ||
               renderHost.parityIssues() != null ||
               renderHost.knownDifferences() != null ||
               renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
+          // The PAIRED implementation, named the way the wall names it. Same source the wall reads
+          // (`parallelSpecSource`), so the chip and the format it deep-links can never disagree
+          // about whether there is a sibling catalog to compare against.
+          parallelComparisonLabel =
+            renderHost.previews.firstNotNullOfOrNull { parallelSpecSource(renderHost, it)?.label },
           // Scoped to the system being served: one repository may publish several catalogs and
           // the index producer pushes the identical file onto each delivery branch. See
           // [ServeWeb.issuesForSystem].
@@ -3874,6 +3878,20 @@ class ServeHttpServer(
       // schema, which reads as "this catalog is fine" to exactly the CI check that shape exists
       // for.
       val accepts = renderHost.knownDifferences() != null
+      // ---- The dashboard is an INDEX, not a place -----------------------------------------------
+      //
+      // It used to be a mini site: coverage bands, a filtered activity feed, a gap table, an issue
+      // index and a comparison inventory, none of which led anywhere — so it was both the least
+      // visited page here and the one that had to be read end to end. Its facts each belong to a
+      // surface the reader is already on (`docs/design/COMPARE_NAVIGATION.md`, §3.4), and this page
+      // keeps the one job none of them can do: saying which components are worth opening, and
+      // opening them.
+      //
+      // So every component here now links into the comparison wall SCOPED TO THAT COMPONENT, the
+      // activity feed is folded away behind a disclosure (it is a changelog, and the catalog
+      // publishes one), and the landing offers this under `Reports` rather than beside the
+      // comparisons it is not one of.
+      //
       // The gate reads the SCOPED list, not the whole index: a catalog whose only rows were filed
       // against a sibling system has nothing of its own to say here, and serving it the bands of a
       // catalog it is not is the same wrong answer this page would have given, one route later.
@@ -3904,15 +3922,13 @@ class ServeHttpServer(
         return@withLeasedSession
       }
       // **The audit-bearing page is not cacheable**, the way an `rcComparePending` comparison is
-      // not.
-      // The walk joins two things of different lifetimes: the preview inventory and the issue rows
-      // are baked into this HTML, while the document it walks is fetched live at `no-store`. Served
-      // from cache after an in-place catalog refresh, a *fresh* document would be resolved against
-      // a
-      // *stale* inventory — and a preview added or renamed in between reads as `orphaned-target`,
-      // which is a false finding of exactly the kind this panel exists to make trustworthy. The
-      // comparison band has no such gap: it is generation-bound by `referenceSha256`, and there is
-      // no equivalent anchor for a walk over the whole catalog.
+      // not. The walk joins two things of different lifetimes: the preview inventory and the issue
+      // rows are baked into this HTML, while the document it walks is fetched live at `no-store`.
+      // Served from cache after an in-place catalog refresh, a *fresh* document would be resolved
+      // against a *stale* inventory — and a preview added or renamed in between reads as
+      // `orphaned-target`, which is a false finding of exactly the kind this panel exists to make
+      // trustworthy. The comparison band has no such gap: it is generation-bound by
+      // `referenceSha256`, and there is no equivalent anchor for a walk over the whole catalog.
       markGeneration(
         "static-page",
         if (accepts) DYNAMIC_RESOURCE_CACHE_CONTROL else pageCacheControl(),
