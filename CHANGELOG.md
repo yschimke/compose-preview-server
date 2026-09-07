@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.17.0](https://github.com/yschimke/compose-preview-server/compare/v3.16.0...v3.17.0) (2026-09-07)
+
+
+### Features
+
+* **design:** compile and render a design locally with --local ([#561](https://github.com/yschimke/compose-preview-server/issues/561)) ([65446a7](https://github.com/yschimke/compose-preview-server/commit/65446a7ace46b36d3b57d07bb2f3d0294abc26fe))
+* **serve:** compare every variant of a component under its own render ([#558](https://github.com/yschimke/compose-preview-server/issues/558)) ([de5c2d5](https://github.com/yschimke/compose-preview-server/commit/de5c2d50bf435d597044fd4f0f53dd39e2c0cb39))
+* **serve:** one vocabulary for comparing, and a parity page that opens components ([#553](https://github.com/yschimke/compose-preview-server/issues/553)) ([09d265f](https://github.com/yschimke/compose-preview-server/commit/09d265f1514652b0b2e28e901bc170249cc2f1a2))
+* **serve:** open the approval page with the requested capability ticked ([#559](https://github.com/yschimke/compose-preview-server/issues/559)) ([4290e25](https://github.com/yschimke/compose-preview-server/commit/4290e25ad8a732939e335cf06dcb8382d598e404))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#565](https://github.com/yschimke/compose-preview-server/issues/565)) ([ee806a7](https://github.com/yschimke/compose-preview-server/commit/ee806a7ed180b221344a6384dfbc96a7b8bd94cf))
+* **deps:** update dependency io.github.classgraph:classgraph to v4.8.195 ([#566](https://github.com/yschimke/compose-preview-server/issues/566)) ([64137de](https://github.com/yschimke/compose-preview-server/commit/64137de599724a544cec99fccc653911058600b0))
+* **playground:** let the first-frame render budget follow renderTimeoutSeconds ([#552](https://github.com/yschimke/compose-preview-server/issues/552)) ([ae7ee69](https://github.com/yschimke/compose-preview-server/commit/ae7ee69ad3bf5e5c9b1b4b6f8afcbf9d3d7830be))
+* **serve:** say the capture has to be pasted when this host cannot embed it ([#562](https://github.com/yschimke/compose-preview-server/issues/562)) ([e5acbe6](https://github.com/yschimke/compose-preview-server/commit/e5acbe6e8342c218b9b513c5f114edaeaa3da667))
+* **test:** follow the pages chip's rename to "N design pages" ([#560](https://github.com/yschimke/compose-preview-server/issues/560)) ([c8f1b6a](https://github.com/yschimke/compose-preview-server/commit/c8f1b6a27a2c538d3ee6f156ae5f47abc322fea4))
+
+
+### Performance Improvements
+
+* **serve:** write every preview id once, in one alias table ([#564](https://github.com/yschimke/compose-preview-server/issues/564)) ([6f5dcd7](https://github.com/yschimke/compose-preview-server/commit/6f5dcd76358b61754e3e7d1a1251d5b7c5025f2d))
+
 ## [3.16.0](https://github.com/yschimke/compose-preview-server/compare/v3.15.0...v3.16.0) (2026-09-07)
 
 
