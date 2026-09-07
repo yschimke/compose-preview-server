@@ -158,6 +158,32 @@ class EditorOperationHistoryTest {
     assertTrue(history[1].mine)
   }
 
+  /**
+   * The line a row shows, in characters the browser build has glyphs for.
+   *
+   * Pinned because the first render of this panel put an arrow between the two ends and the Wasm
+   * font drew a box: the rule is that this line stays inside what the editor can actually draw.
+   */
+  @Test
+  fun `a change reads as what it is now and what it was, without an arrow`() {
+    assertEquals(
+      "text  Nightcall  \u00b7  was Kavinsky",
+      EditorOperationChange("text", before = "Kavinsky", after = "Nightcall").readable(),
+    )
+    assertEquals(
+      "added  discover-grid.items",
+      EditorOperationChange("added", before = null, after = "discover-grid.items").readable(),
+    )
+    assertEquals(
+      "text  was Kavinsky",
+      EditorOperationChange("text", before = "Kavinsky", after = null).readable(),
+    )
+    assertTrue(
+      EditorOperationChange("text", "a", "b").readable().none { it.code > 0xFF },
+      "the line has to stay inside the glyphs the browser build ships",
+    )
+  }
+
   private fun edit(state: UiBuilderEditorState, value: String): UiBuilderEditorState =
     reducer.reduce(state, UiBuilderEditorEvent.CommitProperty(titleId, "text", value))
 

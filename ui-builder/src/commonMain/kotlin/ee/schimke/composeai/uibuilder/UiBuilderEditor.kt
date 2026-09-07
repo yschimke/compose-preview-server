@@ -314,6 +314,20 @@ fun UiBuilderEditor(
   initialCatalogQuery: String = "",
   initialLayerQuery: String = "",
   initialInspectorMode: EditorInspectorMode = EditorInspectorMode.Properties,
+  /**
+   * Changes to make to the design as the editor opens, in order, as though somebody had made them.
+   *
+   * Empty everywhere a person is editing: this is not a way to author a document, and a host that
+   * wants a different design should open a different one. It exists for the same reason
+   * [initialCanvasZoom] pins a scale — a caller that is *picturing* the editor rather than running
+   * it. The History panel is about what this session has done, so a session that has done nothing
+   * draws the one state that says nothing about the panel, and the preview that has to diff it
+   * hands the session the edits it is a picture of.
+   *
+   * Anything the reducer refuses is left out of the state the same way it would be for a person: a
+   * seed that cannot be applied is not a reason to refuse to open the design.
+   */
+  initialEdits: List<UiBuilderEditorEvent> = emptyList(),
   initialPreviewMode: Boolean = false,
   initialCodePaneVisible: Boolean = false,
   /**
@@ -527,6 +541,17 @@ fun UiBuilderEditor(
   LaunchedEffect(document.revision, authoritativeGeneration) {
     if (state.document != document) {
       state = reducer.reconciled(state, document, initialSelectedNodeId)
+    }
+  }
+  // After the reconcile above rather than inside the state it opens with, because that reconcile
+  // fires on the first composition too: a session seeded at construction has a document the
+  // authoritative one does not match, so it was rebuilt from the authoritative one and the seed
+  // was gone before anything drew. Once per design, and never at all in the empty default.
+  var seeded by remember(document.id) { mutableStateOf(false) }
+  LaunchedEffect(document.id) {
+    if (!seeded && initialEdits.isNotEmpty()) {
+      seeded = true
+      state = initialEdits.fold(state, reducer::reduce)
     }
   }
   // Applied once, and only over an editor that has nothing of its own: the host delivers this
@@ -5206,7 +5231,7 @@ private fun PropertyInspector(
             EditorInspectorMode.Screen -> "Frame, density and reference"
             EditorInspectorMode.Issues -> "What the export would refuse"
             EditorInspectorMode.Comments -> "What people and agents have said"
-            EditorInspectorMode.History -> "What has been done, and what undo would take back"
+            EditorInspectorMode.History -> "What has been done, newest first"
           },
         onClose = onClose,
       )
@@ -5896,7 +5921,7 @@ private fun OperationHistoryInspector(
     return
   }
   Text(
-    "Newest first. Undo and redo act on the marked entries — your own changes.",
+    "Undo and redo act on the marked entries, which are your own changes.",
     color = MaterialTheme.colorScheme.onSurfaceVariant,
     style = MaterialTheme.typography.labelSmall,
   )
@@ -5950,9 +5975,7 @@ private fun OperationHistoryRow(entry: EditorOperationEntry, onSelectNode: (Stri
     )
     entry.changes.forEach { change ->
       Text(
-        // An em dash for an end that is not there, so "added" and "cleared" read off the line
-        // instead of needing a word of their own.
-        "${change.label}  ${change.before ?: "—"} → ${change.after ?: "—"}",
+        change.readable(),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.labelSmall,
       )
@@ -5969,6 +5992,22 @@ private fun OperationHistoryRow(entry: EditorOperationEntry, onSelectNode: (Stri
     )
   }
 }
+
+/**
+ * One change as a line: what the value is now, and what it was.
+ *
+ * No arrow, and that is not a style preference: the browser build has no glyph for one, and the
+ * first render of this panel drew a box between every before and after. An absent end is said with
+ * a missing half rather than a dash, for the same reason — "text was Hello" says the property is
+ * gone, in characters the font is known to have.
+ */
+internal fun EditorOperationChange.readable(): String =
+  when {
+    after != null && before != null -> "$label  $after  \u00b7  was $before"
+    after != null -> "$label  $after"
+    before != null -> "$label  was $before"
+    else -> label
+  }
 
 /** What the two entries the toolbar is aimed at say about themselves, and nothing for the rest. */
 private fun EditorOperationStanding.marker(): String? =
