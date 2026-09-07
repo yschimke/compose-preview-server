@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.14.0](https://github.com/yschimke/compose-preview-server/compare/v3.13.0...v3.14.0) (2026-09-07)
+
+
+### Features
+
+* **ui-builder:** a design command, so getting pixels or source out is not a bespoke script ([#532](https://github.com/yschimke/compose-preview-server/issues/532)) ([08649a4](https://github.com/yschimke/compose-preview-server/commit/08649a40c97c4cca75251867d9765147a5b4e04a))
+* **ui-builder:** export a widget as a bundle, its pictures beside its source ([#533](https://github.com/yschimke/compose-preview-server/issues/533)) ([67ff67f](https://github.com/yschimke/compose-preview-server/commit/67ff67ffc5654f63cb5d34132f11d8028fa290e1))
+* **ui-builder:** render a Wear widget on the native preview lane ([#535](https://github.com/yschimke/compose-preview-server/issues/535)) ([a6723d0](https://github.com/yschimke/compose-preview-server/commit/a6723d0946e9e6b3644766b4f77e119a00651bb9))
+* **ui-builder:** say what undo would take back before you press it ([#538](https://github.com/yschimke/compose-preview-server/issues/538)) ([02e8647](https://github.com/yschimke/compose-preview-server/commit/02e86473c400435e1839261f0ba7f5be611c0d1c))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#540](https://github.com/yschimke/compose-preview-server/issues/540)) ([b84237a](https://github.com/yschimke/compose-preview-server/commit/b84237a182150f5525c8ee9fab7c2349f58e84da))
+* **deps:** update compose-preview-contracts to v2.11.0 ([#541](https://github.com/yschimke/compose-preview-server/issues/541)) ([2c7740b](https://github.com/yschimke/compose-preview-server/commit/2c7740b08b7f496dbb785161e27068ddce1d6fad))
+* **deps:** update rc-player-compose to 1.59.3 ([#539](https://github.com/yschimke/compose-preview-server/issues/539)) ([af4ba73](https://github.com/yschimke/compose-preview-server/commit/af4ba736a8d10aefc058016bf72c9a6cbbd840ba))
+
 ## [3.13.0](https://github.com/yschimke/compose-preview-server/compare/v3.12.0...v3.13.0) (2026-09-07)
 
 
