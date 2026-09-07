@@ -556,10 +556,11 @@ fun UiBuilderEditor(
   }
   var catalogDragPosition by remember { mutableStateOf<Offset?>(null) }
   var draggedComponentId by remember { mutableStateOf<String?>(null) }
+  // The frame's own rectangle in the window. Every hit-test against the design happens in this
+  // space — the renderer reports each node's box as `boundsInRoot`, so the frame's offset and the
+  // zoom are already inside the numbers — and this rectangle is what turns a fraction of the frame
+  // into a point that can be compared against them.
   var canvasBounds by remember { mutableStateOf(Rect.Zero) }
-  // The factor between the frame's own pixels and the pane it is drawn in, kept so a drop landing
-  // at a window coordinate can be asked about in the space the renderer reports its slots in.
-  var canvasScale by remember { mutableFloatStateOf(1f) }
   // The scale the design is pinned at, or null while it is framed to the workspace. Local rather
   // than in [UiBuilderEditorState] for the same reason the open panels are: how far somebody has
   // zoomed in is a fact about their window, not about the design, and an authoritative snapshot
@@ -748,16 +749,7 @@ fun UiBuilderEditor(
           // the last click had been. The renderer already reports each slot's box, and the
           // reference
           // overlay already promotes a piece into the slot under it — this asks the same question.
-          val target =
-            canvasInspection?.let { snapshot ->
-              reducer.promotionTarget(
-                state,
-                componentId,
-                snapshot.slots,
-                (position.x - canvasBounds.left) / canvasScale,
-                (position.y - canvasBounds.top) / canvasScale,
-              )
-            } ?: reducer.dropTarget(state, componentId)
+          val target = reducer.dropTargetAt(state, componentId, canvasInspection, position)
           if (canvasBounds.contains(position) && target != null) {
             dispatch(UiBuilderEditorEvent.InsertComponent(componentId, target, variant))
             if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
@@ -797,10 +789,7 @@ fun UiBuilderEditor(
         focusEditor()
         dispatch(UiBuilderEditorEvent.SelectNode(it))
       },
-      onCanvasMetrics = { width, height, scale ->
-        canvasScale = scale
-        onCanvasMetrics(width, height, scale)
-      },
+      onCanvasMetrics = onCanvasMetrics,
       onCanvasBounds = {
         canvasBounds = it
         onCanvasBoundsChanged(it)
@@ -877,20 +866,19 @@ fun UiBuilderEditor(
   /**
    * The slot a piece would be built into, hit-tested at its own centre.
    *
-   * Fractions become render pixels here rather than in the reducer, because the conversion needs
-   * the frame and the density — two facts about how this editor is drawing right now, and neither
-   * of them the reducer's business.
+   * Fractions become a window point here rather than in the reducer, because the conversion needs
+   * where the frame is drawn right now, which is not the reducer's business. That rectangle is the
+   * whole of it — see [centreIn].
    */
   fun promotionTargetFor(piece: ReferencePiece): ParentSlot? {
     val componentId = piece.componentId ?: return null
-    val environment = state.document.screenEnvironmentSettings()
-    val scale = environment.density.toFloat()
+    val centre = piece.centreIn(canvasBounds)
     return reducer.promotionTarget(
       state = state,
       componentId = componentId,
       slots = canvasInspection?.slots.orEmpty(),
-      pointX = (piece.left + piece.right) / 2f * environment.widthDp * scale,
-      pointY = (piece.top + piece.bottom) / 2f * environment.heightDp * scale,
+      pointX = centre.x,
+      pointY = centre.y,
     )
   }
   // Cached the same way and for the same reason, and only while the pane is open: generating is a
@@ -3719,7 +3707,7 @@ internal fun PinnedDesignCanvas(
                 // fact
                 // about this session and must not be hidden by a mock.
                 ReferenceOverlayCanvas(reference, onMarkDrawn, onPieceMoved)
-                RemotePresenceOverlay(collaborators, inspection)
+                RemotePresenceOverlay(collaborators, inspection, frameBounds, drawScale)
                 // Above everything, because a pin is the one thing on this canvas a person clicks
                 // that is
                 // not part of the design: it must not end up under a mock somebody just turned up
@@ -3844,6 +3832,42 @@ private fun ConstrainedFramePane(
   }
 }
 
+/**
+ * The slot a component dropped at [position] would be built into.
+ *
+ * [position] is in the root's space, and no conversion happens here, which is the point of naming
+ * this rather than writing it at the call site: `catalogDrag` reports the pointer in the root's
+ * space precisely so it can be compared against the boxes the inspection reports, and those are
+ * `boundsInRoot` too — the frame's offset in the workspace and the zoom are already inside both.
+ * Subtracting the frame's origin and dividing by the zoom, which is what the drop used to do, moved
+ * the point into the frame's own space and made a drop hit whichever slot sat at the same offset
+ * from the window's corner. It landed correctly only on an unzoomed canvas pinned to that corner.
+ */
+internal fun UiBuilderEditorReducer.dropTargetAt(
+  state: UiBuilderEditorState,
+  componentId: String,
+  inspection: UiBuilderInspectionSnapshot?,
+  position: Offset,
+): ParentSlot? =
+  inspection?.let { promotionTarget(state, componentId, it.slots, position.x, position.y) }
+    ?: dropTarget(state, componentId)
+
+/**
+ * The centre of this piece as a point in the root's space, which is where the slot boxes are.
+ *
+ * A piece's box is fractions of the frame, and [frame] is where that frame is drawn in the window,
+ * so the rectangle is the entire conversion: no density and no zoom, because both are already in
+ * its width and height. Stating it in the design's own pixels — `fraction * widthDp * density`,
+ * which is what this used to be — answered in a space the reducer never hit-tests in, and used the
+ * *frame's* height for the vertical fraction where the overlay's fractions are of the extent, so a
+ * design taller than its frame was wrong down the page as well as across it.
+ */
+internal fun ReferencePiece.centreIn(frame: Rect): Offset =
+  Offset(
+    frame.left + (left + right) / 2f * frame.width,
+    frame.top + (top + bottom) / 2f * frame.height,
+  )
+
 /** Keeps the companion's remembered geometry out of the editing pane's. */
 private const val FRAME_COMPANION_SESSION = "frame-companion"
 
@@ -3931,10 +3955,23 @@ private fun CanvasZoomControls(
   }
 }
 
+/**
+ * What everybody else has selected, outlined over the design.
+ *
+ * Drawn inside the frame, so it draws in the frame's own pixels — while the boxes it is drawing are
+ * the inspection's, which are `boundsInRoot`: the frame's offset in the window and the scale it is
+ * painted at are both already in them. So each box comes back out of that space first. Untranslated
+ * — which is what this did — another person's outline was pushed down and right by wherever the
+ * frame happened to sit, and drawn at the zoom twice over.
+ */
 @Composable
-private fun RemotePresenceOverlay(
+internal fun RemotePresenceOverlay(
   collaborators: List<UiBuilderCollaborator>,
   inspection: UiBuilderInspectionSnapshot?,
+  /** The frame's rectangle in the window, which is the space [inspection] answers in. */
+  frameBounds: Rect,
+  /** How many window pixels one of the frame's own is drawn as; see [PinnedDesignCanvas]. */
+  drawScale: Float,
 ) {
   if (collaborators.isEmpty()) return
   val boundsByNode = inspection?.nodes?.associate { it.nodeId to it.bounds }.orEmpty()
@@ -3945,8 +3982,16 @@ private fun RemotePresenceOverlay(
         val bounds = boundsByNode[nodeId] ?: return@forEach
         drawRect(
           color = color,
-          topLeft = Offset(bounds.x, bounds.y),
-          size = androidx.compose.ui.geometry.Size(bounds.width, bounds.height),
+          topLeft =
+            Offset(
+              (bounds.x - frameBounds.left) / drawScale,
+              (bounds.y - frameBounds.top) / drawScale,
+            ),
+          size =
+            androidx.compose.ui.geometry.Size(
+              bounds.width / drawScale,
+              bounds.height / drawScale,
+            ),
           style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f),
         )
       }
