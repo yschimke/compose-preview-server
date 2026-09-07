@@ -224,8 +224,46 @@ class PlaygroundAndroidRenderService(
   }
 
   companion object {
-    /** Cold Android/Robolectric renders take tens of seconds; budget generously. */
-    val DEFAULT_RENDER_BUDGET: Duration = 180.seconds
+    /** The property `ServeRenderHost` reads for the same quantity — a cold-start render budget. */
+    internal const val RENDER_BUDGET_PROPERTY: String = "composeai.serve.renderTimeoutSeconds"
+
+    /** The value this budget falls back to, and what it meant before it was configurable. */
+    internal val FALLBACK_RENDER_BUDGET: Duration = 180.seconds
+
+    /**
+     * Cold render budget for one first frame, `composeai.serve.renderTimeoutSeconds` or 180s.
+     *
+     * **Every render on this lane is a cold one.** `openSession` opens a fresh daemon subprocess
+     * per call and closes it in the `finally` below, so there is no warm pool to amortise a JVM
+     * start, a Skiko or Robolectric init and a first composition against — which is why this reads
+     * the *cold-start* property rather than `frameRenderTimeoutSeconds`, the per-frame cap that
+     * only means anything to a daemon which is already up.
+     *
+     * It reads a property at all because 180s was neither configurable nor chosen for both lanes.
+     * `ServeRenderHost` has its own 180s default for the same quantity and has been overridable
+     * since it was written — its KDoc says "180s covers a desktop/Skiko daemon, but an
+     * Android/Robolectric daemon's first render is much slower … so make it overridable" — and an
+     * operator who raises it is answering exactly the question this constant also asks. Before
+     * this, that answer reached `ServeRenderHost` and not here, so a host configured with 900s
+     * still cut its playground first frame off at three minutes and reported "this host's renderer
+     * produced no frame for it"
+     * ([#481](https://github.com/yschimke/compose-preview-server/issues/481)).
+     *
+     * The default is unchanged, so a host that sets nothing behaves exactly as before.
+     */
+    val DEFAULT_RENDER_BUDGET: Duration
+      get() = renderBudgetFrom(System.getProperty(RENDER_BUDGET_PROPERTY))
+
+    /**
+     * The property's value as a budget, or [FALLBACK_RENDER_BUDGET] when it is absent or nonsense.
+     *
+     * Split out so the parsing is testable without setting a system property, and clamped at one
+     * second for the reason `ServeRenderHost` clamps: a zero or negative budget would make every
+     * render report an expiry it never waited for.
+     */
+    internal fun renderBudgetFrom(property: String?): Duration =
+      property?.toLongOrNull()?.coerceAtLeast(1)?.seconds ?: FALLBACK_RENDER_BUDGET
+
     val DEFAULT_ACK_TIMEOUT: Duration = 30.seconds
 
     /**
