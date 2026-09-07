@@ -5471,9 +5471,14 @@ class ServeWebFixtureTest {
     )
     // …and the fallback: no tree to list them in (too few previews to synthesize families from)
     // means the chip is the only route, so it stays.
+    //
+    // "design pages", not "pages": #553 gave the chip the same vocabulary the rest of the catalog
+    // uses for the surface it leads to, and this assertion kept the old label — which is why
+    // `main` has been red on this line since that merge. The chip's own emission is the authority
+    // (`actionChip("$basePath/pages$q", "N design page(s)")`).
     assertTrue(
       !landingPublic.contains("cp-tree-pages") &&
-        landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 pages</a>"),
+        landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 design pages</a>"),
       "a catalog with no tree keeps the header chip, or its pages would be unreachable",
     )
     // `reflectTree` walks every expandable row on every open/close; the Pages branch is expandable
