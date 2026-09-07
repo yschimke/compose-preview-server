@@ -166,6 +166,8 @@ private fun ExportFormatV1.fileExtension(): String =
     ExportFormatV1.SVG -> "svg"
     ExportFormatV1.PNG -> "png"
     ExportFormatV1.COMPOSE -> "kt"
+    // An archive: source plus the picture bytes as files. `application/zip` per the contract.
+    ExportFormatV1.BUNDLE -> "zip"
   }
 
 /** The live SVG of one design: the current committed revision, rendered on every request. */
