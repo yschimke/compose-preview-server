@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.bundle.AndroidBundleLaunch
 import ee.schimke.composeai.bundle.BundleReader
 import ee.schimke.composeai.bundle.coordinates.CoordinateResolver
 import ee.schimke.composeai.bundle.extractBundleClassesAndManifest
@@ -41,6 +42,9 @@ object PlaygroundCatalogClasspath {
     extraMavenRepos: List<String> = emptyList(),
     offline: Boolean = false,
     fileSystem: FileSystem = SystemFileSystem,
+    resolveAndroidJar: () -> File? = {
+      AndroidBundleLaunch.resolveAndroidJar(localPropertiesFile = null)
+    },
     onLog: (String) -> Unit = {},
   ): PlaygroundCompileService.Classpath? {
     val manifest =
@@ -94,8 +98,57 @@ object PlaygroundCatalogClasspath {
         .resolveAll(mavenCoords)
     val resolvedJars = requireAllResolved(system, resolutions, onLog) ?: return null
 
-    return assemble(system, classesDir, libJars, resolvedJars)
+    return assemble(
+      system,
+      classesDir,
+      libJars,
+      resolvedJars,
+      platformJars = androidPlatformJars(system, manifest.backend, resolveAndroidJar, onLog),
+    )
   }
+
+  /**
+   * `android.jar`, for an `android`-backend bundle, or nothing.
+   *
+   * The framework is not a Maven coordinate and never appears in `manifest.classpath`, so nothing
+   * above puts it on the compile classpath. Every `androidx.*` class does arrive — an AAR's
+   * `classes.jar` is a resolved dependency like any other — which is why this was invisible for as
+   * long as generated Kotlin named only `androidx.*`: a snippet that imports `android.util.Base64`
+   * or `android.graphics.BitmapFactory` is the first one to need the platform itself, and the Wear
+   * widget native-preview lane emits exactly those two to decode an inlined picture
+   * (`InlineBitmapDeclarations`). Without this the compile fails with `Unresolved reference
+   * 'graphics'` on the import line — a message that reads like a defect in the design rather than a
+   * hole in the host's classpath.
+   *
+   * The render half was never missing it: `ServeRunner.buildPlaygroundAndroidDaemonOpener` puts
+   * `android.jar` on the daemon classpath and disables the Android modes when it cannot find one.
+   * So this closes a compile/render asymmetry rather than adding a new requirement.
+   *
+   * Absent, it is left out rather than failing the whole classpath. A host with no SDK has already
+   * had its Android render lanes disabled by the opener above, and a `desktop` bundle is unaffected
+   * either way — refusing here would take the CMP catalogs down with it.
+   */
+  private fun androidPlatformJars(
+    system: String,
+    backend: String?,
+    resolveAndroidJar: () -> File?,
+    onLog: (String) -> Unit,
+  ): List<File> {
+    if (backend != ANDROID_BACKEND) return emptyList()
+    val androidJar = resolveAndroidJar()
+    if (androidJar == null) {
+      onLog(
+        "playground $system: this is an android bundle and no android.jar was found — set " +
+          "ANDROID_HOME / ANDROID_SDK_ROOT; a snippet naming an `android.*` framework class " +
+          "will not compile against this classpath"
+      )
+      return emptyList()
+    }
+    return listOf(androidJar)
+  }
+
+  /** `manifest.backend` for a bundle whose previews are drawn by Robolectric-backed Android. */
+  private const val ANDROID_BACKEND = "android"
 
   /**
    * Every declared coordinate must resolve, or the compile classpath is **incomplete** and the mode
@@ -123,17 +176,22 @@ object PlaygroundCatalogClasspath {
 
   /**
    * Pure classpath assembly: catalog classes first, then embedded libs, then every resolved Maven
-   * jar, deduplicated and order-preserving. Separated from [resolve]'s IO so the ordering/dedup can
-   * be unit-tested without a real bundle.
+   * jar, then [platformJars], deduplicated and order-preserving. Separated from [resolve]'s IO so
+   * the ordering/dedup can be unit-tested without a real bundle.
+   *
+   * The platform comes last deliberately. `android.jar` carries stubbed method bodies and a few
+   * types the support libraries also ship, so a catalog jar that declares one of them must win —
+   * the same precedence a Gradle Android compilation gives its bootclasspath.
    */
   internal fun assemble(
     system: String,
     classesDir: File,
     libJars: List<File>,
     resolvedJars: List<File>,
+    platformJars: List<File> = emptyList(),
   ): PlaygroundCompileService.Classpath {
     val entries =
-      (listOf(classesDir) + libJars + resolvedJars)
+      (listOf(classesDir) + libJars + resolvedJars + platformJars)
         .map { it.absolutePath }
         .distinct()
         .map { it.toPath() }

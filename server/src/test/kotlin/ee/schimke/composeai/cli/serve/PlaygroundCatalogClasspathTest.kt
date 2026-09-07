@@ -109,4 +109,46 @@ class PlaygroundCatalogClasspathTest {
       "the miss is logged with the offending coordinate: $logs",
     )
   }
+
+  @Test
+  fun `the android platform is appended last so a catalog jar still wins`() {
+    val classes = File(root, "classes")
+    val glanceWear = File(root, "glance-wear.jar")
+    val androidJar = File(root, "android.jar")
+
+    val cp =
+      PlaygroundCatalogClasspath.assemble(
+        system = "remote-m3",
+        classesDir = classes,
+        libJars = emptyList(),
+        resolvedJars = listOf(glanceWear),
+        platformJars = listOf(androidJar),
+      )
+
+    assertEquals(
+      listOf(classes, glanceWear, androidJar).map { it.absolutePath },
+      cp.entries.map { it.toString() },
+      "android.jar is a stubbed bootclasspath, so anything the catalog declares takes precedence",
+    )
+  }
+
+  @Test
+  fun `a classpath with no platform jars is unchanged`() {
+    val classes = File(root, "classes")
+    val skiko = File(root, "skiko.jar")
+
+    assertEquals(
+      PlaygroundCatalogClasspath.assemble("compose-m3", classes, emptyList(), listOf(skiko))
+        .entries,
+      PlaygroundCatalogClasspath.assemble(
+          "compose-m3",
+          classes,
+          emptyList(),
+          listOf(skiko),
+          platformJars = emptyList(),
+        )
+        .entries,
+      "a desktop bundle resolves exactly the classpath it did before the platform was added",
+    )
+  }
 }
