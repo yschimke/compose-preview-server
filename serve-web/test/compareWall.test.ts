@@ -364,6 +364,17 @@ describe("keepRow", () => {
         assert.equal(keepRow(orphan, "", "", "Button"), false);
         assert.equal(keepRow(orphan, "", "", ""), true);
     });
+
+    it("finds a row by a preview id that is no longer in its haystack", () => {
+        // The ids used to be copied into `data-hay` so a typed id matched there. They are written
+        // once in the page's alias table now, so the search has to look at the resolved ids too —
+        // otherwise typing an id the reader can see on the page empties the wall.
+        // See `docs/design/COMPARE_NAVIGATION.md`, F2.
+        const row = { ...facts, hay: "filled button · buttons" };
+        assert.equal(keepRow(row, "FilledButtonPreview", ""), true);
+        assert.equal(keepRow(row, "com.example.FilledButton", ""), true);
+        assert.equal(keepRow(row, "SliderPreview", ""), false);
+    });
 });
 
 describe("countLabel", () => {

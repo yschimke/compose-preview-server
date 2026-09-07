@@ -42,13 +42,20 @@ whichever of `SVG` / `3D` / `Transparent` / `Fit width` happens to spill onto th
 button labelled with one source opens a panel of things that are not that source, and the controls
 change rows depending on how long the source names are.
 
-**F2 — the compare wall is four pages pretending to be one.** `ServeWeb.comparisonPage` bakes the
-URLs for *every* format into *every* row (`data-png-*`, `data-svg-*`, `data-rc-*`,
-`data-reference-*`, `data-parallel-*`) plus a per-row search haystack that inlines the full title of
-every issue touching that row. On `remote-m3` that is **5.8 MB of HTML, 474 rows, 4,279 `<img>`
-elements and 8.4 s to first byte** — of which ~1.9 MB is `data-hay` and `data-preview-ids` alone.
-Then the client assigns 4,279 `src`es and rasterises and scores each pair, which is the "slow to
-load each row" in `?format=parallel`.
+**F2 — the compare wall says the same thing thousands of times.** On `remote-m3` it is **6.4 MB of
+HTML that takes over two minutes to arrive**. Measured attribute by attribute, a third of it is two
+attributes: `data-preview-ids` (988 KB) and `data-hay` (1,096 KB).
+
+Both are the same bytes. Every row carries the full preview-id list of the comparison card it
+stands for, and then the haystack carries that list *again* so a typed id matches. The Remote
+Compose lane wall does it with no claim-once rule at all, so a card with 66 variants writes 66
+copies of its 66 ids. The total is **19,188 id mentions of 538 distinct ids** — a 36× duplication
+of 26 KB of actual text.
+
+The per-format URL sets (`data-png-*`, `data-svg-*`, `data-rc-*`, `data-reference-*`,
+`data-parallel-*`) are the obvious suspect and are **not** the problem: together they are ~270 KB,
+4% of the page. Serving one baseline per document is worth doing for the *page's* clarity (§3.2),
+not for its weight.
 
 **F3 — the wall's columns move.** `specLeadsColumns()` puts the target first for `reference` and
 `parallel` and the render first for `svg` and `rc`, and `targetHeadLabel()` renames the column with
@@ -166,10 +173,20 @@ second implementation of a comparison.
   of tofu is the first thing a reader sees on the page whose whole job is to say what looks wrong.
   The order becomes `reference` → `parallel` → `svg` → `rc`: the design comparison the parity work
   is actually about leads, and both sides of it are PNGs.
-- The per-row haystack drops the inlined issue prose; issue titles are emitted **once** as a
-  component→issues map and joined client-side.
+- **Every preview id is written once**, in one `<script type="application/json">` alias table, and
+  each row points at it by comparison-card key. The haystack keeps the row's label and its issues
+  and drops the ids entirely; `keepRow` matches a typed id against the resolved list instead.
 
-Expected effect on `remote-m3`: HTML from 5.8 MB to ≈1.4 MB, `<img>` from 4,279 to ≈1,400.
+  The table publishes two facts — each card's ids, and which ids have rows of their own — because
+  the two walls need different slices and the difference is a rule the server owns: a design
+  reference names one exact state/props mapping, so that variant gets its own row and must not also
+  alias onto its siblings'. The comparison wall subtracts the rowed ids; the Remote Compose lane
+  wall, whose rows are one per preview, does not.
+
+Measured on a synthetic wall at `remote-m3`'s fold depth (80 rows, cards folding 60 variants):
+**403 KB → 272 KB, −32%**, with `data-preview-ids` −97% and `data-hay` −98%. The alias table is now
+the floor — each id appears exactly once — so on the real catalog, where 538 ids are mentioned
+19,188 times, the saving is proportionally larger.
 
 ### 3.3 The landing page — every baseline it has, and a grid that scores itself
 
@@ -239,9 +256,9 @@ confusion §1 records.
 | **4e** | `/pages` index carries catalog-wide coverage | F0 | `ServeWeb` pages index — *not yet* |
 | **5** | Design pages: hover / hold diffs | F5 | `design/lanes.ts`, `DesignPage.ts`, `serve.css` |
 | **6** | Viewer: compare strip under the stage, and the toolbar's `View` group | F1, F4 | `ServeWeb.comparisonStripHtml`, `ServeHttpServer` viewer handler |
-| **7** | Wall: one baseline per document, haystack diet | F2 | `ServeWeb.comparisonPage` |
+| **7** | Wall: every preview id written once, in one alias table | F2 | `ServeWeb.comparisonAliasTableHtml`, `compare/aliases.ts` |
 
-1–6 have landed. 7 is the remaining structural one: it changes the page's caching shape.
+All seven have landed.
 
 **§3.1 landed smaller than it was drawn, deliberately.** The strip is server-rendered HTML with no
 JavaScript at all: it shows the design reference opposite each variant and the score the delivery

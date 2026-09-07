@@ -4,7 +4,13 @@
 export interface RowFacts {
     /** Lower-cased haystack of everything searchable about the row. */
     hay: string;
-    /** The preview ids behind this row, for the `?preview=` narrow. */
+    /**
+     * The preview ids behind this row, for the `?preview=` narrow and the typed search.
+     *
+     * Resolved by the caller through the page's alias table (`compare/aliases.ts`) rather than read
+     * off the row: the ids are published once for the whole page, and which of a card's ids belong
+     * to THIS row is a rule the server states there.
+     */
     previewIds: string;
     /** The component this row belongs to, for the `?component=` narrow. */
     componentId: string;
@@ -38,10 +44,23 @@ export function keepRow(
     component = "",
 ): boolean {
     if (!row.hasFormat) return false;
+    const previewIds = row.previewIds
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean);
     const needle = query.trim().toLowerCase();
-    if (needle && !row.hay.includes(needle)) return false;
+    // The typed query matches the row's TEXT or one of its preview ids. The ids used to be copied
+    // into the haystack so this was one test; they are now written once in the page's alias table
+    // and resolved onto the row, so the search has to look in both places to keep matching what it
+    // always did — typing `appcard__ideal__icon__compact` still finds the row that stands for it.
+    // See `docs/design/COMPARE_NAVIGATION.md`, F2.
+    if (
+        needle &&
+        !row.hay.includes(needle) &&
+        !previewIds.some((id) => id.includes(needle))
+    )
+        return false;
     const wanted = preview.trim().toLowerCase();
-    const previewIds = row.previewIds.toLowerCase().split(/\s+/);
     if (wanted && !previewIds.includes(wanted)) return false;
     const scope = component.trim().toLowerCase();
     if (scope && row.componentId.trim().toLowerCase() !== scope) return false;
