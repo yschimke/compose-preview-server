@@ -6,6 +6,7 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -149,6 +150,72 @@ class PlaygroundCatalogClasspathTest {
         )
         .entries,
       "a desktop bundle resolves exactly the classpath it did before the platform was added",
+    )
+  }
+
+  // The decision the platform jar turns on. `assemble` above proves where it lands on the
+  // classpath; these prove when it is looked for at all — the half that decides whether a
+  // `compose-android` snippet naming `android.util.Base64` compiles
+  // (yschimke/compose-preview-server#544).
+
+  @Test
+  fun `an android bundle carries the platform`() {
+    val androidJar = File(root, "android.jar")
+    val logs = mutableListOf<String>()
+
+    assertEquals(
+      listOf(androidJar),
+      PlaygroundCatalogClasspath.androidPlatformJars(
+        system = "remote-m3",
+        backend = "android",
+        resolveAndroidJar = { androidJar },
+        onLog = { logs.add(it) },
+      ),
+    )
+    assertTrue(logs.isEmpty(), "nothing to report when the SDK is where it should be: $logs")
+  }
+
+  @Test
+  fun `a desktop bundle never looks for an SDK`() {
+    var asked = false
+
+    listOf("desktop", null).forEach { backend ->
+      assertEquals(
+        emptyList(),
+        PlaygroundCatalogClasspath.androidPlatformJars(
+          system = "compose-m3",
+          backend = backend,
+          resolveAndroidJar = {
+            asked = true
+            File(root, "android.jar")
+          },
+          onLog = {},
+        ),
+        "a $backend bundle resolves the classpath it always did",
+      )
+    }
+    assertFalse(asked, "a CMP catalog must not be taken down by a missing Android SDK")
+  }
+
+  @Test
+  fun `a missing SDK is logged rather than failing the classpath closed`() {
+    val logs = mutableListOf<String>()
+
+    assertEquals(
+      emptyList(),
+      PlaygroundCatalogClasspath.androidPlatformJars(
+        system = "remote-m3",
+        backend = "android",
+        resolveAndroidJar = { null },
+        onLog = { logs.add(it) },
+      ),
+      "an unresolvable coordinate fails closed; the platform does not, because the host's Android " +
+        "render lanes are already disabled without one",
+    )
+    assertTrue(
+      logs.single().let { "android.jar" in it && "ANDROID_HOME" in it },
+      "the miss names what is absent and how to supply it, because the compile error it leaves " +
+        "behind will not: $logs",
     )
   }
 }
