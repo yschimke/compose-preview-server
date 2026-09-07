@@ -1,0 +1,340 @@
+{
+  "schema": "compose-ui-builder-operations/v1-candidate",
+  "documentSchema": "compose-ui-builder-document/v1-candidate",
+  "designId": "deviceless-canvas",
+  "operations": [
+    {
+      "operationId": "create",
+      "type": "createDesign",
+      "title": "Deviceless canvas \u2014 three states of a card",
+      "catalogPin": {
+        "systemId": "m3-catalog",
+        "catalogRevision": "candidate",
+        "capabilityDigest": "candidate",
+        "nativeRuntimeId": "candidate"
+      },
+      "environment": {
+        "widthDp": 720,
+        "heightDp": 460,
+        "density": 1,
+        "theme": "dark",
+        "dynamicColor": false,
+        "locale": "en-US",
+        "fontScale": 1,
+        "layoutDirection": "ltr",
+        "windowPosture": "flat",
+        "browserZoomPercent": 100,
+        "fixedTime": "2024-05-16T12:00:00Z",
+        "animations": "settled",
+        "networkAccess": false
+      },
+      "stateVariables": {}
+    },
+    {
+      "operationId": "insert-card-filled",
+      "type": "insertNode",
+      "parent": null,
+      "afterNodeId": null,
+      "node": {
+        "id": "card-filled",
+        "componentId": "m3/card",
+        "properties": {
+          "variant": {
+            "type": "enum",
+            "value": "filled"
+          }
+        },
+        "modifiers": [
+          {
+            "type": "width",
+            "widthDp": 420
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "insert-card-filled-column",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-filled",
+        "slot": "content"
+      },
+      "node": {
+        "id": "card-filled-column",
+        "componentId": "layout/column",
+        "properties": {
+          "verticalSpacingDp": {
+            "type": "float",
+            "value": 6
+          },
+          "horizontalAlignment": {
+            "type": "enum",
+            "value": "start"
+          }
+        },
+        "modifiers": [
+          {
+            "type": "padding",
+            "startDp": 20,
+            "topDp": 16,
+            "endDp": 20,
+            "bottomDp": 16
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "insert-card-filled-headline",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-filled-column",
+        "slot": "children"
+      },
+      "node": {
+        "id": "card-filled-headline",
+        "componentId": "m3/text",
+        "properties": {
+          "text": {
+            "type": "string",
+            "value": "Filled"
+          },
+          "style": {
+            "type": "typographyToken",
+            "value": "titleMedium"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "insert-card-filled-supporting",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-filled-column",
+        "slot": "children"
+      },
+      "afterNodeId": "card-filled-headline",
+      "node": {
+        "id": "card-filled-supporting",
+        "componentId": "m3/text",
+        "properties": {
+          "text": {
+            "type": "string",
+            "value": "The resting state, on the surface container."
+          },
+          "style": {
+            "type": "typographyToken",
+            "value": "bodyMedium"
+          },
+          "color": {
+            "type": "colorToken",
+            "value": "onSurfaceVariant"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "insert-card-elevated",
+      "type": "insertNode",
+      "parent": null,
+      "afterNodeId": "card-filled",
+      "node": {
+        "id": "card-elevated",
+        "componentId": "m3/card",
+        "properties": {
+          "variant": {
+            "type": "enum",
+            "value": "elevated"
+          }
+        },
+        "modifiers": [
+          {
+            "type": "width",
+            "widthDp": 420
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "insert-card-elevated-column",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-elevated",
+        "slot": "content"
+      },
+      "node": {
+        "id": "card-elevated-column",
+        "componentId": "layout/column",
+        "properties": {
+          "verticalSpacingDp": {
+            "type": "float",
+            "value": 6
+          },
+          "horizontalAlignment": {
+            "type": "enum",
+            "value": "start"
+          }
+        },
+        "modifiers": [
+          {
+            "type": "padding",
+            "startDp": 20,
+            "topDp": 16,
+            "endDp": 20,
+            "bottomDp": 16
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "insert-card-elevated-headline",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-elevated-column",
+        "slot": "children"
+      },
+      "node": {
+        "id": "card-elevated-headline",
+        "componentId": "m3/text",
+        "properties": {
+          "text": {
+            "type": "string",
+            "value": "Elevated"
+          },
+          "style": {
+            "type": "typographyToken",
+            "value": "titleMedium"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "insert-card-elevated-supporting",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-elevated-column",
+        "slot": "children"
+      },
+      "afterNodeId": "card-elevated-headline",
+      "node": {
+        "id": "card-elevated-supporting",
+        "componentId": "m3/text",
+        "properties": {
+          "text": {
+            "type": "string",
+            "value": "Lifted while it is being dragged."
+          },
+          "style": {
+            "type": "typographyToken",
+            "value": "bodyMedium"
+          },
+          "color": {
+            "type": "colorToken",
+            "value": "onSurfaceVariant"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "insert-card-outlined",
+      "type": "insertNode",
+      "parent": null,
+      "afterNodeId": "card-elevated",
+      "node": {
+        "id": "card-outlined",
+        "componentId": "m3/card",
+        "properties": {
+          "variant": {
+            "type": "enum",
+            "value": "outlined"
+          }
+        },
+        "modifiers": [
+          {
+            "type": "width",
+            "widthDp": 420
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "insert-card-outlined-column",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-outlined",
+        "slot": "content"
+      },
+      "node": {
+        "id": "card-outlined-column",
+        "componentId": "layout/column",
+        "properties": {
+          "verticalSpacingDp": {
+            "type": "float",
+            "value": 6
+          },
+          "horizontalAlignment": {
+            "type": "enum",
+            "value": "start"
+          }
+        },
+        "modifiers": [
+          {
+            "type": "padding",
+            "startDp": 20,
+            "topDp": 16,
+            "endDp": 20,
+            "bottomDp": 16
+          }
+        ]
+      }
+    },
+    {
+      "operationId": "insert-card-outlined-headline",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-outlined-column",
+        "slot": "children"
+      },
+      "node": {
+        "id": "card-outlined-headline",
+        "componentId": "m3/text",
+        "properties": {
+          "text": {
+            "type": "string",
+            "value": "Outlined"
+          },
+          "style": {
+            "type": "typographyToken",
+            "value": "titleMedium"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "insert-card-outlined-supporting",
+      "type": "insertNode",
+      "parent": {
+        "nodeId": "card-outlined-column",
+        "slot": "children"
+      },
+      "afterNodeId": "card-outlined-headline",
+      "node": {
+        "id": "card-outlined-supporting",
+        "componentId": "m3/text",
+        "properties": {
+          "text": {
+            "type": "string",
+            "value": "The empty slot it is dragged into."
+          },
+          "style": {
+            "type": "typographyToken",
+            "value": "bodyMedium"
+          },
+          "color": {
+            "type": "colorToken",
+            "value": "onSurfaceVariant"
+          }
+        }
+      }
+    }
+  ]
+}

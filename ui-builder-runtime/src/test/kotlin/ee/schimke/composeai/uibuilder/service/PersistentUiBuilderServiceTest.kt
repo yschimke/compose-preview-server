@@ -1258,9 +1258,10 @@ class PersistentUiBuilderServiceTest {
     val secondOrder = service()
     create(firstOrder)
     create(secondOrder)
-    // The anchor both clients insert at is a slot rather than the root list, because a design has
-    // at most one root (yschimke/compose-preview-server#429). The convergence question is the same
-    // one: two inserts at the same anchor, arriving in either order.
+    // The anchor both clients insert at is a slot rather than the root list. The root list would
+    // work now — several roots is the deviceless canvas — but a slot is the anchor with the
+    // interesting ordering rules, and the convergence question is the same one either way: two
+    // inserts at the same anchor, arriving in either order.
     val root =
       UiBuilderServiceRequest.ApplyOperation(
         batch("root", 0, InsertNodeMutationV1(textNode("root"), NodeLocationV1()))
@@ -1297,6 +1298,49 @@ class PersistentUiBuilderServiceTest {
     )
     assertTrue(accepted(execute(firstOrder, owner, alpha)).idempotentReplay)
     assertEquals(currentDocument(firstOrder), currentDocument(secondOrder))
+  }
+
+  /**
+   * Several top-level items are accepted and persisted: that shape is the deviceless canvas.
+   *
+   * `validateTopology` refused a second root for as long as one was a state nothing could get out
+   * of — export required exactly one, so a design could be created, persisted, loaded and edited
+   * and only refuse when somebody asked for Kotlin out of it (yschimke/compose-preview-server#429).
+   * The export gates resolve a canvas into one column now, so the shape is no longer a trap and the
+   * service stops standing in the way of it.
+   */
+  @Test
+  fun `a second top-level item is accepted, because several roots is the canvas`() {
+    val service = service()
+    create(service)
+
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("first", 0, InsertNodeMutationV1(textNode("first"), NodeLocationV1()))
+        ),
+      )
+    )
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch(
+            "second",
+            1,
+            InsertNodeMutationV1(
+              textNode("second"),
+              NodeLocationV1(afterNodeId = "first"),
+            ),
+          )
+        ),
+      )
+    )
+
+    assertEquals(listOf("first", "second"), currentDocument(service).roots)
   }
 
   @Test

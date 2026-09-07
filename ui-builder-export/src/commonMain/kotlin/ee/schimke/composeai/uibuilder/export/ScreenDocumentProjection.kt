@@ -63,6 +63,7 @@ import ee.schimke.composeai.uibuilder.protocol.WidthModifierV1
 import ee.schimke.composeai.uibuilder.protocol.WrapContentSizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ZIndexModifierV1
 import ee.schimke.composeai.uibuilder.toUiBuilderNode
+import ee.schimke.composeai.uibuilder.withCanvasRoot
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
@@ -217,19 +218,22 @@ object ScreenDocumentProjection {
     // its parameter's recorded type, and `enum` refuses instead — see its KDoc. A parameter kept
     // "in case" is how a reader starts believing this projection type-checks against the record,
     // which it does not: `ScreenGenerator` does that, once, with the record it is handed.
-    val pass = Pass(document, tagNodes)
-    val roots = document.roots
+    // A deviceless canvas arrives as its own column. One root is what a `@Composable fun Screen()`
+    // body is, and choosing an arrangement for two disjoint trees used to be a layout decision the
+    // document had not made — so this refused. The document makes it now: several roots *is* the
+    // canvas, and `DevicelessCanvas` says once, for the surface and both Kotlin exporters as well
+    // as for here, that the canvas is a spaced, centred `layout/column`. Projecting that column is
+    // reporting the design rather than inventing one.
+    val canvas = document.withCanvasRoot()
+    val pass = Pass(canvas, tagNodes)
+    val roots = canvas.roots
     if (roots.size != 1) {
-      // One root is not a limitation of the generator; it is what a `@Composable fun Screen()`
-      // body is. Two roots need a container around them, and choosing `Column` over `Box` is a
-      // layout decision the document did not make and this projection must not invent.
-      //
-      // Every root is still visited before returning. Refusing on the count alone hid whatever
-      // else was wrong inside those roots until after someone had wrapped them and exported
-      // again — one export per problem, which is the thing `Outcome.Refused` exists to avoid.
+      // Zero, then — the only count left. Every root is still visited before returning: refusing
+      // on the count alone hid whatever else was wrong inside those roots until after someone had
+      // fixed it and exported again, which is the thing `Outcome.Refused` exists to avoid.
       val counted =
-        "the document has ${roots.size} roots; a generated screen body needs exactly one, so " +
-          "wrap them in a layout component in the builder"
+        "the document has ${roots.size} roots; a generated screen body needs at least one, so " +
+          "add a component in the builder"
       roots.forEach { pass.node(it) }
       return Outcome.Refused((listOf(counted) + pass.reasons).distinct())
     }

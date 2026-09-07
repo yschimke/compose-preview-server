@@ -615,24 +615,42 @@ class ScreenDocumentProjectionTest {
     )
   }
 
+  /**
+   * Two roots project as the deviceless canvas: one `Column` holding both, spaced and centred.
+   *
+   * This asserted a refusal, and the reason it gave was true at the time — choosing `Column` over
+   * `Box` for two disjoint trees was a layout decision the document had not made. The document
+   * makes it now. `DevicelessCanvas` writes that arrangement down once, for the editor's surface
+   * and both Kotlin exporters as well as for here, so projecting it is reporting the design rather
+   * than inventing one.
+   */
   @Test
-  fun `two roots are refused, because a screen body is one expression`() {
+  fun `two roots project as the deviceless canvas column`() {
+    val root =
+      projected(
+          document(
+            text(),
+            DesignNodeV1(
+              id = "other",
+              componentId = "m3/text",
+              properties = mapOf("text" to StringValueV1("two")),
+            ),
+            roots = listOf("text", "other"),
+          )
+        )
+        .root
+    assertEquals("layout/column", root.componentId)
+    assertEquals(2, root.slots.getValue("content").size)
+  }
+
+  @Test
+  fun `a document with no root at all is still refused`() {
     assertEquals(
       listOf(
-        "the document has 2 roots; a generated screen body needs exactly one, so wrap them in a " +
-          "layout component in the builder"
+        "the document has 0 roots; a generated screen body needs at least one, so add a " +
+          "component in the builder"
       ),
-      refusal(
-        document(
-          text(),
-          DesignNodeV1(
-            id = "other",
-            componentId = "m3/text",
-            properties = mapOf("text" to StringValueV1("two")),
-          ),
-          roots = listOf("text", "other"),
-        )
-      ),
+      refusal(document(text(), roots = emptyList())),
     )
   }
 
@@ -694,10 +712,15 @@ class ScreenDocumentProjectionTest {
     assertTrue(reasons.any { it.contains("predicate") }, reasons.toString())
   }
 
+  /**
+   * A canvas is projected, so what is wrong *inside* one of its items is what refuses it.
+   *
+   * `matchParentSize` is a `BoxScope` modifier and the canvas is a column, which is the same answer
+   * the projection gave when the count alone refused the document — it visited every root before
+   * returning for exactly this reason. `Outcome.Refused` promises one pass, and it still is one.
+   */
   @Test
-  fun `a multi-root document reports what is wrong inside the roots too`() {
-    // Refusing on the count alone made this two exports: wrap the roots, export again, discover
-    // the padding. `Outcome.Refused` promises one pass.
+  fun `a canvas reports what is wrong inside its items`() {
     val document =
       ScreenGeneratorScreenFixture.document().let { base ->
         base.copy(
@@ -711,7 +734,7 @@ class ScreenDocumentProjectionTest {
     val reasons =
       assertIs<ScreenDocumentProjection.Outcome.Refused>(ScreenDocumentProjection.project(document))
         .reasons
-    assertTrue(reasons.any { it.contains("2 roots") }, reasons.toString())
+    assertTrue(reasons.none { it.contains("roots") }, reasons.toString())
     assertTrue(reasons.any { it.contains("matchParentSize") }, reasons.toString())
   }
 

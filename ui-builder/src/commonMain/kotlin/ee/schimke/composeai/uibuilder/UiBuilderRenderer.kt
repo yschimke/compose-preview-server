@@ -525,17 +525,15 @@ fun UiBuilderSurface(
           )
         }
       ) {
-        document.roots.forEach { root ->
-          val rootModifier =
-            when {
-              document.nodes[root]?.componentId?.startsWith("remote-m3/widget-container-") ==
-                true -> Modifier.align(Alignment.Center)
-              // A screen is taller than its frame by design — the stadium IS the scroll extent —
-              // so it is pinned to the top and centred across, the way a long screenshot reads.
-              document.nodes[root]?.componentId == "wear-m3/screen-scaffold" ->
-                Modifier.align(Alignment.TopCenter)
-              else -> Modifier
-            }
+        // A deviceless canvas is drawn as the column it exports as, not as a stack. Several roots
+        // in this `Box` would draw on top of each other, which is what they did back when a second
+        // root was a state nothing could reach; `DevicelessCanvas` owns the arrangement, so the
+        // picture here and the Kotlin the exporters write cannot disagree about it.
+        //
+        // Hoisted into a lambda rather than written twice because only the screen path is a
+        // `BoxScope`: `Modifier.align` is that scope's, and on a canvas the column places its
+        // items.
+        val renderRoot: @Composable (String, Modifier) -> Unit = { root, rootModifier ->
           RenderNode(
             document = document,
             nodeId = root,
@@ -570,6 +568,33 @@ fun UiBuilderSurface(
             semanticActions = semanticActions,
             modifier = rootModifier,
           )
+        }
+        if (document.isDevicelessCanvas) {
+          Column(
+            // The canvas paints a ground; a screen does not. A screen's ground is its own root
+            // `m3/surface`, and a canvas has no root to hang one on by construction — so without
+            // this the items float on whatever the host happens to be showing, and the PNG export
+            // of a canvas is three cards on transparency.
+            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+            verticalArrangement = Arrangement.spacedBy(DevicelessCanvas.CANVAS_SPACING_DP.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+          ) {
+            document.roots.forEach { root -> renderRoot(root, Modifier) }
+          }
+        } else {
+          document.roots.forEach { root ->
+            val rootModifier =
+              when {
+                document.nodes[root]?.componentId?.startsWith("remote-m3/widget-container-") ==
+                  true -> Modifier.align(Alignment.Center)
+                // A screen is taller than its frame by design — the stadium IS the scroll extent —
+                // so it is pinned to the top and centred across, the way a long screenshot reads.
+                document.nodes[root]?.componentId == "wear-m3/screen-scaffold" ->
+                  Modifier.align(Alignment.TopCenter)
+                else -> Modifier
+              }
+            renderRoot(root, rootModifier)
+          }
         }
         if (editorOverlay) {
           val selected = selectedNodeId?.let(overlayBounds::get)

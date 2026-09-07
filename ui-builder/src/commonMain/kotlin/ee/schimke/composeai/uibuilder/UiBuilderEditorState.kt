@@ -411,6 +411,18 @@ data class UiBuilderEditorState(
    * design that already holds one keeps validating and rendering it.
    */
   val enabledPacks: Set<String> = emptySet(),
+  /**
+   * Whether the insert panel's Add places a new top-level item instead of filling a slot.
+   *
+   * A tool mode, not a property of the design: nothing about it is stored, shared with a
+   * collaborator or undone, and reopening the design opens it off. What it produces — a second root
+   * — is the deviceless canvas, and *that* is in the document for everyone to see.
+   *
+   * A mode rather than a second button on all ~200 palette rows, which is a panel 280 dp wide whose
+   * name column already gives way to a badge. One switch, read once, over a list of rows that keep
+   * saying exactly what they said.
+   */
+  val addToCanvas: Boolean = false,
   val layerQuery: String = "",
   /**
    * Whether taps on the canvas drive the screen instead of selecting layers.
@@ -612,6 +624,26 @@ sealed interface UiBuilderEditorEvent {
     val target: ParentSlot,
     val variant: EditorCatalogVariant? = null,
   ) : UiBuilderEditorEvent
+
+  /**
+   * Insert a catalog component as a new top-level item, beside whatever the design already holds.
+   *
+   * The one route into the deviceless canvas, and deliberately its own event rather than a fallback
+   * inside [InsertComponent]: an insert that could not find a slot used to be refused, and turning
+   * that refusal into "then it becomes a second screen" would make a full scaffold silently grow a
+   * neighbour every time somebody added a chip it had no room for. Someone asks for this.
+   *
+   * A design with one item is a screen; from the second on it is a canvas, drawn and exported as
+   * the column [DevicelessCanvas] describes. Deleting back down to one item is a screen again,
+   * which is what makes the mode reversible without anything having to store it.
+   */
+  data class InsertComponentOnCanvas(
+    val componentId: String,
+    val variant: EditorCatalogVariant? = null,
+  ) : UiBuilderEditorEvent
+
+  /** Switch [UiBuilderEditorState.addToCanvas] — what the insert panel's Add does next. */
+  data object ToggleAddToCanvas : UiBuilderEditorEvent
 
   data class MoveNode(
     val nodeId: String,
@@ -1135,6 +1167,9 @@ class UiBuilderEditorReducer(
         else state
       is UiBuilderEditorEvent.InsertComponent ->
         insert(state, event.componentId, event.target, variant = event.variant)
+      is UiBuilderEditorEvent.InsertComponentOnCanvas ->
+        insertOnCanvas(state, event.componentId, event.variant)
+      UiBuilderEditorEvent.ToggleAddToCanvas -> state.copy(addToCanvas = !state.addToCanvas)
       is UiBuilderEditorEvent.MoveNode -> move(state, event)
       is UiBuilderEditorEvent.MoveNodeInto -> moveInto(state, event)
       is UiBuilderEditorEvent.CommitProperty ->
@@ -2385,10 +2420,26 @@ class UiBuilderEditorReducer(
    * against the catalog itself — and re-deriving it from the selection would refuse a slot that is
    * demonstrably legal, because the selection is wherever the operator last clicked.
    */
+  /**
+   * Insert [componentId] as a new root — see [UiBuilderEditorEvent.InsertComponentOnCanvas].
+   *
+   * No destination search and no slot check, because a root has no slot to be compatible with: the
+   * root list accepts anything the catalog can build, which is exactly what makes the canvas able
+   * to hold a card beside a dialog beside a whole screen.
+   */
+  private fun insertOnCanvas(
+    state: UiBuilderEditorState,
+    componentId: String,
+    variant: EditorCatalogVariant?,
+  ): UiBuilderEditorState {
+    val component = catalog.componentsById[componentId] ?: return state
+    return insertAt(state, component, null, null, component.variantProperties(variant))
+  }
+
   private fun insertAt(
     state: UiBuilderEditorState,
     component: ComponentCapability,
-    target: ParentSlot,
+    target: ParentSlot?,
     action: EditorStateAction? = null,
     /** Encoded values written over the inserted root's own defaults — see [variantProperties]. */
     presetProperties: Map<String, JsonObject> = emptyMap(),
@@ -4040,7 +4091,8 @@ private fun ComponentCapability.appendDefaultSubtree(
   catalog: CapabilityCatalog,
   document: UiBuilderDocument,
   nodeId: String,
-  parent: ParentSlot,
+  /** Null is the root list — an item on the deviceless canvas rather than a child of anything. */
+  parent: ParentSlot?,
   afterNodeId: String?,
   operations: MutableList<DesignOperation>,
   starter: StarterNode? = null,

@@ -238,20 +238,21 @@ class MutatedDocumentTest {
   }
 
   /**
-   * Zero roots and two roots, which only the export gate refuses — no topology check on either the
-   * client or the server bounds the count, so both are states a stored design can be in. That is
-   * yschimke/compose-preview-server#429, and this is the assertion that will still hold once it is
-   * fixed: whatever else starts refusing them, the export always did.
+   * Zero roots is refused and two roots are not: a document with nothing in it has no export, and
+   * one with several top-level items is the deviceless canvas, which every exporter resolves into
+   * the single column `DevicelessCanvas` describes.
+   *
+   * This asserted both counts while a second root was the dead end of
+   * yschimke/compose-preview-server#429. Zero is the count that survived.
    */
   @Test
-  fun `a document without exactly one root is refused`() {
+  fun `a document with no root at all is refused, and one with several is a canvas`() {
     assertGraphRefused(valid.copy(roots = emptyList()), "ROOT_CARDINALITY")
 
     val second = UiBuilderNode(id = "second-root", componentId = "layout/box")
-    assertGraphRefused(
-      valid.copy(roots = valid.roots + second.id, nodes = valid.nodes + (second.id to second)),
-      "ROOT_CARDINALITY",
-    )
+    val canvas =
+      valid.copy(roots = valid.roots + second.id, nodes = valid.nodes + (second.id to second))
+    assertEquals(emptyList(), validateDocumentForExport(canvas, catalog).map { it.code })
   }
 
   @Test

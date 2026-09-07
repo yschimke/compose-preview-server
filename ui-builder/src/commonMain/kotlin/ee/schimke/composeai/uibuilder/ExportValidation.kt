@@ -104,11 +104,14 @@ private fun validateCatalogPin(
 
 private fun validateGraph(document: UiBuilderDocument): List<ExportValidationIssue> {
   val issues = mutableListOf<ExportValidationIssue>()
-  if (document.roots.size != 1) {
+  // At least one, not exactly one. Several roots is the deviceless canvas, which every exporter
+  // resolves through `DevicelessCanvas.canvasNode` into the one column it draws, so the count that
+  // stops an export is zero — a document with nothing in it.
+  if (document.roots.isEmpty()) {
     issues +=
       ExportValidationIssue(
         code = "ROOT_CARDINALITY",
-        message = "export requires exactly one root; found ${document.roots.size}",
+        message = "export requires at least one root; found none",
       )
   }
   document.roots.forEach { root ->
@@ -166,7 +169,7 @@ private fun validateGraph(document: UiBuilderDocument): List<ExportValidationIss
     issues +=
       ExportValidationIssue(
         code = "UNREACHABLE_NODE",
-        message = "node is not reachable from the document root",
+        message = "node is not reachable from any document root",
         nodeId = nodeId,
         componentId = document.nodes[nodeId]?.componentId,
       )

@@ -389,16 +389,20 @@ class CollaborationConvergenceTest {
   }
 
   /**
-   * A design has at most one root, checked here rather than only when somebody asks for Kotlin.
+   * A second root is accepted, by an insert and in a loaded document — it is the canvas.
    *
-   * Both doors: an insert that names no parent puts its node in the root list, and a document
-   * loaded with two roots satisfies every placement rule — each node reachable once, no cycles — so
-   * nothing else here would notice. Export refuses `ROOT_CARDINALITY` and the editor cannot delete
-   * a root without its whole subtree, which makes a second root a state a real design can be stored
-   * in and never leave (yschimke/compose-preview-server#429).
+   * This asserted the refusal for as long as a second root was a state nothing could get out of:
+   * export required exactly one, so a design could be created, persisted, loaded and edited and
+   * only refuse when somebody asked for Kotlin out of it (yschimke/compose-preview-server#429). The
+   * dead end is gone — several roots is the deviceless canvas, resolved into one column by
+   * `DevicelessCanvas` for the surface and both exporters — so the reducer stops standing in the
+   * way of it.
+   *
+   * Both doors, still: an insert that names no parent puts its node in the root list, and a
+   * document *loaded* with two roots is what an older client or a stored design hands over.
    */
   @Test
-  fun `a second root is refused, by an insert and in a loaded document`() {
+  fun `a second root is accepted, by an insert and in a loaded document`() {
     val initial = CollaborationState(document())
     val inserted =
       CollaborationReducer.apply(
@@ -412,10 +416,11 @@ class CollaborationConvergenceTest {
         ),
       )
 
-    val rejected = assertIs<CommandOutcome.Rejected>(inserted.outcome)
-    assertEquals(RejectionCode.INVALID_DOCUMENT, rejected.code)
-    assertEquals("a design has at most one root; found 2", rejected.message)
-    assertNoDesignMutation(initial, inserted.state)
+    assertIs<CommandOutcome.Accepted>(inserted.outcome)
+    // An insert naming no anchor goes first in the list it lands in, which is the root list's rule
+    // as much as any slot's. What this asserts is that both items are in it.
+    assertEquals(setOf("container", "second-root"), inserted.state.document.roots.toSet())
+    assertTrue(inserted.state.document.isDevicelessCanvas)
 
     val loaded =
       CollaborationState(
@@ -441,11 +446,8 @@ class CollaborationConvergenceTest {
         propertyValidator,
       )
 
-    assertEquals(
-      RejectionCode.INVALID_DOCUMENT,
-      assertIs<CommandOutcome.Rejected>(touched.outcome).code,
-    )
-    assertNoDesignMutation(loaded, touched.state)
+    assertIs<CommandOutcome.Accepted>(touched.outcome)
+    assertEquals(listOf("container", "b"), touched.state.document.roots)
   }
 
   @Test

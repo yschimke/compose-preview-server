@@ -98,8 +98,16 @@ class CapabilityComposeCodeExporterTest {
     assertTrue(first.provenance.environmentCanonicalJson.contains("\"fontScale\":1"))
   }
 
+  /**
+   * Several roots is the deviceless canvas, and the source says so: one `Column`, spaced and
+   * centred exactly as `DevicelessCanvas` describes and as the editor's surface draws it.
+   *
+   * This asserted a `ROOT_CARDINALITY` refusal while a second root was a state nothing could get
+   * out of (yschimke/compose-preview-server#429). The refusal was there so a design could not be
+   * stored in a shape no exporter could write; the shape is writable now.
+   */
   @Test
-  fun `multiple roots are explicitly rejected instead of silently producing an empty screen`() {
+  fun `multiple roots export as the deviceless canvas column`() {
     val secondRoot =
       document.nodes
         .getValue("search-placeholder")
@@ -126,11 +134,19 @@ class CapabilityComposeCodeExporterTest {
 
     val result = CapabilityComposeCodeExporter.export(multiRoot, catalog, artworkAdapter)
 
-    assertNull(result.source)
+    val source = result.requireSource()
     assertTrue(
-      result.diagnostics.any {
-        it.severity == ComposeExportSeverity.ERROR && it.code == "ROOT_CARDINALITY"
-      }
+      source.contains(
+        "Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = " +
+          "Arrangement.spacedBy(24.dp), " +
+          "horizontalAlignment = Alignment.CenterHorizontally) {"
+      ),
+      source,
+    )
+    assertTrue(source.contains("Second root"), source)
+    assertTrue(
+      result.diagnostics.none { it.severity == ComposeExportSeverity.ERROR },
+      result.diagnostics.toString(),
     )
   }
 

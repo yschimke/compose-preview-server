@@ -765,12 +765,18 @@ fun UiBuilderEditor(
           draggedComponentId = null
           catalogDragPosition = null
         },
-        canAddCatalogComponent = { reducer.dropTarget(state, it) != null },
+        // On the canvas every component can be added: a root has no slot to be compatible with.
+        canAddCatalogComponent = { state.addToCanvas || reducer.dropTarget(state, it) != null },
         onCatalogAdd = { componentId, variant ->
           focusEditor()
-          reducer.dropTarget(state, componentId)?.let { target ->
-            dispatch(UiBuilderEditorEvent.InsertComponent(componentId, target, variant))
+          if (state.addToCanvas) {
+            dispatch(UiBuilderEditorEvent.InsertComponentOnCanvas(componentId, variant))
             if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
+          } else {
+            reducer.dropTarget(state, componentId)?.let { target ->
+              dispatch(UiBuilderEditorEvent.InsertComponent(componentId, target, variant))
+              if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
+            }
           }
         },
         remoteComposeSources =
@@ -3101,16 +3107,20 @@ private fun InsertPanel(
     // Where an Add would land, said before it is pressed rather than after it is refused. The
     // beginner's question about this panel is not what the components are called.
     Text(
-      dropTarget?.let { "Adds into ${it.nodeId}.${it.slot}" }
-        ?: "Select a layer that can hold a component",
+      when {
+        state.addToCanvas -> "Adds beside ${state.document.roots.size} item(s) on the canvas"
+        dropTarget != null -> "Adds into ${dropTarget.nodeId}.${dropTarget.slot}"
+        else -> "Select a layer that can hold a component"
+      },
       Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
       color =
-        if (dropTarget == null) MaterialTheme.colorScheme.onSurfaceVariant
+        if (!state.addToCanvas && dropTarget == null) MaterialTheme.colorScheme.onSurfaceVariant
         else MaterialTheme.colorScheme.primary,
       style = MaterialTheme.typography.labelSmall,
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
     )
+    AddToCanvasSwitch(state.addToCanvas) { dispatch(UiBuilderEditorEvent.ToggleAddToCanvas) }
     if (!packs.isEmpty && onManagePacks != null) {
       PacksSummaryRow(packs, state.enabledPacks, onManagePacks)
     }
@@ -3547,7 +3557,10 @@ private fun PinnedDesignCanvas(
     var expandedHeightDp by remember(document.id) { mutableStateOf(sourceHeight) }
     // Only a design that outgrows its frame gets the second pane. One that fits would be drawn
     // twice identically, and two identical pictures side by side say nothing the one said.
-    val overflowsFrame = expandedHeightDp > sourceHeight + 0.5f
+    // Never for a canvas: the companion pane answers "what does the device show above the fold?",
+    // and a board of several items is not shown on a device at all. Drawing one anyway would put a
+    // clipped copy of the first item beside the canvas and call it the design.
+    val overflowsFrame = expandedHeightDp > sourceHeight + 0.5f && !document.isDevicelessCanvas
     val pairWidth = if (overflowsFrame) sourceWidth * 2f + CANVAS_PANE_GAP_DP.value else sourceWidth
     // Fit frames the pair, not the extent alone: zooming to fit a design whose companion is off
     // the right edge is not fitting the design. Height is the extent's, which is the taller of
@@ -4350,6 +4363,45 @@ private fun CatalogVariantRow(
       }
     }
     CatalogAddButton(canAdd, onAdd, qualified)
+  }
+}
+
+/**
+ * The insert panel's mode switch: does Add fill a slot, or start a new item on the canvas?
+ *
+ * A row under the destination line because that is the line it changes — the switch and the
+ * sentence saying where the next Add lands read as one statement, and a control that changes what a
+ * button does belongs beside the description of what the button does rather than in a menu.
+ *
+ * Off is the behaviour every design has had: an Add fills the selected layer's first accepting
+ * slot. On, an Add places a new top-level item, and from the second item on the design is a
+ * deviceless canvas — drawn and exported as the column `DevicelessCanvas` describes.
+ */
+@Composable
+private fun AddToCanvasSwitch(checked: Boolean, onToggle: () -> Unit) {
+  Row(
+    Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, bottom = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Column(Modifier.weight(1f)) {
+      Text("Add to canvas", style = MaterialTheme.typography.labelMedium)
+      Text(
+        "Place items side by side instead of inside the selection",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+    Switch(
+      checked = checked,
+      onCheckedChange = { onToggle() },
+      modifier =
+        Modifier.semantics {
+          contentDescription =
+            if (checked) "Add into the selected layer instead" else "Add to the canvas instead"
+        },
+    )
   }
 }
 
@@ -6104,7 +6156,28 @@ private fun ScreenEnvironmentInspector(
     style = MaterialTheme.typography.bodySmall,
   )
   HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
-  if (devicePresets.isNotEmpty()) {
+  // A canvas has no device. The frame still bounds it — the items are laid out down the middle of
+  // that width, at that density, under that theme — so the fields below stay; the two device
+  // pickers do not, because "which phone is this?" is a question a board of several items has no
+  // answer to, and offering a preset would quietly restate one of them as the design's frame.
+  if (document.isDevicelessCanvas) {
+    Text(
+      "Deviceless canvas · ${document.roots.size} items",
+      style = MaterialTheme.typography.labelLarge,
+    )
+    Text(
+      "Items are stacked ${DevicelessCanvas.CANVAS_SPACING_DP} dp apart and centred across the " +
+        "frame, which is what the Compose export writes. Deleting all but one makes this a " +
+        "screen again.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.bodySmall,
+    )
+    HorizontalDivider(
+      Modifier.padding(vertical = 10.dp),
+      color = MaterialTheme.colorScheme.outline,
+    )
+  }
+  if (devicePresets.isNotEmpty() && !document.isDevicelessCanvas) {
     DevicePresetPicker(
       presets = devicePresets,
       selected = current.matchingDevicePreset(devicePresets),

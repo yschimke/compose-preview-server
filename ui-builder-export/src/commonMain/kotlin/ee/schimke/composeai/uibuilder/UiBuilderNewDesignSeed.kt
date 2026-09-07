@@ -154,3 +154,14 @@ fun DesignDocumentV1.toUiBuilderDocument(): UiBuilderDocument =
  */
 fun DesignNodeV1.toUiBuilderNode(): UiBuilderNode =
   seedJson.decodeFromString(seedJson.encodeToString(this))
+
+/**
+ * One candidate node as the released wire node — [toUiBuilderNode] backwards.
+ *
+ * The direction the deviceless canvas needs: [DevicelessCanvas] authors its synthetic column once,
+ * as a [UiBuilderNode], and the screen projection holds a `DesignDocumentV1`. Converting the node
+ * rather than the whole document is the point — a document round trip would drop the wire-only
+ * fields the projection's caller still owns.
+ */
+fun UiBuilderNode.toDesignNodeV1(): DesignNodeV1 =
+  seedJson.decodeFromString(seedJson.encodeToString(this))

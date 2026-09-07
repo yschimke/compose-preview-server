@@ -655,6 +655,24 @@ seeing. It needs a host with a compile lane (`--playground-bundle`); where there
 control is absent rather than present and failing. The render is tagged with each design node id,
 so the server's annotation lane can report where every node landed in the frame.
 
+## Several items on one canvas
+
+A design is a screen until it holds a second top-level item. Turn on **Add to canvas** in the insert
+panel — the switch under the line that tells you where the next Add lands — and Add stops filling
+the selection's first free slot and starts placing items side by side instead.
+
+From the second item on, the design is a **deviceless canvas**: the items are drawn stacked 24 dp
+apart and centred across the frame, which is exactly what the Compose export writes, and the Screen
+inspector drops its device pickers because a board of several items is not on a phone. Delete all
+but one and it is a screen again.
+
+Useful when the thing you are designing is not one screen: three states of a card side by side, a
+dialog beside the screen that opens it, a row of components to hand to a reviewer.
+
+The order the items sit in is their order on the canvas; there is no free positioning.
+[`design/UI_BUILDER_DEVICELESS_CANVAS.md`](design/UI_BUILDER_DEVICELESS_CANVAS.md) says why the mode
+is the shape of the document rather than a setting on it, and why the arrangement is a column.
+
 ## Build against a reference
 
 The **Screen** panel's Reference section attaches a picture to the design and draws it over the

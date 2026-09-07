@@ -103,7 +103,12 @@ object CapabilityComposeCodeExporter {
     if (diagnostics.any { it.severity == ComposeExportSeverity.ERROR }) {
       return ComposeExportResult(null, provenance, diagnostics)
     }
-    val emitter = ComposeEmitter(document, catalog, diagnostics, assetAdapter)
+    // The canvas, resolved, is what gets emitted: a deviceless design's roots are wrapped in the
+    // one `layout/column` `DevicelessCanvas` describes, so the source lays them out exactly as the
+    // editor's surface draws them. A one-root screen passes through `withCanvasRoot` unchanged, and
+    // the diagnostics above were taken from the design as authored — a node the person cannot see
+    // has no business appearing in a message about their design.
+    val emitter = ComposeEmitter(document.withCanvasRoot(), catalog, diagnostics, assetAdapter)
     val source = emitter.emit()
     return ComposeExportResult(source, provenance, diagnostics)
   }
