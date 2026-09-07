@@ -9483,6 +9483,30 @@ class ServeHttpServer(
           gesturesRenderable = renderHost.gesturesRenderable,
           // The session's full preview list feeds the left-hand component nav drawer.
           siblings = renderHost.previews,
+          // …and ONE component's worth of it feeds the compare strip under the render: every
+          // variant of the thing on the stage, in catalog order, with the reference and the
+          // published score each of them carries.
+          //
+          // Resolved here rather than in the page because all three answers are the host's.
+          // `componentIdFor` reads the catalog's own component id where there is one and falls
+          // back to a route id parsed out of the preview id — reproducing that fallback in
+          // `ServeWeb` would be a second implementation of a rule with one right answer, and the
+          // strip's `?component=` link has to spell the id exactly as the wall's rows do or it
+          // selects nothing. See `docs/design/COMPARE_NAVIGATION.md`, §3.1.
+          componentVariants =
+            renderHost.previews
+              .filter {
+                ServeIssueReport.componentIdFor(it) == ServeIssueReport.componentIdFor(preview)
+              }
+              .map { variant ->
+                val reference = renderHost.designReferencesFor(variant.id).firstOrNull()
+                ServeWeb.ComponentVariant(
+                  previewId = variant.id,
+                  variant = ServeIssueReport.variantFor(variant),
+                  referenceId = reference?.id,
+                  matchPercent = reference?.match?.percent,
+                )
+              },
           // The catalog's declared stage surface (`display.surface`), so an unthemed preview backs
           // on the dark stage for a dark-first system instead of the default white.
           declaredSurface = catalogBundleHost(renderHost)?.stageSurface,

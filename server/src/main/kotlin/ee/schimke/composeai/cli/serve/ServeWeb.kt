@@ -221,12 +221,160 @@ object ServeWeb {
    * A band never decides whether the number is SHOWN, only how it is coloured, so a drift between
    * the two copies costs a hue and can never hide a finding.
    */
+  /**
+   * One variant of the component a viewer page is showing, for the **compare strip** under its
+   * render ([comparisonStripHtml]).
+   *
+   * The viewer used to be able to put ONE baseline behind ONE variant, on the stage. Seeing the
+   * same component's other variants compared meant leaving for the wall, which opens on the whole
+   * catalog and has to be filtered by hand — from a page that already knew which component you were
+   * looking at (`docs/design/COMPARE_NAVIGATION.md`, F4). The strip is that filter, applied without
+   * anyone typing it.
+   *
+   * **Identity only.** Every URL on the strip is built by [comparisonStripHtml] out of `basePath`,
+   * the link query and the asset generation, exactly as the rest of the viewer's links are — the
+   * same split the parity page's locator draws, and the reason a hand-rolled query here could never
+   * lose its token or its `?at=` pin.
+   */
+  data class ComponentVariant(
+    val previewId: String,
+    /** How this variant differs from its siblings — `ServeIssueReport.variantFor`. */
+    val variant: String,
+    /** This variant's imported design reference, when it publishes one. */
+    val referenceId: String? = null,
+    /**
+     * The match the DELIVERY BRANCH published for this pair, when it has one.
+     *
+     * The strip shows published numbers and scores nothing itself, which is a deliberate limitation
+     * rather than an omission. The viewer bundle is within two kilobytes of its budget
+     * (`serve-web/scripts/check-bundle-budgets.mjs`), so a per-row scorer here would cost every
+     * viewer page the wall's machinery to answer a question the delivery branch has already
+     * answered for these exact pixels. A row with no published number says so and links to the
+     * focused comparison, which scores live.
+     */
+    val matchPercent: Double? = null,
+  )
+
   private fun specMatchBand(percent: Double): String =
     when {
       percent >= 95.0 -> "match"
       percent >= 85.0 -> "close"
       else -> "off"
     }
+
+  /**
+   * The **compare strip** under a viewer's render: every variant of the component on the stage,
+   * measured against the same baseline, without anyone typing a filter.
+   *
+   * ## Why it is here and not a link to the wall
+   *
+   * The question a reader has while looking at one variant is almost never about that variant alone
+   * — it is "is this component wrong, or is this *state* of it wrong?". Answering it used to mean
+   * opening the comparison wall on four hundred rows and narrowing by hand, from a page that
+   * already knew the answer. The strip is that narrowing, applied on arrival; `?component=` on the
+   * wall is the same scope for a reader who wants the full instruments.
+   *
+   * ## What it deliberately does not do
+   *
+   * **It does not score.** Numbers are the ones the delivery branch published for these exact
+   * pixels; a variant with none says `not scored` and links to the focused comparison, which
+   * measures live. The viewer bundle is within two kilobytes of budget, and a per-row scorer would
+   * charge every viewer page the wall's machinery for an answer that is already published.
+   *
+   * **It does not switch baseline.** The strip stands opposite the design reference, which is the
+   * comparison the parity work is about and the only one published per variant. The lane's own
+   * source picker still puts the paired catalog or the SVG export on the stage.
+   *
+   * Both are one server-rendered `<img>` per cell and no JavaScript at all, which is what lets the
+   * strip appear on every viewer page rather than only on the ones a reader thought to ask for.
+   *
+   * Returns empty for a component with a single variant and no reference — there is nothing to
+   * compare and nothing to navigate between, and an empty panel under every one-off preview is
+   * worse than no panel.
+   */
+  private fun comparisonStripHtml(
+    variants: List<ComponentVariant>,
+    currentPreviewId: String,
+    componentId: String,
+    componentName: String,
+    baselineLabel: String,
+    catalogName: String,
+    basePath: String,
+    q: String,
+    assetQ: String,
+  ): String {
+    val scored = variants.filter { it.referenceId != null }
+    // One variant and nothing to compare it against is not a strip, it is a heading over a single
+    // row that restates the picture directly above it.
+    if (variants.size < 2 && scored.isEmpty()) return ""
+    fun seg(value: String) = WebEscaping.urlEncodeSegment(value)
+    val rows =
+      variants.joinToString("\n") { variant ->
+        val current = variant.previewId == currentPreviewId
+        // The CURRENT row is not a link. It is the frame already on the stage, and a link that
+        // reloads the page you are on reads as a control that does nothing.
+        val href = if (current) null else "$basePath/p/${seg(variant.previewId)}$q"
+        val baselineCell =
+          variant.referenceId?.let {
+            "<span class=\"cp-strip-shot\"><img loading=\"lazy\" alt=\"\" " +
+              "src=\"$basePath/reference/${seg(it)}.png$assetQ\"></span>"
+          }
+            // A cell rather than nothing, so the columns line up down the strip: a row that jumps
+            // left because this variant is unmapped reads as a layout fault, where an empty frame
+            // reads as the missing mapping it is.
+            ?: "<span class=\"cp-strip-shot cp-strip-shot--empty\" aria-label=\"No design reference\"></span>"
+        val score =
+          variant.matchPercent?.let {
+            "<span class=\"cp-strip-score\" data-spec-match=\"${specMatchBand(it)}\">" +
+              "${WebEscaping.formatPercent(it)}</span>"
+          } ?: "<span class=\"cp-strip-score cp-strip-score--none\">not scored</span>"
+        // The way to the instruments, per row: the focused Reference / Diff / Actual page for this
+        // exact pair, which is where a delta map, the annotations and the parity findings live.
+        val detail =
+          variant.referenceId?.let {
+            val detailHref =
+              "$basePath/compare/${seg(variant.previewId)}?reference=${seg(it)}" +
+                (if (q.isEmpty()) "" else "&" + q.removePrefix("?"))
+            // Escaped like every other URL this page writes: an `&` between query parameters is a
+            // character reference start in HTML, and a raw one is only tolerated by the parser's
+            // error recovery. `&component=` is one `;` away from being read as an entity.
+            "<a class=\"cp-strip-detail\" href=\"${WebEscaping.htmlEscape(detailHref)}\" " +
+              "title=\"Reference, diff and render for this variant\">diff &rarr;</a>"
+          } ?: ""
+        val name =
+          if (variant.variant.isBlank()) WebEscaping.htmlEscape(componentName)
+          else WebEscaping.htmlEscape(variant.variant)
+        val label =
+          if (href == null) "<span class=\"cp-strip-name\">$name<em>on the stage</em></span>"
+          else "<a class=\"cp-strip-name\" href=\"${WebEscaping.htmlEscape(href)}\">$name</a>"
+        "<li class=\"cp-strip-row\"${if (current) " aria-current=\"true\"" else ""}>" +
+          baselineCell +
+          "<span class=\"cp-strip-shot\"><img loading=\"lazy\" alt=\"\" " +
+          "src=\"$basePath/render/${seg(variant.previewId)}.png$assetQ\"></span>" +
+          label +
+          score +
+          detail +
+          "</li>"
+      }
+    val wallQuery =
+      listOf("format=reference", "component=${seg(componentId)}", q.removePrefix("?"))
+        .filter { it.isNotEmpty() }
+        .joinToString("&")
+    val counted =
+      "${variants.size} ${if (variants.size == 1) "variant" else "variants"} of " +
+        WebEscaping.htmlEscape(componentName)
+    return """
+      <section class="cp-strip" id="cp-compare-strip" aria-labelledby="cp-strip-head">
+        <h2 class="cp-strip-head" id="cp-strip-head">Compare<span class="cp-strip-sub">$counted, against ${WebEscaping.htmlEscape(baselineLabel)}</span></h2>
+        <ol class="cp-strip-rows">
+          <li class="cp-strip-headrow" aria-hidden="true"><span>${WebEscaping.htmlEscape(baselineLabel)}</span><span>${WebEscaping.htmlEscape(catalogName)}</span><span></span><span>Match</span><span></span></li>
+          $rows
+        </ol>
+        <p class="cp-strip-more"><a href="${WebEscaping.htmlEscape("$basePath/compare?$wallQuery")}">every component &rarr;</a></p>
+      </section>
+      """
+      .trimIndent()
+  }
 
   private fun scriptTag(name: String): String = "<script src=\"${assetHref(name)}\"></script>"
 
@@ -13917,6 +14065,18 @@ ${scriptTag("known-differences.js")}
      */
     siblings: List<ServePreview> = emptyList(),
     /**
+     * Every variant of the component [preview] belongs to, in catalog order, for the **compare
+     * strip** under the render ([comparisonStripHtml]) — including [preview] itself, which the
+     * strip marks and does not link.
+     *
+     * Distinct from [siblings], which is the whole catalog and feeds the navigation drawer. This is
+     * the one component, resolved by the handler because `ServeIssueReport.componentIdFor` and the
+     * per-preview reference lookup are the host's answers, not the page's.
+     *
+     * Empty (the default) omits the strip entirely, so a plain module's viewer is unchanged.
+     */
+    componentVariants: List<ComponentVariant> = emptyList(),
+    /**
      * The catalog's declared stage surface (`catalog.json`'s `display.surface`) — decides whether
      * an unthemed preview's stage backs on dark, and with it whether the page offers a day/night
      * choice at all (a declared-dark catalog does not). Null ⇒ the system-name dark-first
@@ -15812,12 +15972,38 @@ ${scriptTag("known-differences.js")}
             comparePlayersLink,
             specSelector,
             motionSelector,
-            svgFmtToggle,
-            explodeToggle,
-            svgMatch,
-            bgPickerHtml("Show the transparent checkerboard behind the preview"),
-            "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
-              "title=\"Show the preview at full width instead of fitting it to the screen\">Fit width</button>",
+            // ---- The VIEW group ---------------------------------------------------------------
+            //
+            // One cluster, wrapping as a unit. These five answer a question none of the controls
+            // before them do — not "what is drawing this?" (the renderer picker) and not "what is
+            // it being compared against?" (the spec lane), but *how is it shown on this screen?*
+            // Loose in the row they were sorted by nothing, and because the spec lane is wide and
+            // grows with the length of a design tool's name, the line they landed on changed with
+            // the lane's state: pressing the design-spec chip moved `SVG` onto the row below and
+            // `Transparent` up beside the comparison views, so the bar a reader had just learned
+            // rearranged itself under the one control they pressed
+            // (`docs/design/COMPARE_NAVIGATION.md`, F1).
+            //
+            // Grouped, the row can still wrap — it has to, at phone width — but it wraps between
+            // groups instead of through one, so a control never changes neighbours.
+            listOf(
+                svgFmtToggle,
+                explodeToggle,
+                svgMatch,
+                bgPickerHtml("Show the transparent checkerboard behind the preview"),
+                "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
+                  "title=\"Show the preview at full width instead of fitting it to the screen\">Fit width</button>",
+              )
+              .filter { it.isNotBlank() }
+              .let {
+                if (it.isEmpty()) ""
+                else
+                  "<span class=\"cp-view-group\" role=\"group\" " +
+                    "aria-label=\"How the preview is shown\">" +
+                    "<span class=\"cp-view-group-label\" aria-hidden=\"true\">View</span>" +
+                    it.joinToString("\n") +
+                    "</span>"
+              },
           )
           .filter { it.isNotBlank() }
           .joinToString("\n")
@@ -16008,6 +16194,29 @@ ${scriptTag("known-differences.js")}
         .orEmpty()
     // Title, trust badge, id and the view tally on ONE baseline-aligned row. They are all
     // *identity* — three separate blocks said so three times, at the cost of ~90px above the fold.
+    // The compare strip, under the workspace: this component's variants against the same baseline.
+    // Withheld from the component browser for the same reason its comparison chips are — that
+    // chrome is a reading surface, and every route out of it is one it does not offer.
+    val comparisonStrip =
+      if (componentBrowser || componentVariants.isEmpty()) ""
+      else
+        comparisonStripHtml(
+          variants = componentVariants,
+          currentPreviewId = preview.id,
+          componentId = ServeIssueReport.componentIdFor(preview),
+          // The preview's own display label, not `componentKey` — that answers with the id slug
+          // (`profile-screen`), and the strip's heading sits directly under an `<h1>` reading
+          // "Profile Screen". One page must not spell the same thing two ways.
+          componentName = label,
+          // Named for what the rows actually stand opposite. The lane's source picker can put the
+          // paired catalog or the SVG export on the STAGE; the strip is the design comparison,
+          // which is the one published per variant.
+          baselineLabel = specProviderLabel ?: "Design reference",
+          catalogName = catalogName.ifBlank { "This catalog" },
+          basePath = basePath,
+          q = q,
+          assetQ = assetQuery(q, revisions),
+        )
     val body =
       """
       $sourceCodeStylesheet${if (browserBreadcrumb.isBlank()) "" else "$browserBreadcrumb\n      "}<div class="cp-preview-head">
@@ -16073,7 +16282,7 @@ ${scriptTag("known-differences.js")}
           ${if (componentBrowser) "" else remoteComposeKnobsHtml(preview, canApplyOverrides || canRenderOverrides || hasRcWasm, requestOverrides)}
           <div class="cp-status" id="cp-status"></div>
         </div>
-      </div>
+      </div>$comparisonStrip
       <!-- Export remains below the workspace; renderer selection is kept beside the preview
            heading so it is visible before a tall stage. The export bar is a SIBLING of the note
            column rather than a child: the note is prose and reads better at `.cp-below`'s measure,

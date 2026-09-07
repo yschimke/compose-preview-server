@@ -969,6 +969,73 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
   border-top: 1px solid var(--cp-border); }
 .cp-actions-group-label { padding: 2px 12px; font-size: 0.68rem; letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--cp-fg-faint); }
+/* The viewer bar's VIEW group: how the preview is shown, as one cluster that wraps as a unit.
+   These used to sit loose in the bar between the design-spec lane and the end of the row, so which
+   line each landed on depended on how wide the lane beside them happened to be — and the lane
+   grows when it is entered. Pressing the design-spec chip therefore rearranged controls that have
+   nothing to do with it. See `docs/design/COMPARE_NAVIGATION.md`, F1. */
+.cp-view-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cp-view-group-label { font-size: 0.68rem; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--cp-fg-faint); }
+
+/* ── The viewer's compare strip ────────────────────────────────────────────────────────────────
+   Every variant of the component on the stage, against the same baseline, under the render it
+   belongs to. See `docs/design/COMPARE_NAVIGATION.md`, §3.1 — the viewer could put ONE baseline
+   behind ONE variant, and answering "is this component wrong, or is this state of it wrong?" meant
+   leaving for a wall of four hundred rows and filtering by hand.
+
+   One grid, five tracks, shared by the header row and every row under it, so the two pictures line
+   up down the strip whatever the labels do. Grid rather than a table because the rows are links
+   first and cells second: a reader scans the pictures and clicks the name. */
+.cp-strip { margin: 22px 0 0; padding: 16px 18px 10px; border: 1px solid var(--cp-border);
+  border-radius: var(--md-sys-shape-corner-large, 16px); background: var(--cp-surface); }
+.cp-strip-head { margin: 0; font-size: var(--md-sys-typescale-title-small-size, 0.95rem);
+  font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.cp-strip-sub { font-weight: 400; font-size: 0.78rem; color: var(--cp-fg-muted); }
+.cp-strip-rows { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 2px; }
+.cp-strip-headrow, .cp-strip-row { display: grid;
+  grid-template-columns: 132px 132px minmax(0, 1fr) 84px 64px;
+  gap: 14px; align-items: center; padding: 6px 10px;
+  border-radius: var(--md-sys-shape-corner-medium, 10px); }
+.cp-strip-headrow { padding-bottom: 0; font-size: 0.68rem; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--cp-fg-faint); }
+/* The frame the reader is already looking at. Marked rather than removed: the strip is a
+   comparison of siblings, and the one on the stage is the sibling the others are being read
+   against. */
+.cp-strip-row[aria-current="true"] { background: var(--cp-accent-soft); }
+.cp-strip-row:hover:not([aria-current="true"]) { background: var(--cp-bg); }
+/* Both pictures in ONE box, the same rule the comparison wall follows: a design export rasterised
+   at a different scale must not sit in a bigger frame than the render it is compared against. */
+.cp-strip-shot { display: grid; place-items: center; height: 84px; border-radius: 8px;
+  overflow: hidden; background: repeating-conic-gradient(var(--cp-surface-2) 0% 25%,
+  var(--cp-surface) 0% 50%) 50% / 12px 12px; }
+.cp-viewer[data-bg-theme="dark"] ~ .cp-strip .cp-strip-shot,
+.cp-strip[data-bg-theme="dark"] .cp-strip-shot { background: #111113; }
+.cp-strip-shot img { width: 100%; height: 100%; object-fit: contain; }
+/* A variant with nothing in the design file mapped to it. An empty FRAME rather than an empty
+   cell: a row that jumps left because this variant is unmapped reads as a layout fault, where a
+   blank frame reads as the missing mapping it is. */
+.cp-strip-shot--empty { border: 1px dashed var(--cp-border); background: none; }
+.cp-strip-name { font-size: 0.84rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.cp-strip-name em { display: block; font-style: normal; font-weight: 400; font-size: 0.74rem;
+  color: var(--cp-fg-muted); }
+.cp-strip-score { text-align: right; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+/* The same three bands the design-spec chip uses, so one number does not change colour between
+   the chip above the stage and the row below it. */
+.cp-strip-score[data-spec-match="match"] { color: light-dark(#1e7a34, #6cd98a); }
+.cp-strip-score[data-spec-match="close"] { color: light-dark(#8a5300, #e6b067); }
+.cp-strip-score[data-spec-match="off"] { color: light-dark(#8a1c1c, #ef9292); }
+.cp-strip-score--none { color: var(--cp-fg-faint); font-size: 0.72rem; }
+.cp-strip-detail { font-size: 0.78rem; white-space: nowrap; }
+.cp-strip-more { margin: 10px 0 0; font-size: 0.8rem; }
+/* Narrow: the two pictures keep their row and everything else stacks under them, because the
+   pictures are what the strip is for and a 132px frame is already the smallest useful one. */
+@media (max-width: 640px) {
+  .cp-strip-headrow { display: none; }
+  .cp-strip-row { grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; }
+  .cp-strip-row > .cp-strip-name, .cp-strip-row > .cp-strip-score,
+  .cp-strip-row > .cp-strip-detail { grid-column: 1 / -1; text-align: left; }
+}
 .cp-catalog-download { margin: 30px 0 0; }
 /* One chip, three weights. M3 calls this an assist chip and draws it as a PILL — which is what the
    rest of this chrome already does with a small interactive target (the nav actions, the interface
@@ -2966,21 +3033,31 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
    the component name, but on its own line where it cannot be mistaken for part of it. */
 .cp-compare-variant { display: block; font-weight: 400; font-size: 0.78rem;
   color: var(--cp-fg-muted); }
-/* ONE BOX FOR BOTH PICTURES.
-   The panel used to size itself to whatever the picture inside it happened to be — `width: auto`
-   under a `max-width`/`max-height` pair — so a design export rasterised at a different scale than
-   the render sat in a visibly larger frame than the render it is compared against, and the reader's
-   first question about the pair was about the exporter rather than about the drawing
-   (`docs/design/COMPARE_NAVIGATION.md`, F3). A fixed 5:3 box with `object-fit: contain` fits both
-   halves into the same frame, so "smaller" on this page always means *drawn* smaller. The pixel
-   size of each is said out loud underneath instead — see `.cp-compare-dim`. */
 .cp-compare-shot { display: grid; place-items: center; width: min(260px, 30vw); min-width: 150px;
-  aspect-ratio: 5 / 3; min-height: 92px; padding: 8px; border-radius: 8px; overflow: hidden;
-  box-sizing: border-box;
+  min-height: 92px; padding: 8px; border-radius: 8px; overflow: hidden;
   background: repeating-conic-gradient(var(--cp-surface-2) 0% 25%, var(--cp-surface) 0% 50%) 50% / 14px 14px; }
 .cp-compare-row[data-bg-theme="dark"] .cp-compare-shot { background: #111113; }
-.cp-compare-shot img, .cp-compare-shot canvas { display: block; width: 100%; height: 100%;
-  max-width: 100%; max-height: 100%; object-fit: contain; }
+.cp-compare-shot img, .cp-compare-shot canvas { display: block; max-width: 100%; max-height: 220px;
+  width: auto; height: auto; object-fit: contain; }
+/* ONE BOX FOR BOTH PICTURES — **the wall's table only**.
+   The panel used to size itself to whatever the picture inside it happened to be, so a design
+   export rasterised at a different scale than the render sat in a visibly larger frame than the
+   render it is compared against, and the reader's first question about the pair was about the
+   exporter rather than about the drawing (`docs/design/COMPARE_NAVIGATION.md`, F3). A fixed 5:3 box
+   with `object-fit: contain` fits both halves into the same frame, so "smaller" on this page always
+   means *drawn* smaller; the pixel size of each is said out loud underneath (`.cp-compare-dim`).
+
+   SCOPED, and the scope is load-bearing twice over. `.cp-compare-shot` is shared with the focused
+   comparison's `.cp-reference-grid`, where it is `width: 100%` inside a flexible grid — an
+   `aspect-ratio` there makes the panel's height depend on a width that depends on its height, and
+   the harness's `serve-format-compare` capture stopped settling and timed out at the shutter. And
+   the round-device clip below states its circle against the IMAGE's own box, which only carries the
+   render's square while the image sizes `width: auto; height: auto`; filling the panel would have
+   landed a `circle()` on the panel's rectangle instead. Both were regressions of the unscoped
+   rule, and both are silent — one as a hung capture, the other as a Wear bezel in the wrong place. */
+.cp-compare-table .cp-compare-shot { aspect-ratio: 5 / 3; box-sizing: border-box; }
+.cp-compare-table .cp-compare-shot img, .cp-compare-table .cp-compare-shot canvas {
+  width: 100%; height: 100%; max-height: 100%; }
 /* What that box is fitting, in the picture's own pixels — the answer to "why is one smaller than
    the other", which the equal frames above would otherwise leave the reader to guess at. Written
    by `<cp-compare-wall>` once it has decoded the pair; empty and invisible until then. */
