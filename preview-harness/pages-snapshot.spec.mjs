@@ -543,6 +543,13 @@ const SERVE_ASSETS = [
   ["viewer.js", "text/javascript"],
   ["spatial-view.js", "text/javascript"],
   ["format-compare.js", "text/javascript"],
+  // The metric itself, which `format-compare.js` runs in a Worker (`scorer/offload.ts`, from the
+  // `data-cp-scorer-worker` href on its own script tag). Unrouted, the worker's script 404s and
+  // every score cell stays on "waiting…" — which is not a visible failure, it is a capture that
+  // spends its whole 60s budget in the wait for settled scores and then times out at the shutter.
+  // It became reachable when the wall stopped opening on the SVG lane and started opening on the
+  // design comparison (`docs/design/COMPARE_NAVIGATION.md`, §3.2).
+  ["compare-scorer.js", "text/javascript"],
   // Fetched by `chrome/reportLauncher.ts` when the report launcher's panel is first opened, and
   // immediately on `/report-bug`. Routed here so the `report-menu` state below shoots the real
   // capture controls rather than a panel with the block still `hidden`.
@@ -1106,9 +1113,14 @@ const FIXTURE_STATES = [
       );
       await page.waitForSelector(".cp-fab-menu[open]", { state: "detached" });
       await page.click('[data-compare-format="parallel"]');
-      await expect(page.locator(".cp-compare-target-head")).toHaveText(
-        "Wear M3",
-      );
+      // The NAME node, not the whole cell: the header also carries a `cp-compare-head-role` line
+      // saying which half of the pair this column is, and that line does not change with the lane.
+      await expect(
+        page.locator(".cp-compare-target-head .cp-compare-head-name"),
+      ).toHaveText("Wear M3");
+      await expect(
+        page.locator(".cp-compare-target-head .cp-compare-head-role"),
+      ).toHaveText("baseline");
       await expect(page.locator(".cp-compare-diff-head")).toBeVisible();
       await page.waitForFunction(() =>
         Array.from(
@@ -1159,13 +1171,22 @@ const FIXTURE_STATES = [
       await page.click('[data-compare-format="reference"]');
       // The header names the lane and moves with its column — assert both rather than trusting the
       // pixels, so a reordered table with a stale header fails loudly here.
-      await expect(page.locator(".cp-compare-target-head")).toHaveText("Figma");
+      await expect(
+        page.locator(".cp-compare-target-head .cp-compare-head-name"),
+      ).toHaveText("Figma");
+      // …and the render column is named after the CATALOG, not after a file format. "Rendered PNG"
+      // answered "which encoding?" where the reader was asking "whose picture is this?".
+      await expect(
+        page.locator(".cp-compare-render-head .cp-compare-head-role"),
+      ).toHaveText("ours");
       // …and assert the text is the text the READER sees. `serve.css` used to hide this `<th>`
       // with `font-size: 0` and paint a `::after` whose content was the generic "Design reference"
       // on every reference lane, so a DOM-text assertion passed while the page said something
       // else. This is the only layer with real CSS, so it is the only one that can catch that.
       const painted = await page.evaluate(() => {
-        const th = document.querySelector(".cp-compare-target-head");
+        const th = document.querySelector(
+          ".cp-compare-target-head .cp-compare-head-name",
+        );
         const style = getComputedStyle(th);
         return {
           fontSize: parseFloat(style.fontSize),
@@ -1285,7 +1306,9 @@ const FIXTURE_STATES = [
         content:
           "*, *::before, *::after { transition-duration: 0ms !important; }",
       });
-      const band = page.locator(".cp-parity-issue-group .cp-parity-issues-sum").first();
+      const band = page
+        .locator(".cp-parity-issue-group .cp-parity-issues-sum")
+        .first();
       await band.scrollIntoViewIfNeeded();
       await band.click();
       await expect(
@@ -5332,9 +5355,9 @@ test("contract · the front door's search collapses into the bar and reaches com
   await expect(page.locator("#cp-site-search-field")).toBeHidden();
   await page.click("#cp-site-search-toggle");
   await expect(page.locator("#cp-site-search-field")).toBeVisible();
-  expect(
-    await page.evaluate(() => document.activeElement?.id),
-  ).toBe("cp-browser-catalog-search");
+  expect(await page.evaluate(() => document.activeElement?.id)).toBe(
+    "cp-browser-catalog-search",
+  );
 
   const cards = () => page.locator(".cp-sys:not([hidden])");
   const all = await cards().count();
@@ -5405,7 +5428,9 @@ test("contract · a refused UI Builder explains itself inside the card", async (
     return {
       insideRight: n.right <= c.right + 1,
       // Wrapped, not one long line: the sentence is far wider than a card at one line.
-      lines: Math.round(n.height / parseFloat(getComputedStyle(note).lineHeight)),
+      lines: Math.round(
+        n.height / parseFloat(getComputedStyle(note).lineHeight),
+      ),
     };
   });
   expect(fits.insideRight).toBe(true);
