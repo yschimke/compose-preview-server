@@ -279,7 +279,7 @@ class WearWidgetCodeExporterTest {
    * The widget is drawn by the system host — out of the app's process, without its resources — so
    * an `R.drawable` or an asset path is not there to resolve at draw time. The pixels have to
    * travel inside the document, which leaves generated source carrying them
-   * (yschimke/compose-preview-server#519). Before this, every widget with an image background
+   * (yschimke/compose-preview-server#523). Before this, every widget with an image background
    * refused outright and told the author to write `WearWidgetBrush.image(bitmap)` by hand.
    */
   @Test

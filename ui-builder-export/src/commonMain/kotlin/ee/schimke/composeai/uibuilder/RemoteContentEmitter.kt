@@ -162,7 +162,7 @@ internal class RemoteContentEmitter(
         // without its resources, so anything resolved at draw time — an `R.drawable`, an asset
         // path — is not there to resolve. The pixels have to travel inside the document, which
         // means the only thing generated source can do is carry them
-        // (yschimke/compose-preview-server#519).
+        // (yschimke/compose-preview-server#523).
         "asset/image" -> {
           val key = node.properties["assetKey"]?.stringOrNull().orEmpty()
           when (val encoded = key.takeIf(String::isNotEmpty)?.let(assets::base64)) {

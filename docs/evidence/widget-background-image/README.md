@@ -1,6 +1,6 @@
 # A widget background picture, inlined
 
-Evidence for [#519](https://github.com/yschimke/compose-preview-server/issues/519).
+Evidence for [#523](https://github.com/yschimke/compose-preview-server/issues/523).
 
 `after-inlined-background.png` is the design `spotify-wear-nowplaying` — a `remote-m3` Large Wear
 widget whose artwork sits in the container's `background` brush chain under two gradients —
