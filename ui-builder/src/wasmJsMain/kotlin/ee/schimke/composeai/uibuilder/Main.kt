@@ -74,10 +74,17 @@ import ee.schimke.composeai.uibuilder.client.UiBuilderProtocolUpdateClient
 import ee.schimke.composeai.uibuilder.client.preparePropertyDelta
 import ee.schimke.composeai.uibuilder.client.toProtocolSubmission
 import ee.schimke.composeai.uibuilder.client.toRendererDocument
+import ee.schimke.composeai.uibuilder.local.CachedLocalText
+import ee.schimke.composeai.uibuilder.local.CachingLocalCatalogSource
+import ee.schimke.composeai.uibuilder.local.LocalCatalogSource
+import ee.schimke.composeai.uibuilder.local.LocalDesignStore
+import ee.schimke.composeai.uibuilder.local.LocalUiBuilderHttpTransport
+import ee.schimke.composeai.uibuilder.local.LocalUiBuilderService
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.OperationOutcomeResponseV1
@@ -367,6 +374,15 @@ private data class LiveSessionConfig(
   val operationIdPrefix: String,
   val displayName: String,
   val colorArgbHex: String,
+  /**
+   * Whether this design lives in the browser rather than on the server.
+   *
+   * `?storage=local`, a query rather than a path segment, because it says *where the design is
+   * kept* and not *which design* — the same distinction that keeps `actor` and `token` in the
+   * query. The server never sees it: the app shell is served for the same catalog-scoped path
+   * either way, and the page decides what to do with it.
+   */
+  val localStorage: Boolean,
 )
 
 /**
@@ -381,18 +397,31 @@ private data class LiveSessionConfig(
 private fun LiveSessionApp() {
   var config by remember { mutableStateOf<LiveSessionConfig?>(null) }
   LaunchedEffect(Unit) { config = liveSessionConfig(resolveServerActorId()) }
-  config?.let { LiveSessionApp(it) }
+  // The local mode is the one that can open a design without a navigation: it has just written the
+  // design to this browser, so re-entering the editor with a new config is the whole of "open it".
+  // A server design still goes through the New design form, whose `303` is the navigation.
+  config?.let { current -> LiveSessionApp(current) { config = it } }
 }
 
 @Composable
-private fun LiveSessionApp(config: LiveSessionConfig) {
+private fun LiveSessionApp(
+  config: LiveSessionConfig,
+  onOpenDesign: (LiveSessionConfig) -> Unit = {},
+) {
   val scope = rememberCoroutineScope()
+  // The store, the catalogs it falls back on, and the service that answers this page's own
+  // requests from them. Null in the ordinary server-backed session, where all three are the
+  // server's.
+  val localSession =
+    remember(config) { if (config.localStorage) BrowserLocalSession(config) else null }
   val http =
-    remember(config) {
+    remember(config, localSession) {
       UiBuilderProtocolHttpClient(
         actorId = config.actorId,
         endpoint = config.httpEndpoint,
-        transport = BrowserUiBuilderHttpTransport(),
+        transport =
+          localSession?.let { LocalUiBuilderHttpTransport(it.service) }
+            ?: BrowserUiBuilderHttpTransport(),
         requestIds = MonotonicUiBuilderRequestIds(config.clientId),
       )
     }
@@ -400,6 +429,9 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   var authoritativeDocument by remember { mutableStateOf<DesignDocumentV1?>(null) }
   var catalog by remember { mutableStateOf<CapabilityCatalog?>(null) }
   var newDesignCatalogs by remember { mutableStateOf<List<UiBuilderNewDesignCatalog>>(emptyList()) }
+  // The chooser's answer is a form-factor summary; seeding a design locally needs the catalog's
+  // own revision and runtime id, which only the capability document carries.
+  var catalogCapabilities by remember { mutableStateOf<List<CatalogCapabilityV1>>(emptyList()) }
   var devicePresets by remember { mutableStateOf<List<UiBuilderDevicePreset>>(emptyList()) }
   var sessionStatus by remember { mutableStateOf("Connecting…") }
   var updates by remember { mutableStateOf<UiBuilderProtocolUpdateClient?>(null) }
@@ -435,7 +467,7 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
     presenceState = presenceState.replace(response.snapshot.presence, browserNowMillis())
     authoritativeGeneration += 1
     sessionStatus =
-      "${config.catalogSystemId} · Live · ${config.actorId}/${config.clientId} · seq ${response.snapshot.state.lastSequence}"
+      "${config.catalogSystemId} · ${sessionModeLabel(config, localSession)} · ${config.actorId}/${config.clientId} · seq ${response.snapshot.state.lastSequence}"
   }
 
   fun acceptSnapshot(response: SnapshotResponseV1) {
@@ -533,7 +565,10 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
     }
   }
 
-  LaunchedEffect(Unit) { devicePresets = loadDevicePresets() }
+  // Remembered in the browser in local mode, so the Screen inspector still offers device frames on
+  // a reload with nothing behind it. The presets are a static file the server derives from a
+  // JVM-only catalog, which is why they cross the wire at all.
+  LaunchedEffect(localSession) { devicePresets = loadDevicePresets(localSession?.text) }
 
   // The reference overlay's browser half: the file picker, the paste listener, the snapshot and
   // the store behind them all. Rebuilt only when the design changes, because it is addressed to
@@ -554,7 +589,14 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   // starting state reaches `onStateChanged` before the stored one arrives and is written over it —
   // which would delete a design's reference by opening the design.
   var referenceLoaded by remember(config.designId) { mutableStateOf(false) }
-  LaunchedEffect(config.designId) {
+  LaunchedEffect(config.designId, config.localStorage) {
+    // A reference picture is a design asset the server stores, and a local design has no server to
+    // store one with. Pictures are also the one thing that would not fit: `localStorage` holds a
+    // few megabytes for this whole origin, and a pasted screenshot is most of that on its own.
+    if (config.localStorage) {
+      referenceStatus = LOCAL_REFERENCE_UNAVAILABLE
+      return@LaunchedEffect
+    }
     installReferenceBridge()
     restoredReference = references.load()
     storedReference =
@@ -581,7 +623,13 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   // One socket for the life of the design. It sends the current board on connect, so there is no
   // fetch beside it to reconcile against — the load below is only the fallback for a host that
   // refuses the upgrade, where the panel is then a snapshot rather than a feed.
-  DisposableEffect(config.designId) {
+  DisposableEffect(config.designId, config.localStorage) {
+    // A discussion is a thing several people have, and a design only this browser holds has nobody
+    // to have it with. The panel stays, empty, saying so.
+    if (config.localStorage) {
+      commentStatus = LOCAL_COMMENTS_UNAVAILABLE
+      return@DisposableEffect onDispose {}
+    }
     val watch =
       commentHost.watch(
         onBoard = { board ->
@@ -594,7 +642,8 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       )
     onDispose { watch.close() }
   }
-  LaunchedEffect(config.designId) {
+  LaunchedEffect(config.designId, config.localStorage) {
+    if (config.localStorage) return@LaunchedEffect
     commentHost.load()?.let { board ->
       // Only if the socket has not already delivered something newer: the two race by design and
       // the sequence is what settles it, rather than whichever answer happened to arrive last.
@@ -605,7 +654,8 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   // One paste listener for the life of the design, re-armed after every catch. Pasting is the
   // gesture Figma's own "copy as PNG" leaves you holding, so it goes straight to the base picture
   // rather than behind a menu.
-  LaunchedEffect(config.designId) {
+  LaunchedEffect(config.designId, config.localStorage) {
+    if (config.localStorage) return@LaunchedEffect
     while (true) {
       when (val outcome = references.awaitPaste()) {
         is ReferenceImportOutcome.Imported -> {
@@ -622,6 +672,7 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   // dragged and each of those would otherwise be a request. The picture itself is only re-sent
   // when it actually changed; see `BrowserReferenceHost.save`.
   LaunchedEffect(pendingReference) {
+    if (config.localStorage) return@LaunchedEffect
     val candidate = pendingReference ?: return@LaunchedEffect
     delay(REFERENCE_SAVE_DEBOUNCE_MILLIS)
     val imagesChanged =
@@ -632,9 +683,23 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   }
 
   LaunchedEffect(config) {
-    val availableCatalogs = loadLiveCatalogs(http)
+    // A local session can be asked for a catalog this browser has never seen — the first visit to
+    // an origin with the network already gone. That is a sentence, not a crash: the live session
+    // has a server behind it and can let the failure take the page down, and a local one has to
+    // explain itself because there is nothing else left to ask.
+    val availableCatalogs =
+      if (!config.localStorage) loadLiveCatalogs(http)
+      else
+        try {
+          loadLiveCatalogs(http)
+        } catch (failure: Exception) {
+          sessionStatus = "Local · ${failure.message ?: "no catalog is available offline"}"
+          markReady()
+          return@LaunchedEffect
+        }
     // Form-factor order — Mobile, Wear, RemoteCompose — however the host lists them: the chooser
     // is a "what am I making" question, not a catalog registry.
+    catalogCapabilities = availableCatalogs
     newDesignCatalogs =
       availableCatalogs.mapNotNull(::newDesignCatalog).sortedBy {
         NEW_DESIGN_CATALOG_ORDER.indexOf(it.systemId)
@@ -647,15 +712,20 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       CapabilityCatalogParser.parse(
         Json.encodeToJsonElement(CatalogCapabilityV1.serializer(), selectedCatalog)
       )
+    // No Export menu for a local design: every format behind it is rendered by the server, from a
+    // design the server does not have. The Code pane is unaffected — the Compose source is
+    // generated in this page from the same exporter, which is why it keeps working offline.
     exportHost =
-      BrowserExportHost(
-        designId = config.designId,
-        formats =
-          exportFormatsFor(
-            svg = selectedCatalog.exportCapabilities.svg,
-            png = selectedCatalog.exportCapabilities.png,
-          ),
-      )
+      if (config.localStorage) null
+      else
+        BrowserExportHost(
+          designId = config.designId,
+          formats =
+            exportFormatsFor(
+              svg = selectedCatalog.exportCapabilities.svg,
+              png = selectedCatalog.exportCapabilities.png,
+            ),
+        )
     val openResult = UiBuilderLiveSessionApi(config.designId, http).open()
     when (val result = openResult) {
       is UiBuilderHttpResult.Response -> {
@@ -666,6 +736,14 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
         }
         acceptSnapshot(response)
         canonicalizeUiBuilderUrl(config.catalogSystemId, config.designId)
+        // A local design has no updates to subscribe to: the only writer is this page, and it has
+        // already seen everything it wrote. Reported as connected because that is what it is —
+        // the service is one call away — rather than leaving the editor offering a reconnect for a
+        // socket that was never going to exist.
+        if (config.localStorage) {
+          socketState = BrowserUiBuilderSocketState.CONNECTED
+          return@LaunchedEffect
+        }
         val client =
           UiBuilderProtocolUpdateClient(
             designId = config.designId,
@@ -795,6 +873,9 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   }
 
   LaunchedEffect(config, socketState, selectedNodeId, document?.revision) {
+    // Nobody to tell. Presence is who else is in the design, and a design in this browser has no
+    // "else".
+    if (config.localStorage) return@LaunchedEffect
     if (socketState != BrowserUiBuilderSocketState.CONNECTED) return@LaunchedEffect
     while (true) {
       val currentDocument = document
@@ -837,13 +918,51 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
         loadRemoteComposeSources(config.catalogSystemId)
       else emptyList()
   }
+  /**
+   * Making a design, by whichever of the two routes this session has.
+   *
+   * A server design is created by the New design form, whose `303` the browser follows, so the
+   * design's permalink is what ends up in history. A local design has nowhere to POST: the page
+   * seeds the document itself from the same shared [UiBuilderNewDesignSeed] the server uses, writes
+   * it to this browser, rewrites the URL and re-enters the editor. One seed, two places to put the
+   * result.
+   */
+  val createDesign: (String, String, String, List<NewDesignState>) -> Unit =
+    { catalogSystemId, designId, templateId, state ->
+      if (localSession == null) {
+        navigateToNewDesign(catalogSystemId, designId, templateId, encodeNewDesignStates(state))
+      } else {
+        scope.launch {
+          val failure =
+            createLocalDesign(
+              session = localSession,
+              catalogs = catalogCapabilities,
+              catalogSystemId = catalogSystemId,
+              designId = designId,
+              templateId = templateId,
+              state = state,
+            )
+          if (failure != null) {
+            sessionStatus = "Local error · $failure"
+          } else {
+            canonicalizeUiBuilderUrl(catalogSystemId, designId)
+            onOpenDesign(
+              config.copy(
+                catalogSystemId = catalogSystemId,
+                designId = designId,
+                startWithNewDesign = false,
+              )
+            )
+          }
+        }
+      }
+    }
+
   if (config.startWithNewDesign && newDesignCatalogs.isNotEmpty()) {
     UiBuilderNewDesignScreen(
       catalogs = newDesignCatalogs,
       initialCatalogSystemId = config.catalogSystemId,
-      onCreate = { catalogSystemId, designId, templateId, state ->
-        navigateToNewDesign(catalogSystemId, designId, templateId, encodeNewDesignStates(state))
-      },
+      onCreate = createDesign,
     )
     LaunchedEffect(newDesignCatalogs) { markReady() }
     return
@@ -883,9 +1002,7 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       collaborators = collaborators,
       devicePresets = devicePresets,
       newDesignCatalogs = newDesignCatalogs,
-      onCreateDesign = { catalogSystemId, designId, templateId, state ->
-        navigateToNewDesign(catalogSystemId, designId, templateId, encodeNewDesignStates(state))
-      },
+      onCreateDesign = createDesign,
       onHelp = ::openUiBuilderGuide,
       exportHost = exportHost,
       restoredReference = restoredReference,
@@ -919,7 +1036,12 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       onInspectionInvalidated = { collector ->
         inspectionPublisher.offer(collector, loadedDocument.revision)
       },
-      onRequestNativeRender = { requestNativeRender(config.designId) },
+      // The native render is a real Compose render the server performs from the stored design, so
+      // it is the one pane a design this server has never seen cannot fill.
+      onRequestNativeRender = {
+        if (config.localStorage) UiBuilderNativeRender(failure = LOCAL_NATIVE_RENDER_UNAVAILABLE)
+        else requestNativeRender(config.designId)
+      },
       remoteComposeSources = remoteComposeSources,
       resolveRemoteComposeDocument = { source ->
         fetchBase64(catalogAssetPath(config.catalogSystemId, "/render/${source.id}.rc"))
@@ -1390,6 +1512,41 @@ private external fun captureMode(): String
 )
 private external fun liveSessionEnabled(): Boolean
 
+/**
+ * Everything a design kept in this browser needs, assembled once per session.
+ *
+ * The three pieces are deliberately separate objects. [store] is the browser's keys and knows
+ * nothing about catalogs; [catalogs] is network-first with the last successful answer kept, which
+ * is what lets an offline reload open a design at all; [service] is the reducer above both,
+ * answering the same v1 requests the server answers. [text] is the same network-first rule for the
+ * two static files a local session still needs — the device presets and the seed fixture.
+ */
+private class BrowserLocalSession(config: LiveSessionConfig) {
+  private val storage = BrowserLocalDesignStorage()
+  val store: LocalDesignStore = LocalDesignStore(storage)
+  val catalogs: CachingLocalCatalogSource =
+    CachingLocalCatalogSource(
+      storage,
+      LocalCatalogSource {
+        loadLiveCatalogs(
+          UiBuilderProtocolHttpClient(
+            actorId = config.actorId,
+            endpoint = config.httpEndpoint,
+            transport = BrowserUiBuilderHttpTransport(),
+            requestIds = MonotonicUiBuilderRequestIds("${config.clientId}-catalog"),
+          )
+        )
+      },
+    )
+  val text: CachedLocalText = CachedLocalText(storage)
+  val service: LocalUiBuilderService =
+    LocalUiBuilderService(store, catalogs, clock = ::browserNowMillis)
+
+  /** True once this session has fallen back to what the browser stored, which is "offline". */
+  val offline: Boolean
+    get() = catalogs.servedFromStorage
+}
+
 private fun liveSessionConfig(serverActorId: String?): LiveSessionConfig {
   val catalogSystemId = liveConfigValue("catalog", uiBuilderCatalogFromPath())
   val defaultDesignId =
@@ -1418,6 +1575,7 @@ private fun liveSessionConfig(serverActorId: String?): LiveSessionConfig {
       displayName =
         liveConfigValue("displayName", serverActorId?.substringAfterLast(':') ?: "Browser user"),
       colorArgbHex = liveConfigValue("color", "#FF6574CD"),
+      localStorage = localDesignStorageRequested(),
     )
     .also {
       require(Regex("[A-Za-z0-9][A-Za-z0-9._-]*").matches(it.catalogSystemId)) {
@@ -1441,10 +1599,13 @@ private fun liveSessionConfig(serverActorId: String?): LiveSessionConfig {
  * being a constant in `:ui-builder`. A failure is not fatal — the inspector falls back to the raw
  * width/height/density fields, which is where it was before the menu existed.
  */
-private suspend fun loadDevicePresets(): List<UiBuilderDevicePreset> =
+private suspend fun loadDevicePresets(cache: CachedLocalText?): List<UiBuilderDevicePreset> =
   try {
     devicePresetJson
-      .decodeFromString(DevicePresetsPayload.serializer(), fetchText(DEVICE_PRESETS_PATH))
+      .decodeFromString(
+        DevicePresetsPayload.serializer(),
+        cache?.text(DEVICE_PRESETS_PATH) { fetchText(it) } ?: fetchText(DEVICE_PRESETS_PATH),
+      )
       .presets
       .map {
         UiBuilderDevicePreset(
@@ -1655,7 +1816,7 @@ private external fun uiBuilderDesignFromPath(): String
     const path = '/ui-builder/' + encodeURIComponent(catalogSystemId) + '/' +
       encodeURIComponent(designId);
     const next = new URL(path, current.origin);
-    ['token', 'actor', 'clientId', 'displayName', 'color', 'endpoint', 'updatesEndpoint']
+    ['token', 'actor', 'clientId', 'displayName', 'color', 'endpoint', 'updatesEndpoint', 'storage']
       .forEach((name) => {
         const value = current.searchParams.get(name);
         if (value !== null) next.searchParams.set(name, value);
@@ -2099,3 +2260,68 @@ private external fun readBrowserSetting(key: String): String
   }"""
 )
 private external fun writeBrowserSetting(key: String, value: String)
+
+/**
+ * What the status line calls this session: live against the server, or this browser's own copy.
+ *
+ * The offline spelling is not cosmetic. A local session that is *also* offline has fallen back to a
+ * catalog remembered from an earlier visit, and an author should be told that the palette in front
+ * of them is a memory rather than what the server serves today.
+ */
+private fun sessionModeLabel(config: LiveSessionConfig, session: BrowserLocalSession?): String =
+  when {
+    !config.localStorage -> "Live"
+    session?.offline == true -> "This browser · offline"
+    else -> "This browser"
+  }
+
+/**
+ * Seeds one design into this browser, or says why it could not be.
+ *
+ * The seed comes from [UiBuilderNewDesignSeed], the same object the server's New design form runs,
+ * so "a blank Wear screen" means one thing whichever route made it. The operations fixture it reads
+ * the environment from is a static file, so it goes through the browser's remembered-text cache and
+ * a second design can be made with the network gone.
+ */
+private suspend fun createLocalDesign(
+  session: BrowserLocalSession,
+  catalogs: List<CatalogCapabilityV1>,
+  catalogSystemId: String,
+  designId: String,
+  templateId: String,
+  state: List<NewDesignState>,
+): String? {
+  val catalog =
+    catalogs.firstOrNull { it.benchmark.catalogSystemId == catalogSystemId }
+      ?: return "this browser has no stored $catalogSystemId catalog to pin a new design to"
+  val document =
+    try {
+      UiBuilderNewDesignSeed.document(
+        designId = designId,
+        catalogSystemId = catalogSystemId,
+        templateId = templateId,
+        catalogRevision = catalog.benchmark.catalogRevision,
+        nativeRuntimeId = catalog.benchmark.nativeRuntimeId,
+        fixture =
+          Json.parseToJsonElement(session.text.text(NEW_DESIGN_FIXTURE_PATH) { fetchText(it) })
+            .jsonObject,
+        state = state,
+      )
+    } catch (failure: Exception) {
+      return failure.message ?: "the design could not be seeded"
+    }
+  val response = session.service.create(document)
+  return (response as? ErrorResponseV1)?.error?.message
+}
+
+/** The operations fixture every new design reads its environment from, beside the Wasm bundle. */
+private const val NEW_DESIGN_FIXTURE_PATH = "jetcaster-discover-operations-v1.json"
+
+private const val LOCAL_COMMENTS_UNAVAILABLE =
+  "Comments need the server. This design is kept in this browser, so there is nobody to discuss it with yet."
+
+private const val LOCAL_REFERENCE_UNAVAILABLE =
+  "Reference pictures need the server. This design is kept in this browser, which has room for the document but not for screenshots."
+
+private const val LOCAL_NATIVE_RENDER_UNAVAILABLE =
+  "A native render is drawn by the server from the stored design, and this design is kept in this browser."
