@@ -9539,6 +9539,32 @@ ${captureControlsHtml().prependIndent("          ")}
       </div>
       """
         .trimIndent()
+    // What this host can actually do with a capture, said before the reporter takes one. The
+    // unconditional "…and embedded in the report automatically" was false on every host that does
+    // not admit the visitor to the image lane — which is every public one, since the lane gates on
+    // a signed-in login with access to the image repository. There the picture only ever reaches
+    // the issue by being pasted, and nothing on the page said so until the reporter had already
+    // opened a screenshot-less issue in another tab (#556).
+    val screenshotProse =
+      if (canUploadCaptures)
+        """
+        <p class="cp-sub">Captured images are uploaded to this preview server and embedded in the
+          report automatically. Use <strong>Mark up</strong> to add boxes, arrows, pen marks, or text
+          before opening the issue. The hosted link follows this server&rsquo;s image-retention window.
+          If this server does not accept the upload, pressing the button above puts the newest
+          capture on the clipboard instead; paste it into the Screenshot section.</p>
+        """
+          .trimIndent()
+          .replace("\n", "\n      ")
+      else
+        """
+        <p class="cp-sub">This server does not host captures, so a picture cannot be embedded in the
+          report for you. Use <strong>Mark up</strong> to add boxes, arrows, pen marks, or text, then
+          open the issue: that puts your newest capture on the clipboard, and the issue&rsquo;s
+          <strong>Screenshot</strong> section is where to paste it. Nothing else carries it there.</p>
+        """
+          .trimIndent()
+          .replace("\n", "\n      ")
     val render = report.renderUrl?.takeIf { it.isNotBlank() }
     val reference = report.referenceUrl?.takeIf { it.isNotBlank() }
     val shot =
@@ -9635,11 +9661,7 @@ ${captureControlsHtml().prependIndent("          ")}
       </form>
 
       <p class="cp-status-sec">Add a screenshot</p>
-      <p class="cp-sub">Captured images are uploaded to this preview server and embedded in the
-        report automatically. Use <strong>Mark up</strong> to add boxes, arrows, pen marks, or text
-        before opening the issue. The hosted link follows this server&rsquo;s image-retention window.
-        If this server does not accept the upload, pressing the button above puts the newest
-        capture on the clipboard instead; paste it into the Screenshot section.</p>
+      $screenshotProse
       $captures
       $shot
 

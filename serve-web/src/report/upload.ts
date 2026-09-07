@@ -33,6 +33,48 @@ export function withUploadedCaptures(
     return `${body.slice(0, end)}\n\n${evidence}${body.slice(end)}`;
 }
 
+/**
+ * The placeholder the server writes into the Screenshot section of a bug report.
+ *
+ * Matched so the clipboard hint can take its place rather than sit beside it, which would leave two
+ * comments a line apart telling the reporter to paste in the same spot.
+ */
+const PASTE_PLACEHOLDER = "<!-- Paste your capture of the page here. -->";
+
+/**
+ * Say, in the Screenshot section itself, that the capture is already on the clipboard.
+ *
+ * A report that cannot be hosted (this server has no image lane, or this visitor is not admitted to
+ * it — see `handleImageUploadCapability`) reaches GitHub with an empty Screenshot section, and the
+ * only thing that ever said otherwise was a status line on `/report-bug` — a page the reporter left
+ * in the same gesture, because the issue form opens in a new tab. So the issue opened with no
+ * picture, no image on screen suggesting there should be one, and a clipboard the reporter had no
+ * reason to think was holding anything: issue #556.
+ *
+ * A markdown COMMENT, for two reasons. It is invisible in the filed issue, so a reporter who
+ * ignores it leaves no boilerplate behind; and it is plainly visible in GitHub's editor, at the
+ * exact insertion point, which is the one place the reporter is certainly looking. Pasting over it
+ * is the gesture it asks for.
+ */
+export function withClipboardHint(body: string, others: number): string {
+    // Worded to hold whichever way the clipboard write goes. It is started as this hint is
+    // written and can still be refused (Safari's private mode, a denied permission), and by the
+    // time that is known the reporter is in this editor and the body cannot be taken back — so the
+    // sentence has to be true for a paste that comes up empty too.
+    const rest = others > 0 ? ` The other ${others} are there as well.` : "";
+    const hint =
+        "<!-- Paste your capture here (Ctrl+V, or Cmd+V on a Mac): opening this issue put your " +
+        "newest one on the clipboard. If the paste comes up empty, the report page still has it " +
+        `— press Copy on it there, then paste again.${rest} -->`;
+    if (body.includes(PASTE_PLACEHOLDER))
+        return body.replace(PASTE_PLACEHOLDER, () => hint);
+    const heading = "### Screenshot";
+    const at = body.indexOf(heading);
+    if (at < 0) return `${body.trimEnd()}\n\n${heading}\n\n${hint}\n`;
+    const end = at + heading.length;
+    return `${body.slice(0, end)}\n\n${hint}${body.slice(end)}`;
+}
+
 /** Upload one capture and return the checked anonymous-read URL. */
 export async function uploadCapture(
     capture: Capture,

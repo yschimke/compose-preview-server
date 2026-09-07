@@ -32,6 +32,7 @@ import {
     hostedCaptureUrl,
     stillHosted,
     uploadCapture,
+    withClipboardHint,
     withUploadedCaptures,
 } from "./upload.js";
 
@@ -41,6 +42,8 @@ type Mode = "view" | "region" | "element";
 export function installCapture(): void {
     if (document.documentElement.hasAttribute("data-cp-capture-ready")) return;
     document.documentElement.setAttribute("data-cp-capture-ready", "1");
+    // A fresh page has established nothing about this host yet, whatever the last one learned.
+    hostingRuledOut = false;
     if (captureSupported()) {
         document
             .querySelectorAll<HTMLElement>(".cp-shot")
@@ -62,6 +65,49 @@ export function installCapture(): void {
 }
 
 /**
+ * Whether this page has established that it cannot host a capture.
+ *
+ * Set once discovery has actually answered, never assumed from the absence of the attribute: at
+ * install time the answer is not in yet, and saying "this will have to be pasted" to someone whose
+ * next capture is about to be embedded is the same class of lie in the other direction.
+ */
+let hostingRuledOut = false;
+
+/**
+ * Tell the reporter, BEFORE they press the button, that the picture will have to be pasted.
+ *
+ * The clipboard fallback has always worked; what it never did was announce itself anywhere the
+ * reporter was still looking. Its one message was written at submit time, into a status line on a
+ * page whose form opens GitHub in a new tab — so the reporter read it, at best, on the way back
+ * from filing a screenshot-less report (issue #556). Said here instead, as soon as both facts are
+ * known: this host does not host captures, and there is a capture for this report.
+ */
+function noteClipboardFallback(): void {
+    if (!hostingRuledOut) return;
+    // Only where something would actually have to be pasted. A pile that rode a navigation still
+    // carrying URLs this host minted earlier is embedded by the hand-off exactly as before, and
+    // telling its reporter to paste would be the same page lying in the other direction.
+    if (
+        !capturesForThisReport().some(
+            (capture) => !hostedCaptureUrl(capture.uploadedUrl),
+        )
+    )
+        return;
+    note(
+        "This server can't host captures. Opening the issue puts your newest one on the " +
+            "clipboard — paste it into the report's Screenshot section.",
+    );
+}
+
+/** The captures taken for the report being written here — see {@link reportedPage}. */
+function capturesForThisReport(): Capture[] {
+    const page = reportedPage();
+    return readCaptures(sessionStore()).filter(
+        (capture) => !!capture.page && capture.page === page,
+    );
+}
+
+/**
  * Persist a capture the shutter just produced and start hosting it when this page has discovered
  * the image lane.
  *
@@ -76,6 +122,9 @@ export function storeCapture(capture: Capture): boolean {
     render();
     const stored = kept.some((item) => item.id === capture.id);
     if (stored && imageUploadEnabled()) void uploadReportCaptures();
+    // Discovery normally finishes while the screen picker is still open, so the "you will have to
+    // paste this" note had nothing to say when it ran: there were no captures yet. Now there are.
+    else if (stored) noteClipboardFallback();
     return stored;
 }
 
@@ -180,6 +229,12 @@ function handOff(): void {
         mine.length > 1
             ? ` The other ${mine.length - 1} are still here — press Copy on one to send it too.`
             : "";
+    // Say so in the BODY as well, and synchronously: the note below lands on a page the reporter is
+    // about to leave (the issue form is `target="_blank"`), while this rides into GitHub's editor
+    // and sits at the exact spot the paste belongs. Written before the copy rather than in its
+    // `then`, because the form's entry list is built as this handler returns — a value set from a
+    // promise arrives after the report has already gone.
+    applyHostedCaptures(mine, { others: mine.length - 1 });
     copyPng(blobFromDataUrl(copying.dataUrl)).then(
         () =>
             note(
@@ -284,13 +339,22 @@ async function discoverImageUpload(): Promise<void> {
             credentials: "same-origin",
             cache: "no-store",
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+            // A 403 (this visitor is not admitted to the lane) and a 404 (no lane at all) are the
+            // same fact to a reporter: nothing they capture will be embedded, so say so rather
+            // than leaving the page silently promising otherwise.
+            hostingRuledOut = true;
+            noteClipboardFallback();
+            return;
+        }
         document
             .querySelector<HTMLElement>(".cp-fab, .cp-shots")
             ?.setAttribute("data-cp-image-upload", "true");
         await uploadReportCaptures();
     } catch {
         // Hosting is optional. The submit-time clipboard hand-off remains the fallback.
+        hostingRuledOut = true;
+        noteClipboardFallback();
     }
 }
 
@@ -430,7 +494,10 @@ function reportBodyInput(): HTMLInputElement | null {
  * @returns whether a body field existed to write into — the caller cannot treat
  *   "uploaded" as "embedded" without it.
  */
-function applyHostedCaptures(captures: Capture[]): boolean {
+function applyHostedCaptures(
+    captures: Capture[],
+    clipboard?: { others: number },
+): boolean {
     const input = reportBodyInput();
     if (!input) return false;
     // Re-read the base whenever anything but us has written to the field since we
@@ -443,10 +510,14 @@ function applyHostedCaptures(captures: Capture[]): boolean {
     if (!originalBodies.has(input) || lastWritten.get(input) !== input.value) {
         originalBodies.set(input, input.value);
     }
-    const next = withUploadedCaptures(
+    const embedded = withUploadedCaptures(
         originalBodies.get(input) ?? input.value,
         captures,
     );
+    // Rebuilt from the cached base every time, so the hint is written once however often this runs.
+    const next = clipboard
+        ? withClipboardHint(embedded, clipboard.others)
+        : embedded;
     input.value = next;
     lastWritten.set(input, next);
     const preview = document.querySelector<HTMLElement>("#cp-bug-preview");

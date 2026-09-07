@@ -1183,6 +1183,9 @@ const FIXTURE_STATES = [
       // with `font-size: 0` and paint a `::after` whose content was the generic "Design reference"
       // on every reference lane, so a DOM-text assertion passed while the page said something
       // else. This is the only layer with real CSS, so it is the only one that can catch that.
+      //
+      // Probed on the name node for the same reason the assertion above moved to it: that is where
+      // the lane's label lives now, so that is where hiding it would hide it.
       const painted = await page.evaluate(() => {
         const th = document.querySelector(
           ".cp-compare-target-head .cp-compare-head-name",
@@ -4008,14 +4011,29 @@ for (const fixture of listPageFixtures()) {
 
       // Comparison scores are asynchronous (fetch + decode + SSIM). Capture the settled
       // fidelity state, not the initial "waiting…" skeleton.
+      //
+      // VISIBLE rows only, and bounded. A row the current lane has nothing to compare is hidden by
+      // `applySearch`, and a hidden row is never dressed and never scored — so its cell keeps the
+      // server-rendered "waiting…" for the life of the page. Asking every cell to settle became
+      // unsatisfiable the moment this fixture's default lane moved to `reference` (#553): the
+      // `switch-on` row carries no `data-reference-*`, so it is hidden from the first pass on.
+      // With no `timeout` this wait never rejects either, so the `.catch` below could not do what
+      // it is for and the whole 60s test budget went to it instead — the capture then died on the
+      // next call, reported against `page.screenshot`. Bounded like the image wait above, so an
+      // unsettleable predicate degrades to "shoot what is on screen" rather than to no shot at all.
       if (fixture === "serve-format-compare") {
         await page
-          .waitForFunction(() =>
-            Array.from(document.querySelectorAll(".cp-compare-score")).every(
-              (cell) =>
-                cell.textContent !== "waiting…" &&
-                cell.textContent !== "comparing…",
-            ),
+          .waitForFunction(
+            () =>
+              Array.from(
+                document.querySelectorAll("tr:not([hidden]) .cp-compare-score"),
+              ).every(
+                (cell) =>
+                  cell.textContent !== "waiting…" &&
+                  cell.textContent !== "comparing…",
+              ),
+            null,
+            { timeout: 15_000 },
           )
           .catch(() => {});
       }
