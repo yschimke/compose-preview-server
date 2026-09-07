@@ -216,17 +216,21 @@ internal class ScreenGeneratorComposeExportExecutor(
     // which left the one catalog that most needs a native render as the one catalog that could not
     // ask for one.
     //
-    // A **Wear widget** still refuses. Its source declares a `WearWidgetDocument` of Remote
-    // Compose — played by a player, not composed — so there is no `@Preview` for this lane to
-    // discover and no frame at the end of compiling it.
+    // A **Wear widget** still refuses, but not for want of a `@Preview`: the generated file has
+    // one, and it compiles and renders in a Glance Wear module — `:samples:wear-widget` in
+    // yschimke/compose-ai-tools is the fixture that does it. What this lane cannot drive is its
+    // *shape*. A widget preview takes a `WearWidgetParams` from a preview-params provider rather
+    // than a screen, and this lane is built around one screen spec, so it has nowhere to put a
+    // canvas that is a container footprint (yschimke/compose-preview-server#522).
     if (RecordFreeExport.applies(document)) {
       if (!RecordFreeExport.composeCompilable(document)) {
         return Generated.Refused(
           RECORD_FREE_DESIGN,
           listOf(
-            "this design generates a Remote Compose document rather than Jetpack Compose, so " +
-              "there is no `@Preview` for the native preview lane to compile and render; export " +
-              "it instead, and preview it on the canvas"
+            "this design generates a Remote Compose document; its generated `@Preview` takes a " +
+              "`WearWidgetParams` from a preview-params provider rather than a screen, which " +
+              "this lane does not drive. Export it and render it in a Glance Wear module, or " +
+              "preview it on the canvas"
           ),
         )
       }
