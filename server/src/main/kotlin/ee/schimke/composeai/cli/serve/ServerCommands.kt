@@ -24,17 +24,34 @@ internal object ServerCommands {
   const val SERVE: String = "serve"
   const val PLAYGROUND: String = "playground"
   const val UI: String = "ui"
+
+  /**
+   * The first command here that does not serve anything.
+   *
+   * `design` runs against a server that is already up and exits, which is a shape this binary did
+   * not have. The wrinkle was worth deciding rather than smuggling in
+   * ([#529](https://github.com/yschimke/compose-preview-server/issues/529)): the alternative was a
+   * one-shot command that stands its own renderer up, and it was rejected because it would make
+   * `ServerCommands` two things at once and because the way anyone actually uses this is against a
+   * running host — a local `serve`, or `preview.coo.ee`. So every *serving* command stays a serving
+   * command, and this is a client that happens to ship in the same jar.
+   */
+  const val DESIGN: String = "design"
+
   const val HELP: String = "help"
 
   /** Every command name, in the order `help` lists them. */
-  val NAMES: List<String> = listOf(SERVE, UI, PLAYGROUND, HELP)
+  val NAMES: List<String> = listOf(SERVE, UI, PLAYGROUND, DESIGN, HELP)
 
-  /** The commands that run a server; [HELP] prints instead. */
+  /** The commands that run a server; [DESIGN] is a client and [HELP] prints instead. */
   private val RUNNABLE = setOf(SERVE, PLAYGROUND, UI)
 
   sealed interface Invocation {
     /** Run a server: [command] chooses which flags are implied, [args] is everything after it. */
     data class Run(val command: String, val args: List<String>) : Invocation
+
+    /** Run a client command against a server that is already up, then exit. */
+    data class Client(val command: String, val args: List<String>) : Invocation
 
     /** Print usage; [topic] is a command name, or null for the command list. */
     data class Help(val topic: String?) : Invocation
@@ -52,6 +69,7 @@ internal object ServerCommands {
     val rest = rawArgs.drop(1)
     return when {
       first in RUNNABLE -> Invocation.Run(first, rest)
+      first == DESIGN -> Invocation.Client(DESIGN, rest)
       first == HELP -> {
         val topic = rest.firstOrNull()?.takeUnless { it.startsWith("-") }
         when {
@@ -102,12 +120,15 @@ internal object ServerCommands {
       ui                Build this project's previews and open the Compose UI builder against
                         them. Needs a `compose-preview` build host.
       playground        serve with the snippet compile lane admitted (POST /api/{v}/compiler/run).
+      design            Render, export or read a UI-builder design from a server that is already
+                        up, and write it to a file. The one command here that does not serve.
       help [command]    Show this list, or one command's options.
 
     Flags may also be passed with no command at all — `compose-preview-server --module app` is
     exactly `compose-preview-server serve --module app`, and stays supported.
 
-    `help serve` lists every server flag; `help ui` explains the builder lane.
+    `help serve` lists every server flag; `help ui` explains the builder lane; `help design`
+    lists the design verbs.
     """
       .trimIndent()
 

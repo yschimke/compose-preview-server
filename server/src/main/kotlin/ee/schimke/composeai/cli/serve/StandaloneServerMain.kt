@@ -14,6 +14,10 @@ public fun main(rawArgs: Array<String>) {
       // 64 = EX_USAGE, the code `serve` already uses when argv asks for something it cannot do.
       exitProcess(64)
     }
+    is ServerCommands.Invocation.Client -> {
+      val code = DesignCommandEntry.run(invocation.args)
+      if (code != 0) exitProcess(code)
+    }
     is ServerCommands.Invocation.Run -> run(invocation.command, invocation.args)
   }
 }
@@ -21,6 +25,7 @@ public fun main(rawArgs: Array<String>) {
 private fun printHelp(topic: String?) {
   when (topic) {
     ServerCommands.UI -> println(LocalUiBuilder.usage())
+    ServerCommands.DESIGN -> println(DesignCommand.usage())
     ServerCommands.SERVE,
     ServerCommands.PLAYGROUND -> serveOptions(listOf("--help")).printUsage()
     else -> println(ServerCommands.commandListing())
