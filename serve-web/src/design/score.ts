@@ -46,7 +46,16 @@ export function badgeFor(result: Measurement): Badge {
     const stretched = geometry > STRETCH_THRESHOLD;
     const worst = Math.max(drift, geometry);
     return {
-        text: `${drift.toFixed(1)}%${stretched ? " ⇲" : ""}`,
+        // A WHOLE percent on the badge. The badge is a triage mark on a drawing, sized to sit in a
+        // node's corner without covering it, and `22.9%` spends four glyphs to say what `23%` says
+        // in three — the tenth is never what decides whether a node is worth opening, and the band
+        // it is drawn in has already answered that. The tenths stay in the tooltip, where a reader
+        // asking "how far apart, exactly?" can get them.
+        //
+        // Rounded rather than truncated, and floored at 1% for anything that is not actually
+        // identical: `0%` on a node that differs is the one reading the badge must never give, and
+        // `toFixed(0)` on 0.4% gives exactly that.
+        text: `${roundPercent(drift)}${stretched ? " ⇲" : ""}`,
         title:
             `${drift.toFixed(1)}% different` +
             (geometry > GEOMETRY_MENTION
@@ -63,4 +72,17 @@ export function badgeFor(result: Measurement): Badge {
  */
 export function bandFor(worst: number): Band {
     return worst < 2 ? "close" : worst < 10 ? "drifting" : "far";
+}
+
+/**
+ * A drift percentage as a whole number, without ever rounding a real difference away to nothing.
+ *
+ * `<1%` rather than `0%` for anything non-zero: the badge's job is to mark what differs, and a
+ * difference reported as none is worse than no badge at all. An exact match is the one case that
+ * gets to say `0%`, and it is also the one the reader never has to act on.
+ */
+export function roundPercent(drift: number): string {
+    if (drift <= 0) return "0%";
+    if (drift < 1) return "<1%";
+    return `${Math.round(drift)}%`;
 }

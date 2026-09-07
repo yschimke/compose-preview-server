@@ -658,14 +658,16 @@ export class CompareWall extends ControllerElement {
         }
         // Re-read per pass rather than resolved once at load: the viewer links in with `?preview=`,
         // and a Back to such an entry has to re-narrow.
-        const preview =
-            new URLSearchParams(location.search).get("preview") ?? "";
+        const params = new URLSearchParams(location.search);
+        const preview = params.get("preview") ?? "";
+        const component = params.get("component") ?? "";
         let visible = 0;
         for (const row of this.rows) {
             const keep = keepRow(
                 {
                     hay: row.getAttribute("data-hay") ?? "",
                     previewIds: row.getAttribute("data-preview-ids") ?? "",
+                    componentId: row.getAttribute("data-component-id") ?? "",
                     hasFormat: Boolean(
                         variantFor(
                             this.sourcesOf(row),
@@ -676,6 +678,7 @@ export class CompareWall extends ControllerElement {
                 },
                 query,
                 preview,
+                component,
             );
             // Dressed HERE, and only when it is going to be seen — see {@link run}. `ensureDressed`
             // is also what keeps a row revealed by a later filter change (the search input clearing,
@@ -686,10 +689,52 @@ export class CompareWall extends ControllerElement {
         }
         if (this.count) this.count.textContent = countLabel(visible);
         if (this.empty) this.empty.hidden = visible !== 0;
+        this.showScope(component || preview, visible);
         // After the dressing, never before it: a row's locator is read off the "+ file" href that
         // {@link dressRow} has just re-pointed at the pair this lane is showing, so recomputing the
         // picked set any earlier would write the previous lane's comparisons into the report.
         this.syncPicks();
+    }
+
+    /**
+     * Say out loud that the wall is scoped, and offer the way out.
+     *
+     * A `?component=` or `?preview=` link opens the wall showing three rows out of four hundred,
+     * and nothing on the page said why: the search box is empty, the count says "3 comparisons",
+     * and the reader's own conclusion is that this catalog compares three things. The chip names
+     * the scope in the catalog's own words and links to the same view without it.
+     *
+     * Server-rendered `hidden` and revealed from here, like every other control that means nothing
+     * without a script — the "clear" is a link the browser can follow either way, but a chip
+     * claiming a scope on a page whose script never ran would be claiming a filter nobody applied.
+     */
+    private showScope(scope: string, visible: number): void {
+        const bar = this.root.querySelector<HTMLElement>("#cp-compare-scope");
+        if (!bar) return;
+        if (!scope) {
+            bar.hidden = true;
+            return;
+        }
+        const kept = this.rows.find((row) => !row.hidden);
+        const name =
+            kept?.getAttribute("data-component-label")?.trim() ||
+            kept?.getAttribute("data-label")?.trim() ||
+            scope;
+        const text = bar.querySelector<HTMLElement>(".cp-compare-scope-text");
+        if (text) {
+            text.textContent = `${name} · ${countLabel(visible)} of ${this.rows.length}`;
+        }
+        const clear = bar.querySelector<HTMLAnchorElement>(
+            ".cp-compare-scope-clear",
+        );
+        if (clear) {
+            const params = new URLSearchParams(location.search);
+            params.delete("component");
+            params.delete("preview");
+            const query = params.toString();
+            clear.href = location.pathname + (query ? `?${query}` : "");
+        }
+        bar.hidden = false;
     }
 
     // ---- one row -------------------------------------------------------------

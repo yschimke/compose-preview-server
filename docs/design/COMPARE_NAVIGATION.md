@@ -19,7 +19,7 @@ agree on what the two pictures are called or which side each stands on.
 | 3 | Compare wall | `/remote-m3/compare` | all previews ↔ one of four formats | *PNG ↔ SVG*, *Remote Compose players*, *Figma ↔ PNG*, *M3 Wear OS Apps Design Kit ↔ PNG*, *Rendered PNG* |
 | 4 | Focused comparison | `/remote-m3/compare/<id>?reference=…` | one preview ↔ one reference | *Reference*, *Diff*, *Actual* |
 | 5 | Layer diff | `/remote-m3/parallel/<id>` | resolved layers across paired catalogs | *layer diff* |
-| 6 | Parity dashboard | `/remote-m3/parity` | coverage, drift, activity, gaps | *mapped*, *design parity* — **retired, see §3.4** |
+| 6 | Parity dashboard | `/remote-m3/parity` | coverage, drift, activity, gaps | *mapped*, *design parity* — **thinned to an index, see §3.4** |
 | 7 | Design pages | `/remote-m3/pages/<page>` | a Figma sheet ↔ our renders in its slots | *Our renders*, *Design spec*, *Diff %* |
 
 Five different words for our own render (*Rendered PNG*, *Actual*, *Render*, *Our renders*,
@@ -30,10 +30,10 @@ not appear on the landing page at all.
 
 ### 1.1 The six concrete faults
 
-**F0 — `design parity` is a destination nobody arrives at.** Its four halves — coverage, mapping
-gaps, per-component scores and an activity feed — are each a fact about a surface that already
-exists, published instead on a page you have to know to open, in a vocabulary none of those
-surfaces use. §3.4 takes it apart.
+**F0 — `design parity` reads as a mini site.** Coverage, a filtered activity feed, a gap table, an
+issue index and a comparison inventory, in five bands, none of which links to the thing it
+describes — so the page that knows which components are worth opening is the one page you cannot
+open a component from. §3.4 keeps the index and gives up the rest.
 
 **F1 — the viewer's `Figma` chip is a mode switch wearing a source's name.** Pressing it reveals a
 row that mixes three unrelated groups: the *source* picker (`Figma` / `M3 Wear OS Apps Design
@@ -159,6 +159,13 @@ second implementation of a comparison.
 - Columns are fixed: `Preview | <baseline> | Diff | <catalog title> | Match | Bugs` (F3, R1).
 - Both picture cells share one box (R2).
 - `?component=<id>` narrows the wall and shows a clearing chip; `?preview=<id>` keeps working.
+- **It opens on a raster pair.** The default lane was `svg`, which is both the slowest to put on
+  screen — a vector document laid out and rasterised per row, against a PNG the decoder hands back
+  whole — and the only one that can be wrong through no fault of the renderer: an SVG resolves its
+  own typefaces at paint time, so a face the visitor's browser cannot get draws **tofu**, and a wall
+  of tofu is the first thing a reader sees on the page whose whole job is to say what looks wrong.
+  The order becomes `reference` → `parallel` → `svg` → `rc`: the design comparison the parity work
+  is actually about leads, and both sides of it are PNGs.
 - The per-row haystack drops the inlined issue prose; issue titles are emitted **once** as a
   component→issues map and joined client-side.
 
@@ -171,40 +178,52 @@ The action chips become three labelled rows instead of one run-on line:
 - **Compare against** — `Figma`, `M3 Wear OS Apps Design Kit`, `SVG`, `Remote Compose players`.
   The sibling catalog is the entry that is missing today, and it is the comparison this catalog is
   most often opened for.
-- **Reports** — `17 components with open issues`, `6 design pages`. No `design parity`: §3.4.
+- **Reports** — `design parity`. It is not a comparison; it is the list that says which
+  comparisons are worth opening (§3.4).
 - **Explore** — `325 motion captures`, `try in playground`.
 
 And the grid below them carries the numbers the retired dashboard used to hold: each component
 card shows its worst match against the chosen baseline, so "where are we bad?" is answered by
 looking at the catalog rather than by opening a report about it.
 
-### 3.4 The parity dashboard — retired, and folded back into the app
+### 3.4 The parity dashboard — an index, not a place
 
-`/remote-m3/parity` is a fifth destination that exists because nothing else had room for its
-facts. Every one of those facts belongs to a surface the reader is already on, so the page goes and
-its contents go with it:
+`/remote-m3/parity` is where "which components are worth opening?" is answered, and that is worth
+keeping. What is not worth keeping is that it answers it *and then five other questions*, in bands
+that lead nowhere: coverage, a filtered activity feed, a gap table, an issue index and a comparison
+inventory, none of which is a link to the thing it describes. It reads as a mini site rather than as
+a way in.
 
-| What `/parity` shows | Where it goes instead |
+So it keeps the one job no other surface can do — listing every component with its mapping and its
+score — and gives up the rest:
+
+| What `/parity` shows | What happens to it |
 | --- | --- |
-| Coverage — *46% of 50 components carry a design reference* | **Figma Pages.** `/pages` and each page already say "162 of 279 components implemented"; that IS coverage, said against the sheet the reader can see. The catalog-wide number joins the `/pages` index. |
-| Mapping gaps — which components have no reference | **Figma Pages.** A gap is a node on a sheet with nothing behind it, and the page already has the coverage filter (*Only what we don't implement*) that draws exactly that set. |
-| Per-component parity scores | **Catalog index.** Every component card carries its own worst match against the current baseline, so the grid *is* the score table and sorts itself by eye. |
+| The comparison inventory | **Stays, opens by default, and every component name becomes a link** into the wall scoped to that component (`compare?format=reference&component=<id>`). This is the "level of detail" the page exists to reach, and it was one row away from it. |
+| Coverage — *46% of 50 components carry a design reference* | Also on **Figma Pages**, where "162 of 279 components implemented" already says it against the sheet the reader can see. |
+| Mapping gaps — which components have no reference | Also on **Figma Pages**: a gap is a node on a sheet with nothing behind it, and the page already has the coverage filter (*Only what we don't implement*) that draws exactly that set. |
 | Per-variant scores | **The preview page.** §3.1's compare panel is the per-variant table, in the place where the variant can be changed. |
-| Open issues per component | Already on the component card, the wall row and the viewer. The landing keeps one chip counting the components that have any. |
-| The code ↔ Figma activity feed | **The changelog.** It is a list of commits with dates; the catalog already publishes one, with an RSS feed. |
+| The code ↔ Figma activity feed | **Folded away behind a disclosure.** It is a list of commits with dates — a changelog, which the catalog already publishes with an RSS feed — and it was the tallest thing on a page whose job is to point at components. Kept rather than dropped, because it is the one changelog joined to the design file's own history. |
 
-`/parity` keeps answering `?format=json` for the CI checks that poll it, and the HTML route
-redirects to the catalog index. Nothing is lost and there is one less place to know about.
+And on the landing it moves out of the comparison chips into a **Reports** group. Under *Compare
+against* it read as a fifth baseline — "design parity" beside "Figma" and "SVG" — which is the
+confusion §1 records.
 
 ### 3.5 The design pages — diffs on demand
 
 `Diff %` stops being a lane that repaints the whole sheet. Instead:
 
-- **Hover** a node to see that node's badge and its diff shading, and nothing else's.
-- **Hold** the `Diff %` button (pointer down, or `Space`/`Enter` held, or the button left toggled
-  on) to show them all — the current behaviour, but as a deliberate, momentary act.
-
-The sheet stays readable at rest, and the question "what is worst here?" is one press away.
+- **The band is on the node, always.** A weak tinted fill and outline in the band's own colour —
+  green, amber, red — so the lane at rest is a heat map of the sheet rather than an unmarked one.
+  This is what the badges were really being read for: red clusters *are* the answer to "what is
+  worst here?".
+- **Hover** a node for that node's number, and nothing else's.
+- **Hold** the `Diff %` control (pointer down, or `Space`/`Enter` held) for every number at once —
+  today's behaviour, as a momentary act you release out of.
+- **The number is a whole percent.** `23%`, not `22.9%`: the badge sits in a node's corner on the
+  drawing it is judging, the tenth never decides whether a node is worth opening, and the band has
+  already answered that. The tenths stay in the tooltip. Anything non-zero but under 1% reads
+  `<1%` — a real difference reported as `0%` is the one thing this badge must never say.
 
 ## 4. Delivery
 
@@ -214,9 +233,10 @@ The sheet stays readable at rest, and the question "what is worst here?" is one 
 | **2** | Wall: catalog title instead of `Rendered PNG`, equal cell boxes | F3 | `ServeWeb.comparisonPage`, `serve.css` |
 | **3** | Wall: `?component=` scope + clearing chip; viewer links carry it | F4 | `compare/wallRows.ts`, `CompareWall.ts` |
 | **4** | Landing: the missing `parallel` chip, chips grouped in three labelled rows | F1 | `ServeWeb` landing |
-| **4b** | Retire `/parity` HTML → redirect to the index; keep `?format=json` | F0 | `ServeHttpServer.handleParity`, landing chips |
-| **4c** | Catalog index cards carry their worst match against the baseline | F0 | `ServeWeb` landing grid |
-| **4d** | `/pages` index carries catalog-wide coverage | F0 | `ServeWeb` pages index |
+| **4b** | Parity: component rows link into the scoped wall; activity folds away; chip moves to `Reports` | F0 | `ServeParityDashboard`, `ServeWeb.parityPage` |
+| **4c** | Wall opens on a raster baseline, not on `svg` | F2 | `ServeWeb.comparisonPage` |
+| **4d** | Catalog index cards carry their worst match against the baseline | F0 | `ServeWeb` landing grid — *not yet* |
+| **4e** | `/pages` index carries catalog-wide coverage | F0 | `ServeWeb` pages index — *not yet* |
 | **5** | Design pages: hover / hold diffs | F5 | `design/lanes.ts`, `DesignPage.ts`, `serve.css` |
 | **6** | Viewer: Compare panel under the stage with the variant strip | F1, F4 | `SpecCompare.ts`, `ServeWeb` viewer |
 | **7** | Wall: one baseline per document, haystack diet | F2 | `ServeWeb.comparisonPage` |

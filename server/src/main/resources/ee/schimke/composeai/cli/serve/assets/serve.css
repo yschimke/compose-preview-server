@@ -3015,6 +3015,22 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
 .cp-compare-pick { display: inline-flex; vertical-align: middle; margin-right: 8px; }
 .cp-compare-pick-input { margin: 0; accent-color: var(--md-sys-color-primary); }
 .cp-compare-pick-input:disabled { opacity: .35; }
+/* The SCOPE the wall was opened with. A `?component=` or `?preview=` link shows three rows out of
+   four hundred and nothing on the page said why — an empty search box, a count reading "3
+   comparisons", and a reader whose honest conclusion is that this catalog compares three things.
+   Drawn as a tonal chip rather than as muted text because it is a filter that is ON, and the way
+   out of it is the second half of the same chip.
+   See `docs/design/COMPARE_NAVIGATION.md`, §2.1. */
+.cp-compare-scope { display: inline-flex; align-items: center; gap: 10px; margin: 12px 0 0;
+  padding: 4px 12px; border-radius: var(--md-sys-shape-corner-full, 999px);
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line);
+  border: 1px solid var(--cp-accent); color: var(--cp-on-accent-soft);
+  background: var(--cp-accent-soft); }
+/* `display` of its own outranks the UA sheet's `[hidden] { display: none }`, so the chip has to
+   restate it or every wall opens claiming a scope it does not have. */
+.cp-compare-scope[hidden] { display: none; }
+.cp-compare-scope-clear { color: inherit; text-decoration: underline; }
 .cp-compare-picked { display: flex; align-items: center; gap: 10px; margin: 10px 0 0;
   font-size: var(--md-sys-typescale-body-small-size);
   line-height: var(--md-sys-typescale-body-small-line); color: var(--cp-fg-muted); }
@@ -4333,6 +4349,26 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
 .cp-page-diff-on .cp-page-node:focus-within > .cp-page-score,
 .cp-page-diff-on .cp-page-node.cp-page-active > .cp-page-score,
 .cp-page-diff-on .cp-page-node.cp-page-selected > .cp-page-score { display: block; }
+/* THE BAND, ON THE NODE. The badges only appear where the reader is pointing, so the lane at rest
+   would otherwise be an unmarked sheet — every node scored and none of it visible. A tinted fill
+   and an outline in the band's own colour say where to look without covering the drawing, and they
+   are what makes the lane readable at a glance: red clusters ARE the answer to "what is worst
+   here?", and the numbers are for the one node you then point at.
+   Deliberately weak (12% fill, 55% outline): this is a wash over a drawing being judged, not a
+   highlight over text. */
+/* The fallback is not decoration: `--cp-score-bg` is a LOCAL variable set by the band rules below,
+   not part of the themed `:root` palette, and `ServeThemeCssTest` requires every unfallbacked
+   `var(--cp-*)` to be a token the projection emits. */
+.cp-page-diff-on .cp-page-node[data-cp-score] {
+  background: color-mix(in srgb, var(--cp-score-bg, #6e7781) 12%, transparent);
+  outline: solid color-mix(in srgb, var(--cp-score-bg, #6e7781) 55%, transparent);
+  outline-width: calc(2px / var(--cp-page-zoom, 1));
+  outline-offset: calc(-2px / var(--cp-page-zoom, 1));
+}
+.cp-page-node[data-cp-score="close"] { --cp-score-bg: #1a7f37; }
+.cp-page-node[data-cp-score="drifting"] { --cp-score-bg: #9a6700; }
+.cp-page-node[data-cp-score="far"] { --cp-score-bg: #cf222e; }
+.cp-page-node[data-cp-score="none"] { --cp-score-bg: #6e7781; }
 .cp-page-score[data-cp-score="close"] { --cp-score-bg: #1a7f37; }
 .cp-page-score[data-cp-score="drifting"] { --cp-score-bg: #9a6700; }
 .cp-page-score[data-cp-score="far"] { --cp-score-bg: #cf222e; }

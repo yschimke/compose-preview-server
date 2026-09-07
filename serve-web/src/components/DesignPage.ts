@@ -641,6 +641,12 @@ export class DesignPage extends ControllerElement {
             badge.textContent = read.text;
             badge.title = read.title;
             badge.setAttribute("data-cp-score", read.band);
+            // The band on the NODE as well as on the badge. The badges only appear where the reader
+            // is pointing now (see {@link holdDiff}), so without this the diff lane at rest would be
+            // an unmarked sheet — the triage would be there and invisible. Colour on the node
+            // survives the badge being hidden, which is the whole point of hiding it: the sheet says
+            // where to look, the badge says how far.
+            entry.overlay.setAttribute("data-cp-score", read.band);
             entry.overlay.setAttribute(
                 "data-cp-score-value",
                 read.value.toFixed(1),
@@ -648,6 +654,7 @@ export class DesignPage extends ControllerElement {
         } catch {
             badge.textContent = "—";
             badge.setAttribute("data-cp-score", "none");
+            entry.overlay.setAttribute("data-cp-score", "none");
             badge.title = "not scoreable";
             // Retryable: a render that had not arrived yet is the likeliest reason to be here.
             this.scoredNodes.delete(id);

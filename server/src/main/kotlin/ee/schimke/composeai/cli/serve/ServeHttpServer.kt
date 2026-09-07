@@ -3498,6 +3498,14 @@ class ServeHttpServer(
           // never lands on a format the page does not offer.
           hasReferenceComparison =
             renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
+          // Same condition `handleParity` serves on, so the link never leads to that route's 404 —
+          // and, since the acceptance lane was added there, so the page it made reachable is not
+          // reachable only by typing the URL.
+          hasParityView =
+            renderHost.parityActivity() != null ||
+              renderHost.parityIssues() != null ||
+              renderHost.knownDifferences() != null ||
+              renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
           // The PAIRED implementation, named the way the wall names it. Same source the wall reads
           // (`parallelSpecSource`), so the chip and the format it deep-links can never disagree
           // about whether there is a sibling catalog to compare against.
@@ -3870,37 +3878,20 @@ class ServeHttpServer(
       // schema, which reads as "this catalog is fine" to exactly the CI check that shape exists
       // for.
       val accepts = renderHost.knownDifferences() != null
-      // ---- The dashboard is retired as a DESTINATION -------------------------------------------
+      // ---- The dashboard is an INDEX, not a place -----------------------------------------------
       //
-      // Its four halves each belong to a surface the reader is already on, and each has been moved
-      // there: coverage and the mapping gaps to the design pages ("N of M components implemented",
-      // said against the sheet you can see), the per-component scores to the catalog index, the
-      // per-variant ones to the preview page, and the code ↔ design activity to the changelog. What
-      // was left was a fifth place to know about, published in a vocabulary none of those surfaces
-      // use. The landing no longer offers it, and the HTML route sends a visitor holding an old
-      // link to the index rather than to a page that now restates it.
-      // See `docs/design/COMPARE_NAVIGATION.md`, F0 and §3.4.
+      // It used to be a mini site: coverage bands, a filtered activity feed, a gap table, an issue
+      // index and a comparison inventory, none of which led anywhere — so it was both the least
+      // visited page here and the one that had to be read end to end. Its facts each belong to a
+      // surface the reader is already on (`docs/design/COMPARE_NAVIGATION.md`, §3.4), and this page
+      // keeps the one job none of them can do: saying which components are worth opening, and
+      // opening them.
       //
-      // TWO THINGS SURVIVE, and both are deliberate.
+      // So every component here now links into the comparison wall SCOPED TO THAT COMPONENT, the
+      // activity feed is folded away behind a disclosure (it is a changelog, and the catalog
+      // publishes one), and the landing offers this under `Reports` rather than beside the
+      // comparisons it is not one of.
       //
-      // `?format=json` is unchanged: it is polled by CI checks and dashboards, which is a contract
-      // with a machine rather than a place a person goes, and redirecting it would break every one
-      // of them for a navigation problem they do not have.
-      //
-      // And a catalog publishing a KNOWN-DIFFERENCE document keeps the HTML page, because the
-      // acceptance audit on it has not been rehomed — it walks the whole document against the whole
-      // preview inventory, which is not a fact about any one component, so no component-scoped
-      // surface can carry it. Redirecting that away would delete a feature under cover of a
-      // navigation change. `remote-m3` publishes no such document and gets the redirect.
-      if (!accepts) {
-        // The request's OWN query string, carried through verbatim: on the legacy rooted form the
-        // session lives in `?session=`, and a redirect that dropped it would land an authenticated
-        // visitor on the front door of a server they were not asking about. `?at=` and `?token=`
-        // ride along for the same reason.
-        val query = call.request.queryString()
-        call.respondRedirect("$basePath/" + if (query.isEmpty()) "" else "?$query")
-        return@withLeasedSession
-      }
       // The gate reads the SCOPED list, not the whole index: a catalog whose only rows were filed
       // against a sibling system has nothing of its own to say here, and serving it the bands of a
       // catalog it is not is the same wrong answer this page would have given, one route later.
@@ -3931,15 +3922,13 @@ class ServeHttpServer(
         return@withLeasedSession
       }
       // **The audit-bearing page is not cacheable**, the way an `rcComparePending` comparison is
-      // not.
-      // The walk joins two things of different lifetimes: the preview inventory and the issue rows
-      // are baked into this HTML, while the document it walks is fetched live at `no-store`. Served
-      // from cache after an in-place catalog refresh, a *fresh* document would be resolved against
-      // a
-      // *stale* inventory — and a preview added or renamed in between reads as `orphaned-target`,
-      // which is a false finding of exactly the kind this panel exists to make trustworthy. The
-      // comparison band has no such gap: it is generation-bound by `referenceSha256`, and there is
-      // no equivalent anchor for a walk over the whole catalog.
+      // not. The walk joins two things of different lifetimes: the preview inventory and the issue
+      // rows are baked into this HTML, while the document it walks is fetched live at `no-store`.
+      // Served from cache after an in-place catalog refresh, a *fresh* document would be resolved
+      // against a *stale* inventory — and a preview added or renamed in between reads as
+      // `orphaned-target`, which is a false finding of exactly the kind this panel exists to make
+      // trustworthy. The comparison band has no such gap: it is generation-bound by
+      // `referenceSha256`, and there is no equivalent anchor for a walk over the whole catalog.
       markGeneration(
         "static-page",
         if (accepts) DYNAMIC_RESOURCE_CACHE_CONTROL else pageCacheControl(),

@@ -124,6 +124,16 @@ object ServeParityDashboard {
     val hasReference: Boolean,
     /** Exact reference asset to score in the browser; null when only mapping presence is known. */
     val referenceId: String? = null,
+    /**
+     * The catalog's own component id, spelled the way the comparison wall's rows spell it
+     * (`ServeIssueReport.componentIdFor`) — so this row can link to `compare?component=<id>` and
+     * land on every variant of the same component rather than on the whole catalog.
+     *
+     * [name] cannot do that job: it is prose ("App Card") where the id is a route slug ("AppCard"),
+     * and one derivation of the id is one right answer. See `docs/design/COMPARE_NAVIGATION.md`,
+     * §3.4.
+     */
+    val componentId: String = "",
   )
 
   /** Everything [ServeWeb.parityPage] renders. */
@@ -248,6 +258,11 @@ object ServeParityDashboard {
             previewId = comparisonPreviewId,
             hasReference = mappedPreviewId != null,
             referenceId = mappedPreviewId?.let(referenceIdFor),
+            componentId =
+              previews
+                .firstOrNull { it.id == comparisonPreviewId }
+                ?.let(ServeIssueReport::componentIdFor)
+                .orEmpty(),
           )
         },
       generatedAt = activity?.generatedAt,

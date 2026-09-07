@@ -2396,8 +2396,38 @@ class ServeWebTest {
   fun `the vector lanes keep catalog order rather than borrowing the design lane's`() {
     // `svg` and `rc` publish no score of their own, and re-ordering their rows by a number about a
     // different comparison is worse than the order the catalog chose.
+    //
+    // A catalog with NO references, because that is the only one the vector lane is served as the
+    // default for now (see the lane-order test below). The gate in `orderedCards` is what keeps the
+    // rule true for the pages that still reach it.
     val previews = listOf("alpha", "beta").map { ServePreview(id = it, label = it) }
-    val html =
+    val html = ServeWeb.comparisonPage("m3-catalog", previews, token = "t", hasSvgFor = { true })
+    val labels = Regex("data-label=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
+    assertEquals(listOf("alpha", "beta"), labels, html)
+  }
+
+  @Test
+  fun `the wall opens on a raster pair, not on the SVG lane`() {
+    // `svg` led because it was the first lane this page had. It is the slowest pair to put on
+    // screen — a vector document laid out and rasterised per row, against a PNG the decoder hands
+    // back whole — and the only one that can be wrong through no fault of the renderer: an SVG
+    // resolves its own typefaces at paint time, so a face the visitor's browser cannot get draws
+    // TOFU, on the page whose whole job is to say what looks wrong.
+    // See `docs/design/COMPARE_NAVIGATION.md`, §3.2.
+    val previews = listOf("alpha", "beta").map { ServePreview(id = it, label = it) }
+    val withReference =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        previews,
+        token = "t",
+        hasSvgFor = { true },
+        referencesFor = { listOf(referenceFor(it)) },
+      )
+    assertTrue(withReference.contains("data-default-format=\"reference\""), withReference)
+
+    // …and with a reference lane to lead with, the served order is worst-first, which the vector
+    // default used to withhold from exactly the catalogs that publish scores.
+    val scored =
       ServeWeb.comparisonPage(
         "m3-catalog",
         previews,
@@ -2405,8 +2435,13 @@ class ServeWebTest {
         hasSvgFor = { true },
         referencesFor = { id -> listOf(scoredReferenceFor(id, if (id == "alpha") 99.0 else 12.0)) },
       )
-    val labels = Regex("data-label=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
-    assertEquals(listOf("alpha", "beta"), labels, html)
+    val labels = Regex("data-label=\"([^\"]+)\"").findAll(scored).map { it.groupValues[1] }.toList()
+    assertEquals(listOf("beta", "alpha"), labels, scored)
+
+    // A catalog with only an SVG export still opens on it — the order is a preference among the
+    // lanes a catalog HAS, not a refusal to serve the one it has.
+    val svgOnly = ServeWeb.comparisonPage("m3-catalog", previews, token = "t", hasSvgFor = { true })
+    assertTrue(svgOnly.contains("data-default-format=\"svg\""), svgOnly)
   }
 
   @Test

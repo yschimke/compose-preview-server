@@ -6,6 +6,8 @@ export interface RowFacts {
     hay: string;
     /** The preview ids behind this row, for the `?preview=` narrow. */
     previewIds: string;
+    /** The component this row belongs to, for the `?component=` narrow. */
+    componentId: string;
     /** Whether the current format can pair this row at all. */
     hasFormat: boolean;
 }
@@ -13,15 +15,27 @@ export interface RowFacts {
 /**
  * Whether a row survives the filter.
  *
- * Three independent narrows, all of which must pass. `?preview=` is the one worth naming: it is how
- * the viewer links INTO this wall for one component, so it has to compose with the search box rather
- * than being overridden by it — someone who arrives from a preview and then types is narrowing
- * within that preview, not starting a new search across the catalog.
+ * Four independent narrows, all of which must pass. Two of them are SCOPES the reader arrived
+ * with rather than typed, and both compose with the search box rather than being overridden by it:
+ * someone who arrives scoped and then types is narrowing within that scope, not starting a new
+ * search across the catalog.
+ *
+ * `?preview=` is one exact variant — the viewer's link for the frame on its stage. `?component=` is
+ * every variant of a component, which is the scope a reader coming from a component page or from
+ * the parity index actually wants: they are not asking about `appcard__ideal__icon__compact`, they
+ * are asking about App Card. Without it the wall opened on the whole catalog and had to be filtered
+ * by hand from a page that already knew the answer
+ * (`docs/design/COMPARE_NAVIGATION.md`, F4).
+ *
+ * Matched case-insensitively and on the id the row carries, not on its label: a component's display
+ * name is prose ("App Card") and its id is not, and a link built from one and matched against the
+ * other silently selects nothing.
  */
 export function keepRow(
     row: RowFacts,
     query: string,
     preview: string,
+    component = "",
 ): boolean {
     if (!row.hasFormat) return false;
     const needle = query.trim().toLowerCase();
@@ -29,6 +43,8 @@ export function keepRow(
     const wanted = preview.trim().toLowerCase();
     const previewIds = row.previewIds.toLowerCase().split(/\s+/);
     if (wanted && !previewIds.includes(wanted)) return false;
+    const scope = component.trim().toLowerCase();
+    if (scope && row.componentId.trim().toLowerCase() !== scope) return false;
     return true;
 }
 
