@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.13.0](https://github.com/yschimke/compose-preview-server/compare/v3.12.0...v3.13.0) (2026-09-07)
+
+
+### Features
+
+* **ui-builder:** inline a widget background picture, so a design with artwork exports ([#524](https://github.com/yschimke/compose-preview-server/issues/524)) ([02cec24](https://github.com/yschimke/compose-preview-server/commit/02cec245d98b719839983487995b6ff7e832ccbd))
+
+
+### Bug Fixes
+
+* **deps:** update dependency dev.snipme:highlights to v1.1.0 ([#500](https://github.com/yschimke/compose-preview-server/issues/500)) ([6927a16](https://github.com/yschimke/compose-preview-server/commit/6927a16fa34c2557239a14343990df009c13973b))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.59.1 ([#519](https://github.com/yschimke/compose-preview-server/issues/519)) ([7595106](https://github.com/yschimke/compose-preview-server/commit/7595106cb732aa7e430d187df9e29a98130a0965))
+* **ui-builder:** emit a six-digit colour opaque, so a generated widget is not invisible ([#517](https://github.com/yschimke/compose-preview-server/issues/517)) ([be585c4](https://github.com/yschimke/compose-preview-server/commit/be585c4e394c013e3a8315649ec0242626f7c8ad))
+* **ui-builder:** give a generated row the alignment the canvas gives it ([#525](https://github.com/yschimke/compose-preview-server/issues/525)) ([07d17d5](https://github.com/yschimke/compose-preview-server/commit/07d17d50fce9c1d28f249cdad78703740b2d4bbc))
+* **ui-builder:** lay the canvas frame out in the design's pixels, not the browser's ([#531](https://github.com/yschimke/compose-preview-server/issues/531)) ([6eda4a6](https://github.com/yschimke/compose-preview-server/commit/6eda4a6370c10214439627ebe9edd334371e4a29))
+* **ui-builder:** say why a widget has no native preview, not that it has no @Preview ([#526](https://github.com/yschimke/compose-preview-server/issues/526)) ([354ad78](https://github.com/yschimke/compose-preview-server/commit/354ad780709078cd584aac6132b88c4f8d561c16))
+
 ## [3.12.0](https://github.com/yschimke/compose-preview-server/compare/v3.11.0...v3.12.0) (2026-09-06)
 
 
