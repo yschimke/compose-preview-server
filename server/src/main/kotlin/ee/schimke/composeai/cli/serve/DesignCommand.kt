@@ -323,5 +323,7 @@ internal fun ExportFormatV1?.extension(): String =
     ExportFormatV1.SVG -> "svg"
     ExportFormatV1.PNG -> "png"
     ExportFormatV1.COMPOSE -> "kt"
+    // An archive: source plus the picture bytes as files. `application/zip` per the contract.
+    ExportFormatV1.BUNDLE -> "zip"
     null -> "json"
   }

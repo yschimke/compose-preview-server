@@ -398,6 +398,7 @@ class ServeUiBuilderRoutesTest {
               )
             )
           ExportFormatV1.COMPOSE -> error("the live routes never ask for Compose")
+          ExportFormatV1.BUNDLE -> error("the live routes never ask for a bundle")
         }
       }
     }
