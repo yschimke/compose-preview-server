@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.16.0](https://github.com/yschimke/compose-preview-server/compare/v3.15.0...v3.16.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* **playground:** put android.jar on the compile classpath for an android bundle ([#544](https://github.com/yschimke/compose-preview-server/issues/544)) ([59a52a1](https://github.com/yschimke/compose-preview-server/commit/59a52a1b4e9bd4ef44eb11553d1b49265caaa92c))
+
 ## [3.15.0](https://github.com/yschimke/compose-preview-server/compare/v3.14.0...v3.15.0) (2026-09-07)
 
 
