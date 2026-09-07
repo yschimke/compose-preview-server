@@ -3502,7 +3502,8 @@ class ServeWebFixtureTest {
       )
 
     // The same page on a box that offers a CAPABILITY beside the scopes — the second fieldset, its
-    // checkboxes unticked, and one capability the approver may not pass on. Its own fixture rather
+    // checkboxes ticked (every row is an ask this approver may grant), and one capability the
+    // approver may not pass on. Its own fixture rather
     // than a variant of the one above, because the control that matters here (an independent
     // checkbox, where the scopes are a radio) only exists on a box whose operator opted in, and a
     // golden that never renders it would let that control change unseen.
