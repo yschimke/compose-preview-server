@@ -2555,12 +2555,12 @@ public class ServeRunner(
       )
       derived.source
     }
-    val compose =
-      ScreenGeneratorComposeExportExecutor(records::record, packs = packs.map { it.id }.toSet())
     // Uploaded asset bytes, content-addressed, in their own directory beside the design state for
     // the reason the references and the comments have one: the state file is rewritten on every
     // accepted operation, and a photograph must not ride along with every keystroke. The export
-    // executor reads the same store so a daemon render draws what the canvas draws.
+    // executor reads the same store so a daemon render draws what the canvas draws — and so a Wear
+    // widget's background picture can be inlined into its generated source, which is the only
+    // place a system-hosted widget can carry one.
     val assetStore = runCatching {
       FileUiBuilderAssetStore(directory.resolve("assets").toPath())
     }
@@ -2571,6 +2571,12 @@ public class ServeRunner(
         )
       }
       .getOrNull()
+    val compose =
+      ScreenGeneratorComposeExportExecutor(
+        records::record,
+        packs = packs.map { it.id }.toSet(),
+        assetStore = assetStore,
+      )
     val exporter =
       renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
         ?: compose
