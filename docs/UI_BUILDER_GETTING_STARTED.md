@@ -20,47 +20,66 @@ rest of the distribution stays on 17.
 
 ## Running it locally
 
-There is no separate builder command: the builder is a surface of `compose-preview serve`, switched
-on by pointing it at the built Wasm bundle. Build the bundle from this repository —
+One command:
 
 ```bash
-./gradlew :ui-builder:wasmFrontendDist
+compose-preview-server ui --no-project
 ```
 
-— which writes it to `ui-builder/build/wasmDist`. Then serve it, naming the catalogs that get a
-builder adapter and somewhere to keep the designs:
+That opens the builder against the design systems packaged inside it — `m3-catalog` and
+`remote-m3` — and needs nothing else: no Gradle project, no `compose-preview` build host, and no
+catalog to fetch. Designs are saved under `~/.compose-preview/ui-builder-state` and survive a
+restart. A browser is opened on the builder; `--no-open` prints the URL instead.
+
+The builder bundle it serves is already inside the server distribution, so downloading
+`compose-preview-server-<version>.tar.gz` from a release is the whole install. Releases also carry
+`compose-preview-ui-builder-web-<version>.zip` on its own, for serving the bundle yourself or
+pointing an existing server at it with `--ui-builder-dir`; the same archive is on Maven Central as
+`compose-preview-ui-builder-web`. To build it from this repository instead:
 
 ```bash
-compose-preview serve \
-  --catalogs m3-catalog,remote-m3@yschimke/wear-m3-catalog \
-  --ui-builder-dir <this repo>/ui-builder/build/wasmDist \
-  --ui-builder-catalogs m3-catalog,remote-m3 \
-  --ui-builder-state-dir ./ui-builder-state
+./gradlew :ui-builder:wasmFrontendDist   # writes ui-builder/build/wasmDist
 ```
 
-Three flags, three different jobs, and they are easy to confuse:
+### Against your own project
 
-- **`--catalogs`** fetches the catalogs themselves, from each system's published
-  `design-artifacts/<system>` branch. No checkout is involved — `remote-m3` lives in
-  `yschimke/wear-m3-catalog`, which is why that one names its repo explicitly; a system in
-  `--catalog-repo` does not need the `@owner/repo` suffix. That repo publishes two systems, the
-  small reviewed widget adapter `remote-m3` and the full `wear-m3-catalog`.
-- **`--ui-builder-catalogs`** is the separate claim that a catalog may be *authored* against, not
-  merely served. Publishing a catalog never enables authoring for it, which is the point made at the
-  top of this guide.
-- **`--ui-builder-state-dir`** is what makes designs outlive a restart. It defaults to
-  `ui-builder-state` beside `--catalogs-file`, or `~/.compose-preview/ui-builder-state` for a local
-  standalone builder, and `none` is the explicit opt-out that serves the assets with no editable
-  design API at all.
+`ui` without `--no-project` is the other mode, and the one the rest of this guide's export sections
+assume:
 
-The designs, the reference overlays, the comment threads and the access requests are separate
-directories under the state dir, so losing one loses only what it was.
+```bash
+compose-preview-server ui --module app
+```
+
+It discovers and builds the module's `@Preview` functions and hands the builder that module's
+`components.json`, so the Compose export writes code that calls **your** composables rather than
+only the packaged design system's. That needs the `compose-preview` build host, because discovering
+and building a Gradle project is work the server asks for over a pipe rather than doing itself —
+without one it says so rather than serving a builder that looks like it worked.
+
+### The flags underneath, and one that is easy to confuse
+
+Both modes are `serve` with flags added, and every flag stays available:
+
+- **`--ui-builder-catalogs <system>[,…]`** — the design systems the builder may author against. Each
+  must have a *packaged adapter*; a catalog with none is refused at startup rather than fetched.
+  This is the one that matters for the builder.
+- **`--ui-builder-state-dir <dir>|none`** — where saved designs live. Defaults to
+  `ui-builder-state` beside `--catalogs-file`, or `~/.compose-preview/ui-builder-state` standalone.
+  `none` serves the builder's assets with no editable design API at all.
+- **`--ui-builder-dir <dir>`** — the bundle to serve. Defaults to the one packaged beside the binary.
+- **`--catalogs <system>[@<owner>/<repo>][,…]`** is **not** part of this. It fetches published
+  catalogs from their `design-artifacts/<system>` branches and serves them as browsable preview
+  sites at `/<system>/`. Publishing a catalog never enables authoring for it, and authoring against
+  one never requires serving it — they are separate features that happen to share catalog ids.
+
+The designs, the reference overlays and the comment threads are separate directories under the
+state dir, so losing one loses only what it was.
 
 Two things worth knowing before the first run. Export needs Java 21, as above. And on `remote-m3`
 the **native preview lane cannot compile a widget**: a widget's generated source is Remote Compose
 rather than Jetpack Compose, so `--ui-builder-native-catalog` has nothing to offer it and the Wasm
-canvas is the authority — which is exactly why the canvas and the generator have to agree about the
-same design, and why they are tested against each other rather than separately.
+canvas is the authority — which is why the canvas and the generator have to agree about the same
+design, and are tested against each other rather than separately.
 
 ## Create a design in the website
 

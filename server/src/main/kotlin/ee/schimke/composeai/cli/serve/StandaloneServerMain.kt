@@ -55,13 +55,14 @@ private fun run(command: String, args: List<String>) {
     // there is no project to point the builder at, and serving the packaged palette with no record
     // would look like it worked. Say so, the way `serve` says what a bundle-backed server cannot
     // select.
-    if (command == ServerCommands.UI && buildHost == null) {
+    if (command == ServerCommands.UI && buildHost == null && !LocalUiBuilder.isProjectless(args)) {
       System.err.println(
         "ui: no `compose-preview` build host found, so this project cannot be discovered or built."
       )
       System.err.println(
         "  Install the compose-preview CLI, or pass --build-host <path> / set " +
-          "${BuildHostDiscovery.ENV}. `serve` hosts published catalogs and bundles without one."
+          "${BuildHostDiscovery.ENV}. `ui --no-project` opens the builder against the packaged " +
+          "design systems instead, and `serve` hosts published catalogs and bundles without one."
       )
       exitProcess(1)
     }
@@ -106,6 +107,12 @@ private fun commandLane(
       .also { it.deleteOnExit() }
       .resolve("components.json")
       .also { it.deleteOnExit() }
+  // Nothing is discovered without a project, so there is nothing to publish a record from — and a
+  // callback that reported "no components.json" for a module nobody named would be noise about a
+  // file this mode never wanted.
+  if (LocalUiBuilder.isProjectless(args)) {
+    return LocalUiBuilder.serveArgs(args, catalog, record, builderDir) to {}
+  }
   return LocalUiBuilder.serveArgs(args, catalog, record, builderDir) to
     { discovery: ServeDiscovery ->
       LocalUiBuilder.publishRecord(discovery, record)?.let(System.err::println)
