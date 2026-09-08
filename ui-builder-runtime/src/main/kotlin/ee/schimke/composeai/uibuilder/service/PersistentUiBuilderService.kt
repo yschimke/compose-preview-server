@@ -519,7 +519,7 @@ public class PersistentUiBuilderService(
       PersistedDesignV1(
         document = document,
         lastSequence = 0,
-        access = DesignAccessControlV1(0, actor.actorId),
+        access = DesignAccessControlV1(0, canonicalActorId(actor.actorId)),
         revisionSnapshots = listOf(RevisionStateV1(document, 0)),
         positions = derivePositions(document),
         positionSnapshots = listOf(PositionStateV1(0, derivePositions(document))),
@@ -603,7 +603,7 @@ public class PersistentUiBuilderService(
 
   private fun access(actor: AuthenticatedUiBuilderActor, designId: String): LockedExecution {
     val design = persisted.designs[designId] ?: return serviceError(notFound(designId))
-    if (design.access.ownerActorId != actor.actorId) {
+    if (!design.access.isOwner(actor.actorId)) {
       return serviceError(forbidden("manage access for", designId))
     }
     return LockedExecution(UiBuilderServiceResponse.DesignAccess(designId, design.access))
@@ -615,7 +615,7 @@ public class PersistentUiBuilderService(
   ): LockedExecution {
     val design =
       persisted.designs[request.designId] ?: return serviceError(notFound(request.designId))
-    if (design.access.ownerActorId != actor.actorId) {
+    if (!design.access.isOwner(actor.actorId)) {
       return serviceError(forbidden("manage access for", request.designId))
     }
     if (request.baseAccessRevision != design.access.accessRevision) {
@@ -635,7 +635,10 @@ public class PersistentUiBuilderService(
     request.mutations.forEach { mutation ->
       when (mutation) {
         is GrantActorAccessMutationV1 -> {
-          if (mutation.actorId.isBlank() || mutation.actorId == access.ownerActorId) {
+          // Stored canonical: a grant is compared by equality for the life of the design, so the
+          // spelling that goes in is the one that has to match the actor that arrives. See #583.
+          val target = canonicalActorId(mutation.actorId)
+          if (target.isBlank() || access.isOwner(target)) {
             return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "invalid actor grant target")
           }
           if (mutation.role == DesignAccessRoleV1.OWNER) {
@@ -646,36 +649,36 @@ public class PersistentUiBuilderService(
           }
           val grant =
             DesignActorGrantV1(
-              mutation.actorId,
+              target,
               mutation.role,
               mutation.allowedActions.distinct(),
-              actor.actorId,
+              canonicalActorId(actor.actorId),
               now,
             )
           access =
             access.copy(
-              actorGrants = access.actorGrants.filterNot { it.actorId == mutation.actorId } + grant
+              actorGrants = access.actorGrants.filterNot { sameActor(it.actorId, target) } + grant
             )
         }
         is RevokeActorAccessMutationV1 -> {
-          if (mutation.actorId == access.ownerActorId) {
+          if (access.isOwner(mutation.actorId)) {
             return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "the owner cannot be revoked")
           }
+          // Canonical comparison, so a grant stored mis-cased before #583 can still be revoked.
           access =
             access.copy(
-              actorGrants = access.actorGrants.filterNot { it.actorId == mutation.actorId }
+              actorGrants = access.actorGrants.filterNot { sameActor(it.actorId, mutation.actorId) }
             )
         }
         is TransferDesignOwnershipMutationV1 -> {
-          if (
-            mutation.newOwnerActorId.isBlank() || mutation.newOwnerActorId == access.ownerActorId
-          ) {
+          val newOwner = canonicalActorId(mutation.newOwnerActorId)
+          if (newOwner.isBlank() || access.isOwner(newOwner)) {
             return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "invalid new owner")
           }
           val formerOwner = access.ownerActorId
           val formerOwnerGrant =
             DesignActorGrantV1(
-              actorId = formerOwner,
+              actorId = canonicalActorId(formerOwner),
               role = DesignAccessRoleV1.EDITOR,
               allowedActions =
                 listOf(
@@ -683,15 +686,15 @@ public class PersistentUiBuilderService(
                   DesignAccessActionV1.WRITE,
                   DesignAccessActionV1.EXPORT,
                 ),
-              grantedByActorId = actor.actorId,
+              grantedByActorId = canonicalActorId(actor.actorId),
               grantedAtEpochMillis = now,
             )
           access =
             access.copy(
-              ownerActorId = mutation.newOwnerActorId,
+              ownerActorId = newOwner,
               actorGrants =
                 access.actorGrants.filterNot {
-                  it.actorId == mutation.newOwnerActorId || it.actorId == formerOwner
+                  sameActor(it.actorId, newOwner) || sameActor(it.actorId, formerOwner)
                 } + formerOwnerGrant,
             )
         }
@@ -2096,7 +2099,7 @@ public class PersistentUiBuilderService(
       catalog = catalog,
       retainedFromSequence = design.retainedFromSequence(),
       presence = presence,
-      access = design.access.takeIf { design.access.ownerActorId == actor.actorId },
+      access = design.access.takeIf { it.isOwner(actor.actorId) },
     )
 
   private fun catchUp(
@@ -2191,8 +2194,7 @@ public class PersistentUiBuilderService(
           revision = design.document.revision,
           catalogPin = design.document.catalogPin,
           ownerActorId = design.access.ownerActorId,
-          collaborators =
-            design.access.actorGrants.count { it.actorId != design.access.ownerActorId },
+          collaborators = design.access.actorGrants.count { !design.access.isOwner(it.actorId) },
           createdAtEpochMillis = design.createdAtEpochMillis,
           updatedAtEpochMillis = design.updatedAtEpochMillis,
           activeSubscribers = runtime[design.document.id]?.subscribers?.size ?: 0,
@@ -2783,16 +2785,48 @@ private fun rejected(
     environmentField,
   )
 
+/**
+ * The prefix under which an actor id names a GitHub login rather than a machine.
+ *
+ * A GitHub login is case-insensitive: `AshleyIngram` and `ashleyingram` are one account, and the
+ * host signs its session over the lowercased form, so the actor that arrives here is always
+ * lowercase. Nothing checked the spelling of a *stored* id, so a grant shared as
+ * `github:AshleyIngram` was accepted and then matched nobody — a share that silently granted
+ * nothing, indistinguishable from never having been shared. See #583.
+ */
+private const val GITHUB_ACTOR_PREFIX = "github:"
+
+/**
+ * One spelling per identity, so equality can decide access.
+ *
+ * Only the `github:` prefix is folded, and only its login part. An `operator` or `agent:<
+ * fingerprint>` id is minted by this host and is already exact — case is meaningful in a
+ * fingerprint, and folding one would make two distinct agents equal.
+ *
+ * Applied on both sides of every comparison rather than only on the way in, so a grant already
+ * stored mis-cased starts working on the next read instead of staying quietly broken.
+ */
+private fun canonicalActorId(actorId: String): String =
+  if (actorId.startsWith(GITHUB_ACTOR_PREFIX))
+    GITHUB_ACTOR_PREFIX + actorId.removePrefix(GITHUB_ACTOR_PREFIX).lowercase()
+  else actorId
+
+private fun sameActor(left: String, right: String): Boolean =
+  canonicalActorId(left) == canonicalActorId(right)
+
+private fun DesignAccessControlV1.isOwner(actorId: String): Boolean =
+  sameActor(ownerActorId, actorId)
+
 private fun PersistedDesignV1.allows(actorId: String, action: DesignAccessActionV1): Boolean =
-  actorId == access.ownerActorId ||
-    access.actorGrants.any { it.actorId == actorId && action in it.allowedActions }
+  access.isOwner(actorId) ||
+    access.actorGrants.any { sameActor(it.actorId, actorId) && action in it.allowedActions }
 
 private fun PersistedDesignV1.listItem(actorId: String): DesignListItemV1 {
   val requester =
-    if (actorId == access.ownerActorId)
+    if (access.isOwner(actorId))
       DesignActorAccessV1(actorId, DesignAccessRoleV1.OWNER, DesignAccessActionV1.entries)
     else {
-      val grant = access.actorGrants.first { it.actorId == actorId }
+      val grant = access.actorGrants.first { sameActor(it.actorId, actorId) }
       DesignActorAccessV1(actorId, grant.role, grant.allowedActions)
     }
   return DesignListItemV1(

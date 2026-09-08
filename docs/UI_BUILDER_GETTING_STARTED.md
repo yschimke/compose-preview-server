@@ -310,9 +310,20 @@ canvas instead of the 216×124dp frame the design was authored in.
 ![The Code pane showing a widget's generated Kotlin](design/evidence/ui-builder-remote-compose/widget-code-pane.png)
 
 Refusals work the way the Compose exporter's do: a node with no Remote Compose counterpart is named
-rather than approximated. An image background is the one to expect — `WearWidgetBrush.image` takes a
-`RemoteImageBitmap`, which generated source cannot name from an asset key, so the refusal says to
-supply the bitmap in `provideWidgetData` and add the call by hand.
+rather than approximated.
+
+**Images name the bitmap they need.** Generated source can never carry pixels, but it can say which
+bitmap to supply: `RemoteImageBitmap(String)` is the named-bitmap overload, and a design's asset key
+is the name. An `asset/image` in the content becomes `RemoteImage(RemoteImageBitmap("<key>"), …)`
+and one in the background slot becomes `WearWidgetBrush.image(RemoteImageBitmap("<key>"), …)`. The
+widget supplies them under those names in `provideWidgetData`; until it does, that layer draws
+nothing, which is why the generated file lists the keys it expects.
+
+What is still refused is what would not compile or would not be the design: a `weight` outside a row
+or column, an `align` outside a box — `RemoteBoxScope` has no member for it, so a box's single
+alignment is hoisted onto the parent's `contentAlignment` instead — a shape named by a theme size
+rather than a corner radius in dp, and a colour given as a theme token, since a widget's document is
+built outside composition where neither can be read.
 
 ## Authoring a Wear screen
 

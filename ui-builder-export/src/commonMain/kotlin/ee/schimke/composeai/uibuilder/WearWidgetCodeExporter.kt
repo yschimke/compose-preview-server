@@ -170,9 +170,13 @@ object WearWidgetCodeExporter {
     val body = "$INDENT${INDENT}return WearWidgetDocument(background = "
     val single = "$body$expression) {"
     if (single.length <= MAX_LINE) return listOf(single)
+    val hoistPad = "$INDENT$INDENT$INDENT"
     return listOf(
       "$INDENT${INDENT}val background =",
-      "$INDENT$INDENT$INDENT$expression",
+      // Hoisting alone is not enough once the brush is a chain: an image fill and two gradients
+      // spend well past the budget on one line, and the chain is broken the same way a modifier's
+      // is.
+      hoistPad + expression.wrappedChain(hoistPad),
       "$INDENT${INDENT}return WearWidgetDocument(background = background) {",
     )
   }

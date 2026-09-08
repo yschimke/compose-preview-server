@@ -6,6 +6,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -90,12 +92,14 @@ class WearWidgetCodeExporterTest {
         .source
 
     write("GradientWidget.kt", source)
-    assertTrue(
-      "WearWidgetBrush.color(Color(0xFF2196F3).rc).horizontalGradient(" in source,
-      source,
-    )
+    // The chain is written across lines rather than on one: a colour plus a two-stop gradient is
+    // 111 columns, and this file's whole line-budget promise is that its output survives ktfmt
+    // unchanged. The assertion is on the calls in order, not on where the breaks fall.
+    assertTrue("WearWidgetBrush.color(Color(0xFF2196F3).rc)" in source, source)
+    assertTrue(".horizontalGradient(" in source, source)
     assertTrue("Color(0xFF2196F3).rc, Color(0xFF0D47A1).rc" in source, source)
     assertTrue("import androidx.glance.wear.horizontalGradient" in source, source)
+    assertNoLineExceedsBudget(source)
   }
 
   /**
@@ -263,6 +267,246 @@ class WearWidgetCodeExporterTest {
 
     val source = assertIs<EditorGeneratedCode.Source>(generated).kotlin
     assertTrue("class HelloWidget : GlanceWearWidget()" in source, source)
+  }
+
+  /**
+   * The modifiers a widget is actually drawn with, which used to be refused wholesale.
+   *
+   * `size`, `background` and `weight` have Remote Compose counterparts — `background` needs its
+   * shape as a separate `clip`, since `RemoteModifier.background` takes a colour alone — and
+   * `align` does not: `RemoteBoxScope` has no member for it, so it is hoisted onto the parent's
+   * `contentAlignment`, which is where RemoteBox states the same thing. Before this, a design as
+   * ordinary as a pill-shaped progress bar refused with four reasons and generated nothing
+   * (yschimke/compose-preview-server#583 diagnosis).
+   */
+  @Test
+  fun `size, background, weight and a hoisted align are written`() {
+    val base = weatherWidgetUiBuilderDocument("weather", pin, environment)
+    val scaffold = base.nodes.values.first { it.componentId.startsWith("remote-m3/") }
+    val fill =
+      UiBuilderNode(
+        id = "fill",
+        componentId = "layout/box",
+        modifiers =
+          JsonArray(
+            listOf(
+              modifier("size", "widthDp" to JsonPrimitive(71), "heightDp" to JsonPrimitive(3)),
+              modifier(
+                "background",
+                "color" to literal("color", "#FF1DB954"),
+                "shape" to JsonPrimitive("999"),
+              ),
+              modifier("align", "alignment" to JsonPrimitive("centerStart")),
+            )
+          ),
+      )
+    val track =
+      UiBuilderNode(
+        id = "track",
+        componentId = "layout/box",
+        modifiers = JsonArray(listOf(modifier("weight", "weight" to JsonPrimitive(1.0)))),
+        slots = mapOf("children" to listOf(fill.id)),
+      )
+    val row =
+      UiBuilderNode(
+        id = "bar",
+        componentId = "layout/row",
+        slots = mapOf("children" to listOf(track.id)),
+      )
+    val document =
+      base.copy(
+        nodes =
+          base.nodes +
+            mapOf(
+              fill.id to fill,
+              track.id to track,
+              row.id to row,
+              scaffold.id to scaffold.copy(slots = scaffold.slots + ("content" to listOf(row.id))),
+            )
+      )
+
+    val source =
+      assertIs<WearWidgetCodeExporter.Result.Emitted>(WearWidgetCodeExporter.export(document))
+        .source
+
+    write("ModifierWidget.kt", source)
+    // `weight` is a row-scope member, written because the box sits inside a RemoteRow.
+    assertTrue("RemoteModifier.weight(1f)" in source, source)
+    // The shape becomes a `clip` BEFORE the fill, which is what makes the fill take that shape.
+    assertTrue("size(71.rdp, 3.rdp)" in source, source)
+    assertTrue(".clip(RemoteRoundedCornerShape(999.rdp))" in source, source)
+    assertTrue(".background(Color(0xFF1DB954).rc)" in source, source)
+    // Hoisted, not written on the child: the child carries no `align` call of its own.
+    assertTrue("contentAlignment = RemoteAlignment.CenterStart" in source, source)
+    assertTrue(".align(" !in source, source)
+    assertTrue("import androidx.compose.remote.creation.compose.modifier.size" in source, source)
+    assertTrue(
+      "import androidx.compose.remote.creation.compose.shapes.RemoteRoundedCornerShape" in source,
+      source,
+    )
+    assertNoLineExceedsBudget(source)
+  }
+
+  /**
+   * An `align` outside a box is refused rather than written, because it would not compile.
+   *
+   * The hoist above is only sound where the parent is the thing that states the alignment. A
+   * `RemoteRow` has no `contentAlignment` to hoist onto and `RemoteRowScope` has no `align`, so the
+   * only honest answers are a refusal or a file the user's compiler rejects.
+   */
+  @Test
+  fun `an align modifier outside a box is refused`() {
+    val base = weatherWidgetUiBuilderDocument("weather", pin, environment)
+    val scaffold = base.nodes.values.first { it.componentId.startsWith("remote-m3/") }
+    val child =
+      UiBuilderNode(
+        id = "child",
+        componentId = "layout/box",
+        modifiers =
+          JsonArray(listOf(modifier("align", "alignment" to JsonPrimitive("centerStart")))),
+      )
+    val row =
+      UiBuilderNode(
+        id = "bar",
+        componentId = "layout/row",
+        slots = mapOf("children" to listOf(child.id)),
+      )
+    val document =
+      base.copy(
+        nodes =
+          base.nodes +
+            mapOf(
+              child.id to child,
+              row.id to row,
+              scaffold.id to scaffold.copy(slots = scaffold.slots + ("content" to listOf(row.id))),
+            )
+      )
+
+    val refused =
+      assertIs<WearWidgetCodeExporter.Result.Refused>(WearWidgetCodeExporter.export(document))
+    assertTrue(refused.reasons.any { "align" in it && "RemoteBox" in it }, "${refused.reasons}")
+  }
+
+  /**
+   * An image names the bitmap the widget has to supply, rather than refusing outright.
+   *
+   * `RemoteImageBitmap(String)` is the named-bitmap overload, so an asset key IS nameable from
+   * generated source — the pixels are supplied under that name in `provideWidgetData`. This holds
+   * for a background fill and for an image in the content, which are the same seam.
+   */
+  @Test
+  fun `an image names its bitmap in the content and in the background`() {
+    val base = weatherWidgetUiBuilderDocument("weather", pin, environment)
+    val scaffold = base.nodes.values.first { it.componentId.startsWith("remote-m3/") }
+    val art =
+      UiBuilderNode(
+        id = "art",
+        componentId = "asset/image",
+        properties =
+          JsonObject(
+            mapOf(
+              "assetKey" to literal("string", "cover-wide"),
+              "contentScale" to literal("enum", "crop"),
+            )
+          ),
+      )
+    val icon =
+      UiBuilderNode(
+        id = "icon",
+        componentId = "asset/image",
+        properties =
+          JsonObject(
+            mapOf(
+              "assetKey" to literal("string", "play-icon"),
+              "contentDescription" to literal("string", "Play"),
+              "contentScale" to literal("enum", "fit"),
+            )
+          ),
+      )
+    val document =
+      base.copy(
+        nodes =
+          base.nodes +
+            mapOf(
+              art.id to art,
+              icon.id to icon,
+              scaffold.id to
+                scaffold.copy(
+                  slots =
+                    scaffold.slots +
+                      ("background" to listOf(art.id)) +
+                      ("content" to listOf(icon.id))
+                ),
+            )
+      )
+
+    val source =
+      assertIs<WearWidgetCodeExporter.Result.Emitted>(WearWidgetCodeExporter.export(document))
+        .source
+
+    write("ImageWidget.kt", source)
+    // The template's own background colour heads the chain, so the fill is the link after it.
+    assertTrue(
+      ".image(RemoteImageBitmap(\"cover-wide\"), ContentScale.Crop)" in source,
+      source,
+    )
+    assertTrue("RemoteImage(" in source, source)
+    assertTrue("RemoteImageBitmap(\"play-icon\")" in source, source)
+    assertTrue("contentDescription = \"Play\".rs" in source, source)
+    assertTrue("contentScale = ContentScale.Fit" in source, source)
+    assertTrue("import androidx.compose.ui.layout.ContentScale" in source, source)
+    assertNoLineExceedsBudget(source)
+  }
+
+  /**
+   * A six-digit colour is opaque, not invisible.
+   *
+   * `Color(0x1DB954)` is Spotify green at **zero alpha** — a widget that draws nothing. A document
+   * may write a colour either way, and the canvas reads both, so the generator pads to match it.
+   */
+  @Test
+  fun `a colour without an alpha pair is written opaque`() {
+    val base = weatherWidgetUiBuilderDocument("weather", pin, environment)
+    val scaffold = base.nodes.values.first { it.componentId.startsWith("remote-m3/") }
+    val swatch =
+      UiBuilderNode(
+        id = "swatch",
+        componentId = "layout/box",
+        modifiers =
+          JsonArray(listOf(modifier("background", "color" to literal("color", "#1DB954")))),
+      )
+    val document =
+      base.copy(
+        nodes =
+          base.nodes +
+            mapOf(
+              swatch.id to swatch,
+              scaffold.id to
+                scaffold.copy(slots = scaffold.slots + ("content" to listOf(swatch.id))),
+            )
+      )
+
+    val source =
+      assertIs<WearWidgetCodeExporter.Result.Emitted>(WearWidgetCodeExporter.export(document))
+        .source
+
+    assertTrue("Color(0xFF1DB954)" in source, source)
+    assertTrue("Color(0x1DB954)" !in source, source)
+  }
+
+  private fun modifier(type: String, vararg fields: Pair<String, JsonElement>): JsonObject =
+    JsonObject(mapOf("type" to JsonPrimitive(type)) + fields.toMap())
+
+  /**
+   * No line runs past ktfmt's default, which is the promise the generator makes about its output.
+   *
+   * Asserted rather than assumed because the two places that can break it — a long call and a long
+   * modifier chain — wrap by different rules, and a regression in either writes a file whose first
+   * `ktfmtFormat` is a diff.
+   */
+  private fun assertNoLineExceedsBudget(source: String) {
+    val long = source.lines().filter { it.length > 100 }
+    assertTrue(long.isEmpty(), "lines past 100 columns:\n${long.joinToString("\n")}")
   }
 
   private fun write(name: String, source: String) {
