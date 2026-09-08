@@ -5199,20 +5199,32 @@ class ServeHttpServer(
       // What the project says the design is for, carried across with it. Only on the design this
       // call actually opened: a design already here has a links record of its own, possibly edited
       // since, and the published index does not get to overwrite somebody's work by being re-read.
-      entry?.links?.let { links ->
-        val written =
-          withContext(Dispatchers.IO) { uiBuilderLinksStore?.replace(document.id, links) }
-        // The design opened; only its sidecar did not. Saying so is the difference between an
-        // operator knowing why the reverse lookup omits this design and being left to guess.
-        val why =
-          when (written) {
-            is LinksWriteResult.Refused -> written.reason
-            is LinksWriteResult.Failed -> written.reason
-            else -> null
+      // And only when the document is the one the entry describes. A stale or wrongly renamed
+      // export can publish an entry for design A whose document carries id B; the design created
+      // is B, and B is not what the entry's issue and pull request are about.
+      entry
+        ?.takeIf { it.designId == document.id }
+        ?.links
+        ?.let { links ->
+          val written =
+            withContext(Dispatchers.IO) { uiBuilderLinksStore?.replace(document.id, links) }
+          // The design opened; only its sidecar did not. Saying so is the difference between an
+          // operator knowing why the reverse lookup omits this design and being left to guess.
+          val why =
+            when (written) {
+              is LinksWriteResult.Refused -> written.reason
+              is LinksWriteResult.Failed -> written.reason
+              else -> null
+            }
+          if (why != null) {
+            System.err.println("serve: links for library design ${document.id} not stored ($why)")
           }
-        if (why != null) {
-          System.err.println("serve: links for library design ${document.id} not stored ($why)")
         }
+      if (entry != null && entry.designId != document.id) {
+        System.err.println(
+          "serve: ${catalog.system} publishes design ${entry.designId} as a document with id " +
+            "${document.id}; its links were not carried across"
+        )
       }
     }
     when (outcome) {

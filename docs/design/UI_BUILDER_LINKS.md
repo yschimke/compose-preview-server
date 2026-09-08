@@ -18,7 +18,9 @@ So a design carries a **links record**: five optional, typed back-links beside i
 ```
 
 `issue`, `reference`, `pr` and `thread` are absolute `http(s)` URLs, at most 2 KB each; `previous`
-is a design id on this host. All five are optional and an absent field means unset. Nothing here is
+is a design id on this host, kept exactly as given: the service creates a design under any
+non-blank id, so this field imposes no shape of its own and only refuses a URL. All five are
+optional and an absent field means unset. Nothing here is
 ever fetched: this host holds no credential for any of the systems these URLs name, and the schemes
 are checked so that what is stored is something a browser can be handed, not so that this process
 can go and get it.
@@ -55,7 +57,7 @@ caller cannot open is a 404 and nothing is enumerable.
 | Route | Capability | What it does |
 | --- | --- | --- |
 | `GET /api/ui-builder/v1/designs/{designId}/links` | `ui-builder-read` | The record, or 404 when nobody has said |
-| `PUT /api/ui-builder/v1/designs/{designId}/links` | `ui-builder-write` | Replace the whole record; 422 with the reason when a value is refused; an all-empty record deletes it |
+| `PUT /api/ui-builder/v1/designs/{designId}/links` | `ui-builder-write` | Replace the whole record; 422 with the reason when a value is refused; an empty object deletes it, but a body naming only fields this host does not know is a 422 rather than a clear; 500 when the disk refuses a record that was otherwise fine |
 | `DELETE /api/ui-builder/v1/designs/{designId}/links` | `ui-builder-write` | Clear it; 204 whether or not there was one, 500 if a record could not be removed |
 | `GET /api/ui-builder/v1/links?issue=<url>` | `ui-builder-read` | The designs citing that issue, filtered to the ones this actor may open |
 

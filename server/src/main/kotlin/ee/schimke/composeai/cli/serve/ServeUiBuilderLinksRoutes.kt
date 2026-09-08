@@ -187,16 +187,46 @@ private suspend fun ApplicationCall.receiveLinksBody(): StoredLinks? {
     respondLinksError(HttpStatusCode.PayloadTooLarge, "the links request is too large")
     return null
   }
-  return try {
-    LINKS_ROUTE_JSON.decodeFromString(
-      StoredLinks.serializer(),
-      bytes.toString(StandardCharsets.UTF_8),
+  val text = bytes.toString(StandardCharsets.UTF_8)
+  val parsed =
+    try {
+      LINKS_ROUTE_JSON.decodeFromString(StoredLinks.serializer(), text)
+    } catch (_: SerializationException) {
+      respondLinksError(HttpStatusCode.BadRequest, "the links request could not be read")
+      return null
+    }
+  if (parsed.isEmpty && !text.isDeliberateClear()) {
+    // Tolerating an unknown key is how a newer client keeps the rest of its record; reading a body
+    // made *only* of unknown keys as a clear is how one misspelled field name silently deletes the
+    // issue and the pull request. An empty record has to be asked for, not arrived at.
+    respondLinksError(
+      HttpStatusCode.UnprocessableEntity,
+      "the links request names no link this host knows; send an empty object to clear the record",
     )
-  } catch (_: SerializationException) {
-    respondLinksError(HttpStatusCode.BadRequest, "the links request could not be read")
-    null
+    return null
   }
+  return parsed
 }
+
+/**
+ * Whether this body asks for an empty record rather than merely failing to name a link.
+ *
+ * A clear is `{}`, or an object carrying only the fields this host assigns itself. Anything else
+ * that decodes to an empty record got there by naming things this host does not know, which is
+ * client skew or a typo — neither of which is a request to forget what a design is for.
+ */
+private fun String.isDeliberateClear(): Boolean {
+  val body =
+    try {
+      LINKS_ROUTE_JSON.parseToJsonElement(this) as? kotlinx.serialization.json.JsonObject
+    } catch (_: SerializationException) {
+      null
+    } ?: return false
+  return body.keys.all { it in HOST_ASSIGNED_LINK_KEYS }
+}
+
+/** The fields a client may echo back without meaning anything by them. */
+private val HOST_ASSIGNED_LINK_KEYS = setOf("schemaVersion", "designId", "updatedAtEpochMillis")
 
 private suspend fun ApplicationCall.respondLinks(links: StoredLinks) {
   respondText(

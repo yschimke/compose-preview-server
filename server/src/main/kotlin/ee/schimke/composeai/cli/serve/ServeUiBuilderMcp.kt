@@ -712,7 +712,7 @@ class ServeUiBuilderMcp(
       when (tool) {
         GET_LINKS -> store.read(designId) ?: StoredLinks(designId = designId)
         SET_LINKS ->
-          when (val result = store.replace(designId, args.links())) {
+          when (val result = store.replace(designId, args.linksArgument())) {
             is LinksWriteResult.Refused -> throw McpRequestException(result.reason)
             is LinksWriteResult.Failed -> throw McpRequestException(result.reason)
             is LinksWriteResult.Stored -> result.links
@@ -722,15 +722,30 @@ class ServeUiBuilderMcp(
     return UI_BUILDER_JSON.encodeToString(StoredLinks.serializer(), stored)
   }
 
-  /** The five links out of a tool call's arguments; an omitted one is unset, not unchanged. */
-  private fun JsonObject.links(): StoredLinks =
-    StoredLinks(
-      issue = text("issue"),
-      reference = text("reference"),
-      pr = text("pr"),
-      thread = text("thread"),
-      previous = text("previous"),
-    )
+  /**
+   * The five links out of a tool call's arguments; an omitted one is unset, not unchanged.
+   *
+   * A call naming none of them clears the record, which is a thing an agent may legitimately ask
+   * for — but only by asking for it. A call that names *other* things and no link got there by
+   * misspelling a field, and reading that as a clear is how one typo deletes the issue and the pull
+   * request behind a design.
+   */
+  private fun JsonObject.linksArgument(): StoredLinks {
+    val links =
+      StoredLinks(
+        issue = text("issue"),
+        reference = text("reference"),
+        pr = text("pr"),
+        thread = text("thread"),
+        previous = text("previous"),
+      )
+    if (links.isEmpty && keys.any { it !in LINKS_CALL_KEYS }) {
+      throw McpRequestException(
+        "this call names no link this host knows; pass only `designId` to clear the record"
+      )
+    }
+    return links
+  }
 
   /**
    * The reply, plus what the design is for, when anybody has said.
@@ -1179,6 +1194,9 @@ class ServeUiBuilderMcp(
 
     private const val MAX_DESIGN_WAIT_SECONDS = 120L
     private const val MCP_CLIENT_ID = "mcp"
+    /** What a links call may carry besides a link: the design it is about, and nothing else. */
+    private val LINKS_CALL_KEYS = setOf("designId")
+
     /** The envelope field carrying the protocol response, and the response's own type tag. */
     private const val RESPONSE_KEY = "response"
 

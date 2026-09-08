@@ -192,6 +192,43 @@ class ServeUiBuilderLinksIntegrationTest {
   }
 
   @Test
+  fun `a body naming no link this host knows is refused rather than read as a clear`() {
+    val server = start()
+    createDesign(server, OPERATOR_TOKEN, DESIGN_ID)
+    links(server, OPERATOR_TOKEN, "PUT", designPath(DESIGN_ID), """{"issue":"$ISSUE"}""")
+
+    // A misspelled field name must not be the way an issue URL disappears.
+    val typo =
+      links(
+        server,
+        OPERATOR_TOKEN,
+        "PUT",
+        designPath(DESIGN_ID),
+        """{"pullRequest":"https://example.com/pull/1"}""",
+      )
+    assertEquals(422, typo.first, typo.second)
+    val kept = links(server, OPERATOR_TOKEN, "GET", designPath(DESIGN_ID), null)
+    assertTrue(kept.second.contains(ISSUE), kept.second)
+
+    // Asking for an empty record still clears it.
+    assertEquals(200, links(server, OPERATOR_TOKEN, "PUT", designPath(DESIGN_ID), "{}").first)
+    assertEquals(404, links(server, OPERATOR_TOKEN, "GET", designPath(DESIGN_ID), null).first)
+
+    // And so does the tool, which refuses the same way.
+    links(server, OPERATOR_TOKEN, "PUT", designPath(DESIGN_ID), """{"issue":"$ISSUE"}""")
+    val refused =
+      call(
+        server,
+        ServeUiBuilderMcp.SET_LINKS,
+        """{"designId":"$DESIGN_ID","pullRequest":"https://example.com/pull/1"}""",
+      )
+    val text = refused["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertEquals(true, refused["isError"]?.jsonPrimitive?.content?.toBoolean(), text)
+    val survived = links(server, OPERATOR_TOKEN, "GET", designPath(DESIGN_ID), null)
+    assertTrue(survived.second.contains(ISSUE), survived.second)
+  }
+
+  @Test
   fun `a design this actor cannot open carries no links on its refusal`() {
     val server = start()
     // The stranger's design, with the stranger's links on it. The operator holds every capability

@@ -78,6 +78,15 @@ class ServeUiBuilderLinksStoreTest {
   }
 
   @Test
+  fun `previous keeps an id exactly as it was given`() {
+    // The service creates a design under any non-blank id, whitespace included, so trimming here
+    // would quietly point the link at a different design than the one named.
+    val spaced = " checkout v1 "
+    assertIs<LinksWriteResult.Stored>(store.replace("design-1", StoredLinks(previous = spaced)))
+    assertEquals(spaced, store.read("design-1")?.previous)
+  }
+
+  @Test
   fun `previous accepts any id the service would create a design under`() {
     // The service creates a design under any non-blank id, so this field must not hold one to the
     // stricter shape the project index requires: a design that opens and edits normally has to be

@@ -80,7 +80,11 @@ class ServeUiBuilderLinksStore(private val root: Path) {
         reference = request.reference.normalized(),
         pr = request.pr.normalized(),
         thread = request.thread.normalized(),
-        previous = request.previous.normalized(),
+        // Blank means unset, and nothing else is touched. Trimming would change which design the
+        // id names: the service creates a design under any non-blank id, whitespace included, so
+        // " checkout " and "checkout" are two designs and this field must not turn one into the
+        // other.
+        previous = request.previous?.ifBlank { null },
         updatedAtEpochMillis = System.currentTimeMillis(),
       )
     if (candidate.isEmpty) {
@@ -213,12 +217,10 @@ class ServeUiBuilderLinksStore(private val root: Path) {
         return "`previous` must be under $MAX_VALUE_BYTES bytes"
       }
       // `previous` names a design on this host rather than a URL. Checked for exactly that and no
-      // more: the service creates a design under any non-blank id, so holding this field to the
-      // stricter shape the project index requires would make a design that opens and edits
-      // normally impossible to name as a predecessor.
-      if (
-        previous.isBlank() || previous.isAbsoluteHttpUrl() || previous.any { it.isWhitespace() }
-      ) {
+      // more: the service creates a design under any non-blank id — long, non-ASCII, or carrying
+      // whitespace — so any shape imposed here would make a design that opens and edits normally
+      // impossible to name as a predecessor.
+      if (previous.isAbsoluteHttpUrl()) {
         return "`previous` must be a design id on this host, not a URL"
       }
       return null
