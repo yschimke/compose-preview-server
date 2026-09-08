@@ -448,6 +448,26 @@ data class UiBuilderEditorState(
    * watching this field — which is why it lives here and not in a composable's `remember`.
    */
   val reference: ReferenceOverlayState = ReferenceOverlayState(),
+  /**
+   * Whether the next Add starts a top-level item beside the design instead of filling a slot.
+   *
+   * A tool mode, not a property of the design: nothing about it is stored, shared with a
+   * collaborator or undone, and reopening the design opens it off. What it *produces* — a board
+   * node holding the items — is in the document for everyone to see, which is the whole reason the
+   * mode itself does not have to be
+   * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+   */
+  val addBeside: Boolean = false,
+  /**
+   * The unstored axes the variant strip draws the design on, beside its own frame.
+   *
+   * Devices are not here: they are `exportDevices` in the document, because the export already
+   * writes them as `@Preview(device = …)` and the strip must show the set that ships. These three
+   * have no stored home — `DesignEnvironmentV1` is closed to this repository — and rather than
+   * smuggle them through a field that means something else they are what they honestly are, a way
+   * of looking.
+   */
+  val variantAxes: Set<EditorVariantAxis> = emptySet(),
 ) {
   /** A reference update, which never touches the document and so never becomes a submission. */
   internal fun withReference(reference: ReferenceOverlayState): UiBuilderEditorState =
@@ -670,6 +690,27 @@ sealed interface UiBuilderEditorEvent {
     val target: ParentSlot,
     val variant: EditorCatalogVariant? = null,
   ) : UiBuilderEditorEvent
+
+  /**
+   * Add a top-level item beside the design rather than into the selection — see
+   * [UiBuilderEditorState.addBeside].
+   *
+   * It names no target, and cannot: where the item lands depends on whether the design already has
+   * a board to append into or has to be wrapped in one, and both of those are decided from the
+   * document at the moment the command is built. [InsertComponent] names a target because the
+   * insert panel showed the author that target before they pressed it; there is nothing equivalent
+   * to show here, because "beside everything else" is the whole of the destination.
+   */
+  data class InsertComponentBeside(
+    val componentId: String,
+    val variant: EditorCatalogVariant? = null,
+  ) : UiBuilderEditorEvent
+
+  /** Flips [UiBuilderEditorState.addBeside]: does an Add fill a slot, or start an item? */
+  data object ToggleAddBeside : UiBuilderEditorEvent
+
+  /** Switches one unstored variant axis of the strip on or off. */
+  data class ToggleVariantAxis(val axis: EditorVariantAxis) : UiBuilderEditorEvent
 
   data class MoveNode(
     val nodeId: String,
@@ -1193,6 +1234,15 @@ class UiBuilderEditorReducer(
         else state
       is UiBuilderEditorEvent.InsertComponent ->
         insert(state, event.componentId, event.target, variant = event.variant)
+      is UiBuilderEditorEvent.InsertComponentBeside ->
+        insertBeside(state, event.componentId, variant = event.variant)
+      UiBuilderEditorEvent.ToggleAddBeside -> state.copy(addBeside = !state.addBeside)
+      is UiBuilderEditorEvent.ToggleVariantAxis ->
+        state.copy(
+          variantAxes =
+            if (event.axis in state.variantAxes) state.variantAxes - event.axis
+            else state.variantAxes + event.axis
+        )
       is UiBuilderEditorEvent.MoveNode -> move(state, event)
       is UiBuilderEditorEvent.MoveNodeInto -> moveInto(state, event)
       is UiBuilderEditorEvent.CommitProperty ->
@@ -2501,6 +2551,88 @@ class UiBuilderEditorReducer(
       )
     }
     return insertAt(state, component, target, action, component.variantProperties(variant))
+  }
+
+  /**
+   * Why an Add beside cannot happen right now, or null when it can.
+   *
+   * Asked by the insert panel before anything is pressed, for the same reason `dropTarget` is: the
+   * beginner's question about that panel is where the next Add lands, and a refusal is a worse
+   * answer after the press than before it.
+   */
+  fun besideRefusal(state: UiBuilderEditorState): String? {
+    val document = state.document
+    if (document.boardRootId != null || document.roots.isEmpty()) return null
+    // Wrapping changes which emitter writes the design: both record-free emitters route on the root
+    // component id, so a wrapped Wear screen would quietly stop being one and be handed to the
+    // record-driven generator instead. Refusing is the honest half of §1 of the design doc — a
+    // board
+    // must not convert a design into something that exports differently without saying so.
+    if (document.isWearScreen() || document.isWearWidget()) {
+      return "A Wear screen or widget is exported as itself, so it cannot become one item of a board"
+    }
+    return null
+  }
+
+  /**
+   * Add a top-level item beside the design rather than into the selection.
+   *
+   * Three shapes, one command
+   * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)):
+   * a design whose root is already a board appends into it, an empty design gets the board as its
+   * root, and any other root is wrapped in one first — insert the board beside it, move it inside.
+   *
+   * The document has two roots between those last two operations, which is legal because the client
+   * reducer checks the root count once per command (`requireSingleRoot`) rather than once per
+   * operation. It is one command, so the wrap and the item that motivated it undo together: a board
+   * that appeared because of an Add disappears when that Add is taken back.
+   */
+  private fun insertBeside(
+    state: UiBuilderEditorState,
+    componentId: String,
+    variant: EditorCatalogVariant? = null,
+  ): UiBuilderEditorState {
+    val component = catalog.componentsById[componentId] ?: return state
+    val sequence = state.operationSequence + 1
+    besideRefusal(state)?.let {
+      return state.rejected(sequence, RejectionCode.INVALID_LOCATION, it)
+    }
+    val document = state.document
+    val operations = mutableListOf<DesignOperation>()
+    val existingBoard = document.boardRootId
+    val boardId: String
+    val afterNodeId: String?
+    if (existingBoard != null) {
+      boardId = existingBoard
+      afterNodeId = document.children(ParentSlot(existingBoard, UiBuilderBoard.SLOT)).lastOrNull()
+    } else {
+      boardId = "editor-board-${sequence.toString().padStart(3, '0')}"
+      operations += DesignOperation.InsertNode(UiBuilderBoard.node(boardId))
+      // Null for an empty design, which has nothing to wrap: the board becomes the root and the
+      // item
+      // below is its first child. A board of one is not yet drawn or described as a board — see
+      // [isBoard] — so this claims nothing about a design somebody has added one thing to.
+      afterNodeId = document.roots.singleOrNull()
+      if (afterNodeId != null) {
+        operations +=
+          DesignOperation.MoveNode(afterNodeId, ParentSlot(boardId, UiBuilderBoard.SLOT))
+      }
+    }
+    val nodeId = "editor-${componentId.replace('/', '-')}-${sequence.toString().padStart(3, '0')}"
+    val defaultError =
+      component.appendDefaultSubtree(
+        catalog = catalog,
+        document = document,
+        nodeId = nodeId,
+        parent = ParentSlot(boardId, UiBuilderBoard.SLOT),
+        afterNodeId = afterNodeId,
+        operations = operations,
+        presetProperties = component.variantProperties(variant),
+      )
+    if (defaultError != null) {
+      return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, defaultError)
+    }
+    return state.apply(sequence, operations, selectionAfter = nodeId)
   }
 
   /**

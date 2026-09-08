@@ -167,6 +167,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -791,13 +792,23 @@ fun UiBuilderEditor(
           draggedComponentId = null
           catalogDragPosition = null
         },
-        canAddCatalogComponent = { reducer.dropTarget(state, it) != null },
+        // Beside the design, every component can be added: a top-level item is in no slot, so there
+        // is no compatibility to satisfy. The one thing that can still refuse is the wrap itself.
+        canAddCatalogComponent = {
+          if (state.addBeside) reducer.besideRefusal(state) == null
+          else reducer.dropTarget(state, it) != null
+        },
+        besideRefusal = reducer.besideRefusal(state),
         onCatalogAdd = { componentId, variant ->
           focusEditor()
-          reducer.dropTarget(state, componentId)?.let { target ->
-            dispatch(UiBuilderEditorEvent.InsertComponent(componentId, target, variant))
+          if (state.addBeside) {
+            dispatch(UiBuilderEditorEvent.InsertComponentBeside(componentId, variant))
             if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
-          }
+          } else
+            reducer.dropTarget(state, componentId)?.let { target ->
+              dispatch(UiBuilderEditorEvent.InsertComponent(componentId, target, variant))
+              if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
+            }
         },
         remoteComposeSources =
           if (resolveRemoteComposeDocument == null) emptyList() else remoteComposeSources,
@@ -815,9 +826,17 @@ fun UiBuilderEditor(
         modifier = modifier,
       )
     }
+  // The strip beside the design: the devices it claims, plus whichever unstored axes are switched
+  // on. Computed here rather than in the canvas because it is a question about the *design* — its
+  // stored `exportDevices` and the editor's own axes — and the canvas draws what it is handed.
+  val variantPanes =
+    remember(state.document, devicePresets, state.variantAxes) {
+      state.document.variantPanes(devicePresets, state.variantAxes)
+    }
   val canvas: @Composable (Modifier, Alignment) -> Unit = { modifier, alignment ->
     PinnedDesignCanvas(
       document = state.document,
+      variants = variantPanes,
       selectedNodeId = state.selectedNodeId,
       onNodeSelected = {
         focusEditor()
@@ -3027,6 +3046,8 @@ private fun EditorNavigator(
   onCatalogDrag: (String, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
   canAddCatalogComponent: (String) -> Boolean,
+  /** Why an Add beside would refuse, or null — see `UiBuilderEditorReducer.besideRefusal`. */
+  besideRefusal: String? = null,
   onCatalogAdd: (String, EditorCatalogVariant?) -> Unit,
   remoteComposeSources: List<RemoteComposeSource>,
   pendingRemoteComposeSource: RemoteComposeSource?,
@@ -3061,6 +3082,7 @@ private fun EditorNavigator(
             onCatalogDrag = onCatalogDrag,
             onCatalogDrop = onCatalogDrop,
             canAddCatalogComponent = canAddCatalogComponent,
+            besideRefusal = besideRefusal,
             onCatalogAdd = onCatalogAdd,
             remoteComposeSources = remoteComposeSources,
             pendingRemoteComposeSource = pendingRemoteComposeSource,
@@ -3111,6 +3133,8 @@ private fun InsertPanel(
   onCatalogDrag: (String, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
   canAddCatalogComponent: (String) -> Boolean,
+  /** Why an Add beside would refuse, or null — see `UiBuilderEditorReducer.besideRefusal`. */
+  besideRefusal: String? = null,
   onCatalogAdd: (String, EditorCatalogVariant?) -> Unit,
   remoteComposeSources: List<RemoteComposeSource>,
   pendingRemoteComposeSource: RemoteComposeSource?,
@@ -3133,17 +3157,36 @@ private fun InsertPanel(
     }
     // Where an Add would land, said before it is pressed rather than after it is refused. The
     // beginner's question about this panel is not what the components are called.
+    // Where an Add beside would land, in the same voice as the line above it: a board says how many
+    // items it already holds, and a design that has to be wrapped says that is what will happen.
+    val boardRootId = state.document.boardRootId
+    val besideDestination =
+      when {
+        besideRefusal != null -> null
+        boardRootId != null -> {
+          val held =
+            state.document.nodes[boardRootId]?.slots?.get(UiBuilderBoard.SLOT).orEmpty().size
+          "Adds beside $held item(s) on the board"
+        }
+        state.document.roots.isEmpty() -> "Adds as this design's first item"
+        else -> "Adds beside the design, on a new board"
+      }
     Text(
-      dropTarget?.let { "Adds into ${it.nodeId}.${it.slot}" }
-        ?: "Select a layer that can hold a component",
+      when {
+        state.addBeside -> besideDestination ?: besideRefusal.orEmpty()
+        dropTarget != null -> "Adds into ${dropTarget.nodeId}.${dropTarget.slot}"
+        else -> "Select a layer that can hold a component"
+      },
       Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
       color =
-        if (dropTarget == null) MaterialTheme.colorScheme.onSurfaceVariant
+        if (if (state.addBeside) besideDestination == null else dropTarget == null)
+          MaterialTheme.colorScheme.onSurfaceVariant
         else MaterialTheme.colorScheme.primary,
       style = MaterialTheme.typography.labelSmall,
-      maxLines = 1,
+      maxLines = 2,
       overflow = TextOverflow.Ellipsis,
     )
+    AddBesideSwitch(state.addBeside) { dispatch(UiBuilderEditorEvent.ToggleAddBeside) }
     if (!packs.isEmpty && onManagePacks != null) {
       PacksSummaryRow(packs, state.enabledPacks, onManagePacks)
     }
@@ -3535,6 +3578,17 @@ private fun NavigatorTab.icon(): ImageVector =
 @Composable
 internal fun PinnedDesignCanvas(
   document: UiBuilderDocument,
+  /**
+   * The read-only panes drawn beside the design, in strip order — see [UiBuilderVariantPane].
+   *
+   * Exactly one pane on this canvas takes edits, and it is the extent below: no variant carries a
+   * selection overlay, a hit-test, a drop target or a comment pin. That is the load-bearing rule of
+   * the feature rather than a limitation of it — a design has one document, so an edit made on the
+   * tablet pane would be an edit to the same tree the phone pane draws, and offering a coordinate
+   * space per pane for one shared outcome is what makes a multi-variant editor confusing
+   * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+   */
+  variants: List<UiBuilderVariantPane> = emptyList(),
   selectedNodeId: String?,
   onNodeSelected: (String) -> Unit,
   onCanvasMetrics: (Int, Int, Float) -> Unit,
@@ -3606,12 +3660,18 @@ internal fun PinnedDesignCanvas(
     // Only a design that outgrows its frame gets the second pane. One that fits would be drawn
     // twice identically, and two identical pictures side by side say nothing the one said.
     val overflowsFrame = expandedHeightDp > sourceHeight + 0.5f
-    val pairWidth = if (overflowsFrame) sourceWidth * 2f + CANVAS_PANE_GAP_DP.value else sourceWidth
-    // Fit frames the pair, not the extent alone: zooming to fit a design whose companion is off
-    // the right edge is not fitting the design. Height is the extent's, which is the taller of
-    // the two by construction.
+    // Every pane in the strip, gap included, because fit has to frame what is actually drawn.
+    val stripWidth =
+      (if (overflowsFrame) sourceWidth + CANVAS_PANE_GAP_DP.value else 0f) +
+        variants.sumOf { (CANVAS_PANE_GAP_DP.value + it.widthDp).toDouble() }.toFloat()
+    val pairWidth = sourceWidth + stripWidth
+    // Fit frames the whole row, not the extent alone: zooming to fit a design whose companion or
+    // whose tablet variant is off the right edge is not fitting the design. Height is the tallest
+    // pane, which is the extent unless a variant's frame is longer than the design is.
+    val stripHeight =
+      maxOf(expandedHeightDp, variants.maxOfOrNull { it.heightDp + VARIANT_LABEL_ROOM_DP } ?: 0f)
     val fitScale =
-      minOf(workspaceWidth.value / pairWidth, workspaceHeight.value / expandedHeightDp)
+      minOf(workspaceWidth.value / pairWidth, workspaceHeight.value / stripHeight)
         .coerceIn(MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM)
     val scale = zoom ?: fitScale
     // The frame is laid out in the design's pixels, so it is drawn back down by the same ratio it
@@ -3779,6 +3839,9 @@ internal fun PinnedDesignCanvas(
               densityRatio = densityRatio,
             )
           }
+          variants.forEach { variant ->
+            VariantPane(pane = variant, scale = scale, hostDensity = density)
+          }
         }
       }
     }
@@ -3842,6 +3905,8 @@ private fun ConstrainedFramePane(
   scale: Float,
   /** The design's pixels per workspace pixel — see the same value in [PinnedDesignCanvas]. */
   densityRatio: Float,
+  /** Distinct per pane, for the reason the function doc gives. */
+  renderSessionId: String = FRAME_COMPANION_SESSION,
 ) {
   Box(Modifier.size((widthDp * scale).dp, (heightDp * scale).dp)) {
     Surface(
@@ -3873,7 +3938,7 @@ private fun ConstrainedFramePane(
       UiBuilderSurface(
         document = document,
         editorOverlay = false,
-        renderSessionId = FRAME_COMPANION_SESSION,
+        renderSessionId = renderSessionId,
         unrolled = false,
       )
     }
@@ -3885,6 +3950,41 @@ private const val FRAME_COMPANION_SESSION = "frame-companion"
 
 /** Canvas dp between the extent and the frame beside it. */
 private val CANVAS_PANE_GAP_DP = 24.dp
+
+/**
+ * One read-only pane of the variant strip: what it is called, and the design under that frame.
+ *
+ * The label sits outside the scaled frame, like the hover editor and for its reason: it names a
+ * picture rather than being part of one, so it stays legible however far the design is zoomed out.
+ * Which is also why it is the pane's own [Column] rather than an overlay — a name drawn on top of a
+ * variant would be the one thing in the strip that is not the design.
+ */
+@Composable
+private fun VariantPane(pane: UiBuilderVariantPane, scale: Float, hostDensity: Density) {
+  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Text(
+      pane.label,
+      Modifier.height(VARIANT_LABEL_ROOM_DP.dp).widthIn(max = (pane.widthDp * scale).dp),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    ConstrainedFramePane(
+      document = pane.document,
+      widthDp = pane.widthDp,
+      heightDp = pane.heightDp,
+      scale = scale,
+      // The variant's own, not the design's: a preset carries a density as well as a size, and a
+      // Pixel Fold drawn at the watch's 2.0 would be the right box around the wrong measurements.
+      densityRatio = pane.document.renderDensity(hostDensity).density / hostDensity.density,
+      renderSessionId = pane.id,
+    )
+  }
+}
+
+/** Room above a variant pane for its label, in canvas dp. */
+private const val VARIANT_LABEL_ROOM_DP = 18f
 
 /** How wide the editor that follows the selection is, and how much room it needs under a node. */
 private val HOVER_EDITOR_WIDTH = 268.dp
@@ -4351,6 +4451,45 @@ private fun CatalogRow(
       )
     }
     CatalogAddButton(canAdd, onAdd, item.displayName)
+  }
+}
+
+/**
+ * The insert panel's mode switch: does an Add fill a slot, or start an item beside the design?
+ *
+ * A row under the destination line because that is the line it changes — the switch and the
+ * sentence saying where the next Add lands read as one statement, and a control that changes what a
+ * button does belongs beside the description of what the button does rather than in a menu.
+ *
+ * Off is the behaviour every design has had. On, an Add appends a top-level item, wrapping the
+ * design in a board first if it is not already on one
+ * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+ */
+@Composable
+private fun AddBesideSwitch(checked: Boolean, onToggle: () -> Unit) {
+  Row(
+    Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, bottom = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Column(Modifier.weight(1f)) {
+      Text("Add beside", style = MaterialTheme.typography.labelMedium)
+      Text(
+        "Place items side by side instead of inside the selection",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+    Switch(
+      checked = checked,
+      onCheckedChange = { onToggle() },
+      modifier =
+        Modifier.semantics {
+          contentDescription =
+            if (checked) "Add into the selected layer instead" else "Add beside the design instead"
+        },
+    )
   }
 }
 
@@ -5340,6 +5479,7 @@ private fun InspectorBody(
         ScreenEnvironmentInspector(
           document = state.document,
           devicePresets = devicePresets,
+          variantAxes = state.variantAxes,
           onTextInputFocusChanged = onTextInputFocusChanged,
           dispatch = dispatch,
         )
@@ -6287,6 +6427,8 @@ private fun NativeRenderFrame(
 private fun ScreenEnvironmentInspector(
   document: UiBuilderDocument,
   devicePresets: List<UiBuilderDevicePreset>,
+  /** The unstored axes the strip is drawing — see [UiBuilderEditorState.variantAxes]. */
+  variantAxes: Set<EditorVariantAxis>,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -6300,17 +6442,36 @@ private fun ScreenEnvironmentInspector(
   var layoutDirection by remember(document.id, current) { mutableStateOf(current.layoutDirection) }
   var validationError by remember(document.id, current) { mutableStateOf<String?>(null) }
 
+  // "Frame" rather than "Screen environment", and the two are not the same claim. What these fields
+  // describe is a measuring surface — a width, a density, a theme — and a device is one way to fill
+  // it in, not what it is. Presenting the two as one thing was wrong in both directions: a
+  // hand-typed 1400 x 1000 frame sat under a heading that claimed a device, and a design of loose
+  // assets on a board appeared to be a phone
+  // ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+  Text("Frame", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
   Text(
-    "Screen environment",
-    style = MaterialTheme.typography.titleSmall,
-    fontWeight = FontWeight.Bold,
-  )
-  Text(
-    "Applies to the complete render, never an individual component.",
+    "What the design is measured in. Applies to the complete render, never an individual component.",
     color = MaterialTheme.colorScheme.onSurfaceVariant,
     style = MaterialTheme.typography.bodySmall,
   )
   HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
+  // Said on a board, and nothing is hidden because of it. The frame still applies — the items are
+  // laid out down the middle of that width, at that density, under that theme — so removing the
+  // width, the density or the presets would take away controls the picture still obeys. What
+  // changes is only the claim.
+  if (document.isBoard) {
+    Text(
+      "A board of ${document.boardItemCount} items",
+      style = MaterialTheme.typography.labelLarge,
+    )
+    Text(
+      "This design holds several top-level items rather than one screen, so its frame is a canvas " +
+        "to lay them out in rather than a device it runs on.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.bodySmall,
+    )
+    HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
+  }
   if (devicePresets.isNotEmpty()) {
     DevicePresetPicker(
       presets = devicePresets,
@@ -6341,6 +6502,7 @@ private fun ScreenEnvironmentInspector(
       },
     )
   }
+  VariantAxisPicker(variantAxes) { dispatch(UiBuilderEditorEvent.ToggleVariantAxis(it)) }
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     EnvironmentTextField(
       label = "Width (dp)",
@@ -6460,7 +6622,10 @@ private fun DevicePresetPicker(
   onPick: (UiBuilderDevicePreset) -> Unit,
 ) {
   var expanded by remember { mutableStateOf(false) }
-  Text("Device", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+  // "Set frame from" rather than "Device": picking one writes the width, the height and the density
+  // and then stops mattering. The design does not become that device, which is why a frame that
+  // matches no preset reads as "Custom size" below rather than as the nearest phone.
+  Text("Set frame from", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
   Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp)) {
     Button(
       onClick = { expanded = true },
@@ -6522,6 +6687,36 @@ private fun DevicePresetPicker(
  * the answer. Nothing here is the frame device, which is why picking none is a legitimate state and
  * reads as "exports at its own frame alone" rather than as an empty selection nobody finished.
  */
+/**
+ * The unstored axes the variant strip draws, as chips.
+ *
+ * Chips rather than another dropdown, and beside the export devices rather than under them, because
+ * they are the other half of the same question — what am I looking at this design as? — while being
+ * a different kind of answer. The devices above are the design's own claim and travel with it into
+ * the export; these three are a way of looking, held in editor state, off again when the design is
+ * reopened. Wording says so: "Also shown and exported as" against "Also compare"
+ * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+ */
+@Composable
+private fun VariantAxisPicker(
+  selected: Set<EditorVariantAxis>,
+  onToggle: (EditorVariantAxis) -> Unit,
+) {
+  Text("Also compare", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+  Row(
+    Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    EditorVariantAxis.entries.forEach { axis ->
+      FilterChip(
+        selected = axis in selected,
+        onClick = { onToggle(axis) },
+        label = { Text(axis.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+      )
+    }
+  }
+}
+
 @Composable
 private fun ExportDevicePicker(
   presets: List<UiBuilderDevicePreset>,
@@ -6529,8 +6724,13 @@ private fun ExportDevicePicker(
   onToggle: (String) -> Unit,
 ) {
   var expanded by remember { mutableStateOf(false) }
+  // The list now says what it does in both directions: it is still the set the export writes as
+  // `@Preview(device = …)`, and it is also the set the workspace draws beside the design. Before
+  // the
+  // variant strip existed a design could claim three devices and show its author one, and the two
+  // decisions were made in different places with neither showing the other.
   Text(
-    "Also exports as",
+    "Also shown and exported as",
     style = MaterialTheme.typography.labelMedium,
     fontWeight = FontWeight.Bold,
   )
