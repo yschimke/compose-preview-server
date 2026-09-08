@@ -189,6 +189,13 @@ server-stored design of the same id are two designs. Publishing one to the serve
 change and would go through the existing `PUT /api/ui-builder/v1/designs/{designId}` create route,
 which refuses to replace.
 
+What that separate change would look like — taking a server design offline with its fork point, and
+replaying the stored log back through the reducer when it comes home — is
+[`UI_BUILDER_DESIGN_PORTABILITY.md`](UI_BUILDER_DESIGN_PORTABILITY.md), along with why a design in a
+file or in git is published rather than synced. Nothing here needs to change for it: a design
+created in this browser has no fork point to record, so the record shape gains one in the change
+that can populate it.
+
 It is not a second document format. The stored record carries the same `UiBuilderDocument` and the
 same reducer commands the rest of the builder uses; the only thing `compose-ui-builder-local-design/v1`
 names is the envelope around them.
