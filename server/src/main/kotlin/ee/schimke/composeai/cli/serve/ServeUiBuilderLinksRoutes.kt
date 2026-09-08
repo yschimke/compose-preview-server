@@ -78,10 +78,19 @@ internal fun Route.installUiBuilderLinksRoutes(
     val designId =
       call.authorizedLinkedDesign(service, authorization, UiBuilderRouteCapability.WRITE)
         ?: return@delete
-    withContext(Dispatchers.IO) { store.delete(designId) }
-    // 204 whether or not there was one: deleting what is already gone is the state the caller
-    // asked for, and a 404 here only tells them whether somebody else got there first.
-    call.respondText("", status = HttpStatusCode.NoContent)
+    when (withContext(Dispatchers.IO) { store.delete(designId) }) {
+      // 204 whether or not there was one: deleting what is already gone is the state the caller
+      // asked for, and a 404 here only tells them whether somebody else got there first.
+      LinksDeleteResult.REMOVED,
+      LinksDeleteResult.ABSENT -> call.respondText("", status = HttpStatusCode.NoContent)
+      // A record still on disk is not the state the caller asked for, and saying 204 over it is
+      // how an issue or a pull request survives the request to forget it.
+      LinksDeleteResult.FAILED ->
+        call.respondLinksError(
+          HttpStatusCode.InternalServerError,
+          "the links record could not be removed",
+        )
+    }
   }
 
   get(UI_BUILDER_LINKS_LOOKUP_PATH) {

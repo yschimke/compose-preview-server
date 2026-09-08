@@ -102,10 +102,25 @@ class ServeUiBuilderLinksStoreTest {
 
   @Test
   fun `deleting says whether there was anything to delete`() {
-    assertTrue(!store.delete("design-1"))
+    assertEquals(LinksDeleteResult.ABSENT, store.delete("design-1"))
     store.replace("design-1", StoredLinks(issue = "https://example.com/issues/1"))
-    assertTrue(store.delete("design-1"))
+    assertEquals(LinksDeleteResult.REMOVED, store.delete("design-1"))
     assertNull(store.read("design-1"))
+  }
+
+  @Test
+  fun `a clear that could not happen is refused rather than reported as stored`() {
+    store.replace("design-1", StoredLinks(issue = "https://example.com/issues/1"))
+    // A non-empty directory where the record file belongs is the portable form of "the delete
+    // failed" — `deleteIfExists` throws on it for root as well, which a read-only parent does not.
+    val record = Files.list(root).use { it.toList() }.single()
+    Files.delete(record)
+    Files.createDirectory(record)
+    Files.writeString(record.resolve("occupied"), "x")
+
+    assertEquals(LinksDeleteResult.FAILED, store.delete("design-1"))
+    // And the caller is told, rather than handed a 200 over a record that is still on disk.
+    assertIs<LinksWriteResult.Refused>(store.replace("design-1", StoredLinks()))
   }
 
   @Test

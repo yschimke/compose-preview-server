@@ -5199,7 +5199,15 @@ class ServeHttpServer(
       // call actually opened: a design already here has a links record of its own, possibly edited
       // since, and the published index does not get to overwrite somebody's work by being re-read.
       entry?.links?.let { links ->
-        withContext(Dispatchers.IO) { uiBuilderLinksStore?.replace(document.id, links) }
+        val written =
+          withContext(Dispatchers.IO) { uiBuilderLinksStore?.replace(document.id, links) }
+        // The design opened; only its sidecar did not. Saying so is the difference between an
+        // operator knowing why the reverse lookup omits this design and being left to guess.
+        if (written is LinksWriteResult.Refused) {
+          System.err.println(
+            "serve: links for library design ${document.id} not stored (${written.reason})"
+          )
+        }
       }
     }
     when (outcome) {

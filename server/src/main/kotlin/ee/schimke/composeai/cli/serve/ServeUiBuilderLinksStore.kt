@@ -85,9 +85,15 @@ class ServeUiBuilderLinksStore(private val root: Path) {
       )
     if (candidate.isEmpty) {
       // Nothing to keep is not a refusal; it is somebody having cleared the record, and the honest
-      // storage for that is no file at all.
-      delete(designId)
-      return LinksWriteResult.Stored(candidate)
+      // storage for that is no file at all. A clear that did not happen is a refusal, though: the
+      // caller asked for these links to be gone, and reporting success over a record still on disk
+      // is how an issue or a pull request outlives the request to forget it.
+      return when (delete(designId)) {
+        LinksDeleteResult.REMOVED,
+        LinksDeleteResult.ABSENT -> LinksWriteResult.Stored(candidate)
+        LinksDeleteResult.FAILED ->
+          LinksWriteResult.Refused("the links record could not be cleared from disk")
+      }
     }
     refusal(candidate)?.let {
       return LinksWriteResult.Refused(it)
@@ -95,12 +101,20 @@ class ServeUiBuilderLinksStore(private val root: Path) {
     return write(fileFor(designId), candidate)
   }
 
-  /** Forget what [designId] is linked to, if anything. Returns whether a file was removed. */
-  fun delete(designId: String): Boolean =
+  /**
+   * Forget what [designId] is linked to, if anything.
+   *
+   * Three answers rather than two, because "there was nothing to remove" and "there was something
+   * and it is still there" are the same `false` to a caller that cannot tell them apart — and the
+   * second one, reported as success, leaves an issue or a pull request readable after an explicit
+   * clear. The caller decides what a failure is worth; the store only declines to hide it.
+   */
+  fun delete(designId: String): LinksDeleteResult =
     try {
-      Files.deleteIfExists(fileFor(designId))
+      if (Files.deleteIfExists(fileFor(designId))) LinksDeleteResult.REMOVED
+      else LinksDeleteResult.ABSENT
     } catch (_: IOException) {
-      false
+      LinksDeleteResult.FAILED
     }
 
   /**
@@ -297,6 +311,13 @@ data class StoredLinks(
   companion object {
     const val SCHEMA_VERSION: Int = 1
   }
+}
+
+/** What [ServeUiBuilderLinksStore.delete] did: removed a record, found none, or could not. */
+enum class LinksDeleteResult {
+  REMOVED,
+  ABSENT,
+  FAILED,
 }
 
 sealed interface LinksWriteResult {

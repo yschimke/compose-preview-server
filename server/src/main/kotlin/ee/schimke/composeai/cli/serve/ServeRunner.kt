@@ -2889,6 +2889,7 @@ public class ServeRunner(
           service = uiBuilderLane.service,
           references = uiBuilderLane.references,
           comments = uiBuilderLane.comments,
+          links = uiBuilderLane.links,
         )
       } else {
         null

@@ -56,7 +56,7 @@ caller cannot open is a 404 and nothing is enumerable.
 | --- | --- | --- |
 | `GET /api/ui-builder/v1/designs/{designId}/links` | `ui-builder-read` | The record, or 404 when nobody has said |
 | `PUT /api/ui-builder/v1/designs/{designId}/links` | `ui-builder-write` | Replace the whole record; 422 with the reason when a value is refused; an all-empty record deletes it |
-| `DELETE /api/ui-builder/v1/designs/{designId}/links` | `ui-builder-write` | Clear it; 204 whether or not there was one |
+| `DELETE /api/ui-builder/v1/designs/{designId}/links` | `ui-builder-write` | Clear it; 204 whether or not there was one, 500 if a record could not be removed |
 | `GET /api/ui-builder/v1/links?issue=<url>` | `ui-builder-read` | The designs citing that issue, filtered to the ones this actor may open |
 
 A **replace** rather than a merge, deliberately: a partial write is how a design ends up citing the

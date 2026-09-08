@@ -735,18 +735,34 @@ class ServeUiBuilderMcp(
    * the pull request arrive on the reply it is already reading, and an agent asked to change a
    * screen can see the brief behind it without being told one exists.
    *
-   * Only [GET_DESIGN], and only where a record exists: a design nobody has linked pays one stat
-   * call and hands the original string back untouched. A reply that is not a JSON object is handed
-   * back as it is — a link is worth having, and never worth mangling the answer the agent asked
-   * for.
+   * Only [GET_DESIGN], only where the reply is a *successful snapshot*, and only where a record
+   * exists: a design nobody has linked pays one stat call and hands the original string back
+   * untouched. A reply that is not a JSON object is handed back as it is — a link is worth having,
+   * and never worth mangling the answer the agent asked for.
+   *
+   * ## Why the snapshot check is load-bearing
+   *
+   * A refused read is not an exception here. [run] hands a `GetSnapshotRequestV1` to the service
+   * and serialises whatever comes back, so a design this actor may not open returns a perfectly
+   * ordinary JSON envelope carrying an error response. Splicing onto that would hand the issue, the
+   * frame, the pull request and the thread of a private design to anyone holding a read capability
+   * who can guess its id — the links would be the answer the access check just refused. So the
+   * record is attached to a snapshot and to nothing else.
    */
   private fun withLinks(tool: String, args: JsonObject, reply: String): String {
     val store = links ?: return reply
     if (tool != GET_DESIGN) return reply
     val designId = args.text("designId") ?: return reply
-    // The design was read as this actor by the call that produced `reply`, so the access check has
-    // already happened; a reply that never reached the design carries no links because the tool
-    // refused before this point.
+    val parsed =
+      try {
+        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+      } catch (_: SerializationException) {
+        return reply
+      }
+    // The access check is this line. Only a snapshot means the service opened the design as this
+    // actor; an error envelope means it refused, and a refused read must not come back carrying
+    // the links of the design it refused.
+    if (!parsed.isSnapshotReply()) return reply
     val stored =
       try {
         store.read(designId)
@@ -756,18 +772,23 @@ class ServeUiBuilderMcp(
         // A record this host cannot read must never cost the agent the answer it asked for.
         null
       } ?: return reply
-    val parsed =
-      try {
-        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
-      } catch (_: SerializationException) {
-        return reply
-      }
     return JsonObject(
         parsed +
           (LINKS_KEY to UI_BUILDER_JSON.encodeToJsonElement(StoredLinks.serializer(), stored))
       )
       .toString()
   }
+
+  /**
+   * Whether this envelope carries a design the service actually handed over.
+   *
+   * Read off the response's own discriminator rather than by decoding it: the envelope a default
+   * agent call produces has had the catalog dropped ([envelope]), so the released serialiser would
+   * reject the very reply this needs to recognise.
+   */
+  private fun JsonObject.isSnapshotReply(): Boolean =
+    (this[RESPONSE_KEY] as? JsonObject)?.get(RESPONSE_TYPE_KEY)?.jsonPrimitive?.contentOrNull ==
+      SNAPSHOT_RESPONSE_TYPE
 
   /**
    * The reply, plus what this actor has not been told, when there is any.
@@ -1150,6 +1171,13 @@ class ServeUiBuilderMcp(
 
     private const val MAX_DESIGN_WAIT_SECONDS = 120L
     private const val MCP_CLIENT_ID = "mcp"
+    /** The envelope field carrying the protocol response, and the response's own type tag. */
+    private const val RESPONSE_KEY = "response"
+
+    private const val RESPONSE_TYPE_KEY = "type"
+
+    /** `SnapshotResponseV1`'s `@SerialName`: the one response that means "here is the design". */
+    private const val SNAPSHOT_RESPONSE_TYPE = "snapshot"
 
     /** The key [CommentNoticeV1] is spliced onto a reply under. */
     internal const val COMMENTS_NOTICE_KEY = "comments"

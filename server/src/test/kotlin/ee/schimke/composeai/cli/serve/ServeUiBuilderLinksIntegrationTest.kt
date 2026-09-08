@@ -192,6 +192,23 @@ class ServeUiBuilderLinksIntegrationTest {
   }
 
   @Test
+  fun `a design this actor cannot open carries no links on its refusal`() {
+    val server = start()
+    // The stranger's design, with the stranger's links on it. The operator holds every capability
+    // this host hands out and still may not open it.
+    createDesign(server, STRANGER_TOKEN, OTHER_DESIGN_ID)
+    links(server, STRANGER_TOKEN, "PUT", designPath(OTHER_DESIGN_ID), """{"issue":"$ISSUE"}""")
+
+    // The service refuses, and a refusal is an ordinary reply envelope rather than a thrown error
+    // — so the splice has to read the refusal, or it hands a private issue URL to anyone holding a
+    // read capability who can guess a design id.
+    val refused =
+      envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"$OTHER_DESIGN_ID"}""")
+    assertEquals(null, Json.parseToJsonElement(refused).jsonObject["links"], refused)
+    assertTrue(!refused.contains(ISSUE), refused)
+  }
+
+  @Test
   fun `a link the tool will not keep is refused as an error rather than stored`() {
     val server = start()
     createDesign(server, OPERATOR_TOKEN, DESIGN_ID)
@@ -358,17 +375,28 @@ class ServeUiBuilderLinksIntegrationTest {
       }
     }
 
-  private fun envelope(server: RunningServer, tool: String, arguments: String = "{}"): String {
-    val result = call(server, tool, arguments)
+  private fun envelope(
+    server: RunningServer,
+    tool: String,
+    arguments: String = "{}",
+    token: String = OPERATOR_TOKEN,
+  ): String {
+    val result = call(server, tool, arguments, token)
     val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
     assertEquals(null, result["isError"], text)
     return text
   }
 
-  private fun call(server: RunningServer, tool: String, arguments: String) =
+  private fun call(
+    server: RunningServer,
+    tool: String,
+    arguments: String,
+    token: String = OPERATOR_TOKEN,
+  ) =
     post(
         server,
         """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$tool","arguments":$arguments}}""",
+        token,
       )["result"]!!
       .jsonObject
 
@@ -378,12 +406,12 @@ class ServeUiBuilderLinksIntegrationTest {
       .jsonArray
       .map { it.jsonObject["name"]!!.jsonPrimitive.content }
 
-  private fun post(server: RunningServer, body: String) =
+  private fun post(server: RunningServer, body: String, token: String = OPERATOR_TOKEN) =
     client
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${server.server.port}/mcp")
-          .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
+          .header(ServeHttpServer.TOKEN_HEADER, token)
           .post(body.toRequestBody(JSON_MEDIA_TYPE))
           .build()
       )
