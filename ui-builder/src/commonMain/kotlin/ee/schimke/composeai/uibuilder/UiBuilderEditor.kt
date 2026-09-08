@@ -348,6 +348,17 @@ fun UiBuilderEditor(
   initialLayersOpen: Boolean = false,
   initialInspectorOpen: Boolean = false,
   /**
+   * The two tool modes a host may want a picture of: whether an Add starts a top-level item, and
+   * which unstored axes the variant strip draws.
+   *
+   * Both are editor state rather than document state, so without these the previews that exist to
+   * diff them would have to click their way into the mode — which a static render cannot do. Every
+   * other host leaves them at their defaults, which are the same off state a person's editor opens
+   * in.
+   */
+  initialAddBeside: Boolean = false,
+  initialVariantAxes: Set<EditorVariantAxis> = emptySet(),
+  /**
    * The scale the canvas opens at, or null to frame the design in the workspace.
    *
    * Null everywhere a person is editing: framing is what a design tool does with a window. A host
@@ -516,6 +527,8 @@ fun UiBuilderEditor(
             catalogQuery = initialCatalogQuery,
             layerQuery = initialLayerQuery,
             inspectorMode = initialInspectorMode,
+            addBeside = initialAddBeside,
+            variantAxes = initialVariantAxes,
             previewMode = initialPreviewMode,
             codePaneVisible = initialCodePaneVisible,
             enabledPacks =

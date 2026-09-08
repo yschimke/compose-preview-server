@@ -1,0 +1,48 @@
+# UI builder — the board, the frame, and the variant strip
+
+Committed evidence for the three axes
+[`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)
+unpins: what is *in* a design, what it is *measured in*, and how many pictures of it you look at.
+
+| file | what it is |
+| --- | --- |
+| `board.before.png` | `UiBuilderBoardBeforePreview` — one screen, Add beside switched on, nothing added yet |
+| `board.after.png` | `UiBuilderBoardPreview` — the same design after two Adds beside: a board of three items |
+| `variant-strip.before.png` | `UiBuilderCanvasForwardPreview` — a design claiming no devices, which is what every design drew before this: one pane |
+| `variant-strip.after.png` | `UiBuilderVariantStripPreview` — one document, three panes: the editing pane, the tablet it claims, and the Dark question |
+| `frame-inspector.before.png` | `UiBuilderDevicePresetPhonePreview` rendered at `origin/main` |
+| `frame-inspector.after.png` | the same preview on this branch |
+
+## What each pair shows
+
+**The board.** Read the two side by side: the insert panel's destination line goes from "Adds beside
+the design, on a new board" to "Adds beside 3 item(s) on the board", and the canvas draws the three
+items 24 dp apart down the middle of the frame. Nothing in that picture is synthetic — the board is a
+`layout/column` the renderer already knew how to draw, the layers panel lists it as the ordinary node
+it is, and both Kotlin exporters and the screen projection were not touched by this change at all.
+The inspector on the right gains "A board of 3 items", and its frame reads `Custom size`: 900 × 1400
+is not a device and the picker no longer implies one.
+
+**The variant strip.** The after is the headline. One document, drawn three times: the editing pane at
+the design's own phone frame with the selection overlay on it, `Pixel Tablet` — the device the
+document already claimed in `exportDevices`, and which until now only the Compose export read — and
+`Dark`. The tablet pane is worth looking at twice: it draws the supporting pane the phone does not,
+which is the adaptive behaviour the whole feature exists to let somebody check without leaving the
+design. Exactly one of the three takes edits.
+
+**The frame inspector.** A true before/after of one preview across the change: `Screen environment` /
+`Device` / `Also exports as` becomes `Frame` / `Set frame from` / `Also shown and exported as`, plus
+the `Also compare` chips that switch the unstored axes on. The fields below are untouched — a board
+is measured by a frame like everything else, so nothing is hidden, only the claim changed.
+
+## How this stays honest
+
+None of the six is hand-made or hand-placed. All are `@Preview` renders in
+[`UiBuilderEditorChromePreview.kt`](../../ui-builder/src/jvmMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderEditorChromePreview.kt),
+so `./gradlew :ui-builder:composePreviewRender -PcomposePreview.filter=<name>` reproduces any of
+them and the next change to the board, the strip or the inspector is diffed without anyone
+remembering to.
+
+The two board pictures are one preview apart in exactly one respect — the second seeds two
+`InsertComponentBeside` events through the ordinary reducer — so the difference between them is the
+feature and nothing else.

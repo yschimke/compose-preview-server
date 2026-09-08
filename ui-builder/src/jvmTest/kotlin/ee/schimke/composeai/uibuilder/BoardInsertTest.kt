@@ -14,8 +14,8 @@ import kotlinx.serialization.json.jsonObject
  * A design that holds several top-level items keeps them in a board, and a board is a node.
  *
  * The rules under test are stated once in `docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`: the
- * root list stays at one, the arrangement is an ordinary `layout/column` the inspector can edit, and
- * the wrap and the item that motivated it are one command so they undo together.
+ * root list stays at one, the arrangement is an ordinary `layout/column` the inspector can edit,
+ * and the wrap and the item that motivated it are one command so they undo together.
  */
 class BoardInsertTest {
   private val catalog = CapabilityCatalogParser.parse(resource("/m3-catalog-capabilities-v1.json"))
@@ -46,9 +46,9 @@ class BoardInsertTest {
   }
 
   /**
-   * The arrangement is in the document, which is the difference between a board node and a synthetic
-   * one: "make the gap smaller" is an ordinary property edit rather than a constant in four
-   * consumers.
+   * The arrangement is in the document, which is the difference between a board node and a
+   * synthetic one: "make the gap smaller" is an ordinary property edit rather than a constant in
+   * four consumers.
    */
   @Test
   fun `the board carries its spacing and alignment as editable properties`() {
@@ -82,7 +82,10 @@ class BoardInsertTest {
 
     assertIs<CommandOutcome.Accepted>(second.lastOutcome, second.lastOutcome.toString())
     assertEquals(boardId, second.document.roots.single())
-    assertEquals(3, second.document.nodes.getValue(boardId).slots.getValue(UiBuilderBoard.SLOT).size)
+    assertEquals(
+      3,
+      second.document.nodes.getValue(boardId).slots.getValue(UiBuilderBoard.SLOT).size,
+    )
     assertEquals(3, second.document.boardItemCount)
   }
 
