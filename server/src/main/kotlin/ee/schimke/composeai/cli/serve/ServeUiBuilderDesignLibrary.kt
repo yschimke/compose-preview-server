@@ -183,8 +183,20 @@ class ServeUiBuilderDesignLibrary(
    * Not cached: it is fetched once, at the moment somebody loads it, and the copy that matters
    * afterwards is the design the service now holds.
    */
-  fun document(catalog: Coordinate, designId: String): DesignDocumentV1? {
-    val entry = index(catalog).firstOrNull { it.designId == designId } ?: return null
+  fun document(catalog: Coordinate, designId: String): DesignDocumentV1? =
+    index(catalog).firstOrNull { it.designId == designId }?.let { document(catalog, it) }
+
+  /**
+   * The document behind an entry the caller already resolved.
+   *
+   * The overload exists so a caller that needs both the entry and its document reads the index
+   * once. A local `--ui-builder-designs` source is deliberately uncached, so two reads can land on
+   * either side of somebody exporting the project, and a caller that took its metadata from the
+   * first read and its document from the second would attach one design's links to another's
+   * document.
+   */
+  fun document(catalog: Coordinate, entry: Entry): DesignDocumentV1? {
+    val designId = entry.designId
     val bytes =
       runCatching { read(catalog, "$DESIGNS_DIR/${entry.file}", MAX_DOCUMENT_BYTES) }.getOrNull()
         ?: return null

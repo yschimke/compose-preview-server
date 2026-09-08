@@ -68,6 +68,10 @@ internal fun Route.installUiBuilderLinksRoutes(
         // 422 rather than 400: the body parsed and the request was understood; this value is not
         // one this host will keep, which is a fact about the link rather than about the call.
         call.respondLinksError(HttpStatusCode.UnprocessableEntity, result.reason)
+      // 500 rather than 422: the record was fine and the disk was not, so this is worth retrying
+      // and a 422 would tell the caller to stop sending a payload that would have worked.
+      is LinksWriteResult.Failed ->
+        call.respondLinksError(HttpStatusCode.InternalServerError, result.reason)
       // An all-empty record stored nothing — the store deleted the file — and the reply says so by
       // handing back the record that is now in force, which is a record with nothing in it.
       is LinksWriteResult.Stored -> call.respondLinks(result.links)

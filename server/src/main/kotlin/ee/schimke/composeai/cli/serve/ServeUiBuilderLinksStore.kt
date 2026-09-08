@@ -92,7 +92,7 @@ class ServeUiBuilderLinksStore(private val root: Path) {
         LinksDeleteResult.REMOVED,
         LinksDeleteResult.ABSENT -> LinksWriteResult.Stored(candidate)
         LinksDeleteResult.FAILED ->
-          LinksWriteResult.Refused("the links record could not be cleared from disk")
+          LinksWriteResult.Failed("the links record could not be cleared from disk")
       }
     }
     refusal(candidate)?.let {
@@ -179,7 +179,7 @@ class ServeUiBuilderLinksStore(private val root: Path) {
       }
       LinksWriteResult.Stored(stored)
     } catch (_: IOException) {
-      LinksWriteResult.Refused("the links record could not be written to disk")
+      LinksWriteResult.Failed("the links record could not be written to disk")
     }
   }
 
@@ -212,9 +212,13 @@ class ServeUiBuilderLinksStore(private val root: Path) {
       if (previous.toByteArray(StandardCharsets.UTF_8).size > MAX_VALUE_BYTES) {
         return "`previous` must be under $MAX_VALUE_BYTES bytes"
       }
-      // `previous` names a design on this host rather than a URL, so it is held to the shape a
-      // design id has here — the same one the create route and the project index already require.
-      if (!DESIGN_ID.matches(previous)) {
+      // `previous` names a design on this host rather than a URL. Checked for exactly that and no
+      // more: the service creates a design under any non-blank id, so holding this field to the
+      // stricter shape the project index requires would make a design that opens and edits
+      // normally impossible to name as a predecessor.
+      if (
+        previous.isBlank() || previous.isAbsoluteHttpUrl() || previous.any { it.isWhitespace() }
+      ) {
         return "`previous` must be a design id on this host, not a URL"
       }
       return null
@@ -231,9 +235,6 @@ class ServeUiBuilderLinksStore(private val root: Path) {
 
     /** The whole record, with the JSON around it and room for a field a later release adds. */
     private const val MAX_FILE_BYTES: Long = 32L * 1024
-
-    /** The same shape the create route and the project design index already require of an id. */
-    private val DESIGN_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
     private val URL_FIELDS: List<Pair<String, (StoredLinks) -> String?>> =
       listOf(
@@ -323,6 +324,20 @@ enum class LinksDeleteResult {
 sealed interface LinksWriteResult {
   data class Stored(val links: StoredLinks) : LinksWriteResult
 
-  /** A sentence the route hands back verbatim; it is written to be read by an operator. */
+  /**
+   * These links are not ones this host will keep, whatever the state of the disk.
+   *
+   * A fact about the record, so the same payload will be refused again: the caller should change it
+   * rather than retry it.
+   */
   data class Refused(val reason: String) : LinksWriteResult
+
+  /**
+   * The record was acceptable and the storage did not take it.
+   *
+   * Kept apart from [Refused] because the two want opposite things from a client. A refusal is
+   * permanent and a failure is not, and reporting a full disk as a validation error tells a caller
+   * to stop sending a payload that would have worked.
+   */
+  data class Failed(val reason: String) : LinksWriteResult
 }

@@ -78,6 +78,21 @@ class ServeUiBuilderLinksStoreTest {
   }
 
   @Test
+  fun `previous accepts any id the service would create a design under`() {
+    // The service creates a design under any non-blank id, so this field must not hold one to the
+    // stricter shape the project index requires: a design that opens and edits normally has to be
+    // nameable as a predecessor.
+    val long = "checkout-" + "x".repeat(120)
+    assertIs<LinksWriteResult.Stored>(store.replace("design-1", StoredLinks(previous = long)))
+    assertEquals(long, store.read("design-1")?.previous)
+
+    assertIs<LinksWriteResult.Stored>(
+      store.replace("design-2", StoredLinks(previous = "Ünicode-café"))
+    )
+    assertEquals("Ünicode-café", store.read("design-2")?.previous)
+  }
+
+  @Test
   fun `a link too long to be a link is refused`() {
     val enormous = "https://example.com/" + "x".repeat(ServeUiBuilderLinksStore.MAX_VALUE_BYTES)
     assertEquals(
@@ -120,7 +135,7 @@ class ServeUiBuilderLinksStoreTest {
 
     assertEquals(LinksDeleteResult.FAILED, store.delete("design-1"))
     // And the caller is told, rather than handed a 200 over a record that is still on disk.
-    assertIs<LinksWriteResult.Refused>(store.replace("design-1", StoredLinks()))
+    assertIs<LinksWriteResult.Failed>(store.replace("design-1", StoredLinks()))
   }
 
   @Test

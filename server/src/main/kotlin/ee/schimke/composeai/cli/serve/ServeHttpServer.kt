@@ -5178,9 +5178,10 @@ class ServeHttpServer(
       )
       return
     }
+    // One index read for both, so the links written below belong to the document created above.
     val entry =
       withContext(Dispatchers.IO) { library.index(catalog).firstOrNull { it.designId == designId } }
-    val document = withContext(Dispatchers.IO) { library.document(catalog, designId) }
+    val document = entry?.let { withContext(Dispatchers.IO) { library.document(catalog, it) } }
     if (document == null) {
       call.respondText(
         "$system publishes no design called $designId",
@@ -5203,10 +5204,14 @@ class ServeHttpServer(
           withContext(Dispatchers.IO) { uiBuilderLinksStore?.replace(document.id, links) }
         // The design opened; only its sidecar did not. Saying so is the difference between an
         // operator knowing why the reverse lookup omits this design and being left to guess.
-        if (written is LinksWriteResult.Refused) {
-          System.err.println(
-            "serve: links for library design ${document.id} not stored (${written.reason})"
-          )
+        val why =
+          when (written) {
+            is LinksWriteResult.Refused -> written.reason
+            is LinksWriteResult.Failed -> written.reason
+            else -> null
+          }
+        if (why != null) {
+          System.err.println("serve: links for library design ${document.id} not stored ($why)")
         }
       }
     }

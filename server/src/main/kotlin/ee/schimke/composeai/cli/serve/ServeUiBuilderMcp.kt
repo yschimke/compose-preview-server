@@ -397,7 +397,14 @@ class ServeUiBuilderMcp(
           .onFailure { onLog("serve: reference overlay for $designId not removed (${it.message})") }
         runCatching { comments?.delete(designId) }
           .onFailure { onLog("serve: comment board for $designId not removed (${it.message})") }
-        runCatching { links?.delete(designId) }
+        runCatching {
+          // The store answers with an enum rather than throwing, so a failure reaches this
+          // `runCatching` as an ordinary value: the check has to be on the result, or a record
+          // left on disk is inherited by whatever takes the id next.
+          if (links?.delete(designId) == LinksDeleteResult.FAILED) {
+            onLog("serve: links record for $designId not removed")
+          }
+        }
           .onFailure { onLog("serve: links record for $designId not removed (${it.message})") }
         UI_BUILDER_JSON.encodeToString(
           DesignDeletedV1.serializer(),
@@ -707,6 +714,7 @@ class ServeUiBuilderMcp(
         SET_LINKS ->
           when (val result = store.replace(designId, args.links())) {
             is LinksWriteResult.Refused -> throw McpRequestException(result.reason)
+            is LinksWriteResult.Failed -> throw McpRequestException(result.reason)
             is LinksWriteResult.Stored -> result.links
           }
         else -> throw McpRequestException("unknown UI-builder links tool '$tool'")
