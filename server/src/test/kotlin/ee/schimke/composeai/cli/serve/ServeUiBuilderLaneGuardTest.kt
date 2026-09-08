@@ -7,6 +7,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -56,6 +57,48 @@ class ServeUiBuilderLaneGuardTest {
     // Moving the file aside loses the designs in it; saying so is the difference between a remedy
     // and a trap.
     assertTrue(warning.contains("copy it first"), warning)
+  }
+
+  @Test
+  fun `a failure that is not about the stored bytes offers no state-file remedy`() {
+    // Advising "restore the backup" for a failure the state file had nothing to do with sends an
+    // operator to overwrite a good file while the real cause goes unfixed.
+    val warning = uiBuilderDisabledWarning(stateDirectory(), IllegalStateException("renderer gone"))
+
+    assertTrue(warning.contains("renderer gone"), warning)
+    assertTrue(warning.contains("not a failure of the stored state"), warning)
+    assertFalse(warning.contains("cp --"), warning)
+    assertFalse(warning.contains("--ui-builder-state-dir none"), warning)
+  }
+
+  @Test
+  fun `the printed command survives a directory a shell would otherwise mangle`() {
+    val awkward = File(stateDirectory(), "state dir with spaces & \$vars")
+    awkward.mkdirs()
+
+    val warning = uiBuilderDisabledWarning(awkward, UiBuilderPersistenceException("bad json"))
+
+    // Single-quoted, so the shell expands none of it, and `--` so a leading dash is not an option.
+    assertTrue(warning.contains("cp -- '"), warning)
+    assertTrue(warning.contains("state dir with spaces & \$vars"), warning)
+    assertFalse(warning.contains("cp -- $awkward"), "an unquoted path would split on the spaces")
+  }
+
+  @Test
+  fun `a relative state directory is reported as an absolute path`() {
+    val warning =
+      uiBuilderDisabledWarning(File("ui-builder-state"), UiBuilderPersistenceException("x"))
+
+    // A relative path resolves against whoever reads the log, not against the server.
+    assertTrue(warning.contains(File("ui-builder-state").absolutePath), warning)
+  }
+
+  @Test
+  fun `a single quote in the path does not break out of the quoting`() {
+    val warning =
+      uiBuilderDisabledWarning(File("/srv/it's here"), UiBuilderPersistenceException("x"))
+
+    assertTrue(warning.contains("it'\\''s here"), warning)
   }
 
   @Test

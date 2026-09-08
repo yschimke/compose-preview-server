@@ -2313,12 +2313,17 @@ public class ServeRunner(
   /**
    * The UI-builder lane, or null when it could not be opened.
    *
-   * Nothing about the builder may stop `serve` binding its port. The one exception kept fatal is
-   * the argument check below: `--ui-builder-migrate-state` is a flag the operator passed on this
-   * invocation asking for durable work, and silently skipping it would be worse than refusing.
-   * Every failure after that — an unwritable state directory, a corrupt or oversize state file, a
-   * checksum mismatch, a migration that could not complete — disables the lane and prints
-   * [uiBuilderDisabledWarning]. See yschimke/compose-preview-server#568 for the deploy this cost.
+   * Nothing about the **stored state** may stop `serve` binding its port: an unwritable state
+   * directory, a corrupt or oversize state file, a checksum mismatch, a migration that could not
+   * complete — each disables the lane and prints [uiBuilderDisabledWarning]. See
+   * yschimke/compose-preview-server#568 for the deploy this cost.
+   *
+   * Two failures stay fatal, and both are the operator's own configuration rather than the host's
+   * state: `--ui-builder-migrate-state` passed where it cannot apply (checked below, before any
+   * I/O), and a component record named by `--ui-builder-packs` that cannot be loaded
+   * ([UiBuilderConfigurationException]). Starting anyway would leave a typo looking like a working
+   * host, and the recovery advice for a state-file failure — restore the backup, move the file
+   * aside — is actively wrong for both.
    */
   private fun openUiBuilderService(
     appDirectory: File?,
@@ -2342,6 +2347,10 @@ public class ServeRunner(
     val opened = AtomicReference<AutoCloseable?>(null)
     return try {
       openUiBuilderLane(directory, catalogStore, catalogLoads, opened::set)
+    } catch (failure: UiBuilderConfigurationException) {
+      // The operator asked for something this host cannot honour. Degrading would bury it.
+      runCatching { opened.get()?.close() }
+      throw failure
     } catch (failure: Exception) {
       runCatching { opened.get()?.close() }
       System.err.println(uiBuilderDisabledWarning(directory, failure))
@@ -2448,7 +2457,11 @@ public class ServeRunner(
           }
           is ComponentRecordSource.Lookup.Unusable ->
             if (records.isConfigured(packId)) {
-              throw IllegalArgumentException(
+              // Typed, not an IllegalArgumentException, so the guard in [openUiBuilderService]
+              // lets it through: this is the operator's typo, and a host that started without the
+              // pack they named — while advising them to restore a state-file backup that was
+              // never the problem — would hide it behind worse advice.
+              throw UiBuilderConfigurationException(
                 "--ui-builder-packs admits `$packId`, and its component record could not be " +
                   "loaded: ${lookup.reason}"
               )
