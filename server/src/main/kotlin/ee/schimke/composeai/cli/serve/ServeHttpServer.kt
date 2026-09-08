@@ -4398,6 +4398,28 @@ class ServeHttpServer(
         )
         return@withLeasedSession
       }
+      // The sibling catalog's rendition of the very cells this sheet defines, resolved per node
+      // through the same `compareWith` + `parallel` pairing the viewer's spec lane uses. A sheet is
+      // where that comparison finally has somewhere to live: the pairing has always been able to
+      // answer "what does wear-m3 make of THIS component", and until now a reader had to open one
+      // component at a time to ask it.
+      //
+      // Skipped whole on a top-level site, for [parallelSpecSource]'s reason: a site host answers a
+      // neighbouring system's `/render/` with its own 404, so the images could only ever be broken.
+      // Skipped just as cheaply on the ordinary catalog, since `resolveParallel` returns null on
+      // the
+      // first step for anything that declares no `compareWith`.
+      val previewsById = renderHost.previews.associateBy { it.id }
+      val parallelRenders = LinkedHashMap<String, String>()
+      var parallelLabel: String? = null
+      if (siteSystem() == null) {
+        for (node in page.nodes) {
+          val preview = previewsById[node.renderablePreviewId ?: continue] ?: continue
+          val resolved = resolveParallel(renderHost, preview) ?: continue
+          parallelLabel = parallelLabel ?: resolved.label
+          parallelRenders[node.nodeId] = parallelRenderUrl(resolved.system, resolved.preview.id)
+        }
+      }
       markGeneration("static-page", pageCacheControl())
       call.respondText(
         ServeWeb.designPage(
@@ -4405,6 +4427,15 @@ class ServeHttpServer(
           page = page,
           svg = svg,
           fileKey = store.fileKey,
+          parallelRenders = parallelRenders,
+          parallelLabel = parallelLabel,
+          // Named only when there is a second catalog to tell it apart from. On its own a sheet has
+          // one set of renders and calling them "Ours" is both shorter and unambiguous; beside
+          // `wear-m3`, a button reading `Ours` is the half of the pair that doesn't say what it is.
+          ownLabel =
+            if (parallelRenders.isEmpty()) null
+            else
+              catalogBundleHost(renderHost)?.title?.takeIf { it.isNotBlank() } ?: renderHost.label,
           // Resolved against what this session actually publishes, so a node mapped to a preview
           // the catalog dropped renders as a plain outline instead of a broken image.
           renderablePreviewIds = renderHost.previews.mapTo(HashSet()) { it.id },
@@ -5579,6 +5610,22 @@ class ServeHttpServer(
     )
   }
 
+  /**
+   * The sibling catalog's own render route for [previewId], carrying this page's credential.
+   *
+   * Same origin: it is that catalog's ordinary render route on this very server, which is the whole
+   * reason a cross-catalog comparison is cheap to offer here and expensive anywhere else. The token
+   * is [linkToken] and not the server's own — a caller holding an agent grant gets pages wired with
+   * THEIR token, and a foreign-catalog raster must not be the one link that leaks the operator's.
+   */
+  private fun RoutingContext.parallelRenderUrl(system: String, previewId: String): String =
+    "/" +
+      WebEscaping.urlEncodeSegment(system) +
+      "/render/" +
+      WebEscaping.urlEncodeSegment(previewId) +
+      ".png" +
+      if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
+
   private fun RoutingContext.parallelSpecSource(
     host: ServeHost,
     preview: ServePreview,
@@ -5600,19 +5647,11 @@ class ServeHttpServer(
       // which is the whole reason the pairing is cheap to offer here and expensive anywhere else
       // (a static compare page can only bake thumbnails at publish time), and is what satisfies
       // the lane's own same-origin guard in `viewer.ts` `specRasterSrc()`.
-      rasterUrl =
-        "/" +
-          WebEscaping.urlEncodeSegment(siblingSystem) +
-          "/render/" +
-          WebEscaping.urlEncodeSegment(siblingPreview.id) +
-          ".png" +
-          // …but the same credential every other URL on this page carries. `/render/` is
-          // token-gated like the rest of the box, so a bare path meets `rejectBadToken`'s own
-          // 404 on every server that is not `--public` — which is every local `serve` and every
-          // private deployment. `linkToken`, not the server's own: a caller holding an agent
-          // grant gets pages wired with THEIR token, and this raster must not be the one link
-          // that leaks the operator's.
-          if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken()),
+      // …but the same credential every other URL on this page carries. `/render/` is token-gated
+      // like the rest of the box, so a bare path meets `rejectBadToken`'s own 404 on every server
+      // that is not `--public` — which is every local `serve` and every private deployment. See
+      // [parallelRenderUrl], which the design-page sheet builds the same URL through.
+      rasterUrl = parallelRenderUrl(siblingSystem, siblingPreview.id),
       // The caveat that keeps the pair honest. Unlike the kit reference, this panel is another
       // catalog's RENDER, produced under its own theme, knobs and overrides rather than the ones
       // that produced the render beside it. Saying so is the difference between a comparison and an

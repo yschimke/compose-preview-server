@@ -13041,6 +13041,23 @@ $cards
      * plain module, or any caller that has nothing to file against) omits it entirely.
      */
     reportIssue: ReportIssue? = null,
+    /**
+     * The `compareWith` sibling's own render of each node, by node id — a second catalog's
+     * rendition of the very cells this sheet defines.
+     *
+     * Empty for the ordinary catalog, which declares no pairing, and empty on a top-level site,
+     * where a neighbouring system's `/render/` route is unreachable by construction ([ServeSites]).
+     * Empty is the whole switch: the sheet then offers exactly the two sources it always did, with
+     * no control that acts on nothing.
+     *
+     * URLs are built by the caller from a validated system and preview id, not taken from any
+     * manifest, and each carries the same credential as every other URL on the page.
+     */
+    parallelRenders: Map<String, String> = emptyMap(),
+    /** What that sibling catalog calls itself — the word its buttons read. */
+    parallelLabel: String? = null,
+    /** What THIS catalog's button reads. Falls back to a neutral "Ours". */
+    ownLabel: String? = null,
   ): String {
     // The session id links may carry. Null on a rooted site (and for the default session): the
     // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
@@ -13074,6 +13091,22 @@ $cards
     // announced instead of a pressed state that was never true, and the sheet still navigates with
     // no script at all.
     val components = page.nodes.filter(PageNode::isComponent)
+
+    /**
+     * A cell WE draw and the sibling does not.
+     *
+     * On the sibling's lane such a slot falls back to the design's own drawing, exactly as a failed
+     * render does — which, unmarked, reads as "the sibling draws it just like the design". It is
+     * the opposite: it is the sibling not drawing it at all, and a cell present on one side and
+     * absent on the other is the more interesting half of a parity comparison. So it is said out
+     * loud on the node rather than papered over, on the same principle as `ServeParallelPairing`'s
+     * stated fallback.
+     */
+    fun unpaired(node: PageNode): Boolean =
+      parallelRenders.isNotEmpty() &&
+        node.renderablePreviewId?.takeIf { it in renderablePreviewIds } != null &&
+        node.nodeId !in parallelRenders
+
     val outlines =
       components.joinToString("\n") { node ->
         val label =
@@ -13093,6 +13126,7 @@ $cards
           "id=\"${nodeAnchorId(node.nodeId)}\" " +
           "data-link=\"${WebEscaping.htmlEscape(node.link.wire)}\"" +
           (if (node in gaps) " data-cp-gap" else "") +
+          (if (unpaired(node)) " data-cp-unpaired" else "") +
           // Separate from `data-link`, because it answers a different question: the link says HOW
           // we know this maps, the cell says WHAT is behind it. See `PageNode.cell`.
           (if (node.cell) " data-cp-cell" else "") +
@@ -13118,6 +13152,52 @@ $cards
             "src=\"$basePath/render/${WebEscaping.urlEncodeSegment(previewId)}.png$q\">"
         }
         .joinToString("\n")
+
+    // The SIBLING catalog's renders of the same cells, in their own inert `<template>` — adopted
+    // only when a reader names that source, since they come off another catalog's daemon and a
+    // sheet that warmed them speculatively would charge every reader for a comparison almost none
+    // of them open. Keyed by node id exactly as ours are, so the element pairs them up without
+    // knowing anything about either catalog's preview vocabulary.
+    val parallelImages =
+      components
+        .mapNotNull { node ->
+          val url = parallelRenders[node.nodeId] ?: return@mapNotNull null
+          "<img class=\"cp-page-parallel\" alt=\"\" loading=\"lazy\" " +
+            "data-cp-node=\"${WebEscaping.htmlEscape(node.nodeId)}\" " +
+            "src=\"${WebEscaping.htmlEscape(url)}\">"
+        }
+        .joinToString("\n")
+    val hasParallel = parallelImages.isNotEmpty()
+    val siblingNameHtml =
+      WebEscaping.htmlEscape(parallelLabel?.takeIf { it.isNotBlank() } ?: "Sibling")
+    val ourNameHtml = WebEscaping.htmlEscape(ownLabel?.takeIf { it.isNotBlank() } ?: "Ours")
+    // A catalog with no sibling sees no third source and no control that could name one. Whole
+    // options rather than disabled ones: a permanently dead button is a worse answer than a missing
+    // one, and every catalog on this server except the paired few would be looking at two of them.
+    val parallelTemplate =
+      if (!hasParallel) ""
+      else "\n                <template data-cp-page-parallel-source>$parallelImages</template>"
+    val showParallel =
+      if (!hasParallel) ""
+      else
+        "\n                <label title=\"$siblingNameHtml's own renders of the same design-kit " +
+          "cells, under that catalog's theme and knobs\">" +
+          "\n                  <input type=\"radio\" name=\"cp-page-lane\" value=\"parallel\" " +
+          "data-cp-page-lane>" +
+          "\n                  <span>$siblingNameHtml</span></label>"
+    val unpairedLegend =
+      if (!hasParallel) ""
+      else
+        "\n            <span data-cp-unpaired><i class=\"cp-page-swatch\" " +
+          "style=\"color:#6e7781;border-style:dotted\"></i> not drawn by $siblingNameHtml</span>"
+    val diffParallel =
+      if (!hasParallel) ""
+      else
+        "\n                <label title=\"Score what the sheet shows against $siblingNameHtml's " +
+          "render of the same cell — hold to light every node at once\">" +
+          "\n                  <input type=\"radio\" name=\"cp-page-baseline\" value=\"parallel\" " +
+          "data-cp-page-baseline>" +
+          "\n                  <span>$siblingNameHtml</span></label>"
 
     // The way out of the diff lane, one anchor per scoreable node, riding the same inert template
     // trick as the renders. `?mode=spec&specView=diff` is the viewer's own deep link into the full
@@ -13156,6 +13236,7 @@ $cards
         val detail = if (code != null) WebEscaping.htmlEscape(code) else "no code behind this"
         "<$tag class=\"cp-page-row\" data-link=\"${WebEscaping.htmlEscape(node.link.wire)}\"" +
           (if (node in gaps) " data-cp-gap" else "") +
+          (if (unpaired(node)) " data-cp-unpaired" else "") +
           (if (node.cell) " data-cp-cell" else "") +
           " " +
           "data-cp-node=\"${WebEscaping.htmlEscape(node.nodeId)}\"$hrefAttr>" +
@@ -13216,17 +13297,35 @@ $cards
           pageReportRowHtml(reportIssue, "cp-page-links")
         }
           <div class="cp-page-controls">
-            <div class="cp-page-lane" role="radiogroup" aria-label="What the sheet shows">
-              <label><input type="radio" name="cp-page-lane" value="code" data-cp-page-lane checked>
-                <span>Our renders</span></label>
-              <label><input type="radio" name="cp-page-lane" value="design" data-cp-page-lane>
-                <span>Design spec</span></label>
-              <label title="Show how far each node is from the design — hold to light every node at once">
-                <input type="radio" name="cp-page-lane" value="diff" data-cp-page-lane>
-                <span>Diff %</span></label>
+            <div class="cp-page-group">
+              <span class="cp-page-group-label" id="cp-page-show-label">Show</span>
+              <div class="cp-page-lane" role="radiogroup" aria-labelledby="cp-page-show-label">
+                <label title="This catalog's own renders, standing in the design's slots">
+                  <input type="radio" name="cp-page-lane" value="code" data-cp-page-lane checked>
+                  <span>$ourNameHtml</span></label>$showParallel
+                <label title="The design file's own drawing of this sheet">
+                  <input type="radio" name="cp-page-lane" value="design" data-cp-page-lane>
+                  <span>Design</span></label>
+              </div>
             </div>
-            <label class="cp-page-opt"><input type="checkbox" data-cp-page-outlines> Outline every component</label>
-            <label class="cp-page-opt"><input type="checkbox" data-cp-page-unlinked> Only what we don't implement</label>
+            <div class="cp-page-group">
+              <span class="cp-page-group-label" id="cp-page-diff-label">Diff against</span>
+              <div class="cp-page-lane" role="radiogroup" aria-labelledby="cp-page-diff-label">
+                <label><input type="radio" name="cp-page-baseline" value="off" data-cp-page-baseline checked>
+                  <span>Off</span></label>
+                <label hidden title="Score what the sheet shows against this catalog's own renders — hold to light every node at once">
+                  <input type="radio" name="cp-page-baseline" value="code" data-cp-page-baseline>
+                  <span>$ourNameHtml</span></label>$diffParallel
+                <label title="Score what the sheet shows against the design's own drawing — hold to light every node at once">
+                  <input type="radio" name="cp-page-baseline" value="design" data-cp-page-baseline>
+                  <span>Design</span></label>
+              </div>
+            </div>
+            <div class="cp-page-group">
+              <span class="cp-page-group-label">Marks</span>
+              <label class="cp-page-opt"><input type="checkbox" data-cp-page-outlines> Outlines</label>
+              <label class="cp-page-opt"><input type="checkbox" data-cp-page-unlinked> Gaps only</label>
+            </div>
             <cp-page-zoom hidden></cp-page-zoom>
           </div>
           <p class="cp-page-hint">Double-click a section to zoom · ⌘/Ctrl-scroll · drag to pan
@@ -13236,13 +13335,13 @@ $cards
             <span data-link="manifest"><i class="cp-page-swatch" style="color:#0969da"></i> design-map</span>
             <span data-link="convention"><i class="cp-page-swatch" style="color:#bf8700"></i> name match</span>
             <span data-cp-cell><i class="cp-page-swatch" style="color:#8250df"></i> override variant</span>
-            <span data-link="unlinked"><i class="cp-page-swatch" style="color:#cf222e;border-style:dashed"></i> not implemented</span>
+            <span data-link="unlinked"><i class="cp-page-swatch" style="color:#cf222e;border-style:dashed"></i> not implemented</span>$unpairedLegend
           </div>
           <div class="cp-page-layout">
             <div class="cp-page-stage" style="--cp-page-aspect:$aspect">
               <div class="cp-page-canvas" data-cp-page-canvas>
                 $svg
-                <template data-cp-page-render-source>$renders</template>
+                <template data-cp-page-render-source>$renders</template>$parallelTemplate
                 <template data-cp-page-diff-links>$diffLinks</template>
                 $outlines
               </div>

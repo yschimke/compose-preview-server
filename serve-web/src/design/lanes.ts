@@ -1,40 +1,127 @@
-// The three lanes, and what the two filters do to the sheet.
+// WHAT THE SHEET SHOWS, AND WHAT IT IS BEING JUDGED AGAINST — two questions, two controls.
 //
-// One sheet, three lanes: this catalog's renders standing in the design's slots, the design's own
-// drawing, or the difference between them scored per node.
+// The surface used to ask one: a three-way lane of `code` / `design` / `diff`. That worked while
+// there were only ever two pictures of a node, because "diff" could mean "ours, scored against the
+// design" without ever saying so. It stops working the moment a catalog has a `compareWith`
+// sibling: a reader on `remote-m3` wants to see `wear-m3`'s rendition of the same kit node, and to
+// score against that rather than against Figma, and neither fits on an axis whose third value is a
+// verb.
 //
-// The first two are deliberately not a composite — no opacity slider, no `difference` blend over the
-// whole sheet. Those answered "how close are these two pictures" by making the reader squint; the
-// diff lane answers it with a number and a map, and the eye compares two clean frames better than
-// one muddy one.
+// So the lane is factored into the two orthogonal questions it was conflating:
+//
+//   SHOW         — whose picture stands in each of the design's slots: ours, the sibling's, or the
+//                  design's own drawing.
+//   DIFF AGAINST — which of the other two that picture is scored against, or nothing.
+//
+// Both axes range over the SAME three sources, which is what makes a pairing describable in one
+// sentence ("showing ours, diffed against wear-m3") and what keeps the readout honest: a diff is a
+// pair of pictures, and both halves are named on screen rather than one being implied by a verb.
+//
+// The two "show" lanes are still deliberately not a composite — no opacity slider, no `difference`
+// blend over the whole sheet. Those answered "how close are these two pictures" by making the
+// reader squint; the diff axis answers it with a number and a map, and the eye compares two clean
+// frames better than one muddy one.
 
-export type Lane = "code" | "design" | "diff";
+/** One picture of a node: this catalog's render, the sibling catalog's, or the design's drawing. */
+export type Source = "code" | "parallel" | "design";
 
-/** The classes the stage carries for a lane. */
+/** Which source stands in the design's slots. */
+export type Lane = Source;
+
+/** What the shown source is scored against — `off` for no scoring at all. */
+export type Baseline = "off" | Source;
+
+/** Every source, in the order the controls offer them. */
+export const SOURCES: readonly Source[] = ["code", "parallel", "design"];
+
+/** The classes the stage carries for a (lane, baseline) pair. */
 export interface StageState {
     "cp-page-swap-on": boolean;
     "cp-page-hide-design": boolean;
+    "cp-page-parallel-on": boolean;
     "cp-page-diff-on": boolean;
 }
 
-export function laneState(lane: Lane): StageState {
-    // Anything that is not the design's own drawing shows ours in the slots — including the diff
-    // lane, which scores what is actually on the sheet.
+/**
+ * What the stage looks like for one pairing.
+ *
+ * The first three are keyed on the LANE alone — what is being scored changes no pixel of what is
+ * drawn, which is exactly the separation this split exists to make. `cp-page-swap-on` still means
+ * "a render stands in the design's slots"; WHICH render is `cp-page-parallel-on`'s business.
+ */
+export function stageState(lane: Lane, baseline: Baseline): StageState {
     const ours = lane !== "design";
     return {
         "cp-page-swap-on": ours,
         "cp-page-hide-design": ours,
-        "cp-page-diff-on": lane === "diff",
+        "cp-page-parallel-on": lane === "parallel",
+        "cp-page-diff-on": baseline !== "off",
     };
 }
 
-/** Whether entering this lane needs the renders adopted out of their inert `<template>`. */
-export function needsRenders(lane: Lane): boolean {
-    return lane !== "design";
+/** Whether this pairing needs THIS catalog's renders adopted out of their inert `<template>`. */
+export function needsRenders(lane: Lane, baseline: Baseline): boolean {
+    return lane === "code" || baseline === "code";
+}
+
+/**
+ * Whether this pairing needs the sibling catalog's renders adopted.
+ *
+ * Asked separately from {@link needsRenders} because the sibling's images come off another
+ * catalog's daemon: a reader who never names it must never cost it a request.
+ */
+export function needsParallel(lane: Lane, baseline: Baseline): boolean {
+    return lane === "parallel" || baseline === "parallel";
 }
 
 export function laneOf(value: string | null | undefined): Lane {
-    return value === "design" || value === "diff" ? value : "code";
+    return value === "design" || value === "parallel" ? value : "code";
+}
+
+export function baselineOf(value: string | null | undefined): Baseline {
+    return value === "design" || value === "parallel" || value === "code"
+        ? value
+        : "off";
+}
+
+/**
+ * Whether [value] is a baseline the sheet can actually be scored against right now.
+ *
+ * Two rules, both about the reader rather than about the scorer. A source cannot be its own
+ * baseline — the answer is zero by construction, and offering it would be a control whose only
+ * outcome is "0.0%" in every slot. And a sibling this page carries no renders for is not a
+ * comparison this server can make, so the option is not offered at all rather than offered and
+ * dashed.
+ */
+export function allowsBaseline(
+    lane: Lane,
+    value: Baseline,
+    hasParallel: boolean,
+): boolean {
+    if (value === "off") return true;
+    if (value === lane) return false;
+    return value !== "parallel" || hasParallel;
+}
+
+/**
+ * The baseline to hold after the reader changes what the sheet SHOWS.
+ *
+ * Flipping onto the source you were scoring against reads as a SWAP — "now show me that one" — so
+ * the baseline takes the lane just vacated rather than falling to `off`. It is the same pair seen
+ * from the other side and the number does not move; dropping to `off` instead would blank every
+ * badge on the one gesture most likely to mean "and how far is it, from here?".
+ *
+ * Nothing else moves: a baseline that is still legal is left exactly where the reader put it.
+ */
+export function baselineAfterLane(
+    previous: Lane,
+    next: Lane,
+    baseline: Baseline,
+    hasParallel: boolean,
+): Baseline {
+    if (allowsBaseline(next, baseline, hasParallel)) return baseline;
+    if (baseline === "off") return "off";
+    return allowsBaseline(next, previous, hasParallel) ? previous : "off";
 }
 
 /**
@@ -68,7 +155,7 @@ export function isInert(unlinkedOnly: boolean, hasGap: boolean): boolean {
 /**
  * The class that puts EVERY diff badge on the sheet at once.
  *
- * The diff lane's resting state is one badge — wherever the reader is pointing or focused — because
+ * The diff axis's resting state is one badge — wherever the reader is pointing or focused — because
  * forty red pills over a specimen sheet hide the drawing they are judging
  * (`docs/design/COMPARE_NAVIGATION.md`, F5). This is the deliberate look at all of them, and it is
  * held rather than latched: it is the gesture for "which one is worst?", which is a question you
@@ -81,11 +168,27 @@ export const DIFF_ALL_CLASS = "cp-page-diff-all";
 /**
  * Whether the sheet is showing every badge.
  *
- * Gated on the lane as well as on the gesture: the control is only held-able while it is the lane's
- * own control, and a stuck `held` outside the diff lane would otherwise arm a class that paints
- * badges the moment the lane is re-entered — a sheet that opens covered in pills for no reason the
- * reader can connect to anything they did.
+ * Gated on the baseline as well as on the gesture: the control is only held-able while something is
+ * actually being scored, and a stuck `held` with the diff axis off would otherwise arm a class that
+ * paints badges the moment a baseline is picked — a sheet that lights up covered in pills for no
+ * reason the reader can connect to anything they did.
  */
-export function showsEveryBadge(lane: Lane, held: boolean): boolean {
-    return lane === "diff" && held;
+export function showsEveryBadge(baseline: Baseline, held: boolean): boolean {
+    return baseline !== "off" && held;
+}
+
+/**
+ * The key a settled score is remembered under.
+ *
+ * A number is about a PAIR, not about a node, so the pair is in the key: flipping the baseline from
+ * Figma to the sibling asks a different question of the same slot, and a cache keyed on the node
+ * alone would answer the new question with the old number. Re-entering a pairing already scored
+ * stays free, which is what the cache is for.
+ */
+export function scoreKey(
+    lane: Lane,
+    baseline: Baseline,
+    nodeId: string,
+): string {
+    return `${lane} ${baseline} ${nodeId}`;
 }
