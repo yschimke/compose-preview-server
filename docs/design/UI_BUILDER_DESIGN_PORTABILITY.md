@@ -1,6 +1,7 @@
 # Where a design lives, and how it comes back
 
-**Status: proposed.** The reconciliation half is not built. This answers the question raised against
+**Status: built for the browser lane — the checkout and the sync back; proposed for the rest.** This
+answers the question raised against
 [#536](https://github.com/yschimke/compose-preview-server/pull/536): a design should be able to live
 on this server, in a file, in this browser, or in a git repository — and one design may move through
 several of them. *I download a design just before a flight, and sync it back when I land.* What
@@ -65,12 +66,10 @@ fork point naming revision 41 of a design whose retained revision 41 hashes diff
 from a different design's history, and the sync should refuse rather than produce a plausible
 document nobody authored.
 
-**This field is not needed in #536 and should not be added there.** The local mode as it stands
-creates designs from a template; a design that was never taken from a server has no fork point to
-record, and there is no act in that change which could populate one. `LocalDesignRecordV1` gains
-`origin` in the change that adds *Take offline* — the act that knows the answer. A v1 record without
-one is not a lossy record, it is an accurate description of a design that has no origin, and it
-syncs as a **create** rather than a merge (below).
+`LocalDesignRecordV1` carries this as `origin`, written by **Keep in this browser** — the act that
+knows the answer — and never rewritten. A record without one is not a lossy record: it is an
+accurate description of a design that has no origin, and it syncs as a **create** rather than a
+merge (below).
 
 ## The flight, step by step
 
@@ -243,26 +242,23 @@ its job. And a locally created design that has no origin **syncs as a create**, 
 there because there is no common ancestor, and inventing one — treating an empty template as the
 base — would be the document merge this design just rejected, with a fabricated base.
 
-## What this means for #536
+## What is built, and what is not
 
-Nothing in it changes. The local-storage mode is complete as a mode: a design kept in this browser,
-edited by the same reducer, with no claim to be reconcilable. This document is the answer to "and
-then what?", and the sequence it argues for is:
+The browser lane is whole: a design can be taken from a server into this browser and brought back.
 
-1. **Land #536** — the browser as a home, offline editing, template-created designs. No `origin`,
-   because nothing can populate one yet.
-2. **Take offline** — copy a server design into this browser with its fork point. Small: the
-   record's `origin`, a snapshot read, and an entry point in the editor. This is the change that
-   makes the flight possible in the first place.
-3. **Sync back** — the replay above, its report, and the refusals. No new endpoint: it is the
-   protocol client, driving the stored log.
+1. **The browser as a home** — offline editing, template-created designs
+   ([`UI_BUILDER_LOCAL_STORAGE.md`](UI_BUILDER_LOCAL_STORAGE.md)). *Built.*
+2. **Keep in this browser** — copies the server's design here with its fork point. *Built.*
+3. **Sync to the server** — the replay above, its base chain, its report and its refusals, driving
+   the ordinary protocol client rather than a new endpoint. *Built*
+   ([`LocalDesignPortability.kt`](../../ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/local/LocalDesignPortability.kt)).
 4. **The checkout bundle as a file** — download and upload of a record with its fork point, for a
-   flight that changes machines.
-5. **The provenance stamp on published documents** and the `.gitattributes` merge rule, which are
-   independent of all of the above and could land any time.
+   flight that changes machines. *Not built.*
+5. **The provenance stamp on published documents**, and the `.gitattributes` merge rule. *Not
+   built*, and independent of everything above.
 
-Steps 2 and 3 are worth doing together or not at all: a checkout that cannot come home is a fork
-with extra steps, and it would be reasonable for an author to expect otherwise.
+Steps 2 and 3 landed together deliberately: a checkout that cannot come home is a fork with extra
+steps, and it would be reasonable for an author to expect otherwise.
 
 ## Not in scope
 

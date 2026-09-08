@@ -38,6 +38,38 @@ data class LocalDesignRecordV1(
   val seedSequence: Long = 0,
   val log: List<LocalSubmissionRecordV1> = emptyList(),
   val updatedAtEpochMillis: Long = 0,
+  /**
+   * Where this design was taken from, when it was taken offline rather than created here.
+   *
+   * Null for a design this browser made, and that is not a missing field — a design with no
+   * ancestor has no fork point, and syncing it to a server is a create rather than a merge
+   * ([`UI_BUILDER_DESIGN_PORTABILITY.md`](../../../../../../../../docs/design/UI_BUILDER_DESIGN_PORTABILITY.md)).
+   */
+  val origin: LocalDesignOriginV1? = null,
+)
+
+/**
+ * The fork point: the design, the server, and the exact revision this copy diverged from.
+ *
+ * It exists only at the moment of the checkout and cannot be recovered afterwards, which is why it
+ * is written then. Without it there are two documents and a guess; with it there is a common
+ * ancestor, which is the whole difference between a merge and an overwrite.
+ *
+ * [documentDigest] is the server's own `documentHash` for that revision —
+ * `sha256Hex(canonicalDocument(document))` — so the claim is checkable rather than asserted: a fork
+ * point naming revision 41 of a design whose retained revision 41 hashes differently is a record
+ * from another design's history, and a sync that trusted it would produce a document nobody
+ * authored.
+ */
+@Serializable
+data class LocalDesignOriginV1(
+  /** The server's origin, as the page saw it: `https://preview.coo.ee`. */
+  val server: String,
+  val designId: String,
+  val revision: Int,
+  val sequence: Long,
+  val documentDigest: String,
+  val takenAtEpochMillis: Long,
 )
 
 /**

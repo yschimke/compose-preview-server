@@ -81,9 +81,21 @@ design (`ui-builder.local.design.<designId>`):
   "seed": { "…": "the document at the revision the log replays from" },
   "seedSequence": 0,
   "log": [ { "type": "batch", "command": { "…": "…" } } ],
-  "updatedAtEpochMillis": 1700000000000
+  "updatedAtEpochMillis": 1700000000000,
+  "origin": {
+    "server": "https://preview.coo.ee",
+    "designId": "cheeky-raccoon",
+    "revision": 41,
+    "sequence": 512,
+    "documentDigest": "…",
+    "takenAtEpochMillis": 1700000000000
+  }
 }
 ```
+
+`origin` is the fork point, and it is absent for a design created here — which is a fact about the
+design rather than a gap in the record. It exists only at the moment of the checkout and cannot be
+recovered afterwards, which is why it is written then and never rewritten.
 
 A log rather than only the current document, because **undo is not a property of a document**. The
 reducer's compensation history is what makes "undo the thing I just did" mean anything, and it
@@ -183,18 +195,20 @@ work that has no undo left.
 
 ## What this is not
 
-It is not offline collaboration. There is no sync back to the server, no merge, no conflict
-resolution against a design somebody else edited meanwhile — a locally stored design and a
-server-stored design of the same id are two designs. Publishing one to the server is a separate
-change and would go through the existing `PUT /api/ui-builder/v1/designs/{designId}` create route,
-which refuses to replace.
+It is not offline collaboration. Two people cannot edit a locally stored design at the same time,
+because there is one author and it is the person at this keyboard.
 
-What that separate change would look like — taking a server design offline with its fork point, and
-replaying the stored log back through the reducer when it comes home — is
-[`UI_BUILDER_DESIGN_PORTABILITY.md`](UI_BUILDER_DESIGN_PORTABILITY.md), along with why a design in a
-file or in git is published rather than synced. Nothing here needs to change for it: a design
-created in this browser has no fork point to record, so the record shape gains one in the change
-that can populate it.
+What it *is*, since the checkout landed, is a round trip. **Keep in this browser** copies the design
+the server is serving into this browser along with its fork point — which server, which design,
+which revision, and the digest of the document at it — and **Sync to the server** replays the
+commands authored since back onto that server, each claiming the revision its predecessor landed at.
+The rules, the refusals and why a merge is a replay rather than a diff are
+[`UI_BUILDER_DESIGN_PORTABILITY.md`](UI_BUILDER_DESIGN_PORTABILITY.md).
+
+A design *created* here still has no fork point, and that is not a missing field: it has no
+ancestor on any server, so publishing it is a create through
+`PUT /api/ui-builder/v1/designs/{designId}`, which refuses to replace. The menu offers it nothing to
+sync, and says why.
 
 It is not a second document format. The stored record carries the same `UiBuilderDocument` and the
 same reducer commands the rest of the builder uses; the only thing `compose-ui-builder-local-design/v1`

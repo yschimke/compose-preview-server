@@ -71,15 +71,20 @@ import ee.schimke.composeai.uibuilder.client.UiBuilderLiveSessionApi
 import ee.schimke.composeai.uibuilder.client.UiBuilderLiveSessionSync
 import ee.schimke.composeai.uibuilder.client.UiBuilderProtocolHttpClient
 import ee.schimke.composeai.uibuilder.client.UiBuilderProtocolUpdateClient
+import ee.schimke.composeai.uibuilder.client.canonicalDocumentHash
 import ee.schimke.composeai.uibuilder.client.preparePropertyDelta
 import ee.schimke.composeai.uibuilder.client.toProtocolSubmission
 import ee.schimke.composeai.uibuilder.client.toRendererDocument
 import ee.schimke.composeai.uibuilder.local.CachedLocalText
 import ee.schimke.composeai.uibuilder.local.CachingLocalCatalogSource
 import ee.schimke.composeai.uibuilder.local.LocalCatalogSource
+import ee.schimke.composeai.uibuilder.local.LocalDesignStorageException
 import ee.schimke.composeai.uibuilder.local.LocalDesignStore
+import ee.schimke.composeai.uibuilder.local.LocalDesignSyncBack
+import ee.schimke.composeai.uibuilder.local.LocalSyncResult
 import ee.schimke.composeai.uibuilder.local.LocalUiBuilderHttpTransport
 import ee.schimke.composeai.uibuilder.local.LocalUiBuilderService
+import ee.schimke.composeai.uibuilder.local.localCheckoutRecord
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
@@ -427,6 +432,10 @@ private fun LiveSessionApp(
     }
   var document by remember { mutableStateOf<UiBuilderDocument?>(null) }
   var authoritativeDocument by remember { mutableStateOf<DesignDocumentV1?>(null) }
+  // The durable cursor the server last answered with, which is half of a fork point: a design taken
+  // offline has to record *which* revision of *which* history it forked from, and the sequence is
+  // what says where in that history it was.
+  var authoritativeSequence by remember { mutableStateOf(0L) }
   var catalog by remember { mutableStateOf<CapabilityCatalog?>(null) }
   var newDesignCatalogs by remember { mutableStateOf<List<UiBuilderNewDesignCatalog>>(emptyList()) }
   // The chooser's answer is a form-factor summary; seeding a design locally needs the catalog's
@@ -458,6 +467,7 @@ private fun LiveSessionApp(
   DisposableEffect(submissions) { onDispose { submissions.close() } }
 
   fun displaySnapshot(response: SnapshotResponseV1) {
+    authoritativeSequence = response.snapshot.state.lastSequence
     recordAuthoritativeReceipt(
       response.snapshot.state.document.revision.toInt(),
       response.snapshot.state.lastSequence,
@@ -958,6 +968,59 @@ private fun LiveSessionApp(
       }
     }
 
+  // Taking the design into this browser, and bringing it home again.
+  //
+  // Two halves of one act, and each is offered only where it means something: a design already kept
+  // here has nowhere to be taken, and a design created here has no server to go home to. The rules
+  // both follow — the fork point, the base chain, what a refusal means — are
+  // `docs/design/UI_BUILDER_DESIGN_PORTABILITY.md`.
+  val storedRecord =
+    remember(config.designId, config.localStorage, localSession) {
+      localSession?.store?.read(config.designId)
+    }
+  val takeOffline: (() -> Unit)? =
+    if (localSession != null) null
+    else
+      authoritativeDocument?.let { wire ->
+        {
+          val outcome =
+            takeDesignOffline(
+              wire = wire,
+              catalogSystemId = config.catalogSystemId,
+              sequence = authoritativeSequence,
+            )
+          if (outcome != null) {
+            sessionStatus = "Local error · $outcome"
+          } else {
+            enterLocalDesignUrl(config.catalogSystemId, config.designId)
+            onOpenDesign(config.copy(localStorage = true, startWithNewDesign = false))
+          }
+        }
+      }
+  val syncToServer: (() -> Unit)? =
+    storedRecord?.origin?.let { origin ->
+      {
+        scope.launch {
+          sessionStatus = "Syncing to ${origin.server}…"
+          val syncClient =
+            UiBuilderProtocolHttpClient(
+              actorId = config.actorId,
+              endpoint = config.httpEndpoint,
+              transport = BrowserUiBuilderHttpTransport(),
+              requestIds = MonotonicUiBuilderRequestIds("${config.clientId}-sync"),
+            )
+          val result =
+            LocalDesignSyncBack(
+                actorId = config.actorId,
+                clientId = config.clientId,
+                execute = { request -> syncClient.execute(request) },
+              )
+              .sync(storedRecord)
+          sessionStatus = "${config.catalogSystemId} · ${syncStatus(result)}"
+        }
+      }
+    }
+
   if (config.startWithNewDesign && newDesignCatalogs.isNotEmpty()) {
     UiBuilderNewDesignScreen(
       catalogs = newDesignCatalogs,
@@ -1004,6 +1067,8 @@ private fun LiveSessionApp(
       newDesignCatalogs = newDesignCatalogs,
       onCreateDesign = createDesign,
       onHelp = ::openUiBuilderGuide,
+      onTakeOffline = takeOffline,
+      onSyncToServer = syncToServer,
       exportHost = exportHost,
       restoredReference = restoredReference,
       onPickReference = { references.pickFile() },
@@ -1829,6 +1894,33 @@ private external fun uiBuilderDesignFromPath(): String
 private external fun canonicalizeUiBuilderUrl(catalogSystemId: String, designId: String)
 
 /**
+ * The same canonical URL, now naming this browser as where the design is kept.
+ *
+ * `replaceState` rather than a navigation: the page already has the app and the design is already
+ * written, so reloading to reach the local mode would cost a round trip to a server the operator
+ * may be about to leave behind. What the URL is for is the *next* visit.
+ */
+@JsFun(
+  """(catalogSystemId, designId) => {
+    const current = new URL(globalThis.location.href);
+    const path = '/ui-builder/' + encodeURIComponent(catalogSystemId) + '/' +
+      encodeURIComponent(designId);
+    const next = new URL(path, current.origin);
+    ['token', 'actor', 'clientId', 'displayName', 'color', 'endpoint', 'updatesEndpoint']
+      .forEach((name) => {
+        const value = current.searchParams.get(name);
+        if (value !== null) next.searchParams.set(name, value);
+      });
+    next.searchParams.set('storage', 'local');
+    globalThis.history.replaceState(null, '', next.toString());
+  }"""
+)
+private external fun enterLocalDesignUrl(catalogSystemId: String, designId: String)
+
+/** The origin this page was served from, which is the server a design taken offline came from. */
+@JsFun("""() => globalThis.location.origin""") private external fun pageOrigin(): String
+
+/**
  * Submit the New design form: a real `POST`, whose `303` the browser follows to the permalink.
  *
  * A form rather than `fetch`, because only a form submission makes the redirect a navigation —
@@ -2313,6 +2405,59 @@ private suspend fun createLocalDesign(
   val response = session.service.create(document)
   return (response as? ErrorResponseV1)?.error?.message
 }
+
+/**
+ * Copies the design the server is serving into this browser, with the fork point it forked at.
+ *
+ * The digest and the document come from the same answer on purpose: it is the server's own
+ * `documentHash` for that revision, so the claim "this copy forked from revision N of that design"
+ * is checkable when it comes home rather than merely asserted.
+ *
+ * Refuses a design id this browser already holds, for the reason create refuses to replace: two
+ * histories under one name is the one thing a later sync could not sort out.
+ */
+private fun takeDesignOffline(
+  wire: DesignDocumentV1,
+  catalogSystemId: String,
+  sequence: Long,
+): String? {
+  val store = LocalDesignStore(BrowserLocalDesignStorage())
+  if (store.read(wire.id) != null) {
+    return "this browser already holds a design called ${wire.id}"
+  }
+  val document =
+    wire.toRendererDocument() ?: return "this design does not fit the editor's own document shape"
+  return try {
+    store.write(
+      localCheckoutRecord(
+        document = document,
+        documentDigest = wire.canonicalDocumentHash(),
+        catalogSystemId = catalogSystemId,
+        sequence = sequence,
+        server = pageOrigin(),
+        nowEpochMillis = browserNowMillis(),
+      )
+    )
+    null
+  } catch (failure: LocalDesignStorageException) {
+    failure.message ?: "this browser refused to store the design"
+  }
+}
+
+/** The status line a sync leaves behind: never silent, and never only "done". */
+private fun syncStatus(result: LocalSyncResult): String =
+  when (result) {
+    is LocalSyncResult.NotLinked ->
+      "This design was made in this browser, so there is nothing to sync it into — publish it as a new design instead"
+    is LocalSyncResult.ForkPointGone ->
+      "Sync refused · the server no longer keeps revision ${result.revision}, which this copy forked from — publish it as a new design instead"
+    is LocalSyncResult.ForkPointDisagrees ->
+      "Sync refused · revision ${result.revision} on the server is not the document this copy forked from"
+    is LocalSyncResult.Unreachable -> "Sync failed · ${result.message} — nothing was sent"
+    is LocalSyncResult.Refused -> "Sync refused · ${result.code}: ${result.message}"
+    is LocalSyncResult.Replayed ->
+      (if (result.report.complete) "Synced · " else "Synced in part · ") + result.report.summary()
+  }
 
 /** The operations fixture every new design reads its environment from, beside the Wasm bundle. */
 private const val NEW_DESIGN_FIXTURE_PATH = "jetcaster-discover-operations-v1.json"
