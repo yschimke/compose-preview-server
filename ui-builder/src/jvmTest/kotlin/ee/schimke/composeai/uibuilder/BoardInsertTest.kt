@@ -1,6 +1,12 @@
 package ee.schimke.composeai.uibuilder
 
+import ee.schimke.composeai.rcplayer.protocol.RcDocument
+import ee.schimke.composeai.rcplayer.protocol.RcDocumentCodec
+import ee.schimke.composeai.rcplayer.protocol.RcHeader
+import ee.schimke.composeai.rcplayer.protocol.RcRemark
+import ee.schimke.composeai.rcplayer.protocol.RcVersion
 import ee.schimke.composeai.uibuilder.capability.CapabilityCatalogParser
+import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -11,6 +17,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * A design that holds several top-level items keeps them in a board, and a board is a node.
@@ -217,6 +224,67 @@ class BoardInsertTest {
 
     assertTrue(reconciled.addBeside)
     assertEquals(setOf(EditorVariantAxis.Dark), reconciled.variantAxes)
+  }
+
+  /**
+   * The wrap refusal is about the *root*, so a board that already exists has no wrap left to refuse
+   * — which is how a Wear scaffold could have become one item of a board on a design whose first
+   * Add was an ordinary layout. `RecordFreeExport` routes on the root component id, so that design
+   * would have lost its emitter and its native preview lane without saying so.
+   */
+  @Test
+  fun `a component its emitter wants at the root is refused even onto an existing board`() {
+    val onBoard =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = null),
+        UiBuilderEditorEvent.InsertComponentBeside("m3/card"),
+      )
+    assertTrue(onBoard.document.isBoard)
+
+    RecordFreeExport.ROOT_ONLY_COMPONENT_IDS.forEach { rootOnly ->
+      assertNotNull(reducer.besideRefusal(onBoard, rootOnly), rootOnly)
+    }
+    // The document-level refusal has nothing to say here, which is exactly why the component-level
+    // one had to exist.
+    assertNull(reducer.besideRefusal(onBoard))
+    assertNull(reducer.besideRefusal(onBoard, "m3/card"))
+  }
+
+  /**
+   * A played Remote Compose document is exactly the kind of asset a board holds, and the panel
+   * offered every such row under Add beside — then resolved an ordinary drop target anyway, so the
+   * row either refused after its fetch or landed inside the selection.
+   */
+  @Test
+  fun `a remote compose document can be added beside the design`() {
+    val initial = reducer.initial(document, selectedNodeId = null)
+    val source = RemoteComposeSource("appcard__ideal__default__compact", "App card", "appcard")
+    val encoded =
+      Base64.Default.encode(
+        RcDocumentCodec.encode(
+          RcDocument(
+            header = RcHeader(RcVersion(0, 1, 0)),
+            operations = listOf(RcRemark("published sticker")),
+          )
+        )
+      )
+
+    val added =
+      reducer.reduce(
+        initial,
+        UiBuilderEditorEvent.InsertRemoteComposeDocumentBeside(source, encoded),
+      )
+
+    assertIs<CommandOutcome.Accepted>(added.lastOutcome, added.lastOutcome.toString())
+    val board = added.document.nodes.getValue(added.document.roots.single())
+    assertEquals(UiBuilderBoard.COMPONENT_ID, board.componentId)
+    val item = added.document.nodes.getValue(board.slots.getValue(UiBuilderBoard.SLOT).last())
+    assertEquals(REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID, item.componentId)
+    // The bytes land on the document node, not on the board that was inserted before it.
+    assertEquals(
+      encoded,
+      item.properties.getValue("documentBase64").jsonObject.getValue("value").jsonPrimitive.content,
+    )
   }
 
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()

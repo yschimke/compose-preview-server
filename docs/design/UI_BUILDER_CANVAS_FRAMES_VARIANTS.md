@@ -112,6 +112,23 @@ the same mistake — code that asks about `roots` when it means *the top of the 
   have made the *first* Wear item on a new design the same silent conversion with nothing to refuse
   over.
 
+  Refusing the *wrap* is only half of it, because a board that already exists has no wrap left to
+  refuse: a design whose first Add beside was an ordinary layout would then accept a Wear scaffold as
+  its second item. So the refusal asks about the component as well as the document, against
+  `RecordFreeExport.ROOT_ONLY_COMPONENT_IDS` — derived from the emitters themselves, the way
+  `CATALOG_SYSTEM_IDS` already is, because a hand-kept list drifts towards claiming a component is
+  placeable while its emitter still demands the root.
+
+### Every insert path, or the panel is lying
+
+"Adds beside the design" is a promise the whole insert panel makes, so every row in it has to keep
+that promise. The Remote Compose rows did not: they were offered under Add beside — a top-level item
+needs no compatible slot — and then resolved an ordinary drop target after their fetch came back, so
+pressing one either refused or landed inside the selection while the panel said otherwise. Both paths
+now ask one `besideDestination` where a top-level item goes, which is also the only place that knows
+whether this design has a board yet. A played `.rc` document is exactly the kind of asset a board is
+for.
+
 Deliberately a switch rather than a fallback inside the ordinary insert. An Add with no compatible
 slot stays *refused*, because turning that refusal into "then it becomes a second item" would make a
 full scaffold grow a neighbour every time somebody added a chip it had no room for.

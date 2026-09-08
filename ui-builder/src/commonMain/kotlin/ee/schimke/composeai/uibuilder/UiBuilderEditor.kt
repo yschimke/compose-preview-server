@@ -809,7 +809,9 @@ fun UiBuilderEditor(
         // Beside the design, every component can be added: a top-level item is in no slot, so there
         // is no compatibility to satisfy. The one thing that can still refuse is the wrap itself.
         canAddCatalogComponent = {
-          if (state.addBeside) reducer.besideRefusal(state) == null
+          // The component as well as the document: beside the design there is no slot to satisfy,
+          // but a component whose emitter demands the root is still not one a board can hold.
+          if (state.addBeside) reducer.besideRefusal(state, it) == null
           else reducer.dropTarget(state, it) != null
         },
         besideRefusal = reducer.besideRefusal(state),
@@ -1004,6 +1006,20 @@ fun UiBuilderEditor(
     // Resolved against the selection as it stands NOW, not as it stood when the row was pressed: a
     // fetch takes a round trip, and the reducer would refuse a target the author has since moved
     // away from. Asking again is what makes the insert land where the canvas says it will.
+    // Beside the design when that is the mode, resolved here for the same reason the target below
+    // is: both are read as they stand NOW rather than as they stood when the row was pressed, and a
+    // fetch is a round trip. Dispatching the ordinary insert regardless is what made a Remote
+    // Compose row offered under Add beside either refuse after its fetch or land inside the
+    // selection while the panel promised a top-level item.
+    if (state.addBeside) {
+      val refusal = reducer.besideRefusal(state, REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID)
+      remoteSourceFailure = refusal?.let { "${source.label}: $it" }
+      if (refusal == null) {
+        dispatch(UiBuilderEditorEvent.InsertRemoteComposeDocumentBeside(source, encoded))
+      }
+      pendingRemoteSource = null
+      return@LaunchedEffect
+    }
     val target = reducer.dropTarget(state, REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID)
     if (target == null) {
       remoteSourceFailure = "${source.label}: no compatible slot is selected"

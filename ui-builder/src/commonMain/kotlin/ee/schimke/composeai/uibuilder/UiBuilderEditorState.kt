@@ -337,6 +337,18 @@ fun ScreenEnvironmentSettings.validationError(): String? =
   }
 
 /**
+ * Where an Add beside lands, and the operations that have to precede it.
+ *
+ * A null [target] means the document's root, which is what an empty design gets: `InsertNode` with
+ * no parent is the root list.
+ */
+private data class BesideDestination(
+  val target: ParentSlot?,
+  val afterNodeId: String?,
+  val prelude: List<DesignOperation>,
+)
+
+/**
  * A detached copy of one subtree, held outside the document.
  *
  * Detached on purpose: the nodes are snapshotted at copy time rather than referenced by id, so a
@@ -832,6 +844,16 @@ sealed interface UiBuilderEditorEvent {
     val target: ParentSlot,
   ) : UiBuilderEditorEvent
 
+  /**
+   * The same insert, beside the design — see [InsertComponentBeside], whose reason for naming no
+   * target this shares: where a top-level item lands is decided from the document when the command
+   * is built, and for this one that is after a fetch has come back.
+   */
+  data class InsertRemoteComposeDocumentBeside(
+    val source: RemoteComposeSource,
+    val documentBase64: String,
+  ) : UiBuilderEditorEvent
+
   data object CopySelected : UiBuilderEditorEvent
 
   data object CutSelected : UiBuilderEditorEvent
@@ -1275,6 +1297,8 @@ class UiBuilderEditorReducer(
         insert(state, event.componentId, event.target, event.action)
       is UiBuilderEditorEvent.InsertRemoteComposeDocument ->
         insertRemoteComposeDocument(state, event.source, event.documentBase64, event.target)
+      is UiBuilderEditorEvent.InsertRemoteComposeDocumentBeside ->
+        insertRemoteComposeDocument(state, event.source, event.documentBase64, target = null)
       UiBuilderEditorEvent.CopySelected -> copySelected(state)
       UiBuilderEditorEvent.CutSelected -> cutSelected(state)
       UiBuilderEditorEvent.Paste -> paste(state)
@@ -2567,8 +2591,17 @@ class UiBuilderEditorReducer(
    * beginner's question about that panel is where the next Add lands, and a refusal is a worse
    * answer after the press than before it.
    */
-  fun besideRefusal(state: UiBuilderEditorState): String? {
+  fun besideRefusal(state: UiBuilderEditorState, componentId: String? = null): String? {
     val document = state.document
+    // Asked of the component before the document, because it holds wherever the item would land.
+    // The document-level refusal below is about *wrapping* an existing root; this one is about the
+    // thing being added, and a board that already exists has no wrap left to refuse — which is
+    // exactly how a Wear scaffold could have become one item of a board on a design whose first Add
+    // was an ordinary layout.
+    if (componentId != null && componentId in RecordFreeExport.ROOT_ONLY_COMPONENT_IDS) {
+      return "A ${catalog.componentsById[componentId]?.displayName ?: componentId} is exported as " +
+        "the whole design, so it cannot be one item of a board"
+    }
     if (document.boardRootId != null || document.roots.isEmpty()) return null
     // Wrapping changes which emitter writes the design: both record-free emitters route on the root
     // component id, so a wrapped Wear screen would quietly stop being one and be handed to the
@@ -2579,6 +2612,43 @@ class UiBuilderEditorReducer(
       return "A Wear screen or widget is exported as itself, so it cannot become one item of a board"
     }
     return null
+  }
+
+  /**
+   * Where an Add beside lands, and what has to happen to the document first.
+   *
+   * Shared, because two insert paths ask it — the palette's and the Remote Compose panel's — and a
+   * second copy is a second answer to "does this design have a board yet".
+   *
+   * Three shapes
+   * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)):
+   * a design whose root is already a board appends into it with no prelude, an empty design takes
+   * the item as its root (no board: there is nothing to be beside, and a root-only component added
+   * first would quietly stop being one), and any other root is wrapped — insert the board beside
+   * it, move it inside.
+   *
+   * The prelude and the insert that motivated it are one command, so a board that appeared because
+   * of an Add disappears when that Add is undone.
+   */
+  private fun besideDestination(state: UiBuilderEditorState, sequence: Int): BesideDestination {
+    val document = state.document
+    val existingBoard = document.boardRootId
+    if (existingBoard != null) {
+      val target = ParentSlot(existingBoard, UiBuilderBoard.SLOT)
+      return BesideDestination(target, document.children(target).lastOrNull(), emptyList())
+    }
+    val existingRoot =
+      document.roots.singleOrNull() ?: return BesideDestination(null, null, emptyList())
+    val boardId = "editor-board-${sequence.toString().padStart(3, '0')}"
+    return BesideDestination(
+      target = ParentSlot(boardId, UiBuilderBoard.SLOT),
+      afterNodeId = existingRoot,
+      prelude =
+        listOf(
+          DesignOperation.InsertNode(UiBuilderBoard.node(boardId)),
+          DesignOperation.MoveNode(existingRoot, ParentSlot(boardId, UiBuilderBoard.SLOT)),
+        ),
+    )
   }
 
   /**
@@ -2601,47 +2671,19 @@ class UiBuilderEditorReducer(
   ): UiBuilderEditorState {
     val component = catalog.componentsById[componentId] ?: return state
     val sequence = state.operationSequence + 1
-    besideRefusal(state)?.let {
+    besideRefusal(state, componentId)?.let {
       return state.rejected(sequence, RejectionCode.INVALID_LOCATION, it)
     }
-    val document = state.document
-    val operations = mutableListOf<DesignOperation>()
-    val existingRoot = document.roots.singleOrNull()
-    val existingBoard = document.boardRootId
-    val target: ParentSlot?
-    val afterNodeId: String?
-    when {
-      existingBoard != null -> {
-        target = ParentSlot(existingBoard, UiBuilderBoard.SLOT)
-        afterNodeId = document.children(target).lastOrNull()
-      }
-      // An empty design has nothing to be beside, so it gets no board: the component becomes the
-      // root, exactly as an ordinary Add would place it. Wrapping here would be worse than
-      // pointless — a Wear screen or widget added first would sit under a column, and both
-      // record-free emitters route on the *root* component id, so the design would quietly stop
-      // being the thing it is. That is what [besideRefusal] guards for an existing root, applied to
-      // the one case that has none to refuse over.
-      existingRoot == null -> {
-        target = null
-        afterNodeId = null
-      }
-      else -> {
-        val boardId = "editor-board-${sequence.toString().padStart(3, '0')}"
-        operations += DesignOperation.InsertNode(UiBuilderBoard.node(boardId))
-        operations +=
-          DesignOperation.MoveNode(existingRoot, ParentSlot(boardId, UiBuilderBoard.SLOT))
-        target = ParentSlot(boardId, UiBuilderBoard.SLOT)
-        afterNodeId = existingRoot
-      }
-    }
+    val destination = besideDestination(state, sequence)
+    val operations = destination.prelude.toMutableList()
     val nodeId = "editor-${componentId.replace('/', '-')}-${sequence.toString().padStart(3, '0')}"
     val defaultError =
       component.appendDefaultSubtree(
         catalog = catalog,
-        document = document,
+        document = state.document,
         nodeId = nodeId,
-        parent = target,
-        afterNodeId = afterNodeId,
+        parent = destination.target,
+        afterNodeId = destination.afterNodeId,
         operations = operations,
         presetProperties = component.variantProperties(variant),
       )
@@ -2764,11 +2806,12 @@ class UiBuilderEditorReducer(
    * player owns the parsed form, and a second in-memory copy would only be a second thing to
    * invalidate.
    */
+  /** @param target the slot to fill, or null for an Add beside — see [besideDestination]. */
   private fun insertRemoteComposeDocument(
     state: UiBuilderEditorState,
     source: RemoteComposeSource,
     documentBase64: String,
-    target: ParentSlot,
+    target: ParentSlot?,
   ): UiBuilderEditorState {
     val sequence = state.operationSequence + 1
     val component =
@@ -2778,13 +2821,23 @@ class UiBuilderEditorReducer(
           RejectionCode.INVALID_LOCATION,
           "This catalog does not offer $REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID",
         )
-    val resolvedTarget = findDestination(state.document, state.selectedNodeId, component)
-    if (resolvedTarget == null || resolvedTarget != target) {
-      return state.rejected(
-        sequence,
-        RejectionCode.INVALID_LOCATION,
-        "${component.displayName} has no compatible selected slot",
-      )
+    // Beside the design rather than into a slot: the panel offered every Remote Compose row while
+    // Add beside was on — a top-level item needs no compatible slot — and then resolved the drop
+    // target anyway, so the row either refused after its fetch or landed inside the selection while
+    // the panel said otherwise. A played document is exactly the kind of asset a board holds.
+    if (target == null) {
+      besideRefusal(state, REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID)?.let {
+        return state.rejected(sequence, RejectionCode.INVALID_LOCATION, it)
+      }
+    } else {
+      val resolvedTarget = findDestination(state.document, state.selectedNodeId, component)
+      if (resolvedTarget == null || resolvedTarget != target) {
+        return state.rejected(
+          sequence,
+          RejectionCode.INVALID_LOCATION,
+          "${component.displayName} has no compatible selected slot",
+        )
+      }
     }
     decodeRemoteComposeDocument(documentBase64).exceptionOrNull()?.let { failure ->
       return state.rejected(
@@ -2796,20 +2849,26 @@ class UiBuilderEditorReducer(
     val nodeId =
       "editor-${REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID.replace('/', '-')}-" +
         sequence.toString().padStart(3, '0')
-    val operations = mutableListOf<DesignOperation>()
+    val destination =
+      if (target == null) besideDestination(state, sequence)
+      else BesideDestination(target, state.document.children(target).lastOrNull(), emptyList())
+    val operations = destination.prelude.toMutableList()
     val defaultError =
       component.appendDefaultSubtree(
         catalog = catalog,
         document = state.document,
         nodeId = nodeId,
-        parent = target,
-        afterNodeId = state.document.children(target).lastOrNull(),
+        parent = destination.target,
+        afterNodeId = destination.afterNodeId,
         operations = operations,
       )
     if (defaultError != null) {
       return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, defaultError)
     }
-    val index = operations.indexOfFirst { it is DesignOperation.InsertNode }
+    // By id, not the first insert: a beside insert may be preceded by the board's own `InsertNode`,
+    // and writing the document's bytes onto the board is not a mistake anything downstream would
+    // report — the pane would simply draw nothing.
+    val index = operations.indexOfFirst { it is DesignOperation.InsertNode && it.node.id == nodeId }
     val root = operations[index] as DesignOperation.InsertNode
     operations[index] =
       root.copy(
