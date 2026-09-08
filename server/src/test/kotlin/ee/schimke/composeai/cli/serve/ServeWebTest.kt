@@ -1179,7 +1179,15 @@ class ServeWebTest {
     for (wire in listOf("js", "cmp-wasm", "java", "cmp-android", "cmp-jvm")) {
       assertTrue(html.contains("value=\"rc:$wire\""), "option for $wire present")
     }
-    // CMP Android is the seeded default: both the combo's selection and the chip's opening label.
+    // The LANE VALUES (`rc:java`, `rc:cmp-android`) are this repository's and do not move. The
+    // LABELS below are the published `render-host` artifact's, and compose-ai-tools 2.3.0 renamed
+    // all five (`Java` -> `AndroidX View`, `CMP Android` -> `AndroidX Embedded`, …). Asserted
+    // literally rather than read back off the combo: the point of this test is that the chip and
+    // the combo agree on ONE label, and comparing them to each other would hold even if both said
+    // the wrong thing.
+    //
+    // AndroidX Embedded is the seeded default: both the combo's selection and the chip's opening
+    // label.
     // It opens on the embedded player because that is the lane whose output is a real Compose tree
     // — editable figma-svg geometry and a described semantics tree, rather than one interop leaf
     // (#3936). `?rcPlayer=java` still selects the view player.
@@ -1187,17 +1195,19 @@ class ServeWebTest {
       html.contains("data-rc-default=\"cmp-android\""),
       "cmp-android is the default player",
     )
-    assertTrue(html.contains("<option value=\"rc:java\">Java</option>"), html)
+    assertTrue(html.contains("<option value=\"rc:java\">AndroidX View</option>"), html)
     // The combo itself rests on its placeholder — the chip is what names the current lane, and a
     // combo repeating that name beside it read as two controls arguing about the same fact.
     assertTrue(html.contains("<option value=\"\" selected>Switch renderer…</option>"), html)
     assertTrue(
-      html.contains("<span id=\"cp-live-toggle-label\">CMP Android</span>"),
+      html.contains("<span id=\"cp-live-toggle-label\">AndroidX Embedded</span>"),
       "the chip names the lane it opens on",
     )
     // cmp-jvm is the disabled option (and says why in its own label); the enabled ones are not.
     assertTrue(
-      html.contains("<option value=\"rc:cmp-jvm\" disabled>CMP JVM (unavailable)</option>"),
+      html.contains(
+        "<option value=\"rc:cmp-jvm\" disabled>AndroidX Embedded (JVM) (unavailable)</option>"
+      ),
       html,
     )
     val android = Regex("<option value=\"rc:cmp-android\"[^>]*>").find(html)?.value ?: ""
