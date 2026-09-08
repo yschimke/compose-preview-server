@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.18.0](https://github.com/yschimke/compose-preview-server/compare/v3.17.0...v3.18.0) (2026-09-08)
+
+
+### Features
+
+* **serve:** split the design page's lane into Show and Diff against ([#574](https://github.com/yschimke/compose-preview-server/issues/574)) ([b43875f](https://github.com/yschimke/compose-preview-server/commit/b43875f916f7e60037b9ceee80b93a273e45c394))
+* **serve:** surface the paired catalog on the front door and the viewer ([#576](https://github.com/yschimke/compose-preview-server/issues/576)) ([41d3e45](https://github.com/yschimke/compose-preview-server/commit/41d3e45345e8a1fc845d8f077067b6ee787b1918))
+
+
+### Bug Fixes
+
+* clear every Kotlin compile warning in the build ([#569](https://github.com/yschimke/compose-preview-server/issues/569)) ([b2dad78](https://github.com/yschimke/compose-preview-server/commit/b2dad78198a999c5c9d8c99bbef1164e298ffb1e))
+* **serve:** never let a UI-builder persistence failure abort startup ([#577](https://github.com/yschimke/compose-preview-server/issues/577)) ([5dfd7a1](https://github.com/yschimke/compose-preview-server/commit/5dfd7a17f4855a02dd83bcf9a2a1bf3a31952dd4))
+* **serve:** one "Compare to" row, and gate both paired links on what resolves ([#579](https://github.com/yschimke/compose-preview-server/issues/579)) ([a94c9fb](https://github.com/yschimke/compose-preview-server/commit/a94c9fbe000d9e5265280b27ec2ea3ed884d6aa0))
+* **ui-builder:** bound retained revisions by bytes and report state headroom ([#573](https://github.com/yschimke/compose-preview-server/issues/573)) ([05a0047](https://github.com/yschimke/compose-preview-server/commit/05a0047c969394ea6ed3bfc75b1e7de06eba2526))
+* **ui-builder:** bound undo state by bytes and raise the state ceiling ([#575](https://github.com/yschimke/compose-preview-server/issues/575)) ([391016c](https://github.com/yschimke/compose-preview-server/commit/391016c6695c2b26cf8f2657277ddff4f0147551))
+
 ## [3.17.0](https://github.com/yschimke/compose-preview-server/compare/v3.16.0...v3.17.0) (2026-09-07)
 
 
