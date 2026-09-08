@@ -34,10 +34,15 @@ import kotlinx.serialization.json.buildJsonObject
  * ## What a failure means
  *
  * Somebody changed `wearM3Catalog` or `remoteM3Catalog` — or changed the packaged Material 3
- * catalog they are both derived from, which is the case people are surprised by. Re-run with
- * `-PuiBuilderGoldens=write` to update the files, then **read the diff**: it is the diff a catalog
- * repository will have to reproduce, and after the cutover it is the diff a catalog repository will
- * have to have caused.
+ * catalog they are both derived from, which is the case people are surprised by. Run
+ * **`scripts/regenerate-goldens.sh`**, which rewrites every committed golden this repository
+ * generates and is where AGENTS.md and the `/regenerate-goldens` workflow both send people; then
+ * **read the diff**: it is the diff a catalog repository will have to reproduce, and after the
+ * cutover it is the diff a catalog repository will have to have caused.
+ *
+ * That script passes `-PuiBuilderGoldens=write`, which is what this class reads. A Gradle property
+ * rather than a bare `-D`, because `-D` on the command line reaches the Gradle JVM and not the
+ * forked test JVM, and the silent no-op that follows is a confusing half hour.
  */
 class SynthesisedCatalogGoldenTest {
 

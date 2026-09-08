@@ -1,6 +1,22 @@
 [
   {
     "field": "componentMenu.groupOrder",
-    "why": "Deliberate, and here the frozen side is not even a Remote Compose taxonomy: `remoteM3Catalog` never declares a componentMenu of its own, so it inherits the packaged Material 3 one wholesale — Scaffolds, Layout, Navigation, Text inputs — shelf names for a catalog of widget containers, shaders and typefaces. The policy states :remote-catalog's own @CatalogComponent(group = ...) vocabulary, led by Widget Container and Scaffold templates because a Remote design starts from a container and everything else goes inside one."
+    "why": "Deliberate, and here the frozen side is not even a Remote Compose taxonomy: `remoteM3Catalog` never declares a componentMenu of its own, so it inherits the packaged Material 3 one wholesale \u2014 Scaffolds, Layout, Navigation, Text inputs \u2014 shelf names for a catalog of widget containers, shaders and typefaces. The policy states :remote-catalog's own @CatalogComponent(group = ...) vocabulary, led by Widget Container and Scaffold templates because a Remote design starts from a container and everything else goes inside one.",
+    "policy": [
+      "Widget Container",
+      "Scaffold templates",
+      "Containment",
+      "Buttons",
+      "Text",
+      "Iconography",
+      "Communication",
+      "Position indicators",
+      "Shapes",
+      "Shaders",
+      "Typeface",
+      "Theme",
+      "Wear M3",
+      "Confetti"
+    ]
   }
 ]

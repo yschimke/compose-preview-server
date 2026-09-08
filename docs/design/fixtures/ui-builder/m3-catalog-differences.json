@@ -1,6 +1,15 @@
 [
   {
     "field": "componentMenu.groupOrder",
-    "why": "Deliberate, and narrower than it looks: the policy's seven shelves are the frozen eleven minus Scaffolds, Layout, Content and Embedded, in the same relative order. Those four hold `layout/*`, `asset/image`, `shape/*` and `remote-compose/*` — components of the BUILDER, not of yschimke/m3-catalog, which renders no Column and ships no Remote Compose embed. A catalog cannot state a shelf order for components it does not publish, and the builder supplies its own builtins' shelves as it always has. Every group the catalog does publish keeps its place."
+    "why": "Deliberate, and narrower than it looks: the policy's seven shelves are the frozen eleven minus Scaffolds, Layout, Content and Embedded, in the same relative order. Those four hold `layout/*`, `asset/image`, `shape/*` and `remote-compose/*` \u2014 components of the BUILDER, not of yschimke/m3-catalog, which renders no Column and ships no Remote Compose embed. A catalog cannot state a shelf order for components it does not publish, and the builder supplies its own builtins' shelves as it always has. Every group the catalog does publish keeps its place.",
+    "policy": [
+      "Navigation",
+      "Actions",
+      "Selection",
+      "Text inputs",
+      "Containment",
+      "Communication",
+      "Styles"
+    ]
   }
 ]
