@@ -2812,14 +2812,20 @@ const FIXTURE_STATES = [
   })),
   {
     // Switching player through the combo. The committed HTML always opens on the default
-    // (`CMP Android`), so this is the only way the picker's *moved* state is diffed: the combo
-    // on `Java`, and — the point of the whole control — the chip beside it renaming itself to
-    // match instead of the visitor having to read which of six chips lit up.
+    // (`AndroidX Embedded`), so this is the only way the picker's *moved* state is diffed: the
+    // combo on `AndroidX View`, and — the point of the whole control — the chip beside it renaming
+    // itself to match instead of the visitor having to read which of six chips lit up.
     //
     // It selects whichever lane is *not* the default, so it followed the default from
     // `cmp-android` to `java` when #3936 flipped it. Selecting the default would leave the
     // picker where it already is and diff nothing, which is the failure this note exists to
     // prevent the next time the default moves.
+    //
+    // The LANE VALUES (`rc:java`) are this repository's; the LABELS are the published
+    // `render-host` artifact's, and 2.3.0 renamed all five of them (`Java` -> `AndroidX View`).
+    // That rename is why this assertion is worth keeping literal rather than reading the label
+    // back off the option: a wait on whatever the combo happens to say would pass even if the
+    // chip stopped following the combo at all, which is the one thing this state exists to prove.
     fixture: "serve-viewer-rc-players",
     suffix: "player-java",
     apply: async (page) => {
@@ -2827,7 +2833,7 @@ const FIXTURE_STATES = [
       await page.waitForFunction(
         () =>
           document.getElementById("cp-live-toggle-label")?.textContent ===
-          "Java",
+          "AndroidX View",
       );
     },
   },
