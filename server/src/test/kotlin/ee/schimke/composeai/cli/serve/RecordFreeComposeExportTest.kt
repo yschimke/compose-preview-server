@@ -83,10 +83,16 @@ class RecordFreeComposeExportTest {
         artifact.content,
       artifact.content,
     )
-    // And its size picks the preview params provider rather than being emitted as a dimension —
-    // one footprint from it rather than a preview unrolled per value.
+    // And its size picks the preview params providers rather than being emitted as a dimension —
+    // one footprint from each rather than a preview unrolled per value. Two shapes, because the
+    // rectangular render is the one recommended as the widget picker editor's image and a designer
+    // should not have to hand-write a `@Preview` to see it.
     assertTrue(
       "SquircleSmallWidgetPreviewParams().values.maxBy { it.widthDp }" in artifact.content,
+      artifact.content,
+    )
+    assertTrue(
+      "RectangularSmallWidgetPreviewParams().values.maxBy { it.widthDp }" in artifact.content,
       artifact.content,
     )
     // The provenance names the revision and catalog the artifact was pinned to, as the
