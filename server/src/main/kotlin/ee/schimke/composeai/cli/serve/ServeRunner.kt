@@ -27,6 +27,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -2309,6 +2310,16 @@ public class ServeRunner(
     }
   }
 
+  /**
+   * The UI-builder lane, or null when it could not be opened.
+   *
+   * Nothing about the builder may stop `serve` binding its port. The one exception kept fatal is
+   * the argument check below: `--ui-builder-migrate-state` is a flag the operator passed on this
+   * invocation asking for durable work, and silently skipping it would be worse than refusing.
+   * Every failure after that — an unwritable state directory, a corrupt or oversize state file, a
+   * checksum mismatch, a migration that could not complete — disables the lane and prints
+   * [uiBuilderDisabledWarning]. See yschimke/compose-preview-server#568 for the deploy this cost.
+   */
   private fun openUiBuilderService(
     appDirectory: File?,
     /** The served catalogs' store, for a pack's record and a served catalog's export record. */
@@ -2326,6 +2337,27 @@ public class ServeRunner(
       uiBuilderStateDirFlag?.let(::File)
         ?: catalogsFilePath?.let(::File)?.absoluteFile?.parentFile?.resolve("ui-builder-state")
         ?: File(System.getProperty("user.home"), ".compose-preview/ui-builder-state")
+    // Anything the lane opens before it fails is closed here: a renderer left running would hold a
+    // daemon and a directory for the life of a process that is no longer using either.
+    val opened = AtomicReference<AutoCloseable?>(null)
+    return try {
+      openUiBuilderLane(directory, catalogStore, catalogLoads, opened::set)
+    } catch (failure: Exception) {
+      runCatching { opened.get()?.close() }
+      System.err.println(uiBuilderDisabledWarning(directory, failure))
+      null
+    }
+  }
+
+  /**
+   * Opens the lane, throwing on any failure; [openUiBuilderService] is what makes that survivable.
+   */
+  private fun openUiBuilderLane(
+    directory: File,
+    catalogStore: ServeCatalogStore?,
+    catalogLoads: CatalogLoadTracker?,
+    registerCloseable: (AutoCloseable?) -> Unit,
+  ): UiBuilderLane {
     if (!(directory.isDirectory || directory.mkdirs()) || !directory.canWrite()) {
       throw IllegalStateException("UI-builder state directory is not writable: $directory")
     }
@@ -2363,6 +2395,7 @@ public class ServeRunner(
         )
       }
       .getOrNull()
+    registerCloseable(renderer)
     // The Compose half of the export is generated from the discovered component record, so it is
     // constructed here rather than defaulted inside the runtime: `checkUiBuilderRuntimeBoundary`
     // forbids any compose-ai-tools module but the protocol on that module's classpath, and
@@ -2552,17 +2585,16 @@ public class ServeRunner(
       ?.let { uiBuilderStorageWarning(it.storageBytes, it.storageMaximumBytes) }
       ?.let(System.err::println)
     if (uiBuilderMigrateState) {
-      try {
-        val migration = service.migratePersistenceToLatest()
-        System.err.println(
-          "serve: UI-builder persistence ${migration.fromFormat} -> ${migration.toFormat} " +
-            if (migration.migrated) "completed (${migration.persistedBytes} bytes)"
-            else "already current"
-        )
-      } catch (failure: Throwable) {
-        runCatching { renderer?.close() }
-        throw failure
-      }
+      // Deliberately not caught here any more. A migration that cannot complete used to close the
+      // renderer and rethrow, which is exactly the path that took the host down; the guard in
+      // [openUiBuilderService] closes the renderer and disables the lane instead, and the operator
+      // still learns what happened and how to recover.
+      val migration = service.migratePersistenceToLatest()
+      System.err.println(
+        "serve: UI-builder persistence ${migration.fromFormat} -> ${migration.toFormat} " +
+          if (migration.migrated) "completed (${migration.persistedBytes} bytes)"
+          else "already current"
+      )
     }
     return UiBuilderLane(
       service = service,
