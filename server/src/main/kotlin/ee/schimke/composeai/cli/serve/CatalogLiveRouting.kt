@@ -166,17 +166,29 @@ internal object CatalogLiveRouting {
    *   does, this entry comes out and `IrReplayDroppedOverridesTest` is what notices.
    *
    * **`fontScale` and `uiMode` are deliberately absent, and that is the subtle one.** They look
-   * inert against `remote-m3` — every render there comes back byte-identical to the baked snapshot
-   * — but that is a property of *those documents*, not of replay. A document can defer both to the
+   * inert against `remote-m3` — every render there came back byte-identical to the baked snapshot —
+   * but that is a property of *those documents*, not of replay. A document can defer both to the
    * host and resolve them at paint time, with no recomposition:
    * `RemoteComposeView.getDefaultTextSize()` is `14f * density * Configuration.fontScale`, and
    * `onDraw` derives the paint theme from `Configuration.isNightModeActive()` whenever the player's
    * own theme is `THEME_UNSPECIFIED`. Both read the live Android `Configuration`, which
    * `RenderEngine` already sets per render spec — so the wiring is end-to-end today and a document
-   * that reads the host values genuinely responds. The `remote-m3` catalog simply baked absolute
-   * text sizes and concrete colours at capture. Naming them here would 409 an override the replay
-   * can honour, which is exactly the false-refusal failure this list's narrowness exists to
-   * prevent. Their silence on a constant-folded document is authored behaviour, not a server lie.
+   * that reads the host values genuinely responds. Naming them here would 409 an override the
+   * replay can honour, which is exactly the false-refusal failure this list's narrowness exists to
+   * prevent.
+   *
+   * What was wrong, until the `rcDensity` capture setting landed upstream, was the *reason* given
+   * for `fontScale`'s silence on `remote-m3`: "the catalog simply baked absolute text sizes at
+   * capture", i.e. authored behaviour. It was not authored. The capture called
+   * `RemoteDensity.from(displayInfo)`, which folds density **and** font scale into literal
+   * constants, and it passed no font scale into `RemoteCreationDisplayInfo` — whose own parameter
+   * defaults to `1f` — so every document baked `fontScale = 1` no matter what the render spec asked
+   * for. A catalog opts out of that with `-PcomposePreview.rcDensity=host`, which captures against
+   * `RemoteDensity.Host` and leaves the sp→px conversions as expressions over the player's
+   * `FONT_SIZE` variable. The conclusion here is unchanged and the entry stays absent — a
+   * host-captured document genuinely responds, so refusing the axis wholesale would be the false
+   * refusal — but the silence of a constant-folded one is a capture setting, not something its
+   * author chose.
    *
    * The size / density / device family is **not** listed either: those reach the player through the
    * capture's `displayMetrics`, so a replay can answer them.
