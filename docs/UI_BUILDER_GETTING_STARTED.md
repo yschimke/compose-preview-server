@@ -18,9 +18,53 @@ on startup — one line naming the version it found and the version it needs. Po
 Java 21 JDK and restart to get the export back. `README.md` has the full picture, including why the
 rest of the distribution stays on 17.
 
+## Running it locally
+
+There is no separate builder command: the builder is a surface of `compose-preview serve`, switched
+on by pointing it at the built Wasm bundle. Build the bundle from this repository —
+
+```bash
+./gradlew :ui-builder:wasmFrontendDist
+```
+
+— which writes it to `ui-builder/build/wasmDist`. Then serve it, naming the catalogs that get a
+builder adapter and somewhere to keep the designs:
+
+```bash
+compose-preview serve \
+  --catalogs m3-catalog,remote-m3@yschimke/wear-m3-catalog \
+  --ui-builder-dir <this repo>/ui-builder/build/wasmDist \
+  --ui-builder-catalogs m3-catalog,remote-m3 \
+  --ui-builder-state-dir ./ui-builder-state
+```
+
+Three flags, three different jobs, and they are easy to confuse:
+
+- **`--catalogs`** fetches the catalogs themselves, from each system's published
+  `design-artifacts/<system>` branch. No checkout is involved — `remote-m3` lives in
+  `yschimke/wear-m3-catalog`, which is why that one names its repo explicitly; a system in
+  `--catalog-repo` does not need the `@owner/repo` suffix. That repo publishes two systems, the
+  small reviewed widget adapter `remote-m3` and the full `wear-m3-catalog`.
+- **`--ui-builder-catalogs`** is the separate claim that a catalog may be *authored* against, not
+  merely served. Publishing a catalog never enables authoring for it, which is the point made at the
+  top of this guide.
+- **`--ui-builder-state-dir`** is what makes designs outlive a restart. It defaults to
+  `ui-builder-state` beside `--catalogs-file`, or `~/.compose-preview/ui-builder-state` for a local
+  standalone builder, and `none` is the explicit opt-out that serves the assets with no editable
+  design API at all.
+
+The designs, the reference overlays, the comment threads and the access requests are separate
+directories under the state dir, so losing one loses only what it was.
+
+Two things worth knowing before the first run. Export needs Java 21, as above. And on `remote-m3`
+the **native preview lane cannot compile a widget**: a widget's generated source is Remote Compose
+rather than Jetpack Compose, so `--ui-builder-native-catalog` has nothing to offer it and the Wasm
+canvas is the authority — which is exactly why the canvas and the generator have to agree about the
+same design, and why they are tested against each other rather than separately.
+
 ## Create a design in the website
 
-Start the server with UI-builder persistence and open `/ui-builder/`. The website opens its New
+Start the server as above and open `/ui-builder/`. The website opens its New
 design chooser when no design is named. The same chooser is available from **New design** in every
 live editor.
 
