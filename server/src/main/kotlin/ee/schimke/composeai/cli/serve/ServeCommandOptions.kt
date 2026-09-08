@@ -771,6 +771,43 @@ public class ServeCommandOptions(
       ?.toMap() ?: emptyMap()
 
   /**
+   * Where comment activity is posted (`--ui-builder-comment-webhook`).
+   *
+   * Validated here rather than at the first delivery, the way every other URL-shaped option is: a
+   * hook that is refused on startup is a line an operator reads while they are still deploying,
+   * where one that fails on the first comment is a channel that is quietly never told anything.
+   *
+   * The refusal names the rule and **never echoes the value**. The URL is the credential (a Slack
+   * hook's secret is its path), and a startup error is exactly the string that ends up in a
+   * deployment log, a CI transcript and a screenshot.
+   */
+  override val uiBuilderCommentWebhook: String? =
+    args
+      .flagValue("--ui-builder-comment-webhook")
+      ?.trim()
+      ?.takeIf { it.isNotEmpty() }
+      ?.also { url ->
+        val rejection = CommentWebhookConfig(url).rejection()
+        require(rejection == null) { "--ui-builder-comment-webhook $rejection" }
+      }
+
+  /**
+   * Which dialect that hook speaks. Refused rather than defaulted when it is a word nobody wrote.
+   */
+  override val uiBuilderCommentWebhookFormat: String? =
+    args
+      .flagValue("--ui-builder-comment-webhook-format")
+      ?.trim()
+      ?.takeIf { it.isNotEmpty() }
+      ?.also {
+        require(CommentWebhookFormat.parse(it) != null) {
+          "--ui-builder-comment-webhook-format must be one of " +
+            CommentWebhookFormat.WIRE_NAMES.joinToString(", ") +
+            "; got `$it`"
+        }
+      }
+
+  /**
    * Which served catalog compiles each UI-builder catalog's designs for the native preview lane.
    *
    * Same `<key>=<value>` shape as `--ui-builder-components` and for the same reason: a host serving

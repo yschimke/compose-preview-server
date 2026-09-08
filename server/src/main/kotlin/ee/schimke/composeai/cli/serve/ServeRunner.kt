@@ -2888,6 +2888,55 @@ public class ServeRunner(
       } else {
         null
       }
+    // Telling the room: comment activity, posted out to one URL. Off unless an operator named one.
+    //
+    // Constructed here and attached in the same breath, so it subscribes before the routes that
+    // accept comments are serving: a hook that attached after the first request could miss the
+    // comment that arrived while it was starting.
+    var startedServer: ServeHttpServer? = null
+    val commentWebhook = uiBuilderCommentWebhook?.let { url ->
+      val comments = uiBuilderLane?.comments
+      if (comments == null) {
+        // Named, and nothing to watch. Said out loud rather than ignored: an operator who
+        // configured a hook and hears nothing for a week should learn why on the day they
+        // deployed it, and the reason is always one of these two.
+        System.err.println(
+          "serve: --ui-builder-comment-webhook is set and there is no comment store to watch " +
+            "(the UI builder is off, or its state directory could not be opened); nothing " +
+            "will be posted"
+        )
+        return@let null
+      }
+      val format =
+        uiBuilderCommentWebhookFormat?.let { CommentWebhookFormat.parse(it) }
+          ?: CommentWebhookFormat.PLAIN
+      // The origin a reader's browser reaches this box at. `--github-auth-callback-base-url` is
+      // the operator's own statement of it and is authoritative where it is set — a deployment
+      // behind a reverse proxy knows its public name and this process does not. Everything else
+      // falls back to the bind address, which is right for the local case the fallback serves.
+      val configuredOrigin =
+        githubAuthCallbackBaseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
+      val linkHost = if (ServeUrls.isExposed(host)) ServeUrls.LOOPBACK else host
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig(url, format),
+          designs = { designId ->
+            runCatching {
+              uiBuilderLane.service.adminListDesigns().firstOrNull { it.designId == designId }
+            }
+              .getOrNull()
+              ?.let { CommentWebhookDesign(it.title, it.catalogPin.systemId) }
+          },
+          baseUrl = {
+            configuredOrigin ?: ServeUrls.origin(linkHost, startedServer?.port ?: requestedPort)
+          },
+        )
+      System.err.println(
+        "serve: UI-builder comment activity posts to a ${format.wire} webhook " +
+          "(${webhook.fingerprint}); threads, replies and resolutions only"
+      )
+      webhook to webhook.attach(comments)
+    }
     val server =
       ServeHttpServer(
         host = host,
@@ -3145,12 +3194,15 @@ public class ServeRunner(
           runCatching { catalogFeed?.close() }
           runCatching { catalogRegistrySync?.close() }
           runCatching { registry.close() }
+          runCatching { commentWebhook?.second?.close() }
+          runCatching { commentWebhook?.first?.close() }
           runCatching { uiBuilderLane?.close() }
           closeables.forEach { c -> runCatching { c?.close() } }
           done.countDown()
         }
       )
 
+    startedServer = server
     server.start()
     // Cadence only — the boot fold-in already read every registry once, so the first pass is a
     // reconciliation, not the initial import.

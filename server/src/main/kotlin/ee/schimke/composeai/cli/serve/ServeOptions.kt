@@ -646,6 +646,32 @@ public interface ServeOptions {
     get() = emptyMap()
 
   /**
+   * Where a comment board's activity is posted when it moves (`--ui-builder-comment-webhook
+   * <url>`). Null keeps the discussion inside the product.
+   *
+   * The outbound half of Talk: a new thread, a reply and a resolution reach one URL, so a reviewer
+   * who is in a chat window rather than in the editor hears about them. Nothing else fires — see
+   * [ServeUiBuilderCommentWebhook] for why a reaction is not news.
+   *
+   * **Treat the value as a credential.** A Slack, Teams or Google Chat incoming-webhook URL carries
+   * its secret in the path, so it is never logged or shown; only `https` is accepted (loopback
+   * aside, for a test receiver or a local relay), and a URL that is neither is refused at startup.
+   */
+  public val uiBuilderCommentWebhook: String?
+    get() = null
+
+  /**
+   * Which body the webhook posts (`--ui-builder-comment-webhook-format`): `plain`, `slack`, `teams`
+   * or `google-chat`. Defaults to this server's own event JSON.
+   *
+   * Named separately from the URL rather than sniffed from its host, deliberately: a hook behind a
+   * relay, a proxy or a workflow runner has a hostname that says nothing about what the far end
+   * parses, and guessing wrong is a channel that silently receives nothing readable.
+   */
+  public val uiBuilderCommentWebhookFormat: String?
+    get() = null
+
+  /**
    * Which served catalog each UI-builder catalog's designs are **compiled** against for the native
    * preview lane (`--ui-builder-native-catalog <builder catalog>=<served catalog>`).
    *

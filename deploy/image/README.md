@@ -132,6 +132,18 @@ on a shelf an author switches on from the editor's settings. A pack's component 
 the served catalog's delivery branch, so nothing else needs configuring. See
 [`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](../../docs/design/UI_BUILDER_COMPONENT_PACKS.md).
 
+`SERVE_UI_BUILDER_COMMENT_WEBHOOK` points a design's **Talk** activity outward: a new thread, a
+reply and a resolution are POSTed to one incoming-webhook URL with the thread's permalink, so a
+reviewer reading a chat window hears about a comment without opening the builder. Reactions and
+acknowledgements deliberately do not fire. `SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT` picks the body
+— `plain` (this server's own event JSON, the default), `slack`, `teams` or `google-chat`.
+
+**The URL is a credential.** A Slack or Teams hook URL carries its secret in the path, so keep it in
+the deployment's env file, never in a compose file or a log; the server accepts only `https`
+(loopback aside) and names the hook by a digest wherever it has to mention one. Delivery is
+fire-and-forget from a bounded queue, so a wedged chat platform never slows an accepted comment.
+See [`docs/design/UI_BUILDER_COMMENTS.md`](../../docs/design/UI_BUILDER_COMMENTS.md).
+
 The compose deployment offers those three agent capabilities by default because the image always
 packages the builder lane. `images` joins them when `SERVE_IMAGE_UPLOAD_REPO` names a repository —
 that is, when this box runs the upload lane — so an approved agent can host a rendered preview

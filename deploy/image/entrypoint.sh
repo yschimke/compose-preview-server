@@ -273,6 +273,21 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # default: admitting a pack is a per-deployment decision. See
   # docs/design/UI_BUILDER_COMPONENT_PACKS.md.
   [[ -n "${SERVE_UI_BUILDER_PACKS:-}" ]] && args+=(--ui-builder-packs "${SERVE_UI_BUILDER_PACKS}")
+  # Outbound comment activity: a new thread, a reply and a resolution on any design's Talk board,
+  # posted to one incoming-webhook URL so a reviewer who is not in the editor hears about it.
+  # Nothing else fires — a reaction is one actor catching up, not news the room has to hear.
+  #
+  # TREAT THE VALUE AS A SECRET. A Slack, Teams or Google Chat hook URL carries its credential in
+  # the path, so it belongs in the deployment's env file and never in a log line; the server
+  # refuses anything but https (loopback aside) and identifies the hook by a digest.
+  #
+  # The format is named rather than sniffed from the hostname: a hook behind a relay or a workflow
+  # runner has a host that says nothing about what parses the body at the far end.
+  if [[ -n "${SERVE_UI_BUILDER_COMMENT_WEBHOOK:-}" ]]; then
+    args+=(--ui-builder-comment-webhook "${SERVE_UI_BUILDER_COMMENT_WEBHOOK}")
+    [[ -n "${SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT:-}" ]] &&
+      args+=(--ui-builder-comment-webhook-format "${SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT}")
+  fi
 fi
 # Explicit per-catalog apps remain additive and take precedence over the packaged fallback.
 [[ -n "${SERVE_WASM_DIR:-}" ]] && args+=(--wasm-dir "${SERVE_WASM_DIR}")
