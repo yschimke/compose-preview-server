@@ -494,6 +494,12 @@ const STYLED_FIXTURES = new Set([
   // simplification would move a baseline. `viewer.js` is needed too, for the `player-java`
   // state below.
   "serve-viewer-rc-players",
+  // The auth-gated twin of the fixture above, and the pair the renderer control has to keep
+  // apart: an RC preview HAS a combo, an auth-gated live lane replaces the chip with a link to
+  // GitHub, and a box run with `--github-auth` serves both at once. Its claim is entirely
+  // painted — a dashed "action to take" affordance standing apart from the solid combo rather
+  // than sharing its outline — so it is worthless without the stylesheet routed in.
+  "serve-viewer-rc-signin",
   // The playground handoff this host cannot honour. Its whole claim is a NOTICE — an
   // error-container panel that says "this server cannot compile against <catalog>" before the
   // visitor spends a compile finding out — and captured bare that is an ordinary paragraph in
@@ -2810,6 +2816,67 @@ const FIXTURE_STATES = [
       await page.mouse.move(0, 0);
     },
   })),
+  {
+    // THE LIT PILL. The renderer chip and the combo are one segmented control, and the lit state is
+    // the one that can come apart: `[aria-pressed="true"]` swaps the chip's outline for a filled
+    // green field, so a caret segment that kept its own border left a borderless green half against
+    // an outlined box — two controls again, at exactly the moment the page is claiming to be live.
+    //
+    // DRIVEN through the control, not dressed by setting `aria-pressed`. There is no daemon behind
+    // this fixture, but the chip enters the lane optimistically — the click runs `setMode("live")`
+    // and `updateLiveToggle()` in full, so the shot holds the state the application actually
+    // produces: pill lit, verb inverted to `▸ Snapshot`, chip renamed to `Live`, and the stage's
+    // invitation withdrawn. Setting the attribute by hand moved the first of those and none of the
+    // rest, which is a toolbar no session can reach — a green "live" pill still offering `▸ Live`
+    // over a stage still saying "click for live".
+    fixture: "serve-viewer-rc-players",
+    suffix: "live-on",
+    apply: async (page) => {
+      await page.click("#cp-live-toggle");
+      // Waits on the DERIVED state, not on the attribute the click sets first. `aria-pressed` is
+      // one of a handful of things `updateLiveToggle()` moves together — the verb inverts, the chip
+      // renames itself to the lane it is now on, and the stage drops its invitation — so a wait on
+      // the attribute alone would pass on a page that had lit the pill and updated nothing else.
+      //
+      // The last clause holds the shot still. There is no daemon behind a committed fixture, so
+      // the socket this click opens always ends in `showModeError`, and WHEN it does is up to the
+      // network stack — shooting before it lands and shooting after are two different pictures of
+      // the same state. Waiting for the settled one makes the capture deterministic, and it is the
+      // honest frame anyway: the toolbar of a page that entered the lane and found nothing there.
+      await page.waitForFunction(
+        () =>
+          document
+            .getElementById("cp-live-toggle")
+            ?.getAttribute("aria-pressed") === "true" &&
+          document.getElementById("cp-live-toggle-verb")?.textContent ===
+            "\u25b8 Snapshot" &&
+          document
+            .querySelector(".cp-viewer")
+            ?.getAttribute("data-live-invite") === "false" &&
+          document.getElementById("cp-error")?.hidden === false,
+      );
+    },
+  },
+  {
+    // Back off the lit state, so the states after this one diff the resting bar rather than a green
+    // one. They run in order against the SAME page.
+    fixture: "serve-viewer-rc-players",
+    suffix: "live-off",
+    apply: async (page) => {
+      await page.click("#cp-live-toggle");
+      await page.waitForFunction(
+        () =>
+          document
+            .getElementById("cp-live-toggle")
+            ?.getAttribute("aria-pressed") === "false" &&
+          document.getElementById("cp-live-toggle-verb")?.textContent ===
+            "\u25b8 Live" &&
+          // …and the failure notice the lane put on the stage is gone with it, so the states after
+          // this one diff a resting bar over a resting stage.
+          document.getElementById("cp-error")?.hidden === true,
+      );
+    },
+  },
   {
     // Switching player through the combo. The committed HTML always opens on the default
     // (`AndroidX Embedded`), so this is the only way the picker's *moved* state is diffed: the

@@ -15650,8 +15650,8 @@ ${scriptTag("known-differences.js")}
     // Only swap in the sign-in link when auth is what's blocking the stream. A pure static bundle
     // has no lane to unlock, so it keeps the honestly-disabled toggle — inviting a sign-in that
     // would change nothing is worse than the greyed chip.
-    val liveToggleHtml =
-      if (liveAuthBlocksStream && liveSignInLink != null) liveSignInLink else liveToggleButton
+    val liveToggleIsSignIn = liveAuthBlocksStream && liveSignInLink != null
+    val liveToggleHtml = if (liveToggleIsSignIn) liveSignInLink!! else liveToggleButton
     // Controls the in-browser Wasm app also honours — day/night (uiMode), font scale (density),
     // locale (layout direction): live whenever the server can render an override OR a Wasm app
     // backs
@@ -16286,6 +16286,16 @@ ${scriptTag("known-differences.js")}
     val rendererControl =
       when {
         componentBrowser -> laneSelectHtml
+        // The SIGN-IN variant is not a renderer control and must not be dressed as half of one.
+        //
+        // When auth is the only thing between the visitor and the daemon lane, the chip's slot
+        // holds an anchor that goes to GitHub instead of a button that toggles a lane. Joining it
+        // to the renderer caret would put a dashed segment against a solid one — and that dash is
+        // load-bearing, not decoration: it is what marks the control as an action to take rather
+        // than a state to read, which is exactly the distinction a shared outline would erase. It
+        // would also wrap a link to another origin in `role="group" aria-label="Renderer"`.
+        liveToggleIsSignIn ->
+          listOf(liveToggleHtml, laneSelectHtml).filter { it.isNotBlank() }.joinToString("\n")
         liveToggleHtml.isBlank() || laneSelectHtml.isBlank() ->
           listOf(liveToggleHtml, laneSelectHtml).filter { it.isNotBlank() }.joinToString("\n")
         else ->
