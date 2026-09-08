@@ -35,9 +35,9 @@ internal fun uiBuilderDisabledWarning(stateDirectory: File, failure: Throwable):
       "Everything else on this host is unaffected and serving. To recover, "
   return if (marker.exists()) {
     preamble +
-      "either move the store aside to start empty (mv ${stateDirectory.path}/designs " +
-      "${stateDirectory.path}/designs.broken — the designs in it are then lost, so copy it " +
-      "first)" +
+      "either move the store aside to start empty (mv ${marker.path} ${marker.path}.broken && mv " +
+      "${stateDirectory.path}/designs ${stateDirectory.path}/designs.broken — the marker goes too, " +
+      "or the next start reads the same one back; the designs are then lost, so copy them first)" +
       (if (migrated.exists()) {
         ", or roll back to the state this store was migrated from (rm ${marker.path} && mv " +
           "${migrated.path} ${stateFile.path})"

@@ -94,6 +94,9 @@ class ServeUiBuilderLaneGuardTest {
     val warning = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("marker"))
 
     assertTrue(warning.contains("designs.broken"), warning)
+    // The marker is one of the things that can fail here, so a recovery that left it in place
+    // would send the operator round the same failure on the next start.
+    assertTrue(warning.contains("store.json.broken"), warning)
     assertTrue(warning.contains("--ui-builder-state-dir none"), warning)
     assertFalse(
       warning.contains(FileUiBuilderStateStorage.BACKUP_FILE),

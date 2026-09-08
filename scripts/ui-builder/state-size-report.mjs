@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -167,9 +167,14 @@ export function projectRetention(report, { keep = 64 } = {}) {
  */
 export function analyzeUiBuilderStore(directory) {
   const designsDirectory = join(directory, "designs");
-  const slugs = readdirSync(designsDirectory, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
+  // A store that has been opened but never written to has a marker and no `designs/` at all, which
+  // is an empty deployment rather than a broken one — and the report exists to be runnable against
+  // a host before anyone has edited anything.
+  const slugs = existsSync(designsDirectory)
+    ? readdirSync(designsDirectory, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+    : [];
 
   let totalBytes = fileBytes(join(directory, "store.json"));
   const designs = [];
@@ -309,19 +314,30 @@ function replayJournal(designDirectory, header) {
     if (!line.trim()) continue;
     let entry;
     try {
-      entry = JSON.parse(line);
+      // Each record is stored beside a checksum of itself; the report reads the record and leaves
+      // verifying it to the store, which quarantines the design rather than reporting on it.
+      entry = JSON.parse(line).entry;
     } catch {
       continue;
     }
-    if (entry.historySet) live.history = entry.historySet;
-    if (entry.historyAppend) {
+    if (!entry) continue;
+    // Presence, not truthiness. A trim to nothing — an asset write clearing a long history — is
+    // encoded as an empty append with `keep: 0`, and both of those are falsy: read as booleans, the
+    // report would go on counting every superseded record as live and attribute a journal's slack
+    // to retained state.
+    if (entry.historySet !== undefined) live.history = entry.historySet;
+    if (entry.historyAppend !== undefined) {
       live.history = live.history.concat(entry.historyAppend);
-      if (entry.historyKeep) live.history = live.history.slice(-entry.historyKeep);
+      if (entry.historyKeep !== undefined) {
+        live.history = entry.historyKeep === 0 ? [] : live.history.slice(-entry.historyKeep);
+      }
     }
-    if (entry.auditSet) live.audit = entry.auditSet;
-    if (entry.auditAppend) {
+    if (entry.auditSet !== undefined) live.audit = entry.auditSet;
+    if (entry.auditAppend !== undefined) {
       live.audit = live.audit.concat(entry.auditAppend);
-      if (entry.auditKeep) live.audit = live.audit.slice(-entry.auditKeep);
+      if (entry.auditKeep !== undefined) {
+        live.audit = entry.auditKeep === 0 ? [] : live.audit.slice(-entry.auditKeep);
+      }
     }
     applyMapDelta(live.operationOutcomes, entry.outcomesPut, entry.outcomesRemoved);
     applyMapDelta(live.acceptedOperations, entry.acceptedPut, entry.acceptedRemoved);

@@ -183,6 +183,19 @@ internal data class JournalEntryV3(
   val tombstonesRemoved: List<String>? = null,
 )
 
+/**
+ * One journal line: a record, and a checksum of the record as stored.
+ *
+ * The header's `journalBytes` says which records are *committed*, which is a different question
+ * from whether the bytes are still the bytes — a torn tail is not corruption. Every other part of a
+ * design carries a checksum of its own stored tree, and a journal record that flipped a bit while
+ * staying valid JSON would otherwise be replayed as though it were authored: an outcome, an undo
+ * record or a tombstone, silently changed. Per record rather than over the whole prefix, because a
+ * digest of everything committed would cost the whole journal on every append, which is the cost
+ * the journal exists to avoid.
+ */
+@Serializable internal data class JournalLineV3(val checksumSha256: String, val entry: JsonElement)
+
 /** Why one design could not be read, written beside it rather than thrown. */
 @Serializable
 internal data class StoredQuarantineV3(val reason: String, val recordedAtEpochMillis: Long)
@@ -216,6 +229,14 @@ internal class FileUiBuilderDesignStore(
   private val markerFile = directory.resolve(STORE_FILE)
   private val lockFile = directory.resolve(LOCK_FILE)
   private val files = linkedMapOf<String, DesignFiles>()
+  /**
+   * The designs that could not be read, by id and directory.
+   *
+   * Held because a quarantined design is still the operator's content and still on the disk: it is
+   * absent from the service's design map, so `remove` has nothing else to resolve its directory
+   * from, and retiring it is the one admin action that must keep working when reading it does not.
+   */
+  private val quarantinedSlugs = linkedMapOf<String, String>()
   private var storedBytes = 0L
 
   init {
@@ -240,6 +261,11 @@ internal class FileUiBuilderDesignStore(
       val existingQuarantine = readQuarantine(designDirectory)
       if (existingQuarantine != null) {
         quarantined[existingQuarantine.first] = existingQuarantine.second
+        quarantinedSlugs[existingQuarantine.first] = slug
+        // Counted even though it cannot be decoded: a large corrupt design is still on the disk,
+        // and a gauge that called those bytes free would be wrong exactly when an operator needs to
+        // notice that broken data is being retained.
+        storedBytes += directoryBytes(designDirectory)
         continue
       }
       try {
@@ -255,6 +281,8 @@ internal class FileUiBuilderDesignStore(
         val reason = failure.message ?: failure::class.simpleName ?: "unreadable"
         writeQuarantine(designDirectory, designId, reason)
         quarantined[designId] = reason
+        quarantinedSlugs[designId] = slug
+        storedBytes += directoryBytes(designDirectory)
       }
     }
     StoredDesigns(designs, quarantined)
@@ -331,15 +359,21 @@ internal class FileUiBuilderDesignStore(
             journalBytes = journal.bytes,
             journalCompactedBytes = journal.compactedBytes,
           )
-        writeHeader(designDirectory, header)
-        Files.deleteIfExists(designDirectory.resolve(QUARANTINE_FILE))
-        sweep(designDirectory, header)
-        val bytes = directoryBytes(designDirectory)
+        // The budget is checked before the header lands, because the header is what makes the new
+        // generation the design. Checked after it, a refused write would already be durable: the
+        // caller would be told its edit failed and a restart would load the edit it was told had
+        // failed. Refusing here leaves the previous generation whole and the parts this commit
+        // wrote unreferenced, which the cleanup below unlinks and the next open would sweep anyway.
+        val bytes = referencedBytes(designDirectory, header)
         if (bytes > limits.maximumDesignBytes) {
+          written.forEach { runCatching { Files.deleteIfExists(it) } }
           throw UiBuilderPersistenceException(
             "UI-builder design $designId is $bytes bytes; limit is ${limits.maximumDesignBytes}"
           )
         }
+        writeHeader(designDirectory, header)
+        Files.deleteIfExists(designDirectory.resolve(QUARANTINE_FILE))
+        sweep(designDirectory, header)
         storedBytes += bytes - (current?.bytes ?: 0)
         files[designId] = DesignFiles(header, bytes)
       } catch (failure: UiBuilderPersistenceException) {
@@ -356,7 +390,10 @@ internal class FileUiBuilderDesignStore(
 
   override fun remove(designId: String) {
     locked {
-      val designDirectory = designsDirectory.resolve(slug(designId))
+      // A quarantined design's id came out of a header this build could not otherwise read, so its
+      // directory is the one recorded at load rather than one derived from the id.
+      val designDirectory =
+        designsDirectory.resolve(quarantinedSlugs.remove(designId) ?: slug(designId))
       val bytes = files.remove(designId)?.bytes ?: directoryBytes(designDirectory)
       storedBytes -= bytes
       if (storedBytes < 0) storedBytes = 0
@@ -459,12 +496,26 @@ internal class FileUiBuilderDesignStore(
       .lineSequence()
       .filter { it.isNotBlank() }
       .forEach { line ->
-        val entry =
+        val stored =
           try {
-            journalJson.decodeFromString<JournalEntryV3>(line)
+            journalJson.decodeFromString(JournalLineV3.serializer(), line)
           } catch (failure: Exception) {
             throw UiBuilderPersistenceException(
-              "invalid UI-builder journal record in $file",
+              "invalid UI-builder journal record in $file: ${failure.message}",
+              failure,
+            )
+          }
+        if (sha256(canonicalJson(stored.entry).encodeToByteArray()) != stored.checksumSha256) {
+          throw UiBuilderPersistenceException(
+            "UI-builder journal record checksum mismatch in $file"
+          )
+        }
+        val entry =
+          try {
+            journalJson.decodeFromJsonElement(JournalEntryV3.serializer(), stored.entry)
+          } catch (failure: Exception) {
+            throw UiBuilderPersistenceException(
+              "invalid UI-builder journal record in $file: ${failure.message}",
               failure,
             )
           }
@@ -659,8 +710,7 @@ internal class FileUiBuilderDesignStore(
         acceptedPut = next.acceptedOperations.takeIf { it.isNotEmpty() },
         tombstonesPut = next.tombstones.takeIf { it.isNotEmpty() },
       )
-    val line =
-      (journalJson.encodeToString(JournalEntryV3.serializer(), entry) + "\n").encodeToByteArray()
+    val line = journalLine(entry)
     val name = "$JOURNAL_PREFIX$generation$JOURNAL_SUFFIX"
     val temporary = writeTemporary(designDirectory, name, line)
     replaceAtomically(temporary, designDirectory.resolve(name))
@@ -675,8 +725,7 @@ internal class FileUiBuilderDesignStore(
     compactedBytes: Long,
   ): JournalWrite {
     val path = designDirectory.resolve(file)
-    val line =
-      (journalJson.encodeToString(JournalEntryV3.serializer(), entry) + "\n").encodeToByteArray()
+    val line = journalLine(entry)
     FileChannel.open(path, StandardOpenOption.WRITE).use { channel ->
       // A previous commit may have appended and died before its header landed. Its records are
       // beyond the committed length, and this one overwrites them: the header is the commit.
@@ -687,6 +736,17 @@ internal class FileUiBuilderDesignStore(
       channel.force(true)
     }
     return JournalWrite(file, committedBytes + line.size, compactedBytes)
+  }
+
+  /** One record, checksummed over the tree that is written beside the number. */
+  private fun journalLine(entry: JournalEntryV3): ByteArray {
+    val payload = journalJson.encodeToJsonElement(JournalEntryV3.serializer(), entry)
+    val checksum = sha256(canonicalJson(payload).encodeToByteArray())
+    return (journalJson.encodeToString(
+        JournalLineV3.serializer(),
+        JournalLineV3(checksum, payload),
+      ) + "\n")
+      .encodeToByteArray()
   }
 
   private fun writePart(designDirectory: Path, part: String, payload: JsonElement): String {
@@ -901,6 +961,24 @@ internal class FileUiBuilderDesignStore(
 
   private fun directoryBytes(directory: Path): Long =
     walkFiles(directory).sumOf { runCatching { Files.size(it) }.getOrDefault(0L) }
+
+  /**
+   * What the design would cost once [header] is current: the parts it names, and nothing else.
+   *
+   * Not the directory's size, which at this point still holds the generation about to be swept and
+   * would refuse a commit for bytes that are on their way out.
+   */
+  private fun referencedBytes(designDirectory: Path, header: StoredDesignHeaderV3): Long {
+    val parts = buildList {
+      add(header.documentFile)
+      add(header.positionsFile)
+      header.journalFile?.let { add(it) }
+      addAll(header.revisionFiles.values)
+    }
+    return parts.sumOf { name ->
+      runCatching { Files.size(designDirectory.resolve(name)) }.getOrDefault(0L)
+    }
+  }
 
   private fun deleteRecursively(directory: Path) {
     if (!Files.exists(directory)) return

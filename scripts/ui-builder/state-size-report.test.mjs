@@ -202,9 +202,11 @@ function storeDirectory(designs) {
       revisionFiles[String(index)] = name;
     });
     // Two records where the second supersedes the first: the slack a compaction would reclaim.
+    const record = (entry) => `${JSON.stringify({ checksumSha256: "x", entry })}\n`;
     const journal =
-      `${JSON.stringify({ outcomesPut: { "op-1": { fingerprint: "a", outcome: spec.outcome } } })}\n` +
-      `${JSON.stringify({ outcomesPut: { "op-1": { fingerprint: "b", outcome: spec.outcome } } })}\n`;
+      record({ outcomesPut: { "op-1": { fingerprint: "a", outcome: spec.outcome } } }) +
+      record({ outcomesPut: { "op-1": { fingerprint: "b", outcome: spec.outcome } } }) +
+      (spec.journalTail ?? "");
     writeFileSync(join(designDirectory, "journal-1.jsonl"), journal);
     writeFileSync(
       join(designDirectory, "design.json"),
@@ -269,5 +271,40 @@ test("the per-design store reports the same sections the one file did", () => {
 test("a state directory with no marker is not mistaken for the store", () => {
   const root = mkdtempSync(join(tmpdir(), "ui-builder-store-"));
   assert.equal(isDesignStore(root), false);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a store with a marker and no designs yet reports an empty deployment", () => {
+  const root = mkdtempSync(join(tmpdir(), "ui-builder-store-"));
+  writeFileSync(join(root, "store.json"), JSON.stringify({ format: "ui-builder-store-v3" }));
+
+  const report = analyzeUiBuilderStore(root);
+
+  assert.equal(report.designCount, 0);
+  assert.equal(report.designBytes, 0);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a history trimmed to nothing is counted as nothing", () => {
+  // An asset write clears the history: the store encodes that as an empty append with keep 0, and
+  // both are falsy — read as booleans the report would go on counting every superseded record.
+  const root = storeDirectory({
+    checkout: {
+      document: document("checkout", 3, 2),
+      revisions: [],
+      outcome: { operationId: "op-1", revision: 3 },
+      journalTail:
+        `${JSON.stringify({
+          checksumSha256: "x",
+          entry: { historySet: [{ big: "x".repeat(500) }] },
+        })}\n` +
+        `${JSON.stringify({ checksumSha256: "x", entry: { historyAppend: [], historyKeep: 0 } })}\n`,
+    },
+  });
+
+  const report = analyzeUiBuilderStore(root);
+
+  assert.equal(report.designs[0].sections.history.count, 0);
+  assert.equal(report.designs[0].sections.history.bytes, 2, "an empty list, and nothing else");
   rmSync(root, { recursive: true, force: true });
 });

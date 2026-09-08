@@ -12,6 +12,7 @@ import kotlin.coroutines.startCoroutine
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
@@ -106,6 +107,37 @@ class PersistentUiBuilderServiceFileStoreTest {
       execute(reopened, owner, UiBuilderServiceRequest.OpenDesign("settings")),
       "and every other design still serves",
     )
+  }
+
+  @Test
+  fun `a design that cannot be read can still be retired`() {
+    val root = createTempDirectory("ui-builder-service-store")
+    val first = service(root)
+    create(first, "checkout")
+    create(first, "settings")
+    Files.writeString(
+      Files.list(designDirectory(root, "checkout"))
+        .use { paths -> paths.filter { it.fileName.toString().startsWith("document-") }.toList() }
+        .single(),
+      "not json",
+    )
+    val reopened = service(root)
+
+    // Download and repair genuinely cannot work on a design whose document would not decode; being
+    // able to retire it is what keeps the quarantine from being a one-way door.
+    assertTrue(reopened.adminDeleteDesign("checkout"))
+
+    assertTrue("checkout" !in reopened.adminUnusableDesigns())
+    assertFalse(Files.exists(designDirectory(root, "checkout")))
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(reopened, owner, UiBuilderServiceRequest.OpenDesign("settings"))
+    )
+  }
+
+  @Test
+  fun `retiring a design that is neither stored nor quarantined is still false`() {
+    val service = service(createTempDirectory("ui-builder-service-store"))
+    assertFalse(service.adminDeleteDesign("nothing-here"))
   }
 
   private fun designDirectory(root: Path, designId: String): Path =

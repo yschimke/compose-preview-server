@@ -477,7 +477,17 @@ public class PersistentUiBuilderService(
    * layer before any of this runs, and `restoreBackup` is the recovery. Trusting a file that failed
    * those checks would be worse than not starting; carrying a design the catalog outgrew is not.
    */
-  private data class UnusableDesign(val code: ServiceErrorCodeV1, val reason: String)
+  private data class UnusableDesign(
+    val code: ServiceErrorCodeV1,
+    val reason: String,
+    /**
+     * True when the *store* could not read this design, rather than the catalog refusing a document
+     * it read fine. The two are unusable for different reasons and recover differently: a document
+     * the catalog outgrew can be downloaded and repaired, and one the store cannot decode can only
+     * be retired.
+     */
+    val storeQuarantine: Boolean = false,
+  )
 
   /**
    * Computed once at load and then maintained, rather than fixed for the life of the process.
@@ -503,7 +513,11 @@ public class PersistentUiBuilderService(
         // rather than one design. Reported like any other unusable design, and repaired the same
         // way — by an operator who can now see which one it is.
         loadedPersistence.quarantined.mapValues { (_, reason) ->
-          UnusableDesign(ServiceErrorCodeV1.INTERNAL, "stored design cannot be read: $reason")
+          UnusableDesign(
+            ServiceErrorCodeV1.INTERNAL,
+            "stored design cannot be read: $reason",
+            storeQuarantine = true,
+          )
         }
     )
 
@@ -2820,7 +2834,17 @@ public class PersistentUiBuilderService(
 
   override fun adminDeleteDesign(designId: String): Boolean {
     val closed: List<SubscriberMailbox> = lock.withLock {
-      if (designId !in persisted.designs) return false
+      // A design whose stored files could not be read is not in the design map — there is no
+      // document to put there — but it is still on the disk, still counted against the store, and
+      // still the operator's to retire. Retiring it is the one action that has to keep working when
+      // reading it does not; download and repair genuinely cannot, because both need the document
+      // the store could not decode.
+      if (designId !in persisted.designs) {
+        if (unusableDesigns[designId]?.storeQuarantine != true) return false
+        store.remove(designId)
+        unusableDesigns.remove(designId)
+        return@withLock emptyList()
+      }
       removeLocked(designId)
     }
     closed.forEach(SubscriberMailbox::close)

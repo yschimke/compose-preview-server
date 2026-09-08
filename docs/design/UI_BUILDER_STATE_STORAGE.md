@@ -258,12 +258,16 @@ absent from the stored tree and defaulted after.
   generation that is complete in every part; a crash after it leaves unreferenced files, which the
   next open of that design unlinks. There is no torn state to replay forward, because nothing
   partially applied is ever reachable.
-- **The journal's tail is bounded by the header, not by a CRC.** Records are one JSON object per
-  line and appended before the header names their length. Replay reads `journalBytes` and stops,
-  so a partial line from a crash — or a complete one from a commit whose header never landed — is
-  never applied. It is truncated on the next commit. This replaces the per-record length and CRC the
-  first sketch called for: the header is already the atomic switch, and a second integrity mechanism
-  underneath it would be answering a question that cannot be asked.
+- **The journal's tail is bounded by the header; its records are checksummed one by one.** Records
+  are one JSON object per line — the record, and a checksum of the record as stored — appended
+  before the header names their length. Replay reads `journalBytes` and stops, so a partial line
+  from a crash, or a complete one from a commit whose header never landed, is never applied; it is
+  truncated on the next commit. That answers *which records are committed*, which is a different
+  question from *whether the bytes are still the bytes*, and only the checksum answers the second:
+  a record that flipped a bit while staying valid JSON would otherwise be replayed as though it had
+  been authored, silently changing an outcome, an undo record or a tombstone while every other part
+  of the design is checked. Per record rather than a digest over the committed prefix, because
+  hashing everything committed on every append is the cost the journal exists to avoid.
 - **The backup goes away, per design.** The single global `.backup` is what makes today's write read
   and rewrite all 23.4 MB to save a copy nobody has ever restored automatically. Retained revisions
   under `revisions/` *are* the previous generations, per design, and `restoreBackup()` becomes
@@ -272,7 +276,15 @@ absent from the stored tree and defaulted after.
 - **A design that cannot be read is quarantined, not thrown.** A missing part, a checksum mismatch
   or a header that will not parse writes `quarantine.json` beside the design and leaves every other
   design serving — the property the single file could not have, because its checksum covered all of
-  them at once.
+  them at once. Its bytes still count against the store's gauge, because they are still on the disk,
+  and `adminDeleteDesign` still retires it: reading a design and retiring it are different
+  permissions on different failures, and a quarantine that could not be cleared would be the
+  one-way door this mechanism exists to avoid. Downloading or repairing it cannot work, and says so
+  — both need the document that would not decode.
+
+- **A commit that exceeds a design's own budget is refused before the header lands.** The header is
+  what makes a generation the design, so a budget checked after it would tell the caller its edit
+  failed and hand a restart the edit that failed.
 
 ## Migration
 

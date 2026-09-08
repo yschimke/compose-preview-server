@@ -250,6 +250,71 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `a journal record changed in place is caught rather than replayed`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    val first = design("checkout")
+    store.commit("checkout", null, first)
+    val journal = journalFile(root, "checkout")
+    // Still valid JSON, still the committed length, and not what was written: the header's
+    // `journalBytes` says which records are committed, which is a different question from whether
+    // the bytes are still the bytes.
+    Files.writeString(journal, Files.readString(journal).replace("\"owner\"", "\"other\""))
+
+    val reopened = FileUiBuilderDesignStore(root).load()
+
+    assertEquals(emptyMap(), reopened.designs)
+    assertTrue(
+      reopened.quarantined.getValue("checkout").contains("checksum"),
+      reopened.quarantined.toString(),
+    )
+  }
+
+  @Test
+  fun `a design refused for its own budget leaves the generation before it`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root, UiBuilderStoreLimits(maximumDesignBytes = 8_192))
+    val first = design("checkout")
+    store.commit("checkout", null, first)
+
+    val overBudget =
+      first.copy(
+        document =
+          first.document.copy(
+            revision = 1,
+            nodes = (0 until 400).associate { "node-$it" to node("node-$it") },
+          ),
+        lastSequence = 1,
+      )
+    assertFailsWith<UiBuilderPersistenceException> { store.commit("checkout", first, overBudget) }
+
+    assertEquals(
+      first,
+      FileUiBuilderDesignStore(root).load().designs.getValue("checkout"),
+      "a refused commit must not be the design a restart loads",
+    )
+  }
+
+  @Test
+  fun `a quarantined design is still counted and can still be retired`() {
+    val root = createTempDirectory("ui-builder-store")
+    FileUiBuilderDesignStore(root).commit("checkout", null, design("checkout"))
+    Files.writeString(documentFiles(root, "checkout").single(), "not json")
+
+    val reopened = FileUiBuilderDesignStore(root)
+    reopened.load()
+    assertTrue(
+      reopened.usage().bytes > 0,
+      "bytes that are still on the disk are not free just because they cannot be decoded",
+    )
+
+    reopened.remove("checkout")
+
+    assertEquals(0, reopened.usage().bytes)
+    assertFalse(Files.exists(root.resolve("designs/${slugOf("checkout")}")))
+  }
+
+  @Test
   fun `removing a design removes its directory`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)
