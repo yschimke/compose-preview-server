@@ -315,6 +315,100 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `a quarantined design keeps the id it was quarantined under across restarts`() {
+    val root = createTempDirectory("ui-builder-store")
+    FileUiBuilderDesignStore(root).commit("checkout", null, design("checkout"))
+    // The header still parses and no longer checks out, which is the case where the id has to come
+    // from somewhere other than a header this build will not trust.
+    val header = root.resolve("designs/${slugOf("checkout")}/design.json")
+    val stored = Files.readString(header)
+    val checksum = Regex("\"checksumSha256\":\"([0-9a-f]+)\"").find(stored)!!.groupValues[1]
+    Files.writeString(header, stored.replace(checksum, "0".repeat(checksum.length)))
+
+    assertContains(FileUiBuilderDesignStore(root).load().quarantined.keys, "checkout")
+    // The second open reads `quarantine.json` rather than the header, and must answer the same id:
+    // an operator retiring the design types the id, not the hash of a directory.
+    assertContains(FileUiBuilderDesignStore(root).load().quarantined.keys, "checkout")
+  }
+
+  @Test
+  fun `a design too large for its budget is compacted rather than refused`() {
+    val root = createTempDirectory("ui-builder-store")
+    // A journal whose growth cannot reach the compaction ratio before the budget: without the
+    // rewrite this design's every edit is refused for bytes nothing needs to keep.
+    val store =
+      FileUiBuilderDesignStore(
+        root,
+        UiBuilderStoreLimits(
+          maximumDesignBytes = 24_000,
+          journalCompactionBytes = 1_024 * 1_024,
+          journalCompactionRatio = 4,
+        ),
+      )
+    var previous = design("checkout")
+    store.commit("checkout", null, previous)
+    repeat(40) { step ->
+      val next =
+        previous.copy(
+          operationOutcomes = mapOf("op-$step" to outcome("op-$step")),
+          audit = listOf(audit("op-$step")),
+        )
+      store.commit("checkout", previous, next)
+      previous = next
+    }
+
+    assertEquals(previous, FileUiBuilderDesignStore(root).load().designs.getValue("checkout"))
+    assertTrue(
+      journalFile(root, "checkout").fileName.toString() != "journal-1.jsonl",
+      "the budget asked for the rewrite instead of refusing the edit",
+    )
+  }
+
+  @Test
+  fun `a v2 file too large to read is refused rather than allowed to exhaust the heap`() {
+    val root = createTempDirectory("ui-builder-store")
+    Files.write(
+      root.resolve(FileUiBuilderStateStorage.STATE_FILE),
+      ByteArray(4_096) { '{'.code.toByte() },
+    )
+
+    val failure =
+      assertFailsWith<UiBuilderPersistenceException> {
+        FileUiBuilderDesignStore(root, UiBuilderStoreLimits(maximumMigrationBytes = 1_024))
+      }
+
+    assertContains(failure.message.orEmpty(), "migration limit")
+  }
+
+  @Test
+  fun `a delete interrupted after the rename is finished by the next open`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    store.commit("checkout", null, design("checkout"))
+    store.commit("settings", null, design("settings"))
+    // What `remove` leaves behind when the cleanup after its rename does not finish.
+    Files.move(
+      root.resolve("designs/${slugOf("checkout")}"),
+      root.resolve("designs/${slugOf("checkout")}${FileUiBuilderDesignStore.DELETED_SUFFIX}1"),
+    )
+
+    val reopened = FileUiBuilderDesignStore(root).load()
+
+    assertEquals(setOf("settings"), reopened.designs.keys)
+    assertEquals(
+      emptyMap(),
+      reopened.quarantined,
+      "a tombstone is not a design that failed to read",
+    )
+    assertFalse(
+      Files.exists(
+        root.resolve("designs/${slugOf("checkout")}${FileUiBuilderDesignStore.DELETED_SUFFIX}1")
+      ),
+      "and the disk it holds is given back",
+    )
+  }
+
+  @Test
   fun `removing a design removes its directory`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)

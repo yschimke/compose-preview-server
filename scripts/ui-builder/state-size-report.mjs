@@ -40,7 +40,16 @@ export const DESIGN_SECTIONS = [
   "access",
 ];
 
+/** What `FileUiBuilderStateStorage` refuses a write at: the ceiling of the single-file store. */
 const DEFAULT_MAXIMUM_BYTES = 128 * 1024 * 1024;
+/**
+ * What `UiBuilderStoreLimits.maximumBytes` gauges the per-design store against.
+ *
+ * Reported against the wrong one, an ordinary v3 deployment at 102 MB reads as 80% full and exits
+ * non-zero while using a tenth of what it is measured by — so the default follows the store the
+ * path actually holds, and `--maximum-bytes` still overrides both.
+ */
+const DEFAULT_STORE_MAXIMUM_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_WARN_PERCENT = 80;
 
 function byteLength(value) {
@@ -181,7 +190,13 @@ export function analyzeUiBuilderStore(directory) {
   for (const slug of slugs) {
     const designDirectory = join(designsDirectory, slug);
     const header = payloadOf(join(designDirectory, "design.json"));
-    if (!header) continue;
+    if (!header) {
+      // A quarantined design whose header will not parse is still on the disk, and the store counts
+      // it: a report that dropped it would understate a store precisely when corrupt state is what
+      // is filling it. It has no sections to attribute, so it is counted and not tabulated.
+      totalBytes += directoryBytes(designDirectory);
+      continue;
+    }
     const sections = {};
     for (const section of DESIGN_SECTIONS) sections[section] = { bytes: 0, count: 0 };
 
@@ -359,7 +374,12 @@ function percent(bytes, of) {
   return `${((bytes / of) * 100).toFixed(1)}%`;
 }
 
-export function formatReport(report, { maximumBytes = DEFAULT_MAXIMUM_BYTES, top = 10 } = {}) {
+/** The ceiling a report is measured against when the caller names none: the one its store has. */
+export function defaultMaximumBytes(report) {
+  return report.format === "ui-builder-store-v3" ? DEFAULT_STORE_MAXIMUM_BYTES : DEFAULT_MAXIMUM_BYTES;
+}
+
+export function formatReport(report, { maximumBytes = defaultMaximumBytes(report), top = 10 } = {}) {
   const lines = [];
   lines.push(
     `format ${report.format}  ${megabytes(report.totalBytes)} of ${megabytes(maximumBytes)} ` +
@@ -410,7 +430,12 @@ export function formatReport(report, { maximumBytes = DEFAULT_MAXIMUM_BYTES, top
 }
 
 function parseArguments(argv) {
-  const options = { path: null, maximumBytes: DEFAULT_MAXIMUM_BYTES, warnPercent: DEFAULT_WARN_PERCENT, top: 10 };
+  const options = {
+    path: null,
+    maximumBytes: null,
+    warnPercent: DEFAULT_WARN_PERCENT,
+    top: 10,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--maximum-bytes") options.maximumBytes = Number(argv[++index]);
@@ -430,7 +455,11 @@ function parseArguments(argv) {
 
 function main(argv) {
   const options = parseArguments(argv);
-  const report = isDesignStore(options.path)
+  const store = isDesignStore(options.path);
+  if (options.maximumBytes === null) {
+    options.maximumBytes = store ? DEFAULT_STORE_MAXIMUM_BYTES : DEFAULT_MAXIMUM_BYTES;
+  }
+  const report = store
     ? analyzeUiBuilderStore(options.path)
     : analyzeUiBuilderState(JSON.parse(readFileSync(options.path, "utf8")), {
         totalBytes: statSync(options.path).size,

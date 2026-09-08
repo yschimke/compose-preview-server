@@ -103,12 +103,21 @@ public data class UiBuilderStoreLimits(
   val maximumDesignBytes: Long = 64L * 1_024 * 1_024,
   /** The journal is rewritten once it is this large and this much larger than what it holds. */
   val journalCompactionBytes: Long = 256L * 1_024,
+  /**
+   * The largest v2 state file the one-shot migration will read into memory.
+   *
+   * The same ceiling `FileUiBuilderStateStorage` refused a read at, kept for the same reason: the
+   * migration reads the whole file at once, and a file large enough to exhaust the heap would take
+   * the host down rather than the lane.
+   */
+  val maximumMigrationBytes: Long = 128L * 1_024 * 1_024,
   val journalCompactionRatio: Int = 4,
 ) {
   init {
     require(maximumBytes > 0) { "maximumBytes must be positive" }
     require(maximumDesignBytes > 0) { "maximumDesignBytes must be positive" }
     require(journalCompactionBytes > 0) { "journalCompactionBytes must be positive" }
+    require(maximumMigrationBytes > 0) { "maximumMigrationBytes must be positive" }
     require(journalCompactionRatio > 1) { "journalCompactionRatio must be greater than one" }
   }
 }
@@ -196,9 +205,19 @@ internal data class JournalEntryV3(
  */
 @Serializable internal data class JournalLineV3(val checksumSha256: String, val entry: JsonElement)
 
-/** Why one design could not be read, written beside it rather than thrown. */
+/**
+ * Why one design could not be read, written beside it rather than thrown.
+ *
+ * [designId] is recorded because the header it came from is, by definition, the thing that could
+ * not be read: recovering the id a second time on the next start would fall back to the directory's
+ * hash, and the id an operator uses to retire the design would change under them at a restart.
+ */
 @Serializable
-internal data class StoredQuarantineV3(val reason: String, val recordedAtEpochMillis: Long)
+internal data class StoredQuarantineV3(
+  val reason: String,
+  val recordedAtEpochMillis: Long,
+  val designId: String? = null,
+)
 
 @Serializable
 internal data class StoreMarkerV3(val format: String, val migratedFrom: String? = null)
@@ -323,16 +342,19 @@ internal class FileUiBuilderDesignStore(
         val previousJournal = current?.header?.journalFile
         val previousJournalBytes = current?.header?.journalBytes ?: 0
         val compactedBytes = current?.header?.journalCompactedBytes ?: 0
-        val journal =
+        var compacted = previousJournal == null
+        var journal =
           when {
             previousJournal == null -> compactJournal(designDirectory, next, generation = 1)
             entry == null -> JournalWrite(previousJournal, previousJournalBytes, compactedBytes)
-            shouldCompact(previousJournalBytes, compactedBytes) ->
+            shouldCompact(previousJournalBytes, compactedBytes) -> {
+              compacted = true
               compactJournal(
                 designDirectory,
                 next,
                 generation = journalGeneration(previousJournal) + 1,
               )
+            }
             else ->
               appendJournal(
                 designDirectory,
@@ -342,7 +364,7 @@ internal class FileUiBuilderDesignStore(
                 compactedBytes,
               )
           }
-        val header =
+        fun headerFor(written: JournalWrite) =
           StoredDesignHeaderV3(
             designId = designId,
             title = next.document.title,
@@ -355,16 +377,33 @@ internal class FileUiBuilderDesignStore(
             documentFile = documentFile,
             positionsFile = positionsFile,
             revisionFiles = revisionFiles,
-            journalFile = journal.file,
-            journalBytes = journal.bytes,
-            journalCompactedBytes = journal.compactedBytes,
+            journalFile = written.file,
+            journalBytes = written.bytes,
+            journalCompactedBytes = written.compactedBytes,
           )
+        var header = headerFor(journal)
         // The budget is checked before the header lands, because the header is what makes the new
         // generation the design. Checked after it, a refused write would already be durable: the
         // caller would be told its edit failed and a restart would load the edit it was told had
         // failed. Refusing here leaves the previous generation whole and the parts this commit
         // wrote unreferenced, which the cleanup below unlinks and the next open would sweep anyway.
-        val bytes = referencedBytes(designDirectory, header)
+        var bytes = referencedBytes(designDirectory, header)
+        if (bytes > limits.maximumDesignBytes && !compacted) {
+          // Compaction is decided from the journal's length against what it describes, and a design
+          // whose live collections are large enough can reach the budget before that ratio is ever
+          // met — every edit refused, for room a rewrite would give back. So the budget asks for
+          // the
+          // rewrite rather than refusing on the strength of bytes nothing needs to keep.
+          journal =
+            compactJournal(
+              designDirectory,
+              next,
+              generation = journalGeneration(journal.file) + 1,
+            )
+          compacted = true
+          header = headerFor(journal)
+          bytes = referencedBytes(designDirectory, header)
+        }
         if (bytes > limits.maximumDesignBytes) {
           written.forEach { runCatching { Files.deleteIfExists(it) } }
           throw UiBuilderPersistenceException(
@@ -398,7 +437,20 @@ internal class FileUiBuilderDesignStore(
       storedBytes -= bytes
       if (storedBytes < 0) storedBytes = 0
       try {
-        deleteRecursively(designDirectory)
+        // The rename is the deletion. A recursive unlink that fails halfway would leave the design
+        // half gone while the caller was told the delete failed and the service kept it in memory —
+        // a restart would then lose or quarantine a design it had been told still existed. Renaming
+        // out of the way is atomic, so after it the design is gone whatever happens next; the
+        // unlink of the tombstone is cleanup, and a failure there costs disk rather than truth.
+        if (Files.exists(designDirectory)) {
+          val tombstone =
+            designDirectory.resolveSibling(
+              "${designDirectory.fileName}$DELETED_SUFFIX${System.currentTimeMillis()}"
+            )
+          Files.move(designDirectory, tombstone, StandardCopyOption.ATOMIC_MOVE)
+          forceDirectory(designsDirectory)
+          runCatching { deleteRecursively(tombstone) }
+        }
       } catch (failure: IOException) {
         throw UiBuilderPersistenceException(
           "cannot remove UI-builder design $designId at $designDirectory",
@@ -417,7 +469,13 @@ internal class FileUiBuilderDesignStore(
     if (!Files.isDirectory(designsDirectory)) return emptyList()
     val slugs = mutableListOf<String>()
     Files.newDirectoryStream(designsDirectory).use { entries ->
-      entries.forEach { if (Files.isDirectory(it)) slugs.add(it.fileName.toString()) }
+      entries.forEach {
+        val name = it.fileName.toString()
+        // A tombstone is a design that was deleted and whose cleanup did not finish. It is not a
+        // design, and the next open is where the disk it holds is given back.
+        if (Files.isDirectory(it) && DELETED_SUFFIX in name) runCatching { deleteRecursively(it) }
+        else if (Files.isDirectory(it)) slugs.add(name)
+      }
     }
     return slugs.sorted()
   }
@@ -831,8 +889,9 @@ internal class FileUiBuilderDesignStore(
     }
       .getOrNull()
     val designId =
-      runCatching { readHeader(designDirectory).designId }.getOrNull()
-        ?: designDirectory.fileName.toString()
+      record?.designId
+        ?: runCatching { readHeader(designDirectory).designId }.getOrNull()
+        ?: quarantineDesignId(designDirectory, designDirectory.fileName.toString())
     return designId to (record?.reason ?: "quarantined")
   }
 
@@ -857,7 +916,7 @@ internal class FileUiBuilderDesignStore(
         json
           .encodeToString(
             StoredQuarantineV3.serializer(),
-            StoredQuarantineV3(reason, System.currentTimeMillis()),
+            StoredQuarantineV3(reason, System.currentTimeMillis(), designId),
           )
           .encodeToByteArray()
       val temporary = writeTemporary(designDirectory, QUARANTINE_FILE, bytes)
@@ -878,6 +937,18 @@ internal class FileUiBuilderDesignStore(
     if (Files.exists(markerFile)) return
     val legacyFile = directory.resolve(FileUiBuilderStateStorage.STATE_FILE)
     if (!Files.exists(legacyFile)) return
+    // Bounded before it is allocated, as the storage it replaces bounded it. A runaway legacy file
+    // read whole is an `OutOfMemoryError` rather than an exception, and `serve` disables the lane
+    // on
+    // an exception — so an unbounded read here would take the host down instead of the lane, which
+    // is the failure #568 exists about.
+    val legacyBytes = Files.size(legacyFile)
+    if (legacyBytes > limits.maximumMigrationBytes) {
+      throw UiBuilderPersistenceException(
+        "UI-builder state at $legacyFile is $legacyBytes bytes; the migration limit is " +
+          "${limits.maximumMigrationBytes}"
+      )
+    }
     val decoded = LegacyUiBuilderState.decode(Files.readAllBytes(legacyFile))
     decoded.designs.forEach { (designId, design) -> commitUnlocked(designId, null, design) }
     writeMarker(StoreMarkerV3(STORE_FORMAT, migratedFrom = decoded.format.wire))
@@ -945,9 +1016,18 @@ internal class FileUiBuilderDesignStore(
     }
   }
 
+  /**
+   * Renames [source] onto [target] and forces the directory the name landed in.
+   *
+   * The directory entry matters as much as the bytes: a retained revision lands in `revisions/`,
+   * and only the design directory was forced before the header was made durable — so a crash could
+   * leave a header naming a revision whose directory entry never reached the disk, quarantining the
+   * whole design over a file that was written.
+   */
   private fun replaceAtomically(source: Path, target: Path) {
     Files.createDirectories(target.parent)
     Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    forceDirectory(target.parent)
   }
 
   private fun walkFiles(directory: Path): List<Path> {
@@ -1020,6 +1100,8 @@ internal class FileUiBuilderDesignStore(
     const val QUARANTINE_FILE: String = "quarantine.json"
     const val REVISIONS_DIRECTORY: String = "revisions"
     const val MIGRATED_SUFFIX: String = ".migrated"
+    /** A design directory renamed out of the way by `remove`, then unlinked as cleanup. */
+    const val DELETED_SUFFIX: String = ".deleted-"
     private const val LOCK_FILE = ".ui-builder-service.lock"
     private const val DOCUMENT_PART = "document"
     private const val POSITIONS_PART = "positions"

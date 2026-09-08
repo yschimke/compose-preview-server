@@ -9,6 +9,7 @@ import {
   DESIGN_SECTIONS,
   analyzeUiBuilderState,
   analyzeUiBuilderStore,
+  defaultMaximumBytes,
   formatReport,
   isDesignStore,
   projectRetention,
@@ -306,5 +307,38 @@ test("a history trimmed to nothing is counted as nothing", () => {
 
   assert.equal(report.designs[0].sections.history.count, 0);
   assert.equal(report.designs[0].sections.history.bytes, 2, "an empty list, and nothing else");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("each store is measured against its own ceiling", () => {
+  // 128 MiB is what the single file refused a write at; the per-design store is gauged at 1 GiB, and
+  // reporting one against the other calls an ordinary deployment 80% full.
+  assert.equal(defaultMaximumBytes({ format: "ui-builder-store-v3" }), 1024 * 1024 * 1024);
+  assert.equal(
+    defaultMaximumBytes({ format: "compose-preview-ui-builder-service/v2" }),
+    128 * 1024 * 1024,
+  );
+});
+
+test("a design whose header will not parse is still counted", () => {
+  const root = storeDirectory({
+    checkout: {
+      document: document("checkout", 2, 4),
+      revisions: [],
+      outcome: { operationId: "op-1", revision: 2 },
+    },
+  });
+  const broken = join(root, "designs", "0".repeat(32));
+  mkdirSync(broken, { recursive: true });
+  writeFileSync(join(broken, "design.json"), "not json");
+  writeFileSync(join(broken, "document-aaaa.json"), "x".repeat(4096));
+
+  const report = analyzeUiBuilderStore(root);
+
+  assert.equal(report.designCount, 1, "it has no sections to tabulate");
+  assert.ok(
+    report.totalBytes > report.designBytes + 4000,
+    "but its bytes are on the disk and are counted",
+  );
   rmSync(root, { recursive: true, force: true });
 });
