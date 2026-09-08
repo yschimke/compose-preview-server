@@ -40,12 +40,21 @@ async function settle(page) {
     });
 }
 
-/** The docks start closed: a test that drives one opens it first, the way an operator does. */
+/**
+ * The docks start closed: a test that drives one opens it first, the way an operator does.
+ *
+ * Pressed until the rail stops offering to open it, rather than once. The rail is one coordinate
+ * on a Compose canvas and a press that lands while the editor is still settling does nothing at
+ * all — which is a flake, not a failure, and the rail's own label is the signal that says which.
+ */
 async function openDock(page, name) {
     const open = page.getByRole("button", { name: `Open ${name} panel` });
     await expect(open).toBeVisible();
-    await clickCompose(page, open);
-    await settle(page);
+    for (let attempt = 0; attempt < 5 && (await open.count()) > 0; attempt++) {
+        await clickCompose(page, open);
+        await settle(page);
+    }
+    await expect(open).toHaveCount(0);
 }
 
 async function openDesign(page, selectors) {
@@ -140,7 +149,9 @@ test("a selected layer offers Copy link in its own menu", async ({ page }) => {
     // not the feature: the Layers tree holds 108 rows and only the first handful are on screen.
     await openDesign(page, { node: "main-scrim" });
     await openDock(page, "layers");
-    const layer = await page.getByRole("button", { name: /Select main-scrim/ }).boundingBox();
+    const layerRow = page.getByRole("button", { name: /Select main-scrim/ });
+    await expect(layerRow).toBeVisible();
+    const layer = await layerRow.boundingBox();
     expect(layer).not.toBeNull();
     await page.mouse.click(layer.x + layer.width / 2, layer.y + layer.height / 2, {
         button: "right",
