@@ -558,12 +558,38 @@ proven equivalent:
     equivalence gate they existed for, and `--ui-builder-native-catalog` as a required flag. The
     entrypoint's `SERVE_UI_BUILDER_CATALOGS` default stays as the allowlist.
 22. The grep gate's allowlist is empty.
-23. **The proof.** A fourth catalog — Confetti's Wear module, or a TV catalog under `platform: "tv"`
-    with `frame/rect` — publishes a policy and appears in the chooser under its own label, with its
-    own templates, exporting and rendering natively, against a server binary that has never heard of
-    it. That is the acceptance test for the whole plan, and it is a deployment, not a unit test.
-    Its cheaper twin, available from phase 4: the same catalog opened locally with
+23. **The proof: Material 4 arrives without a release of this repository.** A `material4-catalog`
+    publishes a policy and appears in the chooser, is drawn on, exports, and renders natively,
+    against a server binary that has never heard of it. It is a deployment, not a unit test, and
+    its cheaper twin is available from phase 4: the same catalog opened locally with
     `compose-preview-server ui`, against a binary that has never heard of it either.
+
+    Material 4 rather than a TV catalog on purpose. A new *platform* exercises the one cost this
+    plan accepts — a frame adapter here, once — and so proves the least interesting thing. Material 4
+    shares `mobile` and `frame/rect`, needs no adapter, and lands squarely on every hardcoded
+    Material 3 fact instead:
+
+    - **Two catalogs under one platform word.** `m3-catalog` and `material4-catalog` are both
+      `mobile`, both in the chooser's Mobile group, each with its own label and its own templates.
+      Today's `when (catalogSystemId)` cannot express that at all: the chooser's three branches
+      *are* the three catalogs.
+    - **A variant table that is not Material 3's.** The sixteen
+      `m3-catalog/androidx.compose.material3.…` literals in `ScreenDocumentProjection` are the only
+      place the export names a catalog, and a Material 4 button's variants are not among them.
+    - **Starter content, colour roles and editor bounds that are not Material 3's.** Every one is a
+      `StarterContent` entry or a `CapabilityCatalogParser.EDITOR_OVERRIDES` row today.
+    - **Canvas adapters this build does not ship.** A Material 4 catalog would name `material4/*`,
+      and drawing it through `material3/*` would be a lookalike of an upstream nobody here
+      compiles — the thing the never-fake rule forbids. So it draws in placeholders, and **the
+      acceptance is that it is usable and honest that way**: the palette, the tree, the properties,
+      the export and the native render all work while the canvas says "not drawn here". A builder
+      that instead refuses the catalog, or silently draws it as Material 3, has failed this test
+      even though every file loaded.
+
+    The last bullet is the one to watch, because it is the tempting failure. "Material 4 works" must
+    not come to mean "we added `material4/*` adapters", which is a release of this repository per
+    catalog — precisely what the plan exists to end. Adapters are welcome afterwards, on their own
+    merits, and only afterwards.
 
 ## Success criteria
 
@@ -576,6 +602,9 @@ proven equivalent:
   within a dp once the geometry is read from the catalog rather than compiled in (the same numbers,
   moved). The equivalence gate is what says so, per catalog, before any of it is deleted.
 - Adding a platform costs at most one frame adapter here; adding a catalog costs nothing here.
+- **Material 4 is the test of that sentence.** A second `mobile` catalog, with its own ids,
+  variants, starter content and colour roles, reaches a person through a server binary released
+  before it existed — drawn in placeholders where this build has no adapter for it, and usable.
 
 ## What this deliberately does not do
 
