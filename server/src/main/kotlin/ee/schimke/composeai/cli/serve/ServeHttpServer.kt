@@ -9624,6 +9624,10 @@ class ServeHttpServer(
                   variant = ServeIssueReport.variantFor(variant),
                   referenceId = reference?.id,
                   matchPercent = reference?.match?.percent,
+                  // The sibling's render of this variant, through the same resolver (and the same
+                  // per-request memo) the lane's `parallel` source goes through, so the strip's
+                  // second baseline is the stage's second source cell for cell.
+                  parallelRenderUrl = parallelSpecSource(renderHost, variant)?.rasterUrl,
                 )
               },
           // The catalog's declared stage surface (`display.surface`), so an unthemed preview backs

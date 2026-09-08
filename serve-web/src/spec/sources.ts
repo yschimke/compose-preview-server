@@ -106,3 +106,40 @@ export function sourceNote(source: SpecSource | null): string {
     if (!source) return "";
     return source.provenance ? source.provenance.trim() : "";
 }
+
+/**
+ * What the address bar should carry for the picked source: its id, or nothing.
+ *
+ * Nothing is the right answer twice over. A lane with no choice has no state worth naming, and the
+ * FIRST source — the one the picker is served pressed — is the default the page already opens on,
+ * so spelling it out would pin a redundant parameter onto every link. Only a departure from that
+ * default is a fact about the page, and it is the one a refresh used to forget (the strip under
+ * the render and the pair on the stage both silently went back to the kit).
+ */
+export function sourceParam(
+    sources: readonly SpecSource[],
+    pressedId: string | null,
+): string {
+    if (!offersChoice(sources)) return "";
+    const active = activeSource(sources, pressedId);
+    if (!active || active.id === sources[0].id) return "";
+    return active.id;
+}
+
+/**
+ * Which source a URL asks for: the named one when the picker offers it, else the default.
+ *
+ * Falling back rather than refusing is what makes a stale or mistyped `?specSource=` harmless — the
+ * page opens on the pair it always opened on, and the next sync drops the parameter it could not
+ * honour.
+ */
+export function sourceForParam(
+    sources: readonly SpecSource[],
+    param: string,
+): string {
+    if (sources.length === 0) return "";
+    if (param) {
+        for (const source of sources) if (source.id === param) return source.id;
+    }
+    return sources[0].id;
+}

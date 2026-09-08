@@ -21,6 +21,7 @@
 // lanes and the two filters).
 
 import { ControllerElement, customElement } from "../controllerElement.js";
+import { urlState } from "../urlState.js";
 import { compareApi, type CompareApi } from "../compare/api.js";
 import { whenParsed } from "../dom/whenParsed.js";
 import { domGeometry, paintedRect } from "../design/clip.js";
@@ -38,6 +39,8 @@ import {
     allowsBaseline,
     baselineAfterLane,
     baselineOf,
+    pageParams,
+    pageStateFrom,
     isInert,
     laneOf,
     needsParallel,
@@ -255,12 +258,27 @@ export class DesignPage extends ControllerElement {
         this.wireNodes();
         this.wireControls();
 
+        // The URL has the first word, before anything is applied: a shared
+        // `?lane=parallel&baseline=design` sheet must open on that pairing rather than paint the
+        // code lane and swap a frame later, which on a page of this size is a visible rebuild.
+        this.hydrate();
         this.shown = this.lane();
         this.applyOutlines();
         this.applyUnlinked();
         this.syncBaselines();
         this.applyLane();
         this.measure();
+        // Back and Forward walk the same four controls. Unsubscribed with the rest — `onPop` is a
+        // `popstate` listener on `window`, which would outlive this element otherwise.
+        const offPop = urlState()?.onPop(() => {
+            this.hydrate();
+            this.shown = this.lane();
+            this.applyOutlines();
+            this.applyUnlinked();
+            this.syncBaselines();
+            this.applyLane();
+        });
+        if (offPop) this.cleanups.push(offPop);
 
         if (typeof ResizeObserver === "function") {
             this.resizes = new ResizeObserver(() => this.measure());
@@ -1048,16 +1066,73 @@ export class DesignPage extends ControllerElement {
         this.diffLinkSource = null;
     }
 
+    /**
+     * Put the URL's state onto the controls, without applying it — the caller owns the order the
+     * four are applied in, and it is not this method's to duplicate.
+     */
+    private hydrate(): void {
+        const url = urlState();
+        if (!url) return;
+        const state = pageStateFrom(
+            {
+                lane: url.get("lane"),
+                baseline: url.get("baseline"),
+                outlines: url.get("outlines"),
+                unlinked: url.get("unlinked"),
+            },
+            this.hasParallel(),
+        );
+        for (const input of this.lanes)
+            input.checked = laneOf(input.value) === state.lane;
+        this.selectBaseline(state.baseline);
+        if (this.outlinesToggle) this.outlinesToggle.checked = state.outlines;
+        if (this.unlinkedToggle) this.unlinkedToggle.checked = state.unlinked;
+    }
+
+    /**
+     * Write the four controls into the address bar.
+     *
+     * Pushed, not replaced: each of them is a discrete choice — a lane, a baseline, a filter — and
+     * Back returning to the previous pairing is the whole point of naming them. The press-and-hold
+     * that reveals every badge is deliberately NOT here: it is a gesture, not a state, and it is
+     * over before a history entry would be worth having.
+     */
+    private syncUrl(): void {
+        urlState()?.push(
+            pageParams({
+                lane: this.lane(),
+                baseline: this.baseline(),
+                outlines: Boolean(this.outlinesToggle?.checked),
+                unlinked: Boolean(this.unlinkedToggle?.checked),
+            }),
+        );
+    }
+
     private wireControls(): void {
         if (this.outlinesToggle)
-            this.on(this.outlinesToggle, "change", () => this.applyOutlines());
+            this.on(this.outlinesToggle, "change", () => {
+                this.applyOutlines();
+                this.syncUrl();
+            });
         if (this.unlinkedToggle)
-            this.on(this.unlinkedToggle, "change", () => this.applyUnlinked());
+            this.on(this.unlinkedToggle, "change", () => {
+                // After `applyUnlinked`, which may turn the outlines on with it — the URL has to
+                // describe both, or Back would restore a filter without the outlines it filters.
+                this.applyUnlinked();
+                this.syncUrl();
+            });
         for (const input of this.lanes) {
-            this.on(input, "change", () => this.changeLane());
+            this.on(input, "change", () => {
+                // Likewise after `changeLane`, which can hand the baseline the lane just vacated.
+                this.changeLane();
+                this.syncUrl();
+            });
         }
         for (const input of this.baselines) {
-            this.on(input, "change", () => this.applyLane());
+            this.on(input, "change", () => {
+                this.applyLane();
+                this.syncUrl();
+            });
         }
         // The hold, on every scoring control rather than on one lane's own. Its label is the hit
         // target a pointer actually lands on (the radio itself is visually replaced), while the

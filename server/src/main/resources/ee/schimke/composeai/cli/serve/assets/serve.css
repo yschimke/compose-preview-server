@@ -1028,6 +1028,12 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
 .cp-strip-score--none { color: var(--cp-fg-faint); font-size: 0.72rem; }
 .cp-strip-detail { font-size: 0.78rem; white-space: nowrap; }
 .cp-strip-more { margin: 10px 0 0; font-size: 0.8rem; }
+/* Two baselines, one on show. Every cell that belongs to a baseline is tagged with its source id
+   and the section names the one the lane's picker has pressed (`viewer.ts` `syncSpecStrip`), so
+   switching the pair on the stage switches the pairs under it without a row being rebuilt. The
+   grid stays five tracks because exactly one of each tagged pair is ever in flow. */
+.cp-strip[data-cp-strip-source="kit"] [data-cp-strip-source="parallel"],
+.cp-strip[data-cp-strip-source="parallel"] [data-cp-strip-source="kit"] { display: none; }
 /* Narrow: the two pictures keep their row and everything else stacks under them, because the
    pictures are what the strip is for and a 132px frame is already the smallest useful one. */
 @media (max-width: 640px) {

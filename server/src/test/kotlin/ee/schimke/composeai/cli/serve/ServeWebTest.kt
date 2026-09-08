@@ -2528,6 +2528,98 @@ class ServeWebTest {
   }
 
   @Test
+  fun `the compare strip carries both baselines and shows the lane's own`() {
+    // The strip stood opposite the design reference and nothing else, so pressing the lane's
+    // source picker changed the pair on the stage and left every row under it comparing against
+    // something the reader had just stopped looking at. Both baselines are rendered, tagged, and
+    // one is shown — `viewer.ts` moves the attribute, `?specSource=` restores it.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("card__ideal__default__light", "Card", componentId = "Card"),
+        token = "t",
+        basePath = "/remote-m3",
+        catalogName = "Remote Compose Material 3",
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__default__light",
+              variant = "default",
+              referenceId = "card-figma",
+              matchPercent = 96.4,
+              parallelRenderUrl = "/wear-m3/render/card__ideal__default__light.png",
+            ),
+            // A variant the sibling does not draw. The pairing refuses to substitute the
+            // component's default, so the row shows an empty frame rather than a wrong picture.
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__long__light",
+              variant = "long text",
+              referenceId = "card-long-figma",
+            ),
+          ),
+        designReference =
+          DesignReference(
+            id = "card-figma",
+            previewId = "card__ideal__default__light",
+            label = "Card",
+            raster = DesignReferenceRaster(path = "references/card-figma.png"),
+            source = DesignReferenceSource(provider = "figma"),
+          ),
+        parallelSource =
+          ServeWeb.SpecSource(
+            id = "parallel",
+            label = "wear-m3-catalog",
+            rasterUrl = "/wear-m3/render/card__ideal__default__light.png",
+          ),
+      )
+    // Both pictures per row, each tagged with the baseline it belongs to.
+    assertTrue(html.contains("data-cp-strip-source=\"kit\""), html)
+    assertTrue(html.contains("data-cp-strip-source=\"parallel\""), html)
+    assertTrue(html.contains("/wear-m3/render/card__ideal__default__light.png"), html)
+    // The section names the one on show, which is the lane's own default source.
+    assertTrue(
+      html.contains("aria-labelledby=\"cp-strip-head\" data-cp-strip-source=\"kit\""),
+      html,
+    )
+    // The published match was measured against the design reference, so it is tagged to it. The
+    // parallel column says `not scored` rather than lending a design number to a pair nobody
+    // measured.
+    assertTrue(html.contains("data-spec-match=\"match\">96.4%"), html)
+    assertTrue(html.contains("not scored"), html)
+    // The sibling is named beside the design provider, over its own column.
+    assertTrue(html.contains("wear-m3-catalog"), html)
+    // …and the way out to the wall exists per baseline, on the format that draws those rows.
+    assertTrue(html.contains("format=reference&amp;component=Card"), html)
+    assertTrue(html.contains("format=parallel&amp;component=Card"), html)
+  }
+
+  @Test
+  fun `an unpaired catalog's compare strip is the single-baseline strip it always was`() {
+    // The tagging is what CSS hides a column with, so a catalog that declares no pairing must not
+    // carry it at all — otherwise one attribute typo hides half of every row on every viewer page.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("card__ideal__default__light", "Card", componentId = "Card"),
+        token = "t",
+        basePath = "/m3",
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__default__light",
+              variant = "default",
+              referenceId = "card-figma",
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__long__light",
+              variant = "long text",
+              referenceId = "card-long-figma",
+            ),
+          ),
+      )
+    assertTrue(html.contains("id=\"cp-compare-strip\""), html)
+    assertFalse(html.contains("data-cp-strip-source"), html)
+  }
+
+  @Test
   fun `the viewer draws no compare strip for a component with one unmapped variant`() {
     // Nothing to compare and nothing to navigate between. An empty panel under every one-off
     // preview is worse than no panel.

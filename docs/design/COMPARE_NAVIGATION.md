@@ -362,6 +362,14 @@ The viewer bundle is within two kilobytes of its budget
 way to "draw the same rows" — would charge every viewer page the wall's whole machinery. And it
 would charge it to re-derive numbers the delivery branch has already published for these exact
 pixels. A variant with no published score says `not scored` and links to the focused comparison,
-which measures live; the lane's own source picker still puts the paired catalog or the SVG export
-on the stage. A baseline picker over the strip is the natural next increment and needs a scorer on
-the page to be worth having.
+which measures live.
+
+The strip no longer has ONE baseline, but it still has no picker of its own. Every row is
+server-rendered with both — the design reference and, where the `compareWith` + `parallel` pairing
+resolves, the paired catalog's render — each cell tagged `data-cp-strip-source`, and the section
+names the one on show. `serve.css` hides the other, `viewer.ts` moves the attribute when the lane's
+source picker is pressed, and `?specSource=` restores it. So the pair on the stage and the pairs
+under it are the same pair, at the cost of one attribute write rather than the wall's scorer. Only
+the published match stays baseline-bound: it was measured against the design reference, so the
+parallel column says `not scored`. Live scoring per row is still the increment that needs a scorer
+on the page to be worth having.
