@@ -6855,7 +6855,7 @@ class ServeWebFixtureTest {
   }
 
   @Test
-  fun `theme choices use a dropdown and secondary actions stay in the renderer row`() {
+  fun `theme choices use a dropdown and stage presentation moves into the panel`() {
     val css = assetText("serve.css")
     assertTrue(
       css.contains(".cp-theme-menu-panel { position: absolute;") &&
@@ -6880,9 +6880,22 @@ class ServeWebFixtureTest {
       "the dropdown contains one theme choice group",
     )
     assertFalse(crowded.contains("class=\"cp-viewer-bar\""), "the old horizontal row is gone")
+    // Transparent and Fit width are no longer on this row. They present the stage rather than
+    // choosing what draws it, a reader sets them once if ever, and on the crowded shape this test
+    // builds they were the two chips paying for that on a bar already carrying eight theme choices.
+    // Asserted from both ends, because "not in the renderer row" on its own is also what a page
+    // that lost the controls entirely looks like.
     val rendererRow =
       crowded.substringAfter("<div class=\"cp-preview-primary\"").substringBefore("</div>")
-    assertTrue(rendererRow.contains("<cp-bg-toggle") && rendererRow.contains("Fit width"))
+    assertFalse(
+      rendererRow.contains("<cp-bg-toggle") || rendererRow.contains("Fit width"),
+      "stage presentation is not on the renderer row",
+    )
+    val panel = crowded.substringAfter("<div class=\"cp-controls\" id=\"cp-controls\">")
+    assertTrue(
+      panel.contains("<cp-bg-toggle") && panel.contains("Fit width"),
+      "…it is in the Overrides panel, where the drawer's own View group holds it",
+    )
   }
 
   /**

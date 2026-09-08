@@ -1159,6 +1159,68 @@ class ServeWebTest {
   }
 
   /**
+   * Every full-page comparison this preview has, behind one affordance.
+   *
+   * The three destinations — the spec diff, the paired catalog's layer diff, every Remote Compose
+   * player — are alike in the one way that matters to a reader deciding whether to click: each
+   * LEAVES the page, giving up the overrides, knobs and theme that produced the render worth
+   * comparing. Loose in the row they neither read as a set nor stayed together: the players link
+   * sat before the spec lane and the layer link INSIDE it, so a pairing that had all three put
+   * forty-odd characters of grey link text either side of a control that grows with the length of a
+   * design tool's name, and the bar's real controls wrapped around them.
+   *
+   * The order is asserted because it is the order they are reached in: what this render is
+   * specified by, what the other implementation of that spec does, then the ways this one can be
+   * drawn.
+   */
+  @Test
+  fun `the comparison destinations are one menu, in reading order`() {
+    val preview =
+      ServePreview(
+        id = "widget.Chip",
+        label = "chip",
+        componentId = "Chip",
+      )
+    val html =
+      ServeWeb.viewerPage(
+        preview,
+        "t",
+        sessionId = "remote-m3",
+        basePath = "/remote-m3",
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        designReference =
+          DesignReference(
+            id = "chip-figma",
+            previewId = preview.id,
+            label = "Chip",
+            raster = DesignReferenceRaster(path = "references/chip-figma.png"),
+            source = DesignReferenceSource(provider = "figma"),
+          ),
+        parallelSource =
+          ServeWeb.SpecSource(
+            id = "parallel",
+            label = "Wear M3",
+            rasterUrl = "/wear-m3-catalog/render/chip.png",
+            provenance = "Wear M3's own render.",
+          ),
+        parallelLayers = true,
+      )
+    val menu = html.substringAfter("class=\"cp-detail-menu\"", "").substringBefore("</details>")
+    assertTrue(menu.isNotEmpty(), "three destinations make a menu: $html")
+    val rows =
+      Regex("class=\"cp-detail-menu-item\"[^>]*>([^<]+)</a>")
+        .findAll(menu)
+        .map { it.groupValues[1] }
+        .toList()
+    assertEquals(listOf("Spec diff", "Wear M3 layers", "Compare players"), rows, html)
+    // The spec lane keeps its instruments and nothing else. The layer link used to live inside it,
+    // which is why a wide lane and a small grey link kept trading places on the same row.
+    val lane = html.substringAfter("class=\"cp-spec-lane\"", "").substringBefore("</span></span>")
+    assertFalse(lane.contains("cp-format-link"), "the lane carries no step-out link: $lane")
+  }
+
+  /**
    * The sign-in affordance is not a renderer control, and must not be dressed as half of one.
    *
    * When auth is the only thing between the visitor and the daemon lane, the chip's slot holds an
@@ -1260,12 +1322,17 @@ class ServeWebTest {
     )
     val android = Regex("<option value=\"rc:cmp-android\"[^>]*>").find(html)?.value ?: ""
     assertFalse(android.contains(" disabled"), "cmp-android is offered: '$android'")
-    // …and the step out to every player side by side.
+    // …and the step out to every player side by side. This preview has exactly ONE full-page
+    // comparison surface, and one destination is not a menu — so it stays the inline link it has
+    // always been rather than costing a click to reach what a link already said. The ampersands are
+    // entity-escaped now that the href goes through `WebEscaping.htmlEscape` with every other URL
+    // the bar emits; `&amp;` in an attribute is the same URL, correctly written.
     assertTrue(
-      html.contains("href=\"/remote-m3/compare?format=rc&preview=widget.Chip&token=t\""),
+      html.contains("href=\"/remote-m3/compare?format=rc&amp;preview=widget.Chip&amp;token=t\""),
       html,
     )
     assertTrue(html.contains(">compare players →</a>"), "the compare link names what it does")
+    assertFalse(html.contains("cp-detail-menu"), "one destination stays a link, not a menu")
   }
 
   @Test
