@@ -1041,13 +1041,19 @@ class ServeWebFixtureTest {
             logoutHref = "/auth/github/logout?return=%2F",
             login = "yschimke",
           ),
-        // Signed in AND permitted, on one of the three design systems: the golden then holds a card
+        // Signed in AND permitted, on two of the three design systems: the golden then holds a card
         // carrying both actions beside a card carrying only the comparison, which is the row the
         // chip row's alignment exists for. The refused shape is a unit-test concern — it turns on
         // the visitor, not on the page, so a second golden of the same grid would pin nothing new.
+        //
+        // `remote-m3` is the SECOND, and it is the widest card this grid can produce: the builder
+        // chip, the `Compare to` label and BOTH destinations, in a fixed grid track. Without it the
+        // golden held the two halves separately — a card with the builder and one comparison, and a
+        // card with two comparisons and no builder — and never the case where they meet, which is
+        // the one that decides whether the row still fits.
         uiBuilder =
           ServeWeb.UiBuilderInvite(
-            systems = setOf("compose-m3"),
+            systems = setOf("compose-m3", "remote-m3"),
             signedIn = true,
             permitted = true,
           ),
