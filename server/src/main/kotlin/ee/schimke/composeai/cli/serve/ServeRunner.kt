@@ -268,6 +268,21 @@ public class ServeRunner(
     get() = acceptImages && !imageUploadRepository.isNullOrBlank()
 
   /**
+   * Whether the UI builder is a lane in its own right on this host.
+   *
+   * It registers no session and hosts no preview, so the empty-server check used to conclude there
+   * was nothing to serve and exit — which made `ui --no-project`, a server whose entire job is the
+   * builder, refuse to start. It is the same case as `--accept-docs`: a real surface that simply
+   * has no sessions, ever.
+   *
+   * Both halves are required, for the reason [imageLaneConfigured] states about its own: assets
+   * that are not there serve nothing, and `--ui-builder-state-dir none` serves an editor that
+   * cannot save, so neither is a lane that should keep an otherwise empty server alive.
+   */
+  private val uiBuilderLaneConfigured: Boolean
+    get() = usableUiBuilderDir() != null && uiBuilderStateDirFlag != "none"
+
+  /**
    * The parsed `--catalogs-file`, or the empty config when none is set / it can't be read. A
    * malformed config is reported and treated as empty rather than fatal: a box whose config file
    * got truncated should still come up on its flag-supplied catalogs.
@@ -1185,6 +1200,7 @@ public class ServeRunner(
         !acceptBundles &&
         !acceptDocs &&
         !imageLaneConfigured &&
+        !uiBuilderLaneConfigured &&
         adminToken == null
     ) {
       // An `--accept-images` that couldn't be configured is why we may be here at all, and the
@@ -1193,7 +1209,8 @@ public class ServeRunner(
       if (acceptImages) System.err.println(ServeDefaults.IMAGE_LANE_NO_REPO)
       System.err.println(
         "serve: nothing to serve — no --bundle / --bundles / --catalogs registered a session, and " +
-          "none of --accept-bundles / --accept-docs / --accept-images / --admin-token is set."
+          "none of --accept-bundles / --accept-docs / --accept-images / --ui-builder-dir / " +
+          "--admin-token is set."
       )
       // Guide the common "ran serve in my project expecting a build" case: Gradle discovery is now
       // opt-in, so point at --discover / --module rather than leaving them staring at a bare error.

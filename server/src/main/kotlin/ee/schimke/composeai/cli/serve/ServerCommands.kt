@@ -118,7 +118,8 @@ internal object ServerCommands {
       serve             Host previews: fetched bundles, published catalogs, or a local module's
                         @Preview functions (with --module / --discover and a build host).
       ui                Build this project's previews and open the Compose UI builder against
-                        them. Needs a `compose-preview` build host.
+                        them. Needs a `compose-preview` build host; `ui --no-project` opens the
+                        builder against the packaged design systems and needs nothing.
       playground        serve with the snippet compile lane admitted (POST /api/{v}/compiler/run).
       design            Render, export or read a UI-builder design from a server that is already
                         up, and write it to a file. The one command here that does not serve.
