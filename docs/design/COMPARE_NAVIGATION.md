@@ -20,7 +20,7 @@ agree on what the two pictures are called or which side each stands on.
 | 4 | Focused comparison | `/remote-m3/compare/<id>?reference=…` | one preview ↔ one reference | *Reference*, *Diff*, *Actual* |
 | 5 | Layer diff | `/remote-m3/parallel/<id>` | resolved layers across paired catalogs | *layer diff* |
 | 6 | Parity dashboard | `/remote-m3/parity` | coverage, drift, activity, gaps | *mapped*, *design parity* — **thinned to an index, see §3.4** |
-| 7 | Design pages | `/remote-m3/pages/<page>` | a Figma sheet ↔ our renders in its slots | *Our renders*, *Design spec*, *Diff %* |
+| 7 | Design pages | `/remote-m3/pages/<page>` | a Figma sheet ↔ any two of {our renders, the paired catalog's, the design} | *Show*, *Diff against* — **re-cut into two axes, see §3.6** |
 
 Five different words for our own render (*Rendered PNG*, *Actual*, *Render*, *Our renders*,
 *PNG*). Four for the thing it is compared against (*Spec*, *Reference*, *Design spec*, *Figma*).
@@ -235,12 +235,43 @@ confusion §1 records.
   This is what the badges were really being read for: red clusters *are* the answer to "what is
   worst here?".
 - **Hover** a node for that node's number, and nothing else's.
-- **Hold** the `Diff %` control (pointer down, or `Space`/`Enter` held) for every number at once —
-  today's behaviour, as a momentary act you release out of.
+- **Hold** a `Diff against` control (pointer down, or `Space`/`Enter` held) for every number at once
+  — today's behaviour, as a momentary act you release out of.
 - **The number is a whole percent.** `23%`, not `22.9%`: the badge sits in a node's corner on the
   drawing it is judging, the tenth never decides whether a node is worth opening, and the band has
   already answered that. The tenths stay in the tooltip. Anything non-zero but under 1% reads
   `<1%` — a real difference reported as `0%` is the one thing this badge must never say.
+
+### 3.6 The design pages — two axes, three sources
+
+The lane in §3.5 was `code` / `design` / `diff`, and its third value is a verb where the other two
+are nouns. That reading held only while a node had exactly two pictures. A catalog with a
+`compareWith` sibling has three — ours, the sibling's, and the design's — and F1's own complaint
+("the comparison the reader most wants is *how does the Remote Compose implementation differ from
+the Wear one*") is precisely the pair that axis cannot express.
+
+So the control splits into the two questions it was conflating, both ranging over the same three
+sources:
+
+- **Show** — whose picture stands in each of the design's slots.
+- **Diff against** — which of the other two it is scored against, or nothing.
+
+One noun, one pair, one direction, as §2 asks: a state reads *showing ours, diffed against wear-m3*,
+and both halves of every number are named on the bar rather than one being implied by a verb. The
+source the sheet is already showing is dropped from the second group rather than greyed there —
+"ours against ours" is 0.0% in every slot — so a catalog with no sibling still sees two short
+groups rather than a row of dead buttons.
+
+The sibling's renders ride the same inert `<template>` the catalog's own do and are fetched only
+when a pairing names one: they come off another catalog's daemon. A cell the sibling does not draw
+falls back to the design's drawing, as a failed render does, and carries a dotted outline saying so
+— unmarked it would read as *the sibling draws it just like the design*, which is the direction that
+makes two diverging catalogs look aligned (the same reason `ServeParallelPairing` states its
+fallback out loud).
+
+The two filters keep their behaviour and lose their sentences: *Outline every component* and *Only
+what we don't implement* are a `Marks` group of *Outlines* and *Gaps only*, so all three groups on
+the bar are labelled by the question they answer.
 
 ## 4. Delivery
 
@@ -257,8 +288,9 @@ confusion §1 records.
 | **5** | Design pages: hover / hold diffs | F5 | `design/lanes.ts`, `DesignPage.ts`, `serve.css` |
 | **6** | Viewer: compare strip under the stage, and the toolbar's `View` group | F1, F4 | `ServeWeb.comparisonStripHtml`, `ServeHttpServer` viewer handler |
 | **7** | Wall: every preview id written once, in one alias table | F2 | `ServeWeb.comparisonAliasTableHtml`, `compare/aliases.ts` |
+| **8** | Design pages: `Show` / `Diff against` over three sources, the paired catalog among them | F1, F5 | `design/lanes.ts`, `DesignPage.ts`, `ServeWeb.designPage`, `ServeHttpServer` design-page handler |
 
-All seven have landed.
+All eight have landed.
 
 **§3.1 landed smaller than it was drawn, deliberately.** The strip is server-rendered HTML with no
 JavaScript at all: it shows the design reference opposite each variant and the score the delivery

@@ -157,6 +157,17 @@ const PAGE_PLACEHOLDER = `
   <rect x="330" y="500" width="180" height="180" rx="90" fill="#6750A4"/>
   <rect x="600" y="500" width="180" height="180" fill="#6750A4"/>
 </svg>`;
+// The `compareWith` SIBLING's render of a design-page cell — a second catalog's rendition of the
+// same kit component, which is what the sheet's third source puts in the slots. Deliberately NOT
+// the same picture as our own stand-in: the whole point of the source is that the two catalogs
+// differ, and a stub identical to ours would capture a lane that looks like a no-op and score 0.0%
+// in every slot, which is the one thing this comparison must never say by accident.
+const SIBLING_RENDER_PLACEHOLDER = `
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <circle cx="100" cy="100" r="76" fill="#1f6f4a"/>
+  <rect x="64" y="88" width="72" height="24" rx="12" fill="#d7f2e4"/>
+</svg>`;
 // The viewer's inspection lanes (`/render/<id>.a11y`, `/render/<id>.annotations`) are daemon data
 // products, so like the image lanes they have no backend here. These stand in for them, shaped
 // exactly as `ServeRenderHost.renderA11y` / `renderAnnotations` emit them and with bounds inside
@@ -1420,15 +1431,85 @@ const FIXTURE_STATES = [
     },
   },
   {
-    // The diff lane: one number per slot, saying how far our render is from the design's own
-    // drawing of that node. Every part of it is produced at runtime — the sheet is cropped per
-    // node, rasterised and scored in the browser — so the committed HTML holds none of it and
-    // a change to the scoring, the bands or the badge would move no baseline without this.
+    // THE THIRD SOURCE. The sheet defines the kit's cells, and a catalog with a `compareWith`
+    // sibling has a second rendition of every one of them — so `wear-m3`'s renders can stand in the
+    // design's slots exactly as ours do. The whole comparison used to be one component at a time in
+    // the viewer's spec lane; a specimen sheet is where it is finally legible in one glance.
+    fixture: "serve-design-page",
+    suffix: "sibling-lane",
+    apply: async (page) => {
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-lane][value="parallel"])',
+      );
+      // The sibling's images ship inert inside their own `<template>` and are fetched only when a
+      // pairing names them, so this shot is also the proof that the adoption path runs at all.
+      await page.waitForFunction(
+        () =>
+          document.querySelectorAll(".cp-page-stage .cp-page-parallel").length >
+          0,
+      );
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector(".cp-page-stage")
+            .classList.contains("cp-page-parallel-on") &&
+          document.querySelectorAll("svg .cp-page-replaced").length > 0,
+      );
+    },
+  },
+  {
+    // …and scored against it. This is the number the surface exists for now: not "how far is our
+    // Button from Figma" but "how far is our Button from the OTHER catalog's Button", which the
+    // design file cannot answer because both implement it and it has no opinion about which is
+    // right. Nothing here is in the committed HTML — the pair is decoded and scored in the browser.
+    fixture: "serve-design-page",
+    suffix: "diff-sibling",
+    apply: async (page) => {
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-lane][value="code"])',
+      );
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-baseline][value="parallel"])',
+      );
+      await page.waitForFunction(() => {
+        const badges = Array.from(document.querySelectorAll(".cp-page-score"));
+        return (
+          badges.length > 0 &&
+          badges.every((b) => b.textContent !== "…" && b.textContent !== "")
+        );
+      });
+      // Only the cells the sibling actually draws get a number. The fixture pairs three of the four
+      // renderable nodes on purpose: a cell present on one side and absent on the other is the more
+      // interesting half of a parity comparison, and reporting that absence as drift would be the
+      // one wrong thing this readout could say.
+      const scored = await page.locator(".cp-page-score").count();
+      const paired = await page.locator(".cp-page-parallel").count();
+      expect(scored).toBe(paired);
+      // …and the two stubs genuinely differ, so a lane that silently scored our render against
+      // itself would fail here rather than capturing a wall of reassuring zeroes.
+      const worst = await page.evaluate(() =>
+        Math.max(
+          ...Array.from(document.querySelectorAll(".cp-page-score")).map((b) =>
+            parseFloat(b.textContent),
+          ),
+        ),
+      );
+      expect(worst).toBeGreaterThan(0);
+    },
+  },
+  {
+    // The diff axis against the DESIGN: one number per slot, saying how far our render is from the
+    // design's own drawing of that node. Every part of it is produced at runtime — the sheet is
+    // cropped per node, rasterised and scored in the browser — so the committed HTML holds none of
+    // it and a change to the scoring, the bands or the badge would move no baseline without this.
     fixture: "serve-design-page",
     suffix: "diff-lane",
     apply: async (page) => {
       await page.click(
-        '.cp-page-lane label:has([data-cp-page-lane][value="diff"])',
+        '.cp-page-lane label:has([data-cp-page-lane][value="code"])',
+      );
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-baseline][value="design"])',
       );
       // Hold for the settled numbers rather than the "…" placeholders, and require at least
       // one: `every()` over an empty list is true, so without the length check this would go
@@ -1503,6 +1584,9 @@ const FIXTURE_STATES = [
       // shot is about the filter alone.
       await page.click(
         '.cp-page-lane label:has([data-cp-page-lane][value="code"])',
+      );
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-baseline][value="off"])',
       );
       await page.check("[data-cp-page-unlinked]");
       await page.waitForFunction(() =>
@@ -3845,6 +3929,15 @@ for (const fixture of listPageFixtures()) {
           ) {
             return route.fulfill({
               body: REFERENCE_PLACEHOLDER,
+              contentType: "image/svg+xml",
+            });
+          }
+          if (
+            fixture === "serve-design-page" &&
+            url.pathname.startsWith("/wear-m3/render/")
+          ) {
+            return route.fulfill({
+              body: SIBLING_RENDER_PLACEHOLDER,
               contentType: "image/svg+xml",
             });
           }

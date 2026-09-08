@@ -4367,7 +4367,8 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
    is still loading: an ink box needs a decoded image and a canvas read, and neither is guaranteed
    (a cross-origin render taints the canvas, a fully transparent one has no ink). It is exactly the
    behaviour this lane had before ink-fitting, so the degraded case is the old case. */
-.cp-page-render {
+.cp-page-render,
+.cp-page-parallel {
   position: absolute;
   inset: 0;
   display: none;
@@ -4376,16 +4377,36 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   object-fit: contain;
   pointer-events: none;
 }
+/* WHICH catalog's render is on the sheet. Both may be adopted at once — the diff axis scores a pair
+   and either half can be the one being shown — so exactly one of them is displayed and the other
+   sits in the same slot, decoded, waiting to be scored against. Adopted-but-not-shown rather than
+   removed, because the pair is what makes the number, and re-fetching the other half on every flip
+   would make the comparison cost a round trip per glance. */
 .cp-page-swap-on .cp-page-render { display: block; }
+.cp-page-swap-on.cp-page-parallel-on .cp-page-render { display: none; }
+.cp-page-swap-on.cp-page-parallel-on .cp-page-parallel { display: block; }
 /* A render the server could not produce. `<cp-design-page>` restores the design's own drawing in that
-   slot and hides the failed image — but the rule above is a two-class selector and would beat the
-   UA stylesheet's `[hidden]`, leaving the browser's broken-image glyph sitting on top of the
-   drawing just restored. Specificity has to be answered explicitly. */
-.cp-page-swap-on .cp-page-render[hidden] { display: none; }
+   slot and hides the failed image — but the rules above are two- and three-class selectors and would
+   beat the UA stylesheet's `[hidden]`, leaving the browser's broken-image glyph sitting on top of
+   the drawing just restored. Specificity has to be answered explicitly. */
+.cp-page-swap-on .cp-page-render[hidden],
+.cp-page-swap-on.cp-page-parallel-on .cp-page-parallel[hidden] { display: none; }
 /* A node the manifest named but the export doesn't carry — a layer the design tool flattened on
    the way out. Its row stays (the mapping is still true); its outline can't, because there is
    nothing to put it around. */
 .cp-page-node[data-cp-missing] { display: none; }
+/* A CELL THE SIBLING DOES NOT DRAW, on the sibling's own lane.
+   Its slot falls back to the design's drawing exactly as a failed render does, and unmarked that
+   reads as "the sibling draws it just like the design" — the opposite of the truth, and in the
+   direction that makes two diverging catalogs look aligned. Shown on that lane alone and without
+   waiting for the outline layer, because it is that lane's own finding rather than a mark the
+   reader asked for; dotted and grey rather than dashed and red, since a cell the other catalog
+   never implemented is not this catalog's gap. */
+.cp-page-parallel-on .cp-page-node[data-cp-unpaired] {
+  border: 2px dotted var(--cp-fg-muted, #6e7781);
+  border-radius: 4px;
+}
+.cp-page-list .cp-page-row[data-cp-unpaired] .cp-page-dot { border-style: dotted; }
 /* The diff lane's readout: how far our render is from the design's drawing of that same node, as
    one number per slot. Hidden outside the lane rather than not built, so flipping back into it is
    free and the scoring runs once.
@@ -4586,10 +4607,32 @@ cp-page-zoom button:focus-visible {
   .cp-page-hint { display: none; }
 }
 .cp-page-controls label { display: inline-flex; align-items: center; gap: 0.35rem; }
-/* The flip, as a segmented pair rather than two loose radios: the two lanes are one question with
-   one answer, and it is the control the page is built around, so it reads as a switch you throw
-   rather than a preference you set. The radios stay real (and stay reachable) — they are visually
-   removed, not `display: none`, so arrow keys still move between the lanes. */
+/* TWO QUESTIONS, LABELLED AS TWO.
+   The bar used to be a flat row of five controls of three different kinds, and the reader had to
+   work out from the wording alone that "Diff %" was a lane while "Outline every component" was a
+   filter. With a `compareWith` sibling on the page there are three sources and two axes over them,
+   so the row is grouped and each group says which question it answers — the label is what makes
+   "showing wear-m3, diffed against Figma" readable off the bar without touching anything. */
+.cp-page-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cp-page-group-label {
+  color: var(--cp-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.68rem;
+}
+/* The group's own label is enough on a wide bar; on a narrow one the groups stack and the labels
+   are what keeps the two segmented pills from reading as one six-way control. */
+@media (max-width: 720px) {
+  .cp-page-controls { gap: 0.5rem 0.7rem; }
+}
+/* The flip, as a segmented group rather than loose radios: each axis is one question with one
+   answer, and they are the controls the page is built around, so they read as switches you throw
+   rather than preferences you set. The radios stay real (and stay reachable) — they are visually
+   removed, not `display: none`, so arrow keys still move between the options. */
 .cp-page-lane {
   display: inline-flex;
   border: 1px solid var(--cp-border);
@@ -4619,6 +4662,10 @@ cp-page-zoom button:focus-visible {
   outline: 2px solid var(--cp-accent, #6750a4);
   outline-offset: -2px;
 }
+/* An option the current lane cannot be scored against — "ours against ours" is 0.0% everywhere —
+   is removed rather than greyed. `<cp-design-page>` sets the attribute; this is what makes it
+   count, since the flex above beats a bare `[hidden]`. */
+.cp-page-lane label[hidden] { display: none; }
 .cp-page-opt { color: var(--cp-fg-muted); }
 .cp-page-legend {
   display: flex;

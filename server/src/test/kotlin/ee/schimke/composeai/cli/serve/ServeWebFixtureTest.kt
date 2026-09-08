@@ -2598,6 +2598,20 @@ class ServeWebFixtureTest {
         // Everything except the pill, so the fixture covers a node the producer mapped but this
         // catalog cannot draw.
         renderablePreviewIds = setOf("com.example.ProfileCardPreview"),
+        // A `compareWith` sibling's rendition of the same cells. Deliberately NOT every node this
+        // catalog can draw: the sibling implements the circle and the square and does not implement
+        // the triangle, which is the state a parity sheet exists to make visible. On the sibling's
+        // lane that slot falls back to the design's own drawing exactly as a failed render does, so
+        // it carries `data-cp-unpaired` and a dotted outline — unmarked it would read as "the
+        // sibling draws it just like the design", which is the direction that makes two diverging
+        // catalogs look aligned.
+        parallelRenders =
+          mapOf(
+            "1:1" to "/wear-m3/render/com.example.WearProfileCardPreview.png",
+            "1:2" to "/wear-m3/render/com.example.WearProfileCardPreview.png",
+          ),
+        parallelLabel = "wear-m3",
+        ownLabel = "compose-m3",
         token = token,
         sessionId = "compose-m3",
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
