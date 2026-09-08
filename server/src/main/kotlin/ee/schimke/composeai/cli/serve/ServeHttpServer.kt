@@ -7100,6 +7100,11 @@ class ServeHttpServer(
      */
     val compareWithSystem: String? = null,
     /**
+     * The counterpart components named in [compareWithSystem], in that catalog's vocabulary. See
+     * [CatalogFacts.parallelComponentIds]; [homeSystemsFor] resolves them against the sibling.
+     */
+    val parallelComponentIds: Set<String> = emptySet(),
+    /**
      * The design tool those references name ("Figma", …), or null when they name none — a `png`, an
      * `svg`, an unmapped provider. Only the action's **label**; whether there is an action at all
      * is [hasReferenceComparison] above.
@@ -7203,7 +7208,9 @@ class ServeHttpServer(
         themeOptimization = host.themeOptimizationSnapshot(),
         renderCache = host.catalogRenderCacheSnapshot(),
         hasReferenceComparison = facts.hasReferenceComparison,
-        compareWithSystem = facts.compareWithSystem?.takeIf { facts.hasParallelPairing },
+        compareWithSystem =
+          facts.compareWithSystem?.takeIf { facts.parallelComponentIds.isNotEmpty() },
+        parallelComponentIds = facts.parallelComponentIds,
         designToolLabel = facts.designToolLabel,
       )
   }
@@ -7254,7 +7261,7 @@ class ServeHttpServer(
      * [homeSystemsFor], which resolves those two at render.
      */
     val compareWithSystem: String?,
-    val hasParallelPairing: Boolean,
+    val parallelComponentIds: Set<String>,
   )
 
   private val catalogFactsByHost = WeakHashMap<ServeHost, CatalogFacts>()
@@ -7306,11 +7313,15 @@ class ServeHttpServer(
       // system, and a component names the counterpart in it. A `compareWith` that no component
       // pairs against would put a chip on the card over an empty wall.
       compareWithSystem = bundle?.compareWithSystem?.takeIf { it.isNotBlank() },
-      hasParallelPairing =
-        bundle?.parallelByComponentId?.isNotEmpty() == true &&
-          host.previews.any {
-            it.componentId?.let(bundle.parallelByComponentId::containsKey) == true
-          },
+      // Scoped to components this catalog actually publishes: a mapping for a component dropped
+      // from the manifest names a pairing nothing on either side can draw. Held as the SIBLING's
+      // component ids, because that is the vocabulary a lookup against the sibling's own previews
+      // has to be made in — see [homeSystemsFor].
+      parallelComponentIds =
+        bundle?.parallelByComponentId.orEmpty().let { mapped ->
+          val published = host.previews.mapNotNullTo(HashSet()) { it.componentId }
+          mapped.filterKeys { it in published }.values.toSet()
+        },
     )
   }
 
@@ -8194,17 +8205,35 @@ class ServeHttpServer(
         // Resolved here rather than remembered beside the pairing, because the two facts have
         // different lifetimes: that this catalog declares a sibling is fixed for the life of its
         // host, while whether the sibling is served on this box at all — and under what title — is
-        // a property of a *different* catalog that can be registered, retitled or retired without
-        // this one changing. Remembering the name would leave a card advertising a comparison
-        // against a neighbour that is no longer here.
+        // a property of a *different* catalog that can be registered, retitled, suspended or
+        // retired without this one changing. Remembering the name would leave a card advertising a
+        // comparison against a neighbour that is no longer here.
         //
-        // `catalogMetaSeen`, not `peekHost`: the sibling is as likely to be suspended as any other
-        // catalog on a quiet server, and the front door must not resume a daemon to find out what a
-        // card should be labelled.
-        parallelComparisonLabel =
-          meta.compareWithSystem
-            ?.takeIf { it in ids }
-            ?.let { sibling -> catalogMetaSeen[sibling]?.title ?: sibling },
+        // GATED ON THE SAME CONDITION THE DESTINATION NEEDS, which is why the sibling's host is
+        // read rather than its name looked up. `parallelSpecSource` — the walk the compare wall
+        // builds every `format=parallel` row from — resolves to nothing unless the sibling is
+        // RESIDENT (`peekHost`, never `lease`) and publishes one of the counterpart components. A
+        // chip gated on anything weaker deep-links a format the wall then finds empty and silently
+        // replaces with another, which is a prominent front-door link promising a comparison it
+        // cannot show. The catalog landing's own chip has always been gated this way; the card now
+        // agrees with it.
+        //
+        // `peekHost` never resumes a daemon, so the front door still costs no wake-up — only a set
+        // lookup per preview of the paired sibling, and only for the few catalogs that declare one.
+        parallelComparison =
+          meta.compareWithSystem?.let { sibling ->
+            val siblingHost = sessions.peekHost(sibling) ?: return@let null
+            if (siblingHost.previews.none { it.componentId in meta.parallelComponentIds }) {
+              return@let null
+            }
+            ServeWeb.ParallelComparison(
+              system = sibling,
+              title =
+                catalogBundleHost(siblingHost)?.title?.takeIf { it.isNotBlank() }
+                  ?: catalogMetaSeen[sibling]?.title
+                  ?: siblingHost.label.ifBlank { sibling },
+            )
+          },
       )
     }
   }
@@ -9641,7 +9670,17 @@ class ServeHttpServer(
           // Whether this render HAS a counterpart, which is a weaker condition than being able to
           // put its raster on the stage: the layer diff is joined server-side, so it answers on a
           // top-level site too, where the sibling's own render is that site's 404.
-          parallelLayers = resolveParallel(renderHost, preview) != null,
+          // A counterpart is not yet a layer diff. `handleParallelLayers` 404s when
+          // `ServeParallelLayers.diff` comes back empty, and a kind neither side carries
+          // contributes no layer at all — so two paired catalogs that publish no annotations for
+          // this cell resolve a pairing and still have nothing to compare. Offering the link on the
+          // pairing alone put a route to that 404 on the toolbar, which matters more now the link
+          // is emitted beside the spec diff rather than only in its absence.
+          parallelLayers =
+            resolveParallel(renderHost, preview)?.let { parallel ->
+              renderHost.annotationsForPreview(preview.id).isNotEmpty() ||
+                parallel.host.annotationsForPreview(parallel.preview.id).isNotEmpty()
+            } == true,
           referenceAnnotations =
             if (revisions.pinned != null) emptyList()
             else

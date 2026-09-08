@@ -299,10 +299,22 @@ the live deployment rather than inferred:
 
 - **The front door named it nowhere.** `remote-m3` and `wear-m3-catalog` are adjacent cards on `/`
   and each offered only `compare to Figma`; the card's action row had no field that could even
-  carry a sibling. It now carries `compare to <sibling title>` beside it — two different questions
-  ("does this match the design file", "does this match the other implementation of it"), so two
-  chips rather than one replacing the other. The title is the neighbour's own and can be long, so
-  a card chip wraps inside the tile instead of running past its border.
+  carry a sibling. Both are offered now — two different questions ("does this match the design
+  file", "does this match the other implementation of it"), so two destinations rather than one
+  replacing the other.
+
+  They forced the row's shape. A chip carrying the whole sentence works while there is one of
+  them and falls apart at two: both open with the same three words, and the second runs to the
+  width of a neighbour's title (`compare to M3 Wear OS Apps Design Kit`) inside a fixed grid track.
+  So the row says **Compare to** once and each chip says only where it goes — `Figma`, `wear-m3` —
+  which is what lets them sit side by side. The sibling chip carries the SYSTEM id rather than the
+  title, because that is short, bounded, and the handle the card already prints under its own name;
+  the title stays in the accessible name and the tooltip, where length costs nothing.
+
+  The chip is gated on the same condition the destination resolves under — the sibling **resident**
+  and publishing a counterpart — not merely on the pairing being declared. `parallelSpecSource`
+  peeks rather than leases, so a suspended sibling yields no wall rows, and a chip gated on
+  anything weaker deep-links a `format=parallel` the wall silently replaces with another format.
 - **The viewer chose one way out and hid the other.** `spec diff →` and `layer diff →` were the two
   arms of one `when`, and the spec arm won — so on the catalog the pairing exists for, every preview
   that *also* carries a Figma reference (most of `remote-m3`) had no route to
@@ -310,7 +322,9 @@ the live deployment rather than inferred:
   implementations of one design differ rather than *whether* they do. Both links are now emitted,
   and the layer link is named for the sibling — on a viewer with both, it is the only thing on the
   resting page that says this catalog has a counterpart at all, since the source picker F1 describes
-  ships `hidden` until the chip is pressed.
+  ships `hidden` until the chip is pressed. Offered only where at least one side publishes
+  annotation layers: `handleParallelLayers` 404s on an empty diff, and a counterpart alone does not
+  make one.
 
 **§3.1 landed smaller than it was drawn, deliberately.** The strip is server-rendered HTML with no
 JavaScript at all: it shows the design reference opposite each variant and the score the delivery

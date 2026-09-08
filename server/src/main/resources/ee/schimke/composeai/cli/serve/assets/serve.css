@@ -1756,13 +1756,33 @@ cp-parity-scores { display: contents; }
 .cp-sys-actions { position: relative; z-index: 2; margin: 12px 0 0;
   display: flex; flex-wrap: wrap; gap: 8px; pointer-events: none; }
 .cp-sys-actions > a, .cp-sys-actions > details { pointer-events: auto; }
-/* A card action NAMES something, and what it names is not this stylesheet's to keep short: the
-   design tool a catalog declares, or the title of the catalog it pairs with — "compare to M3 Wear
-   OS Apps Design Kit" on the real front door. The row wraps between chips, but `white-space:
-   nowrap` on the chip itself means one chip wider than the tile cannot wrap INSIDE itself, so it
-   runs out past the card's own border instead. A card is a fixed grid track, so the text is what
-   has to give. Scoped to the card: a chip in `.cp-actions-panel` sits in a row that can scroll,
-   and keeps the single line it was drawn for. */
+/* "Compare to" once, then the destinations — one line, however many there are.
+   Each chip used to carry the whole sentence, which fell apart as soon as a paired catalog added a
+   second: two stacked chips both opening with "compare to", the second as wide as a neighbour's
+   title. The shared words belong to the row, so the chips are left holding only where they go and
+   shrink to fit beside each other. */
+.cp-sys-compare {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+.cp-sys-compare-label {
+  color: var(--cp-fg-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+/* The compact chip: the same pill, sized for a row of them rather than for one. A card is a fixed
+   grid track, so a label longer than expected still has to give rather than run past the border —
+   `.cp-action-chip` is `white-space: nowrap`, which one chip wider than the tile cannot wrap out
+   of. Scoped to the card: a chip in `.cp-actions-panel` sits in a row that can scroll and keeps the
+   single line it was drawn for. */
+.cp-action-chip--compact {
+  min-height: 28px;
+  padding: 3px 12px;
+  font-size: var(--md-sys-typescale-label-medium-size, 0.78rem);
+}
 .cp-sys-actions .cp-action-chip {
   max-width: 100%;
   white-space: normal;

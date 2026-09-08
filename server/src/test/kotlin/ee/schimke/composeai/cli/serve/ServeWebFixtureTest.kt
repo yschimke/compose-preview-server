@@ -985,7 +985,7 @@ class ServeWebFixtureTest {
           // adjacent cards with nothing saying they were a pair.
           hasReferenceComparison = true,
           designToolLabel = "Figma",
-          parallelComparisonLabel = "Wear Compose Material 3",
+          parallelComparison = ServeWeb.ParallelComparison("wear-m3", "Wear Compose Material 3"),
         ),
         // App systems published UNLISTED from their own repos but promoted to the LISTED set
         // (`--catalogs`), so they show on the front door alongside the design systems.
