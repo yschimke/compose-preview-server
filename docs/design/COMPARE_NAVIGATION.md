@@ -289,8 +289,28 @@ the bar are labelled by the question they answer.
 | **6** | Viewer: compare strip under the stage, and the toolbar's `View` group | F1, F4 | `ServeWeb.comparisonStripHtml`, `ServeHttpServer` viewer handler |
 | **7** | Wall: every preview id written once, in one alias table | F2 | `ServeWeb.comparisonAliasTableHtml`, `compare/aliases.ts` |
 | **8** | Design pages: `Show` / `Diff against` over three sources, the paired catalog among them | F1, F5 | `design/lanes.ts`, `DesignPage.ts`, `ServeWeb.designPage`, `ServeHttpServer` design-page handler |
+| **9** | The paired comparison on the front door, and both ways out of the viewer | §1 | `ServeWeb` home card, `ServeWeb.viewerPage`, `ServeHttpServer` home systems |
 
-All eight have landed.
+All nine have landed.
+
+**§1's "fewest ways in" was still true after row 4.** Putting the `parallel` chip on the catalog
+landing left two surfaces that knew about the pairing and did not say so, both of them audited on
+the live deployment rather than inferred:
+
+- **The front door named it nowhere.** `remote-m3` and `wear-m3-catalog` are adjacent cards on `/`
+  and each offered only `compare to Figma`; the card's action row had no field that could even
+  carry a sibling. It now carries `compare to <sibling title>` beside it — two different questions
+  ("does this match the design file", "does this match the other implementation of it"), so two
+  chips rather than one replacing the other. The title is the neighbour's own and can be long, so
+  a card chip wraps inside the tile instead of running past its border.
+- **The viewer chose one way out and hid the other.** `spec diff →` and `layer diff →` were the two
+  arms of one `when`, and the spec arm won — so on the catalog the pairing exists for, every preview
+  that *also* carries a Figma reference (most of `remote-m3`) had no route to
+  `/{system}/parallel/{preview}` but typing it. That is the surface answering *why* two
+  implementations of one design differ rather than *whether* they do. Both links are now emitted,
+  and the layer link is named for the sibling — on a viewer with both, it is the only thing on the
+  resting page that says this catalog has a counterpart at all, since the source picker F1 describes
+  ships `hidden` until the chip is pressed.
 
 **§3.1 landed smaller than it was drawn, deliberately.** The strip is server-rendered HTML with no
 JavaScript at all: it shows the design reference opposite each variant and the score the delivery

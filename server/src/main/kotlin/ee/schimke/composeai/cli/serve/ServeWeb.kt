@@ -5972,6 +5972,18 @@ ${captureControlsHtml().prependIndent("          ")}
      * is only ever consulted when [hasReferenceComparison] already said there is one.
      */
     val designToolLabel: String? = null,
+    /**
+     * The sibling catalog this one is a parallel rendition of ("M3 Wear OS Apps Design Kit", …),
+     * when the `compareWith` + `parallel` pairing resolves on this server — read off the same
+     * [ServeHttpServer.parallelSpecSource] the catalog landing labels its own chip from, so the
+     * card and the landing can never disagree about whether there is a sibling to compare against.
+     *
+     * Both the switch and the label, unlike [designToolLabel]'s split from
+     * [hasReferenceComparison]: a pairing with no name is not a pairing this server can resolve at
+     * all, so there is no "compare to an unnamed sibling" case to keep an action for. Null — the
+     * default, and every catalog that declares no `compareWith` — renders no action.
+     */
+    val parallelComparisonLabel: String? = null,
   )
 
   /**
@@ -6289,9 +6301,38 @@ ${captureControlsHtml().prependIndent("          ")}
      * before it and leave the explanation dangling outside the row. Nothing else about the row
      * changes; `.cp-sys-actions` still passes pointer events through to the tile link underneath.
      */
+    /**
+     * The card's **compare to the paired catalog** action, beside [compareAction] and built the
+     * same way.
+     *
+     * Two catalogs of one design system sit next to each other on this page — `remote-m3` and
+     * `wear-m3-catalog` are adjacent cards — and until this, nothing on the front door said they
+     * were a pair. The comparison was reachable only from the chip row on a catalog's own landing,
+     * which is the same journey [compareAction] exists to remove for the design-tool comparison:
+     * "how does the Remote Compose rendition differ from the Wear one" is a destination people
+     * arrive *for* — and `docs/design/COMPARE_NAVIGATION.md` §1 names it as the comparison the
+     * reader most wants and the one with the fewest ways in.
+     *
+     * Named for the sibling rather than for the format, for [compareAction]'s reason: "compare to
+     * M3 Wear OS Apps Design Kit" says what you get where "compare parallel" would name the format
+     * slug. Suppressed in the component-browser mode alongside its neighbour, which is for browsing
+     * components rather than auditing them.
+     */
+    fun parallelAction(s: HomeSystem, sysSeg: String): String {
+      if (componentBrowser) return ""
+      val label = s.parallelComparisonLabel?.takeIf { it.isNotBlank() } ?: return ""
+      val query = listOf("format=parallel", tokenParam).filter { it.isNotEmpty() }.joinToString("&")
+      val href = WebEscaping.htmlEscape("/$sysSeg/compare?$query")
+      val text = "compare to $label"
+      val described = WebEscaping.htmlEscape("${s.title}: $text")
+      return "<a class=\"cp-action-chip\" href=\"$href\" aria-label=\"$described\">" +
+        "${WebEscaping.htmlEscape(text)}</a>"
+    }
+
     fun cardActions(s: HomeSystem, sysSeg: String): String {
       val chips =
-        listOf(builderAction(s, sysSeg), compareAction(s, sysSeg)).filter { it.isNotEmpty() }
+        listOf(builderAction(s, sysSeg), compareAction(s, sysSeg), parallelAction(s, sysSeg))
+          .filter { it.isNotEmpty() }
       if (chips.isEmpty()) return ""
       return "\n            <div class=\"cp-sys-actions\">" + chips.joinToString("") + "</div>"
     }
@@ -14857,18 +14898,44 @@ ${scriptTag("known-differences.js")}
               "aria-pressed=\"${value == SPEC_DEFAULT_VIEW}\" " +
               "title=\"${WebEscaping.htmlEscape(viewTip)}\">${WebEscaping.htmlEscape(viewLabel)}</button>"
           }
-        val detailLink =
-          when {
-            specCompareHref != null ->
-              "<a class=\"cp-format-link cp-spec-diff\" " +
-                "href=\"${WebEscaping.htmlEscape(specCompareHref)}\" " +
-                "title=\"${WebEscaping.htmlEscape(tip)}\">spec diff →</a>"
-            parallelLayersHref.isNotEmpty() ->
-              "<a class=\"cp-format-link cp-spec-diff\" " +
-                "href=\"${WebEscaping.htmlEscape(parallelLayersHref)}\" " +
-                "title=\"Compare resolved layers across the paired catalogs\">layer diff →</a>"
-            else -> ""
+        // The step OUT of the lane, one link per surface this pair has that the lane itself is not.
+        //
+        // These were mutually exclusive, and the `when` chose the spec diff — so on the catalog
+        // this pairing exists for, every preview that also carries a Figma reference (the majority
+        // on `remote-m3`) had NO route to the cross-catalog layer diff at all. It was reachable
+        // only by typing `/{system}/parallel/{preview}`, which is the one surface that answers
+        // *why* two implementations of one design differ rather than *whether* they do. Two
+        // destinations are two links; picking one for the reader was a coincidence of the `when`,
+        // not a judgement that they wanted the other less.
+        //
+        // The layer link is also, on a viewer with both, the only thing on the resting page that
+        // NAMES the sibling: the source picker carries it but ships `hidden` until the lane is
+        // opened, so a reader who never clicks the spec chip has no way to learn that this catalog
+        // has a counterpart at all. Naming it here costs nothing the link did not already cost.
+        val specDiffLink =
+          if (specCompareHref == null) ""
+          else
+            "<a class=\"cp-format-link cp-spec-diff\" " +
+              "href=\"${WebEscaping.htmlEscape(specCompareHref)}\" " +
+              "title=\"${WebEscaping.htmlEscape(tip)}\">spec diff →</a>"
+        val layerDiffLink =
+          if (parallelLayersHref.isEmpty()) ""
+          else {
+            // Named for the sibling when this page knows what it is called. It may not: the layer
+            // diff is joined server-side and so survives on a top-level site, where the sibling's
+            // own routes — and with them [parallelSource] — are unreachable by construction. The
+            // neutral wording is what that host keeps.
+            val sibling = parallelSource?.label?.takeIf { it.isNotBlank() }
+            val text = if (sibling == null) "layer diff →" else "$sibling layers →"
+            val layerTip =
+              if (sibling == null) "Compare resolved layers across the paired catalogs"
+              else
+                "Compare resolved layers against $sibling — the fonts, tokens and insets a pixel comparison cannot report"
+            "<a class=\"cp-format-link cp-parallel-layers\" " +
+              "href=\"${WebEscaping.htmlEscape(parallelLayersHref)}\" " +
+              "title=\"${WebEscaping.htmlEscape(layerTip)}\">${WebEscaping.htmlEscape(text)}</a>"
           }
+        val detailLink = specDiffLink + layerDiffLink
         "<span class=\"cp-spec-lane\" id=\"cp-spec-lane\" " +
           // The FIRST source's raster and label stay on these two attributes, unchanged. They are
           // what a single-source lane has always carried and what the backend badge still reads, so

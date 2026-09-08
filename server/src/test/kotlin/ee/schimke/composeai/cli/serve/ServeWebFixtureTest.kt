@@ -938,10 +938,10 @@ class ServeWebFixtureTest {
               height = 68,
             ),
           // Publishes Figma-backed design references, so its card carries the "compare to Figma"
-          // action. Set on two of the three design systems deliberately: the golden then holds a
-          // row where one card has the action and its neighbour does not, which is the case the
-          // `.cp-sys-cell` grid template exists for — the tiles still have to line their artwork
-          // and their footers up.
+          // action. The golden still holds a row where one card has an action and its neighbour has
+          // none — `meshcore-mobile` beside `homeassistant-remotecompose` in the app group below —
+          // which is the case the `.cp-sys-cell` grid template exists for: the tiles have to line
+          // their artwork and their footers up either way.
           hasReferenceComparison = true,
           designToolLabel = "Figma",
         ),
@@ -977,6 +977,15 @@ class ServeWebFixtureTest {
           // Remote Compose draws the dark-first Wear scheme, so its catalog declares
           // `display.surface: "dark"` and the hero backs on the dark stage too.
           darkStage = true,
+          // The card with BOTH comparisons, exactly as the live box renders `remote-m3`: it
+          // publishes Figma-backed references AND declares `compareWith` against the Wear catalog.
+          // The two sit side by side because they are different questions — "does this match the
+          // design file" and "does this match the other implementation of it" — and until now only
+          // the first had a way onto the front door, so two catalogs of one design system sat as
+          // adjacent cards with nothing saying they were a pair.
+          hasReferenceComparison = true,
+          designToolLabel = "Figma",
+          parallelComparisonLabel = "Wear Compose Material 3",
         ),
         // App systems published UNLISTED from their own repos but promoted to the LISTED set
         // (`--catalogs`), so they show on the front door alongside the design systems.
