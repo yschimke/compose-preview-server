@@ -92,12 +92,11 @@
       </div>
 
       <div class="cp-preview-primary" aria-label="Preview renderer">
-      <button type="button" id="cp-live-toggle" class="cp-live-toggle" aria-pressed="false" data-default-lane-label="Snapshot" title="Static snapshot — click for the live, interactive preview">
+      <span class="cp-renderer" role="group" aria-label="Renderer"><button type="button" id="cp-live-toggle" class="cp-live-toggle" aria-pressed="false" data-default-lane-label="Snapshot" title="Static snapshot — click for the live, interactive preview">
             <span class="cp-live-dot" aria-hidden="true"></span>
             <span id="cp-live-toggle-label">Snapshot</span>
             <span class="cp-live-toggle-verb" id="cp-live-toggle-verb" aria-hidden="true">▸ Live</span>
-          </button>
-<select id="cp-lane-select" class="cp-lane-select" aria-label="Switch renderer" title="Draw this preview with a different renderer" data-default="png" data-rc-default=""><option value="" selected>Switch renderer…</option><option value="png">Snapshot</option><option value="wasm">In browser (Wasm)</option></select>
+          </button><span class="cp-renderer-more"><span class="cp-renderer-caret" aria-hidden="true">▾</span><select id="cp-lane-select" class="cp-lane-select" aria-label="Switch renderer" title="Draw this preview with a different renderer" data-default="png" data-rc-default=""><option value="" selected>Switch renderer…</option><option value="png">Snapshot</option><option value="wasm">In browser (Wasm)</option></select></span></span>
 <span class="cp-view-group" role="group" aria-label="How the preview is shown"><span class="cp-view-group-label" aria-hidden="true">View</span><button type="button" id="cp-svg-toggle" class="cp-fmt-toggle" aria-pressed="false" title="Show the vector (SVG) render">SVG</button>
 <button type="button" id="cp-explode-toggle" class="cp-fmt-toggle" aria-pressed="false" title="Show how the visible drawing layers are composed">3D</button>
 <span id="cp-svg-match" class="cp-match" role="status" aria-live="polite" hidden></span><a id="cp-svg-diff" class="cp-format-link" href="/compare?format=svg&preview=button-filled__ideal__default__light&token=demo-token-fixture&session=compose-m3" hidden>view diff →</a>

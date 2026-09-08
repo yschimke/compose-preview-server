@@ -1197,8 +1197,19 @@ class ServeWebTest {
     )
     assertTrue(html.contains("<option value=\"rc:java\">AndroidX View</option>"), html)
     // The combo itself rests on its placeholder — the chip is what names the current lane, and a
-    // combo repeating that name beside it read as two controls arguing about the same fact.
+    // combo repeating that name beside it read as two controls arguing about the same fact. The
+    // placeholder is never SEEN once the two are joined (the combo is a caret), but it is what the
+    // combo falls back to naming when the chip is dropped in the component browser.
     assertTrue(html.contains("<option value=\"\" selected>Switch renderer…</option>"), html)
+    // ONE control, in two segments: the chip inside the group, the combo laid over the caret beside
+    // it. Two pills side by side read as two independent controls and spent a whole control's width
+    // on the words "Switch renderer…", which a caret next to a named renderer already says.
+    val renderer =
+      html.substringAfter("<span class=\"cp-renderer\"", "").substringBefore("</span></span>")
+    assertTrue(renderer.isNotEmpty(), "the renderer group is emitted: $html")
+    assertTrue(renderer.contains("id=\"cp-live-toggle\""), "the chip is the left segment")
+    assertTrue(renderer.contains("class=\"cp-renderer-more\""), "the caret is the right segment")
+    assertTrue(renderer.contains("id=\"cp-lane-select\""), "…with the real combo inside it")
     assertTrue(
       html.contains("<span id=\"cp-live-toggle-label\">AndroidX Embedded</span>"),
       "the chip names the lane it opens on",
@@ -1943,6 +1954,24 @@ class ServeWebTest {
             provenance = "wear-m3-catalog's own render, under that catalog's theme and knobs.",
           ),
       )
+    // THE SIBLING HAS A CONTROL ON THE RESTING BAR, not only inside a panel the kit's chip opens.
+    // The picker below ships `hidden`, so before this the bar named one source and gave the other
+    // no way in at all — a button labelled with ONE source opening a panel of things that are not
+    // that source (`docs/design/COMPARE_NAVIGATION.md`, F1).
+    assertTrue(
+      html.contains("data-cp-spec-open-source=\"parallel\""),
+      "the sibling is a peer chip on the bar: $html",
+    )
+    assertTrue(
+      html.contains("class=\"cp-compare-group\" role=\"group\" aria-label=\"Compare against\""),
+      "…grouped with the kit's chip under one label, so the two read as one question: $html",
+    )
+    // It carries only the ID. The raster, label and provenance stay on the picker's own button —
+    // one server-built description of each source rather than two that can disagree.
+    assertFalse(
+      Regex("""data-cp-spec-open-source="parallel"[^>]*data-spec-src""").containsMatchIn(html),
+      "the peer chip does not duplicate the pair: $html",
+    )
     assertTrue(html.contains("id=\"cp-spec-sources\""), "the picker is offered: $html")
     assertTrue(html.contains("data-cp-spec-source=\"kit\""), "the kit is a source")
     assertTrue(html.contains("data-cp-spec-source=\"parallel\""), "the sibling is a source")
@@ -1962,6 +1991,8 @@ class ServeWebTest {
 
   @Test
   fun `a catalog with no parallel keeps exactly the lane it had`() {
+    // …including no group heading. A "Compare" label over a single chip is a word that earns
+    // nothing, and most catalogs on this server declare no `compareWith`.
     // Every catalog that declares no `compareWith` pairing — which is most of them. One source is
     // not a picker with a single button; it is no picker, because a control that acts on nothing is
     // worse than no control.
@@ -1984,6 +2015,8 @@ class ServeWebTest {
     assertTrue(html.contains("id=\"cp-spec-lane\""), "the lane itself is unchanged")
     assertFalse(html.contains("id=\"cp-spec-sources\""), "no picker for a single source: $html")
     assertFalse(html.contains("data-cp-spec-source"), "and no source buttons at all")
+    assertFalse(html.contains("cp-compare-group"), "and no group heading over one chip: $html")
+    assertFalse(html.contains("data-cp-spec-open-source"), "and no peer chip: $html")
     // The carrier still describes the one source the way it always has, which is what the backend
     // badge reads.
     assertTrue(html.contains("data-spec-src=\"/compose-m3/reference/"), "the carrier is intact")

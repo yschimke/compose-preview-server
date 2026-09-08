@@ -2699,6 +2699,56 @@ cp-history-menu { display: contents; }
   background: transparent; color: var(--md-sys-color-on-surface-variant); cursor: pointer;
   max-width: 200px; }
 .cp-lane-select:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+/* ONE control, in two segments. The chip names the renderer in use and toggles it live; the combo
+   chooses a different one — two halves of one fact, driven from one lane value by `syncLaneSelect`
+   and, side by side as separate pills, reading as two independent controls while spending a whole
+   control's width on the words "Switch renderer…". Joined, the caret beside a named renderer says
+   the same thing in 34px. */
+.cp-renderer { display: inline-flex; align-items: stretch; }
+.cp-renderer > .cp-live-toggle {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 14px;
+}
+/* The right segment: a caret with the real `<select>` laid invisibly over it. Invisible, not
+   replaced — `opacity: 0` keeps the platform's own picker on touch, type-ahead and arrow keys on a
+   keyboard, and the element every id-addressed script and test already binds to. A menu built out
+   of divs would have to reimplement all three. */
+.cp-renderer-more {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  border: 1px solid var(--md-sys-color-outline);
+  border-left: none;
+  border-radius: 0 var(--md-sys-shape-corner-full) var(--md-sys-shape-corner-full) 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.cp-renderer-more:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+}
+.cp-renderer-caret { font-size: 0.7rem; line-height: 1; pointer-events: none; }
+.cp-renderer-more .cp-lane-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  padding: 0;
+  border: none;
+  border-radius: inherit;
+  opacity: 0;
+  cursor: pointer;
+}
+/* The select carries the focus, and it cannot show a ring of its own at zero opacity — so the
+   segment it sits on wears one. Without this a keyboard user tabbing onto the renderer menu would
+   have no idea they were there. */
+.cp-renderer-more:focus-within {
+  outline: 3px solid var(--md-sys-color-secondary);
+  outline-offset: 2px;
+}
 /* The spec lane's carrier — the comparison-view group, its score readout, and the "spec diff →"
    step out to the focused comparison page. */
 .cp-spec-lane { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -3023,6 +3073,21 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
 .cp-spec-chip[data-spec-match="match"]::before { background: light-dark(#146c2e, #6dd58c); }
 .cp-spec-chip[data-spec-match="close"]::before { background: light-dark(#8f5000, #ffb787); }
 .cp-spec-chip[data-spec-match="off"]::before { background: var(--md-sys-color-error); }
+/* The comparison group: the kit's chip and every other source this render can be put beside, as
+   PEERS. One label over both, for the reason `View`'s label exists — it makes them read as answers
+   to one question rather than two buttons that happen to be adjacent. Wraps as a unit, so a source
+   never changes neighbours when the bar reflows. */
+.cp-compare-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* A peer of `.cp-spec-chip`, and deliberately not a smaller or quieter thing: the whole complaint
+   this answers is that one source had a pill and the other had nothing. It carries no verdict —
+   only the kit comparison has a published number, and quoting that over a sibling pair would put
+   two unrelated comparisons in one row (see `sourceIsSpec` in `SpecCompare.ts`). */
+.cp-spec-peer[aria-pressed="false"] { font-weight: 500; }
 .cp-format-link { color: var(--cp-fg-muted); font-size: 0.75rem; white-space: nowrap; }
 .cp-format-link:hover { color: var(--cp-accent-strong); }
 /* Score chips: M3 assist-chip shape, literal semantic colours. */

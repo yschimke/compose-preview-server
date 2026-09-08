@@ -210,6 +210,12 @@ class ServeComponentBrowserTest {
     // a document is the subject of a Remote Compose catalog, not operational chrome. See `catalog
     // mode keeps the whole remote compose facet`.
     assertTrue(html.contains("id=\"cp-lane-select\""))
+    // …and it survives UNJOINED. Everywhere else the combo is a caret beside a chip that names the
+    // current renderer; here the chip is gone, so the combo is the sole indicator of what is
+    // drawing and has to keep its own label and its full width. Wrapping it in the caret segment
+    // would leave a `▾` with nothing beside it to name.
+    assertFalse(html.contains("class=\"cp-renderer\""))
+    assertFalse(html.contains("cp-renderer-more"))
     assertTrue(html.contains("value=\"rc:js\""))
     assertTrue(html.contains("value=\"rc:java\""))
     assertFalse(html.contains("id=\"cp-svg-toggle\""))
