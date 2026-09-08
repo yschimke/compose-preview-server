@@ -544,6 +544,30 @@ proven equivalent:
     and the local project becomes a builder catalog rather than a record hanging off a packaged
     palette. This is the consumer that pays for the contract most visibly, and it needs no delivery
     branch at all.
+
+    Two things about that lane are *not* free, and are written down here because both are easy to
+    discover only after implementing the easy half:
+
+    - **The catalog is chosen before the module is known.** `commandLane` resolves
+      `LocalUiBuilder.catalog(args)` and builds the whole `serve` argument list up front, because
+      options are constructed before any Gradle work runs; the discovery callback can only fill in a
+      path that was *pre-declared*, which is exactly the trick `--ui-builder-components` and the
+      temporary `components.json` already use. A pre-declared path is not enough for a catalog,
+      because the enabled catalog's **id** is also fixed up front and is not knowable from a file
+      that does not exist yet. The way out is that `ui-builder.policy.json` is committed source: it
+      is in the checkout before anything is built, so `ui` can read `catalogId` (or the cover
+      sheet's `system`) from it at startup, enable *that* id, and pre-declare the path discovery
+      will fill. Without this step, `ui` pointed at wear-m3-catalog still opens packaged Material 3
+      and looks like the feature landed.
+    - **A template design is a second file, and there is no branch to fetch it from.** A policy's
+      `templates` are branch-relative paths (`ui-builder/designs/wear-list.json`); locally there is
+      no delivery branch and no `--ui-builder-designs` source, so a catalog whose New-design chooser
+      offers templates would load and then fail to open any of them. Either `ui` stages the
+      referenced documents beside the record in the same per-invocation directory, or — better, and
+      the option this plan prefers — the generator **inlines template documents into
+      `ui-builder.json` when it writes the local copy**, which makes the artifact self-contained and
+      is the same property [One artifact, many builders](#one-artifact-many-builders) asks of it
+      everywhere else.
 20. **The grep gate.** `.github/scripts/ui-builder-catalog-literals.sh` fails a pull request that
     introduces `wear-m3`, `remote-m3` or `wear-m3-catalog` into main sources of `:ui-builder`,
     `:ui-builder-export`, `:ui-builder-runtime` or `:server` outside an allowlist that shrinks every
