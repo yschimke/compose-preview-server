@@ -2543,6 +2543,14 @@ public class ServeRunner(
           "/admin/ui-builder: download it, edit it to satisfy the rule, put it back, or retire it"
       )
     }
+    // The other startup condition nothing announced: a state file near the ceiling every save is
+    // bounded by. Printed here rather than only carried on /status.json because the operator who
+    // needs it is the one reading a deploy's output, and never allowed to fail — a gauge that can
+    // abort startup is the shape #568 exists about.
+    runCatching { service.diagnostics() }
+      .getOrNull()
+      ?.let { uiBuilderStorageWarning(it.storageBytes, it.storageMaximumBytes) }
+      ?.let(System.err::println)
     if (uiBuilderMigrateState) {
       try {
         val migration = service.migratePersistenceToLatest()

@@ -7657,24 +7657,31 @@ class ServeHttpServer(
           (uiBuilderService as? UiBuilderServiceDiagnosticsSource)
             ?.takeIf { onlySystem == null }
             ?.diagnostics()
-            ?.let {
+            ?.let { diagnostics ->
+              // Zero is how a storage that bounds nothing reports, and it must not read as a
+              // measured 0%: the storage rows go null together rather than being carried as zeroes.
+              val ceiling = diagnostics.storageMaximumBytes.takeIf { it > 0 }
               UiBuilderDto(
-                activeSubscribers = it.activeSubscribers,
-                peakSubscribers = it.peakSubscribers,
-                rejectedBatchLimit = it.rejectedBatchLimit,
-                rejectedSubscriberLimit = it.rejectedSubscriberLimit,
-                slowSubscribersClosed = it.slowSubscribersClosed,
-                rejectedPresenceLimit = it.rejectedPresenceLimit,
-                activeExports = it.activeExports,
-                peakExports = it.peakExports,
-                rejectedExportLimit = it.rejectedExportLimit,
-                rejectedMutationRate = it.rejectedMutationRate,
-                rejectedDocumentBytes = it.rejectedDocumentBytes,
-                rejectedAssetBytes = it.rejectedAssetBytes,
-                timedOutExports = it.timedOutExports,
-                activeMutationBuckets = it.activeMutationBuckets,
-                persistenceMigrations = it.persistenceMigrations,
-                unusableDesigns = it.unusableDesigns,
+                activeSubscribers = diagnostics.activeSubscribers,
+                peakSubscribers = diagnostics.peakSubscribers,
+                rejectedBatchLimit = diagnostics.rejectedBatchLimit,
+                rejectedSubscriberLimit = diagnostics.rejectedSubscriberLimit,
+                slowSubscribersClosed = diagnostics.slowSubscribersClosed,
+                rejectedPresenceLimit = diagnostics.rejectedPresenceLimit,
+                activeExports = diagnostics.activeExports,
+                peakExports = diagnostics.peakExports,
+                rejectedExportLimit = diagnostics.rejectedExportLimit,
+                rejectedMutationRate = diagnostics.rejectedMutationRate,
+                rejectedDocumentBytes = diagnostics.rejectedDocumentBytes,
+                rejectedAssetBytes = diagnostics.rejectedAssetBytes,
+                timedOutExports = diagnostics.timedOutExports,
+                activeMutationBuckets = diagnostics.activeMutationBuckets,
+                persistenceMigrations = diagnostics.persistenceMigrations,
+                unusableDesigns = diagnostics.unusableDesigns,
+                storageBytes = ceiling?.let { diagnostics.storageBytes },
+                storageMaximumBytes = ceiling,
+                storageUsedPercent =
+                  ceiling?.let { storageUsedPercent(diagnostics.storageBytes, it) },
               )
             },
         playground =
@@ -14449,6 +14456,16 @@ private data class UiBuilderDto(
   val activeMutationBuckets: Int,
   val persistenceMigrations: Long,
   val unusableDesigns: Int = 0,
+  /**
+   * Durable state bytes against the ceiling a save is refused at, and the percentage between them.
+   *
+   * Null when the storage bounds nothing, so a status reader can tell "not measured" apart from a
+   * measured 0%. The percentage is carried rather than left to be computed because it is the number
+   * an alert gets written against, and two readers dividing it two ways is how thresholds drift.
+   */
+  val storageBytes: Long? = null,
+  val storageMaximumBytes: Long? = null,
+  val storageUsedPercent: Double? = null,
 )
 
 @Serializable
