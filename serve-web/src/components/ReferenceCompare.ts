@@ -14,6 +14,7 @@
 // `annotate/fieldState.ts` (whether a field is a fidelity finding or a local override).
 
 import { ControllerElement, customElement } from "../controllerElement.js";
+import { urlState } from "../urlState.js";
 import {
     fieldState,
     showsOptional,
@@ -249,9 +250,22 @@ export class ReferenceCompare extends ControllerElement {
         this.wireTypographyHighlight();
 
         for (const toggle of this.toggles) {
-            this.on(toggle, "change", () => this.syncKinds());
+            this.on(toggle, "change", () => {
+                this.syncKinds();
+                // A discrete choice — which redline layers are drawn over the pair — and one a
+                // refresh used to lose. Pushed so Back lifts the layer it turned on.
+                urlState()?.push({ annotate: this.kindsParam() });
+            });
         }
+        // The URL before the first draw: a shared `?annotate=typography` link opens with the
+        // overlay already on rather than painting the plain pair and adding it a frame later.
+        this.hydrateKinds();
         this.syncKinds();
+        const offPop = urlState()?.onPop(() => {
+            this.hydrateKinds();
+            this.syncKinds();
+        });
+        if (offPop) this.cleanups.push(offPop);
     }
 
     /**
@@ -708,6 +722,39 @@ export class ReferenceCompare extends ControllerElement {
                 box.node.style.width = `${box.bounds.width * scale}px`;
                 box.node.style.height = `${box.bounds.height * scale}px`;
             }
+        }
+    }
+
+    /**
+     * The layers that are on, comma-separated, or null when none is — every page opens with all of
+     * them off, so the resting state is the clean URL rather than `?annotate=`.
+     */
+    private kindsParam(): string | null {
+        const on = this.toggles
+            .filter((toggle) => toggle.checked)
+            .map((toggle) => toggle.getAttribute("data-cp-annotation-kind"))
+            .filter((kind): kind is string => !!kind);
+        return on.length ? on.join(",") : null;
+    }
+
+    /**
+     * Tick the toggles the URL names. A kind this pair carries no annotations for has no toggle to
+     * tick, so a link from a richer page degrades to whichever of its layers exist here rather than
+     * to nothing at all.
+     */
+    private hydrateKinds(): void {
+        const url = urlState();
+        if (!url) return;
+        const wanted = new Set(
+            url
+                .get("annotate")
+                .split(",")
+                .map((kind) => kind.trim())
+                .filter(Boolean),
+        );
+        for (const toggle of this.toggles) {
+            const kind = toggle.getAttribute("data-cp-annotation-kind") ?? "";
+            toggle.checked = wanted.has(kind);
         }
     }
 

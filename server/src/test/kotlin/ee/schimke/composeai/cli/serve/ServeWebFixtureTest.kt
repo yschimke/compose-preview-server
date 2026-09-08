@@ -1557,6 +1557,35 @@ class ServeWebFixtureTest {
             provenance = "Wear M3's own render under that catalog's theme and knobs.",
           ),
         parallelLayers = true,
+        // The compare strip's SECOND baseline, which only a paired catalog has: every row carries
+        // the design reference and the sibling's render of the same variant, and the lane's source
+        // picker chooses which is shown. This is the fixture that captures it — the unpaired
+        // viewers above render the single-baseline strip they always did, so without a paired page
+        // in the harness the switch would be a visual surface with no picture on any pull request.
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__default__compact",
+              variant = "default",
+              referenceId = "card-figma",
+              matchPercent = 96.4,
+              parallelRenderUrl = "/wear-m3-catalog/render/card__ideal__default.png",
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__outlined__compact",
+              variant = "outlined",
+              referenceId = "card-outlined-figma",
+              matchPercent = 88.1,
+              parallelRenderUrl = "/wear-m3-catalog/render/card__ideal__outlined.png",
+            ),
+            // A variant the sibling does not draw, and one the design file does not map. Both
+            // frames are empty rather than filled with a stand-in, which is what the strip has to
+            // show for the pairing to stay honest about what it could not pair.
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__long__compact",
+              variant = "long text",
+            ),
+          ),
         trust = "branch:yschimke/wear-m3-catalog@design-artifacts/remote-m3",
       )
     // The same rich viewer, PINNED. Captured as the twin of [viewerRcPlayers] because that is the

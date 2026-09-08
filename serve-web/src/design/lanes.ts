@@ -192,3 +192,56 @@ export function scoreKey(
 ): string {
     return `${lane} ${baseline} ${nodeId}`;
 }
+
+/**
+ * What a sheet's URL should carry for its four controls, as a plain map.
+ *
+ * Only departures from the page's defaults are named. A sheet opens on the code lane with no
+ * baseline and both filters off, so writing those out would put four redundant parameters on every
+ * link someone copies — and the empty map is what `cpUrlState` turns into the clean URL a visitor
+ * arrived with. What IS written is the state a refresh used to lose: which drawing the sheet is
+ * showing, what it is being scored against, and whether the outlines and the unlinked-only filter
+ * are on.
+ */
+export function pageParams(state: {
+    lane: Lane;
+    baseline: Baseline;
+    outlines: boolean;
+    unlinked: boolean;
+}): Record<string, string | null> {
+    return {
+        lane: state.lane === "code" ? null : state.lane,
+        baseline: state.baseline === "off" ? null : state.baseline,
+        outlines: state.outlines ? "1" : null,
+        unlinked: state.unlinked ? "1" : null,
+    };
+}
+
+/**
+ * The state a URL asks for, resolved against what this sheet can actually offer.
+ *
+ * A baseline the lane forbids (its own source) or that this page carries no renders for is dropped
+ * rather than honoured, on `allowsBaseline`'s reasoning: a stale link must not put the sheet into a
+ * pairing that does not exist. The unlinked filter implies the outlines it filters, exactly as
+ * pressing it does (`outlinesAfterUnlinked`).
+ */
+export function pageStateFrom(
+    params: {
+        lane: string | null;
+        baseline: string | null;
+        outlines: string | null;
+        unlinked: string | null;
+    },
+    hasParallel: boolean,
+): { lane: Lane; baseline: Baseline; outlines: boolean; unlinked: boolean } {
+    const lane = laneOf(params.lane);
+    const asked = baselineOf(params.baseline);
+    const baseline = allowsBaseline(lane, asked, hasParallel) ? asked : "off";
+    const unlinked = params.unlinked === "1";
+    return {
+        lane,
+        baseline,
+        outlines: outlinesAfterUnlinked(unlinked, params.outlines === "1"),
+        unlinked,
+    };
+}

@@ -253,6 +253,15 @@ object ServeWeb {
      * focused comparison, which scores live.
      */
     val matchPercent: Double? = null,
+    /**
+     * The paired catalog's render of this variant, when the `compareWith` + `parallel` pairing
+     * resolves for it — the same same-origin URL the lane's `parallel` source puts on the stage
+     * ([SpecSource.rasterUrl]), so the strip and the stage can never show two different pictures
+     * under one name. Null for a variant the sibling does not draw, which the strip shows as an
+     * empty frame rather than as the component's default (`ServeParallelPairing`'s reason: a
+     * missing cell is a finding, not an inconvenience).
+     */
+    val parallelRenderUrl: String? = null,
   )
 
   private fun specMatchBand(percent: Double): String =
@@ -281,12 +290,19 @@ object ServeWeb {
    * measures live. The viewer bundle is within two kilobytes of budget, and a per-row scorer would
    * charge every viewer page the wall's machinery for an answer that is already published.
    *
-   * **It does not switch baseline.** The strip stands opposite the design reference, which is the
-   * comparison the parity work is about and the only one published per variant. The lane's own
-   * source picker still puts the paired catalog or the SVG export on the stage.
+   * **It does not pick its own baseline.** The strip follows the lane's source picker rather than
+   * carrying a second one: every row is rendered with BOTH baselines — the design reference and,
+   * where the pairing resolves, the paired catalog's render — each cell tagged
+   * `data-cp-strip-source`, and the section's own `data-cp-strip-source` names the one on show.
+   * `serve.css` hides the other; `viewer.ts` moves the attribute when the picker is pressed
+   * (`syncSpecStrip`) and `?specSource=` restores it. So switching the pair on the stage switches
+   * the pairs under it, and a refresh shows the same page. Only the published match is baseline-
+   * bound: it was measured against the design reference and says `not scored` opposite anything
+   * else, rather than lending a design number to a comparison nobody measured.
    *
-   * Both are one server-rendered `<img>` per cell and no JavaScript at all, which is what lets the
-   * strip appear on every viewer page rather than only on the ones a reader thought to ask for.
+   * Both are one server-rendered `<img>` per cell and one attribute write of JavaScript, which is
+   * what lets the strip appear on every viewer page rather than only on the ones a reader thought
+   * to ask for.
    *
    * Returns empty for a component with a single variant and no reference — there is nothing to
    * compare and nothing to navigate between, and an empty panel under every one-off preview is
@@ -302,12 +318,23 @@ object ServeWeb {
     basePath: String,
     q: String,
     assetQ: String,
+    /** The paired catalog's name, when any variant resolves a parallel render; null otherwise. */
+    parallelLabel: String? = null,
+    /** Which baseline the strip opens on: the lane's own default source (`kit` / `parallel`). */
+    defaultSource: String = "kit",
   ): String {
     val scored = variants.filter { it.referenceId != null }
+    val paired = variants.filter { it.parallelRenderUrl != null }
+    // The second baseline exists as a column only when the pairing resolves somewhere and the page
+    // can name it; otherwise the markup is byte-for-byte the single-baseline strip.
+    val hasParallel = parallelLabel != null && paired.isNotEmpty()
     // One variant and nothing to compare it against is not a strip, it is a heading over a single
     // row that restates the picture directly above it.
-    if (variants.size < 2 && scored.isEmpty()) return ""
+    if (variants.size < 2 && scored.isEmpty() && !hasParallel) return ""
     fun seg(value: String) = WebEscaping.urlEncodeSegment(value)
+    // `data-cp-strip-source` on a cell says which baseline it belongs to. Absent when there is
+    // only one, so a catalog without a pairing keeps the strip it had.
+    fun sourced(id: String) = if (hasParallel) " data-cp-strip-source=\"$id\"" else ""
     val rows =
       variants.joinToString("\n") { variant ->
         val current = variant.previewId == currentPreviewId
@@ -316,18 +343,35 @@ object ServeWeb {
         val href = if (current) null else "$basePath/p/${seg(variant.previewId)}$q"
         val baselineCell =
           variant.referenceId?.let {
-            "<span class=\"cp-strip-shot\"><img loading=\"lazy\" alt=\"\" " +
+            "<span class=\"cp-strip-shot\"${sourced("kit")}><img loading=\"lazy\" alt=\"\" " +
               "src=\"$basePath/reference/${seg(it)}.png$assetQ\"></span>"
           }
             // A cell rather than nothing, so the columns line up down the strip: a row that jumps
             // left because this variant is unmapped reads as a layout fault, where an empty frame
             // reads as the missing mapping it is.
-            ?: "<span class=\"cp-strip-shot cp-strip-shot--empty\" aria-label=\"No design reference\"></span>"
+            ?: "<span class=\"cp-strip-shot cp-strip-shot--empty\"${sourced("kit")} aria-label=\"No design reference\"></span>"
+        // The paired catalog's render of the same variant, on the same terms: an empty frame where
+        // the sibling draws no such cell, because the pairing refuses to substitute its default.
+        val parallelCell =
+          if (!hasParallel) ""
+          else
+            variant.parallelRenderUrl?.let {
+              "<span class=\"cp-strip-shot\"${sourced("parallel")}><img loading=\"lazy\" alt=\"\" " +
+                "src=\"${WebEscaping.htmlEscape(it)}\"></span>"
+            }
+              ?: "<span class=\"cp-strip-shot cp-strip-shot--empty\"${sourced("parallel")} aria-label=\"No paired render\"></span>"
         val score =
           variant.matchPercent?.let {
-            "<span class=\"cp-strip-score\" data-spec-match=\"${specMatchBand(it)}\">" +
+            "<span class=\"cp-strip-score\"${sourced("kit")} data-spec-match=\"${specMatchBand(it)}\">" +
               "${WebEscaping.formatPercent(it)}</span>"
-          } ?: "<span class=\"cp-strip-score cp-strip-score--none\">not scored</span>"
+          }
+            ?: "<span class=\"cp-strip-score cp-strip-score--none\"${sourced("kit")}>not scored</span>"
+        // Nothing measures the parallel pair per variant, and the design number must not stand in
+        // for it: opposite the sibling's render the column says so.
+        val parallelScore =
+          if (!hasParallel) ""
+          else
+            "<span class=\"cp-strip-score cp-strip-score--none\"${sourced("parallel")}>not scored</span>"
         // The way to the instruments, per row: the focused Reference / Diff / Actual page for this
         // exact pair, which is where a delta map, the annotations and the parity findings live.
         val detail =
@@ -338,7 +382,7 @@ object ServeWeb {
             // Escaped like every other URL this page writes: an `&` between query parameters is a
             // character reference start in HTML, and a raw one is only tolerated by the parser's
             // error recovery. `&component=` is one `;` away from being read as an entity.
-            "<a class=\"cp-strip-detail\" href=\"${WebEscaping.htmlEscape(detailHref)}\" " +
+            "<a class=\"cp-strip-detail\"${sourced("kit")} href=\"${WebEscaping.htmlEscape(detailHref)}\" " +
               "title=\"Reference, diff and render for this variant\">diff &rarr;</a>"
           } ?: ""
         val name =
@@ -349,28 +393,49 @@ object ServeWeb {
           else "<a class=\"cp-strip-name\" href=\"${WebEscaping.htmlEscape(href)}\">$name</a>"
         "<li class=\"cp-strip-row\"${if (current) " aria-current=\"true\"" else ""}>" +
           baselineCell +
+          parallelCell +
           "<span class=\"cp-strip-shot\"><img loading=\"lazy\" alt=\"\" " +
           "src=\"$basePath/render/${seg(variant.previewId)}.png$assetQ\"></span>" +
           label +
           score +
+          parallelScore +
           detail +
           "</li>"
       }
-    val wallQuery =
-      listOf("format=reference", "component=${seg(componentId)}", q.removePrefix("?"))
-        .filter { it.isNotEmpty() }
-        .joinToString("&")
+    // The way out to the wall, on the same component and the same baseline: `format=reference`
+    // rows for the design comparison, `format=parallel` rows for the paired one.
+    fun wallHref(format: String) =
+      "$basePath/compare?" +
+        listOf("format=$format", "component=${seg(componentId)}", q.removePrefix("?"))
+          .filter { it.isNotEmpty() }
+          .joinToString("&")
+    val more =
+      "<a${sourced("kit")} href=\"${WebEscaping.htmlEscape(wallHref("reference"))}\">every component &rarr;</a>" +
+        (if (!hasParallel) ""
+        else
+          "<a${sourced("parallel")} href=\"${WebEscaping.htmlEscape(wallHref("parallel"))}\">every component &rarr;</a>")
     val counted =
       "${variants.size} ${if (variants.size == 1) "variant" else "variants"} of " +
         WebEscaping.htmlEscape(componentName)
+    // What the rows stand opposite, once per baseline, in the sub-heading and over the column.
+    // The section's attribute is what `serve.css` reads to show one of them; the lane's default
+    // source is the one it opens on, so the strip and the stage agree before any script runs.
+    fun baselineName(id: String, name: String) =
+      "<span${sourced(id)}>${WebEscaping.htmlEscape(name)}</span>"
+    val against =
+      baselineName("kit", baselineLabel) +
+        (if (!hasParallel) "" else baselineName("parallel", parallelLabel!!))
+    val sectionSource =
+      if (!hasParallel) ""
+      else " data-cp-strip-source=\"${if (defaultSource == "parallel") "parallel" else "kit"}\""
     return """
-      <section class="cp-strip" id="cp-compare-strip" aria-labelledby="cp-strip-head">
-        <h2 class="cp-strip-head" id="cp-strip-head">Compare<span class="cp-strip-sub">$counted, against ${WebEscaping.htmlEscape(baselineLabel)}</span></h2>
+      <section class="cp-strip" id="cp-compare-strip" aria-labelledby="cp-strip-head"$sectionSource>
+        <h2 class="cp-strip-head" id="cp-strip-head">Compare<span class="cp-strip-sub">$counted, against $against</span></h2>
         <ol class="cp-strip-rows">
-          <li class="cp-strip-headrow" aria-hidden="true"><span>${WebEscaping.htmlEscape(baselineLabel)}</span><span>${WebEscaping.htmlEscape(catalogName)}</span><span></span><span>Match</span><span></span></li>
+          <li class="cp-strip-headrow" aria-hidden="true">$against<span>${WebEscaping.htmlEscape(catalogName)}</span><span></span><span>Match</span><span></span></li>
           $rows
         </ol>
-        <p class="cp-strip-more"><a href="${WebEscaping.htmlEscape("$basePath/compare?$wallQuery")}">every component &rarr;</a></p>
+        <p class="cp-strip-more">$more</p>
       </section>
       """
       .trimIndent()
@@ -16637,6 +16702,11 @@ ${scriptTag("known-differences.js")}
           basePath = basePath,
           q = q,
           assetQ = assetQuery(q, revisions),
+          // …and the paired catalog beside it, so the strip can follow the lane's source picker.
+          // Named after the lane's own `parallel` source and opened on the lane's default, which
+          // is what keeps the pair on the stage and the pairs under it the same pair.
+          parallelLabel = specSources.firstOrNull { it.id == "parallel" }?.label,
+          defaultSource = primarySpecSource?.id ?: "kit",
         )
     val body =
       """

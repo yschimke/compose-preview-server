@@ -7,7 +7,9 @@ import {
     changesSource,
     isSpecSource,
     offersChoice,
+    sourceForParam,
     sourceNote,
+    sourceParam,
     type SpecSource,
 } from "../src/spec/sources.js";
 
@@ -89,5 +91,40 @@ describe("spec lane sources", () => {
         // the comparison the lane exists for.
         assert.equal(sourceNote(kit), "");
         assert.equal(sourceNote(null), "");
+    });
+
+    it("names only a source that departs from the lane's default", () => {
+        // The first source is the one the server presses, so the page already opens on it. Pinning
+        // it into the address bar would put a redundant parameter on every copied link.
+        assert.equal(sourceParam([kit, parallel], "kit"), "");
+        assert.equal(sourceParam([kit, parallel], null), "");
+        assert.equal(sourceParam([kit, parallel], "parallel"), "parallel");
+    });
+
+    it("names nothing for a lane that offers no choice", () => {
+        // No picker, no state: a catalog with no pairing writes the URL it always wrote.
+        assert.equal(sourceParam([kit], "kit"), "");
+        assert.equal(sourceParam([], null), "");
+    });
+
+    it("restores the source a URL names", () => {
+        assert.equal(sourceForParam([kit, parallel], "parallel"), "parallel");
+        assert.equal(sourceForParam([kit, parallel], "kit"), "kit");
+    });
+
+    it("falls back to the default for a source the lane cannot offer", () => {
+        // A stale or mistyped `?specSource=` opens the pair the page always opened on rather than
+        // a blank stage; the next sync drops the parameter it could not honour.
+        assert.equal(sourceForParam([kit, parallel], "invented"), "kit");
+        assert.equal(sourceForParam([kit, parallel], ""), "kit");
+        assert.equal(sourceForParam([], "parallel"), "");
+    });
+
+    it("round-trips a picked source through the URL", () => {
+        // The property the address bar needs: what a press writes is what a reload presses back.
+        for (const picked of ["kit", "parallel"]) {
+            const written = sourceParam([kit, parallel], picked);
+            assert.equal(sourceForParam([kit, parallel], written), picked);
+        }
     });
 });
