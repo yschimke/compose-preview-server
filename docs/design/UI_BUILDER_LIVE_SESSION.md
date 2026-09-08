@@ -67,6 +67,64 @@ The path wins where both name a design, and such a URL is rewritten to the path 
 `history.replaceState`, no round trip — as soon as the design is open. `create=1` in such a URL no
 longer creates anything; that is what the two routes above are for.
 
+## Naming a revision, a node or a thread
+
+The canonical URL says which design and nothing else, which was enough while a design was something
+one person had open and not enough the moment two people and an agent were talking about it. A
+designer could not paste "look at this thread" into a chat, and an agent told "the button on the
+checkout design" had to search for it. Three optional selectors say *what in the design* a link
+means, and a URL carrying none of them opens exactly what it opened before.
+
+```text
+/ui-builder/m3-catalog/jetcaster-discover?revision=41&node=discover-grid#thread=t-4f2a
+```
+
+**`?revision=<n>`** opens the design at one committed revision, read-only, with a banner naming it
+and a one-click **Go to latest**. The snapshot is fetched with the `revision` the design API has
+always taken, and the page holds it: no socket, no presence heartbeat, and no edit. Editing is
+refused at the one place every change passes through — the reducer bumps an operation sequence for
+each command it forms and for nothing else, so selecting, filtering, opening a panel and marking up
+the reference all still work while every change to the *document* is dropped before it reaches the
+canvas. A revision the service will not answer for — trimmed out of the retained window, or one this
+design never reached — is a **stale link, not a failed page**: the editor opens the living design and
+the banner says the revision is unavailable. That is the same instinct as the catalog-less redirect
+above; answer the question the reader actually has.
+
+**`?node=<nodeId>`** selects that node as the design opens — the canvas outline and the Layers row —
+and opens the Properties panel on it. An id this design does not have opens the design with a small
+notice rather than an error, for the same reason: the link is stale and the design is not.
+
+**`#thread=<threadId>`** opens the Talk panel scrolled to one conversation, and combines with
+`?node=` where the thread is pinned to a layer, so "the thread about this button, beside the button"
+is one URL. The panel scrolls to it **once**: a link says where to start reading, and a page that
+kept pulling itself back would fight whoever read on.
+
+**The thread is a fragment on purpose, and this is the load-bearing part.** A fragment is never sent
+to the server — not in the request line, not to a proxy, not into an access log, not in a referrer
+header. A thread id names a *discussion*, which is the private half of a private design, and the id
+of a conversation somebody linked to should not accumulate in logs that outlive the link. The
+revision and the node are properties of the document the reader is about to be served anyway, so
+they cost nothing in the query. This is the same argument the redirect above makes about not being
+an existence oracle, applied to the other end of the URL. Nothing on the server reads any of the
+three: the app shell serves the same bytes whatever the query says, which is why adding them needed
+no route change.
+
+**They survive the canonical rewrite, and they do not survive being wrong.** The `history.replaceState`
+that turns a legacy `?designId=` URL into the path form carries `revision` and `node` across and
+leaves the fragment alone — a rewrite that dropped them would silently turn a link to one layer into
+a link to the design. In the other direction, `?node=` is taken back out of the address bar the
+moment the selection moves off it, and `#thread=` the moment the reader closes that thread or opens
+another, so a URL copied later cannot point at something nobody has been looking at.
+
+**Copy link** produces these URLs from the two places a person is standing when they want one: a
+selected layer's menu, which copies the node at the revision on screen, and a comment thread's card,
+which copies the thread and the layer it is pinned to. Both copy the canonical path form with no
+identity or token value on it — a shared link is an address and never a credential, which is the
+rule the export lane's Copy link already follows. The grammar is one function,
+[`parseDesignUrlSelectors`](../../ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/DesignUrlSelectors.kt)
+and its `designUrlPath` twin, in common code with a test rather than in a `@JsFun` in the browser
+entry point: a link this editor writes has to be a link this editor reads back.
+
 The browser opens the design through the released v1 HTTP envelope, renders the authoritative
 snapshot, and subscribes to `/api/ui-builder/v1/designs/{designId}/updates`. Editor batches, undo,
 and redo retain the actor/client identity from the URL and use the currently rendered authoritative

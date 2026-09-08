@@ -429,6 +429,46 @@ fun UiBuilderEditor(
   onResolveCommentThread: ((threadId: String, resolved: Boolean) -> Unit)? = null,
   /** A sentence from the host — a refused comment, a feed that dropped. */
   commentStatus: String? = null,
+  /**
+   * The thread `#thread=` named, opened and scrolled to as the editor mounts.
+   *
+   * Separate from the selection the panel keeps for itself, and read once: a link names where to
+   * start reading, not a thread that has to stay open for the life of the session.
+   */
+  initialSelectedThreadId: String? = null,
+  /**
+   * Which thread the panel has open now, told to the host on every change.
+   *
+   * The host uses it to keep the address bar honest: a `#thread=` naming a conversation the reader
+   * has since closed is a URL that lies about what is on screen.
+   */
+  onSelectedThreadChanged: ((String?) -> Unit)? = null,
+  /**
+   * The committed revision `?revision=` pinned this editor to, or null for the living design.
+   *
+   * See [DesignRevisionPin] — it carries both the revision the link asked for and whether that is
+   * what the canvas got, because a banner that cannot tell those apart cannot be trusted.
+   */
+  revisionPin: DesignRevisionPin? = null,
+  /** Leaves a pinned revision for the design as it stands now. Null where the host cannot. */
+  onGoToLatest: (() -> Unit)? = null,
+  /**
+   * A sentence about the link that opened this editor — a node id this design does not have.
+   *
+   * A notice rather than a refusal, and never an error: a selector that names nothing is a stale
+   * link, and the design behind it still opens.
+   */
+  openingNotice: String? = null,
+  /**
+   * Copies a link to one place in this design and answers with a sentence, or null where the host
+   * cannot reach a clipboard.
+   *
+   * The editor says *what* the link means — this node, this thread, at this revision — and the host
+   * turns that into an address against its own origin; see [designUrlPath]. Null in every preview
+   * and test, where the affordance is then absent rather than present and failing, which is the
+   * rule [onPickReference] and [exportHost] already follow.
+   */
+  onCopyDesignLink: (suspend (DesignUrlSelectors) -> String)? = null,
   newDesignCatalogs: List<UiBuilderNewDesignCatalog> = emptyList(),
   onCreateDesign:
     ((
@@ -639,13 +679,45 @@ fun UiBuilderEditor(
   var captureFailure by remember(document.id) { mutableStateOf<String?>(null) }
   // Which conversation is open, in the panel and under the pin. Editor state rather than document
   // state, and per design: which thread somebody has expanded is a fact about a moment.
-  var selectedThreadId by remember(document.id) { mutableStateOf<String?>(null) }
+  var selectedThreadId by remember(document.id) { mutableStateOf(initialSelectedThreadId) }
+  // A sentence the editor itself put up — a refused edit under a pinned revision, the answer to a
+  // Copy link — kept apart from [openingNotice], which is the host's and does not expire.
+  var transientNotice by remember(document.id) { mutableStateOf<String?>(null) }
+  var transientNoticeGeneration by remember(document.id) { mutableStateOf(0) }
+  LaunchedEffect(transientNoticeGeneration) {
+    if (transientNotice == null) return@LaunchedEffect
+    delay(EXPORT_STATUS_MILLIS)
+    transientNotice = null
+  }
+  fun say(sentence: String) {
+    transientNotice = sentence
+    transientNoticeGeneration += 1
+  }
+  val editorScope = rememberCoroutineScope()
+  fun selectThread(threadId: String?) {
+    selectedThreadId = threadId
+    onSelectedThreadChanged?.invoke(threadId)
+  }
   val draggedTarget = draggedComponentId?.let { reducer.dropTarget(state, it) }
   val canvasDropHovered =
     catalogDragPosition?.let(canvasBounds::contains) == true && draggedTarget != null
+  /**
+   * One editor event, and the one place a pinned revision stops being editable.
+   *
+   * The guard is the operation sequence rather than a list of which events are edits: the reducer
+   * bumps it for every command it forms, accepted or rejected, and for nothing else. So selecting,
+   * filtering, opening a panel, marking up the reference and switching a pack all pass through a
+   * pinned editor untouched, while every change to the *document* is dropped before it can reach
+   * the local state — which matters, because an optimistic edit that never becomes a submission
+   * would leave the canvas showing a revision that exists nowhere.
+   */
   fun dispatch(event: UiBuilderEditorEvent) {
     val previous = state
     val current = reducer.reduce(previous, event)
+    if (revisionPin?.readOnly == true && current.operationSequence != previous.operationSequence) {
+      say("Revision ${revisionPin.requested} is read-only. Go to latest to edit.")
+      return
+    }
     state = current
     reducer.acceptedSubmission(previous, current)?.let { onSubmission?.invoke(it) }
   }
@@ -742,6 +814,29 @@ fun UiBuilderEditor(
         inspectorOpen = true
         mobilePanel = MobileEditorPanel.Properties
       },
+      // The link names the *anchor* rather than the whole selection: a URL selects one node, and
+      // the anchor is the node every other single-selection question in this editor is asked of.
+      // Pinned to the revision it was copied at, because a link to a layer is a link to a layer as
+      // it was — the thing somebody is about to be asked to look at.
+      onCopyLink =
+        onCopyDesignLink?.let { copy ->
+          state.selectedNodeId?.let { nodeId ->
+            {
+              editorScope.launch {
+                say(
+                  copyLinkSentence(
+                    copy,
+                    DesignUrlSelectors(
+                      revision = state.document.revision.toLong(),
+                      nodeId = nodeId,
+                    ),
+                  )
+                )
+              }
+              Unit
+            }
+          }
+        },
       onDismiss = close,
       dispatch = ::dispatch,
     )
@@ -844,7 +939,7 @@ fun UiBuilderEditor(
       commentThreads = comments.pinned(state.reference.marks),
       selectedThreadId = selectedThreadId,
       onCommentThreadSelected = { threadId ->
-        selectedThreadId = threadId
+        selectThread(threadId)
         dispatch(UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Comments))
       },
       onInspectionSnapshot = { snapshot ->
@@ -1122,9 +1217,29 @@ fun UiBuilderEditor(
       comments = comments,
       commentStatus = commentStatus,
       selectedThreadId = selectedThreadId,
-      onSelectThread = { selectedThreadId = it },
+      onSelectThread = ::selectThread,
+      // Read once. The panel scrolls to the thread the URL named as it opens, and never again —
+      // a later scroll would be the page fighting somebody who has started reading elsewhere.
+      revealThreadId = initialSelectedThreadId,
       onPostComment = onPostComment,
       onResolveCommentThread = onResolveCommentThread,
+      // A thread's link carries the thread in the fragment and, where the thread is pinned to a
+      // layer, that layer too: a conversation about a button is worth opening beside the button.
+      // No revision — a discussion is about the living design, not the moment it was linked.
+      onCopyThreadLink =
+        onCopyDesignLink?.let { copy ->
+          { thread: DesignCommentThread ->
+            editorScope.launch {
+              say(
+                copyLinkSentence(
+                  copy,
+                  DesignUrlSelectors(nodeId = thread.anchor?.nodeId, threadId = thread.id),
+                )
+              )
+            }
+            Unit
+          }
+        },
       onTextInputFocusChanged = { textInputFocused = it },
       dispatch = ::dispatch,
       modifier = modifier,
@@ -1221,6 +1336,15 @@ fun UiBuilderEditor(
               dispatch = ::dispatch,
             )
           }
+          // Under the toolbar and over everything else, on both layouts: what a link asked for is
+          // the first thing to know about this page, and a strip inside one of the docks would be
+          // behind a panel that starts closed.
+          EditorUrlBanner(
+            revisionPin = revisionPin,
+            onGoToLatest = onGoToLatest,
+            openingNotice = openingNotice,
+            transientNotice = transientNotice,
+          )
           Box(Modifier.fillMaxSize()) {
             if (!compact) {
               // Which dock is showing, derived rather than stored: the code pane and the inspector
@@ -2304,6 +2428,8 @@ private fun EditorSelectionMenuItems(
   wrapCandidates: List<EditorCatalogItem>,
   canUnwrap: Boolean,
   onOpenProperties: (() -> Unit)?,
+  /** Copies a link that opens this design on this layer, or null where nothing is selected. */
+  onCopyLink: (() -> Unit)? = null,
   onDismiss: () -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -2320,8 +2446,23 @@ private fun EditorSelectionMenuItems(
         onOpenProperties()
       },
     )
-    HorizontalDivider()
   }
+  // Beside Properties rather than among the clipboard verbs, because both of these are ways of
+  // *pointing at* the selected layer while Copy and Cut are ways of moving it. The Export menu's
+  // Copy link is the design's address; this one is a layer's, which is the thing somebody pastes
+  // when they mean "this button, here".
+  if (onCopyLink != null) {
+    DropdownMenuItem(
+      text = { Text("Copy link") },
+      leadingIcon = { Icon(Icons.Filled.Link, contentDescription = null) },
+      modifier = Modifier.semantics { contentDescription = "Copy link to this layer" },
+      onClick = {
+        onDismiss()
+        onCopyLink()
+      },
+    )
+  }
+  if (onOpenProperties != null || onCopyLink != null) HorizontalDivider()
   DropdownMenuItem(
     text = { Text("Duplicate") },
     enabled = canDuplicate,
@@ -2413,6 +2554,84 @@ private fun EditorSelectionMenuItems(
       text = { Text("Unwrap") },
       onClick = { act(UiBuilderEditorEvent.UnwrapSelection) },
     )
+  }
+}
+
+/**
+ * Runs one Copy link against the host and hands back the sentence to show.
+ *
+ * A failure is a sentence too, for the reason the export host gives: the affordance is a button in
+ * a menu, and a clipboard the browser refused should be reported where the button was rather than
+ * swallowed into a console nobody has open.
+ */
+private suspend fun copyLinkSentence(
+  copy: suspend (DesignUrlSelectors) -> String,
+  selectors: DesignUrlSelectors,
+): String =
+  try {
+    copy(selectors)
+  } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+    throw cancelled
+  } catch (failure: Exception) {
+    "Copy link failed: ${failure.message ?: "unknown error"}"
+  }
+
+/**
+ * What a pinned revision, a stale selector or a just-copied link has to say, over the canvas.
+ *
+ * One strip rather than three, because all three are the same kind of sentence — something about
+ * *this opening of this design* that the canvas cannot show — and a page that grows a new bar per
+ * kind of news is a page whose design moves under the reader. The revision line is the only one
+ * that persists; the rest expire, which is why they are drawn after it rather than instead of it.
+ */
+@Composable
+private fun EditorUrlBanner(
+  revisionPin: DesignRevisionPin?,
+  onGoToLatest: (() -> Unit)?,
+  openingNotice: String?,
+  transientNotice: String?,
+) {
+  val pinned = revisionPin?.pinned == true
+  val message =
+    when {
+      pinned -> "Showing revision ${revisionPin.requested} · read-only"
+      revisionPin != null ->
+        "Revision ${revisionPin.requested} is not available — showing the latest design."
+      else -> null
+    }
+  if (message == null && openingNotice == null && transientNotice == null) return
+  Surface(
+    Modifier.fillMaxWidth(),
+    color =
+      if (pinned) MaterialTheme.colorScheme.secondaryContainer
+      else MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Row(
+      Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Icon(
+        if (pinned) Icons.Filled.History else Icons.Filled.Link,
+        contentDescription = null,
+        modifier = Modifier.size(18.dp),
+      )
+      Text(
+        listOfNotNull(message, openingNotice, transientNotice).joinToString("  ·  "),
+        Modifier.weight(1f).semantics { contentDescription = "Design link notice" },
+        style = MaterialTheme.typography.labelMedium,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+      if (revisionPin != null && onGoToLatest != null) {
+        TextButton(
+          onClick = onGoToLatest,
+          modifier = Modifier.semantics { contentDescription = "Go to latest revision" },
+        ) {
+          Text("Go to latest")
+        }
+      }
+    }
   }
 }
 
@@ -5200,8 +5419,10 @@ private fun PropertyInspector(
   commentStatus: String?,
   selectedThreadId: String?,
   onSelectThread: (String?) -> Unit,
+  revealThreadId: String?,
   onPostComment: ((DesignCommentDraft) -> Unit)?,
   onResolveCommentThread: ((String, Boolean) -> Unit)?,
+  onCopyThreadLink: ((DesignCommentThread) -> Unit)?,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
   modifier: Modifier = Modifier.width(INSPECTOR_WIDTH).fillMaxHeight(),
@@ -5258,8 +5479,10 @@ private fun PropertyInspector(
         commentStatus = commentStatus,
         selectedThreadId = selectedThreadId,
         onSelectThread = onSelectThread,
+        revealThreadId = revealThreadId,
         onPostComment = onPostComment,
         onResolveCommentThread = onResolveCommentThread,
+        onCopyThreadLink = onCopyThreadLink,
         onTextInputFocusChanged = onTextInputFocusChanged,
         dispatch = dispatch,
       )
@@ -5292,8 +5515,10 @@ private fun InspectorBody(
   commentStatus: String?,
   selectedThreadId: String?,
   onSelectThread: (String?) -> Unit,
+  revealThreadId: String?,
   onPostComment: ((DesignCommentDraft) -> Unit)?,
   onResolveCommentThread: ((String, Boolean) -> Unit)?,
+  onCopyThreadLink: ((DesignCommentThread) -> Unit)?,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -5312,7 +5537,11 @@ private fun InspectorBody(
       // Scrolled for the same reason the Screen panel is: a design with a dozen threads on it
       // fills the dock, and a panel that silently clips its last thread is worse than one that
       // scrolls.
-      Column(Modifier.verticalScroll(rememberScrollState())) {
+      // The scroll state is held here rather than inside the panel because the panel has to be
+      // able to move it: a `#thread=` link opens a design and then has to bring one conversation
+      // out of a dozen into view.
+      val commentScroll = rememberScrollState()
+      Column(Modifier.verticalScroll(commentScroll)) {
         CommentsInspector(
           board = comments,
           reference = state.reference,
@@ -5320,8 +5549,11 @@ private fun InspectorBody(
           nodeLabel = { nodeId -> state.document.nodes[nodeId]?.componentId ?: nodeId },
           selectedThreadId = selectedThreadId,
           onSelectThread = onSelectThread,
+          revealThreadId = revealThreadId,
+          scrollState = commentScroll,
           onPost = onPostComment,
           onResolve = onResolveCommentThread,
+          onCopyLink = onCopyThreadLink,
           hostStatus = commentStatus,
           onTextInputFocusChanged = onTextInputFocusChanged,
         )

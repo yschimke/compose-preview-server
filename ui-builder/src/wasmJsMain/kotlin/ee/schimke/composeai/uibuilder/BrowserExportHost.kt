@@ -89,6 +89,30 @@ internal class BrowserExportHost(
 internal const val UI_BUILDER_LIVE_EXPORT_PATH = "/api/ui-builder/v1/designs"
 
 /**
+ * Copies one design link — a node, a thread, a revision — and answers with a sentence.
+ *
+ * Beside the export host rather than inside it, because it is not an export: the address it copies
+ * names a place in the *editor*, not a rendered picture, and it is offered from a layer's menu and
+ * a thread's card rather than from the Export menu. What it shares with that host is the two rules
+ * that matter — the link goes through [shareableUrl], so the page's `?token=` never rides along,
+ * and a browser that refuses the clipboard is reported in a sentence rather than thrown.
+ *
+ * The address is shown as well as copied. A link is the one thing on this page whose value a person
+ * checks before pasting it into a pull request, and a bare "Copied" makes them paste it somewhere
+ * to find out what they have.
+ */
+internal suspend fun copyDesignLink(path: String): String {
+  val link = shareableUrl(path)
+  val outcome =
+    try {
+      awaitJsString(copyTextPromise(link))
+    } catch (failure: Exception) {
+      return "Copy link failed: ${failure.message ?: "unknown error"}"
+    }
+  return if (outcome.isEmpty()) "Link copied · $link" else outcome
+}
+
+/**
  * An absolute URL for sharing: resolved against the page, with no credential on it.
  *
  * The opposite of [sameOriginRequestUrl] in the one respect that matters — that one *adds* the
