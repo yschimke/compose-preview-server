@@ -1,12 +1,14 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.protocol.AssetKeyValueV1
 import ee.schimke.composeai.uibuilder.protocol.BooleanValueV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
+import ee.schimke.composeai.uibuilder.protocol.EnumValueV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
@@ -115,7 +117,6 @@ class M3CatalogComponentRecordTest {
   /** Capability ids the record deliberately does not cover yet, each with the reason. */
   private val uncovered =
     mapOf(
-      "asset/image" to "Image takes a Painter; no ScreenValue expresses one",
       // Not "items is a CarouselScope DSL" — that was this list's own guess and it is wrong.
       // `HorizontalUncontainedCarousel(state = rememberCarouselState { 5 }, …) { CarouselItem() }`
       // is how m3-catalog calls it: the content is a trailing composable slot taking an item
@@ -125,26 +126,41 @@ class M3CatalogComponentRecordTest {
       "layout/horizontal-carousel" to
         "takes a CarouselState from rememberCarouselState { n }, whose argument is a lambda, and its content slot is called per item index rather than per child (compose-ai-tools#5218)",
       "layout/supporting-pane-scaffold" to "adaptive API; panes are not plain composable slots",
-      "m3/center-aligned-top-app-bar" to
-        "scrollBehavior is a TopAppBarScrollBehavior from a remembered factory, which no ScreenValue expresses",
+      // Not the factory. `rememberDatePickerState` carries a `$default` bridge, so every parameter
+      // defaults and the no-arg call compiles — the same shape a dozen covered components use. What
+      // blocks it is one property: `selectedDate` is an ISO-8601 `YYYY-MM-DD` string and the
+      // factory
+      // takes `initialSelectedDateMillis: Long?`. Turning one into the other is a computation, and
+      // a
+      // wrong date that compiles is the failure this projection exists to refuse (#441).
       "m3/date-picker" to
-        "takes a DatePickerState from rememberDatePickerState, which no ScreenValue expresses",
+        "selectedDate is an ISO-8601 YYYY-MM-DD string and rememberDatePickerState takes " +
+          "initialSelectedDateMillis: Long?; converting between them is a computation this " +
+          "projection will not invent",
       "m3/dialog" to
         "AlertDialog is a window and needs an onDismissRequest a design cannot write; the builder draws and emits its surface inline instead",
       "m3/horizontal-floating-toolbar" to "experimental; content is a FlowRow-shaped scope",
-      "m3/list-item" to "startAccentColor is a drawBehind, not a parameter of ListItem",
       "m3/primary-tab-row" to "tabs is a TabRow scope, and the row's own indicator takes a lambda",
       "m3/search-bar" to "inputField is a typed lambda, not a plain composable slot",
       "m3/search-input-field" to "SearchBarDefaults.InputField is a member of an object",
-      "m3/slider" to
-        "onValueChange takes the new value, which the document's action vocabulary does not carry",
       "m3/snackbar-host" to "takes a SnackbarHostState, which no ScreenValue expresses",
       "m3/tab" to
         "onClick is required and a design's tab selection is not an action it can express",
+      // Also not the factory, and unlike the date picker nothing about the component blocks it:
+      // `hour`, `minute` and `is24Hour` map straight onto `rememberTimePickerState`'s defaulted
+      // parameters, and `mode` picks between `TimePicker` and `TimeInput` exactly as `m3/card`'s
+      // `variant` picks between its three. What is missing is upstream of this file — the record
+      // carries neither callable, so a COMPONENT_VARIANTS entry would name an id that cannot
+      // resolve and the export would refuse with NO_COMPONENT_RECORD. Coverable as soon as the
+      // record carries them (#441).
       "m3/time-picker" to
-        "takes a TimePickerState from rememberTimePickerState, which no ScreenValue expresses",
+        "the record carries neither TimePicker nor TimeInput, so no variant entry could name a " +
+          "callable that resolves",
       "remote-compose/document" to "typed embed, kept out of the Compose exporter by design",
-      "shape/colour-dot" to "a Box with a background, not a Material component",
+      "remote-compose/inline" to
+        "the vocabulary switch: its subtree is @RemoteComposable and InlineRemoteContentExporter writes it, not the Compose exporter",
+      "remote-compose/custom" to
+        "a Remote Compose custom operation naming a host renderer; no published creation API writes one, so no record could back it",
       "shape/linear-gradient" to "a Modifier, not a component",
       "shape/radial-gradient" to "a Modifier, not a component",
     )
@@ -224,7 +240,7 @@ class M3CatalogComponentRecordTest {
                 DesignNodeV1(
                   id = "column",
                   componentId = "layout/column",
-                  slots = mapOf("children" to listOf("heading", "divider", "agree")),
+                  slots = mapOf("children" to listOf("heading", "divider", "photo", "agree")),
                 ),
               "heading" to
                 DesignNodeV1(
@@ -237,6 +253,20 @@ class M3CatalogComponentRecordTest {
                     ),
                 ),
               "divider" to DesignNodeV1(id = "divider", componentId = "m3/horizontal-divider"),
+              // A picture (#477's `asset/image` row). Its bytes live in the design's asset store
+              // and no generated Kotlin can carry them, so the record lane writes the real
+              // `Image(...)` with a placeholder painter and says so in a warning.
+              "photo" to
+                DesignNodeV1(
+                  id = "photo",
+                  componentId = "asset/image",
+                  properties =
+                    mapOf(
+                      "assetKey" to AssetKeyValueV1("avatar-lain"),
+                      "contentDescription" to StringValueV1("lain"),
+                      "contentScale" to EnumValueV1("crop"),
+                    ),
+                ),
               // A selection control, which is the shape the record could not carry until now: its
               // required `onCheckedChange` is nullable, so a call site can write `null` for it, and
               // `checked` is an ordinary boolean the document supplies. Included here because a
@@ -277,6 +307,17 @@ class M3CatalogComponentRecordTest {
     assertTrue(source.contains("Column(content = {"), source)
     assertTrue(source.contains("""Text(text = "Discover""""), source)
     assertTrue(source.contains("HorizontalDivider("), source)
+    assertTrue(source.contains("Image("), source)
+    assertTrue(source.contains("ColorPainter("), source)
+    assertTrue(source.contains("ContentScale.Crop"), source)
+    assertTrue(source.contains("contentDescription = \"lain\""), source)
+    assertTrue(source.contains("Asset placeholder: node photo draws asset 'avatar-lain'"), source)
+    val placeholder =
+      artifact.diagnostics.single {
+        it.code == ScreenGeneratorComposeExportExecutor.ASSET_PLACEHOLDER
+      }
+    assertEquals(DiagnosticSeverityV1.WARNING, placeholder.severity)
+    assertTrue("avatar-lain" in placeholder.message, placeholder.message)
     assertTrue(source.contains("Checkbox("), source)
     assertTrue(source.contains("checked = true"), source)
     assertTrue(!source.contains("children ="), source)

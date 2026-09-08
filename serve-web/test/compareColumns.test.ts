@@ -8,14 +8,14 @@ import assert from "node:assert/strict";
 import { specLeadsColumns, targetHeadLabel } from "../src/compare/columns.js";
 
 describe("compare wall columns", () => {
-    it("puts the design spec first, and only on the lane that has one", () => {
-        // The house rule everywhere the two are shown together: spec left, render right.
+    it("puts the baseline first on every lane", () => {
+        // The house rule everywhere two pictures are shown together: baseline left, diff, ours
+        // right. `svg` and `rc` used to read the other way round, which meant pressing a baseline
+        // button swapped both pictures' sides as well as relabelling both headers.
         assert.equal(specLeadsColumns("reference"), true);
         assert.equal(specLeadsColumns("parallel"), true);
-        // `svg` and `rc` pit a render against an export OF that render — the render is the source
-        // of truth there, not the thing being measured — so it keeps the left column.
-        assert.equal(specLeadsColumns("svg"), false);
-        assert.equal(specLeadsColumns("rc"), false);
+        assert.equal(specLeadsColumns("svg"), true);
+        assert.equal(specLeadsColumns("rc"), true);
     });
 
     it("names the column after the lane it is actually showing", () => {

@@ -334,6 +334,45 @@ class ServeBugReportRouteTest {
   }
 
   @Test
+  fun `a host that cannot host a capture says the picture has to be pasted`() {
+    // Issue #556. The lane admits only a browser session naming a login with access to the image
+    // repository, so on an open host it admits nobody — and the page still promised that captures
+    // were "embedded in the report automatically". They were not: the report opened on GitHub with
+    // an empty Screenshot section, and the one sentence that said to paste was written into a
+    // status line at submit time, on a page the reporter leaves in the same gesture because the
+    // issue form is `target="_blank"`.
+    server = newServer(public = true, token = "unused")
+    val body = get("/report-bug").second
+    assertFalse(body.contains("embedded in the report automatically"), body)
+    assertTrue(body.contains("does not host captures"), body)
+    assertTrue(body.contains("puts your newest capture on the clipboard"), body)
+    // The mount is still there, and so is Mark up: what changed is what the page claims will
+    // happen to the picture, not whether one can be taken.
+    assertTrue(body.contains("class=\"cp-shots\""), body)
+    assertTrue(body.contains("<strong>Mark up</strong>"), body)
+  }
+
+  @Test
+  fun `a host that does admit the reporter still promises the embed`() {
+    // The other half of the pair above: where the lane answers, hosting is what happens and the
+    // clipboard is the fallback, so the page must not talk the reporter into a manual paste.
+    val page =
+      ServeWeb.bugReportPage(
+        report =
+          ServeWeb.BugReport(
+            action = ServeBugReport.action(),
+            body = "### Screenshot\n\n",
+            bodyTemplate = "### Screenshot\n\n",
+            repo = ServeBugReport.REPO,
+          ),
+        sections = emptyList(),
+        canUploadCaptures = true,
+      )
+    assertTrue(page.contains("uploaded to this preview server"), page)
+    assertFalse(page.contains("does not host captures"), page)
+  }
+
+  @Test
   fun `a report from a browser-composed view says which view, and labels the render as the base one`() {
     // Issue #4261: the embedded PNG is the only picture of a preview this server can make, and on
     // a lane that composes its own view it is not what the reporter was looking at. The motion

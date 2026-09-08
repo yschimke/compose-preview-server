@@ -43,6 +43,41 @@ class ServeAgentGrantStoreTest {
   ) = openRequest("fix #1", "10.0.0.1", scope, ttl)!!
 
   @Test
+  fun `a grant records who approved it, as an actor id the rest of the server understands`() {
+    val store = store()
+    val request = store.ask()
+    val approver = ServeAgentGrants.Approver.github("yuri", true, true, AgentGrantScope.PLAYGROUND)
+    val grant =
+      assertNotNull(
+        store.approve(
+          request.id,
+          approver.name,
+          AgentGrantScope.LIVE,
+          600,
+          emptySet(),
+          approver.actorId,
+        )
+      )
+
+    // The display name is for a page and a log line; the actor id is what a design is owned by,
+    // and the UI builder needs the second to let the approver open what their agent created.
+    assertEquals("@yuri", grant.approvedBy)
+    assertEquals("github:yuri", grant.approvedByActorId)
+    assertEquals(
+      "operator",
+      ServeAgentGrants.Approver.operator(AgentGrantScope.PLAYGROUND).actorId,
+      "the token holder is the same person in a browser as they are here",
+    )
+
+    // A grant nobody named an approver for carries no delegation rather than a blank one.
+    val anonymous = store.ask()
+    assertEquals(
+      "",
+      assertNotNull(store.approve(anonymous.id, "?", AgentGrantScope.LIVE, 600)).approvedByActorId,
+    )
+  }
+
+  @Test
   fun `the token goes to the device secret, not to the link`() {
     val store = store()
     val request = store.ask()

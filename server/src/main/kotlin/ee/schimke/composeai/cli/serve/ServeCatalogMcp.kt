@@ -2,7 +2,6 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
-import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.web.WebEscaping
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -11,6 +10,7 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -173,6 +173,8 @@ class ServeCatalogMcp(
     }
   }
 
+  // `JsonArrayBuilder.addAll` is still experimental; the UI-builder block below is the only caller.
+  @OptIn(ExperimentalSerializationApi::class)
   private fun tools(accessEnabled: Boolean): JsonArray = buildJsonArray {
     if (accessEnabled) {
       // First in the list on purpose: a client with no credential can call only these two, and a
@@ -302,7 +304,14 @@ class ServeCatalogMcp(
       )
     )
     uiBuilder?.let {
-      addAll(ServeUiBuilderMcp.declarations(::tool, uiBuilderNative, it.supportsComments))
+      addAll(
+        ServeUiBuilderMcp.declarations(
+          ::tool,
+          uiBuilderNative,
+          it.supportsComments,
+          it.supportsAssets,
+        )
+      )
     }
     add(
       tool(
@@ -1700,8 +1709,7 @@ class ServeCatalogMcp(
     val capability = builder.capabilityFor(name) ?: return null
     val actor =
       when (val decision = authorize(capability, presentedToken)) {
-        is UiBuilderAuthorizationDecision.Authorized ->
-          AuthenticatedUiBuilderActor(decision.actorId)
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing ->
           return toolError(
             "this tool needs a UI-builder ${capability.name.lowercase()} grant; none was " +

@@ -1,5 +1,153 @@
 # Changelog
 
+## [3.18.0](https://github.com/yschimke/compose-preview-server/compare/v3.17.0...v3.18.0) (2026-09-08)
+
+
+### Features
+
+* **serve:** split the design page's lane into Show and Diff against ([#574](https://github.com/yschimke/compose-preview-server/issues/574)) ([b43875f](https://github.com/yschimke/compose-preview-server/commit/b43875f916f7e60037b9ceee80b93a273e45c394))
+* **serve:** surface the paired catalog on the front door and the viewer ([#576](https://github.com/yschimke/compose-preview-server/issues/576)) ([41d3e45](https://github.com/yschimke/compose-preview-server/commit/41d3e45345e8a1fc845d8f077067b6ee787b1918))
+
+
+### Bug Fixes
+
+* clear every Kotlin compile warning in the build ([#569](https://github.com/yschimke/compose-preview-server/issues/569)) ([b2dad78](https://github.com/yschimke/compose-preview-server/commit/b2dad78198a999c5c9d8c99bbef1164e298ffb1e))
+* **serve:** never let a UI-builder persistence failure abort startup ([#577](https://github.com/yschimke/compose-preview-server/issues/577)) ([5dfd7a1](https://github.com/yschimke/compose-preview-server/commit/5dfd7a17f4855a02dd83bcf9a2a1bf3a31952dd4))
+* **serve:** one "Compare to" row, and gate both paired links on what resolves ([#579](https://github.com/yschimke/compose-preview-server/issues/579)) ([a94c9fb](https://github.com/yschimke/compose-preview-server/commit/a94c9fbe000d9e5265280b27ec2ea3ed884d6aa0))
+* **ui-builder:** bound retained revisions by bytes and report state headroom ([#573](https://github.com/yschimke/compose-preview-server/issues/573)) ([05a0047](https://github.com/yschimke/compose-preview-server/commit/05a0047c969394ea6ed3bfc75b1e7de06eba2526))
+* **ui-builder:** bound undo state by bytes and raise the state ceiling ([#575](https://github.com/yschimke/compose-preview-server/issues/575)) ([391016c](https://github.com/yschimke/compose-preview-server/commit/391016c6695c2b26cf8f2657277ddff4f0147551))
+
+## [3.17.0](https://github.com/yschimke/compose-preview-server/compare/v3.16.0...v3.17.0) (2026-09-07)
+
+
+### Features
+
+* **design:** compile and render a design locally with --local ([#561](https://github.com/yschimke/compose-preview-server/issues/561)) ([65446a7](https://github.com/yschimke/compose-preview-server/commit/65446a7ace46b36d3b57d07bb2f3d0294abc26fe))
+* **serve:** compare every variant of a component under its own render ([#558](https://github.com/yschimke/compose-preview-server/issues/558)) ([de5c2d5](https://github.com/yschimke/compose-preview-server/commit/de5c2d50bf435d597044fd4f0f53dd39e2c0cb39))
+* **serve:** one vocabulary for comparing, and a parity page that opens components ([#553](https://github.com/yschimke/compose-preview-server/issues/553)) ([09d265f](https://github.com/yschimke/compose-preview-server/commit/09d265f1514652b0b2e28e901bc170249cc2f1a2))
+* **serve:** open the approval page with the requested capability ticked ([#559](https://github.com/yschimke/compose-preview-server/issues/559)) ([4290e25](https://github.com/yschimke/compose-preview-server/commit/4290e25ad8a732939e335cf06dcb8382d598e404))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#565](https://github.com/yschimke/compose-preview-server/issues/565)) ([ee806a7](https://github.com/yschimke/compose-preview-server/commit/ee806a7ed180b221344a6384dfbc96a7b8bd94cf))
+* **deps:** update dependency io.github.classgraph:classgraph to v4.8.195 ([#566](https://github.com/yschimke/compose-preview-server/issues/566)) ([64137de](https://github.com/yschimke/compose-preview-server/commit/64137de599724a544cec99fccc653911058600b0))
+* **playground:** let the first-frame render budget follow renderTimeoutSeconds ([#552](https://github.com/yschimke/compose-preview-server/issues/552)) ([ae7ee69](https://github.com/yschimke/compose-preview-server/commit/ae7ee69ad3bf5e5c9b1b4b6f8afcbf9d3d7830be))
+* **serve:** say the capture has to be pasted when this host cannot embed it ([#562](https://github.com/yschimke/compose-preview-server/issues/562)) ([e5acbe6](https://github.com/yschimke/compose-preview-server/commit/e5acbe6e8342c218b9b513c5f114edaeaa3da667))
+* **test:** follow the pages chip's rename to "N design pages" ([#560](https://github.com/yschimke/compose-preview-server/issues/560)) ([c8f1b6a](https://github.com/yschimke/compose-preview-server/commit/c8f1b6a27a2c538d3ee6f156ae5f47abc322fea4))
+
+
+### Performance Improvements
+
+* **serve:** write every preview id once, in one alias table ([#564](https://github.com/yschimke/compose-preview-server/issues/564)) ([6f5dcd7](https://github.com/yschimke/compose-preview-server/commit/6f5dcd76358b61754e3e7d1a1251d5b7c5025f2d))
+
+## [3.16.0](https://github.com/yschimke/compose-preview-server/compare/v3.15.0...v3.16.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* **playground:** put android.jar on the compile classpath for an android bundle ([#544](https://github.com/yschimke/compose-preview-server/issues/544)) ([59a52a1](https://github.com/yschimke/compose-preview-server/commit/59a52a1b4e9bd4ef44eb11553d1b49265caaa92c))
+
+## [3.15.0](https://github.com/yschimke/compose-preview-server/compare/v3.14.0...v3.15.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* **ui-builder:** handle the BUNDLE export format the contracts bump added ([#542](https://github.com/yschimke/compose-preview-server/issues/542)) ([d1c4637](https://github.com/yschimke/compose-preview-server/commit/d1c46373eedca77b928a840e3ca52c1b35fc604a))
+
+## [3.14.0](https://github.com/yschimke/compose-preview-server/compare/v3.13.0...v3.14.0) (2026-09-07)
+
+
+### Features
+
+* **ui-builder:** a design command, so getting pixels or source out is not a bespoke script ([#532](https://github.com/yschimke/compose-preview-server/issues/532)) ([08649a4](https://github.com/yschimke/compose-preview-server/commit/08649a40c97c4cca75251867d9765147a5b4e04a))
+* **ui-builder:** export a widget as a bundle, its pictures beside its source ([#533](https://github.com/yschimke/compose-preview-server/issues/533)) ([67ff67f](https://github.com/yschimke/compose-preview-server/commit/67ff67ffc5654f63cb5d34132f11d8028fa290e1))
+* **ui-builder:** render a Wear widget on the native preview lane ([#535](https://github.com/yschimke/compose-preview-server/issues/535)) ([a6723d0](https://github.com/yschimke/compose-preview-server/commit/a6723d0946e9e6b3644766b4f77e119a00651bb9))
+* **ui-builder:** say what undo would take back before you press it ([#538](https://github.com/yschimke/compose-preview-server/issues/538)) ([02e8647](https://github.com/yschimke/compose-preview-server/commit/02e86473c400435e1839261f0ba7f5be611c0d1c))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#540](https://github.com/yschimke/compose-preview-server/issues/540)) ([b84237a](https://github.com/yschimke/compose-preview-server/commit/b84237a182150f5525c8ee9fab7c2349f58e84da))
+* **deps:** update compose-preview-contracts to v2.11.0 ([#541](https://github.com/yschimke/compose-preview-server/issues/541)) ([2c7740b](https://github.com/yschimke/compose-preview-server/commit/2c7740b08b7f496dbb785161e27068ddce1d6fad))
+* **deps:** update rc-player-compose to 1.59.3 ([#539](https://github.com/yschimke/compose-preview-server/issues/539)) ([af4ba73](https://github.com/yschimke/compose-preview-server/commit/af4ba736a8d10aefc058016bf72c9a6cbbd840ba))
+
+## [3.13.0](https://github.com/yschimke/compose-preview-server/compare/v3.12.0...v3.13.0) (2026-09-07)
+
+
+### Features
+
+* **ui-builder:** inline a widget background picture, so a design with artwork exports ([#524](https://github.com/yschimke/compose-preview-server/issues/524)) ([02cec24](https://github.com/yschimke/compose-preview-server/commit/02cec245d98b719839983487995b6ff7e832ccbd))
+
+
+### Bug Fixes
+
+* **deps:** update dependency dev.snipme:highlights to v1.1.0 ([#500](https://github.com/yschimke/compose-preview-server/issues/500)) ([6927a16](https://github.com/yschimke/compose-preview-server/commit/6927a16fa34c2557239a14343990df009c13973b))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.59.1 ([#519](https://github.com/yschimke/compose-preview-server/issues/519)) ([7595106](https://github.com/yschimke/compose-preview-server/commit/7595106cb732aa7e430d187df9e29a98130a0965))
+* **ui-builder:** emit a six-digit colour opaque, so a generated widget is not invisible ([#517](https://github.com/yschimke/compose-preview-server/issues/517)) ([be585c4](https://github.com/yschimke/compose-preview-server/commit/be585c4e394c013e3a8315649ec0242626f7c8ad))
+* **ui-builder:** give a generated row the alignment the canvas gives it ([#525](https://github.com/yschimke/compose-preview-server/issues/525)) ([07d17d5](https://github.com/yschimke/compose-preview-server/commit/07d17d50fce9c1d28f249cdad78703740b2d4bbc))
+* **ui-builder:** lay the canvas frame out in the design's pixels, not the browser's ([#531](https://github.com/yschimke/compose-preview-server/issues/531)) ([6eda4a6](https://github.com/yschimke/compose-preview-server/commit/6eda4a6370c10214439627ebe9edd334371e4a29))
+* **ui-builder:** say why a widget has no native preview, not that it has no @Preview ([#526](https://github.com/yschimke/compose-preview-server/issues/526)) ([354ad78](https://github.com/yschimke/compose-preview-server/commit/354ad780709078cd584aac6132b88c4f8d561c16))
+
+## [3.12.0](https://github.com/yschimke/compose-preview-server/compare/v3.11.0...v3.12.0) (2026-09-06)
+
+
+### Features
+
+* **ui-builder:** a RemoveNodeProperty operation, sent as the null write the server unsets on ([#505](https://github.com/yschimke/compose-preview-server/issues/505)) ([8aef08a](https://github.com/yschimke/compose-preview-server/commit/8aef08a178591a3399989d5f5cd4a70c9bd06574))
+* **ui-builder:** carry unacknowledged comments on tool replies, and separate seen from settled ([#512](https://github.com/yschimke/compose-preview-server/issues/512)) ([2948685](https://github.com/yschimke/compose-preview-server/commit/2948685599370b109644c38ed0fb50ddcc84eaec))
+* **ui-builder:** read RemoveNodePropertyMutationV1, the unset in its own words ([#513](https://github.com/yschimke/compose-preview-server/issues/513)) ([96e6a45](https://github.com/yschimke/compose-preview-server/commit/96e6a45878c8fd036fde8b599abaef5ef1283591))
+
+
+### Bug Fixes
+
+* **ui-builder:** carry the asset registry across the language boundary, and rehash the fixtures ([#514](https://github.com/yschimke/compose-preview-server/issues/514)) ([84e0758](https://github.com/yschimke/compose-preview-server/commit/84e075813ab5f93c2f039533dbbb2489f6271ae6))
+* **ui-builder:** compose a card's content in a Box in the record-driven export, as the canvas draws it ([#506](https://github.com/yschimke/compose-preview-server/issues/506)) ([68b1cfd](https://github.com/yschimke/compose-preview-server/commit/68b1cfdb8416ec3cfb33f4bbdfb366b17597d007))
+* **ui-builder:** write the widget vocabulary remote-m3 offers, and redirect the catalog-less design URL ([#515](https://github.com/yschimke/compose-preview-server/issues/515)) ([9cb8d0b](https://github.com/yschimke/compose-preview-server/commit/9cb8d0bcca8879dd8575313781997126f29b04dd))
+
+## [3.11.0](https://github.com/yschimke/compose-preview-server/compare/v3.10.0...v3.11.0) (2026-09-06)
+
+
+### Features
+
+* **ui-builder:** a tool surface an agent can work in — context, correction, cleanup ([#495](https://github.com/yschimke/compose-preview-server/issues/495)) ([61993d1](https://github.com/yschimke/compose-preview-server/commit/61993d16fa4691a122d33cc3edd7be603fa4ecc9))
+* **ui-builder:** export a screen on the devices its design named ([#498](https://github.com/yschimke/compose-preview-server/issues/498)) ([c59d7d0](https://github.com/yschimke/compose-preview-server/commit/c59d7d009a0c93e55d40d7859ae7cb671d74ac67))
+* **ui-builder:** generate the custom-component operation for an inline body ([#471](https://github.com/yschimke/compose-preview-server/issues/471)) ([e0ce003](https://github.com/yschimke/compose-preview-server/commit/e0ce003581fa251577377e76306ce7393282b0f7))
+* **ui-builder:** make an ordinary screen export ([#494](https://github.com/yschimke/compose-preview-server/issues/494)) ([6fe1c2a](https://github.com/yschimke/compose-preview-server/commit/6fe1c2a4756553c4e212f6234f1d178735b863e9))
+* **ui-builder:** mark the palette rows the Compose export cannot write ([#502](https://github.com/yschimke/compose-preview-server/issues/502)) ([ef5bbc8](https://github.com/yschimke/compose-preview-server/commit/ef5bbc84432c720d6c351eee914cf7c87a78630d))
+* **ui-builder:** play inline Remote Compose content by capturing it ([#504](https://github.com/yschimke/compose-preview-server/issues/504)) ([33f69a0](https://github.com/yschimke/compose-preview-server/commit/33f69a08795e6a5ef96176e1e25548cfa99aca79))
+* **ui-builder:** put a picture in a design, end to end ([#503](https://github.com/yschimke/compose-preview-server/issues/503)) ([af58f10](https://github.com/yschimke/compose-preview-server/commit/af58f10ec3a01b684d47d08157b3eb76c85e4037))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.59.0 ([#501](https://github.com/yschimke/compose-preview-server/issues/501)) ([2c91a9e](https://github.com/yschimke/compose-preview-server/commit/2c91a9e90e5721a42f0ca202349c458b2aaf2fc0))
+* **serve:** carry the density a preview actually renders at ([#472](https://github.com/yschimke/compose-preview-server/issues/472)) ([3192698](https://github.com/yschimke/compose-preview-server/commit/319269809952436f9e212a0fbb345a7a142c52cf))
+* **serve:** resolve the RC replay's density from the device too ([#482](https://github.com/yschimke/compose-preview-server/issues/482)) ([e666965](https://github.com/yschimke/compose-preview-server/commit/e666965b652a64a976c7d12fabffaabe85a8e870))
+* **ui-builder:** refuse at commit what fails at render or export ([#497](https://github.com/yschimke/compose-preview-server/issues/497)) ([d75bff6](https://github.com/yschimke/compose-preview-server/commit/d75bff68579e0979a6288d851797aef1f1d1c9df))
+* **ui-builder:** wrap a card with no height, and name a coloured root that does not fill the frame ([#499](https://github.com/yschimke/compose-preview-server/issues/499)) ([69d8d12](https://github.com/yschimke/compose-preview-server/commit/69d8d126a08bfcdfdcf11b57a42a346e9c82bbbd))
+
+## [3.10.0](https://github.com/yschimke/compose-preview-server/compare/v3.9.0...v3.10.0) (2026-09-06)
+
+
+### Features
+
+* **serve:** offer the UI builder from the front door, and collapse its search into the bar ([#459](https://github.com/yschimke/compose-preview-server/issues/459)) ([33bc400](https://github.com/yschimke/compose-preview-server/commit/33bc400239ca3884ac138a4606fb9313e4924d75))
+* **serve:** stage a render's own ground into the PNG with ?bg= ([#467](https://github.com/yschimke/compose-preview-server/issues/467)) ([96514cc](https://github.com/yschimke/compose-preview-server/commit/96514cc09af5c524ac28bde5c7e82327ac688e32))
+* **ui-builder:** add a Lottie element to the Wear widget catalog ([#457](https://github.com/yschimke/compose-preview-server/issues/457)) ([b1a4951](https://github.com/yschimke/compose-preview-server/commit/b1a49515c26e65a1380d229219d1986d1b1f8db5))
+* **ui-builder:** an agent's grant is a delegation, and a design can be shared ([#468](https://github.com/yschimke/compose-preview-server/issues/468)) ([56949a0](https://github.com/yschimke/compose-preview-server/commit/56949a05a488a565fff885230c423928775dea3b))
+* **ui-builder:** edit a screen at its extent, beside the frame it ships at ([#458](https://github.com/yschimke/compose-preview-server/issues/458)) ([ef4e2e6](https://github.com/yschimke/compose-preview-server/commit/ef4e2e6da827d1ae8db6cacc38d12900c048e8b3))
+* **ui-builder:** embed Remote Compose in mobile and Wear designs, and Compose back inside it ([#460](https://github.com/yschimke/compose-preview-server/issues/460)) ([58a27fd](https://github.com/yschimke/compose-preview-server/commit/58a27fd211df0b1869788b57c24194ebd0bfff03))
+* **ui-builder:** let a design name the devices it exports as ([#465](https://github.com/yschimke/compose-preview-server/issues/465)) ([08e6aae](https://github.com/yschimke/compose-preview-server/commit/08e6aae8afd881b5777da5f54e4933ed8f042098))
+
+
+### Bug Fixes
+
+* **build:** check every published module's POM, not only the server's ([#454](https://github.com/yschimke/compose-preview-server/issues/454)) ([eb711f7](https://github.com/yschimke/compose-preview-server/commit/eb711f73a1944f1e34fd039afb524051274d057e))
+* **serve:** fill a triptych column with the frame it is showing ([#470](https://github.com/yschimke/compose-preview-server/issues/470)) ([f2adbee](https://github.com/yschimke/compose-preview-server/commit/f2adbeea11afdf5c295bb8bc6c49f3500c1821f7))
+* **serve:** keep the eyedropper's readout out of the spec lane's width ([#469](https://github.com/yschimke/compose-preview-server/issues/469)) ([1e763cb](https://github.com/yschimke/compose-preview-server/commit/1e763cba8a3e2456e5ebdf44c2016f375c6776a3))
+* **viewer:** freeze the eyedropper reading that is on screen ([#466](https://github.com/yschimke/compose-preview-server/issues/466)) ([3393c75](https://github.com/yschimke/compose-preview-server/commit/3393c75e25a4d377ad729e16e2d782d08d3af3bd))
+
 ## [3.9.0](https://github.com/yschimke/compose-preview-server/compare/v3.8.0...v3.9.0) (2026-09-06)
 
 

@@ -41,9 +41,20 @@ maven-publish = "0.37.0"
 # 1.82.0 is a floor rather than a bump: `ScreenDocumentProjection` emits `ChainLink
 # .receiverScopeFqn` and `ScreenValue.Fractional32`, which is how a layout weight became
 # expressible (compose-ai-tools#5212), and neither exists below it.
-composeai-tools = "1.84.0"
-composeai-contracts = "2.8.0"
-rc-players = "1.57.0"
+#
+# 2.0.0 is not a breaking bump. compose-ai-tools#5229 adopted minor-only versioning and cut 2.0.0
+# as the last major it will ever publish, so the number changed and the API did not. The move is
+# here rather than in a Renovate bump because the new `EnvironmentFieldV1.EXPORT_DEVICES` makes
+# three `when` expressions in `PersistentUiBuilderService` non-exhaustive, so the bump and the
+# field's handling are one change. `screen-model` also first carries `ScreenGenerator.Preview
+# .screenSizes` here. 2.1.0 is the first release carrying `ScreenGenerator.Preview.devices`
+# (compose-ai-tools#5248), which is what turns a design's export-device set into one
+# `@Preview(device = …)` per id rather than a multipreview that discards which devices it named.
+composeai-tools = "2.3.0"
+# 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
+# changes, which is the field a design names its export devices in.
+composeai-contracts = "2.11.0"
+rc-players = "1.59.4"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.5.2"
@@ -57,19 +68,19 @@ junit = "4.13.2"
 truth = "1.4.5"
 okhttp = "5.5.0"
 okio = "3.18.2"
-classgraph = "4.8.194"
+classgraph = "4.8.195"
 jmdns = "3.6.3"
 # The UI builder's Kotlin syntax highlighter, behind the Code pane. Pure Kotlin with a published
 # wasmJs variant, which is the whole reason it is this library: the pane is a Compose `Text` on a
 # canvas, so a JS/DOM highlighter (the playground's vendored CodeMirror) cannot reach it.
 #
-# Held at 1.0.0 because nothing this pane does needs 1.1.0 — not because it cannot be taken. Its
-# blocker is gone: 1.1.0's JVM artifact is class file 65, and `:ui-builder` now compiles against
-# `java-ui-builder` (21), so it would load in `:ui-builder:jvmTest` and in the JVM chrome preview
-# the render evidence comes from. Read the two floors at the top of this file before taking it —
-# the constraint that remains is that it must not reach `java-server`'s lane, and
-# `:server:checkServerJvmFloor` is what says so rather than a comment.
-snipme-highlights = "1.0.0"
+# At 1.1.0, which the blocker that once held this at 1.0.0 no longer stops: 1.1.0's JVM artifact is
+# class file 65, and `:ui-builder` compiles against `java-ui-builder` (21), so it loads in
+# `:ui-builder:jvmTest` and in the JVM chrome preview the render evidence comes from. Read the two
+# floors at the top of this file before moving it again — the constraint that remains is that it
+# must not reach `java-server`'s lane, and `:server:checkServerJvmFloor` is what says so rather
+# than a comment.
+snipme-highlights = "1.1.0"
 
 [libraries]
 composeai-common-web-escaping = { module = "ee.schimke.composeai:common-web-escaping", version.ref = "composeai-tools" }

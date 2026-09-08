@@ -958,6 +958,84 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
   align-items: stretch; gap: 2px; }
 .cp-actions-panel .cp-action-chip, .cp-actions-panel .cp-bg-btn {
   width: 100%; min-height: 40px; justify-content: flex-start; text-align: left; }
+/* The menu's destinations, in NAMED GROUPS. It used to be one undifferentiated column of seven
+   rows — four comparisons, a dashboard, two browsers and a toggle — all of them verbs, so telling
+   "compare RC players" from "design parity" meant reading every row. A group heading answers "which
+   of these is the kind of thing I want?" once, and lets the chips inside it drop the verb they were
+   all repeating: under `Compare against`, `Figma` is a complete label.
+   See `docs/design/COMPARE_NAVIGATION.md`, §3.3. */
+.cp-actions-group { display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
+.cp-actions-group + .cp-actions-group { margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--cp-border); }
+.cp-actions-group-label { padding: 2px 12px; font-size: 0.68rem; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--cp-fg-faint); }
+/* The viewer bar's VIEW group: how the preview is shown, as one cluster that wraps as a unit.
+   These used to sit loose in the bar between the design-spec lane and the end of the row, so which
+   line each landed on depended on how wide the lane beside them happened to be — and the lane
+   grows when it is entered. Pressing the design-spec chip therefore rearranged controls that have
+   nothing to do with it. See `docs/design/COMPARE_NAVIGATION.md`, F1. */
+.cp-view-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cp-view-group-label { font-size: 0.68rem; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--cp-fg-faint); }
+
+/* ── The viewer's compare strip ────────────────────────────────────────────────────────────────
+   Every variant of the component on the stage, against the same baseline, under the render it
+   belongs to. See `docs/design/COMPARE_NAVIGATION.md`, §3.1 — the viewer could put ONE baseline
+   behind ONE variant, and answering "is this component wrong, or is this state of it wrong?" meant
+   leaving for a wall of four hundred rows and filtering by hand.
+
+   One grid, five tracks, shared by the header row and every row under it, so the two pictures line
+   up down the strip whatever the labels do. Grid rather than a table because the rows are links
+   first and cells second: a reader scans the pictures and clicks the name. */
+.cp-strip { margin: 22px 0 0; padding: 16px 18px 10px; border: 1px solid var(--cp-border);
+  border-radius: var(--md-sys-shape-corner-large, 16px); background: var(--cp-surface); }
+.cp-strip-head { margin: 0; font-size: var(--md-sys-typescale-title-small-size, 0.95rem);
+  font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.cp-strip-sub { font-weight: 400; font-size: 0.78rem; color: var(--cp-fg-muted); }
+.cp-strip-rows { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 2px; }
+.cp-strip-headrow, .cp-strip-row { display: grid;
+  grid-template-columns: 132px 132px minmax(0, 1fr) 84px 64px;
+  gap: 14px; align-items: center; padding: 6px 10px;
+  border-radius: var(--md-sys-shape-corner-medium, 10px); }
+.cp-strip-headrow { padding-bottom: 0; font-size: 0.68rem; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--cp-fg-faint); }
+/* The frame the reader is already looking at. Marked rather than removed: the strip is a
+   comparison of siblings, and the one on the stage is the sibling the others are being read
+   against. */
+.cp-strip-row[aria-current="true"] { background: var(--cp-accent-soft); }
+.cp-strip-row:hover:not([aria-current="true"]) { background: var(--cp-bg); }
+/* Both pictures in ONE box, the same rule the comparison wall follows: a design export rasterised
+   at a different scale must not sit in a bigger frame than the render it is compared against. */
+.cp-strip-shot { display: grid; place-items: center; height: 84px; border-radius: 8px;
+  overflow: hidden; background: repeating-conic-gradient(var(--cp-surface-2) 0% 25%,
+  var(--cp-surface) 0% 50%) 50% / 12px 12px; }
+.cp-viewer[data-bg-theme="dark"] ~ .cp-strip .cp-strip-shot,
+.cp-strip[data-bg-theme="dark"] .cp-strip-shot { background: #111113; }
+.cp-strip-shot img { width: 100%; height: 100%; object-fit: contain; }
+/* A variant with nothing in the design file mapped to it. An empty FRAME rather than an empty
+   cell: a row that jumps left because this variant is unmapped reads as a layout fault, where a
+   blank frame reads as the missing mapping it is. */
+.cp-strip-shot--empty { border: 1px dashed var(--cp-border); background: none; }
+.cp-strip-name { font-size: 0.84rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.cp-strip-name em { display: block; font-style: normal; font-weight: 400; font-size: 0.74rem;
+  color: var(--cp-fg-muted); }
+.cp-strip-score { text-align: right; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+/* The same three bands the design-spec chip uses, so one number does not change colour between
+   the chip above the stage and the row below it. */
+.cp-strip-score[data-spec-match="match"] { color: light-dark(#1e7a34, #6cd98a); }
+.cp-strip-score[data-spec-match="close"] { color: light-dark(#8a5300, #e6b067); }
+.cp-strip-score[data-spec-match="off"] { color: light-dark(#8a1c1c, #ef9292); }
+.cp-strip-score--none { color: var(--cp-fg-faint); font-size: 0.72rem; }
+.cp-strip-detail { font-size: 0.78rem; white-space: nowrap; }
+.cp-strip-more { margin: 10px 0 0; font-size: 0.8rem; }
+/* Narrow: the two pictures keep their row and everything else stacks under them, because the
+   pictures are what the strip is for and a 132px frame is already the smallest useful one. */
+@media (max-width: 640px) {
+  .cp-strip-headrow { display: none; }
+  .cp-strip-row { grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; }
+  .cp-strip-row > .cp-strip-name, .cp-strip-row > .cp-strip-score,
+  .cp-strip-row > .cp-strip-detail { grid-column: 1 / -1; text-align: left; }
+}
 .cp-catalog-download { margin: 30px 0 0; }
 /* One chip, three weights. M3 calls this an assist chip and draws it as a PILL — which is what the
    rest of this chrome already does with a small interactive target (the nav actions, the interface
@@ -1678,6 +1756,38 @@ cp-parity-scores { display: contents; }
 .cp-sys-actions { position: relative; z-index: 2; margin: 12px 0 0;
   display: flex; flex-wrap: wrap; gap: 8px; pointer-events: none; }
 .cp-sys-actions > a, .cp-sys-actions > details { pointer-events: auto; }
+/* "Compare to" once, then the destinations — one line, however many there are.
+   Each chip used to carry the whole sentence, which fell apart as soon as a paired catalog added a
+   second: two stacked chips both opening with "compare to", the second as wide as a neighbour's
+   title. The shared words belong to the row, so the chips are left holding only where they go and
+   shrink to fit beside each other. */
+.cp-sys-compare {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+.cp-sys-compare-label {
+  color: var(--cp-fg-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+/* The compact chip: the same pill, sized for a row of them rather than for one. A card is a fixed
+   grid track, so a label longer than expected still has to give rather than run past the border —
+   `.cp-action-chip` is `white-space: nowrap`, which one chip wider than the tile cannot wrap out
+   of. Scoped to the card: a chip in `.cp-actions-panel` sits in a row that can scroll and keeps the
+   single line it was drawn for. */
+.cp-action-chip--compact {
+  min-height: 28px;
+  padding: 3px 12px;
+  font-size: var(--md-sys-typescale-label-medium-size, 0.78rem);
+}
+.cp-sys-actions .cp-action-chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 /* Focus lands on the inner link now, so the card's own `:focus-visible` rules can never match (a
    `<div>` never takes focus) — every one of them has to be restated on `:focus-within` or keyboard
    focus silently loses the treatment pointer hover gets: the lift, the elevation, the state layer
@@ -2051,6 +2161,41 @@ html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"] .cp-stage { backg
 cp-history-menu { display: contents; }
 .cp-head-toggles .cp-history-menu { font-size: inherit; }
 .cp-head-toggles .cp-history-btn { min-height: 34px; padding: 6px 14px; }
+/* --- The viewer bar's FULL COMPARISONS menu. Three destinations that leave the page — the spec
+   diff, the paired catalog's layer diff, every Remote Compose player — behind one grey affordance
+   instead of three grey links spread either side of the spec lane. The same `<details>` shape and
+   the same M3 menu surface as Theme and History beside it, so a reader who has opened one of those
+   has already learned this one; only the trigger differs, staying the small muted link text these
+   destinations have always been rather than becoming a fourth chip on a bar this change exists to
+   shorten. */
+.cp-detail-menu { position: relative; display: inline-block; }
+.cp-detail-menu > summary { list-style: none; cursor: pointer; display: inline-flex;
+  align-items: center; gap: 4px; color: var(--cp-fg-muted); font-size: 0.75rem;
+  white-space: nowrap; }
+.cp-detail-menu > summary::-webkit-details-marker { display: none; }
+.cp-detail-menu > summary:hover, .cp-detail-menu[open] > summary {
+  color: var(--cp-accent-strong); }
+.cp-detail-caret { font-size: 0.85em; opacity: 0.7; }
+.cp-detail-menu[open] .cp-detail-caret { transform: rotate(180deg); }
+/* Left-aligned, unlike Theme's panel: this control sits in the middle of the toolbar rather than
+   at its right edge, so a panel pinned to `right: 0` would open leftwards from a trigger with
+   plenty of room to its right. */
+.cp-detail-menu-panel { position: absolute; left: 0; top: calc(100% + 6px); z-index: 50;
+  width: max-content; max-width: min(360px, calc(100vw - 32px)); padding: 8px;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container-high);
+  box-shadow: var(--md-sys-elevation-level2); }
+.cp-detail-menu-list { display: flex; flex-direction: column; gap: 2px; }
+.cp-detail-menu-item { display: flex; align-items: center; min-height: 36px; padding: 6px 12px;
+  border-radius: var(--md-sys-shape-corner-small); color: var(--md-sys-color-on-surface);
+  font-size: var(--md-sys-typescale-label-large-size); text-decoration: none;
+  white-space: nowrap; }
+.cp-detail-menu-item:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+/* --- Transparent + Fit width, in the Overrides panel's View group. A row rather than the panel's
+   usual stacked labels: these are two chips of the same kind, and the panel's `<label>` column
+   would have given each a full-width row and made a two-item group look like a form. */
+.cp-stage-view-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .cp-theme-menu { position: relative; }
 .cp-theme-menu > summary { list-style: none; }
 .cp-theme-menu > summary::-webkit-details-marker { display: none; }
@@ -2284,7 +2429,29 @@ cp-history-menu { display: contents; }
   height: auto; border-radius: var(--md-sys-shape-corner-small); }
 /* Three-up: equal columns (`min-width: 0` so a wide frame shrinks rather than overflowing). */
 .cp-spec-compare[data-view="triptych"] .cp-spec-panel { flex: 1 1 0; }
-.cp-spec-compare[data-view="triptych"] .cp-spec-panel canvas { max-height: 52vh; }
+/* …and the frame FILLS its column here, which the base rule above cannot do: `max-*` against auto
+   dimensions only ever shrinks a replaced element, so a small raster sat at its intrinsic size in
+   a column nearly four times its width. On the Wear catalogs that is the normal case, not an edge
+   one — `button-compact__ideal__filled-variant-icon-only` is 104x66 in a 387px column, so the
+   picture was 19% of the stage it appeared to occupy and the other 81% was inert: nothing to see,
+   and nothing for the eyedropper to read. Measured on that page, a pointer sweep across the
+   triptych read nothing for 73% of its travel. Filling the column takes that to 2%.
+
+   `object-fit: contain` is what keeps this honest when the height budget binds instead. `width`
+   is definite here, so a raster taller than it is wide would otherwise be SQUASHED to `max-height`
+   — a distorted spec comparison, which is worse than a small one — and every Wear screen preview
+   (192x192) is exactly that case. With `contain` the frame letterboxes inside its box instead,
+   and `readingFor` maps through the drawn rectangle rather than the element's, so the eyedropper
+   still names the pixel under the cursor and reads nothing over the bars. */
+.cp-spec-compare[data-view="triptych"] .cp-spec-panel canvas { max-height: 52vh;
+  width: 100%; height: auto; object-fit: contain; }
+/* Nearest-neighbour, but only where the frame is actually being ENLARGED — `<cp-spec-compare>`
+   puts this class on after each paint and on resize. Upscaled, it is the honest rendering for a
+   pixel comparison: the reading says `#f6edff` at a point, and the picture shows the pixel that
+   colour belongs to rather than a smoothed average of it and its neighbours. Downscaled it is the
+   opposite — nearest-neighbour drops rows of a 1000px app screen on the way to 387px and invents
+   aliasing the render does not have — which is why it is not simply set on the rule above. */
+.cp-spec-panel canvas.cp-spec-canvas--upscaled { image-rendering: pixelated; }
 /* The diff map is magenta-on-transparent, so it needs a ground of its own to read against —
    without one it inherits whatever the stage (or the Transparent checkerboard) is showing. */
 .cp-spec-panel[data-cp-spec-panel="diff"] canvas {
@@ -2567,6 +2734,67 @@ cp-history-menu { display: contents; }
   background: transparent; color: var(--md-sys-color-on-surface-variant); cursor: pointer;
   max-width: 200px; }
 .cp-lane-select:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+/* ONE control, in two segments. The chip names the renderer in use and toggles it live; the combo
+   chooses a different one — two halves of one fact, driven from one lane value by `syncLaneSelect`
+   and, side by side as separate pills, reading as two independent controls while spending a whole
+   control's width on the words "Switch renderer…". Joined, the caret beside a named renderer says
+   the same thing in 34px. */
+.cp-renderer { display: inline-flex; align-items: stretch; }
+.cp-renderer > .cp-live-toggle {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 14px;
+}
+/* The right segment: a caret with the real `<select>` laid invisibly over it. Invisible, not
+   replaced — `opacity: 0` keeps the platform's own picker on touch, type-ahead and arrow keys on a
+   keyboard, and the element every id-addressed script and test already binds to. A menu built out
+   of divs would have to reimplement all three. */
+.cp-renderer-more {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  border: 1px solid var(--md-sys-color-outline);
+  border-left: none;
+  border-radius: 0 var(--md-sys-shape-corner-full) var(--md-sys-shape-corner-full) 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.cp-renderer-more:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+}
+.cp-renderer-caret { font-size: 0.7rem; line-height: 1; pointer-events: none; }
+.cp-renderer-more .cp-lane-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  padding: 0;
+  border: none;
+  border-radius: inherit;
+  opacity: 0;
+  cursor: pointer;
+}
+/* LIVE ON, and the pill has to stay one pill.
+   The lit chip drops its own outline for a filled green field (`border-color: transparent` above),
+   so a caret segment that kept its border left the two halves visibly coming apart — a borderless
+   green half against an outlined box. The segment takes the same field, and a divider stands in for
+   the edge that used to separate them: still two targets, still one control. */
+.cp-renderer:has(.cp-live-toggle[aria-pressed="true"]) .cp-renderer-more {
+  background: light-dark(#d7f0dd, #0d3a1c);
+  border-color: transparent;
+  color: light-dark(#10521f, #86dc9d);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, currentColor 25%, transparent);
+}
+/* The select carries the focus, and it cannot show a ring of its own at zero opacity — so the
+   segment it sits on wears one. Without this a keyboard user tabbing onto the renderer menu would
+   have no idea they were there. */
+.cp-renderer-more:focus-within {
+  outline: 3px solid var(--md-sys-color-secondary);
+  outline-offset: 2px;
+}
 /* The spec lane's carrier — the comparison-view group, its score readout, and the "spec diff →"
    step out to the focused comparison page. */
 .cp-spec-lane { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -2625,7 +2853,21 @@ cp-history-menu { display: contents; }
    by scrolling the page, and on a phone `146,122 · M3 Wear OS Apps Design Kit #494451 · Render
    #332e3c · Δ 22` is wider than the content column — the delta, which is the answer, is the part
    that falls off the end. */
-.cp-spec-pick { flex-basis: 100%; line-height: 1.4; min-height: 1.4em; font-size: 0.72rem;
+/* `width: 0` with `min-width: 100%` is what keeps the reading out of the lane's WIDTH, and it is
+   the second half of reserving the row (issue #464). `.cp-spec-lane` is `inline-flex`, so it is
+   shrink-to-fit: its width is decided by its contents, and a `flex-basis: 100%` row contributes
+   nothing while it is empty and the whole available width once it holds text. Measured on
+   `/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec` at the reporter's
+   own 1280x683: the lane sat at 1020px with the row reserved and empty, leaving the SVG and 3D
+   toggles beside it on the same line of `.cp-preview-primary` — itself `flex-wrap: wrap`. The first
+   reading widened the lane to the full 1224px, those two toggles wrapped onto a new line, and the
+   stage moved down 6px. Under the cursor, mid-hover, on every hover and again on every leave.
+   Reserving the row's HEIGHT never addressed that, because the shift came from the row's width.
+   `width: 0` is what the lane measures itself against, so the reading cannot move it; `min-width`
+   resolves against the settled lane afterwards, so the row still spans it. The row scrolls a long
+   reading rather than growing, which `overflow-x` below already provided for. */
+.cp-spec-pick { flex-basis: 100%; width: 0; min-width: 100%;
+  line-height: 1.4; min-height: 1.4em; font-size: 0.72rem;
   overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
   color: var(--cp-fg-muted); white-space: nowrap;
   font-family: var(--cp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -2877,6 +3119,21 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
 .cp-spec-chip[data-spec-match="match"]::before { background: light-dark(#146c2e, #6dd58c); }
 .cp-spec-chip[data-spec-match="close"]::before { background: light-dark(#8f5000, #ffb787); }
 .cp-spec-chip[data-spec-match="off"]::before { background: var(--md-sys-color-error); }
+/* The comparison group: the kit's chip and every other source this render can be put beside, as
+   PEERS. One label over both, for the reason `View`'s label exists — it makes them read as answers
+   to one question rather than two buttons that happen to be adjacent. Wraps as a unit, so a source
+   never changes neighbours when the bar reflows. */
+.cp-compare-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* A peer of `.cp-spec-chip`, and deliberately not a smaller or quieter thing: the whole complaint
+   this answers is that one source had a pill and the other had nothing. It carries no verdict —
+   only the kit comparison has a published number, and quoting that over a sibling pair would put
+   two unrelated comparisons in one row (see `sourceIsSpec` in `SpecCompare.ts`). */
+.cp-spec-peer[aria-pressed="false"] { font-weight: 500; }
 .cp-format-link { color: var(--cp-fg-muted); font-size: 0.75rem; white-space: nowrap; }
 .cp-format-link:hover { color: var(--cp-accent-strong); }
 /* Score chips: M3 assist-chip shape, literal semantic colours. */
@@ -2925,6 +3182,35 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
 .cp-compare-row[data-bg-theme="dark"] .cp-compare-shot { background: #111113; }
 .cp-compare-shot img, .cp-compare-shot canvas { display: block; max-width: 100%; max-height: 220px;
   width: auto; height: auto; object-fit: contain; }
+/* ONE BOX FOR BOTH PICTURES — **the wall's table only**.
+   The panel used to size itself to whatever the picture inside it happened to be, so a design
+   export rasterised at a different scale than the render sat in a visibly larger frame than the
+   render it is compared against, and the reader's first question about the pair was about the
+   exporter rather than about the drawing (`docs/design/COMPARE_NAVIGATION.md`, F3). A fixed 5:3 box
+   with `object-fit: contain` fits both halves into the same frame, so "smaller" on this page always
+   means *drawn* smaller; the pixel size of each is said out loud underneath (`.cp-compare-dim`).
+
+   SCOPED, and the scope is load-bearing twice over. `.cp-compare-shot` is shared with the focused
+   comparison's `.cp-reference-grid`, where it is `width: 100%` inside a flexible grid — an
+   `aspect-ratio` there makes the panel's height depend on a width that depends on its height, and
+   the harness's `serve-format-compare` capture stopped settling and timed out at the shutter. And
+   the round-device clip below states its circle against the IMAGE's own box, which only carries the
+   render's square while the image sizes `width: auto; height: auto`; filling the panel would have
+   landed a `circle()` on the panel's rectangle instead. Both were regressions of the unscoped
+   rule, and both are silent — one as a hung capture, the other as a Wear bezel in the wrong place. */
+.cp-compare-table .cp-compare-shot { aspect-ratio: 5 / 3; box-sizing: border-box; }
+.cp-compare-table .cp-compare-shot img, .cp-compare-table .cp-compare-shot canvas {
+  width: 100%; height: 100%; max-height: 100%; }
+/* What that box is fitting, in the picture's own pixels — the answer to "why is one smaller than
+   the other", which the equal frames above would otherwise leave the reader to guess at. Written
+   by `<cp-compare-wall>` once it has decoded the pair; empty and invisible until then. */
+.cp-compare-dim { display: block; margin-top: 4px; text-align: center; font-size: 0.68rem;
+  color: var(--cp-fg-faint); font-variant-numeric: tabular-nums; min-height: 1em; }
+/* Which half of the pair a column is. The names above it are a design tool and a catalog, and
+   neither says by itself which one is the yardstick. */
+.cp-compare-head-name { display: block; }
+.cp-compare-head-role { display: block; font-weight: 400; text-transform: none;
+  color: var(--cp-fg-faint); }
 .cp-compare-shot [hidden] { display: none; }
 .cp-compare-score { min-width: 88px; text-align: right; white-space: nowrap; color: var(--cp-fg-muted);
   font-variant-numeric: tabular-nums; }
@@ -2949,6 +3235,22 @@ html.cp-bg-transparent .cp-viewer[data-mode="source"] .cp-stage { background: tr
 .cp-compare-pick { display: inline-flex; vertical-align: middle; margin-right: 8px; }
 .cp-compare-pick-input { margin: 0; accent-color: var(--md-sys-color-primary); }
 .cp-compare-pick-input:disabled { opacity: .35; }
+/* The SCOPE the wall was opened with. A `?component=` or `?preview=` link shows three rows out of
+   four hundred and nothing on the page said why — an empty search box, a count reading "3
+   comparisons", and a reader whose honest conclusion is that this catalog compares three things.
+   Drawn as a tonal chip rather than as muted text because it is a filter that is ON, and the way
+   out of it is the second half of the same chip.
+   See `docs/design/COMPARE_NAVIGATION.md`, §2.1. */
+.cp-compare-scope { display: inline-flex; align-items: center; gap: 10px; margin: 12px 0 0;
+  padding: 4px 12px; border-radius: var(--md-sys-shape-corner-full, 999px);
+  font-size: var(--md-sys-typescale-body-small-size);
+  line-height: var(--md-sys-typescale-body-small-line);
+  border: 1px solid var(--cp-accent); color: var(--cp-on-accent-soft);
+  background: var(--cp-accent-soft); }
+/* `display` of its own outranks the UA sheet's `[hidden] { display: none }`, so the chip has to
+   restate it or every wall opens claiming a scope it does not have. */
+.cp-compare-scope[hidden] { display: none; }
+.cp-compare-scope-clear { color: inherit; text-decoration: underline; }
 .cp-compare-picked { display: flex; align-items: center; gap: 10px; margin: 10px 0 0;
   font-size: var(--md-sys-typescale-body-small-size);
   line-height: var(--md-sys-typescale-body-small-line); color: var(--cp-fg-muted); }
@@ -4208,7 +4510,8 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
    is still loading: an ink box needs a decoded image and a canvas read, and neither is guaranteed
    (a cross-origin render taints the canvas, a fully transparent one has no ink). It is exactly the
    behaviour this lane had before ink-fitting, so the degraded case is the old case. */
-.cp-page-render {
+.cp-page-render,
+.cp-page-parallel {
   position: absolute;
   inset: 0;
   display: none;
@@ -4217,16 +4520,36 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   object-fit: contain;
   pointer-events: none;
 }
+/* WHICH catalog's render is on the sheet. Both may be adopted at once — the diff axis scores a pair
+   and either half can be the one being shown — so exactly one of them is displayed and the other
+   sits in the same slot, decoded, waiting to be scored against. Adopted-but-not-shown rather than
+   removed, because the pair is what makes the number, and re-fetching the other half on every flip
+   would make the comparison cost a round trip per glance. */
 .cp-page-swap-on .cp-page-render { display: block; }
+.cp-page-swap-on.cp-page-parallel-on .cp-page-render { display: none; }
+.cp-page-swap-on.cp-page-parallel-on .cp-page-parallel { display: block; }
 /* A render the server could not produce. `<cp-design-page>` restores the design's own drawing in that
-   slot and hides the failed image — but the rule above is a two-class selector and would beat the
-   UA stylesheet's `[hidden]`, leaving the browser's broken-image glyph sitting on top of the
-   drawing just restored. Specificity has to be answered explicitly. */
-.cp-page-swap-on .cp-page-render[hidden] { display: none; }
+   slot and hides the failed image — but the rules above are two- and three-class selectors and would
+   beat the UA stylesheet's `[hidden]`, leaving the browser's broken-image glyph sitting on top of
+   the drawing just restored. Specificity has to be answered explicitly. */
+.cp-page-swap-on .cp-page-render[hidden],
+.cp-page-swap-on.cp-page-parallel-on .cp-page-parallel[hidden] { display: none; }
 /* A node the manifest named but the export doesn't carry — a layer the design tool flattened on
    the way out. Its row stays (the mapping is still true); its outline can't, because there is
    nothing to put it around. */
 .cp-page-node[data-cp-missing] { display: none; }
+/* A CELL THE SIBLING DOES NOT DRAW, on the sibling's own lane.
+   Its slot falls back to the design's drawing exactly as a failed render does, and unmarked that
+   reads as "the sibling draws it just like the design" — the opposite of the truth, and in the
+   direction that makes two diverging catalogs look aligned. Shown on that lane alone and without
+   waiting for the outline layer, because it is that lane's own finding rather than a mark the
+   reader asked for; dotted and grey rather than dashed and red, since a cell the other catalog
+   never implemented is not this catalog's gap. */
+.cp-page-parallel-on .cp-page-node[data-cp-unpaired] {
+  border: 2px dotted var(--cp-fg-muted, #6e7781);
+  border-radius: 4px;
+}
+.cp-page-list .cp-page-row[data-cp-unpaired] .cp-page-dot { border-style: dotted; }
 /* The diff lane's readout: how far our render is from the design's drawing of that same node, as
    one number per slot. Hidden outside the lane rather than not built, so flipping back into it is
    free and the scoring runs once.
@@ -4234,11 +4557,19 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
    A number and not a diff map, deliberately — thirty-eight magenta thumbnails at slot size is the
    annotated sheet this page was rescued from. The map is one click away at a readable size. */
 .cp-page-score { display: none; }
+/* …AND ONE AT A TIME.
+   The lane used to paint every badge the moment it was entered, which on a specimen sheet is forty
+   red pills over the drawing being judged: the lane answers "which node is worst" by destroying
+   "what does that node look like", and the reader has to leave it to see what the number is about
+   (`docs/design/COMPARE_NAVIGATION.md`, F5).
+   So the resting state of the lane is the sheet, and a badge appears where the reader is looking —
+   pointer, keyboard focus, or the node they clicked to keep lit. Every badge at once is still one
+   gesture away: hold the `Diff %` control (`.cp-page-diff-all`, armed by `<cp-design-page>`), and
+   the sheet goes back to being readable the moment it is released. */
 .cp-page-diff-on .cp-page-score {
   position: absolute;
   right: 2px;
   bottom: 2px;
-  display: block;
   padding: 0.05rem 0.3rem;
   border-radius: 999px;
   background: var(--cp-score-bg, #6e7781);
@@ -4250,6 +4581,35 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
 }
 /* Three bands, not a gradient: the reader is triaging, and "does this need looking at" is a
    decision rather than a measurement. */
+/* Where a badge is actually drawn. Split from the property block above so the lane can be entered
+   without painting anything: every rule up there describes what a badge LOOKS like, and this one
+   alone decides whether there is one on screen. */
+.cp-page-diff-on.cp-page-diff-all .cp-page-score,
+.cp-page-diff-on .cp-page-node:hover > .cp-page-score,
+.cp-page-diff-on .cp-page-node:focus-visible > .cp-page-score,
+.cp-page-diff-on .cp-page-node:focus-within > .cp-page-score,
+.cp-page-diff-on .cp-page-node.cp-page-active > .cp-page-score,
+.cp-page-diff-on .cp-page-node.cp-page-selected > .cp-page-score { display: block; }
+/* THE BAND, ON THE NODE. The badges only appear where the reader is pointing, so the lane at rest
+   would otherwise be an unmarked sheet — every node scored and none of it visible. A tinted fill
+   and an outline in the band's own colour say where to look without covering the drawing, and they
+   are what makes the lane readable at a glance: red clusters ARE the answer to "what is worst
+   here?", and the numbers are for the one node you then point at.
+   Deliberately weak (12% fill, 55% outline): this is a wash over a drawing being judged, not a
+   highlight over text. */
+/* The fallback is not decoration: `--cp-score-bg` is a LOCAL variable set by the band rules below,
+   not part of the themed `:root` palette, and `ServeThemeCssTest` requires every unfallbacked
+   `var(--cp-*)` to be a token the projection emits. */
+.cp-page-diff-on .cp-page-node[data-cp-score] {
+  background: color-mix(in srgb, var(--cp-score-bg, #6e7781) 12%, transparent);
+  outline: solid color-mix(in srgb, var(--cp-score-bg, #6e7781) 55%, transparent);
+  outline-width: calc(2px / var(--cp-page-zoom, 1));
+  outline-offset: calc(-2px / var(--cp-page-zoom, 1));
+}
+.cp-page-node[data-cp-score="close"] { --cp-score-bg: #1a7f37; }
+.cp-page-node[data-cp-score="drifting"] { --cp-score-bg: #9a6700; }
+.cp-page-node[data-cp-score="far"] { --cp-score-bg: #cf222e; }
+.cp-page-node[data-cp-score="none"] { --cp-score-bg: #6e7781; }
 .cp-page-score[data-cp-score="close"] { --cp-score-bg: #1a7f37; }
 .cp-page-score[data-cp-score="drifting"] { --cp-score-bg: #9a6700; }
 .cp-page-score[data-cp-score="far"] { --cp-score-bg: #cf222e; }
@@ -4390,10 +4750,32 @@ cp-page-zoom button:focus-visible {
   .cp-page-hint { display: none; }
 }
 .cp-page-controls label { display: inline-flex; align-items: center; gap: 0.35rem; }
-/* The flip, as a segmented pair rather than two loose radios: the two lanes are one question with
-   one answer, and it is the control the page is built around, so it reads as a switch you throw
-   rather than a preference you set. The radios stay real (and stay reachable) — they are visually
-   removed, not `display: none`, so arrow keys still move between the lanes. */
+/* TWO QUESTIONS, LABELLED AS TWO.
+   The bar used to be a flat row of five controls of three different kinds, and the reader had to
+   work out from the wording alone that "Diff %" was a lane while "Outline every component" was a
+   filter. With a `compareWith` sibling on the page there are three sources and two axes over them,
+   so the row is grouped and each group says which question it answers — the label is what makes
+   "showing wear-m3, diffed against Figma" readable off the bar without touching anything. */
+.cp-page-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cp-page-group-label {
+  color: var(--cp-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.68rem;
+}
+/* The group's own label is enough on a wide bar; on a narrow one the groups stack and the labels
+   are what keeps the two segmented pills from reading as one six-way control. */
+@media (max-width: 720px) {
+  .cp-page-controls { gap: 0.5rem 0.7rem; }
+}
+/* The flip, as a segmented group rather than loose radios: each axis is one question with one
+   answer, and they are the controls the page is built around, so they read as switches you throw
+   rather than preferences you set. The radios stay real (and stay reachable) — they are visually
+   removed, not `display: none`, so arrow keys still move between the options. */
 .cp-page-lane {
   display: inline-flex;
   border: 1px solid var(--cp-border);
@@ -4423,6 +4805,10 @@ cp-page-zoom button:focus-visible {
   outline: 2px solid var(--cp-accent, #6750a4);
   outline-offset: -2px;
 }
+/* An option the current lane cannot be scored against — "ours against ours" is 0.0% everywhere —
+   is removed rather than greyed. `<cp-design-page>` sets the attribute; this is what makes it
+   count, since the flex above beats a bare `[hidden]`. */
+.cp-page-lane label[hidden] { display: none; }
 .cp-page-opt { color: var(--cp-fg-muted); }
 .cp-page-legend {
   display: flex;

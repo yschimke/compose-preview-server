@@ -938,10 +938,10 @@ class ServeWebFixtureTest {
               height = 68,
             ),
           // Publishes Figma-backed design references, so its card carries the "compare to Figma"
-          // action. Set on two of the three design systems deliberately: the golden then holds a
-          // row where one card has the action and its neighbour does not, which is the case the
-          // `.cp-sys-cell` grid template exists for — the tiles still have to line their artwork
-          // and their footers up.
+          // action. The golden still holds a row where one card has an action and its neighbour has
+          // none — `meshcore-mobile` beside `homeassistant-remotecompose` in the app group below —
+          // which is the case the `.cp-sys-cell` grid template exists for: the tiles have to line
+          // their artwork and their footers up either way.
           hasReferenceComparison = true,
           designToolLabel = "Figma",
         ),
@@ -977,6 +977,15 @@ class ServeWebFixtureTest {
           // Remote Compose draws the dark-first Wear scheme, so its catalog declares
           // `display.surface: "dark"` and the hero backs on the dark stage too.
           darkStage = true,
+          // The card with BOTH comparisons, exactly as the live box renders `remote-m3`: it
+          // publishes Figma-backed references AND declares `compareWith` against the Wear catalog.
+          // The two sit side by side because they are different questions — "does this match the
+          // design file" and "does this match the other implementation of it" — and until now only
+          // the first had a way onto the front door, so two catalogs of one design system sat as
+          // adjacent cards with nothing saying they were a pair.
+          hasReferenceComparison = true,
+          designToolLabel = "Figma",
+          parallelComparison = ServeWeb.ParallelComparison("wear-m3", "Wear Compose Material 3"),
         ),
         // App systems published UNLISTED from their own repos but promoted to the LISTED set
         // (`--catalogs`), so they show on the front door alongside the design systems.
@@ -1032,13 +1041,19 @@ class ServeWebFixtureTest {
             logoutHref = "/auth/github/logout?return=%2F",
             login = "yschimke",
           ),
-        // Signed in AND permitted, on one of the three design systems: the golden then holds a card
+        // Signed in AND permitted, on two of the three design systems: the golden then holds a card
         // carrying both actions beside a card carrying only the comparison, which is the row the
         // chip row's alignment exists for. The refused shape is a unit-test concern — it turns on
         // the visitor, not on the page, so a second golden of the same grid would pin nothing new.
+        //
+        // `remote-m3` is the SECOND, and it is the widest card this grid can produce: the builder
+        // chip, the `Compare to` label and BOTH destinations, in a fixed grid track. Without it the
+        // golden held the two halves separately — a card with the builder and one comparison, and a
+        // card with two comparisons and no builder — and never the case where they meet, which is
+        // the one that decides whether the row still fits.
         uiBuilder =
           ServeWeb.UiBuilderInvite(
-            systems = setOf("compose-m3"),
+            systems = setOf("compose-m3", "remote-m3"),
             signedIn = true,
             permitted = true,
           ),
@@ -1394,6 +1409,35 @@ class ServeWebFixtureTest {
         siblings = previews,
         figmaSpec = fixtureFigmaSpec,
         designReference = fixtureDesignReference,
+        // The compare strip under the render: every variant of the component on the stage, against
+        // the same baseline (`docs/design/COMPARE_NAVIGATION.md`, §3.1). Shaped like the real
+        // thing — a scored variant, a worse one, and one the design file has nothing mapped to, so
+        // the golden pins all three states the strip can draw rather than a run of green rows.
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__default__light",
+              variant = "default · light",
+              referenceId = "contact-chat-figma",
+              matchPercent = 96.4,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__default__dark",
+              variant = "default · dark",
+              referenceId = "contact-chat-figma-dark",
+              matchPercent = 88.1,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__no-avatar__light",
+              variant = "no avatar",
+              referenceId = "contact-chat-figma-no-avatar",
+              matchPercent = 71.9,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__long-name__light",
+              variant = "long name",
+            ),
+          ),
       )
     // A **Remote Compose** viewer, the shape preview.coo.ee serves for `remote-m3`: the same
     // captured `.rc` document is drawable by five different players, so this is the page the
@@ -1448,6 +1492,38 @@ class ServeWebFixtureTest {
         // needs sidecars this host doesn't carry, so it is the "(unavailable)" option.
         enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
+      )
+    // The SAME Remote Compose preview, behind GitHub auth — the one pair the renderer control has
+    // to keep apart, and the pair no other fixture holds. A Remote Compose preview has a renderer
+    // combo; an auth-gated live lane is independent of it; a box run with `--github-auth` serves
+    // both at once. But `serve-viewer-rc-players` has no auth prompt and `serve-viewer-signin` has
+    // no players, so the toolbar this combination lays out was captured nowhere, and #585 joined a
+    // DASHED sign-in anchor to a SOLID caret without moving a baseline. Here the chip's slot holds
+    // a link to another origin rather than a lane toggle, so the two controls must stand apart:
+    // that is what this shot pins.
+    val viewerRcSignIn =
+      ServeWeb.viewerPage(
+        ServePreview(
+          "appcard__ideal__default__compact",
+          "App card",
+          section = "Cards",
+          componentId = "AppCard",
+        ),
+        token,
+        sessionId = "remote-m3",
+        basePath = "/remote-m3",
+        canApplyOverrides = false,
+        canRenderOverrides = true,
+        hasLiveStream = true,
+        hasSvgExport = true,
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
+        liveAuthPrompt =
+          ServeWeb.LiveAuthPrompt(
+            loginHref =
+              "/auth/github/start?return=%2Fremote-m3%2Fp%2Fappcard__ideal__default__compact"
+          ),
       )
     // A Remote Compose preview whose design target and ordinary implementation both come through
     // its paired Wear M3 catalog. This is the public remote-m3/Card shape: no duplicated local
@@ -2569,6 +2645,20 @@ class ServeWebFixtureTest {
         // Everything except the pill, so the fixture covers a node the producer mapped but this
         // catalog cannot draw.
         renderablePreviewIds = setOf("com.example.ProfileCardPreview"),
+        // A `compareWith` sibling's rendition of the same cells. Deliberately NOT every node this
+        // catalog can draw: the sibling implements the circle and the square and does not implement
+        // the triangle, which is the state a parity sheet exists to make visible. On the sibling's
+        // lane that slot falls back to the design's own drawing exactly as a failed render does, so
+        // it carries `data-cp-unpaired` and a dotted outline — unmarked it would read as "the
+        // sibling draws it just like the design", which is the direction that makes two diverging
+        // catalogs look aligned.
+        parallelRenders =
+          mapOf(
+            "1:1" to "/wear-m3/render/com.example.WearProfileCardPreview.png",
+            "1:2" to "/wear-m3/render/com.example.WearProfileCardPreview.png",
+          ),
+        parallelLabel = "wear-m3",
+        ownLabel = "compose-m3",
         token = token,
         sessionId = "compose-m3",
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
@@ -3502,7 +3592,8 @@ class ServeWebFixtureTest {
       )
 
     // The same page on a box that offers a CAPABILITY beside the scopes — the second fieldset, its
-    // checkboxes unticked, and one capability the approver may not pass on. Its own fixture rather
+    // checkboxes ticked (every row is an ask this approver may grant), and one capability the
+    // approver may not pass on. Its own fixture rather
     // than a variant of the one above, because the control that matters here (an independent
     // checkbox, where the scopes are a radio) only exists on a box whose operator opted in, and a
     // golden that never renders it would let that control change unseen.
@@ -4057,6 +4148,7 @@ class ServeWebFixtureTest {
         "serve-viewer-path.html" to viewerPath,
         "serve-viewer-spec-default-theme.html" to viewerSpecDefaultTheme,
         "serve-viewer-rc-players.html" to viewerRcPlayers,
+        "serve-viewer-rc-signin.html" to viewerRcSignIn,
         "serve-viewer-rc-parallel.html" to viewerRcParallel,
         "serve-viewer-wear-screen.html" to viewerWearScreen,
         "serve-landing-themed.html" to landingThemed,
@@ -4349,31 +4441,32 @@ class ServeWebFixtureTest {
         "the $name page carries the palette",
       )
     }
-    // One assist chip per comparable format, each deep-linking the format it names, rather than a
-    // single "compare formats" text link that hid what this catalog can actually compare.
+    // One assist chip per BASELINE this catalog can compare against, under one group heading that
+    // carries the verb they all used to repeat — so a chip is the name of the thing on the other
+    // side of the comparison and nothing else. See `docs/design/COMPARE_NAVIGATION.md`, §3.3.
     assertTrue(
-      landingThemed.contains(
-        "<a class=\"cp-action-chip\" href=\"/compare?format=svg&amp;session=compose-m3\">" +
-          "compare SVG</a>"
-      ) &&
+      landingThemed.contains("<span class=\"cp-actions-group-label\">Compare against</span>") &&
+        landingThemed.contains(
+          "<a class=\"cp-action-chip\" href=\"/compare?format=svg&amp;session=compose-m3\">SVG</a>"
+        ) &&
         landingThemed.contains(
           "<a class=\"cp-action-chip\" href=\"/compare?format=rc&amp;session=compose-m3\">" +
-            "compare RC players</a>"
+            "Remote Compose players</a>"
         ),
       "a catalog with alternate formats links each one separately: $landingThemed",
     )
     // …and the reference comparison is one of them, named after the tool it compares against and
-    // deep-linking the same comparison page as its siblings — not the parity dashboard, which is a
-    // different question and keeps its own name.
+    // deep-linking the same comparison page as its siblings. The parity index is NOT one of them:
+    // it is the list that says which comparisons are worth opening, so it sits under `Reports`.
     assertTrue(
       landingPath.contains(
-        "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">" +
-          "compare to Figma</a>"
+        "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">Figma</a>"
       ) &&
         landingPath.contains(
-          "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/parity\">design parity</a>"
+          "<div class=\"cp-actions-group\"><span class=\"cp-actions-group-label\">Reports</span>" +
+            "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/parity\">design parity</a></div>"
         ),
-      "a Figma-specified catalog compares against Figma and links the parity dashboard separately",
+      "a Figma-specified catalog compares against Figma and links the parity index separately",
     )
     assertTrue(
       formatComparison.contains("data-compare-format=\"svg\"") &&
@@ -4836,10 +4929,13 @@ class ServeWebFixtureTest {
         sessionId = "compose-m3",
         hasSvgFor = { true },
       )
-    val variantComparisonIds =
-      variantComparison.substringAfter("data-preview-ids=\"").substringBefore('"')
+    // The fold is published in the page's ONE alias table now, not copied onto every row that
+    // stands for it — see `docs/design/COMPARE_NAVIGATION.md`, F2. The claim is unchanged: a
+    // deep link naming a folded-away variant still selects the row that stands for it.
+    val variantAliases =
+      variantComparison.substringAfter("id=\"cp-compare-aliases\">").substringBefore("</script>")
     assertTrue(
-      variantComparisonIds.contains("button-filled__ideal__default__light__direction-rtl"),
+      variantAliases.contains("button-filled__ideal__default__light__direction-rtl"),
       "a folded non-default variant deep-link aliases to its included component comparison row",
     )
     val sizedVariantPreviews =
@@ -4880,19 +4976,39 @@ class ServeWebFixtureTest {
         .map { it.groupValues[1] }
         .toList()
     assertEquals(2, sizedComparisonIds.size)
+    // The claim is about the FOLD, which the page now publishes once in its alias table keyed by
+    // comparison card rather than copying onto each row (`docs/design/COMPARE_NAVIGATION.md`, F2).
+    // Read there: the compact card folds its own state and props variants and nothing from the
+    // expanded one — a breakpoint is a different comparison, not a variant of this one.
+    val sizedTable =
+      sizedVariantComparison
+        .substringAfter("id=\"cp-compare-aliases\">")
+        .substringBefore("</script>")
+    val compactCard =
+      Regex("\"([^\"]*compact[^\"]*)\":\"([^\"]*)\"")
+        .find(sizedTable)
+        ?.groupValues
+        ?.get(2)
+        .orEmpty()
     assertTrue(
-      sizedComparisonIds[0].contains("__compact") &&
-        sizedComparisonIds[0].contains("__pressed__light__compact") &&
-        sizedComparisonIds[0].contains("__compact__direction-rtl") &&
-        !sizedComparisonIds[0].contains("__expanded"),
-      "compact aliases fold state and props without selecting the expanded comparison row",
+      compactCard.contains("__pressed__light__compact") &&
+        compactCard.contains("__compact__direction-rtl") &&
+        !compactCard.contains("__expanded"),
+      "compact aliases fold state and props without selecting the expanded comparison row: " +
+        sizedTable,
     )
+    val expandedCard =
+      Regex("\"([^\"]*expanded[^\"]*)\":\"([^\"]*)\"")
+        .find(sizedTable)
+        ?.groupValues
+        ?.get(2)
+        .orEmpty()
     assertTrue(
-      sizedComparisonIds[1].contains("__expanded") &&
-        sizedComparisonIds[1].contains("__pressed__light__expanded") &&
-        sizedComparisonIds[1].contains("__expanded__direction-rtl") &&
-        !sizedComparisonIds[1].contains("__compact"),
-      "expanded aliases fold state and props without selecting the compact comparison row",
+      expandedCard.contains("__pressed__light__expanded") &&
+        expandedCard.contains("__expanded__direction-rtl") &&
+        !expandedCard.contains("__compact"),
+      "expanded aliases fold state and props without selecting the compact comparison row: " +
+        sizedTable,
     )
     // Long-press a card and its preview streams from the daemon in place. The page carries the
     // gesture's configuration — each card's streamable ids, emitted in document order rather than
@@ -5470,9 +5586,14 @@ class ServeWebFixtureTest {
     )
     // …and the fallback: no tree to list them in (too few previews to synthesize families from)
     // means the chip is the only route, so it stays.
+    //
+    // "design pages", not "pages": #553 gave the chip the same vocabulary the rest of the catalog
+    // uses for the surface it leads to, and this assertion kept the old label — which is why
+    // `main` has been red on this line since that merge. The chip's own emission is the authority
+    // (`actionChip("$basePath/pages$q", "N design page(s)")`).
     assertTrue(
       !landingPublic.contains("cp-tree-pages") &&
-        landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 pages</a>"),
+        landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 design pages</a>"),
       "a catalog with no tree keeps the header chip, or its pages would be unreachable",
     )
     // `reflectTree` walks every expandable row on every open/close; the Pages branch is expandable
@@ -6734,7 +6855,7 @@ class ServeWebFixtureTest {
   }
 
   @Test
-  fun `theme choices use a dropdown and secondary actions stay in the renderer row`() {
+  fun `theme choices use a dropdown and stage presentation moves into the panel`() {
     val css = assetText("serve.css")
     assertTrue(
       css.contains(".cp-theme-menu-panel { position: absolute;") &&
@@ -6759,9 +6880,153 @@ class ServeWebFixtureTest {
       "the dropdown contains one theme choice group",
     )
     assertFalse(crowded.contains("class=\"cp-viewer-bar\""), "the old horizontal row is gone")
+    // Transparent and Fit width are no longer on this row. They present the stage rather than
+    // choosing what draws it, a reader sets them once if ever, and on the crowded shape this test
+    // builds they were the two chips paying for that on a bar already carrying eight theme choices.
+    // Asserted from both ends, because "not in the renderer row" on its own is also what a page
+    // that lost the controls entirely looks like.
     val rendererRow =
       crowded.substringAfter("<div class=\"cp-preview-primary\"").substringBefore("</div>")
-    assertTrue(rendererRow.contains("<cp-bg-toggle") && rendererRow.contains("Fit width"))
+    assertFalse(
+      rendererRow.contains("<cp-bg-toggle") || rendererRow.contains("Fit width"),
+      "stage presentation is not on the renderer row",
+    )
+    val panel = crowded.substringAfter("<div class=\"cp-controls\" id=\"cp-controls\">")
+    assertTrue(
+      panel.contains("<cp-bg-toggle") && panel.contains("Fit width"),
+      "…it is in the Overrides panel, where the drawer's own View group holds it",
+    )
+  }
+
+  /**
+   * The page carries the density the preview actually renders at, not a constant.
+   *
+   * `ServeBundleHost.renderDensityFor` resolves it and `ServeBakedCatalogPreviewParamsTest` pins
+   * that; this is the other half — that the resolved value reaches the attribute the viewer reads,
+   * and that a session which cannot answer still emits the documented fallback rather than nothing.
+   * The two halves are what make the dp→px conversion behind the Fixed / Max / Min / Within inputs
+   * agree with the renderer.
+   */
+  @Test
+  fun `the viewer page carries the preview's own render density`() {
+    val stated =
+      ServeWeb.viewerPage(
+        previews.first(),
+        token,
+        siblings = previews,
+        sessionId = "compose-m3",
+        canApplyOverrides = true,
+        renderDensity = 2.75f,
+      )
+    assertTrue(
+      stated.contains("data-render-density=\"2.75\""),
+      "a preview rendering at 2.75 says so, so a dp box converts against 2.75",
+    )
+    val unknown =
+      ServeWeb.viewerPage(
+        previews.first(),
+        token,
+        siblings = previews,
+        sessionId = "compose-m3",
+        canApplyOverrides = true,
+      )
+    assertTrue(
+      unknown.contains("data-render-density=\"2\""),
+      "and a session that cannot answer falls back, exactly as every page used to",
+    )
+  }
+
+  /**
+   * The eyedropper's readout may not change the LANE'S WIDTH, which is issue #464: hovering the
+   * comparison moved the preview down the screen, and moving off it moved the preview back.
+   *
+   * `.cp-spec-lane` is `inline-flex`, so it is shrink-to-fit — its width is whatever its contents
+   * need. `.cp-spec-pick` is `flex-basis: 100%`, which contributes nothing while the row is empty
+   * and takes the whole available width the moment it holds a reading. Measured on the reported
+   * page, `/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec`, at the
+   * reporter's own 1280x683: the lane sat at 1020px with the row reserved and empty, which left the
+   * SVG and 3D toggles beside it on the same line of `.cp-preview-primary` — itself `flex-wrap:
+   * wrap`. The first reading widened the lane to the full 1224px, those two toggles wrapped onto a
+   * line of their own, and the stage moved down 6px. On every hover, and back again on every leave.
+   *
+   * Reserving the row's HEIGHT — which the lane already did, and which is what
+   * `serve-web/renders/spec-lane-eyedropper` documents — never addressed this, because the shift
+   * came from the row's WIDTH. `width: 0` is the value the lane measures itself against, so a
+   * reading cannot move it; `min-width: 100%` resolves against the settled lane afterwards, so the
+   * row still spans it and `overflow-x` scrolls a reading too long for it.
+   *
+   * Held here rather than in a screenshot because the whole fault is a used width no capture
+   * states: both frames show a readout on its own row, 6px apart.
+   */
+  @Test
+  fun `the eyedropper's readout cannot resize the spec lane`() {
+    val css = assetText("serve.css")
+    assertTrue(
+      css.contains(".cp-spec-pick { flex-basis: 100%; width: 0; min-width: 100%;"),
+      "the readout is measured at zero width, so the lane's size does not follow the reading",
+    )
+    assertTrue(
+      css.contains(".cp-spec-lane { display: inline-flex;"),
+      "…which is only load-bearing because the lane is shrink-to-fit; if that changes, re-measure",
+    )
+    val pickRule = css.substringAfter(".cp-spec-pick { flex-basis: 100%;").substringBefore("}")
+    assertTrue(
+      pickRule.contains("overflow-x: auto;"),
+      "a reading wider than the lane scrolls in its row rather than widening it",
+    )
+  }
+
+  /**
+   * The triptych's frames FILL their columns, and `object-fit` is what keeps that honest.
+   *
+   * The base panel rule sizes a frame with `max-width`/`max-height` against `auto` dimensions,
+   * which only ever SHRINKS a replaced element. In the triptych the columns are stretched (`flex: 1
+   * 1 0`), so a small raster sat at its intrinsic size in a column nearly four times its width:
+   * `button-compact__ideal__filled-variant-icon-only` is 104x66 in a 387px column. Measured on that
+   * page, the picture was 19% of the stage it appeared to occupy, and a pointer sweep across the
+   * triptych read nothing for 73% of its travel — the other 81% of the stage being inert background
+   * with no pixel for the eyedropper to name. Filling the column takes the sweep to 4%.
+   *
+   * `object-fit: contain` is the load-bearing half. `width` is definite once the frame fills its
+   * column, so a raster taller than it is wide would be SQUASHED to `max-height` — and every Wear
+   * screen preview (192x192) is exactly that case. A distorted spec comparison is worse than a
+   * small one. With `contain` the frame letterboxes instead: measured at 1280x400, the same frame
+   * draws 327.8x208 inside a 386.7x208 box, and 327.8/208 is 104/66 to three decimals.
+   *
+   * `SpecCompare.drawnRect` maps the eyedropper through that drawn rectangle rather than the
+   * element's box, which is why the two must not drift apart; `specCompare.test.ts` pins that half.
+   */
+  @Test
+  fun `a triptych frame fills its column without being distorted`() {
+    val css = assetText("serve.css")
+    val triptych =
+      css
+        .substringAfter(".cp-spec-compare[data-view=\"triptych\"] .cp-spec-panel canvas {")
+        .substringBefore("}")
+    assertTrue(
+      triptych.contains("width: 100%;") && triptych.contains("height: auto;"),
+      "the frame fills its stretched column instead of sitting at its intrinsic size",
+    )
+    assertTrue(
+      triptych.contains("object-fit: contain;"),
+      "…and letterboxes rather than squashing when the height budget binds",
+    )
+    assertTrue(
+      triptych.contains("max-height: 52vh;"),
+      "the height budget itself stays — a tall app screen must not push the stage past the fold",
+    )
+    // Nearest-neighbour is applied by class, never by the rule above: upscaled it shows the pixel
+    // a reading names, but downscaling a 1000px app screen that way invents aliasing.
+    assertFalse(
+      triptych.contains("image-rendering"),
+      "the rule itself does not pin an interpolation for every frame in the triptych",
+    )
+    assertTrue(
+      css.contains(
+        ".cp-spec-panel canvas.cp-spec-canvas--upscaled { image-rendering: pixelated; }"
+      ),
+      "only a frame the component marked as enlarged gets nearest-neighbour",
+    )
   }
 
   /**

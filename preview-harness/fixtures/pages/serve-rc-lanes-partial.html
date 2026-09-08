@@ -69,12 +69,16 @@
   </span>
 </span>
           </div>
+          <p id="cp-compare-scope" class="cp-compare-scope" role="status" hidden>
+            <span class="cp-compare-scope-text"></span>
+            <a class="cp-compare-scope-clear" href="#">compare every component</a></p>
           <div class="cp-searchbar cp-compare-searchbar">
             <input id="cp-compare-search" class="cp-search" type="search" placeholder="Filter comparisons…" aria-label="Filter comparisons">
             <span id="cp-compare-count" class="cp-count" role="status"></span>
           </div>
           <p id="cp-compare-picked" class="cp-compare-picked" role="status" hidden><span class="cp-compare-picked-text"></span><button type="button" class="cp-compare-picked-clear">clear</button></p>
           <div id="cp-compare-formats"><p class="cp-empty">No previews in this session carry a comparable format.</p></div>
+          <script type="application/json" id="cp-compare-aliases">{"cards":{"button-filled__ideal__default":"button-filled__ideal__default__light button-filled__ideal__default__dark","switch-on__ideal__default":"switch-on__ideal__default__light switch-on__ideal__default__dark"},"rowed":""}</script>
                 <section id="cp-rc-lanes" hidden>
         <p class="cp-sub">Pick a column and every other column grows a pixel diff and a mismatch chip.
           The baked lane replays the build-time <code>pixelmatch</code> diffs; another player diffs in your browser,
@@ -89,8 +93,8 @@
           <table class="cp-compare-table cp-rc-table">
             <thead><tr><th>Preview</th><th>AndroidX Embedded · baked</th><th>RC · JS player</th><th>RC · cmp-wasm player</th></tr></thead>
             <tbody>
-        <tr class="cp-rc-row" data-row="0" data-hay="button-filled button-filled__ideal__default__light button-filled__ideal__default__dark"
-          data-preview-ids="button-filled__ideal__default__light button-filled__ideal__default__dark">
+        <tr class="cp-rc-row" data-row="0" data-hay="button-filled" data-alias-card="button-filled__ideal__default"
+          data-preview-ids="button-filled__ideal__default__light">
           <th scope="row">
             <a href="/p/button-filled__ideal__default__light?session=remote-m3">button-filled</a>
             <div class="cp-rc-dims">400×400</div>
@@ -110,8 +114,8 @@
   <div class="cp-rc-diffslot" hidden></div>
 </figure></td>
         </tr>
-        <tr class="cp-rc-row" data-row="1" data-hay="switch-on switch-on__ideal__default__light switch-on__ideal__default__dark"
-          data-preview-ids="switch-on__ideal__default__light switch-on__ideal__default__dark">
+        <tr class="cp-rc-row" data-row="1" data-hay="switch-on" data-alias-card="switch-on__ideal__default"
+          data-preview-ids="switch-on__ideal__default__light">
           <th scope="row">
             <a href="/p/switch-on__ideal__default__light?session=remote-m3">switch-on</a>
             <div class="cp-rc-dims">400×400</div>
@@ -131,8 +135,8 @@
   <div class="cp-rc-diffslot" hidden></div>
 </figure></td>
         </tr>
-        <tr class="cp-rc-row" data-row="2" data-hay="button-filled button-filled__ideal__default__light button-filled__ideal__default__dark"
-          data-preview-ids="button-filled__ideal__default__light button-filled__ideal__default__dark">
+        <tr class="cp-rc-row" data-row="2" data-hay="button-filled" data-alias-card="button-filled__ideal__default"
+          data-preview-ids="button-filled__ideal__default__dark">
           <th scope="row">
             <a href="/p/button-filled__ideal__default__dark?session=remote-m3">button-filled</a>
             <div class="cp-rc-dims">400×400</div>
@@ -152,8 +156,8 @@
   <div class="cp-rc-diffslot" hidden></div>
 </figure></td>
         </tr>
-        <tr class="cp-rc-row" data-row="3" data-hay="switch-on switch-on__ideal__default__light switch-on__ideal__default__dark"
-          data-preview-ids="switch-on__ideal__default__light switch-on__ideal__default__dark">
+        <tr class="cp-rc-row" data-row="3" data-hay="switch-on" data-alias-card="switch-on__ideal__default"
+          data-preview-ids="switch-on__ideal__default__dark">
           <th scope="row">
             <a href="/p/switch-on__ideal__default__dark?session=remote-m3">switch-on</a>
             <div class="cp-rc-dims">400×400</div>
@@ -173,7 +177,7 @@
   <div class="cp-rc-diffslot" hidden></div>
 </figure></td>
         </tr>
-        <tr class="cp-rc-row" data-row="4" data-hay="badge badge"
+        <tr class="cp-rc-row" data-row="4" data-hay="badge" data-alias-card="badge"
           data-preview-ids="badge">
           <th scope="row">
             <a href="/p/badge?session=remote-m3">badge</a>

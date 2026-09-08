@@ -11,8 +11,11 @@ import { candidateDocumentHash, replayCandidateOperations } from "./replay-candi
  *   design-sync.mjs export <designId> --server <url> --out <fixture.json>
  *   design-sync.mjs import <fixture.json> --server <url> [--design-id <id>] [--title <title>]
  *
- * The bearer is read from `COMPOSE_PREVIEW_UI_BUILDER_TOKEN`, never from an argument, so it cannot
- * land in a shell history or a CI log. `export` needs `ui-builder-read`; `import` needs
+ * The bearer is read from `COMPOSE_PREVIEW_TOKEN` (or the older `COMPOSE_PREVIEW_UI_BUILDER_TOKEN`
+ * this script used to read alone), never from an argument, so it cannot land in a shell history or
+ * a CI log. Both names are accepted here and by `compose-preview-server design`, which is how the
+ * two spellings were reconciled rather than a third being invented — see that command's
+ * `DesignCommand.TOKEN_ENV`. `export` needs `ui-builder-read`; `import` needs
  * `ui-builder-write`. Import always creates: a live design's revision log is the collaboration
  * record and a file is a snapshot of one revision, so an existing id is refused by the server rather
  * than overwritten here.
@@ -30,6 +33,12 @@ export function documentToOperations(document, { designId = document.id, title =
       stateVariables: clone(document.stateVariables ?? {}),
     },
   ];
+  // Only when the design has one, the way a node's `properties` are emitted only when it has some:
+  // the replay defaults an absent registry to `{}`, so a design with no assets round-trips to the
+  // operations it was written as rather than growing an empty key.
+  if (document.assets && Object.keys(document.assets).length > 0) {
+    operations[0].assets = clone(document.assets);
+  }
   // The replay inserts an anchorless node at the front of its slot, so every sibling after the
   // first names the one before it; without that a slot replays in reverse.
   const visit = (nodeId, parent, afterNodeId) => {
@@ -131,7 +140,7 @@ export function publishDirectory(fixtures) {
 async function main(argv) {
   const [verb, target] = argv;
   const server = flag(argv, "--server");
-  const token = process.env.COMPOSE_PREVIEW_UI_BUILDER_TOKEN;
+  const token = process.env.COMPOSE_PREVIEW_TOKEN || process.env.COMPOSE_PREVIEW_UI_BUILDER_TOKEN;
   if (verb === "publish" ? !target : !verb || !target || !server) {
     console.error(
       "usage: design-sync.mjs export <designId> --server <url> --out <fixture.json>\n" +

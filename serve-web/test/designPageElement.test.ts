@@ -16,16 +16,30 @@ import "../src/components/DesignPage.js";
  * manifest node, and the renders parked in an inert `<template>`.
  */
 async function mount(
-    options: { lane?: string; missing?: boolean } = {},
+    options: { lane?: string; baseline?: string; parallel?: boolean } & {
+        missing?: boolean;
+    } = {},
 ): Promise<void> {
     const lane = options.lane ?? "code";
-    const checked = (value: string) => (lane === value ? "checked" : "");
+    const baseline = options.baseline ?? "off";
+    const laneChecked = (value: string) => (lane === value ? "checked" : "");
+    const baseChecked = (value: string) =>
+        baseline === value ? "checked" : "";
+    const parallel = options.parallel ?? false;
     document.body.innerHTML = `
       <cp-design-page></cp-design-page>
       <section id="cp-design-page">
-        <label><input type="radio" name="lane" data-cp-page-lane value="code" ${checked("code")}></label>
-        <label><input type="radio" name="lane" data-cp-page-lane value="design" ${checked("design")}></label>
-        <label><input type="radio" name="lane" data-cp-page-lane value="diff" ${checked("diff")}></label>
+        <div class="cp-page-lane">
+          <label><input type="radio" name="lane" data-cp-page-lane value="code" ${laneChecked("code")}></label>
+          ${parallel ? `<label><input type="radio" name="lane" data-cp-page-lane value="parallel" ${laneChecked("parallel")}></label>` : ""}
+          <label><input type="radio" name="lane" data-cp-page-lane value="design" ${laneChecked("design")}></label>
+        </div>
+        <div class="cp-page-lane">
+          <label><input type="radio" name="base" data-cp-page-baseline value="off" ${baseChecked("off")}></label>
+          <label hidden><input type="radio" name="base" data-cp-page-baseline value="code" ${baseChecked("code")}></label>
+          ${parallel ? `<label><input type="radio" name="base" data-cp-page-baseline value="parallel" ${baseChecked("parallel")}></label>` : ""}
+          <label><input type="radio" name="base" data-cp-page-baseline value="design" ${baseChecked("design")}></label>
+        </div>
         <label><input type="checkbox" data-cp-page-outlines></label>
         <label><input type="checkbox" data-cp-page-unlinked></label>
         <div class="cp-page-legend" hidden></div>
@@ -44,6 +58,14 @@ async function mount(
             <img class="cp-page-render" data-cp-node="1:20" alt="">
             <img class="cp-page-render" data-cp-node="9:99" alt="">
           </template>
+          ${
+              parallel
+                  ? `<template data-cp-page-parallel-source>
+            <img class="cp-page-parallel" data-cp-node="1:10" alt="">
+            <img class="cp-page-parallel" data-cp-node="1:20" alt="">
+          </template>`
+                  : ""
+          }
           <div data-cp-page-tip hidden></div>
         </div>
         <details class="cp-page-nodes">
@@ -63,9 +85,10 @@ const overlay = (id: string) =>
     ) as HTMLElement;
 const check = async (input: HTMLInputElement, on = true) => {
     if (input.type === "radio") {
-        for (const other of document.querySelectorAll<HTMLInputElement>(
-            "[data-cp-page-lane]",
-        ))
+        const group = input.hasAttribute("data-cp-page-lane")
+            ? "[data-cp-page-lane]"
+            : "[data-cp-page-baseline]";
+        for (const other of document.querySelectorAll<HTMLInputElement>(group))
             other.checked = false;
     }
     input.checked = on;
@@ -76,6 +99,20 @@ const renders = () =>
     Array.from(
         document.querySelectorAll(".cp-page-stage .cp-page-render"),
     ) as HTMLImageElement[];
+const siblings = () =>
+    Array.from(
+        document.querySelectorAll(".cp-page-stage .cp-page-parallel"),
+    ) as HTMLImageElement[];
+const lane = (value: string) =>
+    document.querySelector<HTMLInputElement>(
+        `[data-cp-page-lane][value="${value}"]`,
+    )!;
+const baselineInput = (value: string) =>
+    document.querySelector<HTMLInputElement>(
+        `[data-cp-page-baseline][value="${value}"]`,
+    )!;
+const baselineHidden = (value: string) =>
+    baselineInput(value).closest("label")!.hasAttribute("hidden");
 
 describe("<cp-design-page>", () => {
     afterEach(resetDom);
@@ -113,6 +150,72 @@ describe("<cp-design-page>", () => {
         assert.equal(renders().length, 0);
         assert.ok(document.querySelector("[data-cp-page-render-source]"));
         assert.equal(stage().classList.contains("cp-page-hide-design"), false);
+    });
+
+    it("leaves the SIBLING's renders alone until a pairing names them", async () => {
+        // They come off another catalog's daemon. A sheet that warmed them speculatively would
+        // charge every reader of every page for a comparison almost none of them open.
+        await mount({ parallel: true });
+        assert.equal(siblings().length, 0);
+        assert.ok(document.querySelector("[data-cp-page-parallel-source]"));
+        await check(lane("parallel"));
+        assert.equal(siblings().length, 2);
+        assert.equal(stage().classList.contains("cp-page-parallel-on"), true);
+        assert.equal(stage().classList.contains("cp-page-swap-on"), true);
+    });
+
+    it("adopts the sibling's renders when it is only the BASELINE", async () => {
+        // Scoring needs both halves decoded; only one of them is on screen.
+        await mount({ parallel: true });
+        await check(baselineInput("parallel"));
+        assert.equal(siblings().length, 2);
+        assert.equal(stage().classList.contains("cp-page-parallel-on"), false);
+        assert.equal(stage().classList.contains("cp-page-diff-on"), true);
+    });
+
+    it("hides the baseline the sheet is already showing", async () => {
+        // "Diff ours against ours" is 0.0% in every slot by construction. A permanently dead button
+        // is a worse answer than a missing one.
+        await mount({ parallel: true });
+        assert.equal(baselineHidden("code"), true, "we are showing ours");
+        assert.equal(baselineHidden("design"), false);
+        await check(lane("design"));
+        assert.equal(baselineHidden("code"), false);
+        assert.equal(baselineHidden("design"), true);
+    });
+
+    it("swaps the pair rather than dropping it when the lane takes the baseline", async () => {
+        // Showing ours against the design, then asking to see the design: the reader means "and now
+        // from the other side", so the pair survives and the badges do not blank.
+        await mount({ parallel: true });
+        await check(baselineInput("design"));
+        await check(lane("design"));
+        assert.equal(baselineInput("code").checked, true);
+        assert.equal(stage().classList.contains("cp-page-diff-on"), true);
+    });
+
+    it("offers no sibling controls on a catalog that has none", async () => {
+        await mount();
+        assert.equal(
+            document.querySelector('[data-cp-page-baseline][value="parallel"]'),
+            null,
+        );
+    });
+
+    it("shows the design's drawing again when the shown catalog has no render", async () => {
+        // A slot can hold two pictures now. Latching `cp-page-replaced` on the first image to load
+        // would hide the design's drawing on the SIBLING's arrival and leave our own lane — where
+        // the render is broken — showing nothing at all.
+        await mount({ parallel: true, lane: "parallel" });
+        const target = document.querySelector('[data-node-id="1:10"]')!;
+        siblings()[0].dispatchEvent(new Event("load"));
+        assert.equal(target.classList.contains("cp-page-replaced"), true);
+        await check(lane("code"));
+        assert.equal(
+            target.classList.contains("cp-page-replaced"),
+            false,
+            "ours has not arrived, so the design's drawing stands",
+        );
     });
 
     it("hides the design's drawing only once OURS has arrived", async () => {

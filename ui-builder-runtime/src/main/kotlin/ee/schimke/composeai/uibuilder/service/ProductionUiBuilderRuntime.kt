@@ -2,11 +2,18 @@
 
 package ee.schimke.composeai.uibuilder.service
 
+import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
+import ee.schimke.composeai.uibuilder.protocol.AssetKeyValueV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
+import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
+import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
+import ee.schimke.composeai.uibuilder.protocol.EmbeddedAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
@@ -15,7 +22,10 @@ import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.SlotCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.SlotCardinalityV1
+import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.SvgCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.UiValueV1
+import ee.schimke.composeai.uibuilder.protocol.UploadedAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
 import java.io.Closeable
 import java.nio.file.Files
@@ -144,6 +154,9 @@ public class CurrentM3UiBuilderCatalogExecutor(
 
   override fun resolve(reference: CatalogReferenceV1): CatalogCapabilityV1? =
     catalogs[reference.systemId]?.takeIf { reference == references[reference.systemId] }
+
+  override fun reference(catalog: CatalogCapabilityV1): CatalogReferenceV1? =
+    catalog.benchmark.catalogSystemId.takeIf { catalogs[it] == catalog }?.let(references::get)
 
   override fun validate(
     document: DesignDocumentV1,
@@ -299,9 +312,186 @@ public class CurrentM3UiBuilderCatalogExecutor(
     return null
   }
 
+  /** [validateWrite] against no document — the catalog's own rules alone. */
+  public fun validateWrite(
+    catalog: CatalogCapabilityV1,
+    node: DesignNodeV1,
+    property: String,
+  ): UiBuilderCatalogIssue? = validateWrite(catalog, node, property, pinnedAssetKeys = emptySet())
+
+  override fun validateWrite(
+    catalog: CatalogCapabilityV1,
+    document: DesignDocumentV1,
+    node: DesignNodeV1,
+    property: String,
+  ): UiBuilderCatalogIssue? =
+    validateWrite(catalog, node, property, pinnedAssetKeys = document.assets.keys)
+
+  private fun validateWrite(
+    catalog: CatalogCapabilityV1,
+    node: DesignNodeV1,
+    property: String,
+    pinnedAssetKeys: Set<String>,
+  ): UiBuilderCatalogIssue? {
+    val value = node.properties[property] ?: return null
+    // Undeclared is `validate`'s finding, and a wrapper the value rules do not speak about — a
+    // state binding, a number — is answered by `jsonType` there too.
+    components[catalog.benchmark.catalogSystemId]?.get(node.componentId)?.properties?.firstOrNull {
+      it.name == property
+    } ?: return null
+    return when {
+      isColourProperty(property) -> colourWriteIssue(node, property, value)
+      property == ASSET_KEY_PROPERTY ->
+        assetKeyWriteIssue(catalog, node, property, value, pinnedAssetKeys)
+      else -> null
+    }
+  }
+
+  /**
+   * The colour rule: the wrapper says colour, and the value is one the canvas draws.
+   *
+   * A `string` wrapper committed, rendered, and was refused at export with a sentence about `Text`
+   * (#476); a `colorToken` the canvas does not draw committed, and the renderer threw on it. Both
+   * refused here, with the wording the `background` modifier's export refusal already had — it
+   * names the property, says what a colour looks like, and names the wrapper that was wrong.
+   */
+  private fun colourWriteIssue(
+    node: DesignNodeV1,
+    property: String,
+    value: UiValueV1,
+  ): UiBuilderCatalogIssue? {
+    val colour =
+      when (value) {
+        is StringValueV1 ->
+          return issue(
+            "INVALID_PROPERTY",
+            "property $property is a colour, which is written as a `#RRGGBB` literal or as a " +
+              "theme role — a `color` or `colorToken` wrapper, not `string`",
+            node.id,
+            property,
+          )
+        is ColorValueV1 -> value.value
+        is ColorTokenValueV1 -> value.value
+        else -> return null
+      }
+    if (isDrawableColour(colour)) return null
+    return issue(
+      "INVALID_PROPERTY",
+      "property $property is `$colour`, which is neither a `#RRGGBB` literal nor one of the theme " +
+        "roles the canvas draws (${CANVAS_COLOR_TOKENS.joinToString(", ")})",
+      node.id,
+      property,
+    )
+  }
+
+  /**
+   * The asset rule: the key is one the catalog's registry lists, or one the design has pinned.
+   *
+   * `asset/image` is the one component whose value the renderer must *resolve*, and it was the one
+   * property nothing checked: the reducer accepted `avatar-lain`, and every render of the design
+   * then failed with an `IllegalStateException` (#484). The registry is
+   * `statusSemantics.assetRegistry.keys`; a catalog that declares none says nothing about keys.
+   * [pinnedAssetKeys] are the design's own `assets` — what the asset lane put behind a key (#478) —
+   * and they resolve exactly as a catalog key does, because the canvas draws them.
+   */
+  private fun assetKeyWriteIssue(
+    catalog: CatalogCapabilityV1,
+    node: DesignNodeV1,
+    property: String,
+    value: UiValueV1,
+    pinnedAssetKeys: Set<String>,
+  ): UiBuilderCatalogIssue? {
+    val key =
+      when (value) {
+        is AssetKeyValueV1 -> value.value
+        is StringValueV1 -> value.value
+        else -> return null
+      }
+    val registry = declaredAssetKeys(catalog) ?: return null
+    if (key in registry || key in pinnedAssetKeys) return null
+    return issue(
+      "INVALID_PROPERTY",
+      "property $property is `$key`, which no asset this design or its catalog can draw " +
+        "resolves; the catalog declares ${registry.joinToString(", ")}, and a picture is pinned " +
+        "under a key of your own by PUT /api/ui-builder/v1/designs/{designId}/assets/{assetKey} " +
+        "or the ui_builder_put_asset tool" +
+        (if (pinnedAssetKeys.isEmpty()) ""
+        else "; this design has pinned ${pinnedAssetKeys.sorted().joinToString(", ")}"),
+      node.id,
+      property,
+    )
+  }
+
   public companion object {
     public const val RESOURCE: String =
       "/ee/schimke/composeai/uibuilder/catalogs/m3-catalog-v1.json"
+
+    /**
+     * The value-kind rules, mirrored from `PropertyValueKinds` in `:ui-builder-export`, which this
+     * module cannot reach — the same arrangement `slotAccepts` has with `SlotCapability.accepts`. A
+     * property's name states its kind: `color` and `…Color` hold a colour, `assetKey` a key into
+     * the catalog's asset registry. `docs/design/UI_BUILDER_VALUE_SEMANTICS.md` is the decision.
+     */
+    public fun isColourProperty(property: String): Boolean =
+      property == "color" || property.endsWith("Color")
+
+    /** The property whose value the canvas has to resolve against the catalog's registry. */
+    public const val ASSET_KEY_PROPERTY: String = "assetKey"
+
+    /** The `statusSemantics` entry listing the asset keys the canvas draws, as `{"keys": […]}`. */
+    public const val ASSET_REGISTRY_KEY: String = "assetRegistry"
+
+    /** The `statusSemantics` entry listing [CANVAS_COLOR_TOKENS] for a reader of the catalog. */
+    public const val COLOR_TOKENS_KEY: String = "colorTokens"
+
+    /**
+     * The theme roles the canvas draws — `PropertyValueKinds.CANVAS_COLOR_TOKENS`, and the
+     * catalog's own `statusSemantics.colorTokens.roles`; `ProductionUiBuilderRuntimeTest` pins the
+     * three to one list.
+     */
+    public val CANVAS_COLOR_TOKENS: Set<String> =
+      setOf(
+        "background",
+        "surface",
+        "surfaceContainer",
+        "surfaceContainerLow",
+        "surfaceContainerHigh",
+        "surfaceContainerHighest",
+        "primary",
+        "onPrimary",
+        "tertiary",
+        "onTertiary",
+        "onSurface",
+        "onSurfaceVariant",
+        "outlineVariant",
+        "transparent",
+      )
+
+    /** Whether the canvas draws [value]: a hex literal, a listed role, or nothing (the default). */
+    public fun isDrawableColour(value: String): Boolean =
+      value.isEmpty() || COLOR_LITERAL.matches(value) || value in CANVAS_COLOR_TOKENS
+
+    /** The asset keys [catalog] declares, or null when it declares no registry. */
+    public fun declaredAssetKeys(catalog: CatalogCapabilityV1): Set<String>? =
+      declaredStrings(catalog.statusSemantics, ASSET_REGISTRY_KEY, "keys")
+
+    /** The theme roles [catalog] lists, or null when it lists none. */
+    public fun declaredColorTokens(catalog: CatalogCapabilityV1): Set<String>? =
+      declaredStrings(catalog.statusSemantics, COLOR_TOKENS_KEY, "roles")
+
+    private fun declaredStrings(
+      statusSemantics: JsonObject,
+      entry: String,
+      field: String,
+    ): Set<String>? {
+      val declared =
+        (statusSemantics[entry] as? JsonObject)?.get(field) as? JsonArray ?: return null
+      return declared.mapNotNullTo(linkedSetOf()) {
+        (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.content
+      }
+    }
+
+    private val COLOR_LITERAL = Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
     public const val CURRENT_CAPABILITY_DIGEST: String = "candidate"
     public const val DEFAULT_CATALOG_SYSTEM_ID: String = "m3-catalog"
     public const val REMOTE_M3_CATALOG_SYSTEM_ID: String = "remote-m3"
@@ -368,6 +558,37 @@ public data class UiBuilderComponentPackSource(
     }
   }
 }
+
+/**
+ * The Remote Compose ids `wear-m3` borrows without calling them stand-ins for anything.
+ *
+ * A borrowed *Material* component is drawn as its mobile counterpart and its note says so; a
+ * borrowed *foundation* one is the same declaration on both platforms. These three are neither.
+ * They are the Remote Compose seam itself — a published document, the switch into the remote
+ * vocabulary, and the custom component that switches back out — and none of them is a Wear Compose
+ * component whose fidelity a note could be making a claim about.
+ */
+/**
+ * The node that switches a subtree into the Remote Compose vocabulary.
+ *
+ * Spelled here rather than imported from `:ui-builder-export`, which owns the same two constants
+ * for the emitter and the canvas. This module's dependency graph is a positive allowlist checked by
+ * `checkUiBuilderRuntimeBoundary` and written down in `docs/design/UI_BUILDER_PROJECT_BOUNDARY.md`;
+ * taking an edge to the export module to reach two string literals would be a change to that
+ * document for no gain. `SlotAcceptanceTest`'s committed table is what keeps the two spellings
+ * honest — a catalog naming an id no component declares shows up there.
+ */
+private const val REMOTE_COMPOSE_INLINE_COMPONENT_ID = "remote-compose/inline"
+
+/** The node that switches back out of it — see [REMOTE_COMPOSE_INLINE_COMPONENT_ID]. */
+private const val REMOTE_COMPOSE_CUSTOM_COMPONENT_ID = "remote-compose/custom"
+
+private val REMOTE_COMPOSE_BORROWED_AS_THEMSELVES =
+  setOf(
+    "remote-compose/document",
+    REMOTE_COMPOSE_INLINE_COMPONENT_ID,
+    REMOTE_COMPOSE_CUSTOM_COMPONENT_ID,
+  )
 
 /** The platform word a catalog declares, or the default for one that says nothing. */
 internal val CatalogCapabilityV1.platform: String
@@ -593,7 +814,12 @@ private fun wearComponentMenu(): JsonObject {
         ),
       "Communication" to listOf("wear-m3/progress-indicator"),
       "Content" to listOf("wear-m3/text", "wear-m3/icon", "asset/image"),
-      "Embedded" to listOf("remote-compose/document"),
+      "Embedded" to
+        listOf(
+          "remote-compose/document",
+          REMOTE_COMPOSE_INLINE_COMPONENT_ID,
+          REMOTE_COMPOSE_CUSTOM_COMPONENT_ID,
+        ),
     )
   val variantProperties =
     mapOf(
@@ -621,6 +847,43 @@ private fun wearComponentMenu(): JsonObject {
     }
   }
 }
+
+/**
+ * The modifiers a `remote-m3` component may advertise: what `RemoteContentEmitter` can write.
+ *
+ * A copy, and it has to be one. The emitter lives in `:ui-builder-export` and this module's
+ * `CheckUiBuilderRuntimeBoundary` keeps that classpath out on purpose, so the list cannot be
+ * imported from the one place it is derived. `RemoteContentModifierParityTest` in `:server` — which
+ * has both — fails when this set and `REMOTE_CONTENT_MODIFIERS` disagree, so the copy cannot rot
+ * quietly the way the last one did.
+ */
+private val REMOTE_M3_MODIFIERS =
+  setOf(
+    "align",
+    "alignHorizontal",
+    "alignVertical",
+    "alpha",
+    "background",
+    "border",
+    "clip",
+    "fillMaxHeight",
+    "fillMaxSize",
+    "fillMaxWidth",
+    "height",
+    "heightIn",
+    "horizontalScroll",
+    "offset",
+    "padding",
+    "rotate",
+    "scale",
+    "size",
+    "verticalScroll",
+    "weight",
+    "width",
+    "widthIn",
+    "wrapContentSize",
+    "zIndex",
+  )
 
 private fun remoteM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
   val components = base.components.associateBy { it.componentId }
@@ -693,9 +956,23 @@ private fun remoteM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
       "m3/surface",
       "m3/text",
       "remote-compose/document",
+      // The way host content gets inside a widget body. A `@RemoteComposable` body cannot call an
+      // application's composables — that is the rule this catalog exists to keep — so a custom
+      // component is not a hole in it: the document carries an operation naming a renderer, and the
+      // application registers Compose under that name. `remote-compose/inline` is deliberately
+      // absent, because this catalog's whole body is already a document; an inline switch inside it
+      // would be a second answer to a question the container already answered.
+      REMOTE_COMPOSE_CUSTOM_COMPONENT_ID,
       "shape/linear-gradient",
       "asset/image",
     )
+  // Every borrowed component is narrowed to the modifiers the generator can write. The two lists
+  // used to be independent — the palette offered 28 on a widget node and `RemoteContentEmitter`
+  // wrote three — so `size`, `background` and `weight` were authorable, drawable, and unexportable
+  // (yschimke/compose-preview-server#508). Narrowing here moves the refusal to the moment the
+  // modifier is added, which is the only moment an author can act on it.
+  fun ComponentCapabilityV1.narrowed(): ComponentCapabilityV1 =
+    copy(modifierCapabilities = modifierCapabilities.filter { it in REMOTE_M3_MODIFIERS })
   return base.copy(
     // A Wear widget body is a Remote Compose document, played rather than composed. Said here so
     // the New design chooser can group it apart from the phone screens, and so no mobile pack is
@@ -708,7 +985,20 @@ private fun remoteM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
           // this component: it is synthesized here. Shelved rather than left to fall back to its
           // role heading ("Leaf") for the reason `ComponentMenu` gives — a menu is presentation,
           // and an author looking for an animation looks under Content.
-          ("componentMenu" to base.statusSemantics.withMenuEntry("remote-m3/lottie", "Content"))
+          ("componentMenu" to base.statusSemantics.withMenuEntry("remote-m3/lottie", "Content")) +
+          // Which daemon draws this catalog natively, and it is not a preference: a widget's body
+          // is `androidx.compose.remote.creation.compose`, its container is `androidx.glance.wear`,
+          // and both are Android AARs. Left undeclared this defaulted to `desktop`, so the native
+          // lane sent a widget to Skiko — a compile that fails on every import and reads like the
+          // design is broken. The Wasm claim is left alone: unlike `wear-m3`'s Material 3
+          // lookalikes, the canvas draws this catalog's own borrowed components.
+          ("previewSurfaces" to
+            buildJsonObject {
+              putJsonObject("native") {
+                put("fidelity", JsonPrimitive("authoritative"))
+                put("backend", JsonPrimitive("android"))
+              }
+            })
       ),
     benchmark =
       base.benchmark.copy(
@@ -722,7 +1012,7 @@ private fun remoteM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
         widget("remote-m3/widget-container-small", "Wear widget · Small (216×76dp)"),
         widget("remote-m3/widget-container-large", "Wear widget · Large (216×124dp)"),
         lottie(components.getValue("asset/image"), supportedWasm, blockedSvg),
-      ) + authoringIds.map(components::getValue),
+      ) + authoringIds.map { components.getValue(it).narrowed() },
   )
 }
 
@@ -768,10 +1058,10 @@ private fun lottie(
     traits = listOf("RemoteContent"),
     slots = emptyList(),
     properties = lottieProperties(),
-    // Exactly the three [RemoteContentEmitter] can write, and no more. A component that advertises
-    // a modifier the generator refuses is a component whose export fails after the design is drawn,
+    // Exactly what `RemoteContentEmitter` can write, and no more. A component that advertises a
+    // modifier the generator refuses is a component whose export fails after the design is drawn,
     // which is the worst moment to learn it.
-    modifierCapabilities = listOf("fillMaxSize", "fillMaxWidth", "padding"),
+    modifierCapabilities = borrowed.modifierCapabilities.filter { it in REMOTE_M3_MODIFIERS },
     wasm =
       supportedWasm.copy(
         notes =
@@ -1624,6 +1914,19 @@ private fun wearM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
       // Compose call site, so a screen holding one exports as a refusal that names the node rather
       // than as Kotlin that does not compile.
       "remote-compose/document",
+      // The vocabulary switch and the way back out of it. `remote-compose/inline` says "everything
+      // below me is @RemoteComposable", which is the second way a Wear screen embeds Remote Compose
+      // content: `remote-compose/document` plays bytes somebody else published, and this one is
+      // authored here, in this design, out of the same `layout/column` and `m3/text` stand-ins the
+      // `remote-m3` catalog already publishes for exactly that purpose.
+      //
+      // `remote-compose/custom` is the return direction, and it is why the pair is worth having:
+      // a Remote Compose document cannot call an application's composables, so the only way host
+      // content gets inside one is a custom component the host registers a renderer under. A design
+      // can therefore nest Compose inside Remote Compose inside Compose, which is the shape the
+      // Wear catalogs' own stickers already take.
+      REMOTE_COMPOSE_INLINE_COMPONENT_ID,
+      REMOTE_COMPOSE_CUSTOM_COMPONENT_ID,
     )
   val borrowed =
     borrowedIds.map(components::getValue).map { component ->
@@ -1633,7 +1936,7 @@ private fun wearM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
       // foundation component is not a stand-in for anything: `Box`, `Column`, `Row` and `Image` are
       // the same declarations on both platforms, which is the whole reason these are the only ones
       // left.
-      if (component.componentId == "remote-compose/document") component
+      if (component.componentId in REMOTE_COMPOSE_BORROWED_AS_THEMSELVES) component
       else
         component.copy(
           wasm =
@@ -1751,6 +2054,13 @@ public class ProductionUiBuilderExportExecutor(
   // reachable only by wiring nobody does in production; a default nobody should take is worse than
   // an argument everybody must pass.
   private val compose: UiBuilderExportExecutor,
+  /**
+   * Where a design's uploaded asset bytes are. The daemon render sees one string — the projected
+   * document — so the bytes an `asset/image` names are inlined into that string here, from this
+   * store, as an embedded source. Null leaves every uploaded binding as it is, and the renderer
+   * draws its placeholder for it.
+   */
+  private val assets: UiBuilderAssetStore? = null,
 ) : UiBuilderExportExecutor, Closeable {
   public val capabilities: ExportCapabilitiesV1 =
     ExportCapabilitiesV1(composeCode = true, svg = renderer.supportsSvg, png = true)
@@ -1760,6 +2070,16 @@ public class ProductionUiBuilderExportExecutor(
       ExportFormatV1.COMPOSE -> compose.export(request)
       ExportFormatV1.PNG -> request.binaryArtifact(renderer.renderPng(request.toRenderRequest()))
       ExportFormatV1.SVG -> request.svgArtifact(renderer.renderSvg(request.toRenderRequest()))
+      // Unreachable through the service: [capabilities] leaves `bundle` at its false default, and
+      // PersistentUiBuilderService refuses any format the pinned catalog does not advertise before
+      // an executor is reached. Thrown rather than folded into an `else`, so that implementing
+      // yschimke/compose-preview-server#528 starts from a compile error here instead of silently
+      // handing back Compose source for a caller that asked for a bundle. The service already
+      // wraps this call, so the throw surfaces as an export error, not a crash.
+      ExportFormatV1.BUNDLE ->
+        throw UnsupportedOperationException(
+          "bundle export is not implemented; ExportCapabilitiesV1.bundle is false for this executor"
+        )
     }
 
   override fun close(): Unit = renderer.close()
@@ -1774,7 +2094,10 @@ public class ProductionUiBuilderExportExecutor(
       density = document.environment.density.toFloat(),
       localeTag = document.environment.locale,
       fontScale = document.environment.fontScale.toFloat(),
-      encodedDocument = projectRendererDocument(document),
+      encodedDocument =
+        projectRendererDocument(document) { binding ->
+          (binding.source as? UploadedAssetSourceV1)?.let { assets?.read(it.storageKey) }
+        },
     )
 
   private fun RevisionPinnedUiBuilderExport.binaryArtifact(bytes: ByteArray): ExportArtifactV1 =
@@ -1868,7 +2191,21 @@ public object PackagedUiBuilderRenderBundle {
 }
 
 /** Canonical, loss-checked protocol → renderer wire projection used by the named override. */
-public fun projectRendererDocument(document: DesignDocumentV1): String {
+public fun projectRendererDocument(document: DesignDocumentV1): String =
+  projectRendererDocument(document) { null }
+
+/**
+ * The same projection, carrying the design's `assets` with uploaded bytes inlined.
+ *
+ * [resolveAsset] answers the bytes behind a binding, or null. A binding it answers is rewritten as
+ * an embedded source so the renderer — which sees only this string — can draw it; one it cannot
+ * answer travels as it is and the renderer draws a placeholder in its place. An empty map is left
+ * out altogether, so a design with no assets projects to the same bytes it always did.
+ */
+public fun projectRendererDocument(
+  document: DesignDocumentV1,
+  resolveAsset: (AssetBindingV1) -> ByteArray?,
+): String {
   require(document.revision in 0..Int.MAX_VALUE.toLong()) {
     "renderer revision is outside the v1 Int range: ${document.revision}"
   }
@@ -1907,9 +2244,32 @@ public fun projectRendererDocument(document: DesignDocumentV1): String {
         "stateVariables" to (source["stateVariables"] ?: JsonObject(emptyMap())),
         "roots" to source.getValue("roots"),
         "nodes" to projectedNodes,
-      )
+      ) + projectedAssets(document, resolveAsset)
     )
   return canonicalJson(projected)
+}
+
+private fun projectedAssets(
+  document: DesignDocumentV1,
+  resolveAsset: (AssetBindingV1) -> ByteArray?,
+): Map<String, JsonElement> {
+  if (document.assets.isEmpty()) return emptyMap()
+  val inlined =
+    document.assets.entries
+      .sortedBy { it.key }
+      .associate { (key, binding) ->
+        val carried =
+          when (binding.source) {
+            is UploadedAssetSourceV1 ->
+              resolveAsset(binding)?.let {
+                binding.copy(source = EmbeddedAssetSourceV1(Base64.getEncoder().encodeToString(it)))
+              } ?: binding
+            is EmbeddedAssetSourceV1,
+            is CatalogAssetSourceV1 -> binding
+          }
+        key to json.encodeToJsonElement(carried)
+      }
+  return mapOf("assets" to JsonObject(inlined))
 }
 
 private fun validateCatalog(catalog: CatalogCapabilityV1): CatalogCapabilityV1 {

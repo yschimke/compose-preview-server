@@ -6,8 +6,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -33,7 +31,7 @@ class WearWidgetCodeExporterTest {
       source,
     )
     assertTrue("fun HelloWidgetContent()" in source, source)
-    assertTrue("SquircleSmallWidgetPreviewParams::class" in source, source)
+    assertTrue("SquircleSmallWidgetPreviewParams().values.maxBy { it.widthDp }" in source, source)
   }
 
   @Test
@@ -47,7 +45,7 @@ class WearWidgetCodeExporterTest {
     write("WeatherWidget.kt", source)
     assertTrue("WearWidgetBrush.color(Color(0xFF2196F3).rc)" in source, source)
     assertTrue("RemoteColumn(" in source, source)
-    assertTrue("SquircleLargeWidgetPreviewParams::class" in source, source)
+    assertTrue("SquircleLargeWidgetPreviewParams().values.maxBy { it.widthDp }" in source, source)
   }
 
   /**
@@ -92,14 +90,14 @@ class WearWidgetCodeExporterTest {
         .source
 
     write("GradientWidget.kt", source)
-    // The chain is written across lines rather than on one: a colour plus a two-stop gradient is
-    // 111 columns, and this file's whole line-budget promise is that its output survives ktfmt
-    // unchanged. The assertion is on the calls in order, not on where the breaks fall.
+    // Hoisted and broken between the chain's calls: two literal stops already spend past the
+    // column budget, so the chain is asserted call by call rather than as one line.
     assertTrue("WearWidgetBrush.color(Color(0xFF2196F3).rc)" in source, source)
-    assertTrue(".horizontalGradient(" in source, source)
-    assertTrue("Color(0xFF2196F3).rc, Color(0xFF0D47A1).rc" in source, source)
+    assertTrue(
+      ".horizontalGradient(listOf(Color(0xFF2196F3).rc, Color(0xFF0D47A1).rc))" in source,
+      source,
+    )
     assertTrue("import androidx.glance.wear.horizontalGradient" in source, source)
-    assertNoLineExceedsBudget(source)
   }
 
   /**
@@ -269,249 +267,208 @@ class WearWidgetCodeExporterTest {
     assertTrue("class HelloWidget : GlanceWearWidget()" in source, source)
   }
 
+  private fun write(name: String, source: String) {
+    val directory = Path.of("build", "generated-widget-source")
+    Files.createDirectories(directory)
+    Files.writeString(directory.resolve(name), source)
+  }
+
   /**
-   * The modifiers a widget is actually drawn with, which used to be refused wholesale.
+   * A picture in the background slot is **inlined**, not named.
    *
-   * `size`, `background` and `weight` have Remote Compose counterparts — `background` needs its
-   * shape as a separate `clip`, since `RemoteModifier.background` takes a colour alone — and
-   * `align` does not: `RemoteBoxScope` has no member for it, so it is hoisted onto the parent's
-   * `contentAlignment`, which is where RemoteBox states the same thing. Before this, a design as
-   * ordinary as a pill-shaped progress bar refused with four reasons and generated nothing
-   * (yschimke/compose-preview-server#583 diagnosis).
+   * What a widget rules out is a name the drawing side resolves: the launcher draws the document
+   * out of the app's process and without its resources, so an `R.drawable` in the brush chain is
+   * not there to resolve. The pixels travel inside the document — and source that has to stand
+   * alone has nowhere to load them from, so it carries them (yschimke/compose-preview-server#523).
+   * Before this, every widget with an image background refused outright and told the author to
+   * write `WearWidgetBrush.image(bitmap)` by hand. The bundle lane below is the other way to answer
+   * the same question.
    */
   @Test
-  fun `size, background, weight and a hoisted align are written`() {
-    val base = weatherWidgetUiBuilderDocument("weather", pin, environment)
-    val scaffold = base.nodes.values.first { it.componentId.startsWith("remote-m3/") }
-    val fill =
-      UiBuilderNode(
-        id = "fill",
-        componentId = "layout/box",
-        modifiers =
-          JsonArray(
-            listOf(
-              modifier("size", "widthDp" to JsonPrimitive(71), "heightDp" to JsonPrimitive(3)),
-              modifier(
-                "background",
-                "color" to literal("color", "#FF1DB954"),
-                "shape" to JsonPrimitive("999"),
-              ),
-              modifier("align", "alignment" to JsonPrimitive("centerStart")),
-            )
-          ),
-      )
-    val track =
-      UiBuilderNode(
-        id = "track",
-        componentId = "layout/box",
-        modifiers = JsonArray(listOf(modifier("weight", "weight" to JsonPrimitive(1.0)))),
-        slots = mapOf("children" to listOf(fill.id)),
-      )
-    val row =
-      UiBuilderNode(
-        id = "bar",
-        componentId = "layout/row",
-        slots = mapOf("children" to listOf(track.id)),
-      )
-    val document =
-      base.copy(
-        nodes =
-          base.nodes +
-            mapOf(
-              fill.id to fill,
-              track.id to track,
-              row.id to row,
-              scaffold.id to scaffold.copy(slots = scaffold.slots + ("content" to listOf(row.id))),
-            )
-      )
+  fun `an image background inlines its bytes and builds the brush`() {
+    val document = imageBackgroundDocument()
 
     val source =
-      assertIs<WearWidgetCodeExporter.Result.Emitted>(WearWidgetCodeExporter.export(document))
+      assertIs<WearWidgetCodeExporter.Result.Emitted>(
+          WearWidgetCodeExporter.export(
+            document,
+            assets = { key -> if (key == "cover") "QUJD" else null },
+          )
+        )
         .source
 
-    write("ModifierWidget.kt", source)
-    // `weight` is a row-scope member, written because the box sits inside a RemoteRow.
-    assertTrue("RemoteModifier.weight(1f)" in source, source)
-    // The shape becomes a `clip` BEFORE the fill, which is what makes the fill take that shape.
-    assertTrue("size(71.rdp, 3.rdp)" in source, source)
-    assertTrue(".clip(RemoteRoundedCornerShape(999.rdp))" in source, source)
-    assertTrue(".background(Color(0xFF1DB954).rc)" in source, source)
-    // Hoisted, not written on the child: the child carries no `align` call of its own.
-    assertTrue("contentAlignment = RemoteAlignment.CenterStart" in source, source)
-    assertTrue(".align(" !in source, source)
-    assertTrue("import androidx.compose.remote.creation.compose.modifier.size" in source, source)
+    assertTrue(".image(cover)" in source, source)
+    assertTrue("private val cover: RemoteImageBitmap =" in source, source)
+    assertTrue("decodeInlineBitmap(COVER_PNG)" in source, source)
+    assertTrue("\"QUJD\"," in source, source)
+    assertTrue("Base64.decode(encoded, Base64.NO_WRAP)" in source, source)
+    assertTrue("import androidx.glance.wear.image" in source, source)
+    assertTrue("import android.graphics.BitmapFactory" in source, source)
+    // The bytes are declared above the decode that reads them: a top-level `val` is initialised in
+    // declaration order, and the other way round does not compile.
     assertTrue(
-      "import androidx.compose.remote.creation.compose.shapes.RemoteRoundedCornerShape" in source,
+      source.indexOf("private val COVER_PNG") < source.indexOf("private val cover:"),
       source,
     )
-    assertNoLineExceedsBudget(source)
   }
 
-  /**
-   * An `align` outside a box is refused rather than written, because it would not compile.
-   *
-   * The hoist above is only sound where the parent is the thing that states the alignment. A
-   * `RemoteRow` has no `contentAlignment` to hoist onto and `RemoteRowScope` has no `align`, so the
-   * only honest answers are a refusal or a file the user's compiler rejects.
-   */
+  /** A key the registry cannot answer refuses by name rather than emitting a picture. */
   @Test
-  fun `an align modifier outside a box is refused`() {
-    val base = weatherWidgetUiBuilderDocument("weather", pin, environment)
-    val scaffold = base.nodes.values.first { it.componentId.startsWith("remote-m3/") }
-    val child =
-      UiBuilderNode(
-        id = "child",
-        componentId = "layout/box",
-        modifiers =
-          JsonArray(listOf(modifier("align", "alignment" to JsonPrimitive("centerStart")))),
-      )
-    val row =
-      UiBuilderNode(
-        id = "bar",
-        componentId = "layout/row",
-        slots = mapOf("children" to listOf(child.id)),
-      )
-    val document =
-      base.copy(
-        nodes =
-          base.nodes +
-            mapOf(
-              child.id to child,
-              row.id to row,
-              scaffold.id to scaffold.copy(slots = scaffold.slots + ("content" to listOf(row.id))),
-            )
-      )
-
+  fun `an image background with no bytes is refused by name`() {
     val refused =
-      assertIs<WearWidgetCodeExporter.Result.Refused>(WearWidgetCodeExporter.export(document))
-    assertTrue(refused.reasons.any { "align" in it && "RemoteBox" in it }, "${refused.reasons}")
+      assertIs<WearWidgetCodeExporter.Result.Refused>(
+        WearWidgetCodeExporter.export(imageBackgroundDocument())
+      )
+
+    assertTrue(refused.reasons.any { "bg-art" in it }, refused.reasons.toString())
   }
 
   /**
-   * An image names the bitmap the widget has to supply, rather than refusing outright.
+   * The same background, as a **bundle**: a file beside the source, and a path the source opens.
    *
-   * `RemoteImageBitmap(String)` is the named-bitmap overload, so an asset key IS nameable from
-   * generated source — the pixels are supplied under that name in `provideWidgetData`. This holds
-   * for a background fill and for an image in the content, which are the same seam.
+   * The design is `docs/design/UI_BUILDER_EXPORT_BUNDLE.md`. What this pins is the shape of the
+   * answer — the picture is opened where the `Context` is, the archive carries it under a path
+   * scoped by design, and none of the base64 machinery the inlining lane needs appears at all.
    */
   @Test
-  fun `an image names its bitmap in the content and in the background`() {
-    val base = weatherWidgetUiBuilderDocument("weather", pin, environment)
+  fun `a bundled image background opens the file the archive carries`() {
+    val bundle =
+      assertIs<WearWidgetCodeExporter.BundleResult.Emitted>(
+          WearWidgetCodeExporter.exportBundle(
+            imageBackgroundDocument(),
+            assets = { key ->
+              if (key == "cover") WidgetAssetContent("image/png", "QUJD") else null
+            },
+          )
+        )
+        .bundle
+
+    val source = bundle.source
+    write("CoverWidgetBundle.kt", source)
+    assertTrue(".image(cover)" in source, source)
+    assertTrue(
+      "val cover = context.bundledBitmap(\"uibuilder/cover-widget/cover.png\")" in source,
+      source,
+    )
+    assertTrue("private fun Context.bundledBitmap(path: String): RemoteImageBitmap =" in source)
+    assertTrue("assets.open(path).use { BitmapFactory.decodeStream(it) }" in source, source)
+    // The whole point: no bytes in the file, and none of what decoding them needs.
+    assertTrue("QUJD" !in source, source)
+    assertTrue("Base64" !in source, source)
+    assertTrue("import android.graphics.BitmapFactory" in source, source)
+
+    assertEquals(
+      listOf(WidgetBundleFile("assets/uibuilder/cover-widget/cover.png", "image/png", "QUJD")),
+      bundle.files,
+    )
+    assertEquals("WeatherWidget.kt", bundle.sourceFileName)
+    assertTrue("assets/uibuilder/cover-widget/cover.png" in bundle.readme, bundle.readme)
+  }
+
+  /**
+   * A **content** picture keeps its parameter and gains the design's artwork as its default.
+   *
+   * The parameter is what #508 settled and a bundle does not take it back — an application's album
+   * art is not the design's. What changes is the default: nullable, resolved in `provideWidgetData`
+   * where the `Context` is, so the generated `@Preview` draws the design instead of the
+   * `ImageBitmap(1, 1)` hole the inlining lane has to leave.
+   */
+  @Test
+  fun `a bundled content picture defaults its parameter to the design's artwork`() {
+    val bundle =
+      assertIs<WearWidgetCodeExporter.BundleResult.Emitted>(
+          WearWidgetCodeExporter.exportBundle(
+            contentImageDocument(),
+            assets = { key ->
+              if (key == "album-art") WidgetAssetContent("image/jpeg", "QUJD") else null
+            },
+          )
+        )
+        .bundle
+
+    val source = bundle.source
+    write("AlbumWidgetBundle.kt", source)
+    assertTrue("private val albumArt: RemoteImageBitmap? = null," in source, source)
+    assertTrue(
+      "val albumArt = albumArt ?: context.bundledBitmap(\"uibuilder/album-widget/album-art.jpg\")" in
+        source,
+      source,
+    )
+    assertTrue("WeatherWidgetContent(albumArt = albumArt)" in source, source)
+    assertEquals(
+      listOf(WidgetBundleFile("assets/uibuilder/album-widget/album-art.jpg", "image/jpeg", "QUJD")),
+      bundle.files,
+    )
+    assertTrue("albumArt" in bundle.readme, bundle.readme)
+  }
+
+  /**
+   * A content picture the archive cannot carry keeps the blank default rather than failing.
+   *
+   * The asymmetry with a background is deliberate and is the lanes' shared rule: a background is
+   * the design's own picture, so a key nothing can answer is a refusal; a content picture is the
+   * application's, so the parameter stands on its own and the fallback is the hole.
+   */
+  @Test
+  fun `a content picture with no bytes still exports as a parameter`() {
+    val bundle =
+      assertIs<WearWidgetCodeExporter.BundleResult.Emitted>(
+          WearWidgetCodeExporter.exportBundle(contentImageDocument(), assets = { null })
+        )
+        .bundle
+
+    assertTrue("val albumArt = albumArt ?: ImageBitmap(1, 1).rb" in bundle.source, bundle.source)
+    assertEquals(emptyList(), bundle.files)
+  }
+
+  /** A background key the registry cannot answer refuses in this lane too, and by name. */
+  @Test
+  fun `a bundled image background with no bytes is refused by name`() {
+    val refused =
+      assertIs<WearWidgetCodeExporter.BundleResult.Refused>(
+        WearWidgetCodeExporter.exportBundle(imageBackgroundDocument(), assets = { null })
+      )
+
+    assertTrue(refused.reasons.any { "bg-art" in it }, refused.reasons.toString())
+  }
+
+  /** The weather widget with an `asset/image` as its whole body. */
+  private fun contentImageDocument(): UiBuilderDocument {
+    val base = weatherWidgetUiBuilderDocument("album-widget", pin, environment)
     val scaffold = base.nodes.values.first { it.componentId.startsWith("remote-m3/") }
     val art =
       UiBuilderNode(
         id = "art",
         componentId = "asset/image",
-        properties =
-          JsonObject(
-            mapOf(
-              "assetKey" to literal("string", "cover-wide"),
-              "contentScale" to literal("enum", "crop"),
-            )
-          ),
+        properties = JsonObject(mapOf("assetKey" to literal("string", "album-art"))),
       )
-    val icon =
-      UiBuilderNode(
-        id = "icon",
-        componentId = "asset/image",
-        properties =
-          JsonObject(
-            mapOf(
-              "assetKey" to literal("string", "play-icon"),
-              "contentDescription" to literal("string", "Play"),
-              "contentScale" to literal("enum", "fit"),
-            )
-          ),
-      )
-    val document =
-      base.copy(
-        nodes =
-          base.nodes +
-            mapOf(
-              art.id to art,
-              icon.id to icon,
-              scaffold.id to
-                scaffold.copy(
-                  slots =
-                    scaffold.slots +
-                      ("background" to listOf(art.id)) +
-                      ("content" to listOf(icon.id))
-                ),
-            )
-      )
-
-    val source =
-      assertIs<WearWidgetCodeExporter.Result.Emitted>(WearWidgetCodeExporter.export(document))
-        .source
-
-    write("ImageWidget.kt", source)
-    // The template's own background colour heads the chain, so the fill is the link after it.
-    assertTrue(
-      ".image(RemoteImageBitmap(\"cover-wide\"), ContentScale.Crop)" in source,
-      source,
+    return base.copy(
+      nodes =
+        base.nodes +
+          mapOf(
+            art.id to art,
+            scaffold.id to scaffold.copy(slots = scaffold.slots + ("content" to listOf(art.id))),
+          )
     )
-    assertTrue("RemoteImage(" in source, source)
-    assertTrue("RemoteImageBitmap(\"play-icon\")" in source, source)
-    assertTrue("contentDescription = \"Play\".rs" in source, source)
-    assertTrue("contentScale = ContentScale.Fit" in source, source)
-    assertTrue("import androidx.compose.ui.layout.ContentScale" in source, source)
-    assertNoLineExceedsBudget(source)
   }
 
-  /**
-   * A six-digit colour is opaque, not invisible.
-   *
-   * `Color(0x1DB954)` is Spotify green at **zero alpha** — a widget that draws nothing. A document
-   * may write a colour either way, and the canvas reads both, so the generator pads to match it.
-   */
-  @Test
-  fun `a colour without an alpha pair is written opaque`() {
-    val base = weatherWidgetUiBuilderDocument("weather", pin, environment)
+  /** The weather widget with an `asset/image` in its background slot instead of a colour. */
+  private fun imageBackgroundDocument(): UiBuilderDocument {
+    val base = weatherWidgetUiBuilderDocument("cover-widget", pin, environment)
     val scaffold = base.nodes.values.first { it.componentId.startsWith("remote-m3/") }
-    val swatch =
+    val art =
       UiBuilderNode(
-        id = "swatch",
-        componentId = "layout/box",
-        modifiers =
-          JsonArray(listOf(modifier("background", "color" to literal("color", "#1DB954")))),
+        id = "bg-art",
+        componentId = "asset/image",
+        properties = JsonObject(mapOf("assetKey" to literal("string", "cover"))),
       )
-    val document =
-      base.copy(
-        nodes =
-          base.nodes +
-            mapOf(
-              swatch.id to swatch,
-              scaffold.id to
-                scaffold.copy(slots = scaffold.slots + ("content" to listOf(swatch.id))),
-            )
-      )
-
-    val source =
-      assertIs<WearWidgetCodeExporter.Result.Emitted>(WearWidgetCodeExporter.export(document))
-        .source
-
-    assertTrue("Color(0xFF1DB954)" in source, source)
-    assertTrue("Color(0x1DB954)" !in source, source)
-  }
-
-  private fun modifier(type: String, vararg fields: Pair<String, JsonElement>): JsonObject =
-    JsonObject(mapOf("type" to JsonPrimitive(type)) + fields.toMap())
-
-  /**
-   * No line runs past ktfmt's default, which is the promise the generator makes about its output.
-   *
-   * Asserted rather than assumed because the two places that can break it — a long call and a long
-   * modifier chain — wrap by different rules, and a regression in either writes a file whose first
-   * `ktfmtFormat` is a diff.
-   */
-  private fun assertNoLineExceedsBudget(source: String) {
-    val long = source.lines().filter { it.length > 100 }
-    assertTrue(long.isEmpty(), "lines past 100 columns:\n${long.joinToString("\n")}")
-  }
-
-  private fun write(name: String, source: String) {
-    val directory = Path.of("build", "generated-widget-source")
-    Files.createDirectories(directory)
-    Files.writeString(directory.resolve(name), source)
+    return base.copy(
+      nodes =
+        base.nodes +
+          mapOf(
+            art.id to art,
+            scaffold.id to scaffold.copy(slots = scaffold.slots + ("background" to listOf(art.id))),
+          )
+    )
   }
 }

@@ -6,6 +6,7 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -107,6 +108,114 @@ class PlaygroundCatalogClasspathTest {
     assertTrue(
       logs.any { it.contains("unavailable") && it.contains("runtime") },
       "the miss is logged with the offending coordinate: $logs",
+    )
+  }
+
+  @Test
+  fun `the android platform is appended last so a catalog jar still wins`() {
+    val classes = File(root, "classes")
+    val glanceWear = File(root, "glance-wear.jar")
+    val androidJar = File(root, "android.jar")
+
+    val cp =
+      PlaygroundCatalogClasspath.assemble(
+        system = "remote-m3",
+        classesDir = classes,
+        libJars = emptyList(),
+        resolvedJars = listOf(glanceWear),
+        platformJars = listOf(androidJar),
+      )
+
+    assertEquals(
+      listOf(classes, glanceWear, androidJar).map { it.absolutePath },
+      cp.entries.map { it.toString() },
+      "android.jar is a stubbed bootclasspath, so anything the catalog declares takes precedence",
+    )
+  }
+
+  @Test
+  fun `a classpath with no platform jars is unchanged`() {
+    val classes = File(root, "classes")
+    val skiko = File(root, "skiko.jar")
+
+    assertEquals(
+      PlaygroundCatalogClasspath.assemble("compose-m3", classes, emptyList(), listOf(skiko))
+        .entries,
+      PlaygroundCatalogClasspath.assemble(
+          "compose-m3",
+          classes,
+          emptyList(),
+          listOf(skiko),
+          platformJars = emptyList(),
+        )
+        .entries,
+      "a desktop bundle resolves exactly the classpath it did before the platform was added",
+    )
+  }
+
+  // The decision the platform jar turns on. `assemble` above proves where it lands on the
+  // classpath; these prove when it is looked for at all — the half that decides whether a
+  // `compose-android` snippet naming `android.util.Base64` compiles
+  // (yschimke/compose-preview-server#544).
+
+  @Test
+  fun `an android bundle carries the platform`() {
+    val androidJar = File(root, "android.jar")
+    val logs = mutableListOf<String>()
+
+    assertEquals(
+      listOf(androidJar),
+      PlaygroundCatalogClasspath.androidPlatformJars(
+        system = "remote-m3",
+        backend = "android",
+        resolveAndroidJar = { androidJar },
+        onLog = { logs.add(it) },
+      ),
+    )
+    assertTrue(logs.isEmpty(), "nothing to report when the SDK is where it should be: $logs")
+  }
+
+  @Test
+  fun `a desktop bundle never looks for an SDK`() {
+    var asked = false
+
+    listOf("desktop", null).forEach { backend ->
+      assertEquals(
+        emptyList(),
+        PlaygroundCatalogClasspath.androidPlatformJars(
+          system = "compose-m3",
+          backend = backend,
+          resolveAndroidJar = {
+            asked = true
+            File(root, "android.jar")
+          },
+          onLog = {},
+        ),
+        "a $backend bundle resolves the classpath it always did",
+      )
+    }
+    assertFalse(asked, "a CMP catalog must not be taken down by a missing Android SDK")
+  }
+
+  @Test
+  fun `a missing SDK is logged rather than failing the classpath closed`() {
+    val logs = mutableListOf<String>()
+
+    assertEquals(
+      emptyList(),
+      PlaygroundCatalogClasspath.androidPlatformJars(
+        system = "remote-m3",
+        backend = "android",
+        resolveAndroidJar = { null },
+        onLog = { logs.add(it) },
+      ),
+      "an unresolvable coordinate fails closed; the platform does not, because the host's Android " +
+        "render lanes are already disabled without one",
+    )
+    assertTrue(
+      logs.single().let { "android.jar" in it && "ANDROID_HOME" in it },
+      "the miss names what is absent and how to supply it, because the compile error it leaves " +
+        "behind will not: $logs",
     )
   }
 }

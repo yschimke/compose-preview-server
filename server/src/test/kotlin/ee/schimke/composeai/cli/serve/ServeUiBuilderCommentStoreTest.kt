@@ -186,4 +186,179 @@ class ServeUiBuilderCommentStoreTest {
     assertTrue(deleted.threads.isEmpty())
     assertEquals(2, deleted.sequence)
   }
+
+  @Test
+  fun `a thread is unacknowledged by everybody except whoever said it`() {
+    val opened = board(post(author = "designer"))
+    val thread = opened.threads.single()
+    // Saying something is reading it, so the author is never told to catch up with their own
+    // sentence; everybody else has something to catch up with.
+    assertTrue(!thread.isUnacknowledgedBy("designer"))
+    assertTrue(thread.isUnacknowledgedBy("agent"))
+  }
+
+  @Test
+  fun `acknowledging is per actor and says nothing about whether the question is settled`() {
+    val opened = board(post(author = "designer"))
+    val threadId = opened.threads.single().id
+
+    val acknowledged = board(store.acknowledge("design-1", "agent", threadId))
+    val thread = acknowledged.threads.single()
+    assertTrue(!thread.isUnacknowledgedBy("agent"))
+    // Not a resolution: the question is still open, which is the whole point of the two being
+    // different acts. An agent that has read a bug report it has not fixed can now say so.
+    assertTrue(!thread.resolved)
+    assertNull(thread.resolvedBy)
+    // And still waiting on the second designer, who has read nothing.
+    assertTrue(thread.isUnacknowledgedBy("second-designer"))
+  }
+
+  @Test
+  fun `a reply after an acknowledgement is unacknowledged again`() {
+    val opened = board(post(author = "designer"))
+    val threadId = opened.threads.single().id
+    board(store.acknowledge("design-1", "agent", threadId))
+
+    val replied = board(post(author = "designer", body = "Still wrong.", threadId = threadId))
+    assertTrue(replied.threads.single().isUnacknowledgedBy("agent"))
+  }
+
+  @Test
+  fun `acknowledging what is already acknowledged does not move the sequence`() {
+    board(post(author = "designer"))
+    val first = board(store.acknowledge("design-1", "agent", threadId = null))
+    assertEquals(2, first.sequence)
+    // Every open page waking up because somebody re-read a thread would make the cursor
+    // meaningless, so a write with nothing in it is understood and stored nothing.
+    val again = board(store.acknowledge("design-1", "agent", threadId = null))
+    assertEquals(2, again.sequence)
+  }
+
+  @Test
+  fun `acknowledging a thread that is not there is refused`() {
+    board(post())
+    val refused = store.acknowledge("design-1", "agent", "t-nonexistent")
+    assertEquals("no such comment thread", assertIs<CommentWriteResult.Refused>(refused).reason)
+  }
+
+  @Test
+  fun `a reaction is kept per emoji, is idempotent, and comes back off`() {
+    val opened = board(post(author = "designer"))
+    val commentId = opened.threads.single().comments.single().id
+
+    val reacted = board(store.react("design-1", "agent", commentId, "👀", on = true))
+    assertEquals(
+      mapOf("👀" to listOf("agent")),
+      reacted.threads.single().comments.single().reactions,
+    )
+
+    // The same actor reacting twice is the same reaction, not two.
+    val again = board(store.react("design-1", "agent", commentId, "👀", on = true))
+    assertEquals(listOf("agent"), again.threads.single().comments.single().reactions["👀"])
+
+    val alsoTheDesigner = board(store.react("design-1", "designer", commentId, "👀", on = true))
+    assertEquals(
+      listOf("agent", "designer"),
+      alsoTheDesigner.threads.single().comments.single().reactions["👀"],
+    )
+
+    // Taking the last one back leaves no empty row behind.
+    board(store.react("design-1", "agent", commentId, "👀", on = false))
+    val cleared = board(store.react("design-1", "designer", commentId, "👀", on = false))
+    assertTrue(cleared.threads.single().comments.single().reactions.isEmpty())
+  }
+
+  @Test
+  fun `reacting is the lightest acknowledgement, and still not a resolution`() {
+    val opened = board(post(author = "designer"))
+    val commentId = opened.threads.single().comments.single().id
+
+    val reacted = board(store.react("design-1", "agent", commentId, "👀", on = true))
+    val thread = reacted.threads.single()
+    assertTrue(!thread.isUnacknowledgedBy("agent"))
+    assertTrue(!thread.resolved)
+    // A reaction is not something said, so nobody else is told to catch up with it.
+    assertTrue(thread.isUnacknowledgedBy("designer") || thread.acknowledgedBy["designer"] != null)
+    assertTrue(thread.isUnacknowledgedBy("second-designer"))
+  }
+
+  @Test
+  fun `a reaction that is a sentence, blank, or on nothing is refused`() {
+    val opened = board(post())
+    val commentId = opened.threads.single().comments.single().id
+
+    assertTrue(
+      assertIs<CommentWriteResult.Refused>(store.react("design-1", "a", commentId, "  ", true))
+        .reason
+        .contains("needs a character")
+    )
+    assertTrue(
+      assertIs<CommentWriteResult.Refused>(
+          store.react("design-1", "a", commentId, "👍 nice work", true)
+        )
+        .reason
+        .contains("no whitespace")
+    )
+    assertTrue(
+      assertIs<CommentWriteResult.Refused>(
+          store.react("design-1", "a", commentId, "x".repeat(MAX_COMMENT_REACTION + 1), true)
+        )
+        .reason
+        .contains("under")
+    )
+    assertEquals(
+      "no such comment",
+      assertIs<CommentWriteResult.Refused>(store.react("design-1", "a", "c-nope", "👍", true))
+        .reason,
+    )
+  }
+
+  @Test
+  fun `taking back a reaction nobody left changes nothing`() {
+    val opened = board(post())
+    val commentId = opened.threads.single().comments.single().id
+    val unchanged = board(store.react("design-1", "agent", commentId, "👍", on = false))
+    assertEquals(1, unchanged.sequence)
+  }
+
+  @Test
+  fun `the notice names the thread, the node and what was said, and empties on acknowledgement`() {
+    val opened =
+      board(
+        post(
+          author = "designer",
+          body = "The play icon looks like a cross.",
+          anchor = StoredCommentAnchor(nodeId = "play-button"),
+        )
+      )
+    val notice = assertNotNull(opened.noticeFor("agent"))
+    assertEquals(1, notice.unacknowledged)
+    assertEquals(1, notice.sequence)
+    // The excerpt is the load-bearing part: a bare count is easy to skip past, a quoted sentence
+    // naming a node is not.
+    assertEquals("The play icon looks like a cross.", notice.threads.single().excerpt)
+    assertEquals("play-button", notice.threads.single().nodeId)
+    assertEquals("designer", notice.threads.single().author)
+
+    // Absent rather than zero, so an agent never learns to skip the key.
+    assertNull(opened.noticeFor("designer"))
+    val acknowledged = board(store.acknowledge("design-1", "agent", notice.threads.single().id))
+    assertNull(acknowledged.noticeFor("agent"))
+  }
+
+  @Test
+  fun `the notice stays a glance however loud the discussion is`() {
+    repeat(6) { index -> board(post(author = "designer", body = "Thread $index.")) }
+    val notice = assertNotNull(store.readOrEmpty("design-1").noticeFor("agent"))
+    assertEquals(6, notice.unacknowledged)
+    // Bounded: a count and the newest few, with ui_builder_list_comments one call away for the
+    // rest. A busy design must not turn every apply outcome into a transcript.
+    assertEquals(3, notice.threads.size)
+    assertEquals(listOf("Thread 5.", "Thread 4.", "Thread 3."), notice.threads.map { it.excerpt })
+
+    val long = board(post(author = "designer", body = "x".repeat(400)))
+    val trimmed = assertNotNull(long.noticeFor("agent")).threads.first().excerpt
+    assertTrue(trimmed.length <= 160, trimmed.length.toString())
+    assertTrue(trimmed.endsWith("…"), trimmed)
+  }
 }

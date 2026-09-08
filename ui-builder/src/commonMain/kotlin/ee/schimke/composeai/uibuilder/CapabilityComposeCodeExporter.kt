@@ -157,11 +157,45 @@ object CapabilityComposeCodeExporter {
       return diagnostics
     }
 
+    // Which nodes are written in the Remote Compose vocabulary rather than this one. A node inside
+    // remote content is not this exporter's to judge: `layout/column` there becomes `RemoteColumn`,
+    // its modifiers are `RemoteModifier`s, and every question below — is there a typed call
+    // emitter,
+    // does the catalog allow this modifier on this component — is being asked about the wrong
+    // language. The host that opened the scope is reported once, immediately below, and the subtree
+    // it covers is `RemoteContentEmitter`'s to accept or refuse.
+    val remoteScopes = RemoteScopes.of(document)
+
     document.nodes.values.sortedBy(UiBuilderNode::id).forEach { node ->
+      if (remoteScopes.isRemote(node.id)) return@forEach
       val capability = catalog.componentsById[node.componentId]
       when {
         capability == null ->
           diagnostics += node.error("UNKNOWN_COMPONENT", "No catalog capability exists")
+        // Named before the two generic refusals below, because both of them would be true of it and
+        // neither would be useful. "No typed call emitter exists for RemoteDocumentPlayer" tells a
+        // designer that a component is missing an implementation; what is actually true is that
+        // this subtree is a different language, whose delivery — captured at build time, fetched,
+        // played by whichever host the app already has — the design does not decide.
+        node.componentId == REMOTE_COMPOSE_INLINE_COMPONENT_ID ->
+          diagnostics +=
+            node.error(
+              "REMOTE_CONTENT_NOT_COMPOSE",
+              "Remote Compose content is not part of a Compose screen's source: generate its " +
+                "@RemoteComposable body separately and play the captured document at a call site " +
+                "whose display info and density behaviour are your application's to choose",
+            )
+        // Reachable only by dropping one outside remote content, which the slot rules allow — a
+        // generic container accepts `AnyContent`, and whether a subtree is remote is ancestry
+        // rather than anything a slot can say (see [RemoteScopes]). So it is caught here instead.
+        node.componentId == REMOTE_COMPOSE_CUSTOM_COMPONENT_ID ->
+          diagnostics +=
+            node.error(
+              "CUSTOM_COMPONENT_OUTSIDE_REMOTE_CONTENT",
+              "A custom component is a Remote Compose operation naming a host renderer, so it " +
+                "only means something inside remote content; put it under a " +
+                "$REMOTE_COMPOSE_INLINE_COMPONENT_ID node, or use its children directly here",
+            )
         capability.code == null ->
           diagnostics +=
             node.error("MISSING_CODE_CAPABILITY", "No Kotlin symbol/import mapping exists")
@@ -370,7 +404,7 @@ private class ComposeEmitter(
       "m3/radio-button" ->
         line(
           bodyLevel,
-          "RadioButton(selected = ${node.boolExpression("selected")}, onClick = { ${node.actionExpression("click", stateKotlinTypes)} }, enabled = ${node.boolValue("enabled", true)}, ${node.modifierArgument()})",
+          "RadioButton(selected = ${node.boolExpression("selected")}, onClick = ${node.actionLambda("click", stateKotlinTypes)}, enabled = ${node.boolValue("enabled", true)}, ${node.modifierArgument()})",
         )
       "m3/text-field" -> emitTextField(node, bodyLevel)
       "m3/slider" -> emitSlider(node, bodyLevel)
@@ -592,7 +626,7 @@ private class ComposeEmitter(
     line(level + 1, "selected = ${node.boolExpression("selected")},")
     line(
       level + 1,
-      "onClick = { ${node.actionExpression("click", stateKotlinTypes)} },",
+      "onClick = ${node.actionLambda("click", stateKotlinTypes)},",
     )
     line(level + 1, "enabled = ${node.boolValue("enabled", true)},")
     line(
@@ -748,7 +782,17 @@ private class ComposeEmitter(
       level,
       "Card(${node.modifierArgument()}, shape = RoundedCornerShape(${shapeDp(node.string("shape").ifEmpty { "large" }).dpLiteral()}), elevation = CardDefaults.cardElevation(defaultElevation = ${node.number("elevationDp").dpLiteral()}), colors = builderCardColors(${node.colorExpression("containerColor")})) {",
     )
-    line(level + 1, "Box(Modifier.fillMaxSize()) {")
+    // The same decision the canvas makes — see [cardContentFill] — so the generated screen wraps
+    // an unsized card exactly where the picture did.
+    val fill = node.cardContentFill()
+    val box =
+      when {
+        fill.width && fill.height -> "Box(Modifier.fillMaxSize()) {"
+        fill.width -> "Box(Modifier.fillMaxWidth()) {"
+        fill.height -> "Box(Modifier.fillMaxHeight()) {"
+        else -> "Box {"
+      }
+    line(level + 1, box)
     node.slot("content").forEach { emitNode(it, level + 2) }
     line(level + 1, "}")
     line(level, "}")
@@ -764,7 +808,7 @@ private class ComposeEmitter(
       }
     line(
       level,
-      "$symbol(onClick = { ${node.actionExpression("click", stateKotlinTypes)} }, $colors${node.modifierArgument()}) {",
+      "$symbol(onClick = ${node.actionLambda("click", stateKotlinTypes)}, $colors${node.modifierArgument()}) {",
     )
     if (node.string("style") == "fab") {
       line(level + 1, "Box(Modifier.padding(horizontal = 16.dp)) {")
@@ -874,7 +918,7 @@ private class ComposeEmitter(
   private fun emitToggle(node: UiBuilderNode, level: Int, symbol: String) {
     line(
       level,
-      "$symbol(checked = ${node.boolExpression("checked")}, onCheckedChange = { ${node.actionExpression("click", stateKotlinTypes)} }, enabled = ${node.boolValue("enabled", true)}, ${node.modifierArgument()})",
+      "$symbol(checked = ${node.boolExpression("checked")}, onCheckedChange = ${node.actionLambda("click", stateKotlinTypes)}, enabled = ${node.boolValue("enabled", true)}, ${node.modifierArgument()})",
     )
   }
 
@@ -1070,6 +1114,16 @@ private fun UiBuilderNode.boolExpression(name: String): String {
 }
 
 /**
+ * One event handler as a lambda literal.
+ *
+ * `{}` rather than `{ Unit }` for a handler with no actions: the two are the same handler, but a
+ * bare `Unit` inside a lambda is an unused expression, and the generated fixture compiles under the
+ * same warning-free bar as the rest of the build.
+ */
+private fun UiBuilderNode.actionLambda(event: String, stateTypes: Map<String, String>): String =
+  actionExpression(event, stateTypes).let { if (it.isEmpty()) "{}" else "{ $it }" }
+
+/**
  * The body of one event handler.
  *
  * Every action, not the first: `eventBindings` is a list because a handler runs its actions in
@@ -1083,7 +1137,8 @@ private fun UiBuilderNode.boolExpression(name: String): String {
  */
 private fun UiBuilderNode.actionExpression(event: String, stateTypes: Map<String, String>): String {
   val actions = (eventBindings[event] as? JsonArray).orEmpty()
-  if (actions.isEmpty()) return "Unit"
+  // Empty, not `Unit`: [actionLambda] turns this into `{}`.
+  if (actions.isEmpty()) return ""
   return actions.joinToString("; ") { element ->
     // A safe cast, because this now visits every entry rather than only the head. A malformed
     // later entry — a bare primitive or a null — used to sit unread behind the first action and
@@ -1391,7 +1446,13 @@ private fun alignmentExpression(value: String?): String =
 private fun UiBuilderNode.colorExpression(name: String): String = colorExpressionFor(string(name))
 
 private fun colorExpressionFor(value: String): String {
-  if (value.startsWith("#")) return "Color(0x${value.removePrefix("#").uppercase()})"
+  if (value.startsWith("#")) {
+    val digits = value.removePrefix("#").uppercase()
+    // `#RRGGBB` is opaque everywhere else the document is read — the canvas ORs the alpha in — and
+    // `Color(0xRRGGBB)` is not: its top byte is the alpha, so a six-digit literal compiled to a
+    // fully transparent colour. A surface set to `#313338` exported as one that painted nothing.
+    return "Color(0x${if (digits.length == 6) "FF$digits" else digits})"
+  }
   return when (value) {
     "primary" -> "MaterialTheme.colorScheme.primary"
     "onPrimary" -> "MaterialTheme.colorScheme.onPrimary"

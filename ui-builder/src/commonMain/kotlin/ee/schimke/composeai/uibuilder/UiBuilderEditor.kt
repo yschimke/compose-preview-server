@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.CodeOff
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
@@ -63,6 +64,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.LibraryAdd
@@ -79,6 +81,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconToggleButton
@@ -106,6 +109,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -113,6 +117,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -165,6 +170,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import ee.schimke.composeai.rcplayer.protocol.RcDocument
 import ee.schimke.composeai.uibuilder.capability.CapabilityCatalog
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import kotlin.math.roundToInt
@@ -308,6 +314,20 @@ fun UiBuilderEditor(
   initialCatalogQuery: String = "",
   initialLayerQuery: String = "",
   initialInspectorMode: EditorInspectorMode = EditorInspectorMode.Properties,
+  /**
+   * Changes to make to the design as the editor opens, in order, as though somebody had made them.
+   *
+   * Empty everywhere a person is editing: this is not a way to author a document, and a host that
+   * wants a different design should open a different one. It exists for the same reason
+   * [initialCanvasZoom] pins a scale — a caller that is *picturing* the editor rather than running
+   * it. The History panel is about what this session has done, so a session that has done nothing
+   * draws the one state that says nothing about the panel, and the preview that has to diff it
+   * hands the session the edits it is a picture of.
+   *
+   * Anything the reducer refuses is left out of the state the same way it would be for a person: a
+   * seed that cannot be applied is not a reason to refuse to open the design.
+   */
+  initialEdits: List<UiBuilderEditorEvent> = emptyList(),
   initialPreviewMode: Boolean = false,
   initialCodePaneVisible: Boolean = false,
   /**
@@ -444,6 +464,20 @@ fun UiBuilderEditor(
    */
   resolveRemoteComposeDocument: (suspend (RemoteComposeSource) -> String)? = null,
   /**
+   * Fetches the Base64-encoded document at an embedded node's `documentUrl`, or throws.
+   *
+   * The other half of [resolveRemoteComposeDocument] and deliberately a separate parameter. That
+   * one is an *authoring* action: an author presses Add, the bytes are copied into the design, and
+   * the design carries them for ever after. This one is a *reference*: the design carries a URL,
+   * and what the canvas draws is whatever that URL serves today. A host that can do one and not the
+   * other is a real configuration — a catalog with a published sticker sheet and no proxy for
+   * arbitrary URLs is exactly it — so the two are asked for separately.
+   *
+   * Null leaves every `documentUrl` node drawing its waiting state, which is the honest answer for
+   * a host that cannot fetch: the node is not broken, it is unresolved.
+   */
+  resolveRemoteComposeUrl: (suspend (String) -> String)? = null,
+  /**
    * Fetches a Lottie animation's JSON from the URL a `remote-m3/lottie` element carries, or throws.
    *
    * Host-owned like [resolveRemoteComposeDocument], and for a sharper reason than "the network is
@@ -453,6 +487,15 @@ fun UiBuilderEditor(
    * the unfinished thing it is.
    */
   loadLottieAnimation: (suspend (String) -> String)? = null,
+  /**
+   * Fetches the bytes behind one of the design's **uploaded** assets, by asset key, or throws.
+   *
+   * Host-owned for the reason the two above are: the design names a storage key and only the host
+   * that stores it can turn that into pixels, over whatever route and credential it holds. Null
+   * leaves every uploaded picture drawing its placeholder, which is the honest answer for a host
+   * with no asset lane — the node is not broken, its picture is elsewhere.
+   */
+  resolveDesignAsset: (suspend (String) -> ByteArray)? = null,
 ) {
   val reducer =
     remember(catalog, actorId, clientId, operationIdPrefix) {
@@ -498,6 +541,17 @@ fun UiBuilderEditor(
   LaunchedEffect(document.revision, authoritativeGeneration) {
     if (state.document != document) {
       state = reducer.reconciled(state, document, initialSelectedNodeId)
+    }
+  }
+  // After the reconcile above rather than inside the state it opens with, because that reconcile
+  // fires on the first composition too: a session seeded at construction has a document the
+  // authoritative one does not match, so it was rebuilt from the authoritative one and the seed
+  // was gone before anything drew. Once per design, and never at all in the empty default.
+  var seeded by remember(document.id) { mutableStateOf(false) }
+  LaunchedEffect(document.id) {
+    if (!seeded && initialEdits.isNotEmpty()) {
+      seeded = true
+      state = initialEdits.fold(state, reducer::reduce)
     }
   }
   // Applied once, and only over an editor that has nothing of its own: the host delivers this
@@ -846,6 +900,12 @@ fun UiBuilderEditor(
   // Called inline it would run all of that on every recomposition of the inspector — which is
   // every keystroke in a property field and every frame of a drag.
   val problems = remember(reducer, state.document) { reducer.problems(state.document) }
+  // Keyed on the operation counter rather than on the document: an undo puts the document back to
+  // one the history has already seen, and the entry it moved the marker to is the whole point.
+  val operationHistory =
+    remember(reducer, state.operationSequence, state.document.revision) {
+      reducer.operationHistory(state)
+    }
   /**
    * The slot a piece would be built into, hit-tested at its own centre.
    *
@@ -878,7 +938,7 @@ fun UiBuilderEditor(
   // than showing the frame the design used to have — a stale native render beside a live canvas is
   // the exact disagreement this pane exists to expose.
   LaunchedEffect(nativeRequested, state.document.revision) {
-    if (!nativeRequested || onRequestNativeRender == null) return@LaunchedEffect
+    if (!nativeRequested) return@LaunchedEffect
     nativePending = true
     nativeRender =
       try {
@@ -914,6 +974,64 @@ fun UiBuilderEditor(
       dispatch(UiBuilderEditorEvent.InsertRemoteComposeDocument(source, encoded, target))
     }
     pendingRemoteSource = null
+  }
+  // Every `documentUrl` the design references, and what came back for it.
+  //
+  // Keyed by URL rather than by node, so two nodes pointing at one document are one fetch and one
+  // decode. Held across revisions on purpose: an edit elsewhere in the design must not re-fetch
+  // content that has not changed, and a URL removed from the design costs a map entry rather than a
+  // round trip to discover it is gone.
+  val remoteDocumentsByUrl = remember { mutableStateMapOf<String, Result<RcDocument>>() }
+  val referencedUrls =
+    state.document.nodes.values
+      .filter { it.componentId == REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID }
+      .mapNotNull { node ->
+        (node.properties["documentUrl"] as? JsonObject)
+          ?.get("value")
+          ?.jsonPrimitive
+          ?.contentOrNull
+          ?.takeIf(String::isNotBlank)
+      }
+      .distinct()
+      .sorted()
+  LaunchedEffect(referencedUrls, resolveRemoteComposeUrl) {
+    val resolve = resolveRemoteComposeUrl ?: return@LaunchedEffect
+    referencedUrls.filterNot(remoteDocumentsByUrl::containsKey).forEach { url ->
+      // Stored per URL as it arrives rather than after the whole list, so one unreachable
+      // document does not hold the others off the canvas. The failure is stored too: a URL that
+      // 404s is answered once and drawn as the error it is, instead of being retried every frame.
+      remoteDocumentsByUrl[url] =
+        try {
+          decodeRemoteComposeDocument(resolve(url))
+        } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+          throw cancelled
+        } catch (failure: Throwable) {
+          Result.failure(failure)
+        }
+    }
+  }
+  // Every uploaded asset the design names, decoded once per content digest.
+  //
+  // Keyed by digest rather than by asset key, which is what `LocalUiBuilderAssetBitmaps` is keyed
+  // by too: re-pointing a key at a new picture changes the digest and fetches again, while an edit
+  // anywhere else in the design finds its pictures already here. A failed fetch or decode is stored
+  // as null so the placeholder is drawn once rather than the request retried every recomposition.
+  val assetBitmapsByDigest = remember { mutableStateMapOf<String, ImageBitmap?>() }
+  val uploadedAssets = state.document.uploadedAssets()
+  LaunchedEffect(uploadedAssets, resolveDesignAsset) {
+    val resolve = resolveDesignAsset ?: return@LaunchedEffect
+    uploadedAssets
+      .filterNot { (_, asset) -> assetBitmapsByDigest.containsKey(asset.contentDigest) }
+      .forEach { (assetKey, asset) ->
+        assetBitmapsByDigest[asset.contentDigest] =
+          try {
+            decodeUiBuilderAssetBitmap(resolve(assetKey))
+          } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+            throw cancelled
+          } catch (_: Throwable) {
+            null
+          }
+      }
   }
   // The URL half of a Lottie element, resolved into the JSON half exactly once.
   //
@@ -983,6 +1101,7 @@ fun UiBuilderEditor(
       comparisonBindingProperties = comparisonBindingProperties,
       bindableProperties = bindableProperties,
       problems = problems,
+      operationHistory = operationHistory,
       themeSettings = reducer.themeSettings(state),
       devicePresets = devicePresets,
       onPickReference = onPickReference,
@@ -1036,7 +1155,11 @@ fun UiBuilderEditor(
 
   // Provided once here rather than at each surface: the canvas, every palette thumbnail and the
   // preview frame all draw a pack component, and all of them should draw its placeholder.
-  CompositionLocalProvider(LocalUiBuilderNativeOnly provides catalog.nativeOnlyComponentIds) {
+  CompositionLocalProvider(
+    LocalUiBuilderNativeOnly provides catalog.nativeOnlyComponentIds,
+    LocalRemoteComposeDocuments provides { url -> remoteDocumentsByUrl[url] },
+    LocalUiBuilderAssetBitmaps provides { digest -> assetBitmapsByDigest[digest] },
+  ) {
     MaterialTheme(colorScheme = EditorColors) {
       BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 840.dp
@@ -3288,6 +3411,7 @@ private enum class EditorDock(val label: String) {
   Screen("Screen"),
   Issues("Issues"),
   Comments("Talk"),
+  History("History"),
   Code("Code"),
 }
 
@@ -3304,6 +3428,7 @@ private fun EditorDock.inspectorMode(): EditorInspectorMode? =
     EditorDock.Screen -> EditorInspectorMode.Screen
     EditorDock.Issues -> EditorInspectorMode.Issues
     EditorDock.Comments -> EditorInspectorMode.Comments
+    EditorDock.History -> EditorInspectorMode.History
     EditorDock.Code -> null
   }
 
@@ -3390,6 +3515,7 @@ private fun EditorDock.icon(): ImageVector =
     EditorDock.Screen -> Icons.Filled.PhoneAndroid
     EditorDock.Issues -> Icons.Filled.ErrorOutline
     EditorDock.Comments -> Icons.Filled.ChatBubbleOutline
+    EditorDock.History -> Icons.Filled.History
     EditorDock.Code -> Icons.Filled.Code
   }
 
@@ -3399,8 +3525,15 @@ private fun NavigatorTab.icon(): ImageVector =
     NavigatorTab.Layers -> Icons.Filled.AccountTree
   }
 
+/**
+ * The design pinned in the workspace: framed or zoomed, scrolled, and hit-tested.
+ *
+ * Internal rather than private so a test can measure what the frame hands the design. How big that
+ * frame is depends on the density the design is drawn at, which is a fact about a *rendered*
+ * composition and not one any amount of reading the arithmetic below settles.
+ */
 @Composable
-private fun PinnedDesignCanvas(
+internal fun PinnedDesignCanvas(
   document: UiBuilderDocument,
   selectedNodeId: String?,
   onNodeSelected: (String) -> Unit,
@@ -3436,6 +3569,21 @@ private fun PinnedDesignCanvas(
   val sourceHeight =
     document.environment["heightDp"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 800f
   val density = LocalDensity.current
+  // What one of the design's pixels is worth in the workspace's.
+  //
+  // The workspace is measured at the host's density — the browser's `devicePixelRatio`, which is
+  // usually 1 — while the design inside the frame is measured at the one its environment names: 2.0
+  // for a watch, 2.625 for a phone. So `240.dp` written here and `240.dp` written inside the design
+  // are not the same width, and sizing the frame with the workspace's dp handed a 240dp watch 240
+  // of the *workspace's* pixels, which the design then read as 120dp. Everything authored wider
+  // than that was clamped to it: a 216x124dp Wear widget came out 120dp wide against an unclamped
+  // 124dp tall, which is the square frame with the text column crushed out of it in #521.
+  //
+  // So the frame is sized in the design's pixels — every dp below multiplied through this — and
+  // drawn back down to the workspace by [drawScale], which leaves what is on screen exactly where
+  // the zoom says. It is 1 wherever the two densities agree, which is why the 1280x800-at-1.0
+  // fixture the harness drives never showed any of this.
+  val densityRatio = document.renderDensity(density).density / density.density
   var inspection by
     remember(document.id, document.revision) { mutableStateOf<UiBuilderInspectionSnapshot?>(null) }
   BoxWithConstraints(modifier.clipToBounds(), contentAlignment = contentAlignment) {
@@ -3466,6 +3614,11 @@ private fun PinnedDesignCanvas(
       minOf(workspaceWidth.value / pairWidth, workspaceHeight.value / expandedHeightDp)
         .coerceIn(MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM)
     val scale = zoom ?: fitScale
+    // The frame is laid out in the design's pixels, so it is drawn back down by the same ratio it
+    // was sized up by. Equal to [scale] whenever the design's density is the host's, which is what
+    // keeps the zoom readout and the fit above honest: the frame still covers `sourceWidth * scale`
+    // of the workspace's dp.
+    val drawScale = scale / densityRatio
     // In dp, because that is what the metrics callback reports and what the frame is measured in.
     var measuredDp by remember(document.id) { mutableStateOf(0 to 0) }
     // Reported on every change of either, not just on a resize: the frame's own size does not move
@@ -3501,18 +3654,20 @@ private fun PinnedDesignCanvas(
                 // The frame's width, the content's height, never shorter than the frame — the
                 // extent. `requiredSize` here is what used to cut a long list off at the frame and
                 // leave the rest of it somewhere nobody could edit.
-                .requiredWidth(sourceWidth.dp)
-                .requiredHeightIn(min = sourceHeight.dp)
+                .requiredWidth((sourceWidth * densityRatio).dp)
+                .requiredHeightIn(min = (sourceHeight * densityRatio).dp)
+                // Back into the design's own dp — the unit the environment states the frame in and
+                // the one the extent is compared against above — rather than the workspace's.
                 .onSizeChanged { size ->
+                  val designDensity = document.renderDensity(density).density
                   measuredDp =
-                    with(density) {
-                      size.width.toDp().value.roundToInt() to size.height.toDp().value.roundToInt()
-                    }
-                  expandedHeightDp = with(density) { size.height.toDp().value }
+                    (size.width / designDensity).roundToInt() to
+                      (size.height / designDensity).roundToInt()
+                  expandedHeightDp = size.height / designDensity
                 }
                 .graphicsLayer {
-                  scaleX = scale
-                  scaleY = scale
+                  scaleX = drawScale
+                  scaleY = drawScale
                   transformOrigin = TransformOrigin(0f, 0f)
                   compositingStrategy = CompositingStrategy.Offscreen
                 }
@@ -3534,11 +3689,12 @@ private fun PinnedDesignCanvas(
                 Modifier.fillMaxSize().onSecondaryClick(document.id) { position ->
                   if (!showSelectionOverlay) return@onSecondaryClick
                   // The inspection reports each box in root pixels, which is the space this press
-                  // has to be asked in: the frame is offset in the workspace and drawn at [scale].
+                  // has to be asked in: the frame is offset in the workspace and its own pixels
+                  // reach the screen through [drawScale].
                   val point =
                     Offset(
-                      frameBounds.left + position.x * scale,
-                      frameBounds.top + position.y * scale,
+                      frameBounds.left + position.x * drawScale,
+                      frameBounds.top + position.y * drawScale,
                     )
                   // The design already reports every node's box, which is what the presence
                   // overlay and the catalog drop both hit-test against. Smallest box wins: the
@@ -3569,8 +3725,8 @@ private fun PinnedDesignCanvas(
                     offset =
                       with(density) {
                         DpOffset(
-                          ((menuAt?.x ?: 0f) * scale).toDp(),
-                          ((menuAt?.y ?: 0f) * scale).toDp(),
+                          ((menuAt?.x ?: 0f) * drawScale).toDp(),
+                          ((menuAt?.y ?: 0f) * drawScale).toDp(),
                         )
                       },
                   ) {
@@ -3620,6 +3776,7 @@ private fun PinnedDesignCanvas(
               widthDp = sourceWidth,
               heightDp = sourceHeight,
               scale = scale,
+              densityRatio = densityRatio,
             )
           }
         }
@@ -3683,17 +3840,21 @@ private fun ConstrainedFramePane(
   widthDp: Float,
   heightDp: Float,
   scale: Float,
+  /** The design's pixels per workspace pixel — see the same value in [PinnedDesignCanvas]. */
+  densityRatio: Float,
 ) {
   Box(Modifier.size((widthDp * scale).dp, (heightDp * scale).dp)) {
     Surface(
       Modifier.wrapContentSize(Alignment.TopStart, unbounded = true)
-        .requiredSize(widthDp.dp, heightDp.dp)
+        // The device's frame in the design's own pixels, like the extent beside it: this pane
+        // exists to say what a device shows, and it can only say it at the density the device has.
+        .requiredSize((widthDp * densityRatio).dp, (heightDp * densityRatio).dp)
         // Clipped before it is scrolled: the frame is the device's edge, and content past it is
         // what the person scrolls to rather than something that spills onto the canvas.
         .clip(RoundedCornerShape(0.dp))
         .graphicsLayer {
-          scaleX = scale
-          scaleY = scale
+          scaleX = scale / densityRatio
+          scaleY = scale / densityRatio
           transformOrigin = TransformOrigin(0f, 0f)
           compositingStrategy = CompositingStrategy.Offscreen
         },
@@ -4160,15 +4321,18 @@ private fun CatalogRow(
         DisclosureTriangle(expanded, MaterialTheme.colorScheme.onSurfaceVariant)
       }
     }
-    CatalogThumbnail(
-      document = thumbnail,
-      dragKey = item.componentId,
-      label = item.displayName,
-      size = COMPONENT_THUMBNAIL_SIZE,
-      onDrag = onDrag,
-      onDrop = onDrop,
-    )
-    Column(Modifier.padding(start = 6.dp).weight(1f)) {
+    val unexportable = item.exportsToCompose == false
+    Box(Modifier.unexportable(unexportable)) {
+      CatalogThumbnail(
+        document = thumbnail,
+        dragKey = item.componentId,
+        label = item.displayName,
+        size = COMPONENT_THUMBNAIL_SIZE,
+        onDrag = onDrag,
+        onDrop = onDrop,
+      )
+    }
+    Column(Modifier.padding(start = 6.dp).weight(1f).unexportable(unexportable)) {
       Text(item.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
       Text(
         item.componentId,
@@ -4177,6 +4341,7 @@ private fun CatalogRow(
         maxLines = 1,
       )
     }
+    if (unexportable) UnexportableBadge(item.displayName)
     if (item.variants.isNotEmpty()) {
       Text(
         item.variants.size.toString(),
@@ -4219,17 +4384,25 @@ private fun CatalogVariantRow(
     verticalAlignment = Alignment.CenterVertically,
   ) {
     IndentGuide(depth = 2)
-    CatalogThumbnail(
-      document = thumbnail,
-      dragKey = "${variant.componentId}#${variant.value}",
-      label = qualified,
-      // Smaller than a component's, because a variant is a detail of the row above it and a column
-      // of equal-sized pictures loses the hierarchy the indent just established.
-      size = VARIANT_THUMBNAIL_SIZE,
-      onDrag = onDrag,
-      onDrop = onDrop,
-    )
-    Row(Modifier.padding(start = 6.dp).weight(1f), verticalAlignment = Alignment.CenterVertically) {
+    // Dimmed with its component and no badge of its own: the row above already carries the word,
+    // and a variant is a detail of that row rather than a second component.
+    val unexportable = variant.exportsToCompose == false
+    Box(Modifier.unexportable(unexportable)) {
+      CatalogThumbnail(
+        document = thumbnail,
+        dragKey = "${variant.componentId}#${variant.value}",
+        label = qualified,
+        // Smaller than a component's, because a variant is a detail of the row above it and a
+        // column of equal-sized pictures loses the hierarchy the indent just established.
+        size = VARIANT_THUMBNAIL_SIZE,
+        onDrag = onDrag,
+        onDrop = onDrop,
+      )
+    }
+    Row(
+      Modifier.padding(start = 6.dp).weight(1f).unexportable(unexportable),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
       Text(
         label,
         style = MaterialTheme.typography.bodySmall,
@@ -4249,6 +4422,41 @@ private fun CatalogVariantRow(
     }
     CatalogAddButton(canAdd, onAdd, qualified)
   }
+}
+
+/**
+ * How far a row the Compose export cannot write fades.
+ *
+ * Faded rather than disabled, because the row is not broken: the canvas draws the component, the
+ * PNG and SVG exports carry it, and only the Kotlin is missing. Far enough to read as greyed at a
+ * glance next to a covered row, not so far that the name and the picture stop being legible — the
+ * row still has to be findable by someone who wants the thing on the canvas.
+ */
+private const val UNEXPORTABLE_ALPHA = 0.45f
+
+private fun Modifier.unexportable(unexportable: Boolean): Modifier =
+  if (unexportable) alpha(UNEXPORTABLE_ALPHA) else this
+
+/**
+ * The mark on a row the Compose export cannot write, beside the Add it does not take away.
+ *
+ * An icon rather than a word, and the reason is the panel's width. It is 280 dp at its narrowest
+ * and the name column gives way to whatever sits here: a two-word label turned "Supporting pane"
+ * into "Supporting" and "Search input field" into "Search" — the row saying less about what the
+ * component is in order to say what it cannot do. Code, crossed out, is the whole message in 16 dp;
+ * the fade on the rest of the row is what makes it read at a glance, and the description carries
+ * the sentence for the reader who cannot see either. "Compose export" rather than "export": the PNG
+ * and SVG exports do carry these, and the toolbar's Export offers all three.
+ */
+@Composable
+private fun UnexportableBadge(componentName: String) {
+  Icon(
+    Icons.Filled.CodeOff,
+    contentDescription =
+      "$componentName renders on the canvas, but the Compose export cannot write it yet",
+    modifier = Modifier.padding(end = 6.dp).size(16.dp),
+    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+  )
 }
 
 /**
@@ -4977,6 +5185,7 @@ private fun PropertyInspector(
   comparisonBindingProperties: Set<String>,
   bindableProperties: Set<String>,
   problems: List<EditorProblem>,
+  operationHistory: List<EditorOperationEntry>,
   themeSettings: EditorThemeSettings,
   devicePresets: List<UiBuilderDevicePreset>,
   onPickReference: (suspend () -> ReferenceImportOutcome)?,
@@ -5013,6 +5222,7 @@ private fun PropertyInspector(
               if (problems.isEmpty()) "Issues" else "Issues · ${problems.size}"
             EditorInspectorMode.Comments ->
               comments.openThreads.size.let { if (it == 0) "Talk" else "Talk · $it" }
+            EditorInspectorMode.History -> "History"
           },
         supporting =
           when (state.inspectorMode) {
@@ -5021,6 +5231,7 @@ private fun PropertyInspector(
             EditorInspectorMode.Screen -> "Frame, density and reference"
             EditorInspectorMode.Issues -> "What the export would refuse"
             EditorInspectorMode.Comments -> "What people and agents have said"
+            EditorInspectorMode.History -> "What has been done, newest first"
           },
         onClose = onClose,
       )
@@ -5032,6 +5243,7 @@ private fun PropertyInspector(
         comparisonBindingProperties = comparisonBindingProperties,
         bindableProperties = bindableProperties,
         problems = problems,
+        operationHistory = operationHistory,
         themeSettings = themeSettings,
         devicePresets = devicePresets,
         onPickReference = onPickReference,
@@ -5065,6 +5277,7 @@ private fun InspectorBody(
   comparisonBindingProperties: Set<String>,
   bindableProperties: Set<String>,
   problems: List<EditorProblem>,
+  operationHistory: List<EditorOperationEntry>,
   themeSettings: EditorThemeSettings,
   devicePresets: List<UiBuilderDevicePreset>,
   onPickReference: (suspend () -> ReferenceImportOutcome)?,
@@ -5087,6 +5300,12 @@ private fun InspectorBody(
   Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
     if (state.inspectorMode == EditorInspectorMode.Issues) {
       ProblemsInspector(problems, dispatch)
+      return@Column
+    }
+    if (state.inspectorMode == EditorInspectorMode.History) {
+      OperationHistoryInspector(operationHistory) { nodeId ->
+        dispatch(UiBuilderEditorEvent.SelectNode(nodeId))
+      }
       return@Column
     }
     if (state.inspectorMode == EditorInspectorMode.Comments) {
@@ -5675,6 +5894,131 @@ private fun ProblemsInspector(
 }
 
 /**
+ * What has been done to this design, newest first, and which of it undo would take back.
+ *
+ * The panel exists for one sentence in the toolbar that was never written: undo takes something
+ * back without saying what, and on a design being edited by more than one person the something is
+ * very often not what you last did. So the entry undo is aimed at is marked, the entry redo would
+ * return is marked, and everybody else's changes sit in the list between them — unmarked, because
+ * they are not yours to take back, and named, because they are usually the answer.
+ *
+ * Read-only on purpose. Walking the history from a row is a different feature with a much harder
+ * question behind it — what happens to the changes somebody else made in between — and a panel that
+ * only tells the truth about the buttons that already exist is worth having before that is
+ * answered.
+ */
+@Composable
+private fun OperationHistoryInspector(
+  entries: List<EditorOperationEntry>,
+  onSelectNode: (String) -> Unit,
+) {
+  if (entries.isEmpty()) {
+    Text(
+      "Nothing has been changed in this session yet.",
+      Modifier.padding(top = 16.dp),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    return
+  }
+  Text(
+    "Undo and redo act on the marked entries, which are your own changes.",
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    style = MaterialTheme.typography.labelSmall,
+  )
+  // Selectable for the same reason the issues are: a value somebody is comparing against is a value
+  // they want to paste somewhere. A tap still selects the node underneath.
+  SelectionContainer {
+    LazyColumn(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+      items(entries, key = EditorOperationEntry::operationId) { entry ->
+        OperationHistoryRow(entry, onSelectNode)
+      }
+    }
+  }
+}
+
+@Composable
+private fun OperationHistoryRow(entry: EditorOperationEntry, onSelectNode: (String) -> Unit) {
+  val marked =
+    entry.standing == EditorOperationStanding.NextUndo ||
+      entry.standing == EditorOperationStanding.NextRedo
+  // Undone entries are drawn back rather than removed: what redo would put back is as much a part
+  // of "where am I in this history" as what undo would take away.
+  val faded = entry.standing == EditorOperationStanding.Undone
+  Column(
+    Modifier.fillMaxWidth()
+      .padding(bottom = 4.dp)
+      .let { base ->
+        if (marked)
+          base
+            .background(
+              MaterialTheme.colorScheme.surfaceVariant,
+              RoundedCornerShape(6.dp),
+            )
+            .padding(8.dp)
+        else base.padding(vertical = 4.dp)
+      }
+      .let { base -> entry.nodeId?.let { id -> base.clickable { onSelectNode(id) } } ?: base }
+  ) {
+    entry.standing.marker()?.let { marker ->
+      Text(
+        marker,
+        color = MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.labelSmall,
+      )
+    }
+    Text(
+      entry.summary,
+      color =
+        if (faded) MaterialTheme.colorScheme.onSurfaceVariant
+        else MaterialTheme.colorScheme.onSurface,
+      style = MaterialTheme.typography.bodySmall,
+    )
+    entry.changes.forEach { change ->
+      Text(
+        change.readable(),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+      )
+    }
+    Text(
+      listOfNotNull(
+          "Revision ${entry.revision}",
+          if (entry.mine) "you" else entry.actorId,
+          if (faded) "undone" else null,
+        )
+        .joinToString(" · "),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+    )
+  }
+}
+
+/**
+ * One change as a line: what the value is now, and what it was.
+ *
+ * No arrow, and that is not a style preference: the browser build has no glyph for one, and the
+ * first render of this panel drew a box between every before and after. An absent end is said with
+ * a missing half rather than a dash, for the same reason — "text was Hello" says the property is
+ * gone, in characters the font is known to have.
+ */
+internal fun EditorOperationChange.readable(): String =
+  when {
+    after != null && before != null -> "$label  $after  \u00b7  was $before"
+    after != null -> "$label  $after"
+    before != null -> "$label  was $before"
+    else -> label
+  }
+
+/** What the two entries the toolbar is aimed at say about themselves, and nothing for the rest. */
+private fun EditorOperationStanding.marker(): String? =
+  when (this) {
+    EditorOperationStanding.NextUndo -> "Undo takes this back"
+    EditorOperationStanding.NextRedo -> "Redo puts this back"
+    EditorOperationStanding.Applied,
+    EditorOperationStanding.Undone -> null
+  }
+
+/**
  * The Kotlin the Compose export would write for the document on the canvas.
  *
  * ## Why it is here rather than behind the export button
@@ -5984,6 +6328,18 @@ private fun ScreenEnvironmentInspector(
         if (validationError == null) dispatch(UiBuilderEditorEvent.UpdateEnvironment(applied))
       },
     )
+    ExportDevicePicker(
+      presets = devicePresets,
+      selected = current.exportDevices,
+      onToggle = { id ->
+        // The whole set per edit, matching the protocol change and for its reason: a toggle that
+        // sent an add or a remove would let two people's ideas of the set drift apart between them.
+        val next =
+          if (id in current.exportDevices) current.exportDevices - id
+          else current.exportDevices + id
+        dispatch(UiBuilderEditorEvent.UpdateEnvironment(current.copy(exportDevices = next)))
+      },
+    )
   }
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     EnvironmentTextField(
@@ -6147,6 +6503,84 @@ private fun DevicePresetPicker(
               expanded = false
               onPick(preset)
             },
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * The devices a design is exported as, beside the one it is drawn at.
+ *
+ * A multi-select rather than a second single choice, because the answer is genuinely a set: a
+ * screen claims to work on a phone *and* a foldable *and* a tablet, and picking them one at a time
+ * would make "which does this cover?" a question you answer by remembering. The frame above stays
+ * single — it is the canvas somebody approved — and this says where else the export has to hold up.
+ *
+ * Checked state is the set's membership, so the menu is also the report: open it and the ticks are
+ * the answer. Nothing here is the frame device, which is why picking none is a legitimate state and
+ * reads as "exports at its own frame alone" rather than as an empty selection nobody finished.
+ */
+@Composable
+private fun ExportDevicePicker(
+  presets: List<UiBuilderDevicePreset>,
+  selected: List<String>,
+  onToggle: (String) -> Unit,
+) {
+  var expanded by remember { mutableStateOf(false) }
+  Text(
+    "Also exports as",
+    style = MaterialTheme.typography.labelMedium,
+    fontWeight = FontWeight.Bold,
+  )
+  Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp)) {
+    Button(
+      onClick = { expanded = true },
+      modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Export devices" },
+    ) {
+      Text(
+        // Naming the devices while there are few enough to read beats a count: "Pixel 6, Pixel
+        // Fold" is the answer, where "2 devices" is a prompt to go and look.
+        when {
+          selected.isEmpty() -> "This frame only"
+          selected.size <= 2 ->
+            selected.joinToString(", ") { id -> presets.firstOrNull { it.id == id }?.label ?: id }
+          else -> "${selected.size} devices"
+        },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+      presets.groupBy(UiBuilderDevicePreset::group).forEach { (group, devices) ->
+        Text(
+          group,
+          Modifier.padding(start = 12.dp, top = 10.dp, bottom = 2.dp),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.labelSmall,
+          fontWeight = FontWeight.Bold,
+        )
+        devices.forEach { preset ->
+          val checked = preset.id in selected
+          DropdownMenuItem(
+            text = {
+              Column {
+                Text(
+                  preset.label,
+                  fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
+                )
+                Text(
+                  preset.summary,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  style = MaterialTheme.typography.bodySmall,
+                )
+              }
+            },
+            leadingIcon = { Checkbox(checked = checked, onCheckedChange = null) },
+            // The menu stays open: picking a set one item at a time through a menu that closes
+            // after each is the interaction this control exists to avoid.
+            onClick = { onToggle(preset.id) },
           )
         }
       }

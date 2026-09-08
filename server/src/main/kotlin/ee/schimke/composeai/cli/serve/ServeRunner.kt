@@ -3,21 +3,19 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
-import ee.schimke.composeai.bundle.AndroidBundleLaunch
 import ee.schimke.composeai.bundle.BundleReader
 import ee.schimke.composeai.bundle.BundleVerifier
 import ee.schimke.composeai.bundle.TrustStore
-import ee.schimke.composeai.bundle.locateBundleSidecarJars
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.previewdata.PreviewInfo
 import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
 import ee.schimke.composeai.render.session.RenderSessionException
-import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
+import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
@@ -29,6 +27,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -267,6 +266,21 @@ public class ServeRunner(
    */
   private val imageLaneConfigured: Boolean
     get() = acceptImages && !imageUploadRepository.isNullOrBlank()
+
+  /**
+   * Whether the UI builder is a lane in its own right on this host.
+   *
+   * It registers no session and hosts no preview, so the empty-server check used to conclude there
+   * was nothing to serve and exit — which made `ui --no-project`, a server whose entire job is the
+   * builder, refuse to start. It is the same case as `--accept-docs`: a real surface that simply
+   * has no sessions, ever.
+   *
+   * Both halves are required, for the reason [imageLaneConfigured] states about its own: assets
+   * that are not there serve nothing, and `--ui-builder-state-dir none` serves an editor that
+   * cannot save, so neither is a lane that should keep an otherwise empty server alive.
+   */
+  private val uiBuilderLaneConfigured: Boolean
+    get() = usableUiBuilderDir() != null && uiBuilderStateDirFlag != "none"
 
   /**
    * The parsed `--catalogs-file`, or the empty config when none is set / it can't be read. A
@@ -1186,6 +1200,7 @@ public class ServeRunner(
         !acceptBundles &&
         !acceptDocs &&
         !imageLaneConfigured &&
+        !uiBuilderLaneConfigured &&
         adminToken == null
     ) {
       // An `--accept-images` that couldn't be configured is why we may be here at all, and the
@@ -1194,7 +1209,8 @@ public class ServeRunner(
       if (acceptImages) System.err.println(ServeDefaults.IMAGE_LANE_NO_REPO)
       System.err.println(
         "serve: nothing to serve — no --bundle / --bundles / --catalogs registered a session, and " +
-          "none of --accept-bundles / --accept-docs / --accept-images / --admin-token is set."
+          "none of --accept-bundles / --accept-docs / --accept-images / --ui-builder-dir / " +
+          "--admin-token is set."
       )
       // Guide the common "ran serve in my project expecting a build" case: Gradle discovery is now
       // opt-in, so point at --discover / --module rather than leaving them staring at a bare error.
@@ -1870,6 +1886,9 @@ public class ServeRunner(
       health = health,
       captureNodeBounds = captureNodeBounds,
       catalogBackend = { id -> catalogTargets?.targets()?.firstOrNull { it.id == id }?.backend },
+      remoteComposeCatalog = {
+        catalogTargets?.targets()?.firstOrNull { PlaygroundMode.REMOTE_COMPOSE in it.modes }?.id
+      },
     )
   }
 
@@ -2012,6 +2031,21 @@ public class ServeRunner(
      * map captured here would be empty for the life of the process.
      */
     val catalogBackend: (String) -> String? = { null },
+    /**
+     * A served catalog this host can compile a `@RemoteComposable` body against, or null.
+     *
+     * The first target the selector offers `remote-compose` on, which is already the intersection
+     * of "the bundle is an Android one" with "this host wired the capture and the document store"
+     * ([PlaygroundCatalogTargets]). Any of them is correct: an inline body is written in the Remote
+     * Compose vocabulary rather than in a catalog's own components, so what it needs from a bundle
+     * is the creation library, not a particular design system. Read fresh for the reason
+     * [catalogBackend] is.
+     *
+     * Null on a host running only `--playground-bundle` pins, which offer no selectable catalog id
+     * to name — and a UI-builder capture must name one, because the compile lane deliberately never
+     * falls back from a named catalog to a pinned default.
+     */
+    val remoteComposeCatalog: () -> String? = { null },
   )
 
   /**
@@ -2091,138 +2125,30 @@ public class ServeRunner(
       }
 
   /**
-   * Resolve the Android/Robolectric daemon opener shared by the playground's Android render lanes —
-   * the `lib-daemon-android` sidecar + `android.jar` on the daemon classpath, the Robolectric
-   * jvmArgs/sysprops, and a subprocess `openBundleDaemon`. Mirrors [ServeBundleDaemon]'s
-   * `androidBundleDaemonLaunch`. Returns null (logging why) when the sidecar or `android.jar` is
-   * missing — both Android lanes then report unavailable rather than compiling to a dead end.
+   * The playground's Android/Robolectric daemon opener — [PlaygroundDaemonOpeners.android], with
+   * this host's wording on the way out. Returns null (logging why) when the sidecar or
+   * `android.jar` is missing; both Android lanes then report unavailable rather than compiling to a
+   * dead end.
    */
   private fun buildPlaygroundAndroidDaemonOpener(
     sandbox: PlaygroundSandbox
-  ): PlaygroundAndroidSessionOpener? {
-    val daemonJars = locateBundleSidecarJars("lib-daemon-android")
-    if (daemonJars.isEmpty()) {
-      System.err.println(
-        "serve: playground Android modes need the Android daemon sidecar " +
-          "(lib-daemon-android/), which ships separately as " +
-          "compose-preview-android-daemon-<version>.zip; unpack it and set " +
-          "-Dcomposeai.cli.libDaemonAndroidDir=<dir>/lib-daemon-android. Android modes disabled."
-      )
-      return null
+  ): PlaygroundAndroidSessionOpener? =
+    PlaygroundDaemonOpeners.android(sandbox) {
+      System.err.println("serve: playground Android modes disabled — $it")
     }
-    val androidJar =
-      AndroidBundleLaunch.resolveAndroidJar(localPropertiesFile = null)
-        ?: run {
-          System.err.println(
-            "serve: playground Android modes need android.jar — set ANDROID_HOME / " +
-              "ANDROID_SDK_ROOT. Android modes disabled."
-          )
-          return null
-        }
-    val launch = AndroidBundleLaunch()
-    val daemonClasspath = (daemonJars + listOf(androidJar)).map { it.absolutePath }
-    val jvmArgs = launch.jvmArgs()
-    val sysprops = sandbox.robolectricSystemProperties(launch.robolectricSystemProperties())
-    return { classesDir, previewsJson, workspaceRoot, userClasspath ->
-      openPlaygroundFirstFrameDaemon(
-        daemonClasspath,
-        jvmArgs,
-        sysprops,
-        classesDir,
-        previewsJson,
-        workspaceRoot,
-        userClasspath,
-        sandbox,
-      )
-    }
-  }
 
   /**
-   * Open a bundle-less daemon for a first-frame render, partitioning the snippet's [userClasspath]
-   * the way the live path ([ServeBundleDaemon.materializePlaygroundSnippet]) does: jars in the
-   * namespaces `UserClassLoaderHolder` delegates to the parent (`androidx.*`, `kotlinx-coroutines`,
-   * `kotlinx-io`) must precede the [sidecarClasspath] on the daemon (parent) `-cp`, or the daemon
-   * loads its own sidecar versions and a snippet built against the catalog's newer shared ABI fails
-   * with `NoSuchMethodError`/`NoSuchFieldError` (and the render service then silently returns no
-   * image). The snippet's own classes stay isolated on the child (user) loader.
-   */
-  private fun openPlaygroundFirstFrameDaemon(
-    sidecarClasspath: List<String>,
-    jvmArgs: List<String>,
-    extraSystemProperties: Map<String, String>,
-    classesDir: java.io.File,
-    previewsJson: java.io.File,
-    workspaceRoot: java.io.File,
-    userClasspath: List<String>,
-    sandbox: PlaygroundSandbox,
-  ) =
-    SubprocessRenderSessions.openBundleDaemon(
-      daemonClasspath =
-        userClasspath.filter { ServeBundleDaemon.jarPrecedesDaemonSidecar(java.io.File(it)) } +
-          sidecarClasspath,
-      classesDir = classesDir,
-      previewsJson = previewsJson,
-      workspaceRoot = workspaceRoot,
-      modulePath = ":playground",
-      // The sandbox's JVM caps come last so they win over the backend defaults.
-      jvmArgs = jvmArgs + sandbox.jvmArgs(workspaceRoot),
-      extraSystemProperties = extraSystemProperties,
-      userClasspath =
-        userClasspath.filterNot { ServeBundleDaemon.jarPrecedesDaemonSidecar(java.io.File(it)) },
-      // Stage-1's first frame and the RC capture run a stranger's snippet exactly as the live lane
-      // does, so they are jailed identically — one JVM per snippet, killed at the hard TTL.
-      jailCommand =
-        sandbox.command(
-          PlaygroundSandbox.Paths(
-            workDir = workspaceRoot,
-            readOnly =
-              (sidecarClasspath + userClasspath).map { java.io.File(it) }.distinct() +
-                classesDir +
-                previewsJson,
-            javaHome = java.io.File(System.getProperty("java.home")),
-          )
-        ),
-      hardTtlSeconds = sandbox.ttlSeconds.takeIf { sandbox.isActive },
-    )
-
-  /**
-   * The desktop (CMP/Skiko) daemon opener for the playground's CMP first-frame render — the
-   * `lib-daemon-desktop` + `lib-renderer` sidecar on the daemon classpath and the desktop jvmArgs,
-   * over a subprocess `openBundleDaemon`. Mirrors [ServeBundleDaemon]'s `desktopBundleDaemonLaunch`
-   * (the desktop twin of [buildPlaygroundAndroidDaemonOpener]). Returns null (logging why) when the
-   * sidecar jars are absent — CMP then simply carries no still first frame while its live `/pg/`
-   * redemption keeps rendering on demand.
+   * The desktop (CMP/Skiko) daemon opener for the playground's CMP first-frame render —
+   * [PlaygroundDaemonOpeners.desktop]. Null (logging why) when the sidecar jars are absent: CMP
+   * then simply carries no still first frame while its live `/pg/` redemption keeps rendering on
+   * demand.
    */
   private fun buildPlaygroundDesktopDaemonOpener(
     sandbox: PlaygroundSandbox
-  ): PlaygroundAndroidSessionOpener? {
-    val daemonJars = locateBundleSidecarJars("lib-daemon-desktop")
-    val rendererJars = locateBundleSidecarJars("lib-renderer")
-    if (daemonJars.isEmpty() || rendererJars.isEmpty()) {
-      System.err.println(
-        "serve: playground CMP first-frame needs the desktop daemon sidecar (lib-daemon-desktop/ + " +
-          "lib-renderer/) from an installed distribution; CMP renders no still frame (its live " +
-          "preview still works)."
-      )
-      return null
+  ): PlaygroundAndroidSessionOpener? =
+    PlaygroundDaemonOpeners.desktop(sandbox) {
+      System.err.println("serve: playground CMP first-frame unavailable — $it")
     }
-    val daemonClasspath = (daemonJars + rendererJars).map { it.absolutePath }
-    // -Dapple.awt.UIElement=true keeps the desktop JVM a macOS background agent (no Dock/focus
-    // steal); mirrors desktopBundleDaemonLaunch. No Robolectric sysprops on the desktop backend.
-    val jvmArgs = listOf("--enable-native-access=ALL-UNNAMED", "-Dapple.awt.UIElement=true")
-    return { classesDir, previewsJson, workspaceRoot, userClasspath ->
-      openPlaygroundFirstFrameDaemon(
-        daemonClasspath,
-        jvmArgs,
-        emptyMap(),
-        classesDir,
-        previewsJson,
-        workspaceRoot,
-        userClasspath,
-        sandbox,
-      )
-    }
-  }
 
   /**
    * The playground's first-frame render backend: renders a compiled snippet on the shared [opener]
@@ -2401,6 +2327,16 @@ public class ServeRunner(
     }
   }
 
+  /**
+   * The UI-builder lane, or null when it could not be opened.
+   *
+   * Nothing about the builder may stop `serve` binding its port. The one exception kept fatal is
+   * the argument check below: `--ui-builder-migrate-state` is a flag the operator passed on this
+   * invocation asking for durable work, and silently skipping it would be worse than refusing.
+   * Every failure after that — an unwritable state directory, a corrupt or oversize state file, a
+   * checksum mismatch, a migration that could not complete — disables the lane and prints
+   * [uiBuilderDisabledWarning]. See yschimke/compose-preview-server#568 for the deploy this cost.
+   */
   private fun openUiBuilderService(
     appDirectory: File?,
     /** The served catalogs' store, for a pack's record and a served catalog's export record. */
@@ -2418,6 +2354,27 @@ public class ServeRunner(
       uiBuilderStateDirFlag?.let(::File)
         ?: catalogsFilePath?.let(::File)?.absoluteFile?.parentFile?.resolve("ui-builder-state")
         ?: File(System.getProperty("user.home"), ".compose-preview/ui-builder-state")
+    // Anything the lane opens before it fails is closed here: a renderer left running would hold a
+    // daemon and a directory for the life of a process that is no longer using either.
+    val opened = AtomicReference<AutoCloseable?>(null)
+    return try {
+      openUiBuilderLane(directory, catalogStore, catalogLoads, opened::set)
+    } catch (failure: Exception) {
+      runCatching { opened.get()?.close() }
+      System.err.println(uiBuilderDisabledWarning(directory, failure))
+      null
+    }
+  }
+
+  /**
+   * Opens the lane, throwing on any failure; [openUiBuilderService] is what makes that survivable.
+   */
+  private fun openUiBuilderLane(
+    directory: File,
+    catalogStore: ServeCatalogStore?,
+    catalogLoads: CatalogLoadTracker?,
+    registerCloseable: (AutoCloseable?) -> Unit,
+  ): UiBuilderLane {
     if (!(directory.isDirectory || directory.mkdirs()) || !directory.canWrite()) {
       throw IllegalStateException("UI-builder state directory is not writable: $directory")
     }
@@ -2455,6 +2412,7 @@ public class ServeRunner(
         )
       }
       .getOrNull()
+    registerCloseable(renderer)
     // The Compose half of the export is generated from the discovered component record, so it is
     // constructed here rather than defaulted inside the runtime: `checkUiBuilderRuntimeBoundary`
     // forbids any compose-ai-tools module but the protocol on that module's classpath, and
@@ -2536,9 +2494,31 @@ public class ServeRunner(
       )
       derived.source
     }
+    // Uploaded asset bytes, content-addressed, in their own directory beside the design state for
+    // the reason the references and the comments have one: the state file is rewritten on every
+    // accepted operation, and a photograph must not ride along with every keystroke. The export
+    // executor reads the same store so a daemon render draws what the canvas draws — and so a Wear
+    // widget's background picture can be inlined into its generated source, which is the only
+    // place a system-hosted widget can carry one.
+    val assetStore = runCatching {
+      FileUiBuilderAssetStore(directory.resolve("assets").toPath())
+    }
+      .onFailure {
+        System.err.println(
+          "serve: UI-builder asset store unavailable (${it.message}); " +
+            "the builder works, and a design cannot hold an uploaded image"
+        )
+      }
+      .getOrNull()
     val compose =
-      ScreenGeneratorComposeExportExecutor(records::record, packs = packs.map { it.id }.toSet())
-    val exporter = renderer?.let { ProductionUiBuilderExportExecutor(it, compose) } ?: compose
+      ScreenGeneratorComposeExportExecutor(
+        records::record,
+        packs = packs.map { it.id }.toSet(),
+        assetStore = assetStore,
+      )
+    val exporter =
+      renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
+        ?: compose
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
@@ -2598,7 +2578,8 @@ public class ServeRunner(
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(directory.toPath()),
         catalogs = catalogs,
-        exporter = exporter,
+        exporter = RootSurfaceGroundAnnotatedExporter(exporter),
+        assets = assetStore,
       )
     // An unusable design is the one startup condition that is invisible by construction: the host
     // comes up healthy and serves everything else, so without this line the only evidence is a
@@ -2612,18 +2593,25 @@ public class ServeRunner(
           "/admin/ui-builder: download it, edit it to satisfy the rule, put it back, or retire it"
       )
     }
+    // The other startup condition nothing announced: a state file near the ceiling every save is
+    // bounded by. Printed here rather than only carried on /status.json because the operator who
+    // needs it is the one reading a deploy's output, and never allowed to fail — a gauge that can
+    // abort startup is the shape #568 exists about.
+    runCatching { service.diagnostics() }
+      .getOrNull()
+      ?.let { uiBuilderStorageWarning(it.storageBytes, it.storageMaximumBytes) }
+      ?.let(System.err::println)
     if (uiBuilderMigrateState) {
-      try {
-        val migration = service.migratePersistenceToLatest()
-        System.err.println(
-          "serve: UI-builder persistence ${migration.fromFormat} -> ${migration.toFormat} " +
-            if (migration.migrated) "completed (${migration.persistedBytes} bytes)"
-            else "already current"
-        )
-      } catch (failure: Throwable) {
-        runCatching { renderer?.close() }
-        throw failure
-      }
+      // Deliberately not caught here any more. A migration that cannot complete used to close the
+      // renderer and rethrow, which is exactly the path that took the host down; the guard in
+      // [openUiBuilderService] closes the renderer and disables the lane instead, and the operator
+      // still learns what happened and how to recover.
+      val migration = service.migratePersistenceToLatest()
+      System.err.println(
+        "serve: UI-builder persistence ${migration.fromFormat} -> ${migration.toFormat} " +
+          if (migration.migrated) "completed (${migration.persistedBytes} bytes)"
+          else "already current"
+      )
     }
     return UiBuilderLane(
       service = service,
@@ -2988,6 +2976,7 @@ public class ServeRunner(
         uiBuilderService = uiBuilderLane?.service,
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
+        uiBuilderAssets = uiBuilderLane?.service,
         uiBuilderAuthorization =
           uiBuilderLane?.let {
             ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)
@@ -3046,6 +3035,25 @@ public class ServeRunner(
                   adapter.compile(generated, isSecurityChecked = true)
                 },
                 captureNodeBounds = playground.captureNodeBounds,
+              )
+            }
+          },
+        // The same two halves as the native lane and the same guard: a capture needs the generator
+        // (to write the body) and the playground (to compile and run it). It needs no catalog
+        // mapping of its own — an inline body is Remote Compose rather than a design system, so the
+        // bundle it compiles against is whichever one this host offers `remote-compose` on.
+        uiBuilderInlineCapture =
+          uiBuilderLane?.let {
+            playgroundLane?.let { playground ->
+              val captureAdapter = UiBuilderGeneratedPreviewAdapter(playground.compile)
+              ServeUiBuilderInlineCapture(
+                compile = { generated ->
+                  // `true` for the reason the native lane's is: downstream of the route's
+                  // `ui-builder-export` check, and the source is the emitter's rather than the
+                  // caller's.
+                  captureAdapter.compile(generated, isSecurityChecked = true)
+                },
+                captureCatalog = playground.remoteComposeCatalog,
               )
             }
           },

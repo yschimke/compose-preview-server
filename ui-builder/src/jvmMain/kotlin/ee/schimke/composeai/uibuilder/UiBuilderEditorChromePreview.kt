@@ -119,6 +119,31 @@ fun UiBuilderComponentVariantsPreview() {
 }
 
 /**
+ * The palette narrowed to the components the Compose export cannot write.
+ *
+ * Every row here is one the embedded component record has no call site for, so every one is faded
+ * and carries the "no Kotlin" word — with a variant row under the date picker, which dims with its
+ * component and carries no word of its own. It exists to diff the marker rather than the panel:
+ * [UiBuilderEditorChromePreview] shows the marker beside covered rows, which is where the contrast
+ * is, and this is the row shapes the marker has to survive on.
+ *
+ * "picker" matches the two pickers and nothing else in this catalog, and both take a remembered
+ * state no value expresses, so neither is going to become exportable by accident and turn this
+ * preview into a picture of nothing.
+ */
+@Preview(widthDp = 1600, heightDp = 900)
+@Composable
+fun UiBuilderUnexportablePalettePreview() {
+  UiBuilderEditor(
+    document = editorChromePreviewDocument,
+    catalog = editorChromePreviewCatalog,
+    initialSelectedNodeId = "discover-grid",
+    initialComponentsOpen = true,
+    initialCatalogQuery = "picker",
+  )
+}
+
+/**
  * Two families and three states, so the palette's group headings are visible rather than implied.
  */
 private val REMOTE_COMPOSE_PALETTE_PREVIEW_SOURCES =
@@ -645,3 +670,52 @@ internal val editorChromePreviewCatalog: CapabilityCatalog by lazy {
 internal fun previewResource(path: String): String =
   checkNotNull(UiBuilderDocument::class.java.getResource(path)) { "missing preview resource $path" }
     .readText()
+
+/**
+ * The History dock, over a session that has done something.
+ *
+ * A fresh editor has no history, and a panel about the session's own changes has exactly one thing
+ * to say about a session with none. So this one opens on [seeded edits][historyPreviewEdits] — a
+ * padding, a text, a screen change and an undo over them — and diffs the four things that are only
+ * true with a history behind them: that each change is named from the operation that made it, that
+ * the before and after of every value it moved are on the row, that the entry undo is aimed at is
+ * marked, and that the one the undo took back is marked as redo's.
+ *
+ * The last edit is the undo deliberately. Both markers are in the panel at once only after one, and
+ * a marker that shows in every state is a marker nothing is diffing.
+ */
+@Preview(widthDp = 1600, heightDp = 900)
+@Composable
+fun UiBuilderHistoryDockPreview() {
+  UiBuilderEditor(
+    document = editorChromePreviewDocument,
+    catalog = editorChromePreviewCatalog,
+    initialSelectedNodeId = EDITOR_CHROME_PREVIEW_SELECTION,
+    initialInspectorOpen = true,
+    initialInspectorMode = EditorInspectorMode.History,
+    initialEdits = historyPreviewEdits,
+    exportHost = PREVIEW_EXPORT_HOST,
+  )
+}
+
+/**
+ * Three changes and their undo, chosen to put a different *kind* of entry on each row.
+ *
+ * A modifier chain, a property and the screen itself, each with a different before: a chain that
+ * was empty, a value that was something else, and a field that belongs to no node at all, so its
+ * row has nothing to select. Fixed, ordered, and applied through the same reducer a person's edits
+ * go through, so this is a picture of what the editor does rather than of a list assembled for it.
+ */
+private val historyPreviewEdits: List<UiBuilderEditorEvent> =
+  listOf(
+    UiBuilderEditorEvent.ToggleModifier(EDITOR_CHROME_PREVIEW_SELECTION, "padding"),
+    UiBuilderEditorEvent.CommitProperty(
+      EDITOR_CHROME_PREVIEW_SELECTION,
+      "text",
+      "Search podcasts",
+    ),
+    UiBuilderEditorEvent.UpdateEnvironment(
+      editorChromePreviewDocument.screenEnvironmentSettings().copy(density = 2.0)
+    ),
+    UiBuilderEditorEvent.Undo,
+  )

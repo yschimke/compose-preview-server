@@ -880,19 +880,24 @@ class ServeWebTest {
         isPublic = true,
       )
 
+    // The verb is said once by the row; the chip is left holding only where it goes, so a second
+    // destination can sit beside it on one line.
+    assertTrue(html.contains(">Compare to</span>"), html)
     assertTrue(
       html.contains(
-        "<a class=\"cp-action-chip\" href=\"/compose-m3/compare?format=reference\" " +
-          "aria-label=\"compose-m3: compare to Figma\">compare to Figma</a>"
+        "<a class=\"cp-action-chip cp-action-chip--compact\" " +
+          "href=\"/compose-m3/compare?format=reference\" " +
+          "aria-label=\"compose-m3: compare to Figma\" " +
+          "title=\"compose-m3: compare to Figma\">Figma</a>"
       ),
       html,
     )
     // The label follows the catalog's own design tool rather than being hardcoded to Figma.
-    assertTrue(html.contains(">compare to Penpot</a>"), html)
+    assertTrue(html.contains(">Penpot</a>"), html)
     // …and falls back to the landing page's own neutral wording when there is no tool to name,
     // rather than the action disappearing.
     assertTrue(html.contains("/png-kit/compare?format=reference"), html)
-    assertTrue(html.contains(">compare to design references</a>"), html)
+    assertTrue(html.contains(">design references</a>"), html)
     // A catalog that publishes no design references has nothing behind `format=reference`, so it
     // gets no action rather than a chip that deep-links a format the comparison page won't offer.
     assertFalse(html.contains("/plain/compare"), html)
@@ -901,6 +906,66 @@ class ServeWebTest {
     // placeholder row the outside-the-card layout needed is gone.
     assertEquals(3, Regex("<div class=\"cp-sys-actions\">").findAll(html).count(), html)
     assertFalse(html.contains("<div class=\"cp-sys-actions\"></div>"), html)
+  }
+
+  /**
+   * The PAIRED catalog's comparison, on the card.
+   *
+   * `remote-m3` and `wear-m3-catalog` sit as adjacent cards on the real front door and nothing
+   * there said they were a pair: "how does the Remote Compose rendition differ from the Wear one"
+   * cost a visit to one catalog's landing first, which is exactly the journey the Figma action
+   * above exists to remove. `docs/design/COMPARE_NAVIGATION.md` §1 names this the comparison the
+   * reader most wants and the one with the fewest ways in.
+   */
+  @Test
+  fun `a front-door card offers the paired catalog's comparison, named after the sibling`() {
+    fun system(id: String, sibling: ServeWeb.ParallelComparison?) =
+      ServeWeb.HomeSystem(
+        system = id,
+        title = id,
+        subtitle = null,
+        previewCount = 1,
+        trust = null,
+        heroPreviewId = null,
+        hasReferenceComparison = true,
+        designToolLabel = "Figma",
+        parallelComparison = sibling,
+      )
+
+    val html =
+      ServeWeb.homeIndexPage(
+        listOf(
+          system(
+            "remote-m3",
+            ServeWeb.ParallelComparison("wear-m3-catalog", "M3 Wear OS Apps Design Kit"),
+          ),
+          // Every catalog that declares no `compareWith`, which is most of them.
+          system("compose-m3", sibling = null),
+        ),
+        token = "unused",
+        isPublic = true,
+      )
+
+    // The chip reads the SYSTEM id — short, bounded, and the handle the card already prints under
+    // its own title — while the whole sentence, with the catalog's real name, stays in the
+    // accessible name and the tooltip where its length costs nothing.
+    assertTrue(
+      html.contains(
+        "<a class=\"cp-action-chip cp-action-chip--compact\" " +
+          "href=\"/remote-m3/compare?format=parallel\" " +
+          "aria-label=\"remote-m3: compare to M3 Wear OS Apps Design Kit\" " +
+          "title=\"remote-m3: compare to M3 Wear OS Apps Design Kit\">wear-m3-catalog</a>"
+      ),
+      html,
+    )
+    // It stands BESIDE the design-tool chip under one "Compare to", rather than replacing it or
+    // repeating the verb: they are two different comparisons, and a catalog with a sibling still
+    // has a design file.
+    assertTrue(html.contains("/remote-m3/compare?format=reference"), html)
+    assertEquals(2, Regex(">Compare to</span>").findAll(html).count(), html)
+    // …and a catalog with no pairing gets no second chip rather than a dead one.
+    assertFalse(html.contains("/compose-m3/compare?format=parallel"), html)
+    assertEquals(1, Regex("format=parallel").findAll(html).count(), html)
   }
 
   /**
@@ -941,12 +1006,16 @@ class ServeWebTest {
       html,
     )
     // WCAG 2.5.3 Label in Name: the visible string survives INTACT inside the accessible name, so
-    // "click compare to Figma" still matches. A name like "compare Wear Material 3 to Figma" would
-    // read fine and break that.
-    names.forEach { assertTrue(it.contains("compare to Figma"), it) }
-    // The chip itself stays short — the catalog's name is in the accessible name, not on screen.
+    // "click Figma" still matches. A name like "compare Wear Material 3 to Figma" would read fine
+    // and break that — and so would shortening the chip to something the name does not contain.
+    names.forEach { assertTrue(it.contains("Figma"), it) }
+    // The chip itself stays short — the verb is on the row and the catalog's name is in the
+    // accessible name, neither of them repeated on screen once per destination.
     assertTrue(
-      html.contains("aria-label=\"Wear Material 3: compare to Figma\">compare to Figma</a>"),
+      html.contains(
+        "aria-label=\"Wear Material 3: compare to Figma\" " +
+          "title=\"Wear Material 3: compare to Figma\">Figma</a>"
+      ),
       html,
     )
   }
@@ -1089,6 +1158,105 @@ class ServeWebTest {
     assertEquals("button-filled__ideal__default__light", entries.single().previewId)
   }
 
+  /**
+   * Every full-page comparison this preview has, behind one affordance.
+   *
+   * The three destinations — the spec diff, the paired catalog's layer diff, every Remote Compose
+   * player — are alike in the one way that matters to a reader deciding whether to click: each
+   * LEAVES the page, giving up the overrides, knobs and theme that produced the render worth
+   * comparing. Loose in the row they neither read as a set nor stayed together: the players link
+   * sat before the spec lane and the layer link INSIDE it, so a pairing that had all three put
+   * forty-odd characters of grey link text either side of a control that grows with the length of a
+   * design tool's name, and the bar's real controls wrapped around them.
+   *
+   * The order is asserted because it is the order they are reached in: what this render is
+   * specified by, what the other implementation of that spec does, then the ways this one can be
+   * drawn.
+   */
+  @Test
+  fun `the comparison destinations are one menu, in reading order`() {
+    val preview =
+      ServePreview(
+        id = "widget.Chip",
+        label = "chip",
+        componentId = "Chip",
+      )
+    val html =
+      ServeWeb.viewerPage(
+        preview,
+        "t",
+        sessionId = "remote-m3",
+        basePath = "/remote-m3",
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        designReference =
+          DesignReference(
+            id = "chip-figma",
+            previewId = preview.id,
+            label = "Chip",
+            raster = DesignReferenceRaster(path = "references/chip-figma.png"),
+            source = DesignReferenceSource(provider = "figma"),
+          ),
+        parallelSource =
+          ServeWeb.SpecSource(
+            id = "parallel",
+            label = "Wear M3",
+            rasterUrl = "/wear-m3-catalog/render/chip.png",
+            provenance = "Wear M3's own render.",
+          ),
+        parallelLayers = true,
+      )
+    val menu = html.substringAfter("class=\"cp-detail-menu\"", "").substringBefore("</details>")
+    assertTrue(menu.isNotEmpty(), "three destinations make a menu: $html")
+    val rows =
+      Regex("class=\"cp-detail-menu-item\"[^>]*>([^<]+)</a>")
+        .findAll(menu)
+        .map { it.groupValues[1] }
+        .toList()
+    assertEquals(listOf("Spec diff", "Wear M3 layers", "Compare players"), rows, html)
+    // The spec lane keeps its instruments and nothing else. The layer link used to live inside it,
+    // which is why a wide lane and a small grey link kept trading places on the same row.
+    val lane = html.substringAfter("class=\"cp-spec-lane\"", "").substringBefore("</span></span>")
+    assertFalse(lane.contains("cp-format-link"), "the lane carries no step-out link: $lane")
+  }
+
+  /**
+   * The sign-in affordance is not a renderer control, and must not be dressed as half of one.
+   *
+   * When auth is the only thing between the visitor and the daemon lane, the chip's slot holds an
+   * ANCHOR to GitHub rather than a button that toggles a lane. Joined to the renderer caret it
+   * would put a dashed segment against a solid one — and the dash is load-bearing, not decoration:
+   * it marks the control as an action to take rather than a state to read, which is exactly the
+   * distinction a shared outline erases. It would also wrap a link to another origin in
+   * `role="group" aria-label="Renderer"`.
+   *
+   * Reachable and previously uncaptured: a Remote Compose preview HAS a renderer combo, and an
+   * auth-gated live lane is independent of it, so a server with `--github-auth` serves both at once
+   * and no fixture held the pair.
+   */
+  @Test
+  fun `the sign-in affordance is never joined to the renderer caret`() {
+    val preview = ServePreview(id = "widget.Chip", label = "chip")
+    val html =
+      ServeWeb.viewerPage(
+        preview,
+        token = "t",
+        basePath = "/remote-m3",
+        siblings = listOf(preview),
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("js", "java", "cmp-android"),
+        hasLiveStream = true,
+        liveAuthPrompt = ServeWeb.LiveAuthPrompt(loginHref = "/auth/github/start"),
+      )
+
+    // Both controls are there…
+    assertTrue(html.contains("id=\"cp-live-signin\""), "the sign-in link is offered: $html")
+    assertTrue(html.contains("id=\"cp-lane-select\""), "…beside a real renderer combo: $html")
+    // …and NOT as one pill.
+    assertFalse(html.contains("class=\"cp-renderer\""), "they are not joined: $html")
+    assertFalse(html.contains("cp-renderer-more"), "and there is no caret segment: $html")
+  }
+
   @Test
   fun `the renderer combo lists every player with the unavailable ones disabled`() {
     // A Remote Compose preview on an Android daemon: js (client canvas) + java + cmp-android are
@@ -1110,7 +1278,15 @@ class ServeWebTest {
     for (wire in listOf("js", "cmp-wasm", "java", "cmp-android", "cmp-jvm")) {
       assertTrue(html.contains("value=\"rc:$wire\""), "option for $wire present")
     }
-    // CMP Android is the seeded default: both the combo's selection and the chip's opening label.
+    // The LANE VALUES (`rc:java`, `rc:cmp-android`) are this repository's and do not move. The
+    // LABELS below are the published `render-host` artifact's, and compose-ai-tools 2.3.0 renamed
+    // all five (`Java` -> `AndroidX View`, `CMP Android` -> `AndroidX Embedded`, …). Asserted
+    // literally rather than read back off the combo: the point of this test is that the chip and
+    // the combo agree on ONE label, and comparing them to each other would hold even if both said
+    // the wrong thing.
+    //
+    // AndroidX Embedded is the seeded default: both the combo's selection and the chip's opening
+    // label.
     // It opens on the embedded player because that is the lane whose output is a real Compose tree
     // — editable figma-svg geometry and a described semantics tree, rather than one interop leaf
     // (#3936). `?rcPlayer=java` still selects the view player.
@@ -1118,27 +1294,45 @@ class ServeWebTest {
       html.contains("data-rc-default=\"cmp-android\""),
       "cmp-android is the default player",
     )
-    assertTrue(html.contains("<option value=\"rc:java\">Java</option>"), html)
+    assertTrue(html.contains("<option value=\"rc:java\">AndroidX View</option>"), html)
     // The combo itself rests on its placeholder — the chip is what names the current lane, and a
-    // combo repeating that name beside it read as two controls arguing about the same fact.
+    // combo repeating that name beside it read as two controls arguing about the same fact. The
+    // placeholder is never SEEN once the two are joined (the combo is a caret), but it is what the
+    // combo falls back to naming when the chip is dropped in the component browser.
     assertTrue(html.contains("<option value=\"\" selected>Switch renderer…</option>"), html)
+    // ONE control, in two segments: the chip inside the group, the combo laid over the caret beside
+    // it. Two pills side by side read as two independent controls and spent a whole control's width
+    // on the words "Switch renderer…", which a caret next to a named renderer already says.
+    val renderer =
+      html.substringAfter("<span class=\"cp-renderer\"", "").substringBefore("</span></span>")
+    assertTrue(renderer.isNotEmpty(), "the renderer group is emitted: $html")
+    assertTrue(renderer.contains("id=\"cp-live-toggle\""), "the chip is the left segment")
+    assertTrue(renderer.contains("class=\"cp-renderer-more\""), "the caret is the right segment")
+    assertTrue(renderer.contains("id=\"cp-lane-select\""), "…with the real combo inside it")
     assertTrue(
-      html.contains("<span id=\"cp-live-toggle-label\">CMP Android</span>"),
+      html.contains("<span id=\"cp-live-toggle-label\">AndroidX Embedded</span>"),
       "the chip names the lane it opens on",
     )
     // cmp-jvm is the disabled option (and says why in its own label); the enabled ones are not.
     assertTrue(
-      html.contains("<option value=\"rc:cmp-jvm\" disabled>CMP JVM (unavailable)</option>"),
+      html.contains(
+        "<option value=\"rc:cmp-jvm\" disabled>AndroidX Embedded (JVM) (unavailable)</option>"
+      ),
       html,
     )
     val android = Regex("<option value=\"rc:cmp-android\"[^>]*>").find(html)?.value ?: ""
     assertFalse(android.contains(" disabled"), "cmp-android is offered: '$android'")
-    // …and the step out to every player side by side.
+    // …and the step out to every player side by side. This preview has exactly ONE full-page
+    // comparison surface, and one destination is not a menu — so it stays the inline link it has
+    // always been rather than costing a click to reach what a link already said. The ampersands are
+    // entity-escaped now that the href goes through `WebEscaping.htmlEscape` with every other URL
+    // the bar emits; `&amp;` in an attribute is the same URL, correctly written.
     assertTrue(
-      html.contains("href=\"/remote-m3/compare?format=rc&preview=widget.Chip&token=t\""),
+      html.contains("href=\"/remote-m3/compare?format=rc&amp;preview=widget.Chip&amp;token=t\""),
       html,
     )
     assertTrue(html.contains(">compare players →</a>"), "the compare link names what it does")
+    assertFalse(html.contains("cp-detail-menu"), "one destination stays a link, not a menu")
   }
 
   @Test
@@ -1864,6 +2058,24 @@ class ServeWebTest {
             provenance = "wear-m3-catalog's own render, under that catalog's theme and knobs.",
           ),
       )
+    // THE SIBLING HAS A CONTROL ON THE RESTING BAR, not only inside a panel the kit's chip opens.
+    // The picker below ships `hidden`, so before this the bar named one source and gave the other
+    // no way in at all — a button labelled with ONE source opening a panel of things that are not
+    // that source (`docs/design/COMPARE_NAVIGATION.md`, F1).
+    assertTrue(
+      html.contains("data-cp-spec-open-source=\"parallel\""),
+      "the sibling is a peer chip on the bar: $html",
+    )
+    assertTrue(
+      html.contains("class=\"cp-compare-group\" role=\"group\" aria-label=\"Compare against\""),
+      "…grouped with the kit's chip under one label, so the two read as one question: $html",
+    )
+    // It carries only the ID. The raster, label and provenance stay on the picker's own button —
+    // one server-built description of each source rather than two that can disagree.
+    assertFalse(
+      Regex("""data-cp-spec-open-source="parallel"[^>]*data-spec-src""").containsMatchIn(html),
+      "the peer chip does not duplicate the pair: $html",
+    )
     assertTrue(html.contains("id=\"cp-spec-sources\""), "the picker is offered: $html")
     assertTrue(html.contains("data-cp-spec-source=\"kit\""), "the kit is a source")
     assertTrue(html.contains("data-cp-spec-source=\"parallel\""), "the sibling is a source")
@@ -1883,6 +2095,8 @@ class ServeWebTest {
 
   @Test
   fun `a catalog with no parallel keeps exactly the lane it had`() {
+    // …including no group heading. A "Compare" label over a single chip is a word that earns
+    // nothing, and most catalogs on this server declare no `compareWith`.
     // Every catalog that declares no `compareWith` pairing — which is most of them. One source is
     // not a picker with a single button; it is no picker, because a control that acts on nothing is
     // worse than no control.
@@ -1905,6 +2119,8 @@ class ServeWebTest {
     assertTrue(html.contains("id=\"cp-spec-lane\""), "the lane itself is unchanged")
     assertFalse(html.contains("id=\"cp-spec-sources\""), "no picker for a single source: $html")
     assertFalse(html.contains("data-cp-spec-source"), "and no source buttons at all")
+    assertFalse(html.contains("cp-compare-group"), "and no group heading over one chip: $html")
+    assertFalse(html.contains("data-cp-spec-open-source"), "and no peer chip: $html")
     // The carrier still describes the one source the way it always has, which is what the backend
     // badge reads.
     assertTrue(html.contains("data-spec-src=\"/compose-m3/reference/"), "the carrier is intact")
@@ -2196,14 +2412,28 @@ class ServeWebTest {
     val ids =
       Regex("data-preview-ids=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
     assertEquals(2, ids.size, "two referenced states, two rows: $html")
+    // The row carries its OWN ids and a KEY into the page's alias table; the folded sibling is
+    // written once, there. Only the row that claimed the card carries the key, which is what still
+    // aliases the fold onto exactly one row.
+    assertTrue(ids.none { it.contains("direction-rtl") }, "no fold on the row itself: $html")
+    val keys =
+      Regex("data-alias-card=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
+    assertEquals(
+      listOf("button-elevated__ideal"),
+      keys,
+      "exactly one row claims the card whose fold it stands for: $html",
+    )
+    val table = html.substringAfter("id=\"cp-compare-aliases\">").substringBefore("</script>")
     assertTrue(
-      ids[0].contains("button-elevated__ideal__default__direction-rtl"),
-      "the folded variant aliases onto the first row of its card: $html",
+      table.contains("button-elevated__ideal__default__direction-rtl"),
+      "and the folded id is published once, in the table: $table",
     )
-    assertFalse(
-      ids[1].contains("direction-rtl"),
-      "and onto that row only: $html",
-    )
+    // `rowed` is what the wall subtracts, so the two states that have rows of their own do not
+    // alias onto each other's.
+    val rowed = table.substringAfter("\"rowed\":\"").substringBefore("\"")
+    assertTrue(rowed.contains("button-elevated__ideal__default"), table)
+    assertTrue(rowed.contains("button-elevated__ideal__pressed"), table)
+    assertFalse(rowed.contains("direction-rtl"), "a folded id has no row: $table")
   }
 
   @Test
@@ -2243,12 +2473,240 @@ class ServeWebTest {
   }
 
   @Test
-  fun `the design spec leads the pair, and the render follows`() {
-    // The house rule everywhere the two are shown together: an imported design spec is drawn to
-    // the LEFT of the render it is compared against. The viewer's spec lane says it three ways
+  fun `the viewer compares every variant of the component on its stage`() {
+    // The viewer could put ONE baseline behind ONE variant. Asking "is this component wrong, or is
+    // this STATE of it wrong?" meant leaving for a wall of the whole catalog and narrowing by hand
+    // — from a page that already knew which component you were looking at.
+    // See `docs/design/COMPARE_NAVIGATION.md`, F4 and §3.1.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("card__ideal__default__light", "Card", componentId = "Card"),
+        token = "t",
+        basePath = "/m3",
+        catalogName = "Material 3",
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__default__light",
+              variant = "default · light",
+              referenceId = "card-figma",
+              matchPercent = 96.4,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__outlined__light",
+              variant = "outlined",
+              referenceId = "card-outlined-figma",
+              matchPercent = 71.9,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__long__light",
+              variant = "long text",
+            ),
+          ),
+      )
+    assertTrue(html.contains("id=\"cp-compare-strip\""), html)
+    // Every variant, including the one on the stage — which is marked and deliberately NOT a link,
+    // because a link that reloads the page you are on reads as a control that does nothing.
+    assertTrue(html.contains("aria-current=\"true\""), html)
+    assertFalse(html.contains("href=\"/m3/p/card__ideal__default__light?"), html)
+    assertTrue(html.contains("href=\"/m3/p/card__ideal__outlined__light?"), html)
+    // Baseline left, ours right — the same order the wall and the triptych read in.
+    assertTrue(
+      html.indexOf("/m3/reference/card-figma.png") <
+        html.indexOf("/m3/render/card__ideal__default__light.png"),
+      "the baseline picture leads the pair: $html",
+    )
+    // The published score, banded the way the design-spec chip bands it, so one number does not
+    // change colour between the chip above the stage and the row below it.
+    assertTrue(html.contains("data-spec-match=\"match\">96.4%"), html)
+    assertTrue(html.contains("data-spec-match=\"off\">71.9%"), html)
+    // A variant nothing in the design file is mapped to says so, rather than showing a score it
+    // does not have or vanishing from a strip that claims to list every variant.
+    assertTrue(html.contains("not scored"), html)
+    // And the way out to the full instruments, scoped so it opens on this component.
+    assertTrue(html.contains("/m3/compare?format=reference&amp;component=Card"), html)
+  }
+
+  @Test
+  fun `the viewer draws no compare strip for a component with one unmapped variant`() {
+    // Nothing to compare and nothing to navigate between. An empty panel under every one-off
+    // preview is worse than no panel.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("card__ideal__default__light", "Card"),
+        token = "t",
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(previewId = "card__ideal__default__light", variant = "")
+          ),
+      )
+    assertFalse(html.contains("cp-compare-strip"), html)
+    // …and a viewer told about no variants at all is byte-identical to one that never had the
+    // feature, which is what keeps a plain module's page unchanged.
+    val plain =
+      ServeWeb.viewerPage(ServePreview("card__ideal__default__light", "Card"), token = "t")
+    assertFalse(plain.contains("cp-compare-strip"), plain)
+  }
+
+  @Test
+  fun `the viewer bar keeps its view controls in one group`() {
+    // Loose in the bar, `SVG` / `3D` / `Transparent` / `Fit width` were sorted by nothing, and the
+    // line each landed on depended on how wide the design-spec lane beside them happened to be —
+    // a lane that grows when it is entered. Pressing the spec chip rearranged controls that have
+    // nothing to do with it. See `docs/design/COMPARE_NAVIGATION.md`, F1.
+    val html =
+      ServeWeb.viewerPage(
+        ServePreview("card__ideal__default__light", "Card"),
+        token = "t",
+        hasSvgExport = true,
+      )
+    assertTrue(html.contains("class=\"cp-view-group\""), html)
+    val group = html.substringAfter("class=\"cp-view-group\"").substringBefore("</span></div>")
+    for (control in listOf("cp-bg-btn cp-zoom-toggle", "Transparent")) {
+      assertTrue(group.contains(control), "$control belongs to the view group: $html")
+    }
+  }
+
+  @Test
+  fun `the wall writes every folded preview id once, in one table`() {
+    // Each row used to carry its comparison card's whole id list, and the haystack carried it a
+    // second time. On `remote-m3` that was 19,188 mentions of 538 distinct ids — 967 KB of
+    // `data-preview-ids` and most of another 1.08 MB of `data-hay`, on a 6.4 MB page that took two
+    // minutes to arrive. See `docs/design/COMPARE_NAVIGATION.md`, F2.
+    val previews =
+      listOf(
+        ServePreview("button__ideal__default", "Default", state = "default"),
+        ServePreview("button__ideal__pressed", "Pressed", state = "pressed"),
+      ) +
+        (1..4).map {
+          ServePreview(
+            "button__ideal__default__variant-$it",
+            "Variant $it",
+            state = "default",
+            props = jsonProps("variant" to "$it"),
+          )
+        }
+    val html =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        previews,
+        token = "t",
+        referencesFor = { id ->
+          if (id.contains("variant-")) emptyList() else listOf(referenceFor(id))
+        },
+      )
+    // Every folded id — one with no row of its own — appears exactly once on the whole page.
+    for (n in 1..4) {
+      assertEquals(
+        1,
+        Regex(Regex.escape("button__ideal__default__variant-$n")).findAll(html).count(),
+        "a folded id is written once: $html",
+      )
+    }
+    // …and the haystack repeats none of it.
+    val hay = Regex("data-hay=\"([^\"]*)\"").findAll(html).map { it.groupValues[1] }.toList()
+    assertTrue(hay.isNotEmpty(), html)
+    assertTrue(hay.none { it.contains("__ideal__") }, "no ids in the haystack: $hay")
+  }
+
+  @Test
+  fun `the alias table names both facts, because the two walls apply different rules`() {
+    // `rowed` is what the comparison wall subtracts: a design reference names one exact
+    // state/props mapping, so that variant gets a row of its own and must not also alias onto its
+    // siblings' rows. The Remote Compose lane wall, whose rows are one per preview, does not
+    // subtract it. Publishing both facts once and letting each caller pick is what keeps the
+    // browser from re-deriving a rule with one right answer.
+    val html =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(
+          ServePreview("button__ideal__default", "Default", state = "default"),
+          ServePreview(
+            "button__ideal__default__rtl",
+            "RTL",
+            state = "default",
+            props = jsonProps("direction" to "rtl"),
+          ),
+        ),
+        token = "t",
+        referencesFor = { id -> if (id.endsWith("rtl")) emptyList() else listOf(referenceFor(id)) },
+      )
+    val table = html.substringAfter("id=\"cp-compare-aliases\">").substringBefore("</script>")
+    assertTrue(table.contains("\"cards\":{"), table)
+    assertTrue(table.contains("\"rowed\":"), table)
+    // Nothing in it can close the element early — the one way a JSON island becomes an injection.
+    assertFalse(table.contains("</"), table)
+  }
+
+  @Test
+  fun `the baseline leads the pair on every lane`() {
+    // ONE order, every lane: baseline · diff · ours. The viewer's spec lane says it three ways
     // already (the Spec / Diff / Render triptych, the wipe's seam, the focused Reference / Diff /
-    // Actual page); this wall — the page the catalog's own "compare to Figma" action opens — used
-    // to read the other way round, so the two frames swapped sides between one click and the next.
+    // Actual page). The wall's `svg` and `rc` lanes used to read the other way round, so pressing
+    // a baseline button swapped both pictures' sides as well as relabelling both headers — the one
+    // control that changes the question also moved the answer.
+    // See `docs/design/COMPARE_NAVIGATION.md`, F3.
+    val reference =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(ServePreview(id = "button", label = "Button")),
+        token = "t",
+        referencesFor = { listOf(referenceFor(it)) },
+      )
+    val svg =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(ServePreview(id = "button", label = "Button")),
+        token = "t",
+        hasSvgFor = { true },
+      )
+    for ((lane, html) in listOf("reference" to reference, "svg" to svg)) {
+      assertTrue(
+        html.indexOf("cp-compare-target-cell") < html.indexOf("cp-compare-render-cell"),
+        "the baseline's cell comes first on the $lane lane: $html",
+      )
+      assertTrue(
+        html.indexOf("cp-compare-target-head") < html.indexOf("cp-compare-render-head"),
+        "and its header moves with it on the $lane lane: $html",
+      )
+    }
+    // Named for the lane it is showing, not the constant `SVG` this head used to be — a header
+    // reading `SVG` over the Figma column would state the pair backwards.
+    assertTrue(reference.contains(">Figma</span>"), reference)
+    assertTrue(svg.contains(">SVG</span>"), svg)
+    // The button that enters the lane names the pair in the order the columns stand.
+    assertTrue(reference.contains(">Figma ↔ PNG</button>"), reference)
+  }
+
+  @Test
+  fun `the render column is named after the catalog, and each column says which half it is`() {
+    // "Rendered PNG" named a FILE FORMAT where the reader wanted to know whose picture this is,
+    // and it was the odd one out in a row whose other header is a design tool's name.
+    val html =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        listOf(ServePreview(id = "button", label = "Button")),
+        token = "t",
+        displayTitle = "Material 3",
+        referencesFor = { listOf(referenceFor(it)) },
+      )
+    assertFalse(html.contains("Rendered PNG"), html)
+    assertTrue(
+      html.contains(
+        "<th class=\"cp-compare-render-head\"><span class=\"cp-compare-head-name\">" +
+          "Material 3</span><span class=\"cp-compare-head-role\">ours</span></th>"
+      ),
+      html,
+    )
+    assertTrue(html.contains("<span class=\"cp-compare-head-role\">baseline</span>"), html)
+  }
+
+  @Test
+  fun `each picture cell carries an empty caption for its own pixel size`() {
+    // The two panels are one fixed frame each now, so a baseline exported at a different scale no
+    // longer looks bigger than the render. `<cp-compare-wall>` fills these from the DECODED raster
+    // — the wall chooses which theme variant is on screen, so a size printed here by the server
+    // would be describing a picture the reader may not be looking at.
     val html =
       ServeWeb.comparisonPage(
         "m3-catalog",
@@ -2256,42 +2714,11 @@ class ServeWebTest {
         token = "t",
         referencesFor = { listOf(referenceFor(it)) },
       )
+    assertTrue(html.contains("<span class=\"cp-compare-dim\" data-dim-for=\"png\"></span>"), html)
     assertTrue(
-      html.indexOf("cp-compare-target-cell") < html.indexOf("cp-compare-render-cell"),
-      "the design spec's cell comes first on the reference lane: $html",
+      html.contains("<span class=\"cp-compare-dim\" data-dim-for=\"target\"></span>"),
+      html,
     )
-    assertTrue(
-      html.indexOf("cp-compare-target-head") < html.indexOf("cp-compare-render-head"),
-      "and its header moves with it: $html",
-    )
-    // Named for the lane it is showing, not the constant `SVG` this head used to be — a header
-    // reading `SVG` over the Figma column would state the pair backwards.
-    assertTrue(html.contains("<th class=\"cp-compare-target-head\">Figma</th>"), html)
-    // The button that enters the lane names the pair in the order the columns stand.
-    assertTrue(html.contains(">Figma ↔ PNG</button>"), html)
-  }
-
-  @Test
-  fun `the render leads the lanes that compare it against its own export`() {
-    // `svg` and `rc` are a different question: they pit a render against an export OF that render,
-    // where the render is the source of truth and the export is the thing on trial. So they keep
-    // the render first — only the design-spec lane leads with the spec.
-    val html =
-      ServeWeb.comparisonPage(
-        "m3-catalog",
-        listOf(ServePreview(id = "button", label = "Button")),
-        token = "t",
-        hasSvgFor = { true },
-      )
-    assertTrue(
-      html.indexOf("cp-compare-render-cell") < html.indexOf("cp-compare-target-cell"),
-      "the render's cell comes first on the SVG lane: $html",
-    )
-    assertTrue(
-      html.indexOf("cp-compare-render-head") < html.indexOf("cp-compare-target-head"),
-      "and its header with it: $html",
-    )
-    assertTrue(html.contains("<th class=\"cp-compare-target-head\">SVG</th>"), html)
   }
 
   @Test
@@ -2365,8 +2792,38 @@ class ServeWebTest {
   fun `the vector lanes keep catalog order rather than borrowing the design lane's`() {
     // `svg` and `rc` publish no score of their own, and re-ordering their rows by a number about a
     // different comparison is worse than the order the catalog chose.
+    //
+    // A catalog with NO references, because that is the only one the vector lane is served as the
+    // default for now (see the lane-order test below). The gate in `orderedCards` is what keeps the
+    // rule true for the pages that still reach it.
     val previews = listOf("alpha", "beta").map { ServePreview(id = it, label = it) }
-    val html =
+    val html = ServeWeb.comparisonPage("m3-catalog", previews, token = "t", hasSvgFor = { true })
+    val labels = Regex("data-label=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
+    assertEquals(listOf("alpha", "beta"), labels, html)
+  }
+
+  @Test
+  fun `the wall opens on a raster pair, not on the SVG lane`() {
+    // `svg` led because it was the first lane this page had. It is the slowest pair to put on
+    // screen — a vector document laid out and rasterised per row, against a PNG the decoder hands
+    // back whole — and the only one that can be wrong through no fault of the renderer: an SVG
+    // resolves its own typefaces at paint time, so a face the visitor's browser cannot get draws
+    // TOFU, on the page whose whole job is to say what looks wrong.
+    // See `docs/design/COMPARE_NAVIGATION.md`, §3.2.
+    val previews = listOf("alpha", "beta").map { ServePreview(id = it, label = it) }
+    val withReference =
+      ServeWeb.comparisonPage(
+        "m3-catalog",
+        previews,
+        token = "t",
+        hasSvgFor = { true },
+        referencesFor = { listOf(referenceFor(it)) },
+      )
+    assertTrue(withReference.contains("data-default-format=\"reference\""), withReference)
+
+    // …and with a reference lane to lead with, the served order is worst-first, which the vector
+    // default used to withhold from exactly the catalogs that publish scores.
+    val scored =
       ServeWeb.comparisonPage(
         "m3-catalog",
         previews,
@@ -2374,8 +2831,13 @@ class ServeWebTest {
         hasSvgFor = { true },
         referencesFor = { id -> listOf(scoredReferenceFor(id, if (id == "alpha") 99.0 else 12.0)) },
       )
-    val labels = Regex("data-label=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.toList()
-    assertEquals(listOf("alpha", "beta"), labels, html)
+    val labels = Regex("data-label=\"([^\"]+)\"").findAll(scored).map { it.groupValues[1] }.toList()
+    assertEquals(listOf("beta", "alpha"), labels, scored)
+
+    // A catalog with only an SVG export still opens on it — the order is a preference among the
+    // lanes a catalog HAS, not a refusal to serve the one it has.
+    val svgOnly = ServeWeb.comparisonPage("m3-catalog", previews, token = "t", hasSvgFor = { true })
+    assertTrue(svgOnly.contains("data-default-format=\"svg\""), svgOnly)
   }
 
   @Test
@@ -2472,9 +2934,14 @@ class ServeWebTest {
     // The numbers join the haystack, so `#40` narrows the wall to the rows a report names — and so
     // do the titles, because the pill now shows them and a filter has to match what the reader can
     // see.
+    // The haystack is the row's LABEL and the issues filed against it. The preview ids used to be
+    // copied in here as well — the same list the row already carried in `data-preview-ids`, and
+    // the single biggest thing on a real wall. They are written once in the page's alias table
+    // now, and `keepRow` matches a typed id against the resolved list.
+    // See `docs/design/COMPARE_NAVIGATION.md`, F2.
     assertTrue(
       html.contains(
-        "data-hay=\"button button #40 glyph colour is darker than the design token " +
+        "data-hay=\"button #40 glyph colour is darker than the design token " +
           "#41 verified after the token update\""
       ),
       html,

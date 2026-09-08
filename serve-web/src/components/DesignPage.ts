@@ -34,20 +34,46 @@ import {
 } from "../design/geometry.js";
 import { fitInk, inkFrom, sampleSize, type InkBounds } from "../design/ink.js";
 import {
+    DIFF_ALL_CLASS,
+    allowsBaseline,
+    baselineAfterLane,
+    baselineOf,
     isInert,
     laneOf,
-    laneState,
+    needsParallel,
     needsRenders,
     outlinesAfterUnlinked,
+    scoreKey,
+    showsEveryBadge,
+    stageState,
+    type Baseline,
     type Lane,
+    type Source,
 } from "../design/lanes.js";
 import { badgeFor } from "../design/score.js";
+
+/**
+ * One catalog's render of a node, in that node's slot.
+ *
+ * A slot can hold TWO of these now — this catalog's and the `compareWith` sibling's — because the
+ * diff axis scores a pair and either side of that pair may be the one on screen. They are separate
+ * elements rather than one element whose `src` is swapped: a swapped `src` re-fetches and re-decodes
+ * on every flip, loses the ink measurement each image needs its own of, and would put a URL through
+ * JavaScript as a string (CodeQL `js/xss-through-dom`), which is exactly what the server-built
+ * `<template>` exists to avoid.
+ */
+interface Picture {
+    image: HTMLImageElement;
+    ink?: InkBounds | null;
+    /** Whether the image actually decoded. A slot cannot stand in for the design until one has. */
+    ok: boolean;
+}
 
 interface Entry {
     overlay: HTMLElement;
     target: SVGElement;
-    image?: HTMLImageElement;
-    ink?: InkBounds | null;
+    /** By source — `code` for ours, `parallel` for the sibling's. Never `design`. */
+    pictures: Map<Source, Picture>;
 }
 
 interface Sheet {
@@ -83,6 +109,24 @@ const EMPTY_BOX: Box = { left: 0, top: 0, width: 0, height: 0 };
 const nodeBoxOf = (element: SVGElement): Box =>
     paintedRect(element, domGeometry) ?? EMPTY_BOX;
 
+/**
+ * Where each source's renders are parked until something asks for them.
+ *
+ * `design` is absent on purpose and always will be: the design's own drawing is the inlined SVG,
+ * already on the page, and the one source that needs no template because it needs no fetching.
+ */
+const SOURCE_TEMPLATES: ReadonlyArray<[Source, string]> = [
+    ["code", "[data-cp-page-render-source]"],
+    ["parallel", "[data-cp-page-parallel-source]"],
+];
+
+/** The class the images of one source carry, which is also what the stylesheet shows and hides. */
+const SOURCE_CLASS: Record<Source, string> = {
+    code: "cp-page-render",
+    parallel: "cp-page-parallel",
+    design: "",
+};
+
 @customElement("cp-design-page")
 export class DesignPage extends ControllerElement {
     private installed = false;
@@ -101,6 +145,12 @@ export class DesignPage extends ControllerElement {
     private zoomLayer!: HTMLElement;
 
     private lanes: HTMLInputElement[] = [];
+    /** The `Diff against` radios, in the order the server emitted them. */
+    private baselines: HTMLInputElement[] = [];
+    /** What the sheet showed last, so a swap onto the baseline can hand it the lane just left. */
+    private shown: Lane = "code";
+    /** Whether a diff control is being held down right now. See {@link showsEveryBadge}. */
+    private diffHeld = false;
     private outlinesToggle: HTMLInputElement | null = null;
     private unlinkedToggle: HTMLInputElement | null = null;
     private legend: HTMLElement | null = null;
@@ -111,14 +161,17 @@ export class DesignPage extends ControllerElement {
     private overlays: HTMLElement[] = [];
     private nodes: Entry[] = [];
     private byId = new Map<string, Entry>();
-    private renderSource: HTMLTemplateElement | null = null;
+    /** The inert `<template>` per source, spent when the source is first needed. */
+    private sources = new Map<Source, HTMLTemplateElement>();
     private diffLinkSource: HTMLTemplateElement | null = null;
 
     private sheetRaster: Promise<Sheet | null> | null = null;
     /**
-     * Scored once per page. The numbers cannot move without the renders moving, and re-scoring on
-     * every flip back would redo dozens of rasterise-and-count passes for an answer already on
-     * screen. A node that FAILED is left unscored, so re-entering the lane retries it.
+     * Scored once per PAIRING, keyed by {@link scoreKey}. The numbers cannot move without the
+     * renders moving, and re-scoring on every flip back would redo dozens of rasterise-and-count
+     * passes for an answer already on screen — while keying on the node alone would answer "how far
+     * from wear-m3?" with the number measured against Figma. A pairing that FAILED is left unscored,
+     * so re-entering it retries.
      */
     private scoredNodes = new Set<string>();
     private described: string | null = null;
@@ -164,6 +217,9 @@ export class DesignPage extends ControllerElement {
         this.lanes = Array.from(
             root.querySelectorAll<HTMLInputElement>("[data-cp-page-lane]"),
         );
+        this.baselines = Array.from(
+            root.querySelectorAll<HTMLInputElement>("[data-cp-page-baseline]"),
+        );
         this.outlinesToggle = root.querySelector("[data-cp-page-outlines]");
         this.unlinkedToggle = root.querySelector("[data-cp-page-unlinked]");
         this.legend = root.querySelector(".cp-page-legend");
@@ -185,19 +241,24 @@ export class DesignPage extends ControllerElement {
                 overlay.setAttribute("data-cp-missing", "");
                 continue;
             }
-            const entry: Entry = { overlay, target };
+            const entry: Entry = { overlay, target, pictures: new Map() };
             this.nodes.push(entry);
             this.byId.set(id, entry);
         }
 
-        this.renderSource = stage.querySelector("[data-cp-page-render-source]");
+        for (const [source, selector] of SOURCE_TEMPLATES) {
+            const template = stage.querySelector<HTMLTemplateElement>(selector);
+            if (template) this.sources.set(source, template);
+        }
         this.diffLinkSource = stage.querySelector("[data-cp-page-diff-links]");
         this.armDiffLinks();
         this.wireNodes();
         this.wireControls();
 
+        this.shown = this.lane();
         this.applyOutlines();
         this.applyUnlinked();
+        this.syncBaselines();
         this.applyLane();
         this.measure();
 
@@ -246,14 +307,19 @@ export class DesignPage extends ControllerElement {
             }
             entry.overlay.removeAttribute("data-cp-missing");
             Object.assign(entry.overlay.style, slot);
-            this.placeRender(entry, node);
+            this.placeRenders(entry, node);
         }
     }
 
-    private placeRender(entry: Entry, slot: Box): void {
-        const image = entry.image;
-        if (!image) return;
-        const placed = fitInk(slot, entry.ink ?? null);
+    /** Every picture in this slot, each fitted by its OWN ink — two catalogs crop differently. */
+    private placeRenders(entry: Entry, slot: Box): void {
+        for (const picture of entry.pictures.values())
+            this.placeRender(picture, slot);
+    }
+
+    private placeRender(picture: Picture, slot: Box): void {
+        const image = picture.image;
+        const placed = fitInk(slot, picture.ink ?? null);
         if (!placed) {
             // Back to the stylesheet's `inset: 0` + `object-fit: contain`.
             image.style.left = "";
@@ -299,19 +365,17 @@ export class DesignPage extends ControllerElement {
         }
     }
 
-    private takeInk(entry: Entry): void {
+    private takeInk(entry: Entry, picture: Picture): void {
         const read = () => {
-            if (!entry.image) return;
-            entry.ink = this.inkBounds(entry.image);
+            picture.ink = this.inkBounds(picture.image);
             // Just this slot. The node's box hasn't moved — only what we now know about the image
             // has — and re-running the whole measure per arriving render is dozens of layout reads
             // for one placement.
             const node = nodeBoxOf(entry.target);
             if (node.width > 0 && node.height > 0)
-                this.placeRender(entry, node);
+                this.placeRender(picture, node);
         };
-        const image = entry.image;
-        if (!image) return;
+        const image = picture.image;
         if (image.complete && image.naturalWidth > 0) read();
         else image.addEventListener("load", read);
     }
@@ -319,21 +383,29 @@ export class DesignPage extends ControllerElement {
     // ---- the renders ---------------------------------------------------------
 
     /**
-     * The renders are served inside an inert `<template>` and adopted when the lane that draws them
-     * is entered. That is the lane the page opens on, so this normally runs on first paint; the
+     * A source's renders are served inside an inert `<template>` and adopted the first time a
+     * pairing names that source — as the lane on the sheet, or as the baseline it is scored
+     * against.
+     *
+     * `code` is normally adopted on first paint, since that is the lane the page opens on; the
      * images carry `loading="lazy"`, which is what keeps a tall sheet from asking the daemon for
-     * every node at once.
+     * every node at once. `parallel` is adopted only when the reader asks for the sibling, and that
+     * gate is the point: those images come off ANOTHER catalog's daemon, and a page that warmed
+     * them speculatively would charge every reader of every sheet for a comparison almost none of
+     * them opened.
      *
      * A template rather than a `data-src` swap, deliberately: template content is inert, so the
      * browser parses it and loads none of its images until it is adopted — and it keeps every URL
      * server-built and server-escaped. Reading a URL out of the DOM and assigning it to `img.src` is
      * a taint path (CodeQL `js/xss-through-dom`), and not having the sink beats validating it.
      */
-    private armRenders(): void {
-        const source = this.renderSource;
-        if (!source) return;
-        for (const image of source.content.querySelectorAll<HTMLImageElement>(
-            ".cp-page-render",
+    private armSource(source: Source): void {
+        const template = this.sources.get(source);
+        if (!template) return;
+        this.sources.delete(source);
+        const selector = `.${SOURCE_CLASS[source]}`;
+        for (const image of template.content.querySelectorAll<HTMLImageElement>(
+            selector,
         )) {
             const entry = this.byId.get(
                 image.getAttribute("data-cp-node") ?? "",
@@ -342,40 +414,61 @@ export class DesignPage extends ControllerElement {
             // in and nothing to hide. Skipping leaves the row in the list, which is the honest state.
             if (!entry) continue;
             entry.overlay.appendChild(image);
-            entry.image = image;
-            this.standIn(image, entry.target);
-            this.takeInk(entry);
+            const picture: Picture = { image, ok: false };
+            entry.pictures.set(source, picture);
+            this.standIn(entry, picture);
+            this.takeInk(entry, picture);
         }
-        source.remove();
-        this.renderSource = null;
+        template.remove();
         this.measure();
     }
 
     /**
-     * The design's drawing is hidden ONLY once ours has actually arrived, and comes back if it never
-     * does.
+     * The design's drawing is hidden ONLY once the picture the reader asked for has actually
+     * arrived, and comes back if it never does.
      *
      * Hiding on adoption instead leaves an empty slot for any render the server can't produce: a
-     * preview that throws, a daemon that falls over, a 404. The page opens on this lane and there is
-     * no "untick to get the sheet back" control any more, so a failed render would be a hole where
-     * the whole point is that something is in the slot.
+     * preview that throws, a daemon that falls over, a 404. There is no "untick to get the sheet
+     * back" control, so a failed render would be a hole where the whole point is that something is
+     * in the slot.
      *
-     * Also hides the failed `<img>` itself, or the browser's broken-image glyph would sit on top of
-     * the drawing we just restored.
+     * Recomputed from the SHOWN source rather than latched on the first image to load, because a
+     * slot can now hold two of them: with our render broken and the sibling's fine, latching would
+     * hide the design's drawing on the sibling's arrival and leave the `code` lane showing nothing
+     * at all.
+     *
+     * Also hides a failed `<img>` itself, or the browser's broken-image glyph would sit on top of
+     * the drawing just restored.
      */
-    private standIn(image: HTMLImageElement, target: SVGElement): void {
+    private standIn(entry: Entry, picture: Picture): void {
+        const image = picture.image;
+        const settle = (ok: boolean) => {
+            picture.ok = ok;
+            image.hidden = !ok;
+            this.syncStandIn(entry);
+        };
         if (image.complete && image.naturalWidth > 0) {
-            target.classList.add("cp-page-replaced");
+            picture.ok = true;
+            this.syncStandIn(entry);
             return;
         }
-        image.addEventListener("load", () => {
-            image.hidden = false;
-            target.classList.add("cp-page-replaced");
-        });
-        image.addEventListener("error", () => {
-            image.hidden = true;
-            target.classList.remove("cp-page-replaced");
-        });
+        image.addEventListener("load", () => settle(true));
+        image.addEventListener("error", () => settle(false));
+    }
+
+    /**
+     * Whether the design's own drawing of [entry] stays hidden under what is being shown.
+     *
+     * Not recomputed on the design's own lane, and that is not an oversight: nothing stands in
+     * there, `cp-page-hide-design` is off, and the sheet's drawing is back whatever this says. The
+     * mark is what a slot WOULD be covered by, so clearing it on a lane that covers nothing would
+     * lose the record of which slots have a stand-in at all.
+     */
+    private syncStandIn(entry: Entry): void {
+        const lane = this.lane();
+        if (lane === "design") return;
+        const shown = entry.pictures.get(lane);
+        entry.target.classList.toggle("cp-page-replaced", shown?.ok === true);
     }
 
     // ---- lanes and filters ---------------------------------------------------
@@ -384,13 +477,94 @@ export class DesignPage extends ControllerElement {
         return laneOf(this.lanes.find((input) => input.checked)?.value);
     }
 
+    private baseline(): Baseline {
+        return baselineOf(this.baselines.find((input) => input.checked)?.value);
+    }
+
+    /** Whether this page carries the sibling catalog's renders at all. */
+    private hasParallel(): boolean {
+        return (
+            this.sources.has("parallel") ||
+            this.nodes.some((entry) => entry.pictures.has("parallel"))
+        );
+    }
+
     private applyLane(): void {
         const lane = this.lane();
-        if (needsRenders(lane)) this.armRenders();
-        for (const [name, on] of Object.entries(laneState(lane))) {
+        const baseline = this.baseline();
+        if (needsRenders(lane, baseline)) this.armSource("code");
+        if (needsParallel(lane, baseline)) this.armSource("parallel");
+        for (const [name, on] of Object.entries(stageState(lane, baseline))) {
             this.stage.classList.toggle(name, on);
         }
-        if (lane === "diff") this.score();
+        this.stage.classList.toggle(
+            DIFF_ALL_CLASS,
+            showsEveryBadge(baseline, this.diffHeld),
+        );
+        for (const entry of this.nodes) this.syncStandIn(entry);
+        if (baseline !== "off") this.score();
+    }
+
+    /**
+     * A change to what the sheet SHOWS, which may move the baseline with it.
+     *
+     * The two axes range over the same three sources, so flipping onto the one you were scoring
+     * against is a SWAP rather than a contradiction — {@link baselineAfterLane} hands the baseline
+     * the lane just vacated, and the pair the reader was looking at survives the flip.
+     */
+    private changeLane(): void {
+        const next = this.lane();
+        const baseline = baselineAfterLane(
+            this.shown,
+            next,
+            this.baseline(),
+            this.hasParallel(),
+        );
+        this.shown = next;
+        this.selectBaseline(baseline);
+        this.syncBaselines();
+        this.applyLane();
+    }
+
+    private selectBaseline(baseline: Baseline): void {
+        for (const input of this.baselines)
+            input.checked = input.value === baseline;
+    }
+
+    /**
+     * Hides the baseline the sheet is already showing, rather than disabling it in place.
+     *
+     * A control that can never do anything is worse than one that is not there: "diff ours against
+     * ours" is 0.0% in every slot by construction, and a permanently dead third button is what the
+     * catalogs with no sibling — which is most of them — would be left looking at. Hidden, the group
+     * always offers exactly the comparisons that exist.
+     */
+    private syncBaselines(): void {
+        const lane = this.lane();
+        const hasParallel = this.hasParallel();
+        for (const input of this.baselines) {
+            const allowed = allowsBaseline(
+                lane,
+                baselineOf(input.value),
+                hasParallel,
+            );
+            const label = input.closest("label") ?? input;
+            label.toggleAttribute("hidden", !allowed);
+            input.disabled = !allowed;
+        }
+    }
+
+    /**
+     * Hold a `Diff against` control to see every badge; let go to get the sheet back.
+     *
+     * Re-entered through {@link applyLane} rather than toggling the class here, so the gate on the
+     * diff axis being on at all is stated once, and a release that arrives after the reader has
+     * already switched it off cannot leave the class behind.
+     */
+    private holdDiff(held: boolean): void {
+        if (this.diffHeld === held) return;
+        this.diffHeld = held;
+        this.applyLane();
     }
 
     /**
@@ -440,14 +614,19 @@ export class DesignPage extends ControllerElement {
         }
     }
 
-    // ---- the diff lane -------------------------------------------------------
+    // ---- the diff axis -------------------------------------------------------
     //
-    // The reference is this page's own SVG, cropped to the node — not the component's imported
-    // reference raster. Both are defensible, but only one is on the page already: cropping the
-    // export needs no server round trip, no manifest field, and covers every node that has a render
-    // rather than only those with an imported reference. It also answers the question the page
-    // actually poses, which is about THIS slot: how far is our pixel from the design's pixel, here,
-    // at this size, in the layout the designer drew.
+    // When the DESIGN is one half of the pair, its side is this page's own SVG cropped to the node —
+    // not the component's imported reference raster. Both are defensible, but only one is on the
+    // page already: cropping the export needs no server round trip, no manifest field, and covers
+    // every node that has a render rather than only those with an imported reference. It also
+    // answers the question the page actually poses, which is about THIS slot: how far is our pixel
+    // from the design's pixel, here, at this size, in the layout the designer drew.
+    //
+    // When both halves are catalogs — ours against the `compareWith` sibling — no crop is involved
+    // at all: two rasters of the same kit cell, scored directly. That comparison is the one the
+    // export cannot make, because the two catalogs implement one design and the design has no
+    // opinion about which of them is right.
 
     /**
      * ONE raster of the sheet, cropped per node — not one clone of the sheet per node.
@@ -574,33 +753,56 @@ export class DesignPage extends ControllerElement {
         return badge;
     }
 
+    /**
+     * One side of the comparison, decoded and ready to score.
+     *
+     * The three sources are not the same KIND of thing and this is where that stops mattering: the
+     * design's is cut out of the sheet already on the page, ours and the sibling's are rasters the
+     * server produced. Above this line a pairing is just two sources; below it, each knows how to
+     * become pixels.
+     */
+    private async pictureFor(
+        entry: Entry,
+        source: Source,
+    ): Promise<HTMLImageElement | HTMLCanvasElement | null> {
+        if (source === "design") return this.sheetImage(entry.target);
+        const picture = entry.pictures.get(source);
+        // No render, or one the server could not produce: there is nothing to compare against, and
+        // saying so beats printing a number that means "absent" rather than "apart".
+        if (!picture || picture.image.hidden) return null;
+        return this.decoded(picture.image);
+    }
+
     private score(): void {
         // Read at SCORE time, not at install. `format-compare.js` publishes the global from its own
         // script tag, and on this page that tag comes after the components bundle — so an element
-        // that cached the handle when it upgraded would cache `null` and the diff lane would score
+        // that cached the handle when it upgraded would cache `null` and the diff axis would score
         // nothing, silently, with every badge stuck on a dash. Reading it here costs one property
-        // lookup per entry into the lane and cannot be got wrong by moving a script.
+        // lookup per entry into the axis and cannot be got wrong by moving a script.
         const compare = compareApi();
         if (!compare) return;
+        const lane = this.lane();
+        const baseline = this.baseline();
+        if (baseline === "off") return;
         for (const entry of this.nodes) {
             const id = entry.overlay.getAttribute("data-cp-node") ?? "";
-            if (this.scoredNodes.has(id)) continue;
-            const render =
-                entry.overlay.querySelector<HTMLImageElement>(
-                    ".cp-page-render",
-                );
-            // No render, or one the server could not produce: there is nothing to compare the design
-            // against, and saying so beats printing a number that means "absent" rather than "apart".
-            if (!render || render.hidden) continue;
-            this.scoredNodes.add(id);
-            void this.scoreNode(entry, id, render, compare);
+            const key = scoreKey(lane, baseline, id);
+            if (this.scoredNodes.has(key)) continue;
+            // Both halves have to be here. A slot the sibling does not draw scores nothing rather
+            // than scoring our render against a blank and reporting the absence as drift.
+            if (!entry.pictures.get(lane) && lane !== "design") continue;
+            if (!entry.pictures.get(baseline) && baseline !== "design")
+                continue;
+            this.scoredNodes.add(key);
+            void this.scoreNode(entry, key, lane, baseline, compare);
         }
     }
 
     private async scoreNode(
         entry: Entry,
-        id: string,
-        render: HTMLImageElement,
+        key: string,
+        lane: Lane,
+        baseline: Baseline,
         compare: CompareApi,
     ): Promise<void> {
         // The badge is the whole readout, deliberately. A per-node diff MAP was the obvious next
@@ -611,15 +813,21 @@ export class DesignPage extends ControllerElement {
         badge.textContent = "…";
         try {
             const [reference, candidate] = await Promise.all([
-                this.sheetImage(entry.target),
-                this.decoded(render),
+                this.pictureFor(entry, baseline as Source),
+                this.pictureFor(entry, lane),
             ]);
-            if (!reference) throw new Error("not scoreable");
+            if (!reference || !candidate) throw new Error("not scoreable");
             const result = await compare.scoreImages(reference, candidate);
             const read = badgeFor(result);
             badge.textContent = read.text;
             badge.title = read.title;
             badge.setAttribute("data-cp-score", read.band);
+            // The band on the NODE as well as on the badge. The badges only appear where the reader
+            // is pointing now (see {@link holdDiff}), so without this the diff lane at rest would be
+            // an unmarked sheet — the triage would be there and invisible. Colour on the node
+            // survives the badge being hidden, which is the whole point of hiding it: the sheet says
+            // where to look, the badge says how far.
+            entry.overlay.setAttribute("data-cp-score", read.band);
             entry.overlay.setAttribute(
                 "data-cp-score-value",
                 read.value.toFixed(1),
@@ -627,9 +835,10 @@ export class DesignPage extends ControllerElement {
         } catch {
             badge.textContent = "—";
             badge.setAttribute("data-cp-score", "none");
+            entry.overlay.setAttribute("data-cp-score", "none");
             badge.title = "not scoreable";
             // Retryable: a render that had not arrived yet is the likeliest reason to be here.
-            this.scoredNodes.delete(id);
+            this.scoredNodes.delete(key);
         }
     }
 
@@ -742,7 +951,7 @@ export class DesignPage extends ControllerElement {
             // tab" keeps working.
             this.on(spot, "click", (event) => {
                 const click = event as MouseEvent;
-                if (this.lane() !== "diff") return;
+                if (this.baseline() === "off") return;
                 if (click.defaultPrevented || click.button !== 0) return;
                 if (
                     click.metaKey ||
@@ -817,9 +1026,11 @@ export class DesignPage extends ControllerElement {
     }
 
     /**
-     * In the diff lane a node's click leaves for the component's full Figma comparison rather than
-     * selecting in place — the number on the sheet is the invitation, and the diff map, triptych and
-     * wipe are what it opens onto. Clicking a server-built anchor, never assigning a URL.
+     * While the diff axis is on, a node's click leaves for the component's full comparison rather
+     * than selecting in place — the number on the sheet is the invitation, and the diff map,
+     * triptych and wipe are what it opens onto. That viewer carries its own source picker, so the
+     * sibling comparison is one control away from where this lands. Clicking a server-built anchor,
+     * never assigning a URL.
      */
     private armDiffLinks(): void {
         const source = this.diffLinkSource;
@@ -843,8 +1054,31 @@ export class DesignPage extends ControllerElement {
         if (this.unlinkedToggle)
             this.on(this.unlinkedToggle, "change", () => this.applyUnlinked());
         for (const input of this.lanes) {
+            this.on(input, "change", () => this.changeLane());
+        }
+        for (const input of this.baselines) {
             this.on(input, "change", () => this.applyLane());
         }
+        // The hold, on every scoring control rather than on one lane's own. Its label is the hit
+        // target a pointer actually lands on (the radio itself is visually replaced), while the
+        // keyboard reaches the input — so the press is taken from both and the release from
+        // `window`, which is the only place that hears a pointer let go outside the control it went
+        // down on. Without that last one a drag off the button would latch the sheet on, which is
+        // the exact failure mode a press-and-hold has to not have.
+        for (const input of this.baselines) {
+            if (baselineOf(input.value) === "off") continue;
+            const grip = input.closest("label") ?? input;
+            this.on(grip, "pointerdown", () => this.holdDiff(true));
+            this.on(input, "keydown", (event) => {
+                const key = (event as KeyboardEvent).key;
+                if (key === " " || key === "Enter") this.holdDiff(true);
+            });
+            this.on(input, "keyup", () => this.holdDiff(false));
+            // A control that is only held loses its grip when focus leaves mid-press.
+            this.on(input, "blur", () => this.holdDiff(false));
+        }
+        this.on(window, "pointerup", () => this.holdDiff(false));
+        this.on(window, "pointercancel", () => this.holdDiff(false));
         // Opening the audit list changes nothing about the sheet, but it does change how tall the
         // stage's container is on a short viewport, and every overlay is placed off a measured box.
         if (this.disclosure)

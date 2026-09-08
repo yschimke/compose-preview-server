@@ -1,18 +1,22 @@
 public final class ee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor {
-	public static final synthetic fun box-impl (Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
-	public static fun constructor-impl (Ljava/lang/String;)Ljava/lang/String;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
 	public fun equals (Ljava/lang/Object;)Z
-	public static fun equals-impl (Ljava/lang/String;Ljava/lang/Object;)Z
-	public static final fun equals-impl0 (Ljava/lang/String;Ljava/lang/String;)Z
+	public final fun getAccessIdentities ()Ljava/util/List;
 	public final fun getActorId ()Ljava/lang/String;
+	public final fun getOnBehalfOfActorId ()Ljava/lang/String;
 	public fun hashCode ()I
-	public static fun hashCode-impl (Ljava/lang/String;)I
 	public fun toString ()Ljava/lang/String;
-	public static fun toString-impl (Ljava/lang/String;)Ljava/lang/String;
-	public final synthetic fun unbox-impl ()Ljava/lang/String;
 }
 
 public final class ee/schimke/composeai/uibuilder/service/CurrentM3UiBuilderCatalogExecutor : ee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor {
+	public static final field ASSET_KEY_PROPERTY Ljava/lang/String;
+	public static final field ASSET_REGISTRY_KEY Ljava/lang/String;
+	public static final field COLOR_TOKENS_KEY Ljava/lang/String;
 	public static final field COMPONENT_PACKS_KEY Ljava/lang/String;
 	public static final field CURRENT_CAPABILITY_DIGEST Ljava/lang/String;
 	public static final field Companion Lee/schimke/composeai/uibuilder/service/CurrentM3UiBuilderCatalogExecutor$Companion;
@@ -26,11 +30,25 @@ public final class ee/schimke/composeai/uibuilder/service/CurrentM3UiBuilderCata
 	public fun <init> (Ljava/lang/String;Ljava/util/Set;Lee/schimke/composeai/uibuilder/protocol/ExportCapabilitiesV1;Lkotlin/jvm/functions/Function1;Ljava/util/List;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Set;Lee/schimke/composeai/uibuilder/protocol/ExportCapabilitiesV1;Lkotlin/jvm/functions/Function1;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun listCatalogs ()Ljava/util/List;
+	public fun reference (Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;)Lee/schimke/composeai/uibuilder/protocol/CatalogReferenceV1;
 	public fun resolve (Lee/schimke/composeai/uibuilder/protocol/CatalogReferenceV1;)Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;
 	public fun validate (Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;)Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogIssue;
+	public fun validateWrite (Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/DesignNodeV1;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogIssue;
+	public final fun validateWrite (Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/DesignNodeV1;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogIssue;
 }
 
 public final class ee/schimke/composeai/uibuilder/service/CurrentM3UiBuilderCatalogExecutor$Companion {
+	public final fun declaredAssetKeys (Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;)Ljava/util/Set;
+	public final fun declaredColorTokens (Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;)Ljava/util/Set;
+	public final fun getCANVAS_COLOR_TOKENS ()Ljava/util/Set;
+	public final fun isColourProperty (Ljava/lang/String;)Z
+	public final fun isDrawableColour (Ljava/lang/String;)Z
+}
+
+public final class ee/schimke/composeai/uibuilder/service/FileUiBuilderAssetStore : ee/schimke/composeai/uibuilder/service/UiBuilderAssetStore {
+	public fun <init> (Ljava/nio/file/Path;)V
+	public fun read (Ljava/lang/String;)[B
+	public fun write (Ljava/lang/String;[B)V
 }
 
 public final class ee/schimke/composeai/uibuilder/service/FileUiBuilderStateStorage : ee/schimke/composeai/uibuilder/service/RecoverableUiBuilderMigrationStorage {
@@ -44,6 +62,7 @@ public final class ee/schimke/composeai/uibuilder/service/FileUiBuilderStateStor
 	public fun replaceForMigration ([B)V
 	public final fun restoreBackup ()Z
 	public fun restoreMigrationBackup ()Z
+	public fun usage ()Lee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage;
 }
 
 public final class ee/schimke/composeai/uibuilder/service/FileUiBuilderStateStorage$Companion {
@@ -59,10 +78,10 @@ public final class ee/schimke/composeai/uibuilder/service/PackagedUiBuilderRende
 	public final fun requiredJavaFeatureVersion ()I
 }
 
-public final class ee/schimke/composeai/uibuilder/service/PersistentUiBuilderService : ee/schimke/composeai/uibuilder/service/UiBuilderAdminPort, ee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnosticsSource, ee/schimke/composeai/uibuilder/service/UiBuilderServicePort {
+public final class ee/schimke/composeai/uibuilder/service/PersistentUiBuilderService : ee/schimke/composeai/uibuilder/service/UiBuilderAdminPort, ee/schimke/composeai/uibuilder/service/UiBuilderAssetPort, ee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnosticsSource, ee/schimke/composeai/uibuilder/service/UiBuilderServicePort {
 	public static final field Companion Lee/schimke/composeai/uibuilder/service/PersistentUiBuilderService$Companion;
-	public fun <init> (Lee/schimke/composeai/uibuilder/service/UiBuilderStateStorage;Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderExportExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriberFailureHandler;Ljava/time/Clock;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;)V
-	public synthetic fun <init> (Lee/schimke/composeai/uibuilder/service/UiBuilderStateStorage;Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderExportExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriberFailureHandler;Ljava/time/Clock;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lee/schimke/composeai/uibuilder/service/UiBuilderStateStorage;Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderExportExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriberFailureHandler;Ljava/time/Clock;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;Lee/schimke/composeai/uibuilder/service/UiBuilderAssetStore;)V
+	public synthetic fun <init> (Lee/schimke/composeai/uibuilder/service/UiBuilderStateStorage;Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderExportExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriberFailureHandler;Ljava/time/Clock;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;Lee/schimke/composeai/uibuilder/service/UiBuilderAssetStore;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun adminDeleteDesign (Ljava/lang/String;)Z
 	public fun adminDesignDocument (Ljava/lang/String;)Ljava/lang/String;
 	public fun adminListDesigns ()Ljava/util/List;
@@ -71,6 +90,8 @@ public final class ee/schimke/composeai/uibuilder/service/PersistentUiBuilderSer
 	public fun diagnostics ()Lee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics;
 	public fun execute (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun migratePersistenceToLatest ()Lee/schimke/composeai/uibuilder/service/UiBuilderPersistenceMigrationResult;
+	public fun putAsset (Lee/schimke/composeai/uibuilder/service/UiBuilderAssetWrite;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun readAsset (Lee/schimke/composeai/uibuilder/service/UiBuilderAssetRead;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun subscribe (Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriptionCall;Lkotlin/jvm/functions/Function1;)Ljava/io/Closeable;
 }
 
@@ -78,7 +99,8 @@ public final class ee/schimke/composeai/uibuilder/service/PersistentUiBuilderSer
 }
 
 public final class ee/schimke/composeai/uibuilder/service/ProductionUiBuilderExportExecutor : ee/schimke/composeai/uibuilder/service/UiBuilderExportExecutor, java/io/Closeable {
-	public fun <init> (Lee/schimke/composeai/uibuilder/service/UiBuilderRenderPort;Lee/schimke/composeai/uibuilder/service/UiBuilderExportExecutor;)V
+	public fun <init> (Lee/schimke/composeai/uibuilder/service/UiBuilderRenderPort;Lee/schimke/composeai/uibuilder/service/UiBuilderExportExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderAssetStore;)V
+	public synthetic fun <init> (Lee/schimke/composeai/uibuilder/service/UiBuilderRenderPort;Lee/schimke/composeai/uibuilder/service/UiBuilderExportExecutor;Lee/schimke/composeai/uibuilder/service/UiBuilderAssetStore;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
 	public fun export (Lee/schimke/composeai/uibuilder/service/RevisionPinnedUiBuilderExport;)Lee/schimke/composeai/uibuilder/protocol/ExportArtifactV1;
 	public final fun getCapabilities ()Lee/schimke/composeai/uibuilder/protocol/ExportCapabilitiesV1;
@@ -86,6 +108,7 @@ public final class ee/schimke/composeai/uibuilder/service/ProductionUiBuilderExp
 
 public final class ee/schimke/composeai/uibuilder/service/ProductionUiBuilderRuntimeKt {
 	public static final fun projectRendererDocument (Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;)Ljava/lang/String;
+	public static final fun projectRendererDocument (Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lkotlin/jvm/functions/Function1;)Ljava/lang/String;
 }
 
 public abstract interface class ee/schimke/composeai/uibuilder/service/ProtocolRequestMapping {
@@ -118,19 +141,23 @@ public abstract interface class ee/schimke/composeai/uibuilder/service/Recoverab
 	public abstract fun restoreMigrationBackup ()Z
 }
 
+public final class ee/schimke/composeai/uibuilder/service/RecoverableUiBuilderMigrationStorage$DefaultImpls {
+	public static fun usage (Lee/schimke/composeai/uibuilder/service/RecoverableUiBuilderMigrationStorage;)Lee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage;
+}
+
 public final class ee/schimke/composeai/uibuilder/service/RevisionPinnedUiBuilderExport {
-	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/ExportFormatV1;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1-3DWvQvo ()Ljava/lang/String;
+	public fun <init> (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;JLjava/lang/String;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/ExportFormatV1;)V
+	public final fun component1 ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()J
 	public final fun component4 ()Ljava/lang/String;
 	public final fun component5 ()Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;
 	public final fun component6 ()Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;
 	public final fun component7 ()Lee/schimke/composeai/uibuilder/protocol/ExportFormatV1;
-	public final fun copy-9ou4cvg (Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/ExportFormatV1;)Lee/schimke/composeai/uibuilder/service/RevisionPinnedUiBuilderExport;
-	public static synthetic fun copy-9ou4cvg$default (Lee/schimke/composeai/uibuilder/service/RevisionPinnedUiBuilderExport;Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/ExportFormatV1;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/RevisionPinnedUiBuilderExport;
+	public final fun copy (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;JLjava/lang/String;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/ExportFormatV1;)Lee/schimke/composeai/uibuilder/service/RevisionPinnedUiBuilderExport;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/RevisionPinnedUiBuilderExport;Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;JLjava/lang/String;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/ExportFormatV1;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/RevisionPinnedUiBuilderExport;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getActor-3DWvQvo ()Ljava/lang/String;
+	public final fun getActor ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
 	public final fun getCatalog ()Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;
 	public final fun getDesignId ()Ljava/lang/String;
 	public final fun getDocument ()Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;
@@ -222,10 +249,83 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderAdminRepair$R
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderAssetDigests {
+	public static final field INSTANCE Lee/schimke/composeai/uibuilder/service/UiBuilderAssetDigests;
+	public final fun hexOf (Ljava/lang/String;)Ljava/lang/String;
+	public final fun of ([B)Ljava/lang/String;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderAssetKeys {
+	public static final field INSTANCE Lee/schimke/composeai/uibuilder/service/UiBuilderAssetKeys;
+	public static final field MAXIMUM_LENGTH I
+	public static final field RULE Ljava/lang/String;
+	public final fun isValid (Ljava/lang/String;)Z
+}
+
+public abstract interface class ee/schimke/composeai/uibuilder/service/UiBuilderAssetPort {
+	public abstract fun putAsset (Lee/schimke/composeai/uibuilder/service/UiBuilderAssetWrite;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun readAsset (Lee/schimke/composeai/uibuilder/service/UiBuilderAssetRead;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderAssetRead {
+	public fun <init> (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderAssetRead;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderAssetRead;Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderAssetRead;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getActor ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
+	public final fun getAssetKey ()Ljava/lang/String;
+	public final fun getDesignId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class ee/schimke/composeai/uibuilder/service/UiBuilderAssetReadResult {
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderAssetReadResult$Failed : ee/schimke/composeai/uibuilder/service/UiBuilderAssetReadResult {
+	public fun <init> (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceError;)V
+	public final fun component1 ()Lee/schimke/composeai/uibuilder/service/UiBuilderServiceError;
+	public final fun copy (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceError;)Lee/schimke/composeai/uibuilder/service/UiBuilderAssetReadResult$Failed;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderAssetReadResult$Failed;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceError;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderAssetReadResult$Failed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getError ()Lee/schimke/composeai/uibuilder/service/UiBuilderServiceError;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderAssetReadResult$Found : ee/schimke/composeai/uibuilder/service/UiBuilderAssetReadResult {
+	public fun <init> (Lee/schimke/composeai/uibuilder/protocol/AssetBindingV1;[B)V
+	public final fun getBinding ()Lee/schimke/composeai/uibuilder/protocol/AssetBindingV1;
+	public final fun getBytes ()[B
+}
+
+public abstract interface class ee/schimke/composeai/uibuilder/service/UiBuilderAssetStore {
+	public abstract fun read (Ljava/lang/String;)[B
+	public abstract fun write (Ljava/lang/String;[B)V
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderAssetWrite {
+	public fun <init> (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;Ljava/lang/String;[B)V
+	public final fun getActor ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
+	public final fun getAssetKey ()Ljava/lang/String;
+	public final fun getBytes ()[B
+	public final fun getDesignId ()Ljava/lang/String;
+}
+
 public abstract interface class ee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor {
 	public abstract fun listCatalogs ()Ljava/util/List;
+	public fun reference (Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;)Lee/schimke/composeai/uibuilder/protocol/CatalogReferenceV1;
 	public abstract fun resolve (Lee/schimke/composeai/uibuilder/protocol/CatalogReferenceV1;)Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;
 	public abstract fun validate (Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;)Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogIssue;
+	public fun validateWrite (Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/DesignNodeV1;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogIssue;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor$DefaultImpls {
+	public static fun reference (Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;)Lee/schimke/composeai/uibuilder/protocol/CatalogReferenceV1;
+	public static fun validateWrite (Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogExecutor;Lee/schimke/composeai/uibuilder/protocol/CatalogCapabilityV1;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;Lee/schimke/composeai/uibuilder/protocol/DesignNodeV1;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderCatalogIssue;
 }
 
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderCatalogIssue {
@@ -322,7 +422,7 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderProtocolMappe
 	public final fun toProtocolRequest (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;)Lee/schimke/composeai/uibuilder/protocol/UiBuilderRequestV1;
 	public final fun toProtocolResponse (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse;)Lee/schimke/composeai/uibuilder/protocol/UiBuilderResponseV1;
 	public final fun toProtocolUpdate (Ljava/lang/String;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceUpdate;)Lee/schimke/composeai/uibuilder/protocol/DesignUpdateEnvelopeV1;
-	public final fun toServiceCall-s7NVkz4 (Ljava/lang/String;Lee/schimke/composeai/uibuilder/protocol/UiBuilderRequestV1;)Lee/schimke/composeai/uibuilder/service/ProtocolRequestMapping;
+	public final fun toServiceCall (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Lee/schimke/composeai/uibuilder/protocol/UiBuilderRequestV1;)Lee/schimke/composeai/uibuilder/service/ProtocolRequestMapping;
 	public final fun toServiceResponse (Lee/schimke/composeai/uibuilder/protocol/UiBuilderResponseV1;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse;
 	public final fun toServiceUpdate (Lee/schimke/composeai/uibuilder/protocol/DesignUpdateV1;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceUpdate;
 }
@@ -361,21 +461,21 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderRenderRequest
 }
 
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceCall {
-	public synthetic fun <init> (Ljava/lang/String;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1-3DWvQvo ()Ljava/lang/String;
+	public fun <init> (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest;)V
+	public final fun component1 ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
 	public final fun component2 ()Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest;
-	public final fun copy-s7NVkz4 (Ljava/lang/String;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;
-	public static synthetic fun copy-s7NVkz4$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;Ljava/lang/String;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;
+	public final fun copy (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getActor-3DWvQvo ()Ljava/lang/String;
+	public final fun getActor ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
 	public final fun getRequest ()Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics {
-	public fun <init> (IJJJJJIJJJJJJIJI)V
-	public synthetic fun <init> (IJJJJJIJJJJJJIJIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (IJJJJJIJJJJJJIJIJJ)V
+	public synthetic fun <init> (IJJJJJIJJJJJJIJIJJILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()I
 	public final fun component10 ()J
 	public final fun component11 ()J
@@ -384,6 +484,8 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagno
 	public final fun component14 ()I
 	public final fun component15 ()J
 	public final fun component16 ()I
+	public final fun component17 ()J
+	public final fun component18 ()J
 	public final fun component2 ()J
 	public final fun component3 ()J
 	public final fun component4 ()J
@@ -392,8 +494,8 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagno
 	public final fun component7 ()I
 	public final fun component8 ()J
 	public final fun component9 ()J
-	public final fun copy (IJJJJJIJJJJJJIJI)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics;
-	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics;IJJJJJIJJJJJJIJIILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics;
+	public final fun copy (IJJJJJIJJJJJJIJIJJ)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics;IJJJJJIJJJJJJIJIJJILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getActiveExports ()I
 	public final fun getActiveMutationBuckets ()I
@@ -409,6 +511,8 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagno
 	public final fun getRejectedPresenceLimit ()J
 	public final fun getRejectedSubscriberLimit ()J
 	public final fun getSlowSubscribersClosed ()J
+	public final fun getStorageBytes ()J
+	public final fun getStorageMaximumBytes ()J
 	public final fun getTimedOutExports ()J
 	public final fun getUnusableDesigns ()I
 	public fun hashCode ()I
@@ -443,32 +547,40 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceError 
 
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits {
 	public fun <init> ()V
-	public fun <init> (IIIIIIIIIIIIJIIJIIIJ)V
-	public synthetic fun <init> (IIIIIIIIIIIIJIIJIIIJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (IIIIIJIJIIIIIIIIJIIJIIIJII)V
+	public synthetic fun <init> (IIIIIJIJIIIIIIIIJIIJIIIJIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()I
 	public final fun component10 ()I
 	public final fun component11 ()I
 	public final fun component12 ()I
-	public final fun component13 ()J
+	public final fun component13 ()I
 	public final fun component14 ()I
 	public final fun component15 ()I
-	public final fun component16 ()J
-	public final fun component17 ()I
+	public final fun component16 ()I
+	public final fun component17 ()J
 	public final fun component18 ()I
 	public final fun component19 ()I
 	public final fun component2 ()I
 	public final fun component20 ()J
+	public final fun component21 ()I
+	public final fun component22 ()I
+	public final fun component23 ()I
+	public final fun component24 ()J
+	public final fun component25 ()I
+	public final fun component26 ()I
 	public final fun component3 ()I
 	public final fun component4 ()I
 	public final fun component5 ()I
-	public final fun component6 ()I
+	public final fun component6 ()J
 	public final fun component7 ()I
-	public final fun component8 ()I
+	public final fun component8 ()J
 	public final fun component9 ()I
-	public final fun copy (IIIIIIIIIIIIJIIJIIIJ)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;
-	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;IIIIIIIIIIIIJIIJIIIJILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;
+	public final fun copy (IIIIIJIJIIIIIIIIJIIJIIIJII)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;IIIIIJIJIIIIIIIIJIIJIIIJIIILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getExportTimeoutMillis ()J
+	public final fun getMaximumAssetBytes ()I
+	public final fun getMaximumAssetsPerDesign ()I
 	public final fun getMaximumConcurrentExports ()I
 	public final fun getMaximumDesigns ()I
 	public final fun getMaximumEmbeddedAssetBytes ()I
@@ -479,6 +591,8 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits
 	public final fun getMaximumSerializedDocumentBytes ()I
 	public final fun getMaximumSubscribers ()I
 	public final fun getMaximumSubscribersPerDesign ()I
+	public final fun getMinimumRetainedRevisionSnapshots ()I
+	public final fun getMinimumRetainedUndoOperations ()I
 	public final fun getMutationBurstCapacity ()I
 	public final fun getMutationRefillAmount ()I
 	public final fun getMutationRefillIntervalMillis ()J
@@ -486,7 +600,9 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceLimits
 	public final fun getRetainedAuditRecords ()I
 	public final fun getRetainedCommittedOperations ()I
 	public final fun getRetainedOperationOutcomes ()I
+	public final fun getRetainedRevisionBytes ()J
 	public final fun getRetainedRevisionSnapshots ()I
+	public final fun getRetainedUndoBytes ()J
 	public final fun getSubscriberQueueCapacity ()I
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
@@ -518,6 +634,17 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceReques
 	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$CreateDesign;Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$CreateDesign;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getDocument ()Lee/schimke/composeai/uibuilder/protocol/DesignDocumentV1;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$DeleteDesign : ee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$DeleteDesign;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$DeleteDesign;Ljava/lang/String;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$DeleteDesign;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDesignId ()Ljava/lang/String;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -624,6 +751,19 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceReques
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$RenameDesign : ee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$RenameDesign;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$RenameDesign;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$RenameDesign;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDesignId ()Ljava/lang/String;
+	public final fun getTitle ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest$UpdateDesignAccess : ee/schimke/composeai/uibuilder/service/UiBuilderServiceRequest {
 	public fun <init> (Ljava/lang/String;JLjava/util/List;)V
 	public final fun component1 ()Ljava/lang/String;
@@ -667,12 +807,15 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceRespon
 }
 
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$Catalogs : ee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse {
-	public fun <init> (Ljava/util/List;)V
+	public fun <init> (Ljava/util/List;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/util/List;
-	public final fun copy (Ljava/util/List;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$Catalogs;
-	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$Catalogs;Ljava/util/List;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$Catalogs;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun copy (Ljava/util/List;Ljava/util/Map;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$Catalogs;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$Catalogs;Ljava/util/List;Ljava/util/Map;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$Catalogs;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getCatalogs ()Ljava/util/List;
+	public final fun getPins ()Ljava/util/Map;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -697,6 +840,28 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceRespon
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAccess ()Lee/schimke/composeai/uibuilder/protocol/DesignAccessControlV1;
 	public final fun getDesignId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$DesignDeleted : ee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$DesignDeleted;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$DesignDeleted;Ljava/lang/String;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$DesignDeleted;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDesignId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$DesignRenamed : ee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse {
+	public fun <init> (Lee/schimke/composeai/uibuilder/protocol/DesignListItemV1;)V
+	public final fun component1 ()Lee/schimke/composeai/uibuilder/protocol/DesignListItemV1;
+	public final fun copy (Lee/schimke/composeai/uibuilder/protocol/DesignListItemV1;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$DesignRenamed;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$DesignRenamed;Lee/schimke/composeai/uibuilder/protocol/DesignListItemV1;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderServiceResponse$DesignRenamed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDesign ()Lee/schimke/composeai/uibuilder/protocol/DesignListItemV1;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -821,6 +986,25 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderServiceUpdate
 public abstract interface class ee/schimke/composeai/uibuilder/service/UiBuilderStateStorage {
 	public abstract fun load ()[B
 	public abstract fun replace ([B)V
+	public fun usage ()Lee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderStateStorage$DefaultImpls {
+	public static fun usage (Lee/schimke/composeai/uibuilder/service/UiBuilderStateStorage;)Lee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage;
+}
+
+public final class ee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage {
+	public fun <init> (JJ)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun copy (JJ)Lee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage;JJILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBytes ()J
+	public final fun getMaximumBytes ()J
+	public final fun getUsedFraction ()D
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public abstract interface class ee/schimke/composeai/uibuilder/service/UiBuilderSubmission {
@@ -892,14 +1076,14 @@ public abstract interface class ee/schimke/composeai/uibuilder/service/UiBuilder
 }
 
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderSubscriptionCall {
-	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1-3DWvQvo ()Ljava/lang/String;
+	public fun <init> (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;Ljava/lang/Long;)V
+	public final fun component1 ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/lang/Long;
-	public final fun copy-aVgKSqY (Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;)Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriptionCall;
-	public static synthetic fun copy-aVgKSqY$default (Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriptionCall;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriptionCall;
+	public final fun copy (Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;Ljava/lang/Long;)Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriptionCall;
+	public static synthetic fun copy$default (Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriptionCall;Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;Ljava/lang/String;Ljava/lang/Long;ILjava/lang/Object;)Lee/schimke/composeai/uibuilder/service/UiBuilderSubscriptionCall;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getActor-3DWvQvo ()Ljava/lang/String;
+	public final fun getActor ()Lee/schimke/composeai/uibuilder/service/AuthenticatedUiBuilderActor;
 	public final fun getAfterSequence ()Ljava/lang/Long;
 	public final fun getDesignId ()Ljava/lang/String;
 	public fun hashCode ()I

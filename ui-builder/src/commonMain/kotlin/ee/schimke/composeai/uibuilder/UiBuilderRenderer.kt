@@ -161,8 +161,6 @@ import ee.schimke.composeai.rcplayer.protocol.RcDocument
 import ee.schimke.composeai.rcplayer.protocol.RcDocumentCodec
 import ee.schimke.composeai.rcplayer.runtime.RcNamedValue
 import ee.schimke.composeai.rcplayer.runtime.RcPlayerEvent
-import ee.schimke.composeai.uibuilder.artwork.ANDROID_DEVELOPERS_BACKSTAGE_ARTWORK_KEY
-import ee.schimke.composeai.uibuilder.artwork.GOOGLE_DEVELOPERS_PODCAST_ARTWORK_KEY
 import ee.schimke.composeai.uibuilder.artwork.ProjectOwnedJetcasterArtwork
 import kotlin.io.encoding.Base64
 import kotlin.math.PI
@@ -206,6 +204,53 @@ private val LocalUiBuilderCornerRadius = staticCompositionLocalOf { 16f }
 internal val LocalUiBuilderNativeOnly = staticCompositionLocalOf<Set<String>> { emptySet() }
 
 /**
+ * Remote Compose documents a host has fetched for the `documentUrl` of an embedded document node.
+ *
+ * A composition local rather than a renderer parameter, for the reason [LocalUiBuilderNativeOnly]
+ * is one: every surface that draws a document — the canvas, the thumbnails, the JVM render port,
+ * the previews — would otherwise have to thread a parameter it has no opinion about.
+ *
+ * A **lookup**, not a fetch. Loading bytes is suspending, size-limited and cancellable, and none of
+ * those belong inside a composable that draws: the host resolves a URL once, decides what an
+ * over-large or unreachable one means, and answers here with the document or the failure. `null` is
+ * the third answer and the common one — *not resolved yet*, which is what a first frame sees and
+ * what a host with no resolver at all always answers. The node draws its own waiting state for it
+ * rather than an error, because a design pointing at a URL nobody has fetched is not a broken
+ * design.
+ */
+public val LocalRemoteComposeDocuments:
+  androidx.compose.runtime.ProvidableCompositionLocal<(String) -> Result<RcDocument>?> =
+  staticCompositionLocalOf {
+    { _ -> null }
+  }
+
+/**
+ * Remote Compose documents a host has **captured** from a design's own inline content, by node id.
+ *
+ * The sibling of [LocalRemoteComposeDocuments] and deliberately a second local rather than a
+ * widening of it. That one is keyed by URL because an embedded document names a URL and two nodes
+ * pointing at the same one are the same bytes; this one is keyed by *node*, because an inline
+ * subtree is not addressed by anything — it is the design, and what identifies it is where it sits.
+ *
+ * A **lookup**, not a capture, for the same reason: producing these bytes means compiling the
+ * generated `@RemoteComposable` body and running `captureSingleRemoteDocument` on an Android
+ * daemon, which is a network round trip to `ServeUiBuilderInlineCapture` and cannot happen inside a
+ * composable that draws. The host captures once, decides what a failed capture means, and answers
+ * here.
+ *
+ * `null` — nothing captured for this node — is the common answer and the honest one: it is what a
+ * host with no capture lane always says, and what every node says before anyone has asked for a
+ * capture. The node then draws the Compose stand-ins in their marked frame, exactly as it always
+ * has. A capture is an *upgrade* from describing the content to playing it, never a precondition
+ * for drawing the design.
+ */
+public val LocalRemoteComposeCaptures:
+  androidx.compose.runtime.ProvidableCompositionLocal<(String) -> Result<RcDocument>?> =
+  staticCompositionLocalOf {
+    { _ -> null }
+  }
+
+/**
  * Draw the design at its whole extent rather than at its frame: lists unrolled, scrolling dropped.
  *
  * Compose refuses to measure a scrollable against an unbounded height — a `LazyColumn` under
@@ -222,6 +267,32 @@ internal val LocalUiBuilderNativeOnly = staticCompositionLocalOf<Set<String>> { 
  * stadium, for the same reason and with the same honesty about it.
  */
 internal val LocalUiBuilderUnrolled = staticCompositionLocalOf { false }
+
+/**
+ * The density the design is drawn at: the one its environment names, not the host's.
+ *
+ * Public to the module rather than inlined into [UiBuilderSurface], because the editor's canvas has
+ * to ask the same question. The canvas sizes the frame in *pixels* and this renderer then reads
+ * those pixels as dp at this density, so the frame is the size the design was authored for only
+ * while the two agree about what the density is. They used to each decide separately — the canvas
+ * simply did not ask, and used the host's — and a design whose density was not the browser's was
+ * handed a frame scaled by the ratio between them: a 240dp watch at 2.0 in a browser at 1.0 became
+ * 120dp of room, which is not enough for a 216dp widget. See `PinnedDesignCanvas`.
+ *
+ * [fallback] is the host's own density, which is what an environment that names neither field
+ * means.
+ */
+internal fun UiBuilderDocument.renderDensity(fallback: Density): Density =
+  Density(
+    density = environmentScale("density") ?: fallback.density,
+    fontScale = environmentScale("fontScale") ?: fallback.fontScale,
+  )
+
+/** A positive, finite number from the environment, or null for anything else — missing included. */
+private fun UiBuilderDocument.environmentScale(name: String): Float? =
+  environment[name]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf {
+    it.isFinite() && it > 0f
+  }
 
 fun uiBuilderLayers(editorOverlay: Boolean): List<UiBuilderLayer> =
   if (editorOverlay) listOf(UiBuilderLayer.Design, UiBuilderLayer.EditorOverlay)
@@ -383,17 +454,7 @@ fun UiBuilderSurface(
   val theme = document.environment["theme"]?.jsonPrimitive?.contentOrNull
   val dark = theme == "dark" || (theme == "system" && isSystemInDarkTheme())
   val platformDensity = LocalDensity.current
-  val density =
-    Density(
-      density =
-        document.environment["density"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf {
-          it.isFinite() && it > 0f
-        } ?: platformDensity.density,
-      fontScale =
-        document.environment["fontScale"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf {
-          it.isFinite() && it > 0f
-        } ?: platformDensity.fontScale,
-    )
+  val density = document.renderDensity(platformDensity)
   val layoutDirection =
     if (document.environment["layoutDirection"]?.jsonPrimitive?.contentOrNull == "rtl")
       LayoutDirection.Rtl
@@ -670,11 +731,12 @@ private fun RenderNode(
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         // `IntrinsicSize.Min`, because a Wear list row has to wrap. `m3/card` — which is what a
-        // borrowed row is — draws its content slot in a `Box(Modifier.fillMaxSize())`, and inside a
-        // Column with a bounded parent that makes the first card eat every remaining pixel and the
-        // rest of the list vanish. The real `TransformingLazyColumn` measures each item's own
-        // height too, through `Modifier.transformedHeight`; this is the same question asked with
-        // the tool the canvas has.
+        // borrowed row is — used to draw its content slot in a `Box(Modifier.fillMaxSize())`, and
+        // inside a Column with a bounded parent that made the first card eat every remaining pixel
+        // and the rest of the list vanish; the card wraps its content now (#483, `cardContentFill`)
+        // and this stays as the list's own statement of it. The real `TransformingLazyColumn`
+        // measures each item's own height too, through `Modifier.transformedHeight`; this is the
+        // same question asked with the tool the canvas has.
         slot("items").forEach { child(it, Modifier.fillMaxWidth().height(IntrinsicSize.Min)) }
       }
     "layout/supporting-pane-scaffold" ->
@@ -684,6 +746,57 @@ private fun RenderNode(
         { next -> slot("mainPane").forEach { child(it, next) } },
         { next -> slot("supportingPane").forEach { child(it, next) } },
       )
+    // The vocabulary switch. Everything below is `@RemoteComposable` in the code this design
+    // generates, and this canvas draws it with the ordinary Compose stand-ins the `remote-m3`
+    // catalog has always used for the same components — a `RemoteColumn` is drawn by a `Column`.
+    //
+    // Framed rather than drawn flush, and the frame is the honest part. The browser has no Remote
+    // Compose writer, so these are the shapes the generated body *describes* rather than the pixels
+    // a player produces; the frame is what stops an author reading them as the latter. The rule
+    // this keeps is `wear-m3`'s — never fake a component so it runs in Wasm — applied to a whole
+    // subtree rather than to one component.
+    //
+    // Once a host has captured the subtree ([LocalRemoteComposeCaptures]) none of that applies:
+    // there are real bytes, and they are played by the same `RcComposePlayer` that draws the
+    // embedded document beside it. The frame stays — the boundary is still a fact about the design
+    // — but it stops standing in for the content, which is the difference between marking a scope
+    // and approximating it.
+    REMOTE_COMPOSE_INLINE_COMPONENT_ID -> {
+      val captured = LocalRemoteComposeCaptures.current(node.id)
+      RemoteContentFrame(
+        label = "Remote Compose",
+        detail = if (captured == null) null else "played",
+        modifier = measured,
+      ) {
+        if (captured == null) {
+          slot("content").forEach { child(it, Modifier.fillMaxWidth()) }
+        } else {
+          PlayedInlineRemoteContent(
+            document = document,
+            node = node,
+            captured = captured,
+            modifier = Modifier.fillMaxWidth(),
+            slotContent = { fill, next -> Box(next) { child(fill, Modifier.fillMaxWidth()) } },
+          )
+        }
+      }
+    }
+    // The way back out. A custom component is a hole the document reserves for host content, so
+    // what the canvas draws inside it is ordinary Compose — which is also what a registered
+    // renderer draws on a real player. The name is on the frame because it is the whole contract:
+    // a preview draws this only where a custom component of that name is registered, and an author
+    // who cannot see the name cannot check that.
+    REMOTE_COMPOSE_CUSTOM_COMPONENT_ID ->
+      RemoteContentFrame(
+        label = "Custom",
+        detail = node.string("name").ifEmpty { "unnamed" },
+        modifier =
+          measured
+            .then(node.dimension("widthDp")?.let { Modifier.width(it) } ?: Modifier)
+            .then(node.dimension("heightDp")?.let { Modifier.height(it) } ?: Modifier),
+      ) {
+        slot("content").forEach { child(it, Modifier.fillMaxWidth()) }
+      }
     "remote-compose/document" ->
       RemoteComposeDocument(
         document = document,
@@ -958,7 +1071,13 @@ private fun RenderNode(
             node.color("containerColor", MaterialTheme.colorScheme.surfaceContainer)
           ),
       ) {
-        Box(Modifier.fillMaxSize()) {
+        // Filled only along the axes the card was given a size on — see [cardContentFill] for why
+        // `fillMaxSize` here made a card with no height swallow its column (#483).
+        val fill = node.cardContentFill()
+        Box(
+          Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
+            .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
+        ) {
           slot("content").forEach { id ->
             val item = document.nodes.getValue(id)
             val parentSizing =
@@ -1162,7 +1281,7 @@ private fun RenderNode(
         textAlign = node.textAlign(),
         onTextLayout = { onTextLayout(node.id, it) },
       )
-    "asset/image" -> AssetPlaceholder(node, measured)
+    "asset/image" -> AssetImage(document, node, measured)
     "shape/linear-gradient" -> Box(measured.background(node.linearGradientBrush()))
     "shape/radial-gradient" -> {
       val inner =
@@ -1599,7 +1718,30 @@ private fun RemoteComposeDocument(
   slotContent: @Composable (String, Modifier) -> Unit,
 ) {
   val encoded = node.string("documentBase64")
-  val decoded = remember(encoded) { decodeRemoteComposeDocument(encoded) }
+  val url = node.string("documentUrl")
+  val resolve = LocalRemoteComposeDocuments.current
+  // Bytes win. A design that carries its own document has already been decided; reaching for the
+  // network as well would make an offline reopen of a saved design depend on a host it does not
+  // need, and would leave two answers to the question of what this node holds.
+  val decoded =
+    when {
+      encoded.isNotBlank() -> remember(encoded) { decodeRemoteComposeDocument(encoded) }
+      url.isNotBlank() -> resolve(url)
+      else ->
+        remember {
+          Result.failure(
+            IllegalArgumentException(
+              "Remote Compose node needs either documentBase64 or documentUrl"
+            )
+          )
+        }
+    }
+  if (decoded == null) {
+    // Waiting, not broken — see [LocalRemoteComposeDocuments]. The URL is shown because it is the
+    // only thing an author can act on while it is unresolved.
+    RemoteComposeDiagnostic(message = "Loading $url", modifier = modifier, error = false)
+    return
+  }
   val rcDocument = decoded.getOrNull()
   if (rcDocument == null) {
     RemoteComposeDiagnostic(
@@ -1660,6 +1802,126 @@ private fun RemoteComposeDocument(
   )
 }
 
+/**
+ * A captured inline subtree, played rather than described.
+ *
+ * ## Why the registry is built from the design and not from the document
+ *
+ * The captured document names its custom components by the string the generated body wrote —
+ * `RemoteCustomComponent(name = "field")`, from the node's own `name` property — and the host is
+ * what supplies the Compose that fills each one. So the two halves of that contract are the design
+ * node and its `content` slot, and they are what this walks: every `remote-compose/custom` under
+ * this node registers a renderer under its `name` that draws its own children.
+ *
+ * That is the same seam an embedded `remote-compose/document` uses through its named slots, reached
+ * from the other side — and it is what makes a design nest Compose inside Remote Compose inside
+ * Compose with a real player in the middle rather than a frame.
+ *
+ * ## The walk stops at a custom component
+ *
+ * What is under one is host content again, so its own descendants are not part of the remote
+ * subtree and must not be searched for further custom components: a `remote-compose/custom` nested
+ * inside another one's `content` belongs to whatever *that* content is, not to this document. The
+ * same rule `RemoteScopes` applies when it decides which vocabulary a node is written in.
+ */
+@Composable
+private fun PlayedInlineRemoteContent(
+  document: UiBuilderDocument,
+  node: UiBuilderNode,
+  captured: Result<RcDocument>,
+  modifier: Modifier,
+  slotContent: @Composable (String, Modifier) -> Unit,
+) {
+  val rcDocument = captured.getOrNull()
+  if (rcDocument == null) {
+    RemoteComposeDiagnostic(
+      message =
+        captured.exceptionOrNull()?.message
+          ?: "the captured Remote Compose document could not be read",
+      modifier = modifier,
+    )
+    return
+  }
+  val fills = remember(document, node.id) { document.customComponentFills(node) }
+  val renderers = fills.mapValues { (_, fillIds) ->
+    val content: RcCustomContent = { _, next ->
+      Column(next) { fillIds.forEach { slotContent(it, Modifier.fillMaxWidth()) } }
+    }
+    content
+  }
+  val customComponents = RcCustomComponentRegistry(renderers)
+  // The same preflight the embedded document runs, and it earns its place here for a sharper
+  // reason: these bytes were generated from this design, so an unregistered name is a disagreement
+  // between the emitter and the canvas rather than a document somebody else published. Saying which
+  // name is missing is what turns that into something an author can act on.
+  val missing =
+    remember(rcDocument, customComponents.names) {
+      rcDocument
+        .composeSupportReport(availableCustomComponents = customComponents.names)
+        .issues
+        .filter { it.operation == "Custom" }
+    }
+  if (missing.isNotEmpty()) {
+    RemoteComposeDiagnostic(message = missing.joinToString("\n") { it.detail }, modifier = modifier)
+    return
+  }
+  val inherited =
+    when (document.environment["theme"]?.jsonPrimitive?.contentOrNull) {
+      "light" -> RcPlayerTheme.Light
+      "dark" -> RcPlayerTheme.Dark
+      else -> RcPlayerTheme.System
+    }
+  // The document's own shape, where it declares one, and this is the one place an inline node
+  // differs from an embedded one on purpose. An embedded document is a node an author added and
+  // sized: its modifiers are what they asked for, and overriding them with the bytes' aspect would
+  // ignore the ask. An inline node was never sized *as a document* — the author drew a subtree, and
+  // the only statement about how much room it wants is the one the capture wrote into the header.
+  // Without this the player takes every pixel the column has left and the design's own content
+  // below the remote content stops being drawn at all.
+  val header = rcDocument.header
+  val shaped =
+    if (header.width > 0 && header.height > 0) {
+      modifier.aspectRatio(header.width.toFloat() / header.height.toFloat())
+    } else modifier
+  RcComposePlayer(
+    document = rcDocument,
+    modifier = shaped,
+    theme =
+      when (node.string("theme")) {
+        "light" -> RcPlayerTheme.Light
+        "dark" -> RcPlayerTheme.Dark
+        "system" -> RcPlayerTheme.System
+        else -> inherited
+      },
+    customComponents = customComponents,
+  )
+}
+
+/**
+ * Every custom component in [host]'s remote subtree, as `name` to the node ids that fill it.
+ *
+ * A map rather than a list because that is what a registry is keyed by, and two nodes sharing one
+ * name is a design decision rather than an error — the later one wins here, exactly as it would in
+ * a registry built by hand.
+ */
+private fun UiBuilderDocument.customComponentFills(host: UiBuilderNode): Map<String, List<String>> {
+  val fills = mutableMapOf<String, List<String>>()
+  val seen = mutableSetOf<String>()
+  fun walk(id: String) {
+    if (!seen.add(id)) return
+    val node = nodes[id] ?: return
+    if (node.componentId == REMOTE_COMPOSE_CUSTOM_COMPONENT_ID) {
+      val name = node.string("name")
+      if (name.isNotEmpty()) fills[name] = node.slots["content"].orEmpty()
+      // Deliberately not descended into: see the KDoc above.
+      return
+    }
+    node.slots.values.flatten().forEach(::walk)
+  }
+  host.slots["content"].orEmpty().forEach(::walk)
+  return fills
+}
+
 internal fun decodeRemoteComposeDocument(encoded: String): Result<RcDocument> = runCatching {
   require(encoded.isNotBlank()) { "Remote Compose documentBase64 is required" }
   require(encoded.length <= MAX_REMOTE_COMPOSE_BASE64_CHARS) {
@@ -1705,14 +1967,19 @@ private fun RcPlayerEvent.bindingName(): String? =
   }
 
 @Composable
-private fun RemoteComposeDiagnostic(message: String, modifier: Modifier) {
-  Surface(modifier, color = MaterialTheme.colorScheme.errorContainer) {
-    Text(
-      message,
-      Modifier.padding(8.dp),
-      color = MaterialTheme.colorScheme.onErrorContainer,
-    )
-  }
+private fun RemoteComposeDiagnostic(
+  message: String,
+  modifier: Modifier,
+  /** False for a document that is merely not here yet, which is not the same as a broken one. */
+  error: Boolean = true,
+) {
+  val container =
+    if (error) MaterialTheme.colorScheme.errorContainer
+    else MaterialTheme.colorScheme.surfaceVariant
+  val content =
+    if (error) MaterialTheme.colorScheme.onErrorContainer
+    else MaterialTheme.colorScheme.onSurfaceVariant
+  Surface(modifier, color = container) { Text(message, Modifier.padding(8.dp), color = content) }
 }
 
 /**
@@ -1866,47 +2133,154 @@ private fun LegacyListItem(
   )
 }
 
+/**
+ * An `asset/image` node: the picture its `assetKey` names, or a placeholder that says which key it
+ * could not draw.
+ *
+ * Resolution is [UiBuilderDocument.resolveAsset]'s, shared with the SVG lanes; this composable only
+ * decides what each answer looks like. The one rule here is that **no key fails the frame**. This
+ * used to `error()` on a key it did not know, and because the design is one composition, a single
+ * inserted node took a whole screen down — in the editor, in the daemon render behind
+ * `ui_builder_export`, and for every collaborator with the design open. A key with nothing behind
+ * it is now an ordinary picture-shaped placeholder carrying the key, which is what a designer needs
+ * to see to fix it and what an agent's next render shows it has not.
+ */
 @Composable
-private fun AssetPlaceholder(node: UiBuilderNode, modifier: Modifier) {
+private fun AssetImage(document: UiBuilderDocument, node: UiBuilderNode, modifier: Modifier) {
+  val contentDescription = node.string("contentDescription").ifEmpty { null }
+  val contentScale =
+    when (node.string("contentScale")) {
+      "fit" -> ContentScale.Fit
+      "fillBounds" -> ContentScale.FillBounds
+      "inside" -> ContentScale.Inside
+      else -> ContentScale.Crop
+    }
   val exportRaster = LocalUiBuilderExportRasterAssets.current[node.id]
   if (exportRaster != null) {
     Image(
       bitmap = exportRaster,
-      contentDescription = node.string("contentDescription").ifEmpty { null },
+      contentDescription = contentDescription,
       modifier = modifier,
-      contentScale =
-        when (node.string("contentScale")) {
-          "fit" -> ContentScale.Fit
-          "fillBounds" -> ContentScale.FillBounds
-          "inside" -> ContentScale.Inside
-          else -> ContentScale.Crop
-        },
+      contentScale = contentScale,
     )
     return
   }
   val key = node.string("assetKey")
-  if (
-    key == ANDROID_DEVELOPERS_BACKSTAGE_ARTWORK_KEY || key == GOOGLE_DEVELOPERS_PODCAST_ARTWORK_KEY
-  ) {
-    ProjectOwnedJetcasterArtwork(
-      assetKey = key,
-      contentDescription = node.string("contentDescription").ifEmpty { null },
-      modifier = modifier,
-      contentScale =
-        when (node.string("contentScale")) {
-          "fit" -> ContentScale.Fit
-          "fillBounds" -> ContentScale.FillBounds
-          "inside" -> ContentScale.Inside
-          else -> ContentScale.Crop
-        },
-    )
-    return
-  }
-  val palette =
-    when (key) {
-      "ui-builder.gate0.cover" -> listOf(Color(0xFF6750A4), Color(0xFFB69DF8), Color(0xFF21005D))
-      else -> error("unsupported asset '$key' on ${node.id}")
+  when (val resolved = document.resolveAsset(key)) {
+    is ResolvedUiBuilderAsset.Embedded -> {
+      // Remembered by digest, not by node: the same bytes under two nodes decode once, and a key
+      // re-pointed at a new picture decodes again because the digest moved.
+      val bitmap = remember(resolved.contentDigest) { decodeUiBuilderAssetBitmap(resolved.bytes) }
+      if (bitmap != null) {
+        Image(
+          bitmap = bitmap,
+          contentDescription = contentDescription,
+          modifier = modifier,
+          contentScale = contentScale,
+        )
+      } else {
+        MissingAssetPlaceholder(key, contentDescription, modifier)
+      }
     }
+    is ResolvedUiBuilderAsset.Uploaded -> {
+      val bitmap = LocalUiBuilderAssetBitmaps.current(resolved.contentDigest)
+      if (bitmap != null) {
+        Image(
+          bitmap = bitmap,
+          contentDescription = contentDescription,
+          modifier = modifier,
+          contentScale = contentScale,
+        )
+      } else {
+        MissingAssetPlaceholder(key, contentDescription, modifier)
+      }
+    }
+    is ResolvedUiBuilderAsset.ProjectOwned ->
+      ProjectOwnedJetcasterArtwork(
+        assetKey = key,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = contentScale,
+      )
+    ResolvedUiBuilderAsset.Generated -> GeneratedCoverPlaceholder(modifier)
+    is ResolvedUiBuilderAsset.Missing -> MissingAssetPlaceholder(key, contentDescription, modifier)
+  }
+}
+
+/**
+ * The frame of a picture nobody can show here: a neutral ground, a picture glyph, and the key.
+ *
+ * Neutral rather than an error container, because nothing is necessarily wrong — the bytes may be
+ * uploading, may live on a host this lane cannot reach, or may simply not have been given yet. What
+ * it must be is *visible* and *legible*: a viewer should see at a glance that a picture belongs
+ * here, and read which key to fill. Drawn with the theme's own surface-variant pair so it sits in
+ * either scheme, and with nothing animated or random so two renders of one design are one image.
+ */
+@Composable
+private fun MissingAssetPlaceholder(
+  assetKey: String,
+  contentDescription: String?,
+  modifier: Modifier,
+) {
+  val ground = MaterialTheme.colorScheme.surfaceVariant
+  val ink = MaterialTheme.colorScheme.onSurfaceVariant
+  val semantics =
+    if (contentDescription == null) modifier
+    else modifier.semantics { this.contentDescription = contentDescription }
+  BoxWithConstraints(semantics.background(ground), contentAlignment = Alignment.Center) {
+    Canvas(Modifier.matchParentSize()) {
+      val inset = size.minDimension * 0.18f
+      val frameWidth = size.width - inset * 2
+      val frameHeight = size.height - inset * 2
+      if (frameWidth <= 0f || frameHeight <= 0f) return@Canvas
+      val stroke = Stroke((size.minDimension * 0.035f).coerceAtLeast(1f))
+      drawRect(
+        ink.copy(alpha = 0.55f),
+        Offset(inset, inset),
+        androidx.compose.ui.geometry.Size(frameWidth, frameHeight),
+        style = stroke,
+      )
+      drawCircle(
+        ink.copy(alpha = 0.55f),
+        size.minDimension * 0.07f,
+        Offset(inset + frameWidth * 0.30f, inset + frameHeight * 0.32f),
+      )
+      drawPath(
+        Path().apply {
+          moveTo(inset, inset + frameHeight)
+          lineTo(inset + frameWidth * 0.38f, inset + frameHeight * 0.52f)
+          lineTo(inset + frameWidth * 0.60f, inset + frameHeight * 0.76f)
+          lineTo(inset + frameWidth * 0.76f, inset + frameHeight * 0.60f)
+          lineTo(inset + frameWidth, inset + frameHeight)
+          close()
+        },
+        ink.copy(alpha = 0.35f),
+      )
+    }
+    // The key, on the canvas and in a PNG, where there is room for a word — an avatar-sized frame
+    // shows the glyph alone rather than three clipped letters. Not in a structured SVG: that
+    // recorder fails closed on any text it cannot attribute to an authored text node, which is the
+    // right rule for an export and the wrong place for a label; the SVG keeps the frame and glyph.
+    if (!LocalUiBuilderExportStructuredIcons.current && maxWidth >= 96.dp && maxHeight >= 48.dp) {
+      Text(
+        text = assetKey,
+        modifier =
+          Modifier.align(Alignment.BottomCenter).padding(horizontal = 4.dp, vertical = 2.dp),
+        color = ink,
+        fontSize = 9.sp,
+        lineHeight = 11.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
+      )
+    }
+  }
+}
+
+/** The gate-0 fixture's generated cover: a gradient with a few shapes, no bytes behind it. */
+@Composable
+private fun GeneratedCoverPlaceholder(modifier: Modifier) {
+  val palette = listOf(Color(0xFF6750A4), Color(0xFFB69DF8), Color(0xFF21005D))
   Canvas(modifier) {
     drawRect(Brush.linearGradient(palette, Offset.Zero, Offset(size.width, size.height)))
     drawCircle(
@@ -2013,6 +2387,48 @@ private fun NativeOnlyPlaceholder(
     node.string("label").takeIf(String::isNotEmpty)?.let {
       Text(it, color = MaterialTheme.colorScheme.onSurface)
     }
+    content()
+  }
+}
+
+/**
+ * A labelled frame around content that is not what it appears to be drawn with.
+ *
+ * [NativeOnlyPlaceholder]'s neighbour and deliberately not the same thing. That one stands in for a
+ * component the canvas cannot draw *at all*, so it draws a name and a box. This draws the content
+ * for real — the stand-ins are the right shapes and the right text — and marks the boundary the
+ * content sits on, because a subtree in a different vocabulary is a fact about the design that a
+ * flush render would hide.
+ */
+@Composable
+private fun RemoteContentFrame(
+  label: String,
+  detail: String?,
+  modifier: Modifier,
+  content: @Composable ColumnScope.() -> Unit,
+) {
+  val outline = MaterialTheme.colorScheme.tertiary
+  Column(
+    modifier
+      .drawBehind {
+        drawRoundRect(
+          color = outline,
+          cornerRadius = CornerRadius(8.dp.toPx()),
+          style =
+            androidx.compose.ui.graphics.drawscope.Stroke(
+              width = 1.dp.toPx(),
+              pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 3f)),
+            ),
+        )
+      }
+      .padding(horizontal = 6.dp, vertical = 6.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    Text(
+      detail?.let { "$label · $it" } ?: label,
+      color = outline,
+      style = MaterialTheme.typography.labelSmall,
+    )
     content()
   }
 }
@@ -2688,28 +3104,21 @@ private fun uiBuilderColor(value: String): Color =
   if (value.startsWith("#")) Color(parseArgb(value))
   else colorTokenOrNull(value) ?: Color.Unspecified
 
+/**
+ * A property's colour, through the same table a modifier's goes through.
+ *
+ * An unknown token draws [fallback] rather than throwing. It used to be `error("unsupported color
+ * token …")`, which is the asset failure of #484 in another property: one node's value that this
+ * canvas could not resolve failed the whole frame. The reducers refuse such a value at commit now,
+ * and what still arrives — a design committed before the rule — is drawn in the component's own
+ * default, which is what an unset colour draws anyway.
+ */
 @Composable
 private fun UiBuilderNode.color(name: String, fallback: Color): Color {
   val value = string(name)
   if (value.startsWith("#")) return Color(parseArgb(value))
-  return when (value) {
-    "background" -> MaterialTheme.colorScheme.background
-    "surface" -> MaterialTheme.colorScheme.surface
-    "surfaceContainer" -> MaterialTheme.colorScheme.surfaceContainer
-    "surfaceContainerLow" -> MaterialTheme.colorScheme.surfaceContainerLow
-    "surfaceContainerHigh" -> MaterialTheme.colorScheme.surfaceContainerHigh
-    "surfaceContainerHighest" -> MaterialTheme.colorScheme.surfaceContainerHighest
-    "primary" -> MaterialTheme.colorScheme.primary
-    "onPrimary" -> MaterialTheme.colorScheme.onPrimary
-    "tertiary" -> MaterialTheme.colorScheme.tertiary
-    "onTertiary" -> MaterialTheme.colorScheme.onTertiary
-    "onSurface" -> MaterialTheme.colorScheme.onSurface
-    "onSurfaceVariant" -> MaterialTheme.colorScheme.onSurfaceVariant
-    "outlineVariant" -> MaterialTheme.colorScheme.outlineVariant
-    "transparent" -> Color.Transparent
-    "" -> fallback
-    else -> error("unsupported color token '$value' for $name on $id")
-  }
+  if (value.isEmpty()) return fallback
+  return colorTokenOrNull(value) ?: fallback
 }
 
 private fun UiBuilderNode.shape(themeCornerRadius: Float) =

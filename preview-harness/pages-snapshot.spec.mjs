@@ -157,6 +157,17 @@ const PAGE_PLACEHOLDER = `
   <rect x="330" y="500" width="180" height="180" rx="90" fill="#6750A4"/>
   <rect x="600" y="500" width="180" height="180" fill="#6750A4"/>
 </svg>`;
+// The `compareWith` SIBLING's render of a design-page cell — a second catalog's rendition of the
+// same kit component, which is what the sheet's third source puts in the slots. Deliberately NOT
+// the same picture as our own stand-in: the whole point of the source is that the two catalogs
+// differ, and a stub identical to ours would capture a lane that looks like a no-op and score 0.0%
+// in every slot, which is the one thing this comparison must never say by accident.
+const SIBLING_RENDER_PLACEHOLDER = `
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ffffff"/>
+  <circle cx="100" cy="100" r="76" fill="#1f6f4a"/>
+  <rect x="64" y="88" width="72" height="24" rx="12" fill="#d7f2e4"/>
+</svg>`;
 // The viewer's inspection lanes (`/render/<id>.a11y`, `/render/<id>.annotations`) are daemon data
 // products, so like the image lanes they have no backend here. These stand in for them, shaped
 // exactly as `ServeRenderHost.renderA11y` / `renderAnnotations` emit them and with bounds inside
@@ -483,6 +494,12 @@ const STYLED_FIXTURES = new Set([
   // simplification would move a baseline. `viewer.js` is needed too, for the `player-java`
   // state below.
   "serve-viewer-rc-players",
+  // The auth-gated twin of the fixture above, and the pair the renderer control has to keep
+  // apart: an RC preview HAS a combo, an auth-gated live lane replaces the chip with a link to
+  // GitHub, and a box run with `--github-auth` serves both at once. Its claim is entirely
+  // painted — a dashed "action to take" affordance standing apart from the solid combo rather
+  // than sharing its outline — so it is worthless without the stylesheet routed in.
+  "serve-viewer-rc-signin",
   // The playground handoff this host cannot honour. Its whole claim is a NOTICE — an
   // error-container panel that says "this server cannot compile against <catalog>" before the
   // visitor spends a compile finding out — and captured bare that is an ordinary paragraph in
@@ -543,6 +560,13 @@ const SERVE_ASSETS = [
   ["viewer.js", "text/javascript"],
   ["spatial-view.js", "text/javascript"],
   ["format-compare.js", "text/javascript"],
+  // The metric itself, which `format-compare.js` runs in a Worker (`scorer/offload.ts`, from the
+  // `data-cp-scorer-worker` href on its own script tag). Unrouted, the worker's script 404s and
+  // every score cell stays on "waiting…" — which is not a visible failure, it is a capture that
+  // spends its whole 60s budget in the wait for settled scores and then times out at the shutter.
+  // It became reachable when the wall stopped opening on the SVG lane and started opening on the
+  // design comparison (`docs/design/COMPARE_NAVIGATION.md`, §3.2).
+  ["compare-scorer.js", "text/javascript"],
   // Fetched by `chrome/reportLauncher.ts` when the report launcher's panel is first opened, and
   // immediately on `/report-bug`. Routed here so the `report-menu` state below shoots the real
   // capture controls rather than a panel with the block still `hidden`.
@@ -1106,9 +1130,14 @@ const FIXTURE_STATES = [
       );
       await page.waitForSelector(".cp-fab-menu[open]", { state: "detached" });
       await page.click('[data-compare-format="parallel"]');
-      await expect(page.locator(".cp-compare-target-head")).toHaveText(
-        "Wear M3",
-      );
+      // The NAME node, not the whole cell: the header also carries a `cp-compare-head-role` line
+      // saying which half of the pair this column is, and that line does not change with the lane.
+      await expect(
+        page.locator(".cp-compare-target-head .cp-compare-head-name"),
+      ).toHaveText("Wear M3");
+      await expect(
+        page.locator(".cp-compare-target-head .cp-compare-head-role"),
+      ).toHaveText("baseline");
       await expect(page.locator(".cp-compare-diff-head")).toBeVisible();
       await page.waitForFunction(() =>
         Array.from(
@@ -1159,13 +1188,25 @@ const FIXTURE_STATES = [
       await page.click('[data-compare-format="reference"]');
       // The header names the lane and moves with its column — assert both rather than trusting the
       // pixels, so a reordered table with a stale header fails loudly here.
-      await expect(page.locator(".cp-compare-target-head")).toHaveText("Figma");
+      await expect(
+        page.locator(".cp-compare-target-head .cp-compare-head-name"),
+      ).toHaveText("Figma");
+      // …and the render column is named after the CATALOG, not after a file format. "Rendered PNG"
+      // answered "which encoding?" where the reader was asking "whose picture is this?".
+      await expect(
+        page.locator(".cp-compare-render-head .cp-compare-head-role"),
+      ).toHaveText("ours");
       // …and assert the text is the text the READER sees. `serve.css` used to hide this `<th>`
       // with `font-size: 0` and paint a `::after` whose content was the generic "Design reference"
       // on every reference lane, so a DOM-text assertion passed while the page said something
       // else. This is the only layer with real CSS, so it is the only one that can catch that.
+      //
+      // Probed on the name node for the same reason the assertion above moved to it: that is where
+      // the lane's label lives now, so that is where hiding it would hide it.
       const painted = await page.evaluate(() => {
-        const th = document.querySelector(".cp-compare-target-head");
+        const th = document.querySelector(
+          ".cp-compare-target-head .cp-compare-head-name",
+        );
         const style = getComputedStyle(th);
         return {
           fontSize: parseFloat(style.fontSize),
@@ -1285,7 +1326,9 @@ const FIXTURE_STATES = [
         content:
           "*, *::before, *::after { transition-duration: 0ms !important; }",
       });
-      const band = page.locator(".cp-parity-issue-group .cp-parity-issues-sum").first();
+      const band = page
+        .locator(".cp-parity-issue-group .cp-parity-issues-sum")
+        .first();
       await band.scrollIntoViewIfNeeded();
       await band.click();
       await expect(
@@ -1394,15 +1437,85 @@ const FIXTURE_STATES = [
     },
   },
   {
-    // The diff lane: one number per slot, saying how far our render is from the design's own
-    // drawing of that node. Every part of it is produced at runtime — the sheet is cropped per
-    // node, rasterised and scored in the browser — so the committed HTML holds none of it and
-    // a change to the scoring, the bands or the badge would move no baseline without this.
+    // THE THIRD SOURCE. The sheet defines the kit's cells, and a catalog with a `compareWith`
+    // sibling has a second rendition of every one of them — so `wear-m3`'s renders can stand in the
+    // design's slots exactly as ours do. The whole comparison used to be one component at a time in
+    // the viewer's spec lane; a specimen sheet is where it is finally legible in one glance.
+    fixture: "serve-design-page",
+    suffix: "sibling-lane",
+    apply: async (page) => {
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-lane][value="parallel"])',
+      );
+      // The sibling's images ship inert inside their own `<template>` and are fetched only when a
+      // pairing names them, so this shot is also the proof that the adoption path runs at all.
+      await page.waitForFunction(
+        () =>
+          document.querySelectorAll(".cp-page-stage .cp-page-parallel").length >
+          0,
+      );
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector(".cp-page-stage")
+            .classList.contains("cp-page-parallel-on") &&
+          document.querySelectorAll("svg .cp-page-replaced").length > 0,
+      );
+    },
+  },
+  {
+    // …and scored against it. This is the number the surface exists for now: not "how far is our
+    // Button from Figma" but "how far is our Button from the OTHER catalog's Button", which the
+    // design file cannot answer because both implement it and it has no opinion about which is
+    // right. Nothing here is in the committed HTML — the pair is decoded and scored in the browser.
+    fixture: "serve-design-page",
+    suffix: "diff-sibling",
+    apply: async (page) => {
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-lane][value="code"])',
+      );
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-baseline][value="parallel"])',
+      );
+      await page.waitForFunction(() => {
+        const badges = Array.from(document.querySelectorAll(".cp-page-score"));
+        return (
+          badges.length > 0 &&
+          badges.every((b) => b.textContent !== "…" && b.textContent !== "")
+        );
+      });
+      // Only the cells the sibling actually draws get a number. The fixture pairs three of the four
+      // renderable nodes on purpose: a cell present on one side and absent on the other is the more
+      // interesting half of a parity comparison, and reporting that absence as drift would be the
+      // one wrong thing this readout could say.
+      const scored = await page.locator(".cp-page-score").count();
+      const paired = await page.locator(".cp-page-parallel").count();
+      expect(scored).toBe(paired);
+      // …and the two stubs genuinely differ, so a lane that silently scored our render against
+      // itself would fail here rather than capturing a wall of reassuring zeroes.
+      const worst = await page.evaluate(() =>
+        Math.max(
+          ...Array.from(document.querySelectorAll(".cp-page-score")).map((b) =>
+            parseFloat(b.textContent),
+          ),
+        ),
+      );
+      expect(worst).toBeGreaterThan(0);
+    },
+  },
+  {
+    // The diff axis against the DESIGN: one number per slot, saying how far our render is from the
+    // design's own drawing of that node. Every part of it is produced at runtime — the sheet is
+    // cropped per node, rasterised and scored in the browser — so the committed HTML holds none of
+    // it and a change to the scoring, the bands or the badge would move no baseline without this.
     fixture: "serve-design-page",
     suffix: "diff-lane",
     apply: async (page) => {
       await page.click(
-        '.cp-page-lane label:has([data-cp-page-lane][value="diff"])',
+        '.cp-page-lane label:has([data-cp-page-lane][value="code"])',
+      );
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-baseline][value="design"])',
       );
       // Hold for the settled numbers rather than the "…" placeholders, and require at least
       // one: `every()` over an empty list is true, so without the length check this would go
@@ -1477,6 +1590,9 @@ const FIXTURE_STATES = [
       // shot is about the filter alone.
       await page.click(
         '.cp-page-lane label:has([data-cp-page-lane][value="code"])',
+      );
+      await page.click(
+        '.cp-page-lane label:has([data-cp-page-baseline][value="off"])',
       );
       await page.check("[data-cp-page-unlinked]");
       await page.waitForFunction(() =>
@@ -2596,6 +2712,63 @@ const FIXTURE_STATES = [
     },
   },
   {
+    // FULL COMPARISONS, open. Three destinations that leave the page — the spec diff, the paired
+    // catalog's layer diff, every Remote Compose player — behind one affordance instead of three
+    // grey links spread either side of the spec lane. Closed it is a few words on the bar, which is
+    // the whole point, so the panel is the only part worth diffing: a change to the rows, their
+    // order or the menu surface moves this baseline and nothing else does.
+    //
+    // FIRST among this fixture's states deliberately. They run in order against one page, and the
+    // ones below enter the spec lane, which is a state this menu should be read against the resting
+    // bar rather than after.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "compare-menu",
+    apply: async (page) => {
+      await page.click(".cp-detail-menu > summary");
+      await page.waitForSelector(".cp-detail-menu[open] .cp-detail-menu-item");
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // …and closed again, so the states after this one diff a resting bar rather than one with a
+    // menu surface floating over it.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "compare-menu-closed",
+    apply: async (page) => {
+      await page.click(".cp-detail-menu > summary");
+      await page.waitForSelector(".cp-detail-menu:not([open])");
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // Transparent and Fit width, in the Overrides panel's View group — the two controls this change
+    // takes off the viewer bar. Neither renders anything: one paints a checkerboard behind bytes
+    // the server already sent, the other stops fitting them to the viewport, and a reader sets them
+    // once if ever. The group opens by default, so this is what a visitor finds on first opening
+    // the drawer.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "stage-view-group",
+    apply: async (page) => {
+      await openControlsDrawer(page);
+      await page.waitForSelector(
+        'details[data-cp-group="stage-view"][open] .cp-zoom-toggle',
+      );
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // Back out of the drawer, for the same reason the menu closes above.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "stage-view-closed",
+    apply: async (page) => {
+      await page.click("#cp-controls-toggle");
+      await expect(page.locator(".cp-viewer")).not.toHaveClass(
+        /cp-controls-open/,
+      );
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
     // A Remote Compose component can share both useful counterparts through its catalog pairing:
     // the Wear preview's imported Figma target and the Wear implementation itself. This fixture
     // deliberately publishes no local design reference; the lit Figma chip and two-source picker
@@ -2701,15 +2874,82 @@ const FIXTURE_STATES = [
     },
   })),
   {
+    // THE LIT PILL. The renderer chip and the combo are one segmented control, and the lit state is
+    // the one that can come apart: `[aria-pressed="true"]` swaps the chip's outline for a filled
+    // green field, so a caret segment that kept its own border left a borderless green half against
+    // an outlined box — two controls again, at exactly the moment the page is claiming to be live.
+    //
+    // DRIVEN through the control, not dressed by setting `aria-pressed`. There is no daemon behind
+    // this fixture, but the chip enters the lane optimistically — the click runs `setMode("live")`
+    // and `updateLiveToggle()` in full, so the shot holds the state the application actually
+    // produces: pill lit, verb inverted to `▸ Snapshot`, chip renamed to `Live`, and the stage's
+    // invitation withdrawn. Setting the attribute by hand moved the first of those and none of the
+    // rest, which is a toolbar no session can reach — a green "live" pill still offering `▸ Live`
+    // over a stage still saying "click for live".
+    fixture: "serve-viewer-rc-players",
+    suffix: "live-on",
+    apply: async (page) => {
+      await page.click("#cp-live-toggle");
+      // Waits on the DERIVED state, not on the attribute the click sets first. `aria-pressed` is
+      // one of a handful of things `updateLiveToggle()` moves together — the verb inverts, the chip
+      // renames itself to the lane it is now on, and the stage drops its invitation — so a wait on
+      // the attribute alone would pass on a page that had lit the pill and updated nothing else.
+      //
+      // The last clause holds the shot still. There is no daemon behind a committed fixture, so
+      // the socket this click opens always ends in `showModeError`, and WHEN it does is up to the
+      // network stack — shooting before it lands and shooting after are two different pictures of
+      // the same state. Waiting for the settled one makes the capture deterministic, and it is the
+      // honest frame anyway: the toolbar of a page that entered the lane and found nothing there.
+      await page.waitForFunction(
+        () =>
+          document
+            .getElementById("cp-live-toggle")
+            ?.getAttribute("aria-pressed") === "true" &&
+          document.getElementById("cp-live-toggle-verb")?.textContent ===
+            "\u25b8 Snapshot" &&
+          document
+            .querySelector(".cp-viewer")
+            ?.getAttribute("data-live-invite") === "false" &&
+          document.getElementById("cp-error")?.hidden === false,
+      );
+    },
+  },
+  {
+    // Back off the lit state, so the states after this one diff the resting bar rather than a green
+    // one. They run in order against the SAME page.
+    fixture: "serve-viewer-rc-players",
+    suffix: "live-off",
+    apply: async (page) => {
+      await page.click("#cp-live-toggle");
+      await page.waitForFunction(
+        () =>
+          document
+            .getElementById("cp-live-toggle")
+            ?.getAttribute("aria-pressed") === "false" &&
+          document.getElementById("cp-live-toggle-verb")?.textContent ===
+            "\u25b8 Live" &&
+          // …and the failure notice the lane put on the stage is gone with it, so the states after
+          // this one diff a resting bar over a resting stage.
+          document.getElementById("cp-error")?.hidden === true,
+      );
+    },
+  },
+  {
     // Switching player through the combo. The committed HTML always opens on the default
-    // (`CMP Android`), so this is the only way the picker's *moved* state is diffed: the combo
-    // on `Java`, and — the point of the whole control — the chip beside it renaming itself to
-    // match instead of the visitor having to read which of six chips lit up.
+    // (`AndroidX Embedded`), so this is the only way the picker's *moved* state is diffed: the
+    // combo on `AndroidX View`, and — the point of the whole control — the chip beside it renaming
+    // itself to match instead of the visitor having to read which of six chips lit up.
     //
     // It selects whichever lane is *not* the default, so it followed the default from
     // `cmp-android` to `java` when #3936 flipped it. Selecting the default would leave the
     // picker where it already is and diff nothing, which is the failure this note exists to
     // prevent the next time the default moves.
+    //
+    // The LANE VALUES (`rc:java`) are this repository's; the LABELS are the published
+    // `render-host` artifact's, and 2.3.0 renamed all five of them (`Java` -> `AndroidX View`).
+    // That rename is why this assertion is worth keeping literal rather than reading the label
+    // back off the option: a wait on whatever the combo happens to say would pass even if the
+    // chip stopped following the combo at all, which is the one thing this state exists to prove.
     fixture: "serve-viewer-rc-players",
     suffix: "player-java",
     apply: async (page) => {
@@ -2717,7 +2957,7 @@ const FIXTURE_STATES = [
       await page.waitForFunction(
         () =>
           document.getElementById("cp-live-toggle-label")?.textContent ===
-          "Java",
+          "AndroidX View",
       );
     },
   },
@@ -3822,6 +4062,15 @@ for (const fixture of listPageFixtures()) {
               contentType: "image/svg+xml",
             });
           }
+          if (
+            fixture === "serve-design-page" &&
+            url.pathname.startsWith("/wear-m3/render/")
+          ) {
+            return route.fulfill({
+              body: SIBLING_RENDER_PLACEHOLDER,
+              contentType: "image/svg+xml",
+            });
+          }
           const svg = url.pathname.endsWith(".svg");
           const exploded = svg && url.searchParams.get("exploded") === "1";
           if (!svg && fixture === "serve-design-page") {
@@ -3985,14 +4234,29 @@ for (const fixture of listPageFixtures()) {
 
       // Comparison scores are asynchronous (fetch + decode + SSIM). Capture the settled
       // fidelity state, not the initial "waiting…" skeleton.
+      //
+      // VISIBLE rows only, and bounded. A row the current lane has nothing to compare is hidden by
+      // `applySearch`, and a hidden row is never dressed and never scored — so its cell keeps the
+      // server-rendered "waiting…" for the life of the page. Asking every cell to settle became
+      // unsatisfiable the moment this fixture's default lane moved to `reference` (#553): the
+      // `switch-on` row carries no `data-reference-*`, so it is hidden from the first pass on.
+      // With no `timeout` this wait never rejects either, so the `.catch` below could not do what
+      // it is for and the whole 60s test budget went to it instead — the capture then died on the
+      // next call, reported against `page.screenshot`. Bounded like the image wait above, so an
+      // unsettleable predicate degrades to "shoot what is on screen" rather than to no shot at all.
       if (fixture === "serve-format-compare") {
         await page
-          .waitForFunction(() =>
-            Array.from(document.querySelectorAll(".cp-compare-score")).every(
-              (cell) =>
-                cell.textContent !== "waiting…" &&
-                cell.textContent !== "comparing…",
-            ),
+          .waitForFunction(
+            () =>
+              Array.from(
+                document.querySelectorAll("tr:not([hidden]) .cp-compare-score"),
+              ).every(
+                (cell) =>
+                  cell.textContent !== "waiting…" &&
+                  cell.textContent !== "comparing…",
+              ),
+            null,
+            { timeout: 15_000 },
           )
           .catch(() => {});
       }
@@ -5332,9 +5596,9 @@ test("contract · the front door's search collapses into the bar and reaches com
   await expect(page.locator("#cp-site-search-field")).toBeHidden();
   await page.click("#cp-site-search-toggle");
   await expect(page.locator("#cp-site-search-field")).toBeVisible();
-  expect(
-    await page.evaluate(() => document.activeElement?.id),
-  ).toBe("cp-browser-catalog-search");
+  expect(await page.evaluate(() => document.activeElement?.id)).toBe(
+    "cp-browser-catalog-search",
+  );
 
   const cards = () => page.locator(".cp-sys:not([hidden])");
   const all = await cards().count();
@@ -5405,7 +5669,9 @@ test("contract · a refused UI Builder explains itself inside the card", async (
     return {
       insideRight: n.right <= c.right + 1,
       // Wrapped, not one long line: the sentence is far wider than a card at one line.
-      lines: Math.round(n.height / parseFloat(getComputedStyle(note).lineHeight)),
+      lines: Math.round(
+        n.height / parseFloat(getComputedStyle(note).lineHeight),
+      ),
     };
   });
   expect(fits.insideRight).toBe(true);

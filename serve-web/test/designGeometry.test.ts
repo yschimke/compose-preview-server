@@ -9,13 +9,7 @@ import {
     slotIn,
     tipAt,
 } from "../src/design/geometry.js";
-import {
-    laneOf,
-    laneState,
-    isInert,
-    needsRenders,
-    outlinesAfterUnlinked,
-} from "../src/design/lanes.js";
+import { isInert, outlinesAfterUnlinked } from "../src/design/lanes.js";
 
 const box = (left: number, top: number, width: number, height: number) => ({
     left,
@@ -201,28 +195,9 @@ describe("idSpellings / idMatches", () => {
     });
 });
 
-describe("lanes", () => {
-    it("shows OUR renders in every lane but the design's own", () => {
-        assert.equal(laneState("code")["cp-page-swap-on"], true);
-        assert.equal(laneState("diff")["cp-page-swap-on"], true);
-        assert.equal(laneState("design")["cp-page-swap-on"], false);
-        assert.equal(laneState("diff")["cp-page-diff-on"], true);
-        assert.equal(laneState("code")["cp-page-diff-on"], false);
-    });
-
-    it("adopts the renders for any lane that draws them", () => {
-        // Including diff, which scores what is actually on the sheet.
-        assert.equal(needsRenders("code"), true);
-        assert.equal(needsRenders("diff"), true);
-        assert.equal(needsRenders("design"), false);
-    });
-
-    it("falls back to the code lane for anything it does not recognise", () => {
-        assert.equal(laneOf("diff"), "diff");
-        assert.equal(laneOf("nonsense"), "code");
-        assert.equal(laneOf(null), "code");
-    });
-
+// The two coverage filters. The axes themselves — what the sheet shows and what it is scored
+// against — are pinned in `designLanes.test.ts`, next to their own module.
+describe("the coverage filters", () => {
     it("turns the marks on for a filter that would otherwise be invisible", () => {
         // A coverage filter with nothing to draw on is a no-op the reader cannot see.
         assert.equal(outlinesAfterUnlinked(true, false), true);

@@ -4,6 +4,7 @@ package ee.schimke.composeai.uibuilder.service
 
 import ee.schimke.composeai.uibuilder.protocol.*
 import java.io.Closeable
+import java.io.IOException
 import java.security.MessageDigest
 import java.time.Clock
 import java.util.Base64
@@ -50,6 +51,42 @@ public interface UiBuilderCatalogExecutor {
     document: DesignDocumentV1,
     catalog: CatalogCapabilityV1,
   ): UiBuilderCatalogIssue?
+
+  /**
+   * The pin a document must carry for [resolve] to answer with [catalog], or null when this
+   * executor cannot say. Defaulted so an executor that predates the question still compiles; a null
+   * here means a client is back to guessing the digest, which is what the answer exists to end.
+   */
+  public fun reference(catalog: CatalogCapabilityV1): CatalogReferenceV1? = null
+
+  /**
+   * Whether one property **write** carries a value of the kind the catalog means, asked of the node
+   * as it will be committed.
+   *
+   * [validate] asks about shape — is the component declared, does it declare this property, is the
+   * scalar the right JSON type, is an enumerated value in `allowedValues` — and every expensive
+   * failure of yschimke/compose-preview-server#487 passed it: a colour committed as `string` and
+   * refused at export, an `asset/image` whose key nothing resolved and whose render then failed the
+   * whole design. This is the semantic half, and it is asked **only where a value is chosen** — a
+   * `setProperty`, and each property of an `insertNode` — never document-wide, so a design
+   * committed before a rule existed stays editable everywhere but the field that holds the old
+   * value. The default says nothing, which is what a catalog with no value semantics means.
+   *
+   * A refusal is returned as `INVALID_PROPERTY` naming the node and the field, the way every other
+   * property refusal in the reducer is.
+   */
+  public fun validateWrite(
+    catalog: CatalogCapabilityV1,
+    /**
+     * The document the node is being written into. It is what makes an `assetKey` resolvable beyond
+     * the catalog's own registry: a key pinned into `assets` by the asset lane
+     * (`UiBuilderAssetPort`) is one the canvas draws, and a rule that read only the catalog would
+     * refuse the picture a designer just uploaded.
+     */
+    document: DesignDocumentV1,
+    node: DesignNodeV1,
+    property: String,
+  ): UiBuilderCatalogIssue? = null
 }
 
 public data class RevisionPinnedUiBuilderExport(
@@ -110,7 +147,72 @@ public data class UiBuilderServiceLimits(
   val maximumNodesPerDesign: Int = 10_000,
   val retainedCommittedOperations: Int = 1_024,
   val retainedOperationOutcomes: Int = 4_096,
-  val retainedRevisionSnapshots: Int = 1_025,
+  /**
+   * The most whole-document revisions one design may retain.
+   *
+   * This was 1,025, and a retained revision is a **whole copy** of the document and of the position
+   * map. A 40-node design serializes to about 9.5 KB and therefore occupied 11.5 MB of the one
+   * state file — 99.9% of a store whose live documents were 0.1% of it — which is how
+   * `preview.coo.ee` reached 24.5 MB against a 32 MiB ceiling with a handful of designs and nothing
+   * wrong with any of them (yschimke/compose-preview-server#568). Retention depth is not a protocol
+   * promise: `SNAPSHOT_REQUIRED` and the retained-from floor beside it exist precisely so the
+   * service can say how far back it still goes, which leaves this free to be a number chosen for
+   * the sizes designs actually reach. The store this is the stopgap for is
+   * `docs/design/UI_BUILDER_STATE_STORAGE.md`.
+   */
+  val retainedRevisionSnapshots: Int = 128,
+  /**
+   * The byte budget those retained revisions share, which binds first when documents are large.
+   *
+   * A count alone bounds nothing: at `maximumSerializedDocumentBytes` a design retaining 128
+   * revisions would want a gigabyte. The depth actually used is this budget divided by the size of
+   * the document being retained — measured, not guessed, from the canonical bytes the commit
+   * already hashes — clamped between [minimumRetainedRevisionSnapshots] and
+   * [retainedRevisionSnapshots]. Position snapshots follow the same depth and cost a fraction of
+   * it.
+   */
+  val retainedRevisionBytes: Long = 2L * 1_024 * 1_024,
+  /**
+   * The depth [retainedRevisionBytes] may never cut below.
+   *
+   * Below some depth collaboration breaks rather than degrades: a client editing against a
+   * `baseRevision` needs that revision's position snapshot to rebase onto, and undo replays through
+   * retained state. So a design whose documents are large enough to exhaust the budget keeps this
+   * many anyway and is reported through the storage gauge instead — still strictly better than the
+   * 1,025 the same design would have kept before.
+   *
+   * Never raises [retainedRevisionSnapshots]: a caller that deliberately sets a shallow ceiling
+   * means it, and a floor above it is read as "as deep as the ceiling allows" rather than as a
+   * contradiction to refuse construction over.
+   */
+  val minimumRetainedRevisionSnapshots: Int = 32,
+  /**
+   * The byte budget one design's undo state may hold, applied to `acceptedOperations` and to
+   * `tombstones` separately.
+   *
+   * Measuring the live store is what put this here. The guess was that retained revisions held the
+   * bytes; they held 35% of it. Undo bookkeeping held **55%** — `acceptedOperations` alone was
+   * 29.9% — and one 386-node design spent 4.29 MB across **ten** accepted operations, about 430 KB
+   * each. The cause is structural: `StructureChangeV1` carries `before` and `after` as whole node
+   * subtrees, so one edit near the root of a large design stores that subtree twice, and
+   * `acceptedOperations` was bounded only by [retainedOperationOutcomes] — a count of 4,096 with no
+   * relation to how big a record is. Four thousand records at that size is a design that alone
+   * exceeds any ceiling, and nothing stood between the store and it.
+   *
+   * A count cannot bound this because the records differ in size by three orders of magnitude. The
+   * budget is walked newest-first and stops as soon as it is exceeded, so the work one commit does
+   * is proportional to the budget rather than to the history behind it.
+   */
+  val retainedUndoBytes: Long = 4L * 1_024 * 1_024,
+  /**
+   * Undo steps kept regardless of [retainedUndoBytes], so undo never becomes unavailable.
+   *
+   * Pruning past this point degrades rather than breaks: `undo` and `redo` resolve their target
+   * through a lookup that answers `UNKNOWN_OPERATION` when it is gone, and a `restoreNode` whose
+   * tombstone has aged out is refused with `DELETED_NODE`. What a designer loses is depth, and only
+   * on a design whose individual operations are large enough to spend the budget.
+   */
+  val minimumRetainedUndoOperations: Int = 8,
   val retainedAuditRecords: Int = 4_096,
   val subscriberQueueCapacity: Int = 512,
   val maximumOperationsPerBatch: Int = 256,
@@ -126,13 +228,27 @@ public data class UiBuilderServiceLimits(
   val maximumSerializedDocumentBytes: Int = 8 * 1_024 * 1_024,
   val maximumEmbeddedAssetBytes: Int = 6 * 1_024 * 1_024,
   val presenceTtlMillis: Long = 30_000,
+  /**
+   * Ceiling on one uploaded asset ([UiBuilderAssetPort.putAsset]). A megabyte is a generous
+   * photograph at the sizes a phone screen draws one; it is also what every render lane carries
+   * inline to the daemon on each export, so this bounds a request as much as a file.
+   */
+  val maximumAssetBytes: Int = 1_024 * 1_024,
+  /** How many keys one design's `assets` map may hold. */
+  val maximumAssetsPerDesign: Int = 64,
 ) {
   init {
     require(maximumDesigns > 0)
+    require(maximumAssetBytes > 0)
+    require(maximumAssetsPerDesign > 0)
     require(maximumNodesPerDesign > 0)
     require(retainedCommittedOperations > 0)
     require(retainedOperationOutcomes > 0)
     require(retainedRevisionSnapshots > 0)
+    require(retainedRevisionBytes > 0)
+    require(minimumRetainedRevisionSnapshots > 0)
+    require(retainedUndoBytes > 0)
+    require(minimumRetainedUndoOperations > 0)
     require(retainedAuditRecords > 0)
     require(subscriberQueueCapacity > 0)
     require(maximumOperationsPerBatch > 0)
@@ -171,7 +287,13 @@ public class PersistentUiBuilderService(
     UiBuilderSubscriberFailureHandler {},
   private val clock: Clock = Clock.systemUTC(),
   private val limits: UiBuilderServiceLimits = UiBuilderServiceLimits(),
-) : UiBuilderServicePort, UiBuilderServiceDiagnosticsSource, UiBuilderAdminPort {
+  /**
+   * Where uploaded asset bytes go. Null on a host with nowhere to keep them, which makes [putAsset]
+   * refuse and leaves every other lane exactly as it was.
+   */
+  private val assets: UiBuilderAssetStore? = null,
+) :
+  UiBuilderServicePort, UiBuilderServiceDiagnosticsSource, UiBuilderAdminPort, UiBuilderAssetPort {
   private data class MutationBucket(var tokens: Int, var refilledAtMillis: Long)
 
   private data class RuntimeDesign(
@@ -295,8 +417,20 @@ public class PersistentUiBuilderService(
       activeMutationBuckets = mutationBuckets.size,
       persistenceMigrations = persistenceMigrations.get(),
       unusableDesigns = unusableDesigns.size,
+      storageBytes = storageUsage?.bytes ?: 0,
+      storageMaximumBytes = storageUsage?.maximumBytes ?: 0,
     )
   }
+
+  /**
+   * What the durable storage holds against its ceiling, or null when it reports neither.
+   *
+   * Read where every other gauge is read, under the service lock, and never allowed to fail a
+   * status route: a storage that throws while being asked how big it is reports nothing rather than
+   * taking down the answer it is one row of.
+   */
+  private val storageUsage: UiBuilderStorageUsage?
+    get() = runCatching { storage.usage() }.getOrNull()
 
   init {
     persisted.designs.forEach { (designId, _) -> runtime[designId] = RuntimeDesign() }
@@ -395,6 +529,8 @@ public class PersistentUiBuilderService(
       is UiBuilderServiceRequest.GetDelta -> designId
       is UiBuilderServiceRequest.UpdatePresence -> designId
       is UiBuilderServiceRequest.ExportDesign -> designId
+      is UiBuilderServiceRequest.RenameDesign -> designId
+      is UiBuilderServiceRequest.DeleteDesign -> designId
       UiBuilderServiceRequest.ListCatalogs,
       is UiBuilderServiceRequest.CreateDesign,
       is UiBuilderServiceRequest.ListDesigns -> null
@@ -412,6 +548,197 @@ public class PersistentUiBuilderService(
     return execution.response
   }
 
+  override suspend fun putAsset(write: UiBuilderAssetWrite): UiBuilderServiceResponse {
+    unusableDesigns[write.designId]?.let {
+      return UiBuilderServiceResponse.Error(UiBuilderServiceError(it.code, it.reason))
+    }
+    val execution = lock.withLock { putAssetLocked(write) }
+    drain(execution.mailboxes)
+    return execution.response
+  }
+
+  /**
+   * An asset write is a commit without an operation.
+   *
+   * It moves the revision and the sequence exactly as an accepted batch does — the document's bytes
+   * changed, so its hash, its retained snapshot and every `baseRevision` a client quotes must move
+   * with it — but no `CommittedOperationV1` can describe it, because the released mutation set has
+   * no asset write. So the delta log is cut here: `history` is emptied, which makes
+   * `retainedFromSequence` this sequence, and a subscriber behind it is caught up with a whole
+   * snapshot instead of a delta it could not replay. Live subscribers get that snapshot now. It is
+   * not undoable, for the same reason: undo compensates an operation record, and there is none.
+   * Re-pointing the key, or deleting the node that names it, is how it is taken back.
+   */
+  private fun putAssetLocked(write: UiBuilderAssetWrite): LockedExecution {
+    val store =
+      assets
+        ?: return serviceError(
+          ServiceErrorCodeV1.BAD_REQUEST,
+          "this host keeps no asset store, so a design cannot hold an uploaded image",
+        )
+    val design = persisted.designs[write.designId] ?: return serviceError(notFound(write.designId))
+    if (!design.allows(write.actor, DesignAccessActionV1.WRITE)) {
+      return serviceError(forbidden("write", write.designId))
+    }
+    if (!UiBuilderAssetKeys.isValid(write.assetKey)) {
+      return serviceError(
+        ServiceErrorCodeV1.BAD_REQUEST,
+        "asset key '${write.assetKey}' is malformed: ${UiBuilderAssetKeys.RULE}",
+      )
+    }
+    if (write.bytes.isEmpty()) {
+      return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "asset bytes are empty")
+    }
+    if (write.bytes.size > limits.maximumAssetBytes) {
+      rejectedAssetBytes.incrementAndGet()
+      return serviceError(
+        ServiceErrorCodeV1.BAD_REQUEST,
+        "asset is ${write.bytes.size} bytes; this host stores at most " +
+          "${limits.maximumAssetBytes} bytes per asset",
+      )
+    }
+    val image =
+      UiBuilderImageBytes.sniff(write.bytes)
+        ?: return serviceError(
+          ServiceErrorCodeV1.BAD_REQUEST,
+          "asset bytes are not a ${UiBuilderImageBytes.KNOWN} image",
+        )
+    val digest = UiBuilderAssetDigests.of(write.bytes)
+    val binding =
+      AssetBindingV1(
+        mediaType = image.mediaType,
+        contentDigest = digest,
+        source = UploadedAssetSourceV1(storageKey = digest),
+        widthPx = image.widthPx,
+        heightPx = image.heightPx,
+      )
+    val operationId = "asset:${write.assetKey}:$digest"
+    val current = design.document
+    if (current.assets[write.assetKey] == binding) {
+      return LockedExecution(
+        UiBuilderServiceResponse.OperationOutcome(
+          AcceptedOutcomeV1(
+            operationId,
+            current.revision,
+            design.lastSequence,
+            documentHash(current),
+            idempotentReplay = true,
+            documentUpdatedAtEpochMillis = current.updatedAtEpochMillis,
+          )
+        )
+      )
+    }
+    if (write.assetKey !in current.assets && current.assets.size >= limits.maximumAssetsPerDesign) {
+      return serviceError(
+        ServiceErrorCodeV1.BAD_REQUEST,
+        "a design may hold at most ${limits.maximumAssetsPerDesign} assets",
+      )
+    }
+    val catalog =
+      catalogs.resolve(current.catalogPin)
+        ?: return serviceError(ServiceErrorCodeV1.CATALOG_UNAVAILABLE, "catalog pin is unavailable")
+    val revision = current.revision + 1
+    val sequence = design.lastSequence + 1
+    val now = clock.millis()
+    val document =
+      current.copy(
+        assets = current.assets + (write.assetKey to binding),
+        revision = revision,
+        updatedAtEpochMillis = now,
+      )
+    documentQuotaIssue(document, countRejection = true)?.let {
+      return serviceError(ServiceErrorCodeV1.BAD_REQUEST, it)
+    }
+    try {
+      store.write(digest, write.bytes)
+    } catch (failure: IOException) {
+      return serviceError(
+        ServiceErrorCodeV1.INTERNAL,
+        "asset bytes could not be stored: ${failure.message}",
+      )
+    }
+    val canonical = documentCanonicalBytes(document)
+    val retained = limits.retainedRevisionsFor(canonical.size)
+    val outcome =
+      AcceptedOutcomeV1(
+        operationId,
+        revision,
+        sequence,
+        sha256(canonical),
+        idempotentReplay = false,
+        documentUpdatedAtEpochMillis = now,
+      )
+    val updated =
+      design.copy(
+        document = document,
+        lastSequence = sequence,
+        history = emptyList(),
+        revisionSnapshots =
+          (design.revisionSnapshots + RevisionStateV1(document, sequence)).takeLast(retained),
+        positionSnapshots =
+          (design.positionSnapshots + PositionStateV1(revision, design.positions)).takeLast(
+            retained
+          ),
+        updatedAtEpochMillis = now,
+        audit =
+          (design.audit +
+              AuditRecordV1(
+                AuditKindV1.COMMIT,
+                write.actor.actorId,
+                current.id,
+                revision,
+                sequence,
+                operationId,
+                null,
+                now,
+              ))
+            .takeLast(limits.retainedAuditRecords),
+      )
+    commitPersisted(persisted.copy(designs = persisted.designs + (write.designId to updated)))
+    // One snapshot for every subscriber, so it carries no access list: `snapshot` includes one
+    // for the owner, and the writer being the owner must not show it to the viewers.
+    val broadcast =
+      snapshot(updated, write.actor, catalog, activePresence(write.designId)).copy(access = null)
+    val mailboxes = enqueue(write.designId, UiBuilderServiceUpdate.Snapshot(broadcast), updated)
+    return LockedExecution(UiBuilderServiceResponse.OperationOutcome(outcome), mailboxes)
+  }
+
+  override suspend fun readAsset(read: UiBuilderAssetRead): UiBuilderAssetReadResult {
+    val binding = lock.withLock {
+      val design =
+        persisted.designs[read.designId]
+          ?: return UiBuilderAssetReadResult.Failed(notFound(read.designId))
+      if (!design.allows(read.actor, DesignAccessActionV1.READ)) {
+        return UiBuilderAssetReadResult.Failed(forbidden("read", read.designId))
+      }
+      design.document.assets[read.assetKey]
+        ?: return UiBuilderAssetReadResult.Failed(
+          UiBuilderServiceError(
+            ServiceErrorCodeV1.NOT_FOUND,
+            "design ${read.designId} has no asset '${read.assetKey}'",
+          )
+        )
+    }
+    val bytes =
+      when (val source = binding.source) {
+        is EmbeddedAssetSourceV1 ->
+          try {
+            Base64.getDecoder().decode(source.base64)
+          } catch (_: IllegalArgumentException) {
+            null
+          }
+        is UploadedAssetSourceV1 -> assets?.read(source.storageKey)
+        is CatalogAssetSourceV1 -> null
+      }
+        ?: return UiBuilderAssetReadResult.Failed(
+          UiBuilderServiceError(
+            ServiceErrorCodeV1.NOT_FOUND,
+            "the bytes behind asset '${read.assetKey}' are not on this host",
+          )
+        )
+    return UiBuilderAssetReadResult.Found(binding, bytes)
+  }
+
   override fun subscribe(
     call: UiBuilderSubscriptionCall,
     listener: (UiBuilderServiceUpdate) -> Unit,
@@ -425,7 +752,7 @@ public class PersistentUiBuilderService(
       val design =
         persisted.designs[call.designId]
           ?: throw UiBuilderSubscriptionRejectedException(notFound(call.designId))
-      if (!design.allows(call.actor.actorId, DesignAccessActionV1.READ)) {
+      if (!design.allows(call.actor, DesignAccessActionV1.READ)) {
         throw UiBuilderSubscriptionRejectedException(forbidden("read", call.designId))
       }
       if (
@@ -461,8 +788,20 @@ public class PersistentUiBuilderService(
 
   private fun executeLocked(call: UiBuilderServiceCall): LockedExecution =
     when (val request = call.request) {
-      UiBuilderServiceRequest.ListCatalogs ->
-        LockedExecution(UiBuilderServiceResponse.Catalogs(catalogs.listCatalogs()))
+      UiBuilderServiceRequest.ListCatalogs -> {
+        val listed = catalogs.listCatalogs()
+        LockedExecution(
+          UiBuilderServiceResponse.Catalogs(
+            listed,
+            pins =
+              listed
+                .mapNotNull { catalog ->
+                  catalogs.reference(catalog)?.let { catalog.benchmark.catalogSystemId to it }
+                }
+                .toMap(),
+          )
+        )
+      }
       is UiBuilderServiceRequest.CreateDesign -> create(call.actor, request.document)
       is UiBuilderServiceRequest.ListDesigns -> list(call.actor, request)
       is UiBuilderServiceRequest.OpenDesign -> open(call.actor, request.designId, revision = null)
@@ -479,7 +818,72 @@ public class PersistentUiBuilderService(
       is UiBuilderServiceRequest.UpdatePresence -> presence(call.actor, request)
       is UiBuilderServiceRequest.ExportDesign ->
         error("export is executed outside the service lock")
+      is UiBuilderServiceRequest.RenameDesign -> rename(call.actor, request)
+      is UiBuilderServiceRequest.DeleteDesign -> delete(call.actor, request.designId)
     }
+
+  /**
+   * See [UiBuilderServiceRequest.RenameDesign] for why this is not a mutation. The current
+   * revision's retained snapshot is renamed with the live document, so reading the design *at* its
+   * current revision agrees with reading it plainly; earlier revisions keep the title they had,
+   * which is what a historical read is for.
+   *
+   * Nothing is pushed to subscribers: the protocol client discards a snapshot that does not advance
+   * its sequence cursor, and a rename advances nothing. An open editor sees the new title when it
+   * next opens the design; a listing sees it at once.
+   */
+  private fun rename(
+    actor: AuthenticatedUiBuilderActor,
+    request: UiBuilderServiceRequest.RenameDesign,
+  ): LockedExecution {
+    val design =
+      persisted.designs[request.designId] ?: return serviceError(notFound(request.designId))
+    if (!design.allows(actor, DesignAccessActionV1.WRITE)) {
+      return serviceError(forbidden("write", request.designId))
+    }
+    val title = request.title.trim()
+    if (title.isEmpty()) {
+      return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "design title is blank")
+    }
+    if (title.length > MAXIMUM_TITLE_LENGTH) {
+      return serviceError(
+        ServiceErrorCodeV1.BAD_REQUEST,
+        "design title exceeds $MAXIMUM_TITLE_LENGTH characters",
+      )
+    }
+    val now = clock.millis()
+    val document = design.document.copy(title = title, updatedAtEpochMillis = now)
+    val updated =
+      design.copy(
+        document = document,
+        revisionSnapshots =
+          design.revisionSnapshots.map { retained ->
+            if (retained.document.revision == document.revision)
+              retained.copy(document = retained.document.copy(title = title))
+            else retained
+          },
+        updatedAtEpochMillis = now,
+      )
+    commitPersisted(persisted.copy(designs = persisted.designs + (request.designId to updated)))
+    return LockedExecution(UiBuilderServiceResponse.DesignRenamed(updated.listItem(actor)))
+  }
+
+  /**
+   * See [UiBuilderServiceRequest.DeleteDesign] for who may. The removal itself is the operator's
+   * [adminDeleteDesign], reached through an ownership check rather than an admin token; the two
+   * share [removeLocked] so they cannot disagree about what "gone" means.
+   */
+  private fun delete(actor: AuthenticatedUiBuilderActor, designId: String): LockedExecution {
+    val design = persisted.designs[designId] ?: return serviceError(notFound(designId))
+    if (!design.ownedBy(actor)) {
+      return serviceError(forbidden("delete", designId))
+    }
+    // Closed under the lock, as [updateAccess] closes the streams of an actor it revoked: a
+    // subscriber learns the design is gone only after the removal is durable, which
+    // [removeLocked] guarantees by committing first.
+    removeLocked(designId).forEach(SubscriberMailbox::close)
+    return LockedExecution(UiBuilderServiceResponse.DesignDeleted(designId))
+  }
 
   private fun create(
     actor: AuthenticatedUiBuilderActor,
@@ -519,7 +923,13 @@ public class PersistentUiBuilderService(
       PersistedDesignV1(
         document = document,
         lastSequence = 0,
-        access = DesignAccessControlV1(0, canonicalActorId(actor.actorId)),
+        // Owned by the human when the caller is acting for one. An agent's grant is a
+        // short-lived delegation of *their* authority, so a design it creates has to outlive the
+        // grant in the hands of the person who approved it — the alternative is what this fixes: a
+        // design owned by an id that stops existing in an hour, which its own approver is then
+        // refused when they open the link the agent sent them.
+        access =
+          DesignAccessControlV1(0, canonicalActorId(actor.onBehalfOfActorId ?: actor.actorId)),
         revisionSnapshots = listOf(RevisionStateV1(document, 0)),
         positions = derivePositions(document),
         positionSnapshots = listOf(PositionStateV1(0, derivePositions(document))),
@@ -542,7 +952,7 @@ public class PersistentUiBuilderService(
     }
     val accessible =
       persisted.designs.values
-        .filter { it.allows(actor.actorId, DesignAccessActionV1.READ) }
+        .filter { it.allows(actor, DesignAccessActionV1.READ) }
         .sortedBy { it.document.id }
     val offset =
       request.cursor?.toIntOrNull()?.takeIf { it >= 0 }
@@ -553,9 +963,7 @@ public class PersistentUiBuilderService(
     }
     val page = accessible.drop(offset).take(request.limit)
     val next = (offset + page.size).takeIf { it < accessible.size }?.toString()
-    return LockedExecution(
-      UiBuilderServiceResponse.Designs(page.map { it.listItem(actor.actorId) }, next)
-    )
+    return LockedExecution(UiBuilderServiceResponse.Designs(page.map { it.listItem(actor) }, next))
   }
 
   private fun open(
@@ -564,7 +972,7 @@ public class PersistentUiBuilderService(
     revision: Long?,
   ): LockedExecution {
     val design = persisted.designs[designId] ?: return serviceError(notFound(designId))
-    if (!design.allows(actor.actorId, DesignAccessActionV1.READ)) {
+    if (!design.allows(actor, DesignAccessActionV1.READ)) {
       return serviceError(forbidden("read", designId))
     }
     val state =
@@ -576,7 +984,7 @@ public class PersistentUiBuilderService(
               code = ServiceErrorCodeV1.SNAPSHOT_REQUIRED,
               message = "revision $revision is no longer retained for $designId",
               currentRevision = design.document.revision,
-              retainedFromSequence = design.retainedFromSequence(),
+              retainedFromSequence = design.retainedSnapshotFromSequence(),
             )
           )
     val catalog =
@@ -603,7 +1011,7 @@ public class PersistentUiBuilderService(
 
   private fun access(actor: AuthenticatedUiBuilderActor, designId: String): LockedExecution {
     val design = persisted.designs[designId] ?: return serviceError(notFound(designId))
-    if (!design.access.isOwner(actor.actorId)) {
+    if (!design.ownedBy(actor)) {
       return serviceError(forbidden("manage access for", designId))
     }
     return LockedExecution(UiBuilderServiceResponse.DesignAccess(designId, design.access))
@@ -615,7 +1023,7 @@ public class PersistentUiBuilderService(
   ): LockedExecution {
     val design =
       persisted.designs[request.designId] ?: return serviceError(notFound(request.designId))
-    if (!design.access.isOwner(actor.actorId)) {
+    if (!design.ownedBy(actor)) {
       return serviceError(forbidden("manage access for", request.designId))
     }
     if (request.baseAccessRevision != design.access.accessRevision) {
@@ -635,10 +1043,8 @@ public class PersistentUiBuilderService(
     request.mutations.forEach { mutation ->
       when (mutation) {
         is GrantActorAccessMutationV1 -> {
-          // Stored canonical: a grant is compared by equality for the life of the design, so the
-          // spelling that goes in is the one that has to match the actor that arrives. See #583.
           val target = canonicalActorId(mutation.actorId)
-          if (target.isBlank() || access.isOwner(target)) {
+          if (target.isBlank() || sameActor(target, access.ownerActorId)) {
             return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "invalid actor grant target")
           }
           if (mutation.role == DesignAccessRoleV1.OWNER) {
@@ -661,10 +1067,9 @@ public class PersistentUiBuilderService(
             )
         }
         is RevokeActorAccessMutationV1 -> {
-          if (access.isOwner(mutation.actorId)) {
+          if (sameActor(mutation.actorId, access.ownerActorId)) {
             return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "the owner cannot be revoked")
           }
-          // Canonical comparison, so a grant stored mis-cased before #583 can still be revoked.
           access =
             access.copy(
               actorGrants = access.actorGrants.filterNot { sameActor(it.actorId, mutation.actorId) }
@@ -672,7 +1077,7 @@ public class PersistentUiBuilderService(
         }
         is TransferDesignOwnershipMutationV1 -> {
           val newOwner = canonicalActorId(mutation.newOwnerActorId)
-          if (newOwner.isBlank() || access.isOwner(newOwner)) {
+          if (newOwner.isBlank() || sameActor(newOwner, access.ownerActorId)) {
             return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "invalid new owner")
           }
           val formerOwner = access.ownerActorId
@@ -712,7 +1117,7 @@ public class PersistentUiBuilderService(
 
     val closed = mutableListOf<SubscriberMailbox>()
     runtime.getValue(request.designId).subscribers.entries.removeIf { (_, subscriber) ->
-      val revoke = !updated.allows(subscriber.actor.actorId, DesignAccessActionV1.READ)
+      val revoke = !updated.allows(subscriber.actor, DesignAccessActionV1.READ)
       if (revoke) closed += subscriber.mailbox
       revoke
     }
@@ -726,7 +1131,7 @@ public class PersistentUiBuilderService(
   ): LockedExecution {
     val design =
       persisted.designs[submission.designId] ?: return serviceError(notFound(submission.designId))
-    if (!design.allows(actor.actorId, DesignAccessActionV1.WRITE)) {
+    if (!design.allows(actor, DesignAccessActionV1.WRITE)) {
       return serviceError(forbidden("write", submission.designId))
     }
     if (
@@ -808,7 +1213,21 @@ public class PersistentUiBuilderService(
     val recorded =
       reduction.design.copy(
         operationOutcomes = outcomes,
-        acceptedOperations = reduction.design.acceptedOperations.filterKeys { it in outcomes.keys },
+        // Two bounds, and the byte one is the load-bearing half: keeping `acceptedOperations` a
+        // subset of the retained outcomes preserves the invariant those two have always had, and
+        // the budget is what stops one design's undo records from being most of the store.
+        acceptedOperations =
+          reduction.design.acceptedOperations
+            .filterKeys { it in outcomes.keys }
+            .retainNewestWithinBytes(
+              limits.retainedUndoBytes,
+              limits.minimumRetainedUndoOperations,
+            ),
+        tombstones =
+          reduction.design.tombstones.retainNewestWithinBytes(
+            limits.retainedUndoBytes,
+            limits.minimumRetainedUndoOperations,
+          ),
       )
     val candidate = persisted.copy(designs = persisted.designs + (submission.designId to recorded))
     commitPersisted(candidate)
@@ -888,7 +1307,7 @@ public class PersistentUiBuilderService(
   ): LockedExecution {
     val design =
       persisted.designs[request.designId] ?: return serviceError(notFound(request.designId))
-    if (!design.allows(actor.actorId, DesignAccessActionV1.READ)) {
+    if (!design.allows(actor, DesignAccessActionV1.READ)) {
       return serviceError(forbidden("read", request.designId))
     }
     if (request.limit !in 1..1_024) {
@@ -918,7 +1337,7 @@ public class PersistentUiBuilderService(
   ): LockedExecution {
     val design =
       persisted.designs[request.designId] ?: return serviceError(notFound(request.designId))
-    if (!design.allows(actor.actorId, DesignAccessActionV1.READ)) {
+    if (!design.allows(actor, DesignAccessActionV1.READ)) {
       return serviceError(forbidden("read", request.designId))
     }
     if (
@@ -984,7 +1403,7 @@ public class PersistentUiBuilderService(
       val design =
         persisted.designs[request.designId]
           ?: return UiBuilderServiceResponse.Error(notFound(request.designId))
-      if (!design.allows(call.actor.actorId, DesignAccessActionV1.EXPORT)) {
+      if (!design.allows(call.actor, DesignAccessActionV1.EXPORT)) {
         return UiBuilderServiceResponse.Error(forbidden("export", request.designId))
       }
       val revision = request.revision ?: design.document.revision
@@ -995,7 +1414,7 @@ public class PersistentUiBuilderService(
               ServiceErrorCodeV1.SNAPSHOT_REQUIRED,
               "export revision $revision is not retained",
               currentRevision = design.document.revision,
-              retainedFromSequence = design.retainedFromSequence(),
+              retainedFromSequence = design.retainedSnapshotFromSequence(),
             )
           )
       val catalog =
@@ -1054,7 +1473,10 @@ public class PersistentUiBuilderService(
         )
       } catch (failure: Exception) {
         return UiBuilderServiceResponse.Error(
-          UiBuilderServiceError(ServiceErrorCodeV1.INTERNAL, "export failed: ${failure.message}")
+          UiBuilderServiceError(
+            ServiceErrorCodeV1.INTERNAL,
+            "export failed: ${failure.clientMessage()}",
+          )
         )
       }
     val validDigest =
@@ -1177,6 +1599,17 @@ public class PersistentUiBuilderService(
           RejectionCodeV1.REVISION_NOT_RETAINED,
           "position state for revision ${command.baseRevision} is not retained",
         )
+    // Resolved before the first mutation rather than after the last, because a write is checked
+    // against the catalog as it is applied (`UiBuilderCatalogExecutor.validateWrite`), not only as
+    // a whole document afterwards.
+    val catalog =
+      catalogs.resolve(design.document.catalogPin)
+        ?: return rejectedReduction(
+          design,
+          command.operationId,
+          RejectionCodeV1.INVALID_DOCUMENT,
+          "catalog pin is unavailable",
+        )
     var working = WorkingDesign(design.document, design.tombstones, design.positions)
     val changes = mutableListOf<ChangeRecordV1>()
     val conflicts = mutableListOf<CommandConflictV1>()
@@ -1187,7 +1620,16 @@ public class PersistentUiBuilderService(
             .filterIsInstance<StructureChangeV1>()
             .flatMap { it.affectedNodeIds }
             .mapNotNull { nodeId -> working.positions[nodeId]?.let { nodeId to it } }
-      val applied = applyMutation(working, mutation, command, design, batchPositions, index)
+      val applied =
+        applyMutation(
+          working,
+          mutation,
+          command,
+          design,
+          basePositions = batchPositions,
+          index,
+          catalog,
+        )
       if (applied.error != null) {
         return rejectedReduction(design, command.operationId, applied.error)
       }
@@ -1206,14 +1648,6 @@ public class PersistentUiBuilderService(
     validateTopology(working.document)?.let {
       return rejectedReduction(design, command.operationId, it)
     }
-    val catalog =
-      catalogs.resolve(working.document.catalogPin)
-        ?: return rejectedReduction(
-          design,
-          command.operationId,
-          RejectionCodeV1.INVALID_DOCUMENT,
-          "catalog pin is unavailable",
-        )
     catalogs.validate(working.document, catalog)?.let {
       return rejectedReduction(design, command.operationId, it.toRejection())
     }
@@ -1341,12 +1775,14 @@ public class PersistentUiBuilderService(
     val sequence = design.lastSequence + 1
     val now = clock.millis()
     val document = working.document.copy(revision = revision, updatedAtEpochMillis = now)
+    val canonical = documentCanonicalBytes(document)
+    val retained = limits.retainedRevisionsFor(canonical.size)
     val outcome =
       AcceptedOutcomeV1(
         submission.operationId(),
         revision,
         sequence,
-        documentHash(document),
+        sha256(canonical),
         idempotentReplay = false,
         conflicts = conflicts,
         documentUpdatedAtEpochMillis = now,
@@ -1390,9 +1826,7 @@ public class PersistentUiBuilderService(
     val committed = CommittedOperationV1(submission, outcome)
     val history = (design.history + committed).takeLast(limits.retainedCommittedOperations)
     val snapshots =
-      (design.revisionSnapshots + RevisionStateV1(document, sequence)).takeLast(
-        limits.retainedRevisionSnapshots
-      )
+      (design.revisionSnapshots + RevisionStateV1(document, sequence)).takeLast(retained)
     val audit =
       (design.audit +
           AuditRecordV1(
@@ -1415,7 +1849,7 @@ public class PersistentUiBuilderService(
         positions = working.positions,
         positionSnapshots =
           (design.positionSnapshots + PositionStateV1(revision, working.positions)).takeLast(
-            limits.retainedRevisionSnapshots
+            retained
           ),
         acceptedOperations = accepted,
         tombstones = working.tombstones,
@@ -1432,6 +1866,7 @@ public class PersistentUiBuilderService(
     original: PersistedDesignV1,
     basePositions: Map<String, StableNodePositionV1>,
     index: Int,
+    catalog: CatalogCapabilityV1,
   ): MutationResult =
     try {
       when (mutation) {
@@ -1447,6 +1882,14 @@ public class PersistentUiBuilderService(
               index,
               mutation.node.id,
             )
+          }
+          // An insert is a write of every property at once, and it is how an `asset/image` with a
+          // key nothing resolves arrived (#484): checked here, per property, the way a
+          // `setProperty` of the same value would be.
+          mutation.node.properties.keys.forEach { property ->
+            catalogs.validateWrite(catalog, working.document, mutation.node, property)?.let {
+              fail(RejectionCodeV1.INVALID_PROPERTY, it.message, index, mutation.node.id, it.field)
+            }
           }
           val position =
             allocatePosition(
@@ -1570,55 +2013,30 @@ public class PersistentUiBuilderService(
             ),
           )
         }
-        is SetPropertyMutationV1 -> {
-          val node =
-            working.document.nodes[mutation.nodeId]
-              ?: fail(RejectionCodeV1.UNKNOWN_NODE, "unknown node", index, mutation.nodeId)
-          if (mutation.property.isBlank()) {
-            fail(RejectionCodeV1.INVALID_PROPERTY, "property name is blank", index, mutation.nodeId)
-          }
-          val beforePresent = mutation.property in node.properties
-          val before = node.properties[mutation.property]
-          val document =
-            working.document.copy(
-              nodes =
-                working.document.nodes +
-                  (node.id to
-                    node.copy(properties = node.properties + (mutation.property to mutation.value)))
-            )
-          val conflicts =
-            if (
-              command.baseRevision < original.document.revision &&
-                original.acceptedOperations.values.any {
-                  it.committedRevision > command.baseRevision &&
-                    it.changes.any { change ->
-                      change is PropertyChangeV1 &&
-                        change.nodeId == mutation.nodeId &&
-                        change.property == mutation.property
-                    }
-                }
-            )
-              listOf(
-                CommandConflictV1(
-                  ConflictCodeV1.STALE_PROPERTY_WRITE,
-                  mutation.nodeId,
-                  mutation.property,
-                  original.document.revision,
-                )
-              )
-            else emptyList()
-          MutationResult(
-            WorkingDesign(document, working.tombstones, working.positions),
-            PropertyChangeV1(
-              mutation.nodeId,
-              mutation.property,
-              beforePresent,
-              before,
-              mutation.value,
-            ),
-            conflicts,
+        is SetPropertyMutationV1 ->
+          writeProperty(
+            working,
+            mutation.nodeId,
+            mutation.property,
+            mutation.value,
+            command,
+            original,
+            index,
+            catalog,
           )
-        }
+        // The explicit spelling of the null write (compose-preview-contracts 2.10.0, #480): the
+        // same path, so the change record is the same `afterPresent = false` either way.
+        is RemoveNodePropertyMutationV1 ->
+          writeProperty(
+            working,
+            mutation.nodeId,
+            mutation.property,
+            NullValueV1,
+            command,
+            original,
+            index,
+            catalog,
+          )
         is UpdateEnvironmentMutationV1 -> {
           if (mutation.changes.isEmpty()) {
             fail(
@@ -1850,6 +2268,87 @@ public class PersistentUiBuilderService(
       MutationResult(error = failure.rejection(command.operationId, working.document.revision))
     }
 
+  /**
+   * One property write, for a `setProperty` and for the explicit `removeNodeProperty` alike.
+   *
+   * A [NullValueV1] value unsets the property (#480); `RemoveNodePropertyMutationV1` says the same
+   * thing in its own words and arrives here with that value, so there is one removal path and the
+   * two spellings cannot drift.
+   */
+  private fun writeProperty(
+    working: WorkingDesign,
+    nodeId: String,
+    property: String,
+    value: UiValueV1,
+    command: DesignCommandV1,
+    original: PersistedDesignV1,
+    index: Int,
+    catalog: CatalogCapabilityV1,
+  ): MutationResult {
+    val node =
+      working.document.nodes[nodeId]
+        ?: fail(RejectionCodeV1.UNKNOWN_NODE, "unknown node", index, nodeId)
+    if (property.isBlank()) {
+      fail(RejectionCodeV1.INVALID_PROPERTY, "property name is blank", index, nodeId)
+    }
+    val beforePresent = property in node.properties
+    val before = node.properties[property]
+    // A null value unsets the property rather than storing a null. A stored null is what
+    // the catalog validator refuses ("does not match its catalog JSON type"), and what the
+    // Compose export refuses again; an *absent* property is the state every node starts in
+    // and the one whose default the renderer applies. Whether the property may be absent is
+    // not decided here: the catalog validation the whole batch passes through afterwards
+    // refuses an unset required property with its usual located message. An unset is not a
+    // write of a value either, so the catalog's value rules are asked only of a set.
+    val afterPresent = value !is NullValueV1
+    val written =
+      if (afterPresent) {
+        node.copy(properties = node.properties + (property to value)).also {
+          catalogs.validateWrite(catalog, working.document, it, property)?.let { issue ->
+            fail(
+              RejectionCodeV1.INVALID_PROPERTY,
+              issue.message,
+              index,
+              nodeId,
+              issue.field,
+            )
+          }
+        }
+      } else node.copy(properties = node.properties - property)
+    val document = working.document.copy(nodes = working.document.nodes + (node.id to written))
+    val conflicts =
+      if (
+        command.baseRevision < original.document.revision &&
+          original.acceptedOperations.values.any {
+            it.committedRevision > command.baseRevision &&
+              it.changes.any { change ->
+                change is PropertyChangeV1 && change.nodeId == nodeId && change.property == property
+              }
+          }
+      )
+        listOf(
+          CommandConflictV1(
+            ConflictCodeV1.STALE_PROPERTY_WRITE,
+            nodeId,
+            property,
+            original.document.revision,
+          )
+        )
+      else emptyList()
+    return MutationResult(
+      WorkingDesign(document, working.tombstones, working.positions),
+      PropertyChangeV1(
+        nodeId,
+        property,
+        beforePresent,
+        before,
+        value,
+        afterPresent,
+      ),
+      conflicts,
+    )
+  }
+
   private fun compensate(
     design: PersistedDesignV1,
     target: AcceptedOperationRecordV1,
@@ -1868,8 +2367,8 @@ public class PersistentUiBuilderService(
                   "property node no longer exists",
                   nodeId = change.nodeId,
                 )
-            val expectedPresent = if (undo) true else change.beforePresent
-            val expected = if (undo) change.after else change.before
+            val expectedPresent = if (undo) change.afterPresent else change.beforePresent
+            val expected = if (undo) change.after.takeIf { change.afterPresent } else change.before
             if (
               (change.property in node.properties) != expectedPresent ||
                 node.properties[change.property] != expected
@@ -1881,7 +2380,7 @@ public class PersistentUiBuilderService(
                 field = change.property,
               )
             }
-            val targetPresent = if (undo) change.beforePresent else true
+            val targetPresent = if (undo) change.beforePresent else change.afterPresent
             val targetValue = if (undo) change.before else change.after
             val properties =
               if (targetPresent) node.properties + (change.property to requireNotNull(targetValue))
@@ -2099,7 +2598,7 @@ public class PersistentUiBuilderService(
       catalog = catalog,
       retainedFromSequence = design.retainedFromSequence(),
       presence = presence,
-      access = design.access.takeIf { it.isOwner(actor.actorId) },
+      access = design.access.takeIf { design.ownedBy(actor) },
     )
 
   private fun catchUp(
@@ -2141,7 +2640,7 @@ public class PersistentUiBuilderService(
   ): List<SubscriberMailbox> {
     val accepted = mutableListOf<SubscriberMailbox>()
     runtime.getValue(designId).subscribers.entries.removeIf { (_, subscriber) ->
-      if (!design.allows(subscriber.actor.actorId, DesignAccessActionV1.READ)) {
+      if (!design.allows(subscriber.actor, DesignAccessActionV1.READ)) {
         subscriber.mailbox.close()
         true
       } else if (!subscriber.mailbox.enqueue(update)) {
@@ -2194,7 +2693,8 @@ public class PersistentUiBuilderService(
           revision = design.document.revision,
           catalogPin = design.document.catalogPin,
           ownerActorId = design.access.ownerActorId,
-          collaborators = design.access.actorGrants.count { !design.access.isOwner(it.actorId) },
+          collaborators =
+            design.access.actorGrants.count { it.actorId != design.access.ownerActorId },
           createdAtEpochMillis = design.createdAtEpochMillis,
           updatedAtEpochMillis = design.updatedAtEpochMillis,
           activeSubscribers = runtime[design.document.id]?.subscribers?.size ?: 0,
@@ -2299,18 +2799,26 @@ public class PersistentUiBuilderService(
   override fun adminDeleteDesign(designId: String): Boolean {
     val closed: List<SubscriberMailbox> = lock.withLock {
       if (designId !in persisted.designs) return false
-      // Durable first: a subscriber whose stream closes has lost the design, not merely the
-      // connection, and must not observe that before the removal is on disk.
-      commitPersisted(persisted.copy(designs = persisted.designs - designId))
-      // The design is gone, so its quarantine goes with it: leaving the entry would answer this id
-      // with a catalog error rather than "not found", and would follow a re-created design here.
-      unusableDesigns.remove(designId)
-      val removed = runtime.remove(designId)
-      mutationBuckets.keys.removeIf { (_, bucketDesignId) -> bucketDesignId == designId }
-      removed?.subscribers?.values?.map { it.mailbox }.orEmpty()
+      removeLocked(designId)
     }
     closed.forEach(SubscriberMailbox::close)
     return true
+  }
+
+  /**
+   * Remove a design that exists, under the lock, and hand back the streams that were open on it for
+   * the caller to close once it is safe to.
+   */
+  private fun removeLocked(designId: String): List<SubscriberMailbox> {
+    // Durable first: a subscriber whose stream closes has lost the design, not merely the
+    // connection, and must not observe that before the removal is on disk.
+    commitPersisted(persisted.copy(designs = persisted.designs - designId))
+    // The design is gone, so its quarantine goes with it: leaving the entry would answer this id
+    // with a catalog error rather than "not found", and would follow a re-created design here.
+    unusableDesigns.remove(designId)
+    val removed = runtime.remove(designId)
+    mutationBuckets.keys.removeIf { (_, bucketDesignId) -> bucketDesignId == designId }
+    return removed?.subscribers?.values?.map { it.mailbox }.orEmpty()
   }
 
   private fun commitPersisted(candidate: PersistedServiceV1) {
@@ -2653,6 +3161,12 @@ private data class PropertyChangeV1(
   val beforePresent: Boolean,
   val before: UiValueV1?,
   val after: UiValueV1,
+  /**
+   * False when the operation unset the property — a `setProperty` whose value was `null`. [after]
+   * is then the null value as submitted, kept so the record still says what was asked for.
+   * Defaulted, because every record written before the rule existed set a value.
+   */
+  val afterPresent: Boolean = true,
 ) : ChangeRecordV1
 
 /**
@@ -2785,26 +3299,19 @@ private fun rejected(
     environmentField,
   )
 
-/**
- * The prefix under which an actor id names a GitHub login rather than a machine.
- *
- * A GitHub login is case-insensitive: `AshleyIngram` and `ashleyingram` are one account, and the
- * host signs its session over the lowercased form, so the actor that arrives here is always
- * lowercase. Nothing checked the spelling of a *stored* id, so a grant shared as
- * `github:AshleyIngram` was accepted and then matched nobody — a share that silently granted
- * nothing, indistinguishable from never having been shared. See #583.
- */
 private const val GITHUB_ACTOR_PREFIX = "github:"
 
 /**
- * One spelling per identity, so equality can decide access.
+ * A GitHub login is case-insensitive, and the host signs its session over `login.lowercase()`, so
+ * the actor that arrives is always lowercase. A grant stored whatever the sharer typed: sharing
+ * with `github:AshleyIngram` was accepted, stored, shown back in the access record — and matched
+ * nobody, indistinguishable from either end from never having shared at all.
  *
- * Only the `github:` prefix is folded, and only its login part. An `operator` or `agent:<
- * fingerprint>` id is minted by this host and is already exact — case is meaningful in a
- * fingerprint, and folding one would make two distinct agents equal.
+ * Folding on the way in fixes new grants; comparing canonically fixes the ones already stored, so a
+ * grant written mis-cased before this starts working rather than staying quietly broken.
  *
- * Applied on both sides of every comparison rather than only on the way in, so a grant already
- * stored mis-cased starts working on the next read instead of staying quietly broken.
+ * Only `github:` folds. Case is meaningful in an `agent:<fingerprint>`, and folding one would make
+ * two distinct agents equal.
  */
 private fun canonicalActorId(actorId: String): String =
   if (actorId.startsWith(GITHUB_ACTOR_PREFIX))
@@ -2814,19 +3321,40 @@ private fun canonicalActorId(actorId: String): String =
 private fun sameActor(left: String, right: String): Boolean =
   canonicalActorId(left) == canonicalActorId(right)
 
-private fun DesignAccessControlV1.isOwner(actorId: String): Boolean =
-  sameActor(ownerActorId, actorId)
-
 private fun PersistedDesignV1.allows(actorId: String, action: DesignAccessActionV1): Boolean =
-  access.isOwner(actorId) ||
+  sameActor(actorId, access.ownerActorId) ||
     access.actorGrants.any { sameActor(it.actorId, actorId) && action in it.allowedActions }
 
-private fun PersistedDesignV1.listItem(actorId: String): DesignListItemV1 {
+/**
+ * The same question asked of a whole identity: an actor may act, or the human it acts for may.
+ *
+ * This is the one place delegation is honoured, and it is deliberately a *widening of who* rather
+ * than a widening of what — a delegate reaches exactly the designs its principal reaches, with
+ * exactly the actions the design granted the principal. An actor with no principal
+ * ([AuthenticatedUiBuilderActor.onBehalfOfActorId] null) asks precisely the question it always did.
+ */
+private fun PersistedDesignV1.allows(
+  actor: AuthenticatedUiBuilderActor,
+  action: DesignAccessActionV1,
+): Boolean = actor.accessIdentities.any { allows(it, action) }
+
+/** True when this actor owns the design outright, or acts for the human who does. */
+private fun PersistedDesignV1.ownedBy(actor: AuthenticatedUiBuilderActor): Boolean =
+  actor.accessIdentities.any { sameActor(it, access.ownerActorId) }
+
+private fun PersistedDesignV1.listItem(actor: AuthenticatedUiBuilderActor): DesignListItemV1 {
+  // Reported under the *actor's own* id — the caller asked what it may do here, and being told
+  // about an id it does not use would be an answer to a question nobody asked. What it may do is
+  // resolved through its principal when it has one, which is what put this design in the listing.
+  val actorId = actor.actorId
   val requester =
-    if (access.isOwner(actorId))
+    if (ownedBy(actor))
       DesignActorAccessV1(actorId, DesignAccessRoleV1.OWNER, DesignAccessActionV1.entries)
     else {
-      val grant = access.actorGrants.first { sameActor(it.actorId, actorId) }
+      val grant =
+        actor.accessIdentities.firstNotNullOf { identity ->
+          access.actorGrants.firstOrNull { sameActor(it.actorId, identity) }
+        }
       DesignActorAccessV1(actorId, grant.role, grant.allowedActions)
     }
   return DesignListItemV1(
@@ -2844,6 +3372,19 @@ private fun PersistedDesignV1.listItem(actorId: String): DesignListItemV1 {
 
 private fun PersistedDesignV1.retainedFromSequence(): Long =
   history.firstOrNull()?.outcome?.sequence?.minus(1) ?: lastSequence
+
+/**
+ * The oldest sequence a whole revision is still retained for, which is not [retainedFromSequence].
+ *
+ * That one is the operation log's floor (`retainedCommittedOperations`), and it is the right answer
+ * for a delta: it says how far back the *changes* go. A `SNAPSHOT_REQUIRED` raised because a
+ * revision's document is gone must answer with the snapshot floor instead. The two used to be
+ * within one of each other, so quoting either was harmless; retaining fewer revisions than
+ * operations makes the difference real, and a client told a floor 900 sequences below what is
+ * actually retained would ask again for a revision that is still missing and loop.
+ */
+private fun PersistedDesignV1.retainedSnapshotFromSequence(): Long =
+  revisionSnapshots.firstOrNull()?.sequence ?: lastSequence
 
 private fun PersistedDesignV1.deltaAfter(afterSequence: Long, limit: Int): ServiceDeltaV1 {
   val available = history.filter { it.outcome.sequence > afterSequence }
@@ -3225,7 +3766,6 @@ private fun DesignPredicateV1.stateReads(): List<String> =
     is AllPredicateV1 -> predicates.flatMap(DesignPredicateV1::stateReads)
     is AnyPredicateV1 -> predicates.flatMap(DesignPredicateV1::stateReads)
     is NotPredicateV1 -> predicate.stateReads()
-    else -> emptyList()
   }
 
 /** The variable an action writes, or null for the one action that writes no state at all. */
@@ -3380,6 +3920,24 @@ private fun validateTopology(document: DesignDocumentV1): RejectedOutcomeV1? {
   return null
 }
 
+/**
+ * A throwable's message with Java exception class names taken out of it.
+ *
+ * The render daemon reports a failed composition as `IllegalStateException: unsupported asset
+ * 'avatar-lain' on d-m1-photo`, the render host prefixes `render failed: `, and the export lane
+ * used to forward the lot to the client under the `internal` code. A design the renderer cannot
+ * draw is an ordinary state; a stack-trace class name in a user-facing error is not
+ * (yschimke/compose-preview-server#484). The class names are dropped and the sentence the code
+ * actually wrote is kept.
+ */
+internal fun Throwable.clientMessage(): String {
+  val message = message?.takeIf { it.isNotBlank() } ?: return "the exporter threw without a message"
+  return EXCEPTION_CLASS_PREFIX.replace(message, "").trim().ifEmpty { "the exporter threw" }
+}
+
+private val EXCEPTION_CLASS_PREFIX =
+  Regex("""\b(?:[A-Za-z_$][\w$]*\.)*[A-Z][\w$]*(?:Exception|Error)\b:?\s*""")
+
 private fun UiBuilderCatalogIssue.toRejection(): RejectedOutcomeV1 =
   rejected("", 0, RejectionCodeV1.INVALID_DOCUMENT, message, nodeId = nodeId, field = field)
 
@@ -3391,6 +3949,11 @@ private fun CatalogCapabilityV1.supports(format: ExportFormatV1): Boolean =
     ExportFormatV1.COMPOSE -> exportCapabilities.composeCode
     ExportFormatV1.SVG -> exportCapabilities.svg
     ExportFormatV1.PNG -> exportCapabilities.png
+    // Defaults to false in the contract, and no catalog here sets it, so a BUNDLE export is
+    // refused as BAD_REQUEST at the gate above until the server can actually write one
+    // (yschimke/compose-preview-server#528). No `else`: the next format added should fail this
+    // compile rather than silently read as unsupported.
+    ExportFormatV1.BUNDLE -> exportCapabilities.bundle
   }
 
 private data class EnvironmentValidationIssue(
@@ -3476,6 +4039,12 @@ private fun DesignEnvironmentV1.applyChange(change: EnvironmentChangeV1): Design
     ResetBackgroundEnvironmentChangeV1 -> copy(background = null)
     is SetTypefaceEnvironmentChangeV1 -> copy(typeface = change.value)
     ResetTypefaceEnvironmentChangeV1 -> copy(typeface = null)
+    // The whole set per change, which is what the protocol offers: an add and a remove would each
+    // be a mutation a client could interleave, and the set is read as a set by everything that
+    // consumes it. Reset is the empty set rather than a null, because "exports at its own frame
+    // alone" is a real answer and not an absent one.
+    is SetExportDevicesEnvironmentChangeV1 -> copy(exportDevices = change.value)
+    ResetExportDevicesEnvironmentChangeV1 -> copy(exportDevices = emptyList())
   }
 
 private fun DesignEnvironmentV1.value(field: EnvironmentFieldV1): Any? =
@@ -3495,6 +4064,7 @@ private fun DesignEnvironmentV1.value(field: EnvironmentFieldV1): Any? =
     EnvironmentFieldV1.NETWORK_ACCESS -> networkAccess
     EnvironmentFieldV1.BACKGROUND -> background
     EnvironmentFieldV1.TYPEFACE -> typeface
+    EnvironmentFieldV1.EXPORT_DEVICES -> exportDevices
   }
 
 private fun DesignEnvironmentV1.copyFieldsFrom(
@@ -3520,8 +4090,12 @@ private fun DesignEnvironmentV1.copyFieldsFrom(
       EnvironmentFieldV1.NETWORK_ACCESS -> environment.copy(networkAccess = source.networkAccess)
       EnvironmentFieldV1.BACKGROUND -> environment.copy(background = source.background)
       EnvironmentFieldV1.TYPEFACE -> environment.copy(typeface = source.typeface)
+      EnvironmentFieldV1.EXPORT_DEVICES -> environment.copy(exportDevices = source.exportDevices)
     }
   }
+
+/** Longer than any title a listing can show, shorter than anything that is really a document. */
+private const val MAXIMUM_TITLE_LENGTH = 200
 
 private fun notFound(designId: String): UiBuilderServiceError =
   UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "design $designId was not found")
@@ -3529,11 +4103,63 @@ private fun notFound(designId: String): UiBuilderServiceError =
 private fun forbidden(action: String, designId: String): UiBuilderServiceError =
   UiBuilderServiceError(ServiceErrorCodeV1.FORBIDDEN, "actor may not $action design $designId")
 
+/**
+ * The exact bytes a document's hash is taken over, which are also the bytes retaining it costs.
+ *
+ * Kept as one function so the retention budget is measured on the same canonical form the hash is,
+ * and so a commit that needs both pays for the serialization once.
+ */
+private fun documentCanonicalBytes(document: DesignDocumentV1): ByteArray =
+  canonicalJson(PersistentUiBuilderServiceJson.json.encodeToJsonElement(document))
+    .encodeToByteArray()
+
 private fun documentHash(document: DesignDocumentV1): String =
-  sha256(
-    canonicalJson(PersistentUiBuilderServiceJson.json.encodeToJsonElement(document))
-      .encodeToByteArray()
-  )
+  sha256(documentCanonicalBytes(document))
+
+/**
+ * How many revisions of a document costing [documentBytes] this design may retain.
+ *
+ * The budget divided by the cost of one, held between the floor and the ceiling. A document large
+ * enough to make the division zero still retains the floor, deliberately: see
+ * [UiBuilderServiceLimits.minimumRetainedRevisionSnapshots].
+ */
+/**
+ * The newest entries of [this] that fit in [budgetBytes], keeping at least [minimumEntries].
+ *
+ * Walks from the newest backwards and stops at the first entry that would exceed the budget, so a
+ * commit serializes at most the budget rather than the whole map — the cost is bounded by what is
+ * kept, not by what has accumulated. Insertion order is age order for both maps this is used on:
+ * `acceptedOperations` and `tombstones` are built by `+`, and re-adding an existing key (an undo
+ * marking its target compensated) keeps that key's original position, which is what makes the
+ * oldest entries the ones at the front.
+ *
+ * Returns [this] unchanged when everything fits, so the common case allocates nothing.
+ */
+private inline fun <reified V> Map<String, V>.retainNewestWithinBytes(
+  budgetBytes: Long,
+  minimumEntries: Int,
+): Map<String, V> {
+  if (size <= minimumEntries) return this
+  val ordered = entries.toList()
+  var total = 0L
+  var kept = 0
+  var index = ordered.lastIndex
+  while (index >= 0) {
+    total += PersistentUiBuilderServiceJson.json.encodeToString(ordered[index].value).length
+    if (total > budgetBytes && kept >= minimumEntries) break
+    kept++
+    index--
+  }
+  if (kept >= ordered.size) return this
+  return ordered.subList(ordered.size - kept, ordered.size).associate { it.key to it.value }
+}
+
+private fun UiBuilderServiceLimits.retainedRevisionsFor(documentBytes: Int): Int {
+  if (documentBytes <= 0) return retainedRevisionSnapshots
+  val floor = minimumRetainedRevisionSnapshots.coerceAtMost(retainedRevisionSnapshots)
+  val affordable = (retainedRevisionBytes / documentBytes).coerceAtMost(Int.MAX_VALUE.toLong())
+  return affordable.toInt().coerceIn(floor, retainedRevisionSnapshots)
+}
 
 private fun artifactDigest(artifact: ExportArtifactV1): String =
   sha256(

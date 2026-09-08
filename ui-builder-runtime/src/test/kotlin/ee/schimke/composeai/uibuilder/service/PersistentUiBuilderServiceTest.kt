@@ -43,6 +43,103 @@ class PersistentUiBuilderServiceTest {
   private val outsider = AuthenticatedUiBuilderActor("outsider")
 
   @Test
+  fun `an agent acting for a person reaches the designs that person owns`() {
+    val service = service()
+    create(service)
+    val delegate = AuthenticatedUiBuilderActor("agent:abc123", onBehalfOfActorId = owner.actorId)
+
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, delegate, UiBuilderServiceRequest.OpenDesign("design")),
+      "a delegate reads what its principal owns",
+    )
+    accepted(
+      execute(
+        service,
+        delegate,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("delegated-insert", 0, InsertNodeMutationV1(textNode("t"), NodeLocationV1()))
+        ),
+      )
+    )
+    val delta =
+      assertIs<UiBuilderServiceResponse.Delta>(
+        execute(service, owner, UiBuilderServiceRequest.GetDelta("design", 0, 10))
+      )
+    // The edit is attributed to the agent, not to the person it acted for: delegation decides what
+    // may be touched and never who touched it.
+    assertEquals(
+      "agent:abc123",
+      (delta.delta.operations.single().submission as DesignCommandV1).actorId,
+    )
+    assertIs<UiBuilderServiceResponse.Error>(
+      execute(
+        service,
+        AuthenticatedUiBuilderActor("agent:other"),
+        UiBuilderServiceRequest.OpenDesign("design"),
+      ),
+      "an agent nobody delegated to is still refused",
+    )
+  }
+
+  @Test
+  fun `a design an agent creates for a person is owned by that person`() {
+    val service = service()
+    val delegate = AuthenticatedUiBuilderActor("agent:abc123", onBehalfOfActorId = owner.actorId)
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, delegate, UiBuilderServiceRequest.CreateDesign(document()))
+    )
+
+    val access =
+      assertIs<UiBuilderServiceResponse.DesignAccess>(
+        execute(service, owner, UiBuilderServiceRequest.GetDesignAccess("design")),
+        "the approver owns it, so the approver may manage it",
+      )
+    assertEquals(owner.actorId, access.access.ownerActorId)
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, owner, UiBuilderServiceRequest.OpenDesign("design")),
+      "the person who approved the grant can open what the agent made — the whole point",
+    )
+    // And the delegate keeps working through its principal for as long as the grant lives.
+    assertIs<UiBuilderServiceResponse.DesignAccess>(
+      execute(service, delegate, UiBuilderServiceRequest.GetDesignAccess("design"))
+    )
+    assertIs<UiBuilderServiceResponse.Error>(
+      execute(service, outsider, UiBuilderServiceRequest.OpenDesign("design"))
+    )
+  }
+
+  @Test
+  fun `a delegate is listed under its own id with the access its principal has`() {
+    val service = service()
+    create(service)
+    grant(service, owner, viewer, 0, listOf(DesignAccessActionV1.READ))
+    val delegate = AuthenticatedUiBuilderActor("agent:abc123", onBehalfOfActorId = viewer.actorId)
+
+    val listed =
+      assertIs<UiBuilderServiceResponse.Designs>(
+        execute(service, delegate, UiBuilderServiceRequest.ListDesigns(null, 10))
+      )
+    val row = listed.designs.single()
+    assertEquals(owner.actorId, row.ownerActorId)
+    assertEquals(
+      "agent:abc123",
+      row.requesterAccess.actorId,
+      "the caller is told about its own id",
+    )
+    assertContentEquals(listOf(DesignAccessActionV1.READ), row.requesterAccess.allowedActions)
+    assertIs<UiBuilderServiceResponse.Error>(
+      execute(
+        service,
+        delegate,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("no-write", 0, InsertNodeMutationV1(textNode("t"), NodeLocationV1()))
+        ),
+      ),
+      "a delegate gets no more than its principal was granted",
+    )
+  }
+
+  @Test
   fun `typed render environment updates are document level atomic and compensatable`() {
     val clock = MutableClock(1_000)
     val storage = MemoryStorage()
@@ -2072,6 +2169,666 @@ class PersistentUiBuilderServiceTest {
   }
 
   @Test
+  fun `setting a property to null unsets it and the change undoes and redoes`() {
+    val service = service()
+    create(service)
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("insert", 0, InsertNodeMutationV1(textNode("node"), NodeLocationV1()))
+        ),
+      )
+    )
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("set", 1, SetPropertyMutationV1("node", "text", StringValueV1("First")))
+        ),
+      )
+    )
+    // The node keeps its id, its place and everything else; only the property goes.
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("unset", 2, SetPropertyMutationV1("node", "text", NullValueV1))
+        ),
+      )
+    )
+    assertFalse("text" in currentNode(service, "node").properties)
+    assertTrue("node" in currentDocument(service).nodes)
+
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          UiBuilderSubmission.Undo("design", "undo-unset", "browser", 3, "unset")
+        ),
+      )
+    )
+    assertEquals(StringValueV1("First"), currentNode(service, "node").properties["text"])
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          UiBuilderSubmission.Redo("design", "redo-unset", "browser", 4, "undo-unset")
+        ),
+      )
+    )
+    assertFalse("text" in currentNode(service, "node").properties)
+
+    // Unsetting what is not set is accepted and changes nothing: the state asked for is the state
+    // the node is in, and a retry of an unset must not be refused.
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("unset-again", 5, SetPropertyMutationV1("node", "text", NullValueV1))
+        ),
+      )
+    )
+    assertFalse("text" in currentNode(service, "node").properties)
+  }
+
+  @Test
+  fun `removeNodeProperty is the null write in its own words, on the same path`() {
+    // compose-preview-contracts 2.10.0 gave the unset its own mutation (#480). It has to land
+    // exactly where the null `setProperty` lands: property gone, undo restores, redo removes.
+    val service = service()
+    create(service)
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch(
+            "insert",
+            0,
+            InsertNodeMutationV1(
+              textNode("node").copy(properties = mapOf("text" to StringValueV1("First"))),
+              NodeLocationV1(),
+            ),
+          )
+        ),
+      )
+    )
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("remove", 1, RemoveNodePropertyMutationV1("node", "text"))
+        ),
+      )
+    )
+    assertEquals(emptyMap(), currentNode(service, "node").properties)
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          UiBuilderSubmission.Undo("design", "undo-remove", "browser", 2, "remove")
+        ),
+      )
+    )
+    assertEquals(mapOf("text" to StringValueV1("First")), currentNode(service, "node").properties)
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          UiBuilderSubmission.Redo("design", "redo-remove", "browser", 3, "undo-remove")
+        ),
+      )
+    )
+    assertEquals(emptyMap(), currentNode(service, "node").properties)
+  }
+
+  @Test
+  fun `unsetting a required property is refused with the catalog's located message`() {
+    val service = service()
+    create(service)
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch(
+            "insert",
+            0,
+            InsertNodeMutationV1(
+              DesignNodeV1(
+                id = "button",
+                componentId = "m3.Button",
+                properties = mapOf("label" to StringValueV1("Go")),
+              ),
+              NodeLocationV1(),
+            ),
+          )
+        ),
+      )
+    )
+    val refused =
+      rejected(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            batch("unset", 1, SetPropertyMutationV1("button", "label", NullValueV1))
+          ),
+        )
+      )
+    assertEquals(RejectionCodeV1.INVALID_DOCUMENT, refused.code)
+    assertEquals("required property label is missing", refused.message)
+    assertEquals("button", refused.nodeId)
+    assertEquals("label", refused.field)
+    // Nothing landed: the batch is atomic and the node still carries its label.
+    assertEquals(StringValueV1("Go"), currentNode(service, "button").properties["label"])
+
+    // The explicit mutation is refused the same way, with the same words.
+    val explicitlyRefused =
+      rejected(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            batch("remove", 1, RemoveNodePropertyMutationV1("button", "label"))
+          ),
+        )
+      )
+    assertEquals(refused.copy(operationId = "remove"), explicitlyRefused)
+    assertEquals(StringValueV1("Go"), currentNode(service, "button").properties["label"])
+  }
+
+  @Test
+  fun `anybody who may write a design may rename it, and nobody else`() {
+    val service = service()
+    create(service)
+    val editor = AuthenticatedUiBuilderActor("editor")
+    grant(service, owner, editor, 0, listOf(DesignAccessActionV1.READ, DesignAccessActionV1.WRITE))
+    grant(service, owner, viewer, 1, listOf(DesignAccessActionV1.READ))
+
+    val renamed =
+      assertIs<UiBuilderServiceResponse.DesignRenamed>(
+        execute(service, editor, UiBuilderServiceRequest.RenameDesign("design", "  Library  "))
+      )
+    assertEquals("Library", renamed.design.title)
+    assertEquals("editor", renamed.design.requesterAccess.actorId)
+    // The revision is not a rename's to advance: it identifies the design, which did not change.
+    assertEquals(0, renamed.design.revision)
+    assertEquals("Library", currentDocument(service).title)
+    // Reading the design at its current revision agrees with reading it plainly.
+    assertEquals(
+      "Library",
+      snapshot(execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 0)))
+        .state
+        .document
+        .title,
+    )
+    val listed =
+      assertIs<UiBuilderServiceResponse.Designs>(
+        execute(service, viewer, UiBuilderServiceRequest.ListDesigns(null, 10))
+      )
+    assertEquals("Library", listed.designs.single().title)
+
+    assertEquals(
+      ServiceErrorCodeV1.FORBIDDEN,
+      error(execute(service, viewer, UiBuilderServiceRequest.RenameDesign("design", "Mine"))).code,
+    )
+    assertEquals(
+      ServiceErrorCodeV1.FORBIDDEN,
+      error(execute(service, outsider, UiBuilderServiceRequest.RenameDesign("design", "Mine")))
+        .code,
+    )
+    assertEquals(
+      ServiceErrorCodeV1.BAD_REQUEST,
+      error(execute(service, owner, UiBuilderServiceRequest.RenameDesign("design", "   "))).code,
+    )
+    assertEquals(
+      ServiceErrorCodeV1.NOT_FOUND,
+      error(execute(service, owner, UiBuilderServiceRequest.RenameDesign("missing", "Mine"))).code,
+    )
+    assertEquals("Library", currentDocument(service).title)
+  }
+
+  @Test
+  fun `only the owner may delete a design, and a delete closes every stream on it`() {
+    val service = service()
+    create(service)
+    val editor = AuthenticatedUiBuilderActor("editor")
+    // Even a grant that spells out `delete` does not make a grantee the owner.
+    grant(service, owner, editor, 0, DesignAccessActionV1.entries)
+    assertEquals(
+      ServiceErrorCodeV1.FORBIDDEN,
+      error(execute(service, editor, UiBuilderServiceRequest.DeleteDesign("design"))).code,
+    )
+    assertEquals(
+      ServiceErrorCodeV1.FORBIDDEN,
+      error(execute(service, outsider, UiBuilderServiceRequest.DeleteDesign("design"))).code,
+    )
+    assertTrue(
+      "design" in
+        assertIs<UiBuilderServiceResponse.Designs>(
+            execute(service, owner, UiBuilderServiceRequest.ListDesigns(null, 10))
+          )
+          .designs
+          .map { it.designId }
+    )
+
+    val updates = mutableListOf<UiBuilderServiceUpdate>()
+    val subscription =
+      service.subscribe(UiBuilderSubscriptionCall(editor, "design", 0), updates::add)
+    // An agent acting for the owner is the owner for this purpose, as for every other.
+    val delegate = AuthenticatedUiBuilderActor("agent:abc", onBehalfOfActorId = "owner")
+    assertEquals(
+      UiBuilderServiceResponse.DesignDeleted("design"),
+      execute(service, delegate, UiBuilderServiceRequest.DeleteDesign("design")),
+    )
+    subscription.close()
+    assertEquals(
+      ServiceErrorCodeV1.NOT_FOUND,
+      error(execute(service, owner, UiBuilderServiceRequest.OpenDesign("design"))).code,
+    )
+    assertEquals(
+      ServiceErrorCodeV1.NOT_FOUND,
+      error(execute(service, owner, UiBuilderServiceRequest.DeleteDesign("design"))).code,
+    )
+    assertEquals(emptyList(), service.adminListDesigns())
+  }
+
+  @Test
+  fun `a delete survives a reload of the same storage`() {
+    val storage = MemoryStorage()
+    val first = service(storage)
+    create(first)
+    assertEquals(
+      UiBuilderServiceResponse.DesignDeleted("design"),
+      execute(first, owner, UiBuilderServiceRequest.DeleteDesign("design")),
+    )
+    val second = service(storage)
+    assertEquals(
+      ServiceErrorCodeV1.NOT_FOUND,
+      error(execute(second, owner, UiBuilderServiceRequest.OpenDesign("design"))).code,
+    )
+    // And the id is free again for the next design.
+    create(second)
+  }
+
+  @Test
+  fun `listing catalogs reports the pin a document must carry for each`() {
+    val listed =
+      assertIs<UiBuilderServiceResponse.Catalogs>(
+        execute(service(), owner, UiBuilderServiceRequest.ListCatalogs)
+      )
+    assertEquals(mapOf("m3" to CATALOG_REFERENCE), listed.pins)
+  }
+
+  @Test
+  fun `a write is checked against the catalog's value rules where the value is chosen`() {
+    // The catalog decides what a value of a kind looks like
+    // (`UiBuilderCatalogExecutor.validateWrite`);
+    // what the service owes it is to ask on every write — a `setProperty`, and each property of an
+    // `insertNode` — and to refuse with the node, the field and the operation named.
+    val checked = mutableListOf<Pair<String, String>>()
+    val catalogs =
+      object : UiBuilderCatalogExecutor by TestCatalogs {
+        override fun validateWrite(
+          catalog: CatalogCapabilityV1,
+          document: DesignDocumentV1,
+          node: DesignNodeV1,
+          property: String,
+        ): UiBuilderCatalogIssue? {
+          checked += node.id to property
+          val value = node.properties[property]
+          return if (value is StringValueV1 && value.value == "refused")
+            UiBuilderCatalogIssue("INVALID_PROPERTY", "text is refused", node.id, property)
+          else null
+        }
+      }
+    val service = service(catalogs = catalogs)
+    create(service)
+
+    val refusedNode = textNode("t").copy(properties = mapOf("text" to StringValueV1("refused")))
+    val insert =
+      rejected(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            batch(
+              "insert-refused",
+              0,
+              InsertNodeMutationV1(textNode("keep"), NodeLocationV1()),
+              InsertNodeMutationV1(refusedNode, NodeLocationV1()),
+            )
+          ),
+        )
+      )
+    assertEquals(RejectionCodeV1.INVALID_PROPERTY, insert.code)
+    assertEquals("t", insert.nodeId)
+    assertEquals("text", insert.field)
+    assertEquals(1, insert.operationIndex)
+    assertEquals("text is refused", insert.message)
+    // The batch is atomic: the node that was fine did not land either.
+    assertTrue(currentDocument(service).nodes.isEmpty())
+
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("insert", 0, InsertNodeMutationV1(textNode("t"), NodeLocationV1()))
+        ),
+      )
+    )
+    val write =
+      rejected(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            batch("write-refused", 1, SetPropertyMutationV1("t", "text", StringValueV1("refused")))
+          ),
+        )
+      )
+    assertEquals(RejectionCodeV1.INVALID_PROPERTY, write.code)
+    assertEquals("t", write.nodeId)
+    assertEquals("text", write.field)
+    assertEquals(0, write.operationIndex)
+    assertEquals(emptyMap(), currentNode(service, "t").properties)
+
+    // Asked of the written field and of nothing else — never document-wide.
+    checked.clear()
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("write", 1, SetPropertyMutationV1("t", "text", StringValueV1("fine")))
+        ),
+      )
+    )
+    assertEquals(listOf("t" to "text"), checked)
+  }
+
+  @Test
+  fun `an export failure reaches the client without a Java exception class name`() {
+    // The render daemon says `IllegalStateException: unsupported asset …`, the render host adds
+    // `render failed: `, and the lot used to arrive under `internal`. The class name is the one
+    // part of that a client cannot use (#484).
+    val service =
+      service(
+        exporter =
+          UiBuilderExportExecutor {
+            throw IllegalStateException(
+              "render failed: IllegalStateException: unsupported asset 'avatar-lain' on photo"
+            )
+          }
+      )
+    create(service)
+
+    val failure =
+      error(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ExportDesign("design", null, ExportFormatV1.PNG),
+        )
+      )
+    assertEquals(ServiceErrorCodeV1.INTERNAL, failure.code)
+    assertEquals(
+      "export failed: render failed: unsupported asset 'avatar-lain' on photo",
+      failure.message,
+    )
+
+    assertEquals(
+      "Java heap space",
+      RuntimeException("java.lang.OutOfMemoryError: Java heap space").clientMessage(),
+    )
+    assertEquals("the exporter threw", RuntimeException("UnsatisfiedLinkError").clientMessage())
+    assertEquals("the exporter threw without a message", RuntimeException().clientMessage())
+    assertEquals("timed out after 30s", RuntimeException("timed out after 30s").clientMessage())
+  }
+
+  @Test
+  fun `retention depth follows the byte budget, and never cuts below its floor`() {
+    // A budget too small for even one copy of the document: the floor is what is left, and the
+    // floor is what a client rebasing on a recent revision needs.
+    val service =
+      service(
+        limits =
+          UiBuilderServiceLimits(
+            retainedCommittedOperations = 64,
+            retainedRevisionSnapshots = 64,
+            retainedRevisionBytes = 64,
+            minimumRetainedRevisionSnapshots = 2,
+          )
+      )
+    create(service)
+    editFourTimes(service)
+
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 4)),
+      "the current revision is retained",
+    )
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 3)),
+      "the floor keeps one revision behind the current one",
+    )
+    assertEquals(
+      ServiceErrorCodeV1.SNAPSHOT_REQUIRED,
+      error(execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 2))).code,
+      "anything below the floor is dropped rather than kept for a thousand revisions",
+    )
+  }
+
+  @Test
+  fun `a dropped revision reports the snapshot floor, not the operation log's`() {
+    val service =
+      service(
+        limits =
+          UiBuilderServiceLimits(
+            // The operation log keeps everything; only the whole-document snapshots are shallow.
+            retainedCommittedOperations = 64,
+            retainedRevisionSnapshots = 64,
+            retainedRevisionBytes = 64,
+            minimumRetainedRevisionSnapshots = 2,
+          )
+      )
+    create(service)
+    editFourTimes(service)
+
+    val refused = error(execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 1)))
+
+    assertEquals(ServiceErrorCodeV1.SNAPSHOT_REQUIRED, refused.code)
+    // The delta path still reports 0 here, because every operation is retained. Quoting that floor
+    // for a missing snapshot would send the client back for a revision that is still gone.
+    assertEquals(
+      3,
+      refused.retainedFromSequence,
+      "the floor quoted is the oldest revision still retained",
+    )
+    assertEquals(
+      0,
+      delta(execute(service, owner, UiBuilderServiceRequest.GetDelta("design", 0, 50)))
+        .retainedFromSequence,
+      "the operation log's own floor is unchanged, and is what a delta answers with",
+    )
+  }
+
+  @Test
+  fun `the file storage reports what it holds against the ceiling that would refuse it`() {
+    val storage = FileUiBuilderStateStorage(temporaryDirectory, maximumBytes = 4_096)
+
+    val empty = assertNotNull(storage.usage())
+    assertEquals(0, empty.bytes, "nothing stored yet")
+    assertEquals(4_096, empty.maximumBytes)
+    assertEquals(0.0, empty.usedFraction)
+
+    storage.replace(ByteArray(1_024) { '.'.code.toByte() })
+
+    val used = assertNotNull(storage.usage())
+    assertEquals(1_024, used.bytes)
+    assertEquals(0.25, used.usedFraction)
+  }
+
+  @Test
+  fun `diagnostics carry the storage headroom, and omit it when nothing bounds the store`() {
+    val bounded =
+      service(storage = FileUiBuilderStateStorage(temporaryDirectory, maximumBytes = 1_048_576))
+    create(bounded)
+
+    val measured = bounded.diagnostics()
+    assertEquals(1_048_576, measured.storageMaximumBytes)
+    assertTrue(measured.storageBytes > 0, "a created design is bytes on disk")
+    assertTrue(measured.storageBytes < measured.storageMaximumBytes)
+
+    val unbounded = service()
+    create(unbounded)
+
+    assertEquals(
+      0,
+      unbounded.diagnostics().storageMaximumBytes,
+      "a storage that bounds nothing reports no ceiling rather than a made-up one",
+    )
+  }
+
+  @Test
+  fun `undo records are bounded by bytes, and undoing past the floor is refused not broken`() {
+    // A budget too small for the records this design produces: the floor is all that survives.
+    val service =
+      service(
+        limits =
+          UiBuilderServiceLimits(
+            retainedCommittedOperations = 64,
+            retainedOperationOutcomes = 64,
+            retainedRevisionSnapshots = 64,
+            retainedUndoBytes = 1,
+            minimumRetainedUndoOperations = 2,
+          )
+      )
+    create(service)
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("insert-root", 0, InsertNodeMutationV1(textNode("root"), NodeLocationV1()))
+        ),
+      )
+    )
+    repeat(5) { index ->
+      accepted(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            batch(
+              "insert-$index",
+              index + 1L,
+              InsertNodeMutationV1(
+                textNode("node-$index"),
+                NodeLocationV1(ParentSlotV1("root", "content")),
+              ),
+            )
+          ),
+        )
+      )
+    }
+
+    // The newest operation is still undoable: the floor keeps the most recent records.
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          UiBuilderSubmission.Undo("design", "undo-latest", "browser", 6, "insert-4")
+        ),
+      )
+    )
+
+    // The first one has aged out of the budget, and says so rather than failing some other way.
+    val refused =
+      rejected(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            UiBuilderSubmission.Undo("design", "undo-oldest", "browser", 7, "insert-root")
+          ),
+        )
+      )
+    assertEquals(RejectionCodeV1.UNKNOWN_OPERATION, refused.code)
+  }
+
+  @Test
+  fun `a generous undo budget retains every record`() {
+    val service =
+      service(
+        limits =
+          UiBuilderServiceLimits(
+            retainedCommittedOperations = 64,
+            retainedOperationOutcomes = 64,
+            retainedRevisionSnapshots = 64,
+            retainedUndoBytes = 8L * 1024 * 1024,
+            minimumRetainedUndoOperations = 2,
+          )
+      )
+    create(service)
+    editFourTimes(service)
+
+    // The oldest of the four is still undoable when nothing forced it out.
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          UiBuilderSubmission.Undo("design", "undo-oldest", "browser", 4, "insert-2")
+        ),
+      )
+    )
+  }
+
+  /** A root and three children, so the design reaches revision 4 through four accepted commits. */
+  private fun editFourTimes(service: PersistentUiBuilderService) {
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("insert-root", 0, InsertNodeMutationV1(textNode("root"), NodeLocationV1()))
+        ),
+      )
+    )
+    repeat(3) { index ->
+      accepted(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            batch(
+              "insert-$index",
+              index + 1L,
+              InsertNodeMutationV1(
+                textNode("node-$index"),
+                NodeLocationV1(ParentSlotV1("root", "content")),
+              ),
+            )
+          ),
+        )
+      )
+    }
+  }
+
+  @Test
   fun `a github grant matches its actor whatever case it was shared in`() {
     val storage = MemoryStorage()
     var service = service(storage = storage)
@@ -2158,10 +2915,11 @@ class PersistentUiBuilderServiceTest {
     limits: UiBuilderServiceLimits? = null,
     exporter: UiBuilderExportExecutor = validExporter(exportRequests),
     clock: Clock = Clock.fixed(Instant.ofEpochMilli(1_000), ZoneOffset.UTC),
+    catalogs: UiBuilderCatalogExecutor = TestCatalogs,
   ): PersistentUiBuilderService =
     PersistentUiBuilderService(
       storage = storage,
-      catalogs = TestCatalogs,
+      catalogs = catalogs,
       exporter = exporter,
       clock = clock,
       limits =
@@ -2312,11 +3070,27 @@ class PersistentUiBuilderServiceTest {
       reference == CATALOG_REFERENCE
     }
 
+    override fun reference(catalog: CatalogCapabilityV1): CatalogReferenceV1? =
+      CATALOG_REFERENCE.takeIf {
+        catalog == CATALOG
+      }
+
     override fun validate(
       document: DesignDocumentV1,
       catalog: CatalogCapabilityV1,
     ): UiBuilderCatalogIssue? {
       document.nodes.values.forEach { node ->
+        if (node.componentId == "m3.Button") {
+          if ("label" !in node.properties) {
+            return UiBuilderCatalogIssue(
+              "MISSING_REQUIRED_PROPERTY",
+              "required property label is missing",
+              node.id,
+              "label",
+            )
+          }
+          return@forEach
+        }
         if (node.componentId != "m3.Text") {
           return UiBuilderCatalogIssue("UNKNOWN_COMPONENT", "unknown component", node.id)
         }
@@ -2353,7 +3127,15 @@ class PersistentUiBuilderServiceTest {
               properties =
                 listOf(PropertyCapabilityV1("text", JsonPrimitive("string"), required = false)),
               wasm = WasmCapabilityV1(JsonPrimitive(true), WasmAdapterStatusV1.SUPPORTED),
-            )
+            ),
+            ComponentCapabilityV1(
+              componentId = "m3.Button",
+              displayName = "Button",
+              role = "action",
+              properties =
+                listOf(PropertyCapabilityV1("label", JsonPrimitive("string"), required = true)),
+              wasm = WasmCapabilityV1(JsonPrimitive(true), WasmAdapterStatusV1.SUPPORTED),
+            ),
           ),
         exportCapabilities = ExportCapabilitiesV1(composeCode = true, svg = true, png = true),
       )
@@ -2382,6 +3164,9 @@ private fun <T> runSuspend(block: suspend () -> T): T {
 
 private fun error(response: UiBuilderServiceResponse): UiBuilderServiceError =
   assertIs<UiBuilderServiceResponse.Error>(response).error
+
+private fun delta(response: UiBuilderServiceResponse): ServiceDeltaV1 =
+  assertIs<UiBuilderServiceResponse.Delta>(response).delta
 
 private fun accepted(response: UiBuilderServiceResponse): AcceptedOutcomeV1 =
   assertIs<AcceptedOutcomeV1>(assertIs<UiBuilderServiceResponse.OperationOutcome>(response).outcome)

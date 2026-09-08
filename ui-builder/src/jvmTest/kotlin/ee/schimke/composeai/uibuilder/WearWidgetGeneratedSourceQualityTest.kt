@@ -52,8 +52,27 @@ class WearWidgetGeneratedSourceQualityTest {
 
     assertTrue("@Preview(name = \"Squircle Preview\")" in source, source)
     assertFalse("device =" in source, source)
-    // The provider is still the fan-out: it yields every footprint the Large container ships.
-    assertTrue("SquircleLargeWidgetPreviewParams::class" in source, source)
+  }
+
+  /**
+   * One preview, not one per footprint.
+   *
+   * `@PreviewParameter` unrolls a preview per value the provider yields — for the Large container a
+   * constrained 182×112dp beside the 216×124dp the design is authored against — and a scaffold does
+   * not need both to show what it looks like. The provider is still where the numbers come from, so
+   * the preview keeps the shipped spec rather than inventing a frame; only the fan-out goes. Picked
+   * by width, so the choice does not rest on the order a provider happens to yield.
+   */
+  @Test
+  fun `the generated preview is one, at the container's own footprint`() {
+    val source = generate()
+
+    assertFalse("@PreviewParameter" in source, source)
+    assertFalse("import androidx.compose.ui.tooling.preview.PreviewParameter" in source, source)
+    assertTrue(
+      "SquircleLargeWidgetPreviewParams().values.maxBy { it.widthDp }" in source,
+      source,
+    )
   }
 
   /**
@@ -61,8 +80,8 @@ class WearWidgetGeneratedSourceQualityTest {
    * `:samples:wear-widget` (yschimke/compose-ai-tools) compiles and renders, which is the half of
    * "the generator works" no test on this side of the repository split can answer.
    */
-  private fun generate(): String {
-    val result = WearWidgetCodeExporter.export(activitySummaryDocument(), PACKAGE_NAME)
+  private fun generate(document: UiBuilderDocument = activitySummaryDocument()): String {
+    val result = WearWidgetCodeExporter.export(document, PACKAGE_NAME)
     val source =
       when (result) {
         is WearWidgetCodeExporter.Result.Emitted -> result.source
@@ -71,8 +90,125 @@ class WearWidgetGeneratedSourceQualityTest {
       }
     val directory = Path.of("build", "generated-widget-source")
     Files.createDirectories(directory)
-    Files.writeString(directory.resolve("ActivitySummaryWidget.kt"), source)
+    // Named from the document, so a second design written through here cannot overwrite the
+    // activity-summary file the samples are compared against.
+    val name = if (document.id == "activity-summary") "ActivitySummaryWidget" else document.id
+    Files.writeString(directory.resolve("$name.kt"), source)
     return source
+  }
+
+  /**
+   * A `#RRGGBB` colour is emitted opaque, because `Color` reads its argument as ARGB.
+   *
+   * Six digits spliced straight through produced `Color(0x1DB954)` — alpha `0x00`, which compiles
+   * and draws nothing (yschimke/compose-preview-server#516). Every colour in the design above is
+   * eight digits, which is why nothing here caught it; the validator asks authors for `#RRGGBB`, so
+   * the documented spelling was the one that broke.
+   *
+   * Both widths are pinned: padding six, and leaving eight alone rather than double-prefixing it.
+   */
+  @Test
+  fun `a six-digit colour is emitted opaque and an eight-digit one is left alone`() {
+    val source = generate(colourDocument())
+
+    assertTrue("Color(0xFF1DB954)" in source, source)
+    assertTrue("Color(0xFFFFFFFF)" in source, source)
+    assertTrue("Color(0x80123456)" in source, source)
+    // The transparent forms the splice used to produce.
+    assertFalse("Color(0x1DB954)" in source, source)
+    assertFalse("Color(0xFFFF80123456)" in source, source)
+  }
+
+  /** One text per colour spelling the validator admits, on the Large container. */
+  private fun colourDocument(): UiBuilderDocument {
+    val nodes =
+      listOf(
+        UiBuilderNode(
+          id = "wear-widget-large",
+          componentId = WearWidgetScaffoldSize.Large.componentId,
+          slots = mapOf("content" to listOf("stack")),
+        ),
+        UiBuilderNode(
+          id = "stack",
+          componentId = "layout/column",
+          modifiers = JsonArray(listOf(modifier("fillMaxSize"))),
+          slots = mapOf("children" to listOf("six", "white", "eight")),
+        ),
+        text("six", "Six", size = 12, color = "#1DB954"),
+        text("white", "White", size = 12, color = "#FFFFFF"),
+        text("eight", "Eight", size = 12, color = "#80123456"),
+      )
+    return UiBuilderDocument(
+      schema = "compose-ui-builder-document/v1-candidate",
+      id = "colour-widths",
+      title = "Colour widths",
+      revision = 0,
+      catalogPin = JsonObject(emptyMap()),
+      environment = JsonObject(emptyMap()),
+      stateVariables = JsonObject(emptyMap()),
+      roots = listOf("wear-widget-large"),
+      nodes = nodes.associateBy(UiBuilderNode::id),
+    )
+  }
+
+  /**
+   * A row's own alignment reaches the generated `RemoteRow`, centre included.
+   *
+   * The canvas has always read `verticalAlignment` off the node and defaults a row to
+   * `CenterVertically`; the emitter read only the children's `alignVertical` modifiers, so a row
+   * generated no alignment and the widget drew top-aligned while the canvas drew it centred —
+   * silently, with no diagnostic (yschimke/compose-preview-server#518).
+   *
+   * The centre is written explicitly because `RemoteRow`'s own default is `Top`: emitting nothing
+   * is what kept the two lanes disagreeing.
+   */
+  @Test
+  fun `a row carries the alignment the canvas gives it`() {
+    val source = generate(rowAlignmentDocument())
+
+    assertTrue("verticalAlignment = RemoteAlignment.CenterVertically" in source, source)
+  }
+
+  /** A row that asks for `top` matches RemoteRow's own default, so it writes nothing. */
+  @Test
+  fun `a top-aligned row writes no alignment argument`() {
+    val source = generate(rowAlignmentDocument(alignment = "top"))
+
+    assertFalse("verticalAlignment" in source, source)
+  }
+
+  /** A row on the Large container, with only the node's own alignment to go on. */
+  private fun rowAlignmentDocument(alignment: String? = null): UiBuilderDocument {
+    val nodes =
+      listOf(
+        UiBuilderNode(
+          id = "wear-widget-large",
+          componentId = WearWidgetScaffoldSize.Large.componentId,
+          slots = mapOf("content" to listOf("bar")),
+        ),
+        UiBuilderNode(
+          id = "bar",
+          componentId = "layout/row",
+          properties =
+            JsonObject(
+              buildMap { alignment?.let { put("verticalAlignment", literal("enum", it)) } }
+            ),
+          modifiers = JsonArray(listOf(modifier("fillMaxSize"))),
+          slots = mapOf("children" to listOf("label")),
+        ),
+        text("label", "Nightcall", size = 14),
+      )
+    return UiBuilderDocument(
+      schema = "compose-ui-builder-document/v1-candidate",
+      id = "row-alignment",
+      title = "Row alignment",
+      revision = 0,
+      catalogPin = JsonObject(emptyMap()),
+      environment = JsonObject(emptyMap()),
+      stateVariables = JsonObject(emptyMap()),
+      roots = listOf("wear-widget-large"),
+      nodes = nodes.associateBy(UiBuilderNode::id),
+    )
   }
 
   private fun activitySummaryDocument(): UiBuilderDocument {

@@ -116,7 +116,7 @@ class ServeUiBuilderCommentStore(
     val kind =
       request.authorKind.takeIf { it in StoredComment.KNOWN_AUTHOR_KINDS }
         ?: StoredComment.AUTHOR_KIND_HUMAN
-    return mutate(designId) { board ->
+    return mutate(designId) { board, sequence ->
       val timestamp = now()
       val comment =
         StoredComment(
@@ -142,6 +142,10 @@ class ServeUiBuilderCommentStore(
                   anchor = request.anchor?.sanitized(),
                   createdAtEpochMillis = timestamp,
                   updatedAtEpochMillis = timestamp,
+                  updatedAtSequence = sequence,
+                  // Saying something is reading it: an author is never told to catch up with
+                  // their own sentence.
+                  acknowledgedBy = mapOf(authorId to sequence),
                   comments = listOf(comment),
                 )
           )
@@ -157,10 +161,13 @@ class ServeUiBuilderCommentStore(
         }
         CommentMutation.Applied(
           board.replacing(
-            existing.copy(
-              comments = existing.comments + comment,
-              updatedAtEpochMillis = timestamp,
-            )
+            existing
+              .copy(
+                comments = existing.comments + comment,
+                updatedAtEpochMillis = timestamp,
+                updatedAtSequence = sequence,
+              )
+              .caughtUpBy(authorId)
           )
         )
       }
@@ -181,26 +188,129 @@ class ServeUiBuilderCommentStore(
     threadId: String,
     resolved: Boolean,
   ): CommentWriteResult =
-    mutate(designId) { board ->
+    mutate(designId) { board, sequence ->
       val existing =
         board.threads.firstOrNull { it.id == threadId }
           ?: return@mutate CommentMutation.Refused("no such comment thread")
       val timestamp = now()
       CommentMutation.Applied(
         board.replacing(
-          existing.copy(
-            resolved = resolved,
-            resolvedBy = if (resolved) actorId else null,
-            resolvedAtEpochMillis = if (resolved) timestamp else null,
-            updatedAtEpochMillis = timestamp,
-          )
+          existing
+            .copy(
+              resolved = resolved,
+              resolvedBy = if (resolved) actorId else null,
+              resolvedAtEpochMillis = if (resolved) timestamp else null,
+              updatedAtEpochMillis = timestamp,
+              // Closing or reopening a thread is a thing said about it, so everybody else has
+              // something to catch up with; the actor who said it does not.
+              updatedAtSequence = sequence,
+            )
+            .caughtUpBy(actorId)
         )
       )
     }
 
+  /**
+   * Say "I have read this", which is not the same act as saying it is settled.
+   *
+   * [threadId] null acknowledges every thread on the board, which is what an agent that has just
+   * read the whole discussion means, and what stops a catch-up costing one call per thread.
+   *
+   * Acknowledgement is **per actor**: a thread the agent has read is still waiting for the second
+   * designer, and the board says so for each of them separately. It never claims anything about the
+   * question underneath — that is [resolve], and conflating the two is what makes an agent choose
+   * between staying invisible and resolving a bug it has not fixed yet.
+   *
+   * The write bumps the board sequence like any other, so a page that is open learns the agent has
+   * seen the comment at the moment it does. It deliberately does not move any thread's
+   * [StoredCommentThread.updatedAtSequence]: one actor catching up is not news the others have to
+   * catch up with.
+   */
+  fun acknowledge(designId: String, actorId: String, threadId: String?): CommentWriteResult =
+    mutate(designId) { board, _ ->
+      if (threadId != null && board.threads.none { it.id == threadId }) {
+        return@mutate CommentMutation.Refused("no such comment thread")
+      }
+      val threads =
+        board.threads.map { thread ->
+          if (threadId != null && thread.id != threadId) thread else thread.caughtUpBy(actorId)
+        }
+      if (threads == board.threads) CommentMutation.Unchanged
+      else CommentMutation.Applied(board.copy(threads = threads))
+    }
+
+  /**
+   * React to one comment, or take the reaction back.
+   *
+   * The lightest thing an actor can say, and the point of it: 👀 on a comment an agent has picked
+   * up and 👍 on a fix are answers, and writing them as replies would put two sentences nobody
+   * needs into a thread somebody has to read.
+   *
+   * A reaction **acknowledges the thread** for whoever left it. That is the decision the two
+   * features force — a reaction is engagement with the comment, and telling an agent to catch up
+   * with a thread it has just reacted to would be nagging it about its own answer. What a reaction
+   * is not is a resolution: the thread stays open, and it stays unacknowledged for everybody else.
+   */
+  fun react(
+    designId: String,
+    actorId: String,
+    commentId: String,
+    reaction: String,
+    on: Boolean,
+  ): CommentWriteResult {
+    val emoji = reaction.trim()
+    if (emoji.isEmpty()) return CommentWriteResult.Refused("a reaction needs a character in it")
+    if (emoji.length > MAX_COMMENT_REACTION) {
+      return CommentWriteResult.Refused(
+        "a reaction must be under $MAX_COMMENT_REACTION characters; it is an emoji, not a reply"
+      )
+    }
+    if (emoji.any { it.isWhitespace() }) {
+      return CommentWriteResult.Refused("a reaction is one mark, with no whitespace in it")
+    }
+    return mutate(designId) { board, _ ->
+      val thread =
+        board.threads.firstOrNull { candidate -> candidate.comments.any { it.id == commentId } }
+          ?: return@mutate CommentMutation.Refused("no such comment")
+      val comment = thread.comments.first { it.id == commentId }
+      val actors = comment.reactions[emoji].orEmpty()
+      if (on && actors.size >= MAXIMUM_ACTORS_PER_REACTION) {
+        return@mutate CommentMutation.Refused(
+          "at most $MAXIMUM_ACTORS_PER_REACTION actors may leave the same reaction"
+        )
+      }
+      if (on && emoji !in comment.reactions && comment.reactions.size >= MAXIMUM_REACTIONS) {
+        return@mutate CommentMutation.Refused(
+          "a comment may carry at most $MAXIMUM_REACTIONS different reactions"
+        )
+      }
+      if (!on && actorId !in actors) return@mutate CommentMutation.Unchanged
+      val next = if (on) (actors - actorId) + actorId else actors - actorId
+      val reacted =
+        thread
+          .copy(
+            comments =
+              thread.comments.map { candidate ->
+                if (candidate.id != commentId) candidate
+                else {
+                  val reactions =
+                    if (next.isEmpty()) candidate.reactions - emoji
+                    else candidate.reactions + (emoji to next)
+                  candidate.copy(reactions = reactions)
+                }
+              }
+          )
+          // A reaction is not something said, so the thread's own cursor does not move and nobody
+          // else is told to catch up; the actor who reacted has, by reacting.
+          .caughtUpBy(actorId)
+      if (reacted == thread) CommentMutation.Unchanged
+      else CommentMutation.Applied(board.replacing(reacted))
+    }
+  }
+
   /** Remove a thread and everything said in it. */
   fun deleteThread(designId: String, threadId: String): CommentWriteResult =
-    mutate(designId) { board ->
+    mutate(designId) { board, _ ->
       if (board.threads.none { it.id == threadId }) {
         return@mutate CommentMutation.Refused("no such comment thread")
       }
@@ -261,6 +371,16 @@ class ServeUiBuilderCommentStore(
   private sealed interface CommentMutation {
     data class Applied(val board: StoredCommentBoard) : CommentMutation
 
+    /**
+     * The write was understood, and there was nothing to change.
+     *
+     * Neither a refusal nor a write: an agent acknowledging a discussion it has already
+     * acknowledged asked a reasonable question and gets the board back, and the sequence does not
+     * move — every open page waking up because somebody re-read a thread would make the feed's own
+     * cursor meaningless.
+     */
+    data object Unchanged : CommentMutation
+
     data class Refused(val reason: String) : CommentMutation
   }
 
@@ -273,7 +393,7 @@ class ServeUiBuilderCommentStore(
    */
   private fun mutate(
     designId: String,
-    change: (StoredCommentBoard) -> CommentMutation,
+    change: (StoredCommentBoard, Long) -> CommentMutation,
   ): CommentWriteResult {
     val stored =
       synchronized(lockFor(designId)) {
@@ -285,8 +405,12 @@ class ServeUiBuilderCommentStore(
           )
         }
         val board = current ?: StoredCommentBoard(designId = designId)
-        when (val outcome = change(board)) {
+        // The sequence this write will land at, handed to the change rather than stamped after it:
+        // a thread records the sequence it was last spoken at and an acknowledgement records the
+        // sequence it was made at, and neither can be written by a caller that does not know it.
+        when (val outcome = change(board, board.sequence + 1)) {
           is CommentMutation.Refused -> return CommentWriteResult.Refused(outcome.reason)
+          is CommentMutation.Unchanged -> return CommentWriteResult.Stored(board)
           is CommentMutation.Applied -> {
             val next =
               outcome.board.copy(
@@ -373,6 +497,16 @@ class ServeUiBuilderCommentStore(
     /** The whole board is one response and one file; a megabyte of text is already generous. */
     const val MAX_BOARD_BYTES: Int = 1024 * 1024
 
+    /**
+     * Ceilings on one comment's reactions.
+     *
+     * A reaction row is a handful of chips; past that it is a way to grow the board a byte at a
+     * time under a write that looks free, which is the shape every other limit here answers.
+     */
+    const val MAXIMUM_REACTIONS: Int = 20
+
+    const val MAXIMUM_ACTORS_PER_REACTION: Int = 200
+
     private const val LOCKS = 64
 
     private val COMMENT_JSON = Json {
@@ -388,8 +522,41 @@ class ServeUiBuilderCommentStore(
   }
 }
 
+/**
+ * This thread with [actorId] caught up to what has been said in it.
+ *
+ * The acknowledgement is pinned to [StoredCommentThread.updatedAtSequence] rather than to the
+ * sequence of the write making it, so acknowledging the same thread twice is the same board and
+ * costs nobody a wake-up. Callers that also *say* something set that field first, so their own
+ * sentence is acknowledged along with it.
+ */
+private fun StoredCommentThread.caughtUpBy(actorId: String): StoredCommentThread =
+  copy(acknowledgedBy = acknowledgedBy.acknowledging(actorId, updatedAtSequence))
+
 private fun StoredCommentBoard.replacing(thread: StoredCommentThread) =
   copy(threads = threads.map { if (it.id == thread.id) thread else it })
+
+/**
+ * This actor's acknowledgement moved forward to [sequence], and never backwards.
+ *
+ * Bounded, because the map is one entry per actor who has ever read the thread and a board is one
+ * file: past the cap the oldest acknowledgements are dropped, which costs those actors one
+ * resurfaced thread rather than costing everybody the board.
+ */
+private fun Map<String, Long>.acknowledging(actorId: String, sequence: Long): Map<String, Long> {
+  val moved = this + (actorId to maxOf(this[actorId] ?: 0L, sequence))
+  if (moved.size <= MAXIMUM_ACKNOWLEDGERS) return moved
+  val kept =
+    moved.entries
+      .filterNot { it.key == actorId }
+      .sortedByDescending { it.value }
+      .take(MAXIMUM_ACKNOWLEDGERS - 1)
+      .associate { it.key to it.value }
+  return kept + (actorId to moved.getValue(actorId))
+}
+
+/** How many actors' acknowledgements one thread remembers. */
+private const val MAXIMUM_ACKNOWLEDGERS = 200
 
 sealed interface CommentWriteResult {
   data class Stored(val board: StoredCommentBoard) : CommentWriteResult

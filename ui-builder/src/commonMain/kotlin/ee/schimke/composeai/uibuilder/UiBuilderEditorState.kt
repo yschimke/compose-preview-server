@@ -8,6 +8,7 @@ import ee.schimke.composeai.uibuilder.capability.PropertyEditorControl
 import ee.schimke.composeai.uibuilder.capability.SlotCapability
 import ee.schimke.composeai.uibuilder.capability.accepts
 import ee.schimke.composeai.uibuilder.client.toProtocolDocument
+import ee.schimke.composeai.uibuilder.export.PropertyValueKinds
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import kotlin.math.abs
 import kotlin.math.floor
@@ -125,6 +126,19 @@ data class EditorCatalogItem(
   val variants: List<EditorCatalogVariant> = emptyList(),
   /** The pack this component came from, or null for one of the catalog's own. */
   val pack: String? = null,
+  /**
+   * Whether the Compose export can write this component, or null where the panel cannot say.
+   *
+   * Read off the same component record the code pane and the problems panel judge a design by — see
+   * [UiBuilderEditorReducer.composeExportCoverage] — so the palette and the export cannot disagree
+   * about which third of the catalog is writable. Before this the only way to learn that
+   * `asset/image` renders and does not export was to place one and read the refusal, one component
+   * at a time (compose-preview-server#477).
+   *
+   * False is not "do not insert": the canvas draws every one of these, and the PNG and SVG exports
+   * carry them. It is a warning drawn on the row, not a gate on the Add.
+   */
+  val exportsToCompose: Boolean? = null,
 )
 
 /**
@@ -145,6 +159,8 @@ data class EditorCatalogVariant(
   val label: String,
   /** Whether this is what the component inserts as when nobody picks a variant. */
   val default: Boolean,
+  /** The component's own [EditorCatalogItem.exportsToCompose], so a variant row dims with it. */
+  val exportsToCompose: Boolean? = null,
 )
 
 /**
@@ -261,6 +277,19 @@ data class ScreenEnvironmentSettings(
   val locale: String,
   val theme: EditorScreenTheme,
   val layoutDirection: EditorLayoutDirection,
+  /**
+   * Device ids this design is also exported as, beside the one frame the fields above describe.
+   *
+   * A design is authored at one size and lives at several, and until this existed the answer to
+   * "which devices does this screen claim to work on?" was whatever each exporter guessed from the
+   * catalog it happened to be generating for. The frame stays a single choice — it is the canvas
+   * somebody approved — and this is the set beside it.
+   *
+   * Ids rather than geometry, matching `DesignEnvironmentV1.exportDevices`: an id is what a
+   * `@Preview(device = …)` resolves, so a design cannot name a frame no renderer produces. Empty
+   * means it exports at its own frame alone, which is what every design written before this said.
+   */
+  val exportDevices: List<String> = emptyList(),
 )
 
 fun UiBuilderDocument.screenEnvironmentSettings(): ScreenEnvironmentSettings =
@@ -278,6 +307,10 @@ fun UiBuilderDocument.screenEnvironmentSettings(): ScreenEnvironmentSettings =
       EditorLayoutDirection.entries.firstOrNull {
         it.wireValue == environment["layoutDirection"]?.primitiveOrNull()?.content
       } ?: EditorLayoutDirection.Ltr,
+    exportDevices =
+      (environment["exportDevices"] as? JsonArray)
+        ?.mapNotNull { it.primitiveOrNull()?.content }
+        .orEmpty(),
   )
 
 /**
@@ -481,7 +514,65 @@ enum class EditorInspectorMode {
    * The discussion about this design. See [DesignCommentBoard] for why it is not in the document.
    */
   Comments,
+  /** What has been done to this design, and which of it undo would take back. */
+  History,
 }
+
+/**
+ * Where one accepted change stands in the history right now.
+ *
+ * Undo and redo each act on one particular change, and until the history was drawn nothing said
+ * which. [NextUndo] and [NextRedo] are those two, and they are the reason this exists: the toolbar
+ * has a button that takes something back without saying what.
+ */
+enum class EditorOperationStanding {
+  /** In the document, with newer changes of yours above it. */
+  Applied,
+  /** In the document, and the next undo is this one. */
+  NextUndo,
+  /** Taken back, and the next redo puts this one back. */
+  NextRedo,
+  /** Taken back by an undo that has since been redone past. */
+  Undone,
+}
+
+/**
+ * One value an operation moved, as the two ends of the move.
+ *
+ * [before] and [after] are null for the absences at either end — a property that did not exist
+ * before, and one the change removed — so "added" and "cleared" are readable off the pair rather
+ * than needing a kind of their own.
+ */
+data class EditorOperationChange(
+  val label: String,
+  val before: String?,
+  val after: String?,
+)
+
+/**
+ * One accepted change to the design, said in words, with what it did to each value.
+ *
+ * Built from what the collaboration state already keeps: every accepted command carries its own
+ * operations and the before/after of every property, modifier chain, environment field and
+ * structural move it made. Nothing new is recorded to draw this — the history was always there,
+ * with nothing looking at it.
+ *
+ * [mine] is the distinction the panel is for. Undo walks *this editor's* commands, so a
+ * collaborator's change sits in the list, is not undoable by you, and is very often the reason the
+ * design does not look like what your own last change left behind.
+ */
+data class EditorOperationEntry(
+  val operationId: String,
+  val revision: Int,
+  /** What happened, in one line: "Set text on Episode title". */
+  val summary: String,
+  /** The node it happened to, for selecting it — null where the change was the screen's. */
+  val nodeId: String?,
+  val actorId: String,
+  val mine: Boolean,
+  val standing: EditorOperationStanding,
+  val changes: List<EditorOperationChange>,
+)
 
 /**
  * One thing standing between the current document and an export.
@@ -1001,6 +1092,27 @@ class UiBuilderEditorReducer(
    * [exportRecord]: the code pane and the problems panel. See [packComponentsById].
    */
   private val packComponents by lazy { catalog.packComponentsById() }
+
+  /**
+   * The catalog ids the Compose export can write a call site for, or null when this panel cannot
+   * say.
+   *
+   * The record, not a second table: a component is covered when [exportRecord] holds a component
+   * answering to its id with a printable call, which is the same question `ScreenGenerator` asks
+   * before it writes one. A pack's components count, because [exportRecord] carries their projected
+   * records exactly as the export does.
+   *
+   * Null — no marker on any row — for a catalog the embedded record was not authored for. `wear-m3`
+   * and `remote-m3` screens generate through their own emitters (`RecordFreeExport`) and are judged
+   * by neither this record nor its absence, so greying every row of a Wear palette against
+   * `m3-catalog`'s record would be the palette lying in the other direction.
+   */
+  private val composeExportCoverage: Set<String>? by lazy {
+    val record = exportRecord ?: return@lazy null
+    if (record.module != catalog.benchmark.catalogSystemId) return@lazy null
+    record.components.filter { it.code?.call != null }.flatMapTo(mutableSetOf()) { it.componentIds }
+  }
+
   private val validator = CapabilityPropertyWriteValidator(capabilityValidator)
   private val documentValidator = CapabilityDocumentWriteValidator(capabilityValidator)
 
@@ -1230,6 +1342,95 @@ class UiBuilderEditorReducer(
   fun canUndo(state: UiBuilderEditorState): Boolean = state.undoTargetOperationId(actorId) != null
 
   fun canRedo(state: UiBuilderEditorState): Boolean = state.redoTargetUndoId(actorId) != null
+
+  /**
+   * What has been done to this design, newest first, and which of it undo would take back.
+   *
+   * Read out of the collaboration state rather than recorded alongside it: an accepted command
+   * already carries its operations and the before/after of everything it moved, and a second
+   * account of the same history is a second account that can disagree with the first.
+   *
+   * Everybody's changes, not only this editor's. Undo walks your own commands, so the entry it
+   * would take back is often not the newest one in the list, and the ones above it are the answer
+   * to "why did undo not put back what I was looking at".
+   */
+  fun operationHistory(state: UiBuilderEditorState): List<EditorOperationEntry> {
+    val collaboration = state.collaboration
+    val undoTarget = state.undoTargetOperationId(actorId)
+    val redoTarget =
+      state.redoTargetUndoId(actorId)?.let {
+        collaboration.undoRecords[it]?.target?.command?.operationId
+      }
+    return collaboration.acceptedCommands.values
+      .sortedByDescending(AcceptedCommand::committedRevision)
+      .map { accepted ->
+        val undone = accepted.command.operationId in collaboration.compensatedOperationIds
+        EditorOperationEntry(
+          operationId = accepted.command.operationId,
+          revision = accepted.committedRevision,
+          summary = summarise(state, accepted),
+          nodeId = accepted.subjectNodeId(),
+          actorId = accepted.command.actorId,
+          mine = accepted.command.actorId == actorId,
+          standing =
+            when {
+              undone && accepted.command.operationId == redoTarget ->
+                EditorOperationStanding.NextRedo
+              undone -> EditorOperationStanding.Undone
+              accepted.command.operationId == undoTarget -> EditorOperationStanding.NextUndo
+              else -> EditorOperationStanding.Applied
+            },
+          changes = accepted.describeChanges(),
+        )
+      }
+  }
+
+  /**
+   * The command in one line, from its operations rather than from what it moved.
+   *
+   * The operations are the intent — "set this property", "put this component there" — and the
+   * changes below are what that came to. A batch that did one kind of thing is named after it; one
+   * that did several is counted, because a sentence listing five verbs is not a summary.
+   */
+  private fun summarise(state: UiBuilderEditorState, accepted: AcceptedCommand): String {
+    val operations = accepted.command.operations
+    if (operations.isEmpty()) return "No change"
+    fun label(nodeId: String) = nodeLabel(state, nodeId)
+    val summaries = operations.map { operation ->
+      when (operation) {
+        is DesignOperation.InsertNode ->
+          "Added ${componentLabel(operation.node.componentId)}" +
+            (operation.parent?.let { " to ${label(it.nodeId)}" } ?: "")
+        is DesignOperation.MoveNode -> "Moved ${label(operation.nodeId)}"
+        is DesignOperation.DeleteNode -> "Deleted ${label(operation.nodeId)}"
+        is DesignOperation.RestoreNode -> "Restored ${label(operation.nodeId)}"
+        is DesignOperation.SetProperty -> "Set ${operation.property} on ${label(operation.nodeId)}"
+        is DesignOperation.RemoveNodeProperty ->
+          "Cleared ${operation.property} on ${label(operation.nodeId)}"
+        is DesignOperation.SetEnvironment -> "Set ${operation.field} on the screen"
+        is DesignOperation.SetModifiers -> "Changed the layout of ${label(operation.nodeId)}"
+      }
+    }
+    return summaries.distinct().singleOrNull() ?: "${operations.size} changes"
+  }
+
+  /**
+   * What a person calls this node — the layers panel's own name for it, or the bare id.
+   *
+   * The name it has *now*, deliberately, which for a text node whose text is what changed is the
+   * new one: "Set text on Nightcall". The row is a way back to a node on the canvas, so it has to
+   * agree with what the canvas and the layers panel call that node today, and the before/after line
+   * under the summary is where the old value is already said. A node deleted by the change it is
+   * describing has no name left to read and falls back to its id.
+   */
+  private fun nodeLabel(state: UiBuilderEditorState, nodeId: String): String {
+    val node = state.document.nodes[nodeId] ?: return nodeId
+    val capability = catalog.componentsById[node.componentId] ?: return nodeId
+    return node.contentLabel(capability) ?: capability.displayName
+  }
+
+  private fun componentLabel(componentId: String): String =
+    catalog.componentsById[componentId]?.displayName ?: componentId
 
   /**
    * Whether the whole selection can be duplicated.
@@ -1577,12 +1778,14 @@ class UiBuilderEditorReducer(
 
   private fun ComponentCapability.editorCatalogItem(): EditorCatalogItem {
     val kind = editorKind()
+    val exportsToCompose = composeExportCoverage?.let { componentId in it }
     return EditorCatalogItem(
       componentId = componentId,
       displayName = displayName,
       kind = kind,
       group = catalog.componentMenu.groupOf(componentId) ?: kind.label,
       pack = catalog.componentPacks.packOf(componentId)?.id,
+      exportsToCompose = exportsToCompose,
       variants =
         menuVariantValues(catalog.componentMenu).mapIndexed { index, value ->
           EditorCatalogVariant(
@@ -1593,6 +1796,7 @@ class UiBuilderEditorReducer(
             // The catalog's first allowed value is what `defaultEncodedValue` writes on a plain
             // insert, so it is the default here by the same rule rather than by a second opinion.
             default = index == 0,
+            exportsToCompose = exportsToCompose,
           )
         },
     )
@@ -2095,7 +2299,19 @@ class UiBuilderEditorReducer(
         // Appended rather than replacing: the capability diagnostics still answer questions the
         // generator does not ask — catalog pin drift, a modifier the catalog disallows on a
         // component — and dropping them to unify the source would narrow the panel's promise.
-        exportRefusals(document))
+        exportRefusals(document) +
+        // Not a refusal — the export runs — but the one property a whole design is judged by that
+        // commits and changes nothing visible (#485). The same notice the served export attaches.
+        listOfNotNull(
+          RootSurfaceGround.diagnose(document)?.let { notice ->
+            EditorProblem(
+              code = RootSurfaceGround.CODE,
+              message = notice.message,
+              nodeId = notice.nodeId,
+              componentId = "m3/surface",
+            )
+          }
+        ))
       .distinctBy { it.code to it.message }
 
   /**
@@ -2109,7 +2325,54 @@ class UiBuilderEditorReducer(
    * fail its decode, and a pane that propagated that would take the editor down over exactly the
    * document whose code someone is trying to read.
    */
-  fun generatedCode(document: UiBuilderDocument): EditorGeneratedCode = runCatching {
+  fun generatedCode(document: UiBuilderDocument): EditorGeneratedCode =
+    screenCode(document).withRemoteContent(document)
+
+  /**
+   * The `@RemoteComposable` bodies of the design's inline remote content, joined to [screenCode].
+   *
+   * Two generators write one design, and a pane that showed only the first would show a refusal for
+   * every design holding remote content — the screen generators have no call site for it, which is
+   * the whole reason [InlineRemoteContentExporter] exists. So the bodies are appended when the
+   * screen generates, and *replace* the refusal when it does not: a designer who has drawn remote
+   * content and is told only "this design cannot be exported" has been given the least useful true
+   * thing that could be said. The screen's reasons are kept as a header comment above the bodies,
+   * so nothing is dropped.
+   */
+  private fun EditorGeneratedCode.withRemoteContent(
+    document: UiBuilderDocument
+  ): EditorGeneratedCode {
+    val hosts =
+      document.nodes.values
+        .filter { it.componentId == REMOTE_COMPOSE_INLINE_COMPONENT_ID }
+        .map { it.id }
+        .sorted()
+    if (hosts.isEmpty()) return this
+    val bodies = hosts.map { InlineRemoteContentExporter.export(document, it) }
+    val emitted = bodies.filterIsInstance<InlineRemoteContentExporter.Result.Emitted>()
+    val refusedBodies =
+      bodies.filterIsInstance<InlineRemoteContentExporter.Result.Refused>().flatMap { it.reasons }
+    if (emitted.isEmpty()) {
+      return EditorGeneratedCode.Refused(
+        (this as? EditorGeneratedCode.Refused)?.reasons.orEmpty() + refusedBodies
+      )
+    }
+    val header =
+      when (this) {
+        is EditorGeneratedCode.Source -> listOf(kotlin)
+        is EditorGeneratedCode.Refused ->
+          listOf(
+            (reasons + refusedBodies).joinToString("\n") {
+              "// The screen around this content is not generated: ${it.replace("\n", " ")}"
+            }
+          )
+      }
+    return EditorGeneratedCode.Source(
+      (header + emitted.map { it.source }).joinToString("\n\n").trimEnd() + "\n"
+    )
+  }
+
+  private fun screenCode(document: UiBuilderDocument): EditorGeneratedCode = runCatching {
     // A Wear widget ships as a `WearWidgetDocument` of Remote Compose and a Wear screen's
     // `ScreenScaffold` takes a scroll state no record can recover, so neither has a component
     // record and the Compose gate below can only ever refuse them. Asked first rather than as a
@@ -2581,8 +2844,15 @@ class UiBuilderEditorReducer(
       val existingType =
         property.canonicalWrapper(existingValue?.get("type")?.primitiveOrNull()?.contentOrNull)
       val encoded =
-        if (edgeName == null) literal(existingType ?: field.defaultEncodedType(), value)
-        else
+        if (edgeName == null) {
+          // A colour's wrapper follows the value rather than the node's existing spelling: a theme
+          // role is a `colorToken` and a literal is a `color`, which is what the export reads, and
+          // an existing `string` is exactly the spelling this edit exists to leave behind.
+          val type =
+            if (field.control == EditorPropertyControl.Color) colourWrapper(value)
+            else existingType ?: field.defaultEncodedType()
+          literal(type, value)
+        } else
           objectValueWithEdge(
             kind = property.editor?.objectKind ?: existingType.orEmpty(),
             existing = existingValue,
@@ -2744,7 +3014,7 @@ class UiBuilderEditorReducer(
             pointY <= bounds.bottom
         }
         .filter { slot -> acceptsComponent(state.document, slot, component) }
-        .minByOrNull { slot -> slot.bounds!!.width * slot.bounds!!.height }
+        .minByOrNull { slot -> slot.bounds!!.width * slot.bounds.height }
     return hit?.let { ParentSlot(it.parentNodeId, it.slotName) }
       ?: findDestination(state.document, state.selectedNodeId, component)
   }
@@ -2820,7 +3090,7 @@ class UiBuilderEditorReducer(
       )
     }
     val values =
-      linkedMapOf(
+      linkedMapOf<String, JsonElement>(
         "widthDp" to JsonPrimitive(settings.widthDp),
         "heightDp" to JsonPrimitive(settings.heightDp),
         "density" to JsonPrimitive(settings.density),
@@ -2829,6 +3099,14 @@ class UiBuilderEditorReducer(
         "theme" to JsonPrimitive(settings.theme.wireValue),
         "layoutDirection" to JsonPrimitive(settings.layoutDirection.wireValue),
       )
+    // Not in the map above, because the map's "has this field moved?" test is a raw JSON compare
+    // and an absent key is not the same JSON as an empty array — though it is the same *answer*.
+    // Every design written before this field says nothing, so folding it in blindly would have
+    // added an empty `exportDevices` write to every unrelated environment edit, turning a
+    // single-field density change into a two-field one and costing the undo step its meaning.
+    if (settings.exportDevices != state.document.screenEnvironmentSettings().exportDevices) {
+      values["exportDevices"] = JsonArray(settings.exportDevices.map(::JsonPrimitive))
+    }
     val operations = values.mapNotNull { (field, value) ->
       DesignOperation.SetEnvironment(field, value).takeIf {
         state.document.environment[field] != value
@@ -4096,7 +4374,7 @@ private fun defaultChildFor(
  * Free-text means a lone `string` with no `allowedValues` — an enum is a setting, and a colour is
  * not something anyone recognises a layer by.
  */
-private val IDENTITY_PROPERTY_SUFFIXES = listOf("Key", "Id", "Base64")
+private val IDENTITY_PROPERTY_SUFFIXES = listOf("Key", "Id", "Base64", "Url")
 
 private fun UiBuilderNode.contentLabel(capability: ComponentCapability): String? {
   fun freeText(property: PropertyCapability) =
@@ -4105,10 +4383,14 @@ private fun UiBuilderNode.contentLabel(capability: ComponentCapability): String?
       !property.name.endsWith("Color", ignoreCase = true) &&
       // `required` is necessary and not sufficient, which the first cut of this got wrong twice.
       // A component can require a string it needs in order to work rather than one a person would
-      // recognise it by, and in this catalog five of the six do: `asset/image` requires `assetKey`,
-      // the three lazy containers require `scrollStateKey`, and `remote-compose/document` requires
-      // `documentBase64` — so the layers panel offered an asset key, a scroll key, and a base64
-      // blob as layer names. Only `m3/text.text` was content.
+      // recognise it by, and in this catalog most do: `asset/image` requires `assetKey` and the
+      // three lazy containers require `scrollStateKey` — so the layers panel offered an asset key
+      // and a scroll key as layer names. Only `m3/text.text` was content.
+      //
+      // `remote-compose/document` used to require `documentBase64` and be the worst of them, a
+      // base64 blob as a layer name. It now requires neither of its two sources — a node carries
+      // bytes or a URL — so it no longer reaches this at all; both suffixes stay listed because
+      // the rule is about the kind of string, not about which component happens to require one.
       //
       // The name carries the kind, the same way it does for a `…Dp` dimension: a key, an id or a
       // payload is plumbing whatever its type. Excluding them by suffix leaves `text` and any
@@ -4352,7 +4634,9 @@ private fun JsonElement.asLiteral(property: PropertyCapability): JsonObject {
     when {
       primitive.booleanOrNull != null -> "bool"
       primitive.doubleOrNull != null -> "float"
-      property.name.endsWith("Color") -> "color"
+      PropertyValueKinds.isColour(property.name) ->
+        if (primitive.content.isEmpty() || primitive.content.startsWith("#")) "color"
+        else "colorToken"
       // Read off the declaration rather than from a list of three property names, which is how
       // `textAlign` and `horizontalAlignment` came to be written as `string` in the first place.
       property.allowedValues.isNotEmpty() -> "enum"
@@ -4462,7 +4746,9 @@ private fun EditorPropertyField.parseDraft(draft: String): PropertyDraft {
     }
     EditorPropertyControl.Color -> {
       val color = draft.trim()
-      if (color.matches(Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")) || color in choices)
+      // Empty is the component's own default, which `startAccentColor` documents as "draws none";
+      // clearing the field is how an author asks for it.
+      if (color.isEmpty() || PropertyValueKinds.isDrawableColour(color) || color in choices)
         PropertyDraft.Valid(JsonPrimitive(color))
       else
         PropertyDraft.Invalid("$label must be #RRGGBB, #AARRGGBB, or a listed Material color token")
@@ -4470,6 +4756,15 @@ private fun EditorPropertyField.parseDraft(draft: String): PropertyDraft {
     EditorPropertyControl.Unsupported ->
       PropertyDraft.Invalid("$label cannot be safely edited from its catalog metadata")
   }
+}
+
+/**
+ * `color` for a literal (or nothing), `colorToken` for a theme role — the wrappers the export
+ * reads.
+ */
+private fun colourWrapper(value: JsonElement): String {
+  val content = (value as? JsonPrimitive)?.contentOrNull.orEmpty()
+  return if (content.isEmpty() || content.startsWith("#")) "color" else "colorToken"
 }
 
 private fun EditorPropertyField.defaultEncodedType(): String =
@@ -4648,7 +4943,8 @@ private enum class EditorLayoutScope {
 private val EDITOR_LAYOUT_SCOPES: Map<String, EditorLayoutScope> =
   mapOf(
     "layout/box" to EditorLayoutScope.Box,
-    // A card's content slot is a `Box` in the renderer, so its children align like a box's.
+    // A card's content slot is a `Box` — in the renderer, in the capability exporter and in the
+    // record-driven projection alike — so its children align like a box's.
     "m3/card" to EditorLayoutScope.Box,
     "layout/column" to EditorLayoutScope.Column,
     "layout/row" to EditorLayoutScope.Row,
@@ -4738,3 +5034,104 @@ private fun UiBuilderNode.modifierTypes(): Set<String> =
 
 private fun JsonObject.optionalStringValue(key: String): String? =
   (this[key] as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull
+
+/**
+ * The node an operation is about, for selecting it from the history.
+ *
+ * The first one it names, which is the only honest answer for a batch that touched several: a list
+ * row selects one node, and the summary beside it already says how many things moved. Null for a
+ * command that only wrote the environment, which belongs to no node.
+ */
+private fun AcceptedCommand.subjectNodeId(): String? =
+  command.operations.firstNotNullOfOrNull { operation ->
+    when (operation) {
+      is DesignOperation.InsertNode -> operation.node.id
+      is DesignOperation.MoveNode -> operation.nodeId
+      is DesignOperation.DeleteNode -> operation.nodeId
+      is DesignOperation.RestoreNode -> operation.nodeId
+      is DesignOperation.SetProperty -> operation.nodeId
+      is DesignOperation.RemoveNodeProperty -> operation.nodeId
+      is DesignOperation.SetModifiers -> operation.nodeId
+      is DesignOperation.SetEnvironment -> null
+    }
+  }
+
+/**
+ * Everything this command moved, as before/after pairs.
+ *
+ * Structure last, and named by what it did rather than by a position: "added", "moved", "deleted"
+ * is what somebody reading a history wants, and a stable position key is not something to show
+ * anyone. The values either side come from the change records, which is the only place the *old*
+ * value survives at all — the document holds the new one.
+ */
+private fun AcceptedCommand.describeChanges(): List<EditorOperationChange> =
+  propertyChanges.map {
+    EditorOperationChange(
+      label = it.address.property,
+      before = it.before?.displayValue(),
+      after = it.afterValue?.displayValue(),
+    )
+  } +
+    modifierChanges.map {
+      EditorOperationChange(
+        label = "layout",
+        before = it.before.modifierSummary(),
+        after = it.after.modifierSummary(),
+      )
+    } +
+    environmentChanges.map {
+      EditorOperationChange(
+        label = it.field,
+        before = it.before?.displayValue(),
+        after = it.after.displayValue(),
+      )
+    } +
+    structuralChanges.map {
+      EditorOperationChange(
+        label =
+          when (it.kind) {
+            StructuralChangeKind.INSERT -> "added"
+            StructuralChangeKind.MOVE -> "moved"
+            StructuralChangeKind.DELETE -> "deleted"
+            StructuralChangeKind.RESTORE -> "restored"
+          },
+        before = it.beforePosition?.parent?.readable(),
+        after = it.afterPosition?.parent?.readable(),
+      )
+    }
+
+private fun ParentSlot.readable(): String = "$nodeId.$slot"
+
+/**
+ * A typed property value as the value alone.
+ *
+ * Properties are `{"type": …, "value": …}` and a history that showed the wrapper would be showing
+ * the storage rather than the change. Anything that is not that shape is printed as it stands,
+ * because guessing is worse than being literal about an unfamiliar value.
+ */
+private fun JsonElement.displayValue(): String {
+  val value = (this as? JsonObject)?.get("value") ?: this
+  return value.primitiveOrNull()?.content ?: value.toString()
+}
+
+/**
+ * A modifier chain as the short line the layout panel would show for it.
+ *
+ * Type plus its own values, because a chain named by type alone cannot distinguish the padding
+ * somebody just changed from the padding they had. Empty is stated rather than left blank: "no
+ * layout modifiers" is a real end of a change and an empty cell reads as missing information.
+ */
+private fun JsonArray.modifierSummary(): String {
+  if (isEmpty()) return "none"
+  return joinToString(", ") { element ->
+    val modifier = element as? JsonObject ?: return@joinToString element.toString()
+    val type = modifier.optionalStringValue("type") ?: return@joinToString modifier.toString()
+    val values =
+      modifier
+        .filterKeys { it != "type" }
+        .values
+        .mapNotNull { it.primitiveOrNull()?.content }
+        .joinToString(" ")
+    if (values.isEmpty()) type else "$type $values"
+  }
+}

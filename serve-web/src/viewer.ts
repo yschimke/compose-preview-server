@@ -34,6 +34,8 @@ import {
 } from "./spec/sources.js";
 import { type ApiDocLink, usableApiDocs } from "./viewer/apiDocs.js";
 import { reportBody } from "./report/body.js";
+import { withStage } from "./annotate/report.js";
+import { isTransparent } from "./backgroundChoice.js";
 import { writeThemeMemory } from "./chrome/themeMemory.js";
 import {
     effectiveUnseeded,
@@ -1318,10 +1320,20 @@ document.querySelectorAll<HTMLElement>(".cp-copyimg").forEach(function (btn) {
         btn.textContent = "Copying…";
         // Copy SVG targets the EMBEDDED variant (data-embed-url) — the field itself holds the
         // web-mode URL for Copy URL, but a copied SVG is usually pasted into Figma / an editor,
-        // which needs the fonts baked in, not an external @import. PNG has one variant.
+        // which needs the fonts baked in, not an external @import.
+        //
+        // PNG has one variant and one CHOICE: the copy follows the stage the visitor is looking
+        // at. On the solid stage (the default) it copies the render composited onto its resolved
+        // ground, because the thing a copied PNG is pasted into — an issue, a doc, a chat — has a
+        // white page and no stage of its own, and a dark-first catalog's sticker lands there as a
+        // blank rectangle otherwise. Flip the header's Transparent toggle and it copies the raw
+        // alpha, which is what a paste into Figma wants. Neither is a hidden default: the page is
+        // already showing which one you will get.
         var src =
             (ext === ".svg" && field.getAttribute("data-embed-url")) ||
-            field.value;
+            (ext === ".png" && !isTransparent()
+                ? withStage(field.value)
+                : field.value);
         // fetch() resolves even on a non-2xx render (503 saturated, 400 bad override, 404 a
         // preview that can't export that lane), so guard on r.ok — otherwise the error body,
         // not the artefact, would land on the clipboard and still report "Copied".
@@ -4163,6 +4175,39 @@ if (liveToggle) {
 // returns to the static snapshot — the same place the Live chip returns to — rather than to
 // whichever interactive lane was up before, because the spec is entered to compare against the
 // *render*, and that is the lane the comparison views (Diff / Triptych / Slider) draw from.
+// The comparison group's OTHER sources, on the resting bar beside the kit's chip.
+//
+// Each one is a way INTO the lane on its own source. The picker inside the lane is still what
+// switches between them once it is up; these are what make a second source discoverable at all,
+// since that picker ships hidden until the kit's chip is pressed.
+//
+// Order matters, and it is the opposite of the obvious one. `pickSpecSource` presses the source and
+// updates `specSrc`, then returns early while the page is not on the spec lane — so pressing FIRST
+// and entering SECOND means `setMode("spec")` opens directly on the requested pair. Entering first
+// would open on the kit and then re-request, which is a visible flash of the wrong panel and a
+// wasted raster.
+var specPeerChips: HTMLButtonElement[] = Array.prototype.slice.call(
+    document.querySelectorAll<HTMLButtonElement>("[data-cp-spec-open-source]"),
+);
+for (var pi = 0; pi < specPeerChips.length; pi++) {
+    (function (chip: HTMLButtonElement) {
+        chip.addEventListener("click", function () {
+            if (!specAvailable()) return;
+            var wanted = chip.getAttribute("data-cp-spec-open-source") || "";
+            var target: HTMLButtonElement | null = null;
+            for (var i = 0; i < specSourceButtons.length; i++) {
+                if (
+                    specSourceButtons[i].getAttribute("data-cp-spec-source") ===
+                    wanted
+                )
+                    target = specSourceButtons[i];
+            }
+            if (!target) return;
+            pickSpecSource(target);
+            if (!specActive()) setMode("spec");
+        });
+    })(specPeerChips[pi]);
+}
 if (specChip) {
     specChip.addEventListener("click", function () {
         if (specActive()) setMode("png");

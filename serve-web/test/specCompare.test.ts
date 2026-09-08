@@ -251,6 +251,70 @@ describe("<cp-spec-compare>", () => {
             }),
         );
 
+    it("reads through the drawn frame, not the panel's box", async () => {
+        // The triptych stretches its columns, so a panel is `object-fit: contain` and a frame
+        // whose ratio does not match its column is letterboxed inside the box. Mapping through
+        // the element's box then slides every reading toward the centre by half the bar.
+        // Here: an 8x8 pair in a 16-wide, 8-tall box, so the frame draws 8x8 centred, with 4px
+        // bars either side of it. Client x 5.5 is the frame's own x 1; mapping through the box
+        // instead reads 5.5 x 8/16 = 2.75, i.e. x 2 — a whole pixel out, and further out the
+        // squarer the frame is.
+        const actual = await openReadableLane();
+        actual.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 16,
+                bottom: 8,
+                width: 16,
+                height: 8,
+            }) as DOMRect;
+
+        movePointer(actual, 5.5, 4.5);
+        assert.match(
+            pick().textContent ?? "",
+            /^1,4 /,
+            "the point is read where the frame actually draws it",
+        );
+    });
+
+    it("reads nothing over the letterbox beside a frame", async () => {
+        // The bars are the panel's background, not the picture. `sampleAt` would answer "outside
+        // this frame" for them — a reading, about a point that is not on the frame at all — so
+        // the row stays empty exactly as it does off a panel.
+        const actual = await openReadableLane();
+        actual.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 16,
+                bottom: 8,
+                width: 16,
+                height: 8,
+            }) as DOMRect;
+
+        movePointer(actual, 5.5, 4.5);
+        assert.notEqual(pick().textContent, "", "on the frame, a reading");
+        movePointer(actual, 1.5, 4.5);
+        assert.equal(pick().textContent, "", "on the bar beside it, nothing");
+    });
+
+    it("has nothing to freeze on the letterbox either", async () => {
+        const actual = await openReadableLane();
+        actual.getBoundingClientRect = () =>
+            ({
+                left: 0,
+                top: 0,
+                right: 16,
+                bottom: 8,
+                width: 16,
+                height: 8,
+            }) as DOMRect;
+        movePointer(actual, 1.5, 4.5);
+        clickPanel(actual, 1.5, 4.5);
+        assert.equal(pick().classList.contains("cp-spec-pick--frozen"), false);
+    });
+
     it("freezes the reading on screen, not the click's own pixel", async () => {
         const actual = await openReadableLane();
         // y 1.9 of a panel at half scale is row 3 — the row that matches. The click that follows

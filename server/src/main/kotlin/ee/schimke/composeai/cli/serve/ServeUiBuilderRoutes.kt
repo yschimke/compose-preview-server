@@ -60,6 +60,8 @@ internal fun Route.installUiBuilderRoutes(
    * always answers "unavailable" is worse than one a client can discover the absence of.
    */
   nativePreview: UiBuilderNativePreviewLane? = null,
+  /** The inline Remote Compose capture lane, left out on a host that cannot compile — as above. */
+  inlineCapture: UiBuilderInlineCaptureLane? = null,
 ) {
   installUiBuilderLiveExportRoutes(service, authorization)
   post(UI_BUILDER_REQUEST_PATH) {
@@ -98,9 +100,9 @@ internal fun Route.installUiBuilderRoutes(
     }
 
     val decision = authorization.authorize(call, envelope.request.requiredCapability())
-    val actorId =
+    val actor =
       when (decision) {
-        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing -> {
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
           call.respondProtocolError(
@@ -121,7 +123,7 @@ internal fun Route.installUiBuilderRoutes(
           return@post
         }
       }
-    if (envelope.actorId != actorId) {
+    if (envelope.actorId != actor.actorId) {
       call.respondProtocolError(
         envelope.requestId,
         ServiceErrorCodeV1.UNAUTHORIZED,
@@ -131,8 +133,7 @@ internal fun Route.installUiBuilderRoutes(
       return@post
     }
 
-    val mapping =
-      UiBuilderProtocolMapper.toServiceCall(AuthenticatedUiBuilderActor(actorId), envelope.request)
+    val mapping = UiBuilderProtocolMapper.toServiceCall(actor, envelope.request)
     val response =
       when (mapping) {
         is ProtocolRequestMapping.Mapped ->
@@ -176,9 +177,9 @@ internal fun Route.installUiBuilderRoutes(
    */
   put(UI_BUILDER_DESIGN_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-    val actorId =
+    val actor =
       when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
-        is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing -> {
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
           call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
@@ -227,7 +228,6 @@ internal fun Route.installUiBuilderRoutes(
       )
       return@put
     }
-    val actor = AuthenticatedUiBuilderActor(actorId)
     // `If-None-Match: *` is answered where the answer is known. The service reports a create onto
     // an existing id as a bad request, indistinguishable in its code from a malformed one, so the
     // precondition is evaluated as its own read first — and a create that still fails afterwards
@@ -280,9 +280,9 @@ internal fun Route.installUiBuilderRoutes(
      */
     post(UI_BUILDER_NATIVE_PREVIEW_PATH) {
       call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-      val actorId =
+      val actor =
         when (val decision = authorization.authorize(call, UiBuilderRouteCapability.EXPORT)) {
-          is UiBuilderAuthorizationDecision.Authorized -> decision.actorId
+          is UiBuilderAuthorizationDecision.Authorized -> decision.actor
           UiBuilderAuthorizationDecision.Missing -> {
             call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
             call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
@@ -303,7 +303,7 @@ internal fun Route.installUiBuilderRoutes(
       // would be a way to render a design you cannot open.
       val mapping =
         UiBuilderProtocolMapper.toServiceCall(
-          AuthenticatedUiBuilderActor(actorId),
+          actor,
           GetSnapshotRequestV1(designId = designId, revision = null),
         )
       val snapshot =
@@ -341,6 +341,89 @@ internal fun Route.installUiBuilderRoutes(
                 taggedNodeIds = result.taggedNodeIds,
                 nodeBounds = result.nodeBounds.mapValues { (_, box) -> box.toNodeBoundsV1() },
                 compileError = result.failure,
+              ),
+            ),
+            ContentType.Application.Json,
+            HttpStatusCode.OK,
+          )
+      }
+    }
+  }
+
+  if (inlineCapture != null) {
+    /**
+     * One design's inline Remote Compose content, captured into the document it describes.
+     *
+     * A POST beside the native render and gated the same way, for the same two reasons: the
+     * released `UiBuilderRequestV1` union has no capture request, and this compiles and runs the
+     * Kotlin an export hands back — an actor that may not read that source may not run it.
+     *
+     * The node id is in the path rather than in a body because it is the thing being captured: a
+     * design holds any number of inline nodes and each is a separate document, so the URL names one
+     * the same way the design path names one design.
+     */
+    post(UI_BUILDER_INLINE_CAPTURE_PATH) {
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      val actor =
+        when (val decision = authorization.authorize(call, UiBuilderRouteCapability.EXPORT)) {
+          is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+          UiBuilderAuthorizationDecision.Missing -> {
+            call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+            call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+            return@post
+          }
+          UiBuilderAuthorizationDecision.Forbidden -> {
+            call.respondText("UI-builder export access required", status = HttpStatusCode.Forbidden)
+            return@post
+          }
+        }
+      val designId = call.parameters["designId"].orEmpty()
+      val nodeId = call.parameters["nodeId"].orEmpty()
+      if (designId.isBlank() || nodeId.isBlank()) {
+        call.respondText(
+          "a design id and a node id are required",
+          status = HttpStatusCode.BadRequest,
+        )
+        return@post
+      }
+      // Read through the service, as this actor, exactly as the native render does: a lane that
+      // took the document from anywhere else would be a way to capture a design you cannot open.
+      val mapping =
+        UiBuilderProtocolMapper.toServiceCall(
+          actor,
+          GetSnapshotRequestV1(designId = designId, revision = null),
+        )
+      val snapshot =
+        (mapping as? ProtocolRequestMapping.Mapped)?.let { service.execute(it.call) }
+          as? UiBuilderServiceResponse.Snapshot
+      if (snapshot == null) {
+        call.respondText("no such design", status = HttpStatusCode.NotFound)
+        return@post
+      }
+      val document = snapshot.snapshot.state.document
+      val result = withContext(Dispatchers.IO) { inlineCapture.capture(document, nodeId) }
+      when (result) {
+        is UiBuilderInlineCaptureOutcome.Refused ->
+          call.respondText(
+            UI_BUILDER_JSON.encodeToString(
+              InlineCaptureRefusalV1.serializer(),
+              InlineCaptureRefusalV1(code = result.code, reasons = result.reasons),
+            ),
+            ContentType.Application.Json,
+            // Not a 500, for the reason the native refusal is not: the subtree captures or it does
+            // not, and which one is a fact about the design and this host rather than a failure.
+            HttpStatusCode.UnprocessableEntity,
+          )
+        is UiBuilderInlineCaptureOutcome.Captured ->
+          call.respondText(
+            UI_BUILDER_JSON.encodeToString(
+              InlineCaptureResultV1.serializer(),
+              InlineCaptureResultV1(
+                designId = designId,
+                revision = document.revision,
+                nodeId = result.nodeId,
+                functionName = result.functionName,
+                documentUrl = result.documentUrl,
               ),
             ),
             ContentType.Application.Json,
@@ -426,8 +509,8 @@ internal fun Route.installUiBuilderRoutes(
       return@webSocket
     }
     val decision = authorization.authorize(call, UiBuilderRouteCapability.READ)
-    val actorId = (decision as? UiBuilderAuthorizationDecision.Authorized)?.actorId
-    if (actorId == null) {
+    val actor = (decision as? UiBuilderAuthorizationDecision.Authorized)?.actor
+    if (actor == null) {
       close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "UI-builder read access required"))
       return@webSocket
     }
@@ -438,7 +521,7 @@ internal fun Route.installUiBuilderRoutes(
       try {
         service.subscribe(
           UiBuilderSubscriptionCall(
-            actor = AuthenticatedUiBuilderActor(actorId),
+            actor = actor,
             designId = designId,
             afterSequence = afterSequence,
           )
@@ -565,6 +648,8 @@ internal const val UI_BUILDER_DEVICE_PRESETS_PATH = "/api/ui-builder/v1/device-p
 internal const val UI_BUILDER_IDENTITY_PATH = "/api/ui-builder/v1/identity"
 internal const val UI_BUILDER_NATIVE_PREVIEW_PATH =
   "/api/ui-builder/v1/designs/{designId}/native-preview"
+internal const val UI_BUILDER_INLINE_CAPTURE_PATH =
+  "/api/ui-builder/v1/designs/{designId}/remote-content/{nodeId}/capture"
 /** 428, which Ktor's [HttpStatusCode] does not name. RFC 6585: the precondition is missing. */
 private val PRECONDITION_REQUIRED = HttpStatusCode(428, "Precondition Required")
 
@@ -625,6 +710,33 @@ internal data class NativePreviewNodeBoundsV1(
 
 private fun AnnotationBounds.toNodeBoundsV1() =
   NativePreviewNodeBoundsV1(x = x, y = y, width = width, height = height)
+
+/**
+ * Where one inline node's captured Remote Compose document is served.
+ *
+ * [documentUrl] is the same shape a `remote-compose/document` node's own `documentUrl` carries — a
+ * `/d/<id>` permalink this host serves — so a client plays it through the resolver it already has
+ * rather than through a second path that happens to end in bytes. [functionName] names the
+ * `@RemoteComposable` body these bytes were captured from, which is what lets a client say *which*
+ * generated body produced them when a design holds several.
+ */
+@kotlinx.serialization.Serializable
+internal data class InlineCaptureResultV1(
+  val schema: String = "compose-preview/ui-builder-inline-capture/v1",
+  val designId: String,
+  val revision: Long,
+  val nodeId: String,
+  val functionName: String,
+  val documentUrl: String,
+)
+
+/** Why there was no captured document — the lane's own reasons, in its own vocabulary. */
+@kotlinx.serialization.Serializable
+internal data class InlineCaptureRefusalV1(
+  val schema: String = "compose-preview/ui-builder-inline-capture-refusal/v1",
+  val code: String,
+  val reasons: List<String>,
+)
 
 /** Why there was no native render — the generator's own reasons, not a second vocabulary. */
 @kotlinx.serialization.Serializable

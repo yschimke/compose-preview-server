@@ -6,16 +6,21 @@ import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
+import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
+import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor
 import java.security.MessageDigest
+import java.util.Base64
 
 /**
  * Compose-source export driven by the **discovered component record** rather than by a guess.
@@ -57,6 +62,16 @@ internal class ScreenGeneratorComposeExportExecutor(
    * golden test would not have caught it — it passes a package explicitly.
    */
   private val packageName: String = ScreenExportGate.PACKAGE_NAME,
+  /**
+   * Where a design's uploaded asset bytes are, for the one lane that has to **inline** them.
+   *
+   * A Wear widget's background is drawn by the system host, out of the app's process and without
+   * its resources, so a picture there cannot be a name the drawing side resolves — the pixels
+   * travel inside the document and therefore inside the generated source. Null leaves a widget with
+   * an image background refusing by name, which is what a host with no asset store can honestly
+   * say.
+   */
+  private val assetStore: UiBuilderAssetStore? = null,
   /**
    * The component packs this host admits, by id.
    *
@@ -102,6 +117,7 @@ internal class ScreenGeneratorComposeExportExecutor(
           request.document,
           packageName,
           packComponents = packRecords.byComponentId(),
+          assets = request.document.widgetAssetBytes(),
         )
         ?.let { recordFree ->
           return when (recordFree) {
@@ -118,32 +134,95 @@ internal class ScreenGeneratorComposeExportExecutor(
 
     return when (val generated = generate(request.document)) {
       is Generated.Refused -> refused(generated.code, generated.reasons)
-      is Generated.Emitted -> emitted(provenance(request) + generated.source)
+      is Generated.Emitted ->
+        emitted(
+          provenance(request) + generated.assetPlaceholders.commentedNotes() + generated.source,
+          generated.assetPlaceholders.map { it.warning() },
+        )
     }
   }
 
   /**
    * A generated file as an artifact.
    *
-   * No diagnostic at all on the success path, and that is the whole point of this executor. An
-   * artifact with an empty diagnostic list says "this is the screen you designed"; the one it
-   * replaced could only ever say "this is nearly it".
+   * No diagnostic about its own compilability on the success path, and that is the whole point of
+   * this executor. An artifact with an empty diagnostic list says "this is the screen you
+   * designed"; the one it replaced could only ever say "this is nearly it". The one warning it does
+   * carry, [ASSET_PLACEHOLDER], is about the design rather than the generator: a picture the source
+   * could not bundle stands in the frame as a coloured painter, and the person pasting the file
+   * needs to know which line to replace and with which bytes.
    */
-  private fun emitted(source: String): ExportArtifactV1 =
+  private fun emitted(
+    source: String,
+    warnings: List<ExportDiagnosticV1> = emptyList(),
+  ): ExportArtifactV1 =
     ExportArtifactV1(
       format = ExportFormatV1.COMPOSE,
       mediaType = "text/x-kotlin; charset=utf-8",
       encoding = ExportEncodingV1.UTF8,
       content = source,
       contentDigest = source.sha256(),
-      diagnostics = emptyList(),
+      diagnostics = warnings,
+    )
+
+  /**
+   * The asset lines of the header: which `Image(...)` stands in for which picture.
+   *
+   * Beside the provenance rather than inline at the call, because the generator emits from a typed
+   * value tree that carries no comments — and a header the reader sees first is where a "replace
+   * this" belongs anyway. Every value here is document-supplied and folded per physical line by the
+   * rule [refused] uses.
+   */
+  private fun List<ScreenDocumentProjection.AssetPlaceholder>.commentedNotes(): String {
+    if (isEmpty()) return ""
+    return map { it.note() }.commented() + "\n\n"
+  }
+
+  private fun ScreenDocumentProjection.AssetPlaceholder.note(): String =
+    "Asset placeholder: node ${nodeId} draws asset '$assetKey'" +
+      (if (contentDigest != null) " (${mediaType ?: "image"}, $contentDigest)"
+      else " (not in this design's assets)") +
+      " as a ColorPainter; bundle the picture as a resource and pass painterResource(...) there."
+
+  private fun ScreenDocumentProjection.AssetPlaceholder.warning(): ExportDiagnosticV1 =
+    ExportDiagnosticV1(
+      severity = DiagnosticSeverityV1.WARNING,
+      code = ASSET_PLACEHOLDER,
+      message = note(),
     )
 
   /** The Kotlin for a document, or why there is none. */
   internal sealed interface Generated {
-    data class Emitted(val source: String, val screenName: String) : Generated
+    data class Emitted(
+      val source: String,
+      val screenName: String,
+      /**
+       * The pictures the source stands in for; see [ScreenDocumentProjection.Outcome.Projected].
+       */
+      val assetPlaceholders: List<ScreenDocumentProjection.AssetPlaceholder> = emptyList(),
+      /**
+       * The container this source is a **Wear widget** for, or null for a screen.
+       *
+       * Present rather than inferred from the catalog id, because it is what the preview entry the
+       * server synthesizes has to switch on: a widget's source declares no screen to call, it
+       * declares a body, a brush and a container spec, and it is drawn inside the Glance Wear
+       * container rather than composed at the design's own frame. [screenName] is then the base
+       * identifier the three are declared under.
+       */
+      val widgetFrame: WidgetFrame? = null,
+    ) : Generated
 
     data class Refused(val code: String, val reasons: List<String>) : Generated
+
+    /**
+     * A widget container's whole frame — its content box plus the padding the design authored — in
+     * dp.
+     *
+     * The design's `environment` is not this. A widget design is authored at a container footprint
+     * and the environment is a screen's, so rendering at it would letterbox the container inside a
+     * watch face or crop it, and the frame the canvas draws beside it would be a different size.
+     */
+    data class WidgetFrame(val widthDp: Int, val heightDp: Int)
   }
 
   /**
@@ -171,20 +250,37 @@ internal class ScreenGeneratorComposeExportExecutor(
     // which left the one catalog that most needs a native render as the one catalog that could not
     // ask for one.
     //
-    // A **Wear widget** still refuses. Its source declares a `WearWidgetDocument` of Remote
-    // Compose — played by a player, not composed — so there is no `@Preview` for this lane to
-    // discover and no frame at the end of compiling it.
-    if (RecordFreeExport.applies(document)) {
-      if (!RecordFreeExport.composeCompilable(document)) {
-        return Generated.Refused(
-          RECORD_FREE_DESIGN,
-          listOf(
-            "this design generates a Remote Compose document rather than Jetpack Compose, so " +
-              "there is no `@Preview` for the native preview lane to compile and render; export " +
-              "it instead, and preview it on the canvas"
-          ),
-        )
+    // A **Wear widget** is Remote Compose — recorded into a `WearWidgetDocument` and played by the
+    // host, never composed — so there is no screen here for this lane to call. It reaches the same
+    // compiler by a third road: `RecordFreeExport.nativePreview` writes the body, the widget's own
+    // `WearWidgetBrush` and the `WearWidgetParams` its scaffold describes, and the preview entry
+    // draws them inside the Glance Wear container. Not the file `export` hands a designer, and
+    // deliberately — that one asks for its pictures as parameters nothing here could pass, and may
+    // only name the container specs upstream publishes, where this host builds the design's own
+    // (yschimke/compose-preview-server#522).
+    if (RecordFreeExport.isWearWidget(document)) {
+      return when (
+        val preview =
+          RecordFreeExport.nativePreview(document, packageName, document.widgetAssetBytes())
+      ) {
+        // Unreachable: `isWearWidget` was true, so the widget emitter owns this document. Reported
+        // rather than asserted, for the reason the screen branch below reports its own null.
+        null ->
+          Generated.Refused(
+            RECORD_FREE_DESIGN,
+            listOf("no record-free emitter claimed this design"),
+          )
+        is RecordFreeExport.NativePreview.Refused ->
+          Generated.Refused(UNEXPRESSIBLE_DOCUMENT, preview.reasons)
+        is RecordFreeExport.NativePreview.Emitted ->
+          Generated.Emitted(
+            preview.source,
+            preview.name,
+            widgetFrame = Generated.WidgetFrame(preview.widthDp, preview.heightDp),
+          )
       }
+    }
+    if (RecordFreeExport.applies(document)) {
       val packRecords =
         when (val packs = packRecordsFor(document)) {
           is PackRecords.Refused -> return Generated.Refused(packs.code, packs.reasons)
@@ -271,19 +367,60 @@ internal class ScreenGeneratorComposeExportExecutor(
       if (packRecords.isEmpty()) record
       else record.copy(components = record.components + packRecords.flatMap { it.components })
     val screenName = ScreenDocumentProjection.screenNameFor(document)
-    val projected =
-      when (val projection = ScreenDocumentProjection.project(document, screenName, tagNodes)) {
-        is ScreenDocumentProjection.Outcome.Projected -> projection.document
+    val projection =
+      when (val outcome = ScreenDocumentProjection.project(document, screenName, tagNodes)) {
+        is ScreenDocumentProjection.Outcome.Projected -> outcome
         is ScreenDocumentProjection.Outcome.Refused ->
-          return Generated.Refused(UNEXPRESSIBLE_DOCUMENT, projection.reasons)
+          return Generated.Refused(UNEXPRESSIBLE_DOCUMENT, outcome.reasons)
       }
     return when (
-      val generated = ScreenGenerator.generate(projected, merged, packageName, EXPRESSION_PACKAGES)
+      val generated =
+        ScreenGenerator.generate(
+          projection.document,
+          merged,
+          packageName,
+          EXPRESSION_PACKAGES,
+          previewFor(document.environment),
+        )
     ) {
       is ScreenGenerator.Result.Refused -> Generated.Refused(UNPROVEN_CALL_SITE, generated.reasons)
-      is ScreenGenerator.Result.Emitted -> Generated.Emitted(generated.source, screenName)
+      is ScreenGenerator.Result.Emitted ->
+        Generated.Emitted(generated.source, screenName, projection.assetPlaceholders)
     }
   }
+
+  /**
+   * The previews a generated screen carries, or null for none — which is what an export emitted
+   * before this and what a design naming no devices still gets.
+   *
+   * Gated on [DesignEnvironmentV1.exportDevices] rather than emitted always, deliberately. A
+   * `@Preview` is a claim about how a screen should be looked at, and until a design named devices
+   * nothing in the document made that claim: turning it on for every export would put a preview
+   * into files whose authors never asked for one, and the frame would be the only picture — which
+   * is the picture the builder canvas already is.
+   *
+   * When a design *has* named devices, the frame comes along. The design's own size is the canvas
+   * its author approved, and a file that draws a screen on a Pixel Fold but not on the size it was
+   * designed at has dropped the one picture that was signed off. The generator puts the frame on
+   * its own wrapper and the devices on another, so the two do not contend.
+   *
+   * `density` and `layoutDirection` are deliberately not carried: `@Preview` has no parameter for
+   * either. Naming that here beats leaving the next reader to wonder whether their omission was an
+   * oversight.
+   */
+  private fun previewFor(environment: DesignEnvironmentV1): ScreenGenerator.Preview? =
+    environment.exportDevices
+      .takeIf { it.isNotEmpty() }
+      ?.let { devices ->
+        ScreenGenerator.Preview(
+          widthDp = environment.widthDp,
+          heightDp = environment.heightDp,
+          fontScale = environment.fontScale,
+          locale = environment.locale,
+          darkMode = environment.theme == ThemeV1.DARK,
+          devices = devices,
+        )
+      }
 
   /** The records of the packs a design uses, aliased to the pack's ids, or why there are none. */
   private sealed interface PackRecords {
@@ -498,9 +635,38 @@ internal class ScreenGeneratorComposeExportExecutor(
     const val UNPROVEN_CALL_SITE = "UNPROVEN_CALL_SITE"
 
     /**
+     * A warning, not a refusal: an `asset/image` was written as `Image(painter = ColorPainter(…))`
+     * because its picture is bytes in the design's asset store, which no generated Kotlin can
+     * carry. The message names the node, the key and the digest to bundle.
+     */
+    const val ASSET_PLACEHOLDER = "ASSET_PLACEHOLDER"
+
+    /**
      * The design generates through a record-free emitter, which the asking lane cannot use. Only
      * [generate] produces it — [export] serves these designs rather than refusing them.
      */
     const val RECORD_FREE_DESIGN = "RECORD_FREE_DESIGN"
+  }
+
+  /**
+   * The design's own asset registry, as the bytes an inlining lane can carry.
+   *
+   * An **embedded** binding already is base64 and is handed over unchanged; an **uploaded** one is
+   * content-addressed, so its bytes are joined here from the store beside the design state rather
+   * than in the emitter, which has no filesystem and no business acquiring one. A catalog binding
+   * has no bytes on this host and answers null, which the export turns into a refusal naming the
+   * node instead of a picture it does not have.
+   */
+  private fun ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1.widgetAssetBytes():
+    WidgetAssetBytes {
+    val bindings = assets
+    return WidgetAssetBytes { key ->
+      when (val source = bindings[key]?.source) {
+        is ee.schimke.composeai.uibuilder.protocol.EmbeddedAssetSourceV1 -> source.base64
+        is ee.schimke.composeai.uibuilder.protocol.UploadedAssetSourceV1 ->
+          assetStore?.read(source.storageKey)?.let(Base64.getEncoder()::encodeToString)
+        else -> null
+      }
+    }
   }
 }

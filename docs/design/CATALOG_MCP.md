@@ -146,12 +146,17 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `get_preview_data` | `live` | Retrieve accessibility or Compose annotation data |
 | `list-all-documentation`, `get-documentation-for-story` | `preview` | Storybook-MCP-compatible discovery aliases |
 | `preview-stories` | `live` | Storybook-MCP-compatible preview rendering alias |
-| `ui_builder_list_catalogs`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to, the designs on this box, and one design's whole document |
-| `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one |
+| `ui_builder_list_catalogs`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
+| `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one — a `setProperty` whose value is `{"type":"null"}` unsets an optional property |
+| `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
+| `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
+| `ui_builder_design_access` | `ui-builder-read` | Who can open a design — its owner, and everyone it has been shared with |
+| `ui_builder_share_design` | `ui-builder-write` | Share a design with another actor as `viewer` or `editor`, or take that back |
 | `ui_builder_list_comments`, `ui_builder_await_comments` | `ui-builder-read` | Read a design's discussion, and **wait** for the next thing said in it |
 | `ui_builder_post_comment`, `ui_builder_resolve_comment_thread` | `ui-builder-write` | Say something on a design, and close a thread once it is answered |
+| `ui_builder_acknowledge_comment`, `ui_builder_react_to_comment` | `ui-builder-write` | Say you have **read** a thread — which is not resolving it — or react to one comment with an emoji |
 
 The `ui_builder_*` tools appear in `tools/list` only on a box that actually serves a UI builder
 (`--ui-builder-dir`). A box without one does not advertise them, because listed-and-failing tells an
@@ -164,16 +169,44 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
 `UiBuilderRequestV1` ones. A session looks like:
 
 1. `ui_builder_list_catalogs` — a document's `catalogPin` names a catalog revision the service
-   checks, so this is where a real one comes from.
+   checks, so this is where a real one comes from: each catalog in the reply carries its
+   `catalogPin` verbatim. The reply is a summary — per component its id, role, traits, `slots` as
+   `name[min..max]:accepted|roles` and `properties` as `name:type`, `!` when required, `=a|b` for
+   the allowed values; per catalog its export formats and modifier vocabulary — because the whole
+   `CatalogCapabilityV1` is 58 KB for the packaged M3 catalog alone and 72 on the hosted
+   deployment with its packs, and an agent pays for every byte of it as context, on the call whose
+   description says "start here". `full: true` is the released
+   `CatalogsResponseV1`, adapter status and parity included; `componentIds` narrows either.
 2. `ui_builder_create_design` — with a whole `document`, or `fromDesignId` to copy an existing
    design. There is no "blank template" argument: a starter document assembled inside the server
    would carry a pin invented there, and the service would reject it. A copy carries a pin that is
    real by construction.
 3. `ui_builder_get_design` — read the `revision` to quote next. `baseRevision` is how a concurrent
-   edit is detected, so an agent that guesses it *is* the concurrent edit.
+   edit is detected, so an agent that guesses it *is* the concurrent edit. The snapshot comes back
+   **without** the `catalog` a `ServiceSnapshotV1` embeds — the document's `catalogPin` names it
+   exactly and step 1 serves it — so an 80-node design is single-digit KB rather than sixty;
+   `includeCatalog: true` restores the released shape. `ui_builder_create_design` and a resync from
+   `ui_builder_await_design` take the same argument.
 4. `ui_builder_apply` — `operations` is an array of `DesignMutationV1`: `insertNode`, `setProperty`,
-   `deleteNode`, `moveNode` and the rest. `operationId` is yours, and makes a retry idempotent.
-5. `ui_builder_export` — the Kotlin, or the refusals.
+   `deleteNode`, `moveNode` and the rest. `operationId` is yours, and makes a retry idempotent. A
+   `setProperty` with `{"type":"null"}` as its value **unsets** the property rather than storing a
+   null — the way back after trying one — and is refused, naming the node and the field, when the
+   catalog requires it.
+5. `ui_builder_put_asset` — when a screen needs a photograph. `asset/image` names an `assetKey`,
+   and the reducer refuses a key that is neither in the catalog's registry nor pinned in the
+   design, so put the picture **first**: this stores PNG, JPEG, GIF or WebP bytes (base64, at most
+   1 MiB) content-addressed and pins the key into the design's `assets` map, moving the revision
+   like an apply does. Then insert the node naming the key. See
+   [`UI_BUILDER_ASSETS.md`](UI_BUILDER_ASSETS.md).
+6. `ui_builder_export` — the Kotlin, or the refusals. An `asset/image` exports as the real
+   `Image(...)` with a `ColorPainter` in place of the picture and an `ASSET_PLACEHOLDER` warning
+   naming the key and digest to bundle.
+7. `ui_builder_rename_design` when the design has become something else, and
+   `ui_builder_delete_design` when it was a probe. Rename is open to anybody who may write the
+   design and moves no revision. Delete is **owner only** — an agent under a grant owns what it
+   created as the person who approved the grant — so a session can clear its own litter and cannot
+   reach anybody else's; a design whose owner no longer exists is still the operator's to remove
+   through `/admin/ui-builder`.
 
 ### Watching, rather than asking again
 
@@ -183,6 +216,16 @@ past a `sequence` you quote. Both return the moment a designer in the browser or
 something, and answer a `timedOut` reply when nothing happens within `waitSeconds`, which you act on
 by calling again with the same cursor. `ui_builder_await_design` replies with the released
 `DesignUpdateEnvelopeV1` — the identical frame the browser's own `/updates` socket receives.
+
+**And why waiting is no longer the only way to find out.** A design's replies carry the discussion
+with them: `ui_builder_get_design`, `ui_builder_apply`, `ui_builder_export`,
+`ui_builder_render_native`, `ui_builder_put_asset` and `ui_builder_await_design` grow a `comments`
+block — a count, the cursor and up to three quoted excerpts naming the node each is pinned to —
+whenever somebody has said something you have not acknowledged. Clear it with
+`ui_builder_acknowledge_comment`, which claims only that you have read the thread, or with
+`ui_builder_react_to_comment`, which is the lightest way to say the same thing; neither claims the
+question is settled, which is what `ui_builder_resolve_comment_thread` is for.
+[`UI_BUILDER_COMMENTS.md`](UI_BUILDER_COMMENTS.md) has the three acts and why they are separate.
 
 **Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, and this
 endpoint deliberately cannot send one: `/mcp` is stateless JSON-RPC, `GET /mcp` — the

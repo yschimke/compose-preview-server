@@ -63,6 +63,62 @@ class ServeBakedCatalogPreviewParamsTest {
     assertEquals(ServeDeviceFrame(227.0, 227.0, isRound = true), preview.deviceFrame)
   }
 
+  /**
+   * The density the page converts dp boxes against, resolved per preview rather than assumed.
+   *
+   * `data-render-density` was the constant `2` on every page of every catalog. The size-override
+   * inputs are authored in dp and multiplied by it before they go on the wire as `widthPx` /
+   * `min…Px` / `max…Px`, so on any preview rendering at another density the reader's number reached
+   * the renderer in the wrong unit — and 42 of the 56 device ids `DeviceDimensions` knows are not
+   * 2.0. A published catalog is where this bites hardest: `PreviewParamsMeta` carries no density
+   * field at all, so the only thing that can answer is the `@Preview(device = …)` the entry does
+   * carry, resolved through the same catalog the renderer resolves it through.
+   */
+  @Test
+  fun `a published catalog resolves its render density from the device it names`() {
+    val host =
+      bakedCatalog(
+        """
+        {"timetext":{"componentId":"Template/TimeText",
+          "previewParams":{"device":"id:wearos_large_round","widthDp":227,"heightDp":227}},
+         "sticker":{"componentId":"Template/Sticker",
+          "previewParams":{"device":"id:pixel_5"}}}
+        """
+          .trimIndent()
+      )
+    // Wear is 2.0, which is why the Wear catalogs were right by luck under the old constant…
+    assertEquals(2.0f, host.renderDensityFor("timetext"))
+    // …and a phone is not, which is why nothing else was.
+    assertEquals(2.75f, host.renderDensityFor("sticker"))
+  }
+
+  @Test
+  fun `a preview naming no device leaves the density to the page's fallback`() {
+    val host =
+      bakedCatalog(
+        """{"timetext":{"componentId":"Template/TimeText","previewParams":{"widthDp":227}}}"""
+      )
+    assertNull(
+      host.renderDensityFor("timetext"),
+      "null is 'nothing here knows', which is not the same claim as 'it renders at 2'",
+    )
+    assertNull(host.renderDensityFor("no-such-preview"))
+  }
+
+  @Test
+  fun `the attribute keeps a whole density short and a fractional one exact`() {
+    // The viewer reads it with `parseFloat`, which takes either — but the attribute is also what a
+    // reader inspecting the page sees when they ask why a dp box became the px it did.
+    assertEquals("2", ServeWeb.renderDensityAttr(null), "the documented fallback")
+    assertEquals("2", ServeWeb.renderDensityAttr(2.0f))
+    assertEquals("2.75", ServeWeb.renderDensityAttr(2.75f))
+    assertEquals("2.625", ServeWeb.renderDensityAttr(2.625f))
+    // A manifest can say anything; a nonsense density is the fallback rather than a broken page.
+    assertEquals("2", ServeWeb.renderDensityAttr(0f))
+    assertEquals("2", ServeWeb.renderDensityAttr(-1f))
+    assertEquals("2", ServeWeb.renderDensityAttr(Float.NaN))
+  }
+
   @Test
   fun `the stated ground reaches the comparison stage, rather than the catalog's default`() {
     // The point of the whole change, asserted where a reader would see it. `PreviewBackdrop` would

@@ -1,4 +1,4 @@
-// Generator content SHA-256: 28580b8613867308278a51436c32ce68d10a3409e30050bb848354fa24880afb
+// Generator content SHA-256: b7d74a01c48e8f51274deded353c185d2ca19f01ea5aff64bd2bda91080f1c96
 @file:OptIn(ExperimentalMaterial3Api::class)
 
 package generated.uibuilder
@@ -454,7 +454,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                           elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                           colors = builderCardColors(MaterialTheme.colorScheme.surfaceContainer),
                         ) {
-                          Box(Modifier.fillMaxSize()) {
+                          Box(Modifier.fillMaxWidth()) {
                             // node:main-episode-column component:layout/column symbol:Column
                             // typed-properties:{"verticalSpacingDp":{"type":"float","value":8}}
                             Column(
@@ -768,7 +768,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         colors = builderCardColors(MaterialTheme.colorScheme.surfaceContainerLow),
                       ) {
-                        Box(Modifier.fillMaxSize()) {
+                        Box {
                           // node:detail-hero-row component:layout/row symbol:Row
                           // typed-properties:{"horizontalSpacingDp":{"type":"float","value":20},"verticalAlignment":{"type":"enum","value":"center"}}
                           Row(
@@ -826,7 +826,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                               // node:detail-follow component:m3/button symbol:Button
                               // typed-properties:{"selected":{"type":"bool","value":true},"style":{"type":"enum","value":"filledTonal"}}
                               FilledTonalButton(
-                                onClick = { Unit },
+                                onClick = {},
                                 modifier = Modifier.semantics { selected = true },
                               ) {
                                 // node:detail-follow-icon component:m3/icon symbol:Icon
@@ -887,7 +887,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                       // typed-properties:{"enabled":{"type":"bool","value":true},"selected":{"type":"bool","value":false}}
                       FilterChip(
                         selected = false,
-                        onClick = { Unit },
+                        onClick = {},
                         enabled = true,
                         shape = RoundedCornerShape(16.dp),
                         label = {
@@ -937,7 +937,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         colors = builderCardColors(MaterialTheme.colorScheme.surfaceContainer),
                       ) {
-                        Box(Modifier.fillMaxSize()) {
+                        Box(Modifier.fillMaxWidth()) {
                           // node:detail-episode-140-column component:layout/column symbol:Column
                           // typed-properties:{"verticalSpacingDp":{"type":"float","value":0}}
                           Column(
@@ -1080,7 +1080,7 @@ fun JetcasterDiscoverExpandedSupportingPane() {
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         colors = builderCardColors(MaterialTheme.colorScheme.surfaceContainer),
                       ) {
-                        Box(Modifier.fillMaxSize()) {
+                        Box(Modifier.fillMaxWidth()) {
                           // node:detail-episode-139-column component:layout/column symbol:Column
                           // typed-properties:{"verticalSpacingDp":{"type":"float","value":0}}
                           Column(

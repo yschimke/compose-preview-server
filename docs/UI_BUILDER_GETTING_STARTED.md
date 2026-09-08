@@ -20,47 +20,66 @@ rest of the distribution stays on 17.
 
 ## Running it locally
 
-There is no separate builder command: the builder is a surface of `compose-preview serve`, switched
-on by pointing it at the built Wasm bundle. Build the bundle from this repository —
+One command:
 
 ```bash
-./gradlew :ui-builder:wasmFrontendDist
+compose-preview-server ui --no-project
 ```
 
-— which writes it to `ui-builder/build/wasmDist`. Then serve it, naming the catalogs that get a
-builder adapter and somewhere to keep the designs:
+That opens the builder against the design systems packaged inside it — `m3-catalog` and
+`remote-m3` — and needs nothing else: no Gradle project, no `compose-preview` build host, and no
+catalog to fetch. Designs are saved under `~/.compose-preview/ui-builder-state` and survive a
+restart. A browser is opened on the builder; `--no-open` prints the URL instead.
+
+The builder bundle it serves is already inside the server distribution, so downloading
+`compose-preview-server-<version>.tar.gz` from a release is the whole install. Releases also carry
+`compose-preview-ui-builder-web-<version>.zip` on its own, for serving the bundle yourself or
+pointing an existing server at it with `--ui-builder-dir`; the same archive is on Maven Central as
+`compose-preview-ui-builder-web`. To build it from this repository instead:
 
 ```bash
-compose-preview serve \
-  --catalogs m3-catalog,remote-m3@yschimke/wear-m3-catalog \
-  --ui-builder-dir <this repo>/ui-builder/build/wasmDist \
-  --ui-builder-catalogs m3-catalog,remote-m3 \
-  --ui-builder-state-dir ./ui-builder-state
+./gradlew :ui-builder:wasmFrontendDist   # writes ui-builder/build/wasmDist
 ```
 
-Three flags, three different jobs, and they are easy to confuse:
+### Against your own project
 
-- **`--catalogs`** fetches the catalogs themselves, from each system's published
-  `design-artifacts/<system>` branch. No checkout is involved — `remote-m3` lives in
-  `yschimke/wear-m3-catalog`, which is why that one names its repo explicitly; a system in
-  `--catalog-repo` does not need the `@owner/repo` suffix. That repo publishes two systems, the
-  small reviewed widget adapter `remote-m3` and the full `wear-m3-catalog`.
-- **`--ui-builder-catalogs`** is the separate claim that a catalog may be *authored* against, not
-  merely served. Publishing a catalog never enables authoring for it, which is the point made at the
-  top of this guide.
-- **`--ui-builder-state-dir`** is what makes designs outlive a restart. It defaults to
-  `ui-builder-state` beside `--catalogs-file`, or `~/.compose-preview/ui-builder-state` for a local
-  standalone builder, and `none` is the explicit opt-out that serves the assets with no editable
-  design API at all.
+`ui` without `--no-project` is the other mode, and the one the rest of this guide's export sections
+assume:
 
-The designs, the reference overlays, the comment threads and the access requests are separate
-directories under the state dir, so losing one loses only what it was.
+```bash
+compose-preview-server ui --module app
+```
+
+It discovers and builds the module's `@Preview` functions and hands the builder that module's
+`components.json`, so the Compose export writes code that calls **your** composables rather than
+only the packaged design system's. That needs the `compose-preview` build host, because discovering
+and building a Gradle project is work the server asks for over a pipe rather than doing itself —
+without one it says so rather than serving a builder that looks like it worked.
+
+### The flags underneath, and one that is easy to confuse
+
+Both modes are `serve` with flags added, and every flag stays available:
+
+- **`--ui-builder-catalogs <system>[,…]`** — the design systems the builder may author against. Each
+  must have a *packaged adapter*; a catalog with none is refused at startup rather than fetched.
+  This is the one that matters for the builder.
+- **`--ui-builder-state-dir <dir>|none`** — where saved designs live. Defaults to
+  `ui-builder-state` beside `--catalogs-file`, or `~/.compose-preview/ui-builder-state` standalone.
+  `none` serves the builder's assets with no editable design API at all.
+- **`--ui-builder-dir <dir>`** — the bundle to serve. Defaults to the one packaged beside the binary.
+- **`--catalogs <system>[@<owner>/<repo>][,…]`** is **not** part of this. It fetches published
+  catalogs from their `design-artifacts/<system>` branches and serves them as browsable preview
+  sites at `/<system>/`. Publishing a catalog never enables authoring for it, and authoring against
+  one never requires serving it — they are separate features that happen to share catalog ids.
+
+The designs, the reference overlays and the comment threads are separate directories under the
+state dir, so losing one loses only what it was.
 
 Two things worth knowing before the first run. Export needs Java 21, as above. And on `remote-m3`
 the **native preview lane cannot compile a widget**: a widget's generated source is Remote Compose
 rather than Jetpack Compose, so `--ui-builder-native-catalog` has nothing to offer it and the Wasm
-canvas is the authority — which is exactly why the canvas and the generator have to agree about the
-same design, and why they are tested against each other rather than separately.
+canvas is the authority — which is why the canvas and the generator have to agree about the same
+design, and are tested against each other rather than separately.
 
 ## Create a design in the website
 
@@ -119,6 +138,22 @@ A design has one URL, and it names the catalog and the design:
 
 Opening it opens the design. It does not create one: a `GET` never writes, so a mistyped link
 reports a design that is not there rather than quietly making it.
+
+**Both segments are canonical, and the short form redirects to them.** `/ui-builder/<designId>`,
+with the catalog left out, is not a design URL: the routing reads the first segment as a catalog
+name, and the app reads the catalog back out of `location.pathname` before it has fetched anything.
+It is a link people and agents build anyway, because the design's *API* resource below **is**
+catalog-free — `/api/ui-builder/v1/designs/<designId>` names a design with its id alone, since the
+server reads the catalog out of the stored document's `catalogPin` — so an id that works against
+the API used to produce a `404` that looks like a deleted design
+([#509](https://github.com/yschimke/compose-preview-server/issues/509)).
+
+The server now answers it with `302` to `/ui-builder/<catalog>/<designId>`, reading the missing
+segment from that same `catalogPin`. It does that **as the caller**: designs are private to their
+owner and collaborators, and a redirect that fired for any id that exists would tell a stranger
+both that a (fairly guessable) id is taken and which catalog it pins. Whoever cannot open the
+design still gets a `404`, and so does an id that names nothing — which is also what keeps a
+genuinely missing asset a `404` instead of silently rendering the app shell.
 
 Creating is a `POST`. The New design dialog opens on a form factor — Mobile, Wear, RemoteCompose
 — with a generated id already filled in (a `cheeky-raccoon`, reshuffled or overwritten as you
@@ -200,6 +235,32 @@ browser is authoritative and the native lane is the second opinion rather than t
 Column, Surface, Text, and nested Remote Compose document. It is not an alias for every M3
 capability.
 
+### A card's content is a box, in every lane
+
+`m3/card` stacks its children the way `layout/box` does: two children with no alignment sit on top
+of each other at the card's origin, `matchParentSize` fills the card, and `align` places a child at
+one of the nine box positions. That is what the canvas draws and what the Properties panel offers a
+card's child, and it is also what the export writes — `Card { Box { … } }` — whether the code comes
+from the code pane or from the record-driven generator the native render compiles, so a card that
+lays a gradient under a title renders the same in all three. A card whose children should read top
+to bottom holds one `layout/column`, which is what the card starter content already does.
+
+### The frame's ground is the theme's, unless the root fills the frame
+
+Every renderer paints the pixels no node reaches in the theme's `background` — the canvas from
+`environment.theme`, the native lane from the preview's own backdrop. A node paints its
+`containerColor` across the area it is measured to and no further, and that includes the root: an
+`m3/surface` with no size modifier wraps its content, exactly as `Surface` does, so its colour is
+a patch behind the content and the rest of the frame stays the theme's. A dark chat mock whose
+root carries `containerColor: #313338` and no `fillMaxSize` renders on the light theme's ground,
+with nothing refused and nothing to search for.
+
+Two ways to make the two agree. Give the root `fillMaxSize`, and its `containerColor` *is* the
+ground. Or set `environment.theme` to `dark`, and the ground is the dark theme's. The export
+attaches `ROOT_SURFACE_DOES_NOT_FILL_FRAME` to every artifact of a design whose coloured root does
+neither, and the **Issues** panel shows the same line, so the fact is stated where an agent and a
+person each look rather than inferred from a picture.
+
 ## Starting from a worked widget
 
 `remote-m3`'s New Widget dialog offers four templates. Two are empty host frames — **Small widget**
@@ -255,8 +316,10 @@ gradient, not the gradient over `#272430`.
 
 The image tile shows the brush slot composing and clipping a bitmap to the frame. Whether arbitrary
 widget artwork resolves in the browser is the builder's asset-registry question, not this
-scaffold's: `asset/image` currently draws real pixels for the project-owned artwork keys and a
-placeholder otherwise.
+scaffold's: `asset/image` draws the bytes the design's `assets` map pins under its key (put there
+with `PUT /api/ui-builder/v1/designs/{designId}/assets/{assetKey}` or `ui_builder_put_asset`), the
+project-owned artwork keys, and a placeholder carrying the key otherwise — see
+[`design/UI_BUILDER_ASSETS.md`](design/UI_BUILDER_ASSETS.md).
 
 A blank widget declares none of this, so both empty templates open on the default frame:
 
@@ -291,7 +354,6 @@ import androidx.compose.remote.creation.compose.state.rs
 import androidx.compose.remote.creation.compose.state.rsp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.glance.wear.GlanceWearWidget
 import androidx.glance.wear.WearWidgetBrush
 import androidx.glance.wear.WearWidgetData
@@ -332,9 +394,11 @@ class HelloWidget : GlanceWearWidget() {
 
 @Preview(name = "Squircle Preview")
 @Composable
-fun HelloWidgetSquirclePreview(
-    @PreviewParameter(SquircleSmallWidgetPreviewParams::class) params: WearWidgetParams
-) = WearWidgetPreview(HelloWidget(), params)
+fun HelloWidgetSquirclePreview() =
+    WearWidgetPreview(
+        HelloWidget(),
+        SquircleSmallWidgetPreviewParams().values.maxBy { it.widthDp },
+    )
 ```
 
 Read what is *not* there: the host container. `remote-m3/widget-container-*` is this builder's
@@ -346,28 +410,102 @@ that moved them is refused by name rather than generating a preview that draws a
 have.
 
 The `@Preview` carries **no `device`**, and that is deliberate rather than an omission. A widget's
-canvas is its `WearWidgetParams` — the provider yields every footprint the platform ships for that
-container size, so one preview function already fans out over them. A screen spec beside it says
-nothing the params do not, and a renderer that honours it draws the widget across a phone-sized
-canvas instead of the 216×124dp frame the design was authored in.
+canvas is its `WearWidgetParams`, so a screen spec beside it says nothing the params do not, and a
+renderer that honours it draws the widget across a phone-sized canvas instead of the 216×124dp
+frame the design was authored in.
+
+It is also **one** preview rather than a fan-out. The params still come from the shipped provider —
+the preview invents no frame — but the generator picks the widest footprint the container ships
+instead of unrolling a preview per value with `@PreviewParameter`. A scaffold does not need both
+the constrained 182×112dp and the 216×124dp the design is authored against to show what it looks
+like. The cost, stated: an overflow that only appears at the narrower footprint no longer shows up
+in the generated preview, so a widget whose content is close to the width has to be checked there
+deliberately.
 
 ![The Code pane showing a widget's generated Kotlin](design/evidence/ui-builder-remote-compose/widget-code-pane.png)
 
-Refusals work the way the Compose exporter's do: a node with no Remote Compose counterpart is named
-rather than approximated.
+### A picture in the content slot
 
-**Images name the bitmap they need.** Generated source can never carry pixels, but it can say which
-bitmap to supply: `RemoteImageBitmap(String)` is the named-bitmap overload, and a design's asset key
-is the name. An `asset/image` in the content becomes `RemoteImage(RemoteImageBitmap("<key>"), …)`
-and one in the background slot becomes `WearWidgetBrush.image(RemoteImageBitmap("<key>"), …)`. The
-widget supplies them under those names in `provideWidgetData`; until it does, that layer draws
-nothing, which is why the generated file lists the keys it expects.
+An image is the one node whose bytes stay out of the generated file, and the reason is not a
+limitation: album art, an avatar or a logo is *application data* that changes long after the file is
+written, so baking today's bytes in would generate a widget that draws the picture the design was
+built with forever. The design names an asset **key**; the generated code takes a bitmap.
 
-What is still refused is what would not compile or would not be the design: a `weight` outside a row
-or column, an `align` outside a box — `RemoteBoxScope` has no member for it, so a box's single
-alignment is hoisted onto the parent's `contentAlignment` instead — a shape named by a theme size
-rather than a corner radius in dp, and a colour given as a theme token, since a widget's document is
-built outside composition where neither can be read.
+```kotlin
+@RemoteComposable
+@Composable
+fun NowPlayingWidgetContent(albumArt: RemoteImageBitmap) {
+    RemoteRow(modifier = RemoteModifier.fillMaxSize()) {
+        RemoteImage(
+            remoteBitmap = albumArt,
+            contentDescription = "Album art".rs,
+            modifier = RemoteModifier.size(60.rdp, 60.rdp).clip(RemoteRoundedCornerShape(8.rdp)),
+            contentScale = ContentScale.Crop,
+        )
+        …
+    }
+}
+
+class NowPlayingWidget(
+    // The design's `album-art` asset.
+    private val albumArt: RemoteImageBitmap = ImageBitmap(1, 1).rb,
+) : GlanceWearWidget() { … }
+```
+
+One parameter per distinct key, named after it, defaulted to a **blank** 1×1 bitmap — which is what
+lets the generated `@Preview` beside it still compile, and is deliberately not a picture: a
+placeholder that looked like artwork would be a preview showing something the design does not have.
+Pass the real bitmap when the application constructs the widget.
+
+The **background** slot inlines its bytes instead, and the difference is the host. A widget is drawn
+by the **system**, out of the application's process and without its resources, so a background
+picture cannot be a name the drawing side resolves — no `R.drawable`, no asset path, nothing looked
+up at draw time. The pixels have to travel inside the document, which leaves generated source
+carrying them:
+
+```kotlin
+val background = WearWidgetBrush.image(coverWide)
+
+private val COVER_WIDE_PNG: String =
+    listOf(
+        "iVBORw0KGgoAAAANSUhEUgAAAbAAAAD4CAIAAAACUCTIAABrS0lEQVR42uzcV3Qbd5bvez53T0/Hdc890zk7yJYl",
+        …
+    )
+        .joinToString("")
+
+private fun decodeInlineBitmap(encoded: String): RemoteImageBitmap {
+    val bytes = Base64.decode(encoded, Base64.NO_WRAP)
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        .asImageBitmap()
+        .rb
+}
+```
+
+The bytes are chunked into a list joined at runtime rather than one `const val`, because a JVM
+string constant is capped at 65535 bytes and a photograph passes that easily. They are declared
+above the decode that reads them, because a top-level `val` is initialised in declaration order.
+
+A key whose bytes this host cannot read still refuses, by name — the export says which node names
+which asset rather than emitting a picture it does not have.
+
+### What else a widget body can say
+
+The modifiers are `RemoteModifier`'s, not Compose's, and the palette offers exactly the ones the
+generator can write — `size`, `width`, `height`, `widthIn`, `heightIn`, `fillMax*`, `padding`,
+`background`, `border`, `clip`, `alpha`, `offset`, `rotate`, `scale`, `zIndex`, `wrapContentSize`,
+the scrolls, `weight` and the three alignments. Four Compose modifiers are missing from a widget's
+inspector on purpose, because Remote Compose has no counterpart: `matchParentSize` (use
+`fillMaxSize`), `aspectRatio` (state a `size`), `shadow` (a played document draws no elevation) and
+`testTag`.
+
+Two of them are written by the *container* rather than as a call: `background` with a shape becomes
+`clip(shape).background(colour)`, because `RemoteModifier.background` takes no shape, and an
+alignment becomes the row's, column's or box's own argument, because a played document aligns its
+content as a group. That last one is why a box whose children ask to be aligned differently from one
+another is refused: `RemoteBox` has one `contentAlignment` for all of them.
+
+Refusals work the way the Compose exporter's do: a node or modifier with no Remote Compose
+counterpart is named, with the reason and the route that does work, rather than approximated.
 
 ## Authoring a Wear screen
 
@@ -454,6 +592,99 @@ copied link carries **no credential**: whoever opens it presents their own token
 A design's catalog decides which rows appear — a catalog whose renderer cannot draw SVG has no SVG
 rows, and one that cannot render at all has no Export button. On a server running below Java 21
 there is no render lane, so there is no menu; the startup line says so.
+
+### From a shell: `compose-preview-server design`
+
+The menu is the browser's door. The shell's is `design`, a command on the server binary that is a
+**client**: it talks to a server that is already up and exits, rather than starting one
+([#529](https://github.com/yschimke/compose-preview-server/issues/529)).
+
+```shell
+compose-preview-server design list                       # what this credential can see
+compose-preview-server design render my-widget -o cover.png   # or --format svg
+compose-preview-server design export my-widget -o Widget.kt   # the generated Kotlin
+compose-preview-server design get    my-widget > design.json  # the document
+```
+
+`--server <url>` picks the host (a local one by default, `$COMPOSE_PREVIEW_SERVER` otherwise) and
+`--revision N` pins, exactly as `?revision=` does on the URLs above. Every verb runs the same
+export lane as the menu and the MCP tool: same gate, same renderer, same artifact.
+
+Three things it does deliberately:
+
+- **The credential comes from the environment**, `$COMPOSE_PREVIEW_TOKEN` or the older
+  `$COMPOSE_PREVIEW_UI_BUILDER_TOKEN`, and there is no `--token` flag — a credential on a command
+  line lands in a shell history and a CI log. Each verb asks the server for the least it needs:
+  `ui-builder-read` to list, get and render, `ui-builder-export` to export.
+- **With no credential it asks a human**, through the server's own device-code flow: it prints the
+  approval link and the code, waits, and carries on. So does a token a restart has invalidated,
+  which is otherwise the most confusing failure on this surface — an unauthorised caller and a
+  design that does not exist are deliberately indistinguishable
+  ([#509](https://github.com/yschimke/compose-preview-server/issues/509)). `--no-authorize` turns
+  that off for CI, where nobody is there to approve.
+- **A refusal is not an empty file.** When the generator cannot express a design — `asset/image`
+  has no Remote Compose counterpart, an image background needs a `RemoteImageBitmap` — those
+  diagnostics go to stderr, nothing is written, and the exit code is non-zero.
+
+### When the server is the thing that is broken
+
+Everything above asks a host to render, which is no help when that host's render lane is what you
+are trying to debug: `exception: null` + `image: null` + a valid preview id is the identical
+observable for a missing sidecar, a render that timed out and a render that threw, and the reason
+only ever reaches the server's log
+([#481](https://github.com/yschimke/compose-preview-server/issues/481)). `--local` runs the same
+generator, compiler and daemon **in this process** instead, and says which of those it was
+([#551](https://github.com/yschimke/compose-preview-server/issues/551)):
+
+```shell
+compose-preview-server design get my-widget --server https://preview.coo.ee > doc.json
+compose-preview-server design render --document doc.json --local \
+  --catalog wear-m3.bundle --assets ./assets -o replay.png
+compose-preview-server design export my-widget --local --components m3-catalog=components.json
+```
+
+- `--document <file>` reads the design off disk, so a document captured from a broken host replays
+  against a known-good tree — or yesterday's bundle, or under a debugger. Without it, `--local`
+  still asks a server for the design, but only to **read** it; the render happens here.
+- `--catalog <bundle>` is the classpath a render compiles against, and its manifest picks the
+  daemon (an `android` bundle renders on Robolectric, a desktop one on Skiko). `--assets <dir>` is
+  the uploaded bytes a widget inlines; `--components <catalog>=<components.json>` is the record a
+  record-driven catalog's call sites are proven against. A local `export` needs none of the three.
+- **The output says why.** A missing frame prints the compiler's own diagnostics, the classpath
+  entry count and which daemon opener was built — being chattier than the HTTP surface is the point
+  of the mode rather than a slip.
+
+It does **not** replace [`scripts/ui-builder/design-sync.mjs`](../scripts/ui-builder/design-sync.mjs),
+which moves a design's *document* between a live host and a committed operations fixture in both
+directions ([below](#keep-a-design-in-the-repository)). `design` gets artifacts out; the script
+versions the design itself. They read the same environment variables, so a shell set up for one
+works with the other.
+
+## Letting somebody else in
+
+A design belongs to whoever created it, and nobody else can open it until you say so. Two doors,
+per design:
+
+- **The page.** `/ui-builder/<catalog>/<designId>/access` — visible to the owner, and to an agent
+  acting for them. It lists who can open the design and shares it with somebody else.
+- **The MCP tools.** `ui_builder_design_access` reads that list; `ui_builder_share_design` changes
+  it, so "share this with @colleague" is one tool call.
+
+You name the other party by **actor id**, which is how this server spells an identity:
+`github:<login>` for a signed-in person, `operator` for the token holder, `agent:<fingerprint>` for
+an agent's approved grant. An agent reads its own from `GET /agent-access/whoami`; a browser reads
+yours from `GET /api/ui-builder/v1/identity`, and the share page prints it.
+
+A **viewer** may open and export; an **editor** may also change the design. Neither may share it on
+— a design has exactly one owner, and sharing never hands that over.
+
+### Your agent is already in
+
+An agent working under a grant **you** approved acts for you: designs it creates are owned by *you*,
+and designs you own are open to it, with the read/write/export capabilities you ticked when you
+approved. Nothing has to be shared for that, and nothing outlives the grant — it is your access,
+borrowed. Its edits and comments are still recorded under the agent's own id, so the history says
+who did what. `docs/design/AGENT_ACCESS_GRANTS.md` has the whole rule.
 
 ## Adding a published Remote Compose component
 
@@ -633,6 +864,22 @@ as `typographyToken` — is a different claim about the value and is still prese
 hold the old spelling keep rendering, keep exporting, and are rewritten to `enum` by the next edit
 to that field.
 
+The same shape of rule covers what a value *means*. A property named `color` or `…Color` is a
+colour and takes a `color` (`#RRGGBB` / `#AARRGGBB`) or `colorToken` wrapper naming one of the
+theme roles in the catalog's `statusSemantics.colorTokens`; `assetKey` names one of the keys in
+`statusSemantics.assetRegistry`. Either written otherwise is refused at commit, on the write that
+chooses the value, with the node and the field named — and a design that already holds such a
+value renders it as a visible placeholder rather than failing the frame. The decision, and why
+the line is "the canvas cannot draw it" rather than "the export cannot write it", is
+[`design/UI_BUILDER_VALUE_SEMANTICS.md`](design/UI_BUILDER_VALUE_SEMANTICS.md).
+
+An optional property can be **unset** again, so the component's own default applies: the editor's
+`removeNodeProperty` operation names the node and the field, and on the wire
+`removeNodeProperty` is its own mutation (a `setProperty` whose value is `{"type": "null"}` still
+means the same thing). A required property cannot be unset — the
+refusal names it — and unsetting a property the node does not hold is accepted as the no-op it is.
+Undo puts the value back.
+
 Existing `size`, `fillMaxWidth`, and `padding` modifiers render and export. Their JSON is visible in
 the inspector, but modifier parameter editing is read-only until the released Design API has an
 authoritative modifier mutation; the builder does not invent a browser-only operation.
@@ -666,27 +913,36 @@ with the builder.
 ## Connect an MCP agent
 
 The builder is reachable over the server's own `/mcp` endpoint — the same one the catalog tools use,
-with the same bearer. Seven tools, one per protocol request plus the native render:
+with the same bearer. One tool per protocol request, plus the ones the contract does not define:
 
 | Tool | Capability | What it answers |
 | --- | --- | --- |
-| `ui_builder_list_catalogs` | `ui-builder-read` | What a design's `catalogPin` may name |
+| `ui_builder_list_catalogs` | `ui-builder-read` | What a design's `catalogPin` may name, as a summary with the pin; `full: true` for the whole capability |
 | `ui_builder_list_designs` | `ui-builder-read` | The designs on this box |
-| `ui_builder_get_design` | `ui-builder-read` | One whole document, and the revision to quote next |
+| `ui_builder_get_design` | `ui-builder-read` | One whole document, and the revision to quote next; the pinned catalog only with `includeCatalog: true` |
 | `ui_builder_await_design` | `ui-builder-read` | Waits for somebody else to change the design, and returns what they changed |
 | `ui_builder_create_design` | `ui-builder-write` | A design, from a document or copied from one |
-| `ui_builder_apply` | `ui-builder-write` | `DesignMutationV1` operations — insert, set, delete, move |
+| `ui_builder_apply` | `ui-builder-write` | `DesignMutationV1` operations — insert, set, removeNodeProperty (a null set unsets too), delete, move |
 | `ui_builder_export` | `ui-builder-export` | The generator's Kotlin, or its refusals |
+| `ui_builder_put_asset` | `ui-builder-write` | A picture behind an `assetKey`, for an `asset/image` node to draw |
+| `ui_builder_design_access` | `ui-builder-read` | Who can open the design: its owner, and everyone it is shared with |
+| `ui_builder_share_design` | `ui-builder-write` | Shares it with an actor id as `viewer` or `editor`, or takes that back |
+| `ui_builder_rename_design` | `ui-builder-write` | A new title, from anybody who may write the design; the revision does not move |
+| `ui_builder_delete_design` | `ui-builder-write` | Removes a design — its **owner** only, so a session cleans up after itself and nobody else |
 | `ui_builder_render_native` | `ui-builder-export` | A frame compiled by real Compose on the host, plus where each node drew on it |
 | `ui_builder_list_comments` | `ui-builder-read` | The discussion on a design, and the cursor to wait from |
 | `ui_builder_await_comments` | `ui-builder-read` | Waits for the next thing anybody says about the design |
 | `ui_builder_post_comment` | `ui-builder-write` | A reply, or a new thread pinned to a mark, a node or a point |
+| `ui_builder_acknowledge_comment` | `ui-builder-write` | Says you have **read** a thread, or the whole discussion — not that it is settled |
+| `ui_builder_react_to_comment` | `ui-builder-write` | An emoji on one comment, or `on: false` to take it back; the lightest acknowledgement |
 | `ui_builder_resolve_comment_thread` | `ui-builder-write` | Closes a thread once it is answered, or reopens one |
 
 They are absent from `tools/list` on a box that serves no builder, and `ui_builder_render_native` is
 absent on one that cannot compile — a client reads what this server can do off the tool list rather
 than off a failed call. Replies are the released `McpResponseEnvelopeV1`, except the native render,
-which has no request type in the contract and says so in its own description.
+the rename and the delete, which have no request type in the contract and say so in their own
+descriptions; and a snapshot's `catalog` is left out unless asked for, because an agent pays for it
+as context on every call and the design's `catalogPin` already names it.
 
 A session runs: list catalogs → create or open a design → read its revision → apply mutations →
 export. `baseRevision` is how a concurrent edit is detected, so quote the revision you read rather

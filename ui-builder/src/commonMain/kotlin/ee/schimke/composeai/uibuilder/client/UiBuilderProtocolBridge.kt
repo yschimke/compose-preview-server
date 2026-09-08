@@ -16,11 +16,15 @@ import ee.schimke.composeai.uibuilder.protocol.InsertNodeMutationV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.MoveNodeMutationV1
 import ee.schimke.composeai.uibuilder.protocol.NodeLocationV1
+import ee.schimke.composeai.uibuilder.protocol.NullValueV1
 import ee.schimke.composeai.uibuilder.protocol.ParentSlotV1
 import ee.schimke.composeai.uibuilder.protocol.RedoCommandV1
+import ee.schimke.composeai.uibuilder.protocol.RemoveNodePropertyMutationV1
+import ee.schimke.composeai.uibuilder.protocol.ResetExportDevicesEnvironmentChangeV1
 import ee.schimke.composeai.uibuilder.protocol.RestoreNodeMutationV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceDeltaV1
 import ee.schimke.composeai.uibuilder.protocol.SetDensityEnvironmentChangeV1
+import ee.schimke.composeai.uibuilder.protocol.SetExportDevicesEnvironmentChangeV1
 import ee.schimke.composeai.uibuilder.protocol.SetFontScaleEnvironmentChangeV1
 import ee.schimke.composeai.uibuilder.protocol.SetHeightDpEnvironmentChangeV1
 import ee.schimke.composeai.uibuilder.protocol.SetLayoutDirectionEnvironmentChangeV1
@@ -41,6 +45,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
 private val bridgeJson = Json {
@@ -79,6 +84,9 @@ fun UiBuilderDocument.toProtocolDocument(): DesignDocumentV1 = toDesignDocumentV
  * before the authoritative document timestamp was added cannot reproduce the hashed document and
  * deliberately return null so the caller retains the snapshot fallback.
  */
+/** One property write out of a committed batch; a null [value] is a removal. */
+private data class PropertyWrite(val nodeId: String, val property: String, val value: UiValueV1?)
+
 internal data class PropertyDeltaCandidate(
   val protocolDocument: DesignDocumentV1,
   val rendererDocument: UiBuilderDocument,
@@ -97,26 +105,47 @@ internal fun DesignDocumentV1.preparePropertyDelta(
   var renderer = rendererDocument
   delta.operations.forEach { committed ->
     val command = committed.submission as? DesignCommandV1 ?: return null
-    val mutations = command.operations.map { it as? SetPropertyMutationV1 ?: return null }
+    // A property write in either spelling: a set, a null set, or the explicit removal. A removal
+    // (#480) takes the property off both documents rather than storing a null the canvas would
+    // then read as a value.
+    val writes =
+      command.operations.map { mutation ->
+        when (mutation) {
+          is SetPropertyMutationV1 ->
+            PropertyWrite(
+              mutation.nodeId,
+              mutation.property,
+              mutation.value.takeUnless { it is NullValueV1 },
+            )
+          is RemoveNodePropertyMutationV1 -> PropertyWrite(mutation.nodeId, mutation.property, null)
+          else -> return null
+        }
+      }
     var protocolNodes = protocol.nodes
     var rendererNodes = renderer.nodes
-    mutations.forEach { mutation ->
-      val protocolNode = protocolNodes[mutation.nodeId] ?: return null
-      val rendererNode = rendererNodes[mutation.nodeId] ?: return null
+    writes.forEach { write ->
+      val protocolNode = protocolNodes[write.nodeId] ?: return null
+      val rendererNode = rendererNodes[write.nodeId] ?: return null
+      val value = write.value
       protocolNodes =
         protocolNodes +
           (protocolNode.id to
             protocolNode.copy(
-              properties = protocolNode.properties + (mutation.property to mutation.value)
+              properties =
+                if (value == null) protocolNode.properties - write.property
+                else protocolNode.properties + (write.property to value)
             ))
-      val rendererValue = bridgeJson.encodeToJsonElement(UiValueV1.serializer(), mutation.value)
       rendererNodes =
         rendererNodes +
           (rendererNode.id to
             rendererNode.copy(
               properties =
                 kotlinx.serialization.json.JsonObject(
-                  rendererNode.properties + (mutation.property to rendererValue)
+                  if (value == null) rendererNode.properties - write.property
+                  else
+                    rendererNode.properties +
+                      (write.property to
+                        bridgeJson.encodeToJsonElement(UiValueV1.serializer(), value))
                 )
             ))
     }
@@ -206,6 +235,9 @@ private fun DesignOperation.toProtocolMutation(): DesignMutationV1 =
         property,
         bridgeJson.decodeFromString(UiValueV1.serializer(), value.toString()),
       )
+    // Its own mutation since compose-preview-contracts 2.10.0 (#480); the server reads it as the
+    // same removal a null `setProperty` is, which is what this sent before the wire could say it.
+    is DesignOperation.RemoveNodeProperty -> RemoveNodePropertyMutationV1(nodeId, property)
     is DesignOperation.SetModifiers ->
       SetModifiersMutationV1(
         nodeId,
@@ -226,6 +258,16 @@ private fun DesignOperation.toProtocolMutation(): DesignMutationV1 =
               SetLayoutDirectionEnvironmentChangeV1(
                 LayoutDirectionV1.valueOf(value.jsonPrimitive.content.uppercase())
               )
+            // Reset rather than an empty Set, because the protocol distinguishes them and the
+            // document's own default is the empty set: clearing the picker should leave a design
+            // saying exactly what one written before the field ever existed says.
+            "exportDevices" ->
+              value.jsonArray
+                .map { it.jsonPrimitive.content }
+                .let { devices ->
+                  if (devices.isEmpty()) ResetExportDevicesEnvironmentChangeV1
+                  else SetExportDevicesEnvironmentChangeV1(devices)
+                }
             else -> error("unsupported editor environment field: $field")
           }
         )

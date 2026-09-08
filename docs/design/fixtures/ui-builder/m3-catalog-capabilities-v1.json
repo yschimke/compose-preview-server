@@ -9,6 +9,14 @@
   },
   "statusSemantics": {
     "platform": "mobile",
+    "colorTokens": {
+      "$comment": "The theme roles a colour property or a background modifier may name, which are the roles the canvas draws. A colour is otherwise a #RRGGBB or #AARRGGBB literal. Mirrored by PropertyValueKinds.CANVAS_COLOR_TOKENS in :ui-builder-export and by the runtime's catalog executor; a test pins the three to this list.",
+      "roles": ["background", "surface", "surfaceContainer", "surfaceContainerLow", "surfaceContainerHigh", "surfaceContainerHighest", "primary", "onPrimary", "tertiary", "onTertiary", "onSurface", "onSurfaceVariant", "outlineVariant", "transparent"]
+    },
+    "assetRegistry": {
+      "$comment": "Every assetKey the catalog itself ships, because these are the assets the canvas draws from its own resources: the two project-owned Jetcaster covers in :ui-builder-artwork, the generated gate-0 cover, and the editor's own insert placeholder. A design extends this set with the keys its assets map pins through the asset lane (PUT /api/ui-builder/v1/designs/{designId}/assets/{assetKey}, ui_builder_put_asset; yschimke/compose-preview-server#478). Both reducers refuse any other key at commit (#484).",
+      "keys": ["jetcaster.cover.android-developers-backstage", "jetcaster.cover.google-developers-podcast", "ui-builder.gate0.cover", "editor.placeholder"]
+    },
     "componentMenu": {
       "$comment": "How the UI builder shelves this catalog in its insert panel. Read by ComponentMenu.from; see ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/ComponentMenu.kt. Section names are m3-catalog's own @file:CatalogGroup(section = ...) vocabulary.",
       "groupOrder": [
@@ -61,6 +69,8 @@
         "m3/text-field": { "group": "Text inputs", "variantProperty": "variant" },
         "m3/time-picker": { "group": "Selection", "variantProperty": "mode" },
         "remote-compose/document": { "group": "Embedded" },
+        "remote-compose/inline": { "group": "Embedded" },
+        "remote-compose/custom": { "group": "Embedded" },
         "shape/colour-dot": { "group": "Styles" },
         "shape/linear-gradient": { "group": "Styles" },
         "shape/radial-gradient": { "group": "Styles" }
@@ -86,21 +96,21 @@
       "traits": ["ImageContent"],
       "slots": [],
       "properties": [
-        { "name": "assetKey", "jsonType": "string", "required": true },
+        { "name": "assetKey", "jsonType": "string", "required": true, "notes": "The key of an asset the canvas can draw, written as {\"type\":\"assetKey\",\"value\":\"…\"}: one of statusSemantics.assetRegistry.keys, or a key pinned in the design's own assets map by PUT /api/ui-builder/v1/designs/{designId}/assets/{assetKey} (raw PNG, JPEG, GIF or WebP body) or the ui_builder_put_asset MCP tool. Any other key is refused at commit, so put the picture before inserting the node. A pinned key whose bytes this lane cannot show renders as a placeholder naming it, and exports as Image(painter = ColorPainter(...)) with an ASSET_PLACEHOLDER warning." },
         { "name": "contentDescription", "jsonType": ["string", "null"], "required": false },
         { "name": "contentScale", "jsonType": "string", "required": false, "allowedValues": ["crop", "fit", "fillBounds", "inside"] },
         { "name": "alignment", "jsonType": "string", "required": false }
       ],
       "modifierCapabilities": ["size", "fillMaxSize", "fillMaxWidth", "clip", "matchParentSize", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "fillMaxHeight", "align", "alignHorizontal", "alignVertical", "weight"],
-      "wasm": { "platformSupported": true, "adapterStatus": "planned", "notes": "Requires the pinned, hash-checked builder asset registry and deterministic loading state." },
+      "wasm": { "platformSupported": true, "adapterStatus": "supported", "notes": "Draws the bytes the design's assets map pins under assetKey (content-addressed, hash-checked, stored by the host), the project-owned Jetcaster covers, or a visible placeholder carrying the key. External URLs are not accepted." },
       "code": { "symbol": "Image", "imports": ["androidx.compose.foundation.Image", "androidx.compose.ui.layout.ContentScale"] },
-      "svg": { "status": "raster-fallback-required", "fallback": "embedded-raster", "blocksExport": false, "notes": "The current recorder embeds deterministic generated placeholder bytes with source and payload provenance; production asset bytes remain a release gate and external URLs are forbidden." }
+      "svg": { "status": "raster-fallback-required", "fallback": "embedded-raster", "blocksExport": false, "notes": "The recorder embeds the pinned asset bytes, or the project-owned artwork, with source and payload provenance; a key with no bytes behind it is drawn as a vector placeholder rather than declared as a raster fallback." }
     },
     {
       "componentId": "layout/box",
       "displayName": "Box",
       "role": "Container",
-      "traits": ["OrderedContent", "OverlayContent", "LayoutPrimitive"],
+      "traits": ["OrderedContent", "OverlayContent", "LayoutPrimitive", "RemoteAuthorable"],
       "slots": [
         { "name": "children", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
       ],
@@ -117,7 +127,7 @@
       "componentId": "layout/column",
       "displayName": "Column",
       "role": "Container",
-      "traits": ["OrderedContent", "VerticalContent", "LayoutPrimitive"],
+      "traits": ["OrderedContent", "VerticalContent", "LayoutPrimitive", "RemoteAuthorable"],
       "slots": [
         { "name": "children", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
       ],
@@ -218,7 +228,7 @@
       "componentId": "layout/row",
       "displayName": "Row",
       "role": "Container",
-      "traits": ["OrderedContent", "HorizontalContent", "LayoutPrimitive"],
+      "traits": ["OrderedContent", "HorizontalContent", "LayoutPrimitive", "RemoteAuthorable"],
       "slots": [
         { "name": "children", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
       ],
@@ -243,7 +253,7 @@
         { "name": "content", "cardinality": { "min": 1, "max": 1 }, "ordered": false, "acceptedRoles": ["Scaffold", "Container"], "acceptedTraits": ["AnyContent"] }
       ],
       "properties": [
-        { "name": "containerColor", "jsonType": "string", "required": false },
+        { "name": "containerColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "contentWindowInsets", "jsonType": "array", "required": false },
         { "name": "loading", "jsonType": "boolean", "required": false },
         { "name": "scrollStateKey", "jsonType": "string", "required": false }
@@ -287,7 +297,7 @@
         { "name": "style", "jsonType": "string", "required": true, "allowedValues": ["filled", "filledTonal", "text", "fab"] },
         { "name": "enabled", "jsonType": "boolean", "required": false },
         { "name": "selected", "jsonType": ["boolean", "string", "object"], "required": false, "notes": "A flag, or a `stateEquals` read of a declared state variable — which is an object, and why `object` is one of the accepted types." },
-        { "name": "containerColor", "jsonType": "string", "required": false },
+        { "name": "containerColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "onClickAction", "jsonType": ["object", "null"], "required": false }
       ],
       "modifierCapabilities": ["size", "fillMaxWidth", "padding", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "align", "alignHorizontal", "alignVertical", "weight"],
@@ -305,7 +315,7 @@
       ],
       "properties": [
         { "name": "variant", "jsonType": "string", "required": false, "allowedValues": ["filled", "elevated", "outlined"] },
-        { "name": "containerColor", "jsonType": "string", "required": false },
+        { "name": "containerColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "shape", "jsonType": "string", "required": false },
         { "name": "stableKey", "jsonType": "string", "required": false },
         { "name": "elevationDp", "jsonType": "number", "required": false },
@@ -325,8 +335,8 @@
         { "name": "title", "cardinality": { "min": 0, "max": 1 }, "ordered": false, "acceptedRoles": ["Leaf"], "acceptedTraits": ["TextContent"] }
       ],
       "properties": [
-        { "name": "containerColor", "jsonType": "string", "required": false },
-        { "name": "scrolledContainerColor", "jsonType": "string", "required": false },
+        { "name": "containerColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
+        { "name": "scrolledContainerColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "scrollBehavior", "jsonType": "string", "required": false, "allowedValues": ["pinned", "enterAlways", "exitUntilCollapsed"], "notes": "Reaches the generated Kotlin as the matching TopAppBarDefaults behavior. The canvas draws the bar pinned whatever this says: a scroll behavior is driven by a nested-scroll connection the document has no scaffold to carry." }
       ],
       "modifierCapabilities": ["fillMaxWidth", "padding", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "align", "alignHorizontal", "alignVertical", "weight"],
@@ -378,7 +388,7 @@
         { "name": "confirmButton", "cardinality": { "min": 1, "max": 1 }, "ordered": false, "acceptedRoles": ["Container"], "acceptedTraits": ["Action"] }
       ],
       "properties": [
-        { "name": "containerColor", "jsonType": "string", "required": false },
+        { "name": "containerColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "tonalElevationDp", "jsonType": "number", "required": false },
         { "name": "shapeDp", "jsonType": "number", "required": false }
       ],
@@ -415,7 +425,7 @@
       "slots": [],
       "properties": [
         { "name": "thicknessDp", "jsonType": "number", "required": false },
-        { "name": "color", "jsonType": "string", "required": false }
+        { "name": "color", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." }
       ],
       "modifierCapabilities": ["size", "fillMaxWidth", "padding", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "align", "alignHorizontal", "alignVertical", "weight"],
       "wasm": { "platformSupported": true, "adapterStatus": "supported" },
@@ -432,7 +442,7 @@
       ],
       "properties": [
         { "name": "expanded", "jsonType": "boolean", "required": false },
-        { "name": "containerColor", "jsonType": "string", "required": false },
+        { "name": "containerColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "contentPadding", "jsonType": "object", "required": false },
         { "name": "alignment", "jsonType": "string", "required": false }
       ],
@@ -451,7 +461,7 @@
         { "name": "iconKey", "jsonType": "string", "required": true, "allowedValues": ["accessTime", "accountCircle", "add", "addCircle", "arrowBack", "arrowForward", "bookmark", "bookmarkBorder", "calendarMonth", "cameraAlt", "check", "checkCircle", "chevronRight", "close", "coffee", "delete", "download", "edit", "email", "expandMore", "favorite", "genres", "home", "image", "info", "locationOn", "lock", "menu", "moreVert", "notifications", "pauseCircle", "person", "phone", "playCircle", "playlistAdd", "refresh", "remove", "search", "settings", "share", "star", "stopCircle", "upload", "videoLibrary", "visibility", "warning"] },
         { "name": "contentDescription", "jsonType": ["string", "null"], "required": false },
         { "name": "sizeDp", "jsonType": "number", "required": false },
-        { "name": "color", "jsonType": "string", "required": false }
+        { "name": "color", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." }
       ],
       "modifierCapabilities": ["size", "padding", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "align", "alignHorizontal", "alignVertical", "weight"],
       "wasm": { "platformSupported": true, "adapterStatus": "supported", "notes": "Only explicitly registered, license-compatible vector keys are valid." },
@@ -491,7 +501,7 @@
         { "name": "trailing", "cardinality": { "min": 0, "max": 1 }, "ordered": false, "acceptedRoles": ["Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
       ],
       "properties": [
-        { "name": "startAccentColor", "jsonType": "string", "required": false, "notes": "A 3dp bar down the leading edge, drawn behind the item. Empty draws none." }
+        { "name": "startAccentColor", "jsonType": "string", "required": false, "notes": "A 3dp bar down the leading edge, drawn behind the item. Empty draws none. A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." }
       ],
       "modifierCapabilities": ["fillMaxWidth", "padding", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "align", "alignHorizontal", "alignVertical", "weight"],
       "wasm": { "platformSupported": true, "adapterStatus": "supported" },
@@ -626,19 +636,19 @@
       "componentId": "m3/surface",
       "displayName": "Surface",
       "role": "Container",
-      "traits": ["ScreenContent", "PaneContent", "GridItem", "ListItem"],
+      "traits": ["ScreenContent", "PaneContent", "GridItem", "ListItem", "RemoteAuthorable"],
       "slots": [
         { "name": "content", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
       ],
       "properties": [
-        { "name": "containerColor", "jsonType": "string", "required": false },
-        { "name": "contentColor", "jsonType": "string", "required": false },
+        { "name": "containerColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit. Painted across the area the surface is measured to, and no further. A root surface with no size modifier wraps its content, so its containerColor is the frame's ground only when the root fills the frame (fillMaxSize); the ground outside it comes from environment.theme. The export reports ROOT_SURFACE_DOES_NOT_FILL_FRAME when a coloured root does not." },
+        { "name": "contentColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "shapeDp", "jsonType": "number", "required": false },
         { "name": "tonalElevationDp", "jsonType": "number", "required": false },
-        { "name": "themePrimaryColor", "jsonType": "string", "required": false },
-        { "name": "themeBackgroundColor", "jsonType": "string", "required": false },
-        { "name": "themeSurfaceColor", "jsonType": "string", "required": false },
-        { "name": "themeContentColor", "jsonType": "string", "required": false },
+        { "name": "themePrimaryColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
+        { "name": "themeBackgroundColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
+        { "name": "themeSurfaceColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
+        { "name": "themeContentColor", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "themeTypeScale", "jsonType": "number", "required": false },
         { "name": "themeCornerRadiusDp", "jsonType": "number", "required": false }
       ],
@@ -682,14 +692,14 @@
       "componentId": "m3/text",
       "displayName": "Text",
       "role": "Leaf",
-      "traits": ["TextContent"],
+      "traits": ["TextContent", "RemoteAuthorable"],
       "slots": [],
       "properties": [
         { "name": "text", "jsonType": "string", "required": true },
         { "name": "style", "jsonType": "string", "required": false, "allowedValues": ["displayLarge", "displayMedium", "displaySmall", "headlineLarge", "headlineMedium", "headlineSmall", "titleLarge", "titleMedium", "titleSmall", "bodyLarge", "bodyMedium", "bodySmall", "labelLarge", "labelMedium", "labelSmall"] },
         { "name": "fontWeight", "jsonType": "string", "required": false, "allowedValues": ["normal", "medium", "semiBold", "bold"] },
         { "name": "fontStyle", "jsonType": "string", "required": false, "allowedValues": ["normal", "italic"] },
-        { "name": "color", "jsonType": "string", "required": false },
+        { "name": "color", "jsonType": "string", "required": false, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "fontSizeSp", "jsonType": "number", "required": false },
         { "name": "lineHeightSp", "jsonType": "number", "required": false },
         { "name": "letterSpacingSp", "jsonType": "number", "required": false },
@@ -750,13 +760,32 @@
       "svg": { "status": "verified", "fallback": "none", "blocksExport": false }
     },
     {
+      "componentId": "remote-compose/custom",
+      "displayName": "Custom component",
+      "role": "Container",
+      "traits": ["RemoteContent", "RemoteAuthorable", "OrderedContent"],
+      "slots": [
+        { "name": "content", "cardinality": { "min": 0, "max": null }, "ordered": true, "acceptedRoles": ["Scaffold", "Container", "Leaf"], "acceptedTraits": ["AnyContent"] }
+      ],
+      "properties": [
+        { "name": "name", "jsonType": "string", "required": true, "notes": "The custom-component config name the document writes and the host registers a renderer under. Namespaced by convention (slot:, rc:, or an application domain) so two documents composed together cannot collide." },
+        { "name": "widthDp", "jsonType": "number", "required": false, "notes": "The bounds the document reserves for host content it cannot measure. A player lays out a custom component from the document, not from the Compose content filling it." },
+        { "name": "heightDp", "jsonType": "number", "required": false, "notes": "See widthDp." }
+      ],
+      "modifierCapabilities": ["size", "fillMaxSize", "fillMaxWidth", "padding", "clip", "matchParentSize", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "fillMaxHeight", "align", "alignHorizontal", "alignVertical", "weight"],
+      "wasm": { "platformSupported": true, "adapterStatus": "supported", "notes": "Draws the ordinary Compose content in its own slot, which is what a registered renderer draws on a real player too. A preview only draws it if a custom component of this name is registered; an unregistered one is a player support issue rather than silently borrowed content. The code mapping names the registry rather than a composable, because the composable is whatever the host registers under this name." },
+      "code": { "symbol": "RcCustomComponentRegistry", "imports": ["ee.schimke.composeai.rcplayer.compose.RcCustomComponentRegistry"] },
+      "svg": { "status": "unsupported", "fallback": "none", "blocksExport": true, "notes": "Host content inside a Remote Compose document has no structured SVG answer." }
+    },
+    {
       "componentId": "remote-compose/document",
       "displayName": "Remote Compose document",
       "role": "Container",
       "traits": ["RemoteContent", "OrderedContent", "DynamicSlots"],
       "slots": [],
       "properties": [
-        { "name": "documentBase64", "jsonType": "string", "required": true, "notes": "Base64-encoded Remote Compose wire document; limited to 8 MiB encoded." },
+        { "name": "documentBase64", "jsonType": "string", "required": false, "notes": "Base64-encoded Remote Compose wire document; limited to 8 MiB encoded. Not required on its own: a node carries either the bytes or a documentUrl, and the editor's own rule reports a node that carries neither." },
+        { "name": "documentUrl", "jsonType": "string", "required": false, "notes": "Absolute http(s) URL the host resolves to the same wire document. Read only when documentBase64 is empty, so a design that carries its own bytes never depends on the network." },
         { "name": "theme", "jsonType": "string", "required": false, "allowedValues": ["inherit", "light", "dark", "system"] },
         { "name": "namedValues", "jsonType": "object", "required": false, "notes": "Typed host values keyed by the Remote Compose named-variable name." }
       ],
@@ -766,13 +795,29 @@
       "svg": { "status": "unsupported", "fallback": "none", "blocksExport": true, "notes": "Nested Remote Compose SVG export requires an explicit renderer implementation." }
     },
     {
+      "componentId": "remote-compose/inline",
+      "displayName": "Remote Compose content",
+      "role": "Container",
+      "traits": ["RemoteContent", "OrderedContent"],
+      "slots": [
+        { "name": "content", "cardinality": { "min": 0, "max": 1 }, "ordered": true, "acceptedRoles": ["Container", "Leaf"], "acceptedTraits": ["RemoteAuthorable"] }
+      ],
+      "properties": [
+        { "name": "theme", "jsonType": "string", "required": false, "allowedValues": ["inherit", "light", "dark", "system"] }
+      ],
+      "modifierCapabilities": ["size", "fillMaxSize", "fillMaxWidth", "padding", "clip", "matchParentSize", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "fillMaxHeight", "align", "alignHorizontal", "alignVertical", "weight"],
+      "wasm": { "platformSupported": true, "adapterStatus": "planned", "notes": "The subtree is drawn with the ordinary Compose stand-ins remote-m3 already uses, inside a marked frame. The canvas has no Remote Compose writer, so until the subtree is captured these are the shapes the generated @RemoteComposable body describes rather than the pixels a player produces. A host that captures it - compiling the generated body and running captureSingleRemoteDocument on the Android daemon - answers with a document, and the same frame then plays it through the player that draws an embedded remote-compose/document, with the design's own custom components registered by name." },
+      "code": { "symbol": "RemoteDocumentPlayer", "imports": ["androidx.compose.remote.creation.compose.capture.captureSingleRemoteDocument", "androidx.compose.remote.player.compose.RemoteDocumentPlayer"] },
+      "svg": { "status": "unsupported", "fallback": "none", "blocksExport": true, "notes": "The subtree becomes a Remote Compose document at export; SVG export of one needs an explicit renderer, exactly as remote-compose/document does." }
+    },
+    {
       "componentId": "shape/colour-dot",
       "displayName": "Colour dot",
       "role": "Leaf",
       "traits": ["Decoration", "DrawLayer"],
       "slots": [],
       "properties": [
-        { "name": "color", "jsonType": "string", "required": true },
+        { "name": "color", "jsonType": "string", "required": true, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "diameterDp", "jsonType": "number", "required": false }
       ],
       "modifierCapabilities": ["padding", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "align", "alignHorizontal", "alignVertical", "weight"],
@@ -787,8 +832,8 @@
       "traits": ["DrawLayer", "OverlayContent"],
       "slots": [],
       "properties": [
-        { "name": "startColor", "jsonType": "string", "required": true },
-        { "name": "endColor", "jsonType": "string", "required": true },
+        { "name": "startColor", "jsonType": "string", "required": true, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
+        { "name": "endColor", "jsonType": "string", "required": true, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "direction", "jsonType": "string", "required": false }
       ],
       "modifierCapabilities": ["size", "fillMaxSize", "fillMaxWidth", "clip", "matchParentSize", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "fillMaxHeight", "align", "alignHorizontal", "alignVertical", "weight"],
@@ -803,8 +848,8 @@
       "traits": ["DrawLayer", "BackgroundContent"],
       "slots": [],
       "properties": [
-        { "name": "innerColor", "jsonType": "string", "required": true },
-        { "name": "outerColor", "jsonType": "string", "required": true },
+        { "name": "innerColor", "jsonType": "string", "required": true, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
+        { "name": "outerColor", "jsonType": "string", "required": true, "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit." },
         { "name": "innerAlpha", "jsonType": "number", "required": false },
         { "name": "center", "jsonType": "string", "required": false }
       ],

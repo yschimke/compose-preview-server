@@ -50,6 +50,34 @@ internal object LocalUiBuilder {
   /** This lane's own flag: print the URL instead of opening a browser, as `browse` has. */
   const val NO_OPEN: String = "--no-open"
 
+  /**
+   * This lane's other flag: the builder against the packaged design systems, with no project.
+   *
+   * `ui` exists to point the builder at *your* module, and everything that makes it worth using —
+   * the discovery, the component record, the export that calls your own composables — needs a build
+   * host and a Gradle project. But the other reason to open the builder is to draw against a design
+   * system that is already packaged in it, which needs none of that, and until now the only way to
+   * do it was to work out the `serve` flags by hand.
+   *
+   * A flag rather than a silent degrade. The two modes differ in what the export can do, and a `ui`
+   * that quietly became the smaller one whenever a build host happened to be missing would look
+   * like it had worked — which is exactly the failure the hard exit in `StandaloneServerMain` was
+   * added to avoid.
+   */
+  const val NO_PROJECT: String = "--no-project"
+
+  /**
+   * The catalogs offered when a projectless builder names none.
+   *
+   * Both are packaged adapters ([ProductionUiBuilderRuntime]), which is the whole reason this mode
+   * needs nothing fetched: `--catalogs` serves the browsable preview *sites*, a different feature,
+   * and a builder catalog with no packaged adapter is refused at startup rather than fetched.
+   */
+  val DEFAULT_CATALOGS: List<String> = listOf(DEFAULT_CATALOG, "remote-m3")
+
+  /** Whether this invocation is the projectless one. */
+  fun isProjectless(args: List<String>): Boolean = NO_PROJECT in args
+
   /** The catalog the builder is opened at — the caller's first, else the packaged default. */
   fun catalog(args: List<String>): String =
     args.flagValue("--ui-builder-catalogs")?.split(",")?.firstOrNull()?.trim()?.takeIf {
@@ -69,19 +97,30 @@ internal object LocalUiBuilder {
     componentRecord: File,
     builderDir: File?,
   ): List<String> = buildList {
-    // `--no-open` is this lane's flag, not a server flag; forwarding it would leave an argument the
-    // server does not know in its argv.
-    addAll(args.filterNot { it == NO_OPEN })
+    val projectless = isProjectless(args)
+    // `--no-open` and `--no-project` are this lane's flags, not server flags; forwarding one would
+    // leave an argument the server does not know in its argv.
+    addAll(args.filterNot { it == NO_OPEN || it == NO_PROJECT })
     // The builder is being pointed at a project, so the previews have to be discovered and built.
     // `--module` implies it already; `--discover` alone means every module in the build.
-    if (!args.hasFlag("--module") && !args.hasFlag("--discover")) add("--discover")
+    if (!projectless && !args.hasFlag("--module") && !args.hasFlag("--discover")) add("--discover")
     if (builderDir != null && !args.hasFlag("--ui-builder-dir")) {
       add("--ui-builder-dir")
       add(builderDir.path)
     }
-    if (!args.hasFlag("--ui-builder-components")) {
+    // No project, no record: the Compose export falls back to what the packaged catalog can write
+    // on its own, and naming a file that discovery is never going to produce would make the export
+    // refuse against a path that cannot appear.
+    if (!projectless && !args.hasFlag("--ui-builder-components")) {
       add("--ui-builder-components")
       add("$catalog=${componentRecord.path}")
+    }
+    // Offer every packaged design system rather than only the one being opened: the reason to run
+    // this mode is to draw against them, and picking one at launch would mean relaunching to try
+    // the other.
+    if (projectless && !args.hasFlag("--ui-builder-catalogs")) {
+      add("--ui-builder-catalogs")
+      add(DEFAULT_CATALOGS.joinToString(","))
     }
     if (NO_OPEN !in args) {
       if (!args.hasFlag("--open-browser")) add("--open-browser")
@@ -165,7 +204,19 @@ internal object LocalUiBuilder {
     there is nothing to point the builder at, and this command says so instead of serving an empty
     builder.
 
+    Or, with no project at all:
+
+        compose-preview-server ui --no-project
+
+    which opens the builder against the packaged design systems
+    (${DEFAULT_CATALOGS.joinToString(", ")}) and needs nothing else — no build host, no Gradle
+    project, no catalog to fetch. Designs are saved under ~/.compose-preview/ui-builder-state and
+    survive a restart. The Compose export still writes code; what it cannot do is call your
+    project's own composables, because there is no project to have discovered them from.
+
     Options:
+      --no-project      Open the builder against the packaged design systems, with no Gradle project
+                        and no build host. Everything below about modules stops applying.
       --module <path>   Build and serve one Gradle module. Omit it to discover every module in the
                         build (a build with more than one module of previews then asks you to pick).
       --variant <name>  Android build variant used for previews.

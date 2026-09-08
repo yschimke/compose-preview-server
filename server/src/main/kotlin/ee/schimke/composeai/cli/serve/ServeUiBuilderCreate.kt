@@ -40,13 +40,12 @@ internal class ServeUiBuilderCreate(
   }
 
   suspend fun create(
-    actorId: String,
+    actor: AuthenticatedUiBuilderActor,
     catalogSystemId: String,
     designId: String,
     templateId: String,
     state: List<NewDesignState>,
   ): Outcome {
-    val actor = AuthenticatedUiBuilderActor(actorId)
     when (val existing = service.executeMapped(OpenDesignRequestV1(designId), actor)) {
       is UiBuilderServiceResponse.Error ->
         if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {
@@ -112,8 +111,7 @@ internal class ServeUiBuilderCreate(
    * shape: the service validates every node against the catalog it resolves, and duplicating that
    * here would be a second opinion that can disagree with the one that counts.
    */
-  suspend fun install(actorId: String, document: DesignDocumentV1): Outcome {
-    val actor = AuthenticatedUiBuilderActor(actorId)
+  suspend fun install(actor: AuthenticatedUiBuilderActor, document: DesignDocumentV1): Outcome {
     when (val existing = service.executeMapped(OpenDesignRequestV1(document.id), actor)) {
       is UiBuilderServiceResponse.Error ->
         if (existing.error.code != ServiceErrorCodeV1.NOT_FOUND) {

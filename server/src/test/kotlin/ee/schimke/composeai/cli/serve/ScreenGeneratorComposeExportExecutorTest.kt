@@ -11,6 +11,7 @@ import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.StateValueV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
+import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
 import kotlin.test.Test
@@ -41,6 +42,12 @@ import kotlin.test.assertTrue
  * That was a real improvement arriving as a red golden, which is what a golden is for — but note
  * the shape of it, because this repository pins that dependency and the next such change lands the
  * same way.
+ *
+ * And once more when a card's content gained the `Box` this catalog says it is
+ * (`ScreenDocumentProjection.cardContentBox`): the two texts inside the card now sit in a
+ * `Box(modifier = Modifier.fillMaxWidth())` rather than straight under `Card`'s `ColumnScope`,
+ * which is what the canvas and the capability exporter had drawn all along. `Box` is a plain
+ * foundation call site the same classpath resolves; the change is structural, not lexical.
  */
 class ScreenGeneratorComposeExportExecutorTest {
 
@@ -251,6 +258,7 @@ class ScreenGeneratorComposeExportExecutorTest {
 
 package generated.uibuilder
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -272,13 +280,60 @@ fun ScheduleOperations() {
         Column(modifier = Modifier.padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 16.dp), content = {
             Text(text = "Schedule", color = MaterialTheme.colorScheme.onBackground, style = MaterialTheme.typography.headlineSmall)
             Card(modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium), shape = MaterialTheme.shapes.medium, content = {
-                Text(text = "Opening keynote", modifier = Modifier.width(120.dp), style = MaterialTheme.typography.bodyMedium)
-                Text(text = "09:00", color = Color(4284960932L))
+                Box(modifier = Modifier.fillMaxWidth(), content = {
+                    Text(text = "Opening keynote", modifier = Modifier.width(120.dp), style = MaterialTheme.typography.bodyMedium)
+                    Text(text = "09:00", color = Color(4284960932L))
+                })
             })
         })
     })
 }
 """
         .trimStart('\n')
+  }
+
+  /**
+   * A design that named devices gets one `@Preview(device = …)` per id, and its own frame beside
+   * them.
+   *
+   * The frame comes along deliberately: the design's own size is the canvas its author approved,
+   * and a file that draws a screen on a Pixel Fold but not at the size it was designed at has
+   * dropped the one picture that was signed off.
+   */
+  @Test
+  fun `a named device set becomes one Preview each, beside the design's own frame`() {
+    val base = ScreenGeneratorScreenFixture.document()
+    val document =
+      base.copy(
+        environment =
+          base.environment.copy(
+            theme = ThemeV1.DARK,
+            exportDevices = listOf("id:pixel_6", "id:pixel_fold"),
+          )
+      )
+
+    val source = export(document).content
+
+    assertTrue("""device = "id:pixel_6"""" in source, source)
+    assertTrue("""device = "id:pixel_fold"""" in source, source)
+    // The frame the design was drawn at, on its own wrapper.
+    assertTrue("widthDp = 400," in source, source)
+    assertTrue("heightDp = 800," in source, source)
+    assertTrue("UI_MODE_NIGHT_YES" in source, source)
+    // …and not on the device wrappers, which supply their own geometry.
+    val fanOut = source.substringAfter("""device = "id:pixel_6"""")
+    assertFalse("widthDp" in fanOut, fanOut)
+  }
+
+  /**
+   * A design that named none is untouched, which is what the golden above already pins and what
+   * makes this change contained: a `@Preview` is a claim about how a screen should be looked at,
+   * and turning it on for every export would put one into files whose authors never asked.
+   */
+  @Test
+  fun `a design naming no devices still carries no preview at all`() {
+    val source = export().content
+
+    assertFalse("@Preview" in source, source)
   }
 }
