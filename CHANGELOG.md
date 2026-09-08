@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.19.0](https://github.com/yschimke/compose-preview-server/compare/v3.18.0...v3.19.0) (2026-09-08)
+
+
+### Features
+
+* **serve:** one Full comparisons menu, and stage presentation in the panel ([#588](https://github.com/yschimke/compose-preview-server/issues/588)) ([d215bad](https://github.com/yschimke/compose-preview-server/commit/d215bad8195a498daa6eaa2626bfc2aca1922b56))
+* **serve:** one renderer control, and the sibling as a peer of the kit ([#585](https://github.com/yschimke/compose-preview-server/issues/585)) ([a80ea5d](https://github.com/yschimke/compose-preview-server/commit/a80ea5d636e72378e6527cdd0b4450365403d804))
+* **serve:** open the UI builder locally in one command ([#590](https://github.com/yschimke/compose-preview-server/issues/590)) ([ac96ca0](https://github.com/yschimke/compose-preview-server/commit/ac96ca0f4ebd09a08f8536700c3ba078b4baad9e))
+
+
+### Bug Fixes
+
+* **serve:** keep the renderer pill whole when live, and never join the sign-in ([#586](https://github.com/yschimke/compose-preview-server/issues/586)) ([c2a1ae6](https://github.com/yschimke/compose-preview-server/commit/c2a1ae62eb970d5c18f5c89a2041030c26b59734))
+* **serve:** regenerate the goldens the compose-ai-tools 2.3.0 bump moved ([#582](https://github.com/yschimke/compose-preview-server/issues/582)) ([d790763](https://github.com/yschimke/compose-preview-server/commit/d790763ea8b713f2565e0db106c3fe60eb4b691a))
+* **ui-builder:** match a github grant to its actor, and write the widget modifiers a design uses ([#589](https://github.com/yschimke/compose-preview-server/issues/589)) ([850e8a5](https://github.com/yschimke/compose-preview-server/commit/850e8a5103eb8b810cb770e5a6dc82ba4ecd1f70))
+
 ## [3.18.0](https://github.com/yschimke/compose-preview-server/compare/v3.17.0...v3.18.0) (2026-09-08)
 
 
