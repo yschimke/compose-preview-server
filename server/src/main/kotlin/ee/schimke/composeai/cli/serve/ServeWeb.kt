@@ -5973,18 +5973,28 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     val designToolLabel: String? = null,
     /**
-     * The sibling catalog this one is a parallel rendition of ("M3 Wear OS Apps Design Kit", …),
-     * when the `compareWith` + `parallel` pairing resolves on this server — read off the same
-     * [ServeHttpServer.parallelSpecSource] the catalog landing labels its own chip from, so the
-     * card and the landing can never disagree about whether there is a sibling to compare against.
+     * The sibling catalog this one is a parallel rendition of, when the `compareWith` + `parallel`
+     * pairing resolves **and the sibling is resident with a counterpart to draw** — the same
+     * condition the compare wall builds its `format=parallel` rows from, so the card cannot
+     * deep-link a format that page would find empty.
      *
-     * Both the switch and the label, unlike [designToolLabel]'s split from
-     * [hasReferenceComparison]: a pairing with no name is not a pairing this server can resolve at
-     * all, so there is no "compare to an unnamed sibling" case to keep an action for. Null — the
-     * default, and every catalog that declares no `compareWith` — renders no action.
+     * Both the switch and the name, unlike [designToolLabel]'s split from [hasReferenceComparison]:
+     * a pairing this server cannot resolve is not a pairing to keep an action for. Null — the
+     * default, and every catalog that declares no `compareWith` — renders no chip.
      */
-    val parallelComparisonLabel: String? = null,
+    val parallelComparison: ParallelComparison? = null,
   )
+
+  /**
+   * The paired catalog a card can offer a comparison against, in both the lengths a card needs.
+   *
+   * Two fields because a catalog has two names and the card needs each in a different place: the
+   * SYSTEM id is short, bounded and already the handle a card prints under its own title, so it is
+   * what the chip reads; the TITLE is what a person calls it, so it is what the link is announced
+   * and tooltipped as. Carrying only one would mean either a chip four times the width of its
+   * neighbour or a link announced as a slug.
+   */
+  data class ParallelComparison(val system: String, val title: String)
 
   /**
    * One component offered by the home page's cross-catalog command palette. The server keeps this
@@ -6201,54 +6211,30 @@ ${captureControlsHtml().prependIndent("          ")}
     val tokenParam = if (isPublic) "" else "token=" + WebEscaping.urlEncodeSegment(token)
     val suffix = querySuffix(tokenParam)
     /**
-     * The card's **compare to Figma** action: a chip in the card's own meta block, under the
-     * preview count, deep-linking that catalog's comparison page straight to its `reference`
-     * format.
+     * The card's comparison destinations, shortest label that still identifies them.
      *
-     * It is on the front door because the comparison is a destination people arrive *for*, and
-     * until this it was reachable only from the chip row on a catalog's own landing page — so
-     * "compare this system against its Figma" cost a visit to the catalog first, and was invisible
-     * from `/` (compose-ai-tools#4324).
-     *
-     * The label names the design tool the catalog is actually specified by, for the same reason the
-     * landing chip does: "compare to Figma" says what you get where "compare reference" would name
-     * the format slug — and falls back to the landing's own neutral "compare to design references"
-     * for a catalog whose references name no tool (a checked-in `png`, an `svg`, an unmapped
-     * provider). Whether there is an action at all is [HomeSystem.hasReferenceComparison], never
-     * the label: those are two questions, and answering the first with the second dropped the
-     * action from every provider-neutral catalog (#4349).
-     *
-     * The accessible name carries the catalog's title ("Compose Material 3: compare to Figma")
-     * while the visible text stays short. A front door lists many catalogs and several may name the
-     * same tool, so half a dozen links otherwise announce identically as "compare to Figma" with
-     * nothing in a screen-reader link list to tell them apart. The visible string is kept intact
-     * inside the accessible name (WCAG 2.5.3 Label in Name), so "click compare to Figma" still
-     * matches.
-     *
-     * It lives INSIDE the card, which is why the card is a `<div>` whose title carries the
-     * `.cp-sys-open` link rather than being one big `<a>`: a link inside a link is not a thing HTML
-     * has. `.cp-sys-open` stretches an overlay across the whole tile, so the tile is still one
-     * click target, and the chip sits above that overlay as the one region that goes somewhere
-     * else. The earlier shape hung the chip under the card in a wrapper cell, which meant a card
-     * with an action was taller than one without unless an empty row was reserved for it — with the
-     * chip inside, the grid's own stretch makes every card in a section the same size and the
-     * reservation is gone.
-     *
-     * Suppressed in the component-browser ("Catalog") interface mode, which hides the format
-     * comparisons on the catalog landing too — the mode is for browsing components, not for
-     * auditing them against a design file.
+     * The design tool is already a short proper noun ("Figma"). The sibling is a whole catalog, and
+     * its TITLE is not: `M3 Wear OS Apps Design Kit` is four times the width of the chip beside it.
+     * So the sibling chip carries its SYSTEM ID — `wear-m3-catalog` — which is short, bounded, and
+     * the handle this very card already prints under its own title for the catalog it belongs to.
+     * The full title stays in the accessible name and the tooltip, where length costs nothing.
      */
-    fun compareAction(s: HomeSystem, sysSeg: String): String {
-      if (componentBrowser || !s.hasReferenceComparison) return ""
-      val query =
-        listOf("format=reference", tokenParam).filter { it.isNotEmpty() }.joinToString("&")
-      val href = WebEscaping.htmlEscape("/$sysSeg/compare?$query")
-      val label =
-        s.designToolLabel?.takeIf { it.isNotBlank() }?.let { "compare to $it" }
-          ?: "compare to design references"
-      val described = WebEscaping.htmlEscape("${s.title}: $label")
-      return "<a class=\"cp-action-chip\" href=\"$href\" aria-label=\"$described\">" +
-        "${WebEscaping.htmlEscape(label)}</a>"
+    fun compareChips(s: HomeSystem, sysSeg: String): List<String> {
+      fun chip(format: String, text: String, spoken: String): String {
+        val query =
+          listOf("format=$format", tokenParam).filter { it.isNotEmpty() }.joinToString("&")
+        val href = WebEscaping.htmlEscape("/$sysSeg/compare?$query")
+        val described = WebEscaping.htmlEscape("${s.title}: compare to $spoken")
+        return "<a class=\"cp-action-chip cp-action-chip--compact\" href=\"$href\" " +
+          "aria-label=\"$described\" title=\"$described\">${WebEscaping.htmlEscape(text)}</a>"
+      }
+      val out = mutableListOf<String>()
+      if (s.hasReferenceComparison) {
+        val tool = s.designToolLabel?.takeIf { it.isNotBlank() }
+        out += chip("reference", tool ?: "design references", tool ?: "design references")
+      }
+      s.parallelComparison?.let { out += chip("parallel", it.system, it.title) }
+      return out
     }
 
     /**
@@ -6302,37 +6288,68 @@ ${captureControlsHtml().prependIndent("          ")}
      * changes; `.cp-sys-actions` still passes pointer events through to the tile link underneath.
      */
     /**
-     * The card's **compare to the paired catalog** action, beside [compareAction] and built the
-     * same way.
+     * The card's **compare to Figma** action: a chip in the card's own meta block, under the
+     * preview count, deep-linking that catalog's comparison page straight to its `reference`
+     * format.
      *
-     * Two catalogs of one design system sit next to each other on this page — `remote-m3` and
-     * `wear-m3-catalog` are adjacent cards — and until this, nothing on the front door said they
-     * were a pair. The comparison was reachable only from the chip row on a catalog's own landing,
-     * which is the same journey [compareAction] exists to remove for the design-tool comparison:
-     * "how does the Remote Compose rendition differ from the Wear one" is a destination people
-     * arrive *for* — and `docs/design/COMPARE_NAVIGATION.md` §1 names it as the comparison the
-     * reader most wants and the one with the fewest ways in.
+     * It is on the front door because the comparison is a destination people arrive *for*, and
+     * until this it was reachable only from the chip row on a catalog's own landing page — so
+     * "compare this system against its Figma" cost a visit to the catalog first, and was invisible
+     * from `/` (compose-ai-tools#4324).
      *
-     * Named for the sibling rather than for the format, for [compareAction]'s reason: "compare to
-     * M3 Wear OS Apps Design Kit" says what you get where "compare parallel" would name the format
-     * slug. Suppressed in the component-browser mode alongside its neighbour, which is for browsing
-     * components rather than auditing them.
+     * The label names the design tool the catalog is actually specified by, for the same reason the
+     * landing chip does: "compare to Figma" says what you get where "compare reference" would name
+     * the format slug — and falls back to the landing's own neutral "compare to design references"
+     * for a catalog whose references name no tool (a checked-in `png`, an `svg`, an unmapped
+     * provider). Whether there is an action at all is [HomeSystem.hasReferenceComparison], never
+     * the label: those are two questions, and answering the first with the second dropped the
+     * action from every provider-neutral catalog (#4349).
+     *
+     * The accessible name carries the catalog's title ("Compose Material 3: compare to Figma")
+     * while the visible text stays short. A front door lists many catalogs and several may name the
+     * same tool, so half a dozen links otherwise announce identically as "compare to Figma" with
+     * nothing in a screen-reader link list to tell them apart. The visible string is kept intact
+     * inside the accessible name (WCAG 2.5.3 Label in Name), so "click compare to Figma" still
+     * matches.
+     *
+     * It lives INSIDE the card, which is why the card is a `<div>` whose title carries the
+     * `.cp-sys-open` link rather than being one big `<a>`: a link inside a link is not a thing HTML
+     * has. `.cp-sys-open` stretches an overlay across the whole tile, so the tile is still one
+     * click target, and the chip sits above that overlay as the one region that goes somewhere
+     * else. The earlier shape hung the chip under the card in a wrapper cell, which meant a card
+     * with an action was taller than one without unless an empty row was reserved for it — with the
+     * chip inside, the grid's own stretch makes every card in a section the same size and the
+     * reservation is gone.
+     *
+     * Suppressed in the component-browser ("Catalog") interface mode, which hides the format
+     * comparisons on the catalog landing too — the mode is for browsing components, not for
+     * auditing them against a design file.
      */
-    fun parallelAction(s: HomeSystem, sysSeg: String): String {
+    fun compareAction(s: HomeSystem, sysSeg: String): String {
       if (componentBrowser) return ""
-      val label = s.parallelComparisonLabel?.takeIf { it.isNotBlank() } ?: return ""
-      val query = listOf("format=parallel", tokenParam).filter { it.isNotEmpty() }.joinToString("&")
-      val href = WebEscaping.htmlEscape("/$sysSeg/compare?$query")
-      val text = "compare to $label"
-      val described = WebEscaping.htmlEscape("${s.title}: $text")
-      return "<a class=\"cp-action-chip\" href=\"$href\" aria-label=\"$described\">" +
-        "${WebEscaping.htmlEscape(text)}</a>"
+      val chips = compareChips(s, sysSeg)
+      if (chips.isEmpty()) return ""
+      // ONE "Compare to", then the destinations.
+      //
+      // Each chip used to carry the whole sentence, which read fine while there was only ever one
+      // of them and fell apart the moment a paired catalog added a second: two stacked chips both
+      // opening with "compare to", the second running to the width of a neighbour's title
+      // ("compare to M3 Wear OS Apps Design Kit") and wrapping to two lines inside a fixed grid
+      // track. The words the two share belong to the row, not to each button — so the row says the
+      // verb once and the chips say only where they go, which is what lets both sit on one line.
+      //
+      // A `<span>` label rather than a heading: it names a pair of links inside a card that already
+      // has a heading, and the accessible name of each link still carries the whole sentence
+      // (`<catalog>: compare to <destination>`) for a reader who meets it out of context.
+      return "<span class=\"cp-sys-compare\">" +
+        "<span class=\"cp-sys-compare-label\" aria-hidden=\"true\">Compare to</span>" +
+        chips.joinToString("") +
+        "</span>"
     }
 
     fun cardActions(s: HomeSystem, sysSeg: String): String {
       val chips =
-        listOf(builderAction(s, sysSeg), compareAction(s, sysSeg), parallelAction(s, sysSeg))
-          .filter { it.isNotEmpty() }
+        listOf(builderAction(s, sysSeg), compareAction(s, sysSeg)).filter { it.isNotEmpty() }
       if (chips.isEmpty()) return ""
       return "\n            <div class=\"cp-sys-actions\">" + chips.joinToString("") + "</div>"
     }

@@ -880,19 +880,24 @@ class ServeWebTest {
         isPublic = true,
       )
 
+    // The verb is said once by the row; the chip is left holding only where it goes, so a second
+    // destination can sit beside it on one line.
+    assertTrue(html.contains(">Compare to</span>"), html)
     assertTrue(
       html.contains(
-        "<a class=\"cp-action-chip\" href=\"/compose-m3/compare?format=reference\" " +
-          "aria-label=\"compose-m3: compare to Figma\">compare to Figma</a>"
+        "<a class=\"cp-action-chip cp-action-chip--compact\" " +
+          "href=\"/compose-m3/compare?format=reference\" " +
+          "aria-label=\"compose-m3: compare to Figma\" " +
+          "title=\"compose-m3: compare to Figma\">Figma</a>"
       ),
       html,
     )
     // The label follows the catalog's own design tool rather than being hardcoded to Figma.
-    assertTrue(html.contains(">compare to Penpot</a>"), html)
+    assertTrue(html.contains(">Penpot</a>"), html)
     // …and falls back to the landing page's own neutral wording when there is no tool to name,
     // rather than the action disappearing.
     assertTrue(html.contains("/png-kit/compare?format=reference"), html)
-    assertTrue(html.contains(">compare to design references</a>"), html)
+    assertTrue(html.contains(">design references</a>"), html)
     // A catalog that publishes no design references has nothing behind `format=reference`, so it
     // gets no action rather than a chip that deep-links a format the comparison page won't offer.
     assertFalse(html.contains("/plain/compare"), html)
@@ -914,7 +919,7 @@ class ServeWebTest {
    */
   @Test
   fun `a front-door card offers the paired catalog's comparison, named after the sibling`() {
-    fun system(id: String, sibling: String?) =
+    fun system(id: String, sibling: ServeWeb.ParallelComparison?) =
       ServeWeb.HomeSystem(
         system = id,
         title = id,
@@ -924,13 +929,16 @@ class ServeWebTest {
         heroPreviewId = null,
         hasReferenceComparison = true,
         designToolLabel = "Figma",
-        parallelComparisonLabel = sibling,
+        parallelComparison = sibling,
       )
 
     val html =
       ServeWeb.homeIndexPage(
         listOf(
-          system("remote-m3", sibling = "M3 Wear OS Apps Design Kit"),
+          system(
+            "remote-m3",
+            ServeWeb.ParallelComparison("wear-m3-catalog", "M3 Wear OS Apps Design Kit"),
+          ),
           // Every catalog that declares no `compareWith`, which is most of them.
           system("compose-m3", sibling = null),
         ),
@@ -938,17 +946,23 @@ class ServeWebTest {
         isPublic = true,
       )
 
+    // The chip reads the SYSTEM id — short, bounded, and the handle the card already prints under
+    // its own title — while the whole sentence, with the catalog's real name, stays in the
+    // accessible name and the tooltip where its length costs nothing.
     assertTrue(
       html.contains(
-        "<a class=\"cp-action-chip\" href=\"/remote-m3/compare?format=parallel\" " +
-          "aria-label=\"remote-m3: compare to M3 Wear OS Apps Design Kit\">" +
-          "compare to M3 Wear OS Apps Design Kit</a>"
+        "<a class=\"cp-action-chip cp-action-chip--compact\" " +
+          "href=\"/remote-m3/compare?format=parallel\" " +
+          "aria-label=\"remote-m3: compare to M3 Wear OS Apps Design Kit\" " +
+          "title=\"remote-m3: compare to M3 Wear OS Apps Design Kit\">wear-m3-catalog</a>"
       ),
       html,
     )
-    // It stands BESIDE the design-tool action rather than replacing it: they are two different
-    // comparisons, and a catalog with a sibling still has a design file.
+    // It stands BESIDE the design-tool chip under one "Compare to", rather than replacing it or
+    // repeating the verb: they are two different comparisons, and a catalog with a sibling still
+    // has a design file.
     assertTrue(html.contains("/remote-m3/compare?format=reference"), html)
+    assertEquals(2, Regex(">Compare to</span>").findAll(html).count(), html)
     // …and a catalog with no pairing gets no second chip rather than a dead one.
     assertFalse(html.contains("/compose-m3/compare?format=parallel"), html)
     assertEquals(1, Regex("format=parallel").findAll(html).count(), html)
@@ -992,12 +1006,16 @@ class ServeWebTest {
       html,
     )
     // WCAG 2.5.3 Label in Name: the visible string survives INTACT inside the accessible name, so
-    // "click compare to Figma" still matches. A name like "compare Wear Material 3 to Figma" would
-    // read fine and break that.
-    names.forEach { assertTrue(it.contains("compare to Figma"), it) }
-    // The chip itself stays short — the catalog's name is in the accessible name, not on screen.
+    // "click Figma" still matches. A name like "compare Wear Material 3 to Figma" would read fine
+    // and break that — and so would shortening the chip to something the name does not contain.
+    names.forEach { assertTrue(it.contains("Figma"), it) }
+    // The chip itself stays short — the verb is on the row and the catalog's name is in the
+    // accessible name, neither of them repeated on screen once per destination.
     assertTrue(
-      html.contains("aria-label=\"Wear Material 3: compare to Figma\">compare to Figma</a>"),
+      html.contains(
+        "aria-label=\"Wear Material 3: compare to Figma\" " +
+          "title=\"Wear Material 3: compare to Figma\">Figma</a>"
+      ),
       html,
     )
   }
