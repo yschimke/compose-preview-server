@@ -227,6 +227,16 @@ queue means the far end is behind, and in that state the newest comment is the o
 Timeouts are seconds, and there is exactly one retry — a chat platform's hook is up or it is not,
 and a longer ladder turns one wedged host into a queue that never drains.
 
+**What a notification says is fixed when the comment is written, not when it is delivered.** The
+queue carries the change plus the design as it looked at that moment, because design ids come from
+the client and are free again once a design is deleted: resolving the title and catalog at delivery
+time would let a delete and re-create while the queue drains point a permalink at whatever holds the
+id now. Reading them from the service is far too expensive for the thread accepting a comment — it
+takes the service-wide lock and scans every design — so the writer reads a small cache the worker
+keeps current, which is one map lookup and no lock. Shutdown gives the queue a couple of seconds to
+drain and says out loud what it abandons: nothing replays a notification, so an event dropped at
+SIGTERM is a comment that stays in the board and is never announced.
+
 **The permalink needs a public origin.** The link is the whole of the notification's value, so the
 host has to know the name a reader's browser reaches it at. That is
 `--github-auth-callback-base-url`, which is the operator's own statement of the public origin and is

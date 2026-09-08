@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import java.nio.file.Files
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.system.measureTimeMillis
@@ -353,6 +354,104 @@ class ServeUiBuilderCommentWebhookTest {
           releaseLookup.countDown()
         }
       }
+    } finally {
+      root.toFile().deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `a queued event names the design as it was when the comment was written`() {
+    // Design ids come from the client and are free again once a design is deleted, so "the design
+    // with this id" at delivery time need not be the design the comment was written on. Behind a
+    // slow endpoint that is how a permalink ends up pointing at an unrelated replacement.
+    val root = Files.createTempDirectory("comment-webhook-snapshot")
+    try {
+      val store = ServeUiBuilderCommentStore(root)
+      val current =
+        java.util.concurrent.atomic.AtomicReference(CommentWebhookDesign("Checkout", "m3-catalog"))
+      val delivered = CopyOnWriteArrayList<String>()
+      val releaseFirstSend = CountDownLatch(1)
+      val firstSendEntered = CountDownLatch(1)
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig("https://hooks.example/hook"),
+          designs = { current.get() },
+          baseUrl = { "https://preview.example" },
+          send = { body ->
+            delivered += body
+            if (delivered.size == 1) {
+              firstSendEntered.countDown()
+              releaseFirstSend.await(10, TimeUnit.SECONDS)
+            }
+            true
+          },
+          onLog = {},
+        )
+      webhook.use {
+        it.attach(store).use {
+          // The first comment warms the cache and then wedges the worker inside `send`.
+          store.post("design-1", "Yuri", CommentPostRequest(body = "First."))
+          assertTrue(firstSendEntered.await(10, TimeUnit.SECONDS), "the first send never ran")
+
+          // The second is queued behind it, snapshotting the design as it is now.
+          store.post("design-1", "Yuri", CommentPostRequest(body = "Second."))
+
+          // Only then is the design renamed — after the comment, before the delivery.
+          current.set(CommentWebhookDesign("Something else entirely", "other-catalog"))
+          releaseFirstSend.countDown()
+
+          val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+          while (delivered.size < 2 && System.nanoTime() < deadline) Thread.sleep(25)
+          assertEquals(2, delivered.size, "expected both events, saw $delivered")
+
+          val second =
+            Json.parseToJsonElement(delivered[1]).jsonObject.getValue("design").jsonObject
+          assertEquals("Checkout", second.getValue("title").jsonPrimitive.content)
+          assertEquals("m3-catalog", second.getValue("catalog").jsonPrimitive.content)
+        }
+      }
+    } finally {
+      root.toFile().deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `shutdown waits for the queue and says what it could not deliver`() {
+    // A restart or a rolling deployment must not throw queued notifications away in silence:
+    // nothing replays them, so a comment stays in the board and is never announced. Bounded, so
+    // shutdown is not held hostage by somebody's chat platform either.
+    val root = Files.createTempDirectory("comment-webhook-shutdown")
+    try {
+      val store = ServeUiBuilderCommentStore(root)
+      val logged = CopyOnWriteArrayList<String>()
+      val sendEntered = CountDownLatch(1)
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig("https://hooks.example/hook"),
+          designs = { CommentWebhookDesign("Checkout", "m3-catalog") },
+          baseUrl = { "https://preview.example" },
+          send = {
+            sendEntered.countDown()
+            // Longer than the drain window, so the event is genuinely still in flight at close.
+            Thread.sleep(30_000)
+            true
+          },
+          onLog = { logged += it },
+        )
+      val attached = webhook.attach(store)
+      store.post("design-1", "Yuri", CommentPostRequest(body = "Never delivered."))
+      assertTrue(sendEntered.await(10, TimeUnit.SECONDS), "the worker never started delivering")
+
+      val elapsed = measureTimeMillis { webhook.close() }
+      attached.close()
+
+      // Bounded: shutdown is not held hostage by somebody's chat platform.
+      assertTrue(elapsed < 20_000, "close waited $elapsed ms; shutdown must be bounded")
+      // And not silent: an abandoned notification is never announced again by anything.
+      assertTrue(
+        logged.any { it.contains("shutdown") },
+        "close discarded a queued event without saying so: $logged",
+      )
     } finally {
       root.toFile().deleteRecursively()
     }

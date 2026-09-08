@@ -8,6 +8,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.security.MessageDigest
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -112,20 +115,36 @@ internal class ServeUiBuilderCommentWebhook(
   /** What the log calls this hook. A digest of the URL, never the URL. */
   val fingerprint: String = fingerprintOf(config.url)
 
-  // What the queue carries is the raw change, not the finished body.
+  // What the queue carries is the raw change plus the design as it was *when the comment was
+  // written*, not the finished body.
   //
-  // Everything that turns one into the other — the design's title and catalog, the origin, the
-  // adapter — happens on the worker. The design lookup in particular reads service state behind
-  // the service's own lock, and doing that on the writer's thread would put an unrelated design
-  // persistence operation on the critical path of accepting a comment, which is the one thing
-  // fire-and-forget delivery exists to prevent.
-  private val queue = Channel<CommentBoardChange>(QUEUE_CAPACITY)
+  // Both halves of that matter. Turning a change into a body needs the design's title and catalog,
+  // and reading those from the service takes the service-wide lock and scans every persisted
+  // design — far too much to do on the thread accepting a comment, which is the one thing
+  // fire-and-forget delivery exists to protect. But resolving it later, on the worker, would
+  // describe the design as it is at *delivery* time, and behind a slow endpoint those are not the
+  // same design: ids are supplied by the client and are free again once a design is deleted, so a
+  // delete and re-create while the queue drains would point the permalink at an unrelated design
+  // that happens to hold the id now.
+  //
+  // So the writer thread reads a cache ([knownDesigns]) and nothing else — one concurrent-map get,
+  // no lock, no scan — and the worker keeps that cache current.
+  private val queue = Channel<QueuedCommentChange>(QUEUE_CAPACITY)
+
+  /**
+   * The last thing the worker learned about each design, and how long ago.
+   *
+   * Read on the comment writer's thread and written only by the worker. Refreshed lazily rather
+   * than on every event: within [DESIGN_CACHE_MILLIS] an entry is reused, which bounds how stale a
+   * title can be while costing one lookup per design per window rather than one per comment.
+   */
+  private val knownDesigns = ConcurrentHashMap<String, TimedDesign>()
 
   private val worker = scope.launch {
-    for (change in queue) {
+    for (queued in queue) {
       // One at a time and never rethrowing: a webhook host that answers with an exception must
       // not take the loop down and leave every later comment undelivered in silence.
-      runCatching { deliver(describe(change)) }
+      runCatching { deliver(describe(queued)) }
         .onFailure { onLog("serve: comment webhook $fingerprint failed (${it.message})") }
     }
   }
@@ -133,23 +152,31 @@ internal class ServeUiBuilderCommentWebhook(
   /** Watch every board on [store] until the returned handle is closed. */
   fun attach(store: ServeUiBuilderCommentStore): Closeable =
     store.subscribeToHost { previous, next ->
-      // On the writer's thread, so nothing here waits: a diff of two small in-memory boards, and
-      // an offer to a queue that never blocks.
-      for (change in diffCommentBoards(previous, next)) enqueue(change)
+      // On the writer's thread, so nothing here waits: a diff of two small in-memory boards, a map
+      // lookup, and an offer to a queue that never blocks.
+      for (change in diffCommentBoards(previous, next)) {
+        enqueue(QueuedCommentChange(change, knownDesigns[change.designId]?.design))
+      }
     }
 
-  private fun enqueue(change: CommentBoardChange) {
-    if (queue.trySend(change).isSuccess) return
+  private fun enqueue(queued: QueuedCommentChange) {
+    if (queue.trySend(queued).isSuccess) return
     val dropped = queue.tryReceive().getOrNull()
     if (dropped != null) {
       onLog(
         "serve: comment webhook $fingerprint is behind; dropped the oldest queued event " +
-          "(${dropped.kind.wire} on design ${dropped.designId})"
+          "(${dropped.change.kind.wire} on design ${dropped.change.designId})"
       )
     }
-    // Best effort: if this still does not fit, the queue drained and refilled between the two
-    // calls, which means the worker is running and the next event will find room.
-    queue.trySend(change)
+    // The slot freed above is not reserved, so another writer's event can take it first. Losing
+    // this one silently is the one outcome not allowed: a lossy notification is tolerable, a
+    // notification that is lossy without saying so is not.
+    if (!queue.trySend(queued).isSuccess) {
+      onLog(
+        "serve: comment webhook $fingerprint is behind; dropped a ${queued.change.kind.wire} " +
+          "event on design ${queued.change.designId}"
+      )
+    }
   }
 
   private suspend fun deliver(event: CommentWebhookEventV1) {
@@ -165,8 +192,9 @@ internal class ServeUiBuilderCommentWebhook(
   }
 
   /** The change, plus everything the store does not know: the design's name and where to click. */
-  private fun describe(change: CommentBoardChange): CommentWebhookEventV1 {
-    val design = designs(change.designId)
+  private fun describe(queued: QueuedCommentChange): CommentWebhookEventV1 {
+    val change = queued.change
+    val design = queued.design ?: resolveDesign(change.designId)
     return CommentWebhookEventV1(
       event = change.kind.wire,
       design =
@@ -187,8 +215,41 @@ internal class ServeUiBuilderCommentWebhook(
     )
   }
 
+  /**
+   * What the design is called now, remembered for the next comment on it.
+   *
+   * Only reached for a design the cache has never seen or has not seen recently — the first comment
+   * on a design, or the first in a while. Everything else is described from the snapshot the writer
+   * took, which is both cheaper and the metadata the comment was actually written against.
+   */
+  private fun resolveDesign(designId: String): CommentWebhookDesign? {
+    val cached = knownDesigns[designId]
+    if (cached != null && System.currentTimeMillis() - cached.atEpochMillis < DESIGN_CACHE_MILLIS) {
+      return cached.design
+    }
+    val resolved = designs(designId)
+    knownDesigns[designId] = TimedDesign(resolved, System.currentTimeMillis())
+    return resolved
+  }
+
+  /**
+   * Stop watching, giving what is already queued a bounded chance to go out.
+   *
+   * Closing the channel lets the worker finish the events it has; cancelling immediately would
+   * throw them away on every restart and rolling deployment, and those comments are durable in the
+   * board but will never be announced again — nothing replays them. So this waits, briefly, and
+   * says out loud what it is abandoning if the far end is too slow to take them in that window.
+   * Bounded because shutdown cannot be held hostage by somebody's chat platform either.
+   */
   override fun close() {
     queue.close()
+    val drained = runBlocking { withTimeoutOrNull(DRAIN_TIMEOUT_MILLIS) { worker.join() } != null }
+    if (!drained) {
+      onLog(
+        "serve: comment webhook $fingerprint still had events queued at shutdown; " +
+          "they were not delivered"
+      )
+    }
     worker.cancel()
     scope.cancel()
   }
@@ -203,6 +264,12 @@ internal class ServeUiBuilderCommentWebhook(
     const val QUEUE_CAPACITY: Int = 64
 
     const val RETRY_DELAY_MILLIS: Long = 500
+
+    /** How long a cached design title and catalog are reused before the worker looks again. */
+    const val DESIGN_CACHE_MILLIS: Long = 30_000
+
+    /** How long [close] waits for the queue to drain before saying what it is abandoning. */
+    const val DRAIN_TIMEOUT_MILLIS: Long = 2_000
 
     /** A short digest of a URL, for a log line that must not carry the URL. */
     fun fingerprintOf(url: String): String =
@@ -233,6 +300,21 @@ internal class ServeUiBuilderCommentWebhook(
     }
   }
 }
+
+/**
+ * One change, with the design as it looked when the change happened.
+ *
+ * [design] is null when the writer's cache had never seen the design; the worker resolves it then,
+ * which is the first comment on a design and the one case where delivery-time metadata is the best
+ * available.
+ */
+internal data class QueuedCommentChange(
+  val change: CommentBoardChange,
+  val design: CommentWebhookDesign?,
+)
+
+/** A cached design lookup and when it was made. */
+internal data class TimedDesign(val design: CommentWebhookDesign?, val atEpochMillis: Long)
 
 /** Where the notification goes, and in whose dialect. */
 internal data class CommentWebhookConfig(
