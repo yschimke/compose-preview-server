@@ -8,6 +8,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 /**
@@ -123,6 +125,98 @@ class BoardInsertTest {
     // The design it came from: one root, no board, nothing claimed.
     assertNull(document.boardRootId)
     assertEquals(0, document.boardItemCount)
+  }
+
+  /**
+   * An empty design has nothing to be beside, so it gets no board — the component becomes the root,
+   * exactly as an ordinary Add would place it.
+   *
+   * Not a tidiness point. Both record-free emitters route on the *root* component id, so a Wear
+   * screen added as the first item of a board would quietly stop being a Wear screen; the wrap is
+   * refused for an existing Wear root for that reason, and this is the case with no root to refuse
+   * over.
+   */
+  @Test
+  fun `an empty design takes the component as its root rather than a board`() {
+    val empty = document.copy(roots = emptyList(), nodes = emptyMap())
+
+    val added =
+      reducer.reduce(
+        reducer.initial(empty, selectedNodeId = null),
+        UiBuilderEditorEvent.InsertComponentBeside("m3/card"),
+      )
+
+    assertIs<CommandOutcome.Accepted>(added.lastOutcome, added.lastOutcome.toString())
+    val root = added.document.nodes.getValue(added.document.roots.single())
+    assertEquals("m3/card", root.componentId)
+    assertNull(added.document.boardRootId)
+  }
+
+  /**
+   * The theme lives on a root `m3/surface`, and both lookups for it scanned the root list. Wrapping
+   * a themed screen therefore dropped its palette, type scale and corner radius from the canvas and
+   * made Apply theme refuse the document for having no root surface.
+   */
+  @Test
+  fun `wrapping a themed screen keeps its theme`() {
+    val rootId = document.roots.single()
+    val root = document.nodes.getValue(rootId)
+    assertEquals("m3/surface", root.componentId)
+    // A theme worth losing: the fixture's own surface carries none, so comparing it before and
+    // after would pass against the bug it is here to catch.
+    val themed =
+      document.copy(
+        nodes =
+          document.nodes +
+            (rootId to
+              root.copy(
+                properties =
+                  JsonObject(
+                    root.properties +
+                      mapOf(
+                        "themeTypeScale" to
+                          JsonObject(
+                            mapOf(
+                              "type" to JsonPrimitive("float"),
+                              "value" to JsonPrimitive(1.25),
+                            )
+                          )
+                      )
+                  )
+              ))
+      )
+    val initial = reducer.initial(themed, selectedNodeId = null)
+    assertEquals(1.25f, reducer.themeSettings(initial).typeScale)
+
+    val added = reducer.reduce(initial, UiBuilderEditorEvent.InsertComponentBeside("m3/card"))
+
+    assertEquals(
+      rootId,
+      added.document.nodes
+        .getValue(added.document.roots.single())
+        .slots
+        .getValue(UiBuilderBoard.SLOT)
+        .first(),
+    )
+    assertEquals(1.25f, reducer.themeSettings(added).typeScale)
+  }
+
+  /**
+   * Every accepted edit and every collaborator delta rebuilds the editor from the authoritative
+   * document, so a tool mode not carried across is lost on the next keystroke anyone makes: the
+   * strip emptied and Add beside turned itself off one Add after being switched on.
+   */
+  @Test
+  fun `the tool modes survive a document arriving`() {
+    val state =
+      reducer
+        .initial(document, selectedNodeId = null)
+        .copy(addBeside = true, variantAxes = setOf(EditorVariantAxis.Dark))
+
+    val reconciled = reducer.reconciled(state, document)
+
+    assertTrue(reconciled.addBeside)
+    assertEquals(setOf(EditorVariantAxis.Dark), reconciled.variantAxes)
   }
 
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()

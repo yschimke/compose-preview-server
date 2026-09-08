@@ -90,7 +90,27 @@ On, an Add appends a top-level item:
 
 It is a **tool mode**, not a property of the design: `UiBuilderEditorState.addBeside`, not stored, not
 shared with a collaborator, not undone, and off again when the design is reopened. What it produces —
-the board node and its children — is in the document for everyone to see.
+the board node and its children — is in the document for everyone to see. It does survive a document
+*arriving*, though, the way the selection and the clipboard do: every accepted edit and every
+collaborator delta rebuilds the editor state from the authoritative document, so a mode dropped there
+would switch itself off one Add after being switched on.
+
+### What a board must not change about the design under it
+
+A board is a container the editor put there, not one the author reached for, so a question that was
+true of the root before an Add beside has to stay true after it. Two of them were not, and both are
+the same mistake — code that asks about `roots` when it means *the top of the design*:
+
+- **The theme host.** The `m3/surface` carrying the palette, the type scale and the corner radius was
+  looked for in the root list by both the renderer and `themeSettings`, so wrapping a themed screen
+  dropped its theme from the canvas and made Apply theme refuse the document for having no root
+  surface. Both now ask `topLevelNodes`, which is the roots, or the board's items when a board is the
+  root. One level, deliberately: a surface three cards deep was never the theme host.
+- **Which emitter writes the design.** Both record-free emitters route on the root component id, so a
+  wrapped Wear screen would quietly stop being one. That is what the refusal above is for — and why
+  an empty design takes the component as its root rather than opening a board around it, which would
+  have made the *first* Wear item on a new design the same silent conversion with nothing to refuse
+  over.
 
 Deliberately a switch rather than a fallback inside the ordinary insert. An Add with no compatible
 slot stays *refused*, because turning that refusal into "then it becomes a second item" would make a

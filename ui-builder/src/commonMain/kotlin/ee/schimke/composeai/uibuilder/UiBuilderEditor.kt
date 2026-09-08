@@ -108,6 +108,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -965,6 +966,11 @@ fun UiBuilderEditor(
   // surface is the setting, and a second flag that could disagree with it is a bug waiting.
   val nativeRequested =
     onRequestNativeRender != null && state.previewSurface != EditorPreviewSurface.Wasm
+  // Whether the builder's own canvas is on screen, which is the only surface the variant strip is
+  // drawn on: the layout below omits it entirely when the host's renderer has taken the pane. The
+  // Screen inspector reads this so its comparison controls say that rather than accepting a choice
+  // that would draw nothing.
+  val variantsDrawn = state.previewSurface != EditorPreviewSurface.Native || !nativeRequested
   var nativePending by remember(document.id) { mutableStateOf(false) }
   // Keyed on the revision as well as the request, so asking again after an edit re-renders rather
   // than showing the frame the design used to have — a stale native render beside a live canvas is
@@ -1136,6 +1142,7 @@ fun UiBuilderEditor(
       operationHistory = operationHistory,
       themeSettings = reducer.themeSettings(state),
       devicePresets = devicePresets,
+      variantsDrawn = variantsDrawn,
       onPickReference = onPickReference,
       onSnapshotDesign = onSnapshotDesign,
       onFlatten = ::flattenCurrentReference,
@@ -3681,10 +3688,17 @@ internal fun PinnedDesignCanvas(
     // Fit frames the whole row, not the extent alone: zooming to fit a design whose companion or
     // whose tablet variant is off the right edge is not fitting the design. Height is the tallest
     // pane, which is the extent unless a variant's frame is longer than the design is.
-    val stripHeight =
-      maxOf(expandedHeightDp, variants.maxOfOrNull { it.heightDp + VARIANT_LABEL_ROOM_DP } ?: 0f)
+    val stripHeight = maxOf(expandedHeightDp, variants.maxOfOrNull { it.heightDp } ?: 0f)
+    // A variant's label is laid out *above* its scaled frame at a fixed size, so it does not shrink
+    // with the zoom: the room it needs comes off the workspace before the scale is worked out,
+    // rather than being scaled along with the frame. Folding it into `stripHeight` instead made the
+    // tallest variant overflow a workspace that claimed to be fitting it.
+    val labelRoom = if (variants.isEmpty()) 0f else VARIANT_LABEL_ROOM_DP
     val fitScale =
-      minOf(workspaceWidth.value / pairWidth, workspaceHeight.value / stripHeight)
+      minOf(
+          workspaceWidth.value / pairWidth,
+          (workspaceHeight.value - labelRoom).coerceAtLeast(0f) / stripHeight,
+        )
         .coerceIn(MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM)
     val scale = zoom ?: fitScale
     // The frame is laid out in the design's pixels, so it is drawn back down by the same ratio it
@@ -3852,8 +3866,12 @@ internal fun PinnedDesignCanvas(
               densityRatio = densityRatio,
             )
           }
+          // Keyed by the pane rather than by its position in the row. Every pane draws the same
+          // document id, and `UiBuilderSurface` remembers its bounds and its design state against
+          // that id, so an unkeyed loop hands a removed pane's composition — and its scroll
+          // positions — to whichever pane slid into its slot.
           variants.forEach { variant ->
-            VariantPane(pane = variant, scale = scale, hostDensity = density)
+            key(variant.id) { VariantPane(pane = variant, scale = scale, hostDensity = density) }
           }
         }
       }
@@ -5340,6 +5358,10 @@ private fun PropertyInspector(
   operationHistory: List<EditorOperationEntry>,
   themeSettings: EditorThemeSettings,
   devicePresets: List<UiBuilderDevicePreset>,
+  /**
+   * Whether the builder's own canvas — the surface the variant strip is drawn on — is on screen.
+   */
+  variantsDrawn: Boolean,
   onPickReference: (suspend () -> ReferenceImportOutcome)?,
   onSnapshotDesign: (suspend () -> ReferenceImportOutcome)?,
   onFlatten: () -> Unit,
@@ -5398,6 +5420,7 @@ private fun PropertyInspector(
         operationHistory = operationHistory,
         themeSettings = themeSettings,
         devicePresets = devicePresets,
+        variantsDrawn = variantsDrawn,
         onPickReference = onPickReference,
         onSnapshotDesign = onSnapshotDesign,
         onFlatten = onFlatten,
@@ -5432,6 +5455,10 @@ private fun InspectorBody(
   operationHistory: List<EditorOperationEntry>,
   themeSettings: EditorThemeSettings,
   devicePresets: List<UiBuilderDevicePreset>,
+  /**
+   * Whether the builder's own canvas — the surface the variant strip is drawn on — is on screen.
+   */
+  variantsDrawn: Boolean,
   onPickReference: (suspend () -> ReferenceImportOutcome)?,
   onSnapshotDesign: (suspend () -> ReferenceImportOutcome)?,
   onFlatten: () -> Unit,
@@ -5493,6 +5520,7 @@ private fun InspectorBody(
           document = state.document,
           devicePresets = devicePresets,
           variantAxes = state.variantAxes,
+          variantsDrawn = variantsDrawn,
           onTextInputFocusChanged = onTextInputFocusChanged,
           dispatch = dispatch,
         )
@@ -6442,6 +6470,15 @@ private fun ScreenEnvironmentInspector(
   devicePresets: List<UiBuilderDevicePreset>,
   /** The unstored axes the strip is drawing — see [UiBuilderEditorState.variantAxes]. */
   variantAxes: Set<EditorVariantAxis>,
+  /**
+   * Whether the surface that draws the strip is the one on screen.
+   *
+   * False on the host's renderer, which draws one render of one frame and has no strip to put a
+   * variant in. The controls then say so instead of accepting a choice nothing acts on — the
+   * devices still reach the export, which is why the picker stays live and only the comparison
+   * chips go quiet.
+   */
+  variantsDrawn: Boolean,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -6515,7 +6552,9 @@ private fun ScreenEnvironmentInspector(
       },
     )
   }
-  VariantAxisPicker(variantAxes) { dispatch(UiBuilderEditorEvent.ToggleVariantAxis(it)) }
+  VariantAxisPicker(variantAxes, variantsDrawn) {
+    dispatch(UiBuilderEditorEvent.ToggleVariantAxis(it))
+  }
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     EnvironmentTextField(
       label = "Width (dp)",
@@ -6713,9 +6752,18 @@ private fun DevicePresetPicker(
 @Composable
 private fun VariantAxisPicker(
   selected: Set<EditorVariantAxis>,
+  drawn: Boolean,
   onToggle: (EditorVariantAxis) -> Unit,
 ) {
   Text("Also compare", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+  if (!drawn) {
+    Text(
+      "The comparison strip is drawn on the builder's own canvas. This design is being previewed " +
+        "on the host's renderer, which draws one frame.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+    )
+  }
   Row(
     Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp),
     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -6723,6 +6771,7 @@ private fun VariantAxisPicker(
     EditorVariantAxis.entries.forEach { axis ->
       FilterChip(
         selected = axis in selected,
+        enabled = drawn,
         onClick = { onToggle(axis) },
         label = { Text(axis.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
       )

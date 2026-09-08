@@ -1202,6 +1202,13 @@ class UiBuilderEditorReducer(
       previewSurface = state.previewSurface,
       operationSequence = state.operationSequence,
       inspectorMode = state.inspectorMode,
+      // Tool modes, so they survive a document arriving for the same reason the selection and the
+      // clipboard do: every accepted edit and every collaborator delta rebuilds the editor from the
+      // authoritative document, and anything not carried across is lost on the next keystroke
+      // anyone in the session makes. Without these, the strip emptied and Add beside turned itself
+      // off one Add after being switched on.
+      addBeside = state.addBeside,
+      variantAxes = state.variantAxes,
     )
   }
 
@@ -2599,23 +2606,32 @@ class UiBuilderEditorReducer(
     }
     val document = state.document
     val operations = mutableListOf<DesignOperation>()
+    val existingRoot = document.roots.singleOrNull()
     val existingBoard = document.boardRootId
-    val boardId: String
+    val target: ParentSlot?
     val afterNodeId: String?
-    if (existingBoard != null) {
-      boardId = existingBoard
-      afterNodeId = document.children(ParentSlot(existingBoard, UiBuilderBoard.SLOT)).lastOrNull()
-    } else {
-      boardId = "editor-board-${sequence.toString().padStart(3, '0')}"
-      operations += DesignOperation.InsertNode(UiBuilderBoard.node(boardId))
-      // Null for an empty design, which has nothing to wrap: the board becomes the root and the
-      // item
-      // below is its first child. A board of one is not yet drawn or described as a board — see
-      // [isBoard] — so this claims nothing about a design somebody has added one thing to.
-      afterNodeId = document.roots.singleOrNull()
-      if (afterNodeId != null) {
+    when {
+      existingBoard != null -> {
+        target = ParentSlot(existingBoard, UiBuilderBoard.SLOT)
+        afterNodeId = document.children(target).lastOrNull()
+      }
+      // An empty design has nothing to be beside, so it gets no board: the component becomes the
+      // root, exactly as an ordinary Add would place it. Wrapping here would be worse than
+      // pointless — a Wear screen or widget added first would sit under a column, and both
+      // record-free emitters route on the *root* component id, so the design would quietly stop
+      // being the thing it is. That is what [besideRefusal] guards for an existing root, applied to
+      // the one case that has none to refuse over.
+      existingRoot == null -> {
+        target = null
+        afterNodeId = null
+      }
+      else -> {
+        val boardId = "editor-board-${sequence.toString().padStart(3, '0')}"
+        operations += DesignOperation.InsertNode(UiBuilderBoard.node(boardId))
         operations +=
-          DesignOperation.MoveNode(afterNodeId, ParentSlot(boardId, UiBuilderBoard.SLOT))
+          DesignOperation.MoveNode(existingRoot, ParentSlot(boardId, UiBuilderBoard.SLOT))
+        target = ParentSlot(boardId, UiBuilderBoard.SLOT)
+        afterNodeId = existingRoot
       }
     }
     val nodeId = "editor-${componentId.replace('/', '-')}-${sequence.toString().padStart(3, '0')}"
@@ -2624,7 +2640,7 @@ class UiBuilderEditorReducer(
         catalog = catalog,
         document = document,
         nodeId = nodeId,
-        parent = ParentSlot(boardId, UiBuilderBoard.SLOT),
+        parent = target,
         afterNodeId = afterNodeId,
         operations = operations,
         presetProperties = component.variantProperties(variant),
@@ -4113,8 +4129,16 @@ private val THEME_PROPERTIES =
     THEME_CORNER_RADIUS,
   )
 
-private fun UiBuilderDocument.themeHost(): UiBuilderNode? =
-  roots.asSequence().mapNotNull(nodes::get).firstOrNull { it.componentId == "m3/surface" }
+/**
+ * The `m3/surface` this design hangs its theme on, or null.
+ *
+ * [topLevelNodes] rather than `roots` so that wrapping a themed screen in a board keeps its theme:
+ * the board is a container the editor put there, and the surface under it is still the top of the
+ * design. The renderer asks the same question the same way.
+ */
+private fun UiBuilderDocument.themeHost(): UiBuilderNode? = topLevelNodes.firstOrNull {
+  it.componentId == "m3/surface"
+}
 
 private fun UiBuilderNode.stringValue(name: String, fallback: String): String =
   properties[name]?.jsonObject?.get("value")?.primitiveOrNull()?.content ?: fallback
@@ -4319,7 +4343,8 @@ private fun ComponentCapability.appendDefaultSubtree(
   catalog: CapabilityCatalog,
   document: UiBuilderDocument,
   nodeId: String,
-  parent: ParentSlot,
+  /** Null inserts this node as the document's root, which is what `InsertNode` already means. */
+  parent: ParentSlot?,
   afterNodeId: String?,
   operations: MutableList<DesignOperation>,
   starter: StarterNode? = null,

@@ -85,3 +85,23 @@ val UiBuilderDocument.isBoard: Boolean
 /** How many top-level items the board holds, or 0 when this design is not one. */
 val UiBuilderDocument.boardItemCount: Int
   get() = if (isBoard) nodes[boardRootId]?.slots?.get("children")?.size ?: 0 else 0
+
+/**
+ * The nodes a document-level question about "the top of the design" has to look at: its roots, and
+ * the board's items when a board is the root.
+ *
+ * A board is a container the editor put there, not something the author reached for, so a question
+ * that was true of the root before an Add beside must stay true after it. The theme host is the
+ * case that made this necessary: both lookups for the `m3/surface` carrying the palette, the type
+ * scale and the corner radius scanned `roots` alone, so wrapping a themed screen dropped its theme
+ * from the canvas and made Apply theme refuse the document for having no root surface.
+ *
+ * One level, deliberately. This is "the things the board holds", not a search: a surface three
+ * levels inside a card was never the theme host and does not become one.
+ */
+val UiBuilderDocument.topLevelNodes: List<UiBuilderNode>
+  get() {
+    val board = boardRootId
+    val ids = if (board == null) roots else nodes[board]?.slots?.get(UiBuilderBoard.SLOT).orEmpty()
+    return ids.mapNotNull(nodes::get)
+  }
