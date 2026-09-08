@@ -123,14 +123,14 @@ reducing it to two.
 
 ### Where it starts
 
-The loop has no fixed entry, and the four common ones are different enough to name.
+The loop has no fixed entry, and the five common ones are different enough to name.
 
 **The designer arrives with a frame.** A screen drawn in the design tool, against the team's kit.
 The join is the clipboard: the frame goes onto the reference overlay, the designer or the agent
 builds the real components under it, and the kit stays the source of truth for what it looks like.
 For a kit the catalog reproduces, the agent can fetch the kit node itself through the design tool's
 connector, using the reference the catalog already records per component — which is what a
-`ui_builder_put_reference` tool (item 5) is for, since the overlay routes exist and the tool does
+`ui_builder_put_reference` tool (item 6) is for, since the overlay routes exist and the tool does
 not.
 
 **There is an existing screen, and it needs to change.** Most work is this. The screen is code; it
@@ -161,9 +161,56 @@ and this is that case in its purest form. The napkin is never the reference the 
 against; it is replaced by the frame or the render as soon as one exists, which is what
 **flatten** and the `links.reference` slot (4.2) are for.
 
-A fifth is a brief with nothing behind it yet — the PM's issue and a sentence in a thread — and it
-collapses into one of the four the moment somebody starts: a template copy, a snapshot of the
-screen it changes, last time's design, or a sketch.
+**Somebody has feedback on the shipped screen.** The screen is a `@Preview` the app publishes,
+served in its own catalog with a permalink, a matrix and a history — and today the only thing a
+person can do with a reaction to it is file an issue. This entry is a comment left *on the served
+render*, which is where the PM and the designer already are, and it is the one that would move
+where the loop starts: circle a region, say "make this a card", and an agent woken by the comment
+snapshots that render into a design, erases the region, builds the change from the app's own
+component pack, exports the fragment and opens the PR. The catalog becomes where feedback starts
+and the builder becomes only where the change is made. It needs the comment board keyed by catalog
+and preview id rather than by design id — a small generalisation, since the board is already a
+sidecar — the sign-in that live preview already requires on a public catalog, and an anchor that
+survives a republish, which is the next section.
+
+A sixth is a brief with nothing behind it yet — the PM's issue and a sentence in a thread — and it
+collapses into one of the five the moment somebody starts: a template copy, a snapshot of the
+screen it changes, last time's design, a sketch, or a comment on what shipped.
+
+### Anchoring a comment to something that gets republished
+
+A design comment pins to a node in a document that only changes when somebody edits it. A screen
+comment pins to a render that the next publish replaces, so its anchor has to say three things,
+and the viewer has to be honest about which of them it is using. Three fields:
+
+| field | what it is | what it is for |
+| --- | --- | --- |
+| `ref` | the element — the authored `testTag` where there is one, else the semantics ref | identity: the pin follows the element wherever it now is |
+| `point` | frame fractions, the space design comments and reference marks already use | position: where the author put it, surviving a phone becoming a tablet |
+| `sha` | the render's content id — the history timeline's version, not the commit | time: the version this was said about, and the key that shows it |
+
+`ref` is the `testTag` rather than the semantics tree's generated ref for the reason `diff_semantics`
+gives: a generated ref is sibling-indexed and retargets when a sibling is inserted, which is exactly
+the edit a reader most needs to see; a `testTag` either survives or stops resolving, and both are
+reported. `sha` is the content id rather than the commit because the history timeline already
+collapses adjacent publishes with identical bytes into one version — the same baseline-inheritance
+a Storybook-hosted review service relies on — so a comment stays *current* across republishes that
+did not move the pixels, and `history_diff` says when one did.
+
+Resolved top-down, a republish leaves a thread in one of three states, each drawn differently:
+
+- **on the element, current** — `ref` resolves and `sha` is the served version: an ordinary pin;
+- **on the element, written against an older version** — `ref` resolves, `sha` is behind: the pin
+  sits on the element as it is now, the thread says which version it was said about, and the
+  history lane serves that render beside the current one, so the reader sees *what it was*;
+- **by position** — `ref` no longer resolves: a visibly different pin at `point`, labelled as such,
+  the thread saying the element it named is gone, and again the old render one click away.
+
+The rule that makes the ladder trustworthy is that the fallback is never silent, and with history
+it is never blind either: a comment can lose its element, but it cannot lose its picture. The
+parity locator already reserves `element` and `bounds` and already keys acceptances to a reference
+fingerprint, and its caveat carries over unchanged — an element's bounds are measured on the baked
+render, and must not be read against pixels an override or a pin has re-rendered.
 
 ### What tends to happen
 
@@ -410,17 +457,19 @@ on is `compose-preview-contracts`.
 | 1 | **Design URL selectors and an unfurl card.** `?revision=` / `?node=` / `#thread=` on `/ui-builder/<catalog>/<design>`; an `og:image` for the design page from its PNG export or blank frame, content-addressed, privacy-aware | S | server, ui-builder | 4.1; a link in the chat means something |
 | 2 | **`links` beside the design.** A `links/<digest>.json` store, Screen-panel editor, `ui_builder_set_links` / carried in `ui_builder_get_design`, an additive `links` field on the project index, `GET /ui-builder/links?issue=` | S | server, ui-builder, contracts (index schema) | 4.2; "where were we" |
 | 3 | **Outbound comment webhook.** `--ui-builder-comment-webhook <url>` (and a per-design override in `links.thread`), posting new threads and replies with the thread permalink as plain JSON; the Slack, Teams and Google Chat incoming-webhook bodies are one adapter each | S | server | Reviewing without opening the builder |
-| 4 | **`resolve_reference(url)`** on `/mcp`, answering `kind`, ids, revision and the fetching call; the locator block's fields as its schema | S | server (mcp), contracts | 4.1; every agent seat |
-| 5 | **`ui_builder_put_reference`** — the reference-overlay routes as a tool (image bytes, or a piece placed at a rect), so an agent with a design-tool connector, or a render from this server, can put a frame under the design | S | server (mcp) | The frame, existing-screen and napkin entries |
-| 6 | **Persist grants across restart.** Encrypted at rest under a `/config` key; TTLs and `unknown` unchanged | M | server | 4.3 |
-| 7 | **Service actor and `via` attribution.** `app:<installation>` as an owner / share target with its own credential; `via` on comments, cosmetic; `authorKind: agent` on everything it writes | M | server, ui-builder-runtime, contracts | 4.4; chat agents, routines, CI |
-| 8 | **Team share targets.** `team:<org>/<slug>` resolved against the directory the box trusts; shown as the team in the access list | M | server | 4.4 |
-| 9 | **A second reference scheme.** Admit a non-`figma:` kit reference on a catalog component and resolve it per scheme on the compare page | S | compose-ai-tools (annotation), server (compare) | Section 2's first seam |
-| 10 | **Chat-agent connector recipe.** For whichever chat-resident agent the team runs: the connector to `/mcp`, the device-flow grant, and the prompt shape that keeps the design authoritative | docs | docs/ | Adoption |
+| 4 | **Comments on served previews.** The comment board keyed by `<catalog>/<previewId>` beside its design keying; the `ref` / `point` / `sha` anchor and the three display states above; the viewer's Talk panel; the same six MCP tools with a `preview` argument, and the same `comments` block on `render_preview` | M | server, serve-web | The "feedback on the shipped screen" entry |
+| 5 | **`resolve_reference(url)`** on `/mcp`, answering `kind`, ids, revision and the fetching call; the locator block's fields as its schema | S | server (mcp), contracts | 4.1; every agent seat |
+| 6 | **`ui_builder_put_reference`** — the reference-overlay routes as a tool (image bytes, or a piece placed at a rect), so an agent with a design-tool connector, or a render from this server, can put a frame under the design | S | server (mcp) | The frame, existing-screen and napkin entries |
+| 7 | **Persist grants across restart.** Encrypted at rest under a `/config` key; TTLs and `unknown` unchanged | M | server | 4.3 |
+| 8 | **Service actor and `via` attribution.** `app:<installation>` as an owner / share target with its own credential; `via` on comments, cosmetic; `authorKind: agent` on everything it writes | M | server, ui-builder-runtime, contracts | 4.4; chat agents, routines, CI |
+| 9 | **Team share targets.** `team:<org>/<slug>` resolved against the directory the box trusts; shown as the team in the access list | M | server | 4.4 |
+| 10 | **A second reference scheme.** Admit a non-`figma:` kit reference on a catalog component and resolve it per scheme on the compare page | S | compose-ai-tools (annotation), server (compare) | Section 2's first seam |
+| 11 | **Chat-agent connector recipe.** For whichever chat-resident agent the team runs: the connector to `/mcp`, the device-flow grant, and the prompt shape that keeps the design authoritative | docs | docs/ | Adoption |
 
-Items 1–5 and 9 are the whole of "better references" and "sagas" and are all additive. Items 6–8
-are the identity work and are where the design decisions live; 7 should come with its own
-document. Item 10 is the adoption guide.
+Items 1–6 and 10 are the whole of "better references", "sagas" and the shipped-screen entry, and are all
+additive. Items 7–9
+are the identity work and are where the design decisions live; 8 should come with its own
+document. Item 11 is the adoption guide.
 
 ## 7. What not to build
 
@@ -445,7 +494,7 @@ document. Item 10 is the adoption guide.
   `hint` telling the agent what to do, by design. A shared design is a place where anyone with
   editor access can write text an agent will act on. The mitigations are the existing ones —
   the agent reaches only what its principal reaches, and nothing on the board widens that — plus
-  a rule for the service actor (7): it acts on a comment only from an actor the design's owner has
+  a rule for the service actor (8): it acts on a comment only from an actor the design's owner has
   shared with, never on one from a `via` it cannot verify.
 - **Noise.** An agent that reacts to every comment and posts to every thread trains people to
   ignore it. React on receipt, reply when there is something to say, resolve when it is done — the
@@ -460,7 +509,7 @@ document. Item 10 is the adoption guide.
   accounts are exempt and the PR body rule is unchanged, so the workflow is compatible — but a team
   adopting this should read [`AGENTS.md`](../../AGENTS.md#enforced-rules) before their first PR
   opened from a thread.
-- **The restart.** Until item 6, a redeploy mid-review drops every agent's grant at once. The
+- **The restart.** Until item 7, a redeploy mid-review drops every agent's grant at once. The
   in-protocol re-request makes recovery a tool call rather than a human, but it is still an
   interruption a person notices.
 
