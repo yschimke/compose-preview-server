@@ -310,6 +310,17 @@ fun UiBuilderEditor(
   onReconnect: (() -> Unit)? = null,
   onSubmission: ((EditorSubmission) -> Unit)? = null,
   authoritativeGeneration: Int = 0,
+  /**
+   * The revision the *server* has accepted, or null where no host says.
+   *
+   * Not `state.document.revision`, which the reducer raises the moment an edit is applied so the
+   * canvas can draw it — a number that is a claim about a submission still in the queue. A link
+   * copied at that number would either resolve to nothing, or, once a collaborator's edit claimed
+   * the same number first, to a document the person who copied it never saw. So a link names the
+   * last revision that certainly exists, and where nothing is authoritative it names no revision at
+   * all and opens the living design.
+   */
+  authoritativeRevision: Long? = null,
   initialSelectedNodeId: String? = null,
   initialCatalogQuery: String = "",
   initialLayerQuery: String = "",
@@ -635,7 +646,17 @@ fun UiBuilderEditor(
   // value being edited and cleared the moment it lands.
   var hoverFocusTarget by remember(document.id) { mutableStateOf<String?>(null) }
   var textInputFocused by remember { mutableStateOf(false) }
-  var mobilePanel by remember(document.id) { mutableStateOf(MobileEditorPanel.None) }
+  // Opened where the URL asked for a panel, on a narrow viewport as much as a wide one. The
+  // compact layout draws its docks from this rather than from [inspectorOpen], so initialising only
+  // that flag left `?node=` and `#thread=` selecting silently on a phone: the state was right and
+  // nothing was on screen. `Properties` is the compact dock that hosts every inspector mode, Talk
+  // included — the same pairing `onOpenProperties` already makes.
+  var mobilePanel by
+    remember(document.id) {
+      mutableStateOf(
+        if (initialInspectorOpen) MobileEditorPanel.Properties else MobileEditorPanel.None
+      )
+    }
   // Which panels are open. Local rather than in [UiBuilderEditorState] on purpose: what a
   // collaborator has open is not part of the document, and an editor that reopened someone else's
   // panels on every reconcile would be worse than one that remembers nothing.
@@ -816,8 +837,9 @@ fun UiBuilderEditor(
       },
       // The link names the *anchor* rather than the whole selection: a URL selects one node, and
       // the anchor is the node every other single-selection question in this editor is asked of.
-      // Pinned to the revision it was copied at, because a link to a layer is a link to a layer as
-      // it was — the thing somebody is about to be asked to look at.
+      // Pinned to the last revision the host confirmed, because a link to a layer is a link to a
+      // layer as it was — the thing somebody is about to be asked to look at. See
+      // [authoritativeRevision] for why that is not the revision on screen.
       onCopyLink =
         onCopyDesignLink?.let { copy ->
           state.selectedNodeId?.let { nodeId ->
@@ -826,10 +848,7 @@ fun UiBuilderEditor(
                 say(
                   copyLinkSentence(
                     copy,
-                    DesignUrlSelectors(
-                      revision = state.document.revision.toLong(),
-                      nodeId = nodeId,
-                    ),
+                    DesignUrlSelectors(revision = authoritativeRevision, nodeId = nodeId),
                   )
                 )
               }

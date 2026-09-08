@@ -88,16 +88,35 @@ the reference all still work while every change to the *document* is dropped bef
 canvas. A revision the service will not answer for — trimmed out of the retained window, or one this
 design never reached — is a **stale link, not a failed page**: the editor opens the living design and
 the banner says the revision is unavailable. That is the same instinct as the catalog-less redirect
-above; answer the question the reader actually has.
+above; answer the question the reader actually has. `?revision=0` is a revision like any other: a
+design is created at 0 and that snapshot is retained, so the link names the state a template started
+in. Only a negative or non-numeric value is no revision at all.
+
+A pinned page is historical all the way down, not merely un-editable, and three things follow that
+are easy to leave out. The catalog installed is the one the **pinned** snapshot resolved against, not
+the one the catalog list offers today, so a design whose catalog pin moved between revisions is drawn
+with the capabilities it actually had. Presence is dropped: the page holds no socket, and collaborator
+avatars and selection outlines from the live design would be pointing at nodes of a revision this
+canvas is not showing. And the lanes that render on request are pinned or withheld — the export
+routes take the same `revision`, so the Export menu answers about history; the native-preview route
+takes none, so it is not offered at all, and a catalog whose Wasm canvas is only a stand-in (Wear)
+shows a pinned revision on that stand-in rather than a faithful picture of the wrong revision.
+**Reconnect** is withheld for the same reason: there is no session to resume, and its handler would
+fetch the head under a banner still naming the revision.
 
 **`?node=<nodeId>`** selects that node as the design opens — the canvas outline and the Layers row —
 and opens the Properties panel on it. An id this design does not have opens the design with a small
-notice rather than an error, for the same reason: the link is stale and the design is not.
+notice rather than an error, for the same reason: the link is stale and the design is not. On a
+viewport too narrow for the docked inspector the same selector opens the compact Properties sheet,
+which is the one dock that hosts every inspector mode, Talk included — a selector that set the state
+and left the phone showing nothing would be the panel half of the feature missing.
 
 **`#thread=<threadId>`** opens the Talk panel scrolled to one conversation, and combines with
 `?node=` where the thread is pinned to a layer, so "the thread about this button, beside the button"
-is one URL. The panel scrolls to it **once**: a link says where to start reading, and a page that
-kept pulling itself back would fight whoever read on.
+is one URL. A thread the URL names is shown even when it is resolved, without switching **Show
+resolved** on for everything else: a permalink to a settled conversation is exactly the link somebody
+sends to explain a decision. The panel scrolls to it **once**: a link says where to start reading,
+and a page that kept pulling itself back would fight whoever read on.
 
 **The thread is a fragment on purpose, and this is the load-bearing part.** A fragment is never sent
 to the server — not in the request line, not to a proxy, not into an access log, not in a referrer
@@ -117,7 +136,9 @@ moment the selection moves off it, and `#thread=` the moment the reader closes t
 another, so a URL copied later cannot point at something nobody has been looking at.
 
 **Copy link** produces these URLs from the two places a person is standing when they want one: a
-selected layer's menu, which copies the node at the revision on screen, and a comment thread's card,
+selected layer's menu, which copies the node at the last revision the host has confirmed — not the
+one on screen, which the reducer has already raised for an edit still in the queue and which a
+collaborator may yet claim first — and a comment thread's card,
 which copies the thread and the layer it is pinned to. Both copy the canonical path form with no
 identity or token value on it — a shared link is an address and never a credential, which is the
 rule the export lane's Copy link already follows. The grammar is one function,

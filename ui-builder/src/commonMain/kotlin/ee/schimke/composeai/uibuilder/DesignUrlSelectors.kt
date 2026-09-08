@@ -98,11 +98,11 @@ private const val SELECTOR_VALUE_MAX = 512
  * Reads the three selectors out of one URL's query and fragment.
  *
  * Tolerant by construction, because every input is somebody else's link: an unknown key is ignored
- * rather than refused, a `revision` that is not a positive number is dropped rather than failing
- * the page, and a value that is blank or absurdly long is treated as absent. A selector that names
- * something this design does not have is **not** this function's problem — an unknown node id is
- * still returned here and answered by the editor with a notice, because "there is no such layer" is
- * a sentence a reader needs and a parse failure is not.
+ * rather than refused, a `revision` that is not a non-negative number is dropped rather than
+ * failing the page, and a value that is blank or absurdly long is treated as absent. A selector
+ * that names something this design does not have is **not** this function's problem — an unknown
+ * node id is still returned here and answered by the editor with a notice, because "there is no
+ * such layer" is a sentence a reader needs and a parse failure is not.
  *
  * Both arguments take the browser's own spelling, with or without their leading `?` and `#`, so a
  * caller can hand over `location.search` and `location.hash` unmodified.
@@ -166,8 +166,16 @@ private fun parseUrlPairs(raw: String?): Map<String, String> {
   return values
 }
 
-/** A revision is a positive whole number or it is not a revision. */
-private fun String.toRevisionOrNull(): Long? = trim().toLongOrNull()?.takeIf { it > 0 }
+/**
+ * A revision is a whole number that is not negative, or it is not a revision.
+ *
+ * Zero is included, and deliberately: a design is created at revision 0 and that snapshot is
+ * retained like any other, so `?revision=0` names the state the design was born in — the one a
+ * reader asks for to see what a template started as. The export routes already accept it on the
+ * same terms, and a parser that dropped it would answer that link by silently opening the live
+ * editable design instead.
+ */
+private fun String.toRevisionOrNull(): Long? = trim().toLongOrNull()?.takeIf { it >= 0 }
 
 /** A node or thread id, or null where the URL named nothing usable. */
 private fun String.toSelectorIdOrNull(): String? =

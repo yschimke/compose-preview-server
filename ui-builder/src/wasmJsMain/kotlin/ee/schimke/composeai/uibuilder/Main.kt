@@ -660,19 +660,26 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
     val selectedCatalog =
       availableCatalogs.singleOrNull { it.benchmark.catalogSystemId == config.catalogSystemId }
         ?: error("UI builder is not enabled for catalog ${config.catalogSystemId}")
-    catalog =
-      CapabilityCatalogParser.parse(
-        Json.encodeToJsonElement(CatalogCapabilityV1.serializer(), selectedCatalog)
-      )
-    exportHost =
-      BrowserExportHost(
-        designId = config.designId,
-        formats =
-          exportFormatsFor(
-            svg = selectedCatalog.exportCapabilities.svg,
-            png = selectedCatalog.exportCapabilities.png,
-          ),
-      )
+    fun installCatalog(capability: CatalogCapabilityV1, revision: Long?) {
+      catalog =
+        CapabilityCatalogParser.parse(
+          Json.encodeToJsonElement(CatalogCapabilityV1.serializer(), capability)
+        )
+      // Pinned to the same revision the canvas is drawing, because the export routes render on
+      // request: without it the Export menu would answer a question about history with the
+      // picture of the head, which is the one thing the banner promises it is not showing.
+      exportHost =
+        BrowserExportHost(
+          designId = config.designId,
+          formats =
+            exportFormatsFor(
+              svg = capability.exportCapabilities.svg,
+              png = capability.exportCapabilities.png,
+            ),
+          revision = revision,
+        )
+    }
+    installCatalog(selectedCatalog, null)
     // `?revision=` first, because a design pinned to a committed revision is a different opening:
     // one snapshot, no socket, no presence. A revision the service will not answer for — trimmed
     // out of the retained window, or one this design never reached — is *not* a failure to open.
@@ -685,7 +692,15 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
           ?.response as? SnapshotResponseV1
       revisionPin = DesignRevisionPin(requested = requested, pinned = pinned != null)
       if (pinned != null) {
-        acceptSnapshot(pinned)
+        // The catalog the *pinned* document was resolved against, not the one the catalog list
+        // offers today. A design whose catalog pin moved between revisions is validated and drawn
+        // with the capabilities it actually had, which is the whole claim a historical view makes.
+        installCatalog(pinned.snapshot.catalog, requested)
+        // Presence belongs to the living design. This page holds no socket and never will, so the
+        // avatars and selection outlines the snapshot happens to carry are other people editing a
+        // document this canvas is not showing — drawn over history for as long as they take to
+        // expire, and pointing at node ids from the head revision.
+        acceptSnapshot(pinned.copy(snapshot = pinned.snapshot.copy(presence = emptyList())))
         canonicalizeUiBuilderUrl(config.catalogSystemId, config.designId, config.selectors)
         sessionStatus = "Revision $requested · read-only"
         markReady()
@@ -906,10 +921,18 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       clientId = config.clientId,
       operationIdPrefix = config.operationIdPrefix,
       sessionLabel = sessionStatus,
-      onReconnect = {
-        updates?.reconnect()
-        refreshSnapshot("Reconnecting…")
-      },
+      // No Reconnect while a revision is pinned. There is no session to reconnect: the pinned page
+      // opened one snapshot and holds no socket, and the button's own handler would fetch the head
+      // and replace the document under a banner still naming the revision — the exact lie the
+      // banner exists to prevent.
+      onReconnect =
+        if (revisionPin?.pinned == true) null
+        else {
+          {
+            updates?.reconnect()
+            refreshSnapshot("Reconnecting…")
+          }
+        },
       onSubmission = { submission ->
         // Queued rather than sent: the revision this command claims, and the order it reaches the
         // server in, are the drain loop's to decide.
@@ -920,6 +943,7 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
         }
       },
       authoritativeGeneration = authoritativeGeneration,
+      authoritativeRevision = authoritativeDocument?.revision,
       initialSelectedNodeId = selectedNodeId,
       // `#thread=` wins the panel where a link names both: one dock is open at a time, and a link
       // that names a conversation is a link to read it. `?node=` still selects the layer, which is
@@ -994,7 +1018,16 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       onInspectionInvalidated = { collector ->
         inspectionPublisher.offer(collector, loadedDocument.revision)
       },
-      onRequestNativeRender = { requestNativeRender(config.designId) },
+      // Withheld while pinned, unlike the export lane above: the native-preview route renders the
+      // design's current committed revision and takes no revision of its own, so the only honest
+      // answer for a historical page is not to offer it. A catalog whose Wasm canvas is a stand-in
+      // (Wear) therefore opens a pinned revision on that stand-in rather than on a faithful
+      // picture of the wrong revision.
+      onRequestNativeRender =
+        if (revisionPin?.pinned == true) null
+        else {
+          { requestNativeRender(config.designId) }
+        },
       remoteComposeSources = remoteComposeSources,
       resolveRemoteComposeDocument = { source ->
         fetchBase64(catalogAssetPath(config.catalogSystemId, "/render/${source.id}.rc"))

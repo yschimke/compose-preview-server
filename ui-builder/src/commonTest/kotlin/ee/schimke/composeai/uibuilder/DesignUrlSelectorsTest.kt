@@ -53,9 +53,19 @@ class DesignUrlSelectorsTest {
   }
 
   @Test
-  fun `a revision that is not a positive number is no revision at all`() {
-    listOf("?revision=", "?revision=latest", "?revision=0", "?revision=-3", "?revision=4.5")
-      .forEach { assertNull(parseDesignUrlSelectors(it, null).revision, "for $it") }
+  fun `a revision that is not a whole non-negative number is no revision at all`() {
+    listOf("?revision=", "?revision=latest", "?revision=-3", "?revision=4.5").forEach {
+      assertNull(parseDesignUrlSelectors(it, null).revision, "for $it")
+    }
+  }
+
+  @Test
+  fun `revision zero is the revision a design was created at`() {
+    assertEquals(0L, parseDesignUrlSelectors("?revision=0", null).revision)
+    assertEquals(
+      "/ui-builder/m3-catalog/jetcaster-discover?revision=0",
+      designUrlPath("m3-catalog", "jetcaster-discover", DesignUrlSelectors(revision = 0)),
+    )
   }
 
   @Test

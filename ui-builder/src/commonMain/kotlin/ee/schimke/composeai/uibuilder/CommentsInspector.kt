@@ -241,7 +241,14 @@ internal fun CommentsInspector(
 
   HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
 
-  val shown = if (showResolved) board.threads else board.openThreads
+  // A thread the URL named is shown whether or not it is resolved, and without turning "Show
+  // resolved" on for everything else. A permalink to a conversation that was settled is exactly the
+  // link somebody sends to explain a decision, and hiding it behind a toggle the reader does not
+  // know to press makes that link open a panel with nothing in it — the reveal below would also
+  // wait forever for an offset no card ever records.
+  val shown =
+    if (showResolved) board.threads
+    else board.threads.filterNot { it.resolved && it.id != revealThreadId }
   if (shown.isEmpty()) {
     Text(
       if (board.threads.isEmpty()) "Nothing has been said about this design yet."
