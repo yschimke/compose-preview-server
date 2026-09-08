@@ -89,6 +89,12 @@ tasks.withType<Test>().configureEach {
   providers.gradleProperty("uiBuilderSlotAcceptanceUpdate").orNull?.let {
     systemProperty("uiBuilderSlotAcceptanceUpdate", it)
   }
+  // `SynthesisedCatalogGoldenTest` rewrites the frozen `wear-m3` / `remote-m3` catalogs when asked;
+  // see the class for what a failure means and why reading the diff is the point. A Gradle property
+  // rather than a bare `-D` for the same reason as the line above: `-D` on the command line reaches
+  // the Gradle JVM, not the forked test JVM, and the silent no-op that follows is a confusing half
+  // hour.
+  providers.gradleProperty("uiBuilderGoldens").orNull?.let { systemProperty("ui.builder.goldens", it) }
 }
 
 abstract class CheckUiBuilderRuntimeBoundary : DefaultTask() {

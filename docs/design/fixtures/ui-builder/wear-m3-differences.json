@@ -1,0 +1,6 @@
+[
+  {
+    "field": "componentMenu.groupOrder",
+    "why": "Deliberate, and the first substantive thing the contract changes rather than moves. The frozen order — Screens, Layout, Lists, Actions, Selection, Containment, Communication, Content, Embedded — is a taxonomy this repository invented for a catalog whose components it has never compiled; 'Lists', 'Content' and 'Embedded' are not words wear-m3-catalog uses about itself. The policy states that catalog's own @file:CatalogGroup(section = ...) vocabulary instead, which is the same vocabulary its published sticker sheet is already organised by, so the builder's insert panel and the catalog's own site stop disagreeing about what a component is filed under. Expect the shelves to move at cutover; that is the change, not a regression."
+  }
+]
