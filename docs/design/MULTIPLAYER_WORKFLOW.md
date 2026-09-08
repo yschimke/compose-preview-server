@@ -73,7 +73,7 @@ An inventory of what exists, ordered by how much of the workflow each already ca
 | A design with a canonical URL, revisions, presence and an owner/viewer/editor list | `/ui-builder/<catalog>/<design>`; [`UI_BUILDER_LIVE_SESSION.md`](UI_BUILDER_LIVE_SESSION.md), `ui_builder_share_design` | The shared object. A browser and an MCP client land in one `PersistentUiBuilderService.apply`, and every accepted write reaches every subscriber |
 | Comments pinned to a node, a mark or a point, with react / acknowledge / resolve kept distinct | [`UI_BUILDER_COMMENTS.md`](UI_BUILDER_COMMENTS.md) | The in-context discussion. Stored *beside* the design, so talking never moves the revision |
 | The agent is woken, and told what it has not read, on every reply | `ui_builder_await_comments`; the `comments` block on `ui_builder_get_design` / `_apply` / `_export` | An agent mid-edit learns a designer spoke without polling |
-| A reference overlay: paste a frame from any tool, or a screenshot of a shipped screen; mark it up, erase, capture a component, promote it into the tree | [`UI_BUILDER_REFERENCE_OVERLAY.md`](UI_BUILDER_REFERENCE_OVERLAY.md) | The cheapest possible join to a design tool *and* to the existing app: the clipboard |
+| A reference overlay: paste a frame from any tool, a screenshot of a shipped screen, or a photo of a sketch; mark it up, erase, capture a component, promote it into the tree | [`UI_BUILDER_REFERENCE_OVERLAY.md`](UI_BUILDER_REFERENCE_OVERLAY.md) | The cheapest possible join to a design tool *and* to the existing app: the clipboard |
 | An app's own composables on the palette, from its discovered component record | [`UI_BUILDER_COMPONENT_PACKS.md`](UI_BUILDER_COMPONENT_PACKS.md), `ui --module app` | A change to an existing screen is built from the screen's own parts |
 | Designs in the app's repository, `ui-builder/designs/index.json`, and a library to open one from | [`UI_BUILDER_PROJECT_DESIGNS.md`](UI_BUILDER_PROJECT_DESIGNS.md) | The design survives the session, can be argued about in a pull request, and is there for the next feature |
 | Deterministic export: Compose source, layered SVG, PNG, all pinned to a revision | `ui_builder_export`, `compose-preview-server design …` | The handoff to engineering is a file, not a screenshot; the handoff to the design tool is a vector it can import |
@@ -123,7 +123,7 @@ reducing it to two.
 
 ### Where it starts
 
-The loop has no fixed entry, and the three common ones are different enough to name.
+The loop has no fixed entry, and the four common ones are different enough to name.
 
 **The designer arrives with a frame.** A screen drawn in the design tool, against the team's kit.
 The join is the clipboard: the frame goes onto the reference overlay, the designer or the agent
@@ -150,9 +150,20 @@ says what changed underneath. This is the case the project-designs convention ex
 one where "where were we" is answered by the design's back-links (4.2) rather than by whoever
 remembers.
 
-A fourth is a brief with nothing behind it yet — the PM's issue and a sentence in a thread — and
-it collapses into one of the three the moment somebody starts: a template copy, a snapshot of the
-screen it changes, or last time's design.
+**Somebody has a napkin drawing.** A photo of a sketch, a whiteboard after a meeting, a wireframe
+from a whiteboarding tool, or five boxes and an arrow drawn in the builder's own markup layer — which
+has exactly that vocabulary: draw, box, arrow, label, image placeholder. This is the entry where
+the agent does the most and the person corrects. The picture goes on the overlay like any other;
+the agent reads it and proposes the tree — *"a top bar, a list of cards, a floating action"* — as
+operations the person can see land and undo. The reference-overlay document is explicit that a
+piece with no provenance is the one case that needs an agent rather than a deterministic promote,
+and this is that case in its purest form. The napkin is never the reference the screen is judged
+against; it is replaced by the frame or the render as soon as one exists, which is what
+**flatten** and the `links.reference` slot (4.2) are for.
+
+A fifth is a brief with nothing behind it yet — the PM's issue and a sentence in a thread — and it
+collapses into one of the four the moment somebody starts: a template copy, a snapshot of the
+screen it changes, last time's design, or a sketch.
 
 ### What tends to happen
 
@@ -400,7 +411,7 @@ on is `compose-preview-contracts`.
 | 2 | **`links` beside the design.** A `links/<digest>.json` store, Screen-panel editor, `ui_builder_set_links` / carried in `ui_builder_get_design`, an additive `links` field on the project index, `GET /ui-builder/links?issue=` | S | server, ui-builder, contracts (index schema) | 4.2; "where were we" |
 | 3 | **Outbound comment webhook.** `--ui-builder-comment-webhook <url>` (and a per-design override in `links.thread`), posting new threads and replies with the thread permalink as plain JSON; the Slack, Teams and Google Chat incoming-webhook bodies are one adapter each | S | server | Reviewing without opening the builder |
 | 4 | **`resolve_reference(url)`** on `/mcp`, answering `kind`, ids, revision and the fetching call; the locator block's fields as its schema | S | server (mcp), contracts | 4.1; every agent seat |
-| 5 | **`ui_builder_put_reference`** — the reference-overlay routes as a tool (image bytes, or a piece placed at a rect), so an agent with a design-tool connector, or a render from this server, can put a frame under the design | S | server (mcp) | Both "designer arrives with a frame" and "existing screen" entries |
+| 5 | **`ui_builder_put_reference`** — the reference-overlay routes as a tool (image bytes, or a piece placed at a rect), so an agent with a design-tool connector, or a render from this server, can put a frame under the design | S | server (mcp) | The frame, existing-screen and napkin entries |
 | 6 | **Persist grants across restart.** Encrypted at rest under a `/config` key; TTLs and `unknown` unchanged | M | server | 4.3 |
 | 7 | **Service actor and `via` attribution.** `app:<installation>` as an owner / share target with its own credential; `via` on comments, cosmetic; `authorKind: agent` on everything it writes | M | server, ui-builder-runtime, contracts | 4.4; chat agents, routines, CI |
 | 8 | **Team share targets.** `team:<org>/<slug>` resolved against the directory the box trusts; shown as the team in the access list | M | server | 4.4 |
