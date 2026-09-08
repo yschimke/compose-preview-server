@@ -17,6 +17,19 @@
       "Theme",
       "Wear M3",
       "Confetti"
+    ],
+    "frozen": [
+      "Scaffolds",
+      "Layout",
+      "Navigation",
+      "Actions",
+      "Selection",
+      "Text inputs",
+      "Containment",
+      "Communication",
+      "Content",
+      "Styles",
+      "Embedded"
     ]
   }
 ]

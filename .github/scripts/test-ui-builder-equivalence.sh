@@ -39,7 +39,7 @@ JSON
 
 cat >"${work}/accepted.json" <<'JSON'
 [ { "field": "componentMenu.groupOrder", "why": "the catalog's own sections, deliberately",
-    "policy": ["B", "A"] } ]
+    "policy": ["B", "A"], "frozen": ["A", "B"] } ]
 JSON
 
 cat >"${work}/unpinned.json" <<'JSON'
@@ -48,12 +48,27 @@ JSON
 
 cat >"${work}/stale.json" <<'JSON'
 [ { "field": "componentMenu.groupOrder", "why": "reviewed something else",
-    "policy": ["C", "D"] } ]
+    "policy": ["C", "D"], "frozen": ["A", "B"] } ]
 JSON
 
 # States nothing the golden states. The gate must not call this ready.
 cat >"${work}/silent.json" <<'JSON'
 { "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear" }
+JSON
+
+cat >"${work}/unexplained.json" <<'JSON'
+[ { "field": "componentMenu.groupOrder", "policy": ["B", "A"], "frozen": ["A", "B"] } ]
+JSON
+
+cat >"${work}/frozen-moved.json" <<'JSON'
+[ { "field": "componentMenu.groupOrder", "why": "reviewed against a different frozen value",
+    "policy": ["B", "A"], "frozen": ["X", "Y"] } ]
+JSON
+
+# The published shape: the same facts under statusSemantics, with `menu` called `componentMenu`.
+cat >"${work}/published.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A", "B"] } } }
 JSON
 
 # The same facts as the golden, with object members in the other order.
@@ -98,7 +113,7 @@ check "a missing golden is a usage error, not a pass" 2 $?
 # question wrongly rather than declining to answer it.
 "${gate}" --policy "${work}/silent.json" --golden "${work}/golden.json" --strict >"${work}/out" 2>&1
 check "a policy silent about a fact the golden states fails --strict" 1 $?
-grep -q "the policy is silent" "${work}/out" ||
+grep -q "the catalog is silent" "${work}/out" ||
   { echo "FAIL silence not reported"; failures=$((failures + 1)); }
 
 # An exemption that outlives the thing it exempted approves every future value of the field —
@@ -106,13 +121,13 @@ grep -q "the policy is silent" "${work}/out" ||
 "${gate}" --policy "${work}/differs.json" --golden "${work}/golden.json" \
   --differences "${work}/unpinned.json" --strict >"${work}/out" 2>&1
 check "an exemption naming no reviewed value fails --strict" 1 $?
-grep -q "names no reviewed value" "${work}/out" ||
+grep -q "names no reviewed policy value" "${work}/out" ||
   { echo "FAIL unpinned exemption not reported"; failures=$((failures + 1)); }
 
 "${gate}" --policy "${work}/differs.json" --golden "${work}/golden.json" \
   --differences "${work}/stale.json" --strict >"${work}/out" 2>&1
 check "an exemption whose reviewed value has changed fails --strict" 1 $?
-grep -q "changed since this difference was accepted" "${work}/out" ||
+grep -q "catalog changed since this was accepted" "${work}/out" ||
   { echo "FAIL stale exemption not reported"; failures=$((failures + 1)); }
 
 # Two generators emitting one object in different insertion orders is not a difference, and a
@@ -120,6 +135,32 @@ grep -q "changed since this difference was accepted" "${work}/out" ||
 "${gate}" --policy "${work}/reordered-policy.json" --golden "${work}/reordered-golden.json" \
   --strict >"${work}/out" 2>&1
 check "object key order is not a difference" 0 $?
+
+# An exemption with the values but no reason is the failure the `why` field exists to prevent.
+"${gate}" --policy "${work}/differs.json" --golden "${work}/golden.json" \
+  --differences "${work}/unexplained.json" --strict >"${work}/out" 2>&1
+check "an exemption with no why fails --strict" 1 $?
+grep -q "carries no \`why\`" "${work}/out" ||
+  { echo "FAIL unexplained exemption not reported"; failures=$((failures + 1)); }
+
+# Pinning only the catalog side leaves the frozen side free to move under a waiver that no longer
+# describes the discrepancy it waived.
+"${gate}" --policy "${work}/differs.json" --golden "${work}/golden.json" \
+  --differences "${work}/frozen-moved.json" --strict >"${work}/out" 2>&1
+check "an exemption whose reviewed frozen value has changed fails --strict" 1 $?
+grep -q "frozen catalog changed" "${work}/out" ||
+  { echo "FAIL moved frozen side not reported"; failures=$((failures + 1)); }
+
+# The generated artifact is the shape the cutover fetches; the authored policy is all a catalog has
+# before the pipeline release. Both have to work, or the gate is useless at one end or the other.
+"${gate}" --policy "${work}/published.json" --golden "${work}/golden.json" --strict >"${work}/out" 2>&1
+check "the generated ui-builder.json shape is read too" 0 $?
+grep -q "as a generated ui-builder.json" "${work}/out" ||
+  { echo "FAIL published shape not detected"; failures=$((failures + 1)); }
+
+# --strict is the cutover asserting readiness; "there is no catalog" must not read as success.
+"${gate}" --policy "${work}/absent.json" --golden "${work}/golden.json" --strict >/dev/null 2>&1
+check "a missing policy fails --strict" 1 $?
 set -e
 
 if [[ ${failures} -gt 0 ]]; then

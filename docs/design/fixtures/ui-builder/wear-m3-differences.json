@@ -13,6 +13,17 @@
       "Motion",
       "Styles",
       "Horologist"
+    ],
+    "frozen": [
+      "Screens",
+      "Layout",
+      "Lists",
+      "Actions",
+      "Selection",
+      "Containment",
+      "Communication",
+      "Content",
+      "Embedded"
     ]
   }
 ]

@@ -10,6 +10,19 @@
       "Containment",
       "Communication",
       "Styles"
+    ],
+    "frozen": [
+      "Scaffolds",
+      "Layout",
+      "Navigation",
+      "Actions",
+      "Selection",
+      "Text inputs",
+      "Containment",
+      "Communication",
+      "Content",
+      "Styles",
+      "Embedded"
     ]
   }
 ]
