@@ -4175,6 +4175,39 @@ if (liveToggle) {
 // returns to the static snapshot — the same place the Live chip returns to — rather than to
 // whichever interactive lane was up before, because the spec is entered to compare against the
 // *render*, and that is the lane the comparison views (Diff / Triptych / Slider) draw from.
+// The comparison group's OTHER sources, on the resting bar beside the kit's chip.
+//
+// Each one is a way INTO the lane on its own source. The picker inside the lane is still what
+// switches between them once it is up; these are what make a second source discoverable at all,
+// since that picker ships hidden until the kit's chip is pressed.
+//
+// Order matters, and it is the opposite of the obvious one. `pickSpecSource` presses the source and
+// updates `specSrc`, then returns early while the page is not on the spec lane — so pressing FIRST
+// and entering SECOND means `setMode("spec")` opens directly on the requested pair. Entering first
+// would open on the kit and then re-request, which is a visible flash of the wrong panel and a
+// wasted raster.
+var specPeerChips: HTMLButtonElement[] = Array.prototype.slice.call(
+    document.querySelectorAll<HTMLButtonElement>("[data-cp-spec-open-source]"),
+);
+for (var pi = 0; pi < specPeerChips.length; pi++) {
+    (function (chip: HTMLButtonElement) {
+        chip.addEventListener("click", function () {
+            if (!specAvailable()) return;
+            var wanted = chip.getAttribute("data-cp-spec-open-source") || "";
+            var target: HTMLButtonElement | null = null;
+            for (var i = 0; i < specSourceButtons.length; i++) {
+                if (
+                    specSourceButtons[i].getAttribute("data-cp-spec-source") ===
+                    wanted
+                )
+                    target = specSourceButtons[i];
+            }
+            if (!target) return;
+            pickSpecSource(target);
+            if (!specActive()) setMode("spec");
+        });
+    })(specPeerChips[pi]);
+}
 if (specChip) {
     specChip.addEventListener("click", function () {
         if (specActive()) setMode("png");

@@ -15092,6 +15092,49 @@ ${scriptTag("known-differences.js")}
           "data-spec-chip-tip=\"${WebEscaping.htmlEscape(tip)}\"$staleTipAttr " +
           "title=\"${WebEscaping.htmlEscape(tip)}\">${WebEscaping.htmlEscape(label)}</button>"
       }
+    // ---- The comparison group
+    // --------------------------------------------------------------------
+    //
+    // EVERY source this render can be compared against, as PEERS.
+    //
+    // The lane has offered two since the `compareWith` pairing landed, but only one of them had a
+    // control: the chip named the kit ("Figma"), and the sibling lived in a picker that ships
+    // `hidden` until that chip is pressed. So the bar read as Figma-first with the second
+    // comparison nowhere on it — a button labelled with ONE source opening a panel of things that
+    // are not that source, which is `docs/design/COMPARE_NAVIGATION.md`'s F1 almost word for word.
+    //
+    // The picker stays: once the lane is up, switching between sources belongs beside the views it
+    // is switching for. What changes is that each source also has a way IN from the resting bar, so
+    // a reader who never presses the kit's chip can still discover that this catalog has a
+    // counterpart — and reach it in one click instead of two.
+    //
+    // These carry only the source ID. The raster, the label and the provenance stay on the picker's
+    // own buttons, which the server already built and escaped; `viewer.js` presses the matching one
+    // rather than re-deriving a pair from attributes copied onto a second element, so there is one
+    // description of each source rather than two that can disagree.
+    val specPeerChips =
+      if (primarySpecSource == null) ""
+      else
+        specSources.drop(1).joinToString("") { source ->
+          "<button type=\"button\" class=\"cp-spec-chip cp-spec-peer\" " +
+            "data-cp-spec-open-source=\"${WebEscaping.htmlEscape(source.id)}\" " +
+            "aria-pressed=\"false\" " +
+            "title=\"Compare this render against ${WebEscaping.htmlEscape(source.label)}\">" +
+            "${WebEscaping.htmlEscape(source.label)}</button>"
+        }
+    // Labelled, and only when there is more than one — on the ordinary catalog a group heading over
+    // a single chip is a word that earns nothing. The label is what makes the two read as answers
+    // to one question rather than as two unrelated buttons that happen to sit together, which is
+    // the same job `View`'s label does for the group below it.
+    val specGroupHtml =
+      if (specChipHtml.isBlank()) ""
+      else if (specPeerChips.isEmpty()) specChipHtml
+      else
+        "<span class=\"cp-compare-group\" role=\"group\" aria-label=\"Compare against\">" +
+          "<span class=\"cp-view-group-label\" aria-hidden=\"true\">Compare</span>" +
+          specChipHtml +
+          specPeerChips +
+          "</span>"
     val sourceKnown = !usageHref.isNullOrBlank()
     val usageAvailable = sourceKnown && pinned == null
     // The **Source chip** — the usage code behind this card, on the same row and for the same
@@ -16219,15 +16262,48 @@ ${scriptTag("known-differences.js")}
     // subtle
     // "go compare this elsewhere" links, then the SVG format toggle for whatever the chip is
     // currently showing.
+    // ---- The renderer control ------------------------------------------------------------------
+    //
+    // ONE control, not two. The chip NAMES the renderer in use ("CMP Android") and toggles it live;
+    // the combo CHOOSES a different one — and the two have always been driven from one lane value
+    // by `syncLaneSelect`, precisely because they are two halves of one fact. Side by side as
+    // separate pills they read as two independent controls and spent the width of a whole second
+    // one on the words "Switch renderer…", which say what the caret beside a named renderer already
+    // says.
+    //
+    // Joined, they are one segmented pill: the chip is the wide left segment, and the right
+    // segment is a caret the native `<select>` sits invisibly on top of.
+    //
+    // A real `<select>` rather than a menu built out of divs, because three things come free with
+    // it and would all have to be reimplemented: the platform's own picker on touch, type-ahead
+    // and arrow keys on a keyboard, and every id, option and event that `viewer.js`,
+    // `keyboardNavigation.ts` and the harness already address it by. Only its presentation
+    // changes.
+    //
+    // NOT joined in the component browser, which drops the chip with the rest of the Live control:
+    // there the combo is the sole indicator of what is drawing, so it has to keep its own label and
+    // its full width rather than becoming a caret with nothing beside it to name.
+    val rendererControl =
+      when {
+        componentBrowser -> laneSelectHtml
+        liveToggleHtml.isBlank() || laneSelectHtml.isBlank() ->
+          listOf(liveToggleHtml, laneSelectHtml).filter { it.isNotBlank() }.joinToString("\n")
+        else ->
+          "<span class=\"cp-renderer\" role=\"group\" aria-label=\"Renderer\">" +
+            liveToggleHtml +
+            "<span class=\"cp-renderer-more\">" +
+            "<span class=\"cp-renderer-caret\" aria-hidden=\"true\">\u25be</span>" +
+            laneSelectHtml +
+            "</span></span>"
+      }
     val primaryControls =
       if (spatialSceneUrl != null)
         "<span class=\"cp-spatial-mode\">WebGL spatial · headset mode available over HTTPS</span>"
       else
         listOf(
             browserPreviewTab,
-            liveToggleHtml.takeUnless { componentBrowser }.orEmpty(),
-            laneSelectHtml,
-            specChipHtml,
+            rendererControl,
+            specGroupHtml,
             sourceChipHtml,
             motionChipHtml,
             comparePlayersLink,
