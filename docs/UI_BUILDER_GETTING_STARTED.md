@@ -72,7 +72,9 @@ Both modes are `serve` with flags added, and every flag stays available:
   permalink, so somebody reading a chat window hears about a comment without opening the builder.
   Reactions and acknowledgements deliberately do not fire. Only `https` is accepted (`http://` on
   loopback aside, for a test receiver), because a Slack or Teams hook URL is a credential — it is
-  never logged, and the server names it by a digest. Off unless you set it.
+  never logged, and the server names it by a digest. Off unless you set it. Set
+  `--github-auth-callback-base-url` too on any host behind a proxy: the permalink is built from it,
+  and without it the links carry the bind address. The deployed image derives it from `DOMAIN`.
 - **`--ui-builder-comment-webhook-format plain|slack|teams|google-chat`** — which body that hook
   receives. `plain` is this server's own event JSON and is the default; the other three are the
   incoming-webhook shapes those platforms accept. Named rather than guessed from the hostname: a

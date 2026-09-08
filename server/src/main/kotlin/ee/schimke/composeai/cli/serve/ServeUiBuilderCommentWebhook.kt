@@ -112,13 +112,20 @@ internal class ServeUiBuilderCommentWebhook(
   /** What the log calls this hook. A digest of the URL, never the URL. */
   val fingerprint: String = fingerprintOf(config.url)
 
-  private val queue = Channel<CommentWebhookEventV1>(QUEUE_CAPACITY)
+  // What the queue carries is the raw change, not the finished body.
+  //
+  // Everything that turns one into the other — the design's title and catalog, the origin, the
+  // adapter — happens on the worker. The design lookup in particular reads service state behind
+  // the service's own lock, and doing that on the writer's thread would put an unrelated design
+  // persistence operation on the critical path of accepting a comment, which is the one thing
+  // fire-and-forget delivery exists to prevent.
+  private val queue = Channel<CommentBoardChange>(QUEUE_CAPACITY)
 
   private val worker = scope.launch {
-    for (event in queue) {
+    for (change in queue) {
       // One at a time and never rethrowing: a webhook host that answers with an exception must
       // not take the loop down and leave every later comment undelivered in silence.
-      runCatching { deliver(event) }
+      runCatching { deliver(describe(change)) }
         .onFailure { onLog("serve: comment webhook $fingerprint failed (${it.message})") }
     }
   }
@@ -128,21 +135,21 @@ internal class ServeUiBuilderCommentWebhook(
     store.subscribeToHost { previous, next ->
       // On the writer's thread, so nothing here waits: a diff of two small in-memory boards, and
       // an offer to a queue that never blocks.
-      for (event in diffCommentBoards(previous, next).map(::describe)) enqueue(event)
+      for (change in diffCommentBoards(previous, next)) enqueue(change)
     }
 
-  private fun enqueue(event: CommentWebhookEventV1) {
-    if (queue.trySend(event).isSuccess) return
+  private fun enqueue(change: CommentBoardChange) {
+    if (queue.trySend(change).isSuccess) return
     val dropped = queue.tryReceive().getOrNull()
     if (dropped != null) {
       onLog(
         "serve: comment webhook $fingerprint is behind; dropped the oldest queued event " +
-          "(${dropped.event} on design ${dropped.design.id})"
+          "(${dropped.kind.wire} on design ${dropped.designId})"
       )
     }
     // Best effort: if this still does not fit, the queue drained and refilled between the two
     // calls, which means the worker is running and the next event will find room.
-    queue.trySend(event)
+    queue.trySend(change)
   }
 
   private suspend fun deliver(event: CommentWebhookEventV1) {
@@ -247,7 +254,13 @@ internal data class CommentWebhookConfig(
   fun rejection(): String? {
     val parsed = runCatching { URI(url) }.getOrNull() ?: return "is not a URL"
     val scheme = parsed.scheme?.lowercase()
-    val host = parsed.host?.lowercase()
+    val host = parsed.host?.lowercase()?.let(::unbracket)
+    // A port `URI` will parse but the HTTP client will not. Caught here rather than at the first
+    // delivery: the promise of validating at startup is that a hook which cannot work says so on
+    // the day it is configured, and `HttpClient.send` throwing per event would instead look like
+    // an ordinary delivery failure and retry forever against a URL that can never answer.
+    val port = parsed.port
+    if (port != -1 && port !in 1..65535) return "names port $port, which is not a port"
     if (scheme == "https") return if (host.isNullOrEmpty()) "names no host" else null
     if (scheme != "http") return "must be https (it is a credential, and it crosses a network)"
     if (host in LOOPBACK_HOSTS) return null
@@ -256,6 +269,15 @@ internal data class CommentWebhookConfig(
 
   private companion object {
     val LOOPBACK_HOSTS = setOf("127.0.0.1", "localhost", "::1")
+
+    /**
+     * `[::1]` as `::1`.
+     *
+     * `URI.getHost` hands back an IPv6 literal with the brackets it was written with, so the
+     * loopback exception would otherwise refuse the one spelling of loopback that a v6-only box
+     * has.
+     */
+    fun unbracket(host: String): String = host.removeSurrounding("[", "]")
   }
 }
 
@@ -605,7 +627,14 @@ internal class HttpCommentWebhookSender(
       .followRedirects(HttpClient.Redirect.NEVER)
       .build(),
 ) {
-  /** True when the far end took it. A 2xx or 3xx is taken; anything else is a failure to retry. */
+  /**
+   * True when the far end took it, which means 2xx and nothing else.
+   *
+   * A redirect is a failure here rather than a success. Redirects are not followed — a webhook URL
+   * is a credential and the target of a 302 is chosen by whatever answered, not by the operator —
+   * so a 3xx means the body was never delivered anywhere. Counting it as delivered would retire the
+   * retry and swallow the log line for a hook that is quietly posting nothing.
+   */
   fun post(body: String): Boolean = runCatching {
     val request =
       HttpRequest.newBuilder(URI(config.url))
@@ -613,7 +642,7 @@ internal class HttpCommentWebhookSender(
         .header("Content-Type", "application/json; charset=utf-8")
         .POST(HttpRequest.BodyPublishers.ofString(body, Charsets.UTF_8))
         .build()
-    http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode() < 400
+    http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode() in 200..299
   }
     .getOrDefault(false)
 

@@ -227,6 +227,17 @@ queue means the far end is behind, and in that state the newest comment is the o
 Timeouts are seconds, and there is exactly one retry — a chat platform's hook is up or it is not,
 and a longer ladder turns one wedged host into a queue that never drains.
 
+**The permalink needs a public origin.** The link is the whole of the notification's value, so the
+host has to know the name a reader's browser reaches it at. That is
+`--github-auth-callback-base-url`, which is the operator's own statement of the public origin and is
+authoritative wherever it is set; the deployed image derives it from `DOMAIN`, independently of
+whether GitHub sign-in is configured, precisely so a box with no OAuth does not post `127.0.0.1`
+links that nobody receiving them can open. Falling back to the bind address is right only for the
+local case, where the reader is on the same machine. The `#thread=` selector is build item 1 of the
+same list and may not have landed: a host that does not understand the fragment opens the design and
+ignores it, which is the correct degraded behaviour and is why a fragment rather than a query
+carries it.
+
 **The URL is a credential.** A Slack or Teams hook URL carries its secret in its path: anybody
 holding the string can post into that channel. So it is never logged — not on success, not on
 failure, not in the banner — and everything that has to name it names a short digest of it instead,

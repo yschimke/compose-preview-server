@@ -14,10 +14,13 @@ import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.receiveText
+import io.ktor.server.response.header
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
@@ -224,6 +227,44 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
   // -------------------------------------------------------------------------------------------
 
   /** A real HTTP endpoint that records what it was sent, and can be told to never answer. */
+  @Test
+  fun `a redirect is a failed delivery, because nothing was delivered`() {
+    // Redirects are not followed: a webhook URL is a credential and the destination of a 302 is
+    // chosen by whatever answered rather than by the operator. So a 3xx means the body went
+    // nowhere, and counting it as delivered would retire the retry and swallow the log line for a
+    // hook that is quietly posting nothing.
+    val redirecting = redirectReceiver(302)
+    val sender = HttpCommentWebhookSender(CommentWebhookConfig(redirecting.url))
+
+    assertTrue(!sender.post("""{"hello":"world"}"""), "a 302 must not read as delivered")
+    assertTrue(redirecting.bodies.isNotEmpty(), "the receiver should still have seen the POST")
+
+    // The 2xx boundary itself, so the check cannot drift back to `< 400`.
+    val accepting = redirectReceiver(200)
+    assertTrue(HttpCommentWebhookSender(CommentWebhookConfig(accepting.url)).post("{}"))
+  }
+
+  /** A receiver that answers one fixed status and never redirects the client anywhere real. */
+  private fun redirectReceiver(status: Int): Receiver {
+    val bodies = CopyOnWriteArrayList<String>()
+    val arrived = CountDownLatch(1)
+    val engine =
+      embeddedServer(CIO, host = "127.0.0.1", port = 0) {
+          routing {
+            post("/hook") {
+              bodies += call.receiveText()
+              arrived.countDown()
+              call.response.header(HttpHeaders.Location, "http://127.0.0.1:1/elsewhere")
+              call.respondText("", status = HttpStatusCode.fromValue(status))
+            }
+          }
+        }
+        .also { it.start(wait = false) }
+    val port = runBlocking { engine.engine.resolvedConnectors().first().port }
+    closeables += Closeable { engine.stop(0, 0) }
+    return Receiver("http://127.0.0.1:$port/hook", bodies, arrived)
+  }
+
   private fun receiver(hangSeconds: Long = 0): Receiver {
     val bodies = CopyOnWriteArrayList<String>()
     val arrived = CountDownLatch(1)

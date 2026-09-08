@@ -445,27 +445,42 @@ class ServeUiBuilderCommentStore(
         // The sequence this write will land at, handed to the change rather than stamped after it:
         // a thread records the sequence it was last spoken at and an acknowledgement records the
         // sequence it was made at, and neither can be written by a caller that does not know it.
-        when (val outcome = change(board, board.sequence + 1)) {
-          is CommentMutation.Refused -> return CommentWriteResult.Refused(outcome.reason)
-          is CommentMutation.Unchanged -> return CommentWriteResult.Stored(board)
-          is CommentMutation.Applied -> {
-            val next =
-              outcome.board.copy(
-                designId = designId,
-                sequence = board.sequence + 1,
-                updatedAtEpochMillis = now(),
-              )
-            when (val written = write(file, next)) {
-              is CommentWriteResult.Refused -> return written
-              is CommentWriteResult.Stored -> written.board
+        val applied =
+          when (val outcome = change(board, board.sequence + 1)) {
+            is CommentMutation.Refused -> return CommentWriteResult.Refused(outcome.reason)
+            is CommentMutation.Unchanged -> return CommentWriteResult.Stored(board)
+            is CommentMutation.Applied -> {
+              val next =
+                outcome.board.copy(
+                  designId = designId,
+                  sequence = board.sequence + 1,
+                  updatedAtEpochMillis = now(),
+                )
+              when (val written = write(file, next)) {
+                is CommentWriteResult.Refused -> return written
+                is CommentWriteResult.Stored -> written.board
+              }
             }
           }
-        }
+        // Host subscribers are announced *inside* the lock, unlike the per-design ones below.
+        //
+        // They are told what changed, as a before and an after, so the order they are told in is
+        // part of the message: two actors writing the same board concurrently both release this
+        // lock before announcing, and the second write can then be announced first — a reply
+        // reaching a chat channel above the thread it answers. Holding the lock across the
+        // announcement makes the announcement order the write order, which is the only order that
+        // reads correctly.
+        //
+        // Affordable only because this listener is bounded by construction: it diffs two small
+        // in-memory boards and offers the result to a queue that never blocks
+        // ([ServeUiBuilderCommentWebhook]). A listener that did I/O here would serialize writes to
+        // the design behind it, so this seam stays deliberately narrow.
+        hostSubscribers.forEach { listener -> runCatching { listener(previous, applied) } }
+        applied
       }
-    // Announced outside the lock: a slow subscriber must not hold the next writer up, and neither
-    // caller does anything but hand the board on.
+    // Announced outside the lock: a slow subscriber must not hold the next writer up, and this
+    // caller does nothing but hand the board on.
     subscribers[designId]?.forEach { listener -> runCatching { listener(stored) } }
-    hostSubscribers.forEach { listener -> runCatching { listener(previous, stored) } }
     return CommentWriteResult.Stored(stored)
   }
 

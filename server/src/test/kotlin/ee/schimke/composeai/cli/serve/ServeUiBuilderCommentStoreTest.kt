@@ -22,6 +22,41 @@ class ServeUiBuilderCommentStoreTest {
     root.toFile().deleteRecursively()
   }
 
+  @Test
+  fun `a host subscriber is told inside the write's lock, so it is told in write order`() {
+    // Host subscribers receive a before and an after, so the order they are told in is part of the
+    // message: announced after the lock is released, two concurrent writes to one board could be
+    // announced in the opposite order and a chat channel would show a reply above the thread it
+    // answers.
+    //
+    // Asserted as the property that makes that impossible: a second write to the same design
+    // cannot start while the first write's announcement is still running.
+    val secondWriteStarted = CountDownLatch(1)
+    val insideListener = CountDownLatch(1)
+    val overlapped = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    store.subscribeToHost { _, _ ->
+      insideListener.countDown()
+      // If the announcement ran outside the lock, this second write would get in here.
+      if (secondWriteStarted.await(750, TimeUnit.MILLISECONDS)) overlapped.set(true)
+    }
+
+    val writer = Thread {
+      insideListener.await(5, TimeUnit.SECONDS)
+      store.post("design-1", "second", CommentPostRequest(body = "Second."))
+      secondWriteStarted.countDown()
+    }
+    writer.start()
+    store.post("design-1", "first", CommentPostRequest(body = "First."))
+    writer.join(TimeUnit.SECONDS.toMillis(10))
+
+    assertTrue(
+      !overlapped.get(),
+      "a second write to the design ran while the first was still being announced",
+    )
+    assertEquals(2, store.readOrEmpty("design-1").threads.size)
+  }
+
   private fun board(result: CommentWriteResult): StoredCommentBoard =
     assertIs<CommentWriteResult.Stored>(result).board
 

@@ -1,7 +1,12 @@
 package ee.schimke.composeai.cli.serve
 
+import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
@@ -283,6 +288,74 @@ class ServeUiBuilderCommentWebhookTest {
     )
     assertTrue(CommentWebhookConfig("ftp://chat.example/hook").rejection() != null)
     assertTrue(CommentWebhookConfig("not a url at all").rejection() != null)
+  }
+
+  @Test
+  fun `the IPv6 loopback is loopback, brackets and all`() {
+    // `URI.getHost` hands an IPv6 literal back with its brackets, so the spelling a v6-only box
+    // writes must be unwrapped before it is compared or the documented exception refuses it.
+    assertNull(CommentWebhookConfig("http://[::1]:8080/hook").rejection())
+    assertNull(CommentWebhookConfig("http://[::1]/hook").rejection())
+  }
+
+  @Test
+  fun `a port no client could dial is refused at startup rather than every delivery`() {
+    // Accepted here, `HttpClient.send` would throw on every event and `post` would read that as an
+    // ordinary delivery failure — a hook that retries forever against a URL that cannot answer.
+    val rejection =
+      assertNotNull(
+        CommentWebhookConfig("https://hooks.example:99999/hook").rejection(),
+        "a five-digit port must not be accepted",
+      )
+
+    assertTrue(rejection.contains("99999"), rejection)
+    assertNull(CommentWebhookConfig("https://hooks.example:65535/hook").rejection())
+  }
+
+  @Test
+  fun `naming the design happens on the worker, not on the thread accepting the comment`() {
+    // The design's title and catalog come from the service, behind the service's own lock and via
+    // a scan of every persisted design. Resolving that on the writer's thread would put an
+    // unrelated design persistence operation on the critical path of accepting a comment — the one
+    // thing fire-and-forget delivery exists to prevent — so the queue carries the raw change and
+    // everything expensive happens after it.
+    val root = Files.createTempDirectory("comment-webhook-off-thread")
+    try {
+      val store = ServeUiBuilderCommentStore(root)
+      val lookupEntered = CountDownLatch(1)
+      val releaseLookup = CountDownLatch(1)
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig("https://hooks.example/hook"),
+          designs = {
+            lookupEntered.countDown()
+            releaseLookup.await(10, TimeUnit.SECONDS)
+            CommentWebhookDesign("Checkout", "m3-catalog")
+          },
+          baseUrl = { "https://preview.example" },
+          send = { true },
+          onLog = {},
+        )
+      webhook.use {
+        it.attach(store).use {
+          val elapsed = measureTimeMillis {
+            store.post("design-1", "Yuri", CommentPostRequest(body = "This row should be a card."))
+          }
+
+          assertTrue(
+            lookupEntered.await(10, TimeUnit.SECONDS),
+            "the worker never looked the design up",
+          )
+          assertTrue(
+            elapsed < 5_000,
+            "the comment write waited $elapsed ms on a design lookup it should not touch",
+          )
+          releaseLookup.countDown()
+        }
+      }
+    } finally {
+      root.toFile().deleteRecursively()
+    }
   }
 
   @Test

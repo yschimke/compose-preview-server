@@ -1354,6 +1354,17 @@ public class ServeCommandOptions(
         --ui-builder-migrate-state
                           Explicitly migrate a validated v1 design store to v2 before serving.
                           Retains the exact v1 generation for rollback; never runs implicitly.
+        --ui-builder-comment-webhook <url>
+                          Post UI-builder comment activity to one URL: a new thread, a reply, a
+                          resolve and a reopen, each carrying the thread permalink. Reactions and
+                          acknowledgements are deliberately silent. Delivery is fire-and-forget, so
+                          a slow endpoint never delays a comment. https only, except
+                          http://127.0.0.1 and http://localhost; the URL is treated as a credential
+                          and is never logged.
+        --ui-builder-comment-webhook-format plain|slack|teams|google-chat
+                          The body shape --ui-builder-comment-webhook posts. Defaults to plain,
+                          this server's own event JSON, for a bespoke receiver or a relay. The
+                          other three are the incoming-webhook bodies those chat platforms accept.
         --open-browser    Open a browser on the served URL at startup. Used by the `browse` and
                           `ui` launchers; plain `serve` prints the link instead.
         --open-path <path>

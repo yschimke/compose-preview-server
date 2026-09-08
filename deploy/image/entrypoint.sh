@@ -136,6 +136,20 @@ fi
 # not erase engagement. Set to `none` to keep counters process-local.
 : "${SERVE_ENGAGEMENT_FILE:=/config/engagement.json}"
 [[ "${SERVE_ENGAGEMENT_FILE}" != "none" ]] && args+=(--engagement-file "${SERVE_ENGAGEMENT_FILE}")
+# The public origin this box is reached at, stated once and used by everything that has to write a
+# URL a person will click: the OAuth callback, and the UI-builder comment webhook's thread
+# permalinks. Derived from DOMAIN when it is not pinned explicitly.
+#
+# Forwarded independently of whether GitHub OAuth is configured. It used to be passed only inside
+# the credential block below, which meant a box with a DOMAIN and no OAuth fell back to the bind
+# address and posted http://127.0.0.1:8080/... links into a chat channel — the one thing the
+# notification exists to carry, unusable for everyone who received it.
+github_auth_callback_base_url="${SERVE_GITHUB_AUTH_CALLBACK_BASE_URL:-}"
+if [[ -z "${github_auth_callback_base_url}" && -n "${DOMAIN:-}" ]]; then
+  github_auth_callback_base_url="https://${DOMAIN}"
+fi
+[[ -n "${github_auth_callback_base_url}" ]] &&
+  args+=(--github-auth-callback-base-url "${github_auth_callback_base_url}")
 if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   -n "${SERVE_GITHUB_AUTH_CLIENT_SECRET:-}" ||
   -n "${SERVE_GITHUB_AUTH_COOKIE_SECRET:-}" ]]; then
@@ -143,12 +157,6 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   args+=(--github-auth-client-secret "${SERVE_GITHUB_AUTH_CLIENT_SECRET:-}")
   args+=(--github-auth-cookie-secret "${SERVE_GITHUB_AUTH_COOKIE_SECRET:-}")
   args+=(--github-auth-repo "${SERVE_GITHUB_AUTH_REPO:-yschimke/compose-ai-tools}")
-  github_auth_callback_base_url="${SERVE_GITHUB_AUTH_CALLBACK_BASE_URL:-}"
-  if [[ -z "${github_auth_callback_base_url}" && -n "${DOMAIN:-}" ]]; then
-    github_auth_callback_base_url="https://${DOMAIN}"
-  fi
-  [[ -n "${github_auth_callback_base_url}" ]] &&
-    args+=(--github-auth-callback-base-url "${github_auth_callback_base_url}")
   # Scope the auth cookies to the parent domain so ONE sign-in covers this host and every
   # SERVE_SITES hostname under it. Without it the cookies are host-only, the state cookie written on
   # a site host never reaches the pinned callback origin, and the server withholds the sign-in
