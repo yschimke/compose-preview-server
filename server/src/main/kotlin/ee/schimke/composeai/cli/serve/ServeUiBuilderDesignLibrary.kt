@@ -111,6 +111,17 @@ class ServeUiBuilderDesignLibrary(
     val title: String,
     val description: String?,
     val file: String,
+    /**
+     * What the project says this design is for — the issue, the frame, the pull request, the
+     * thread, the design it continues — written into this host's links store when the design is
+     * opened here.
+     *
+     * Optional and additive: an index published before this field existed carries none, and an
+     * index that carries one still loads on a host that ignores it. Null when the entry omits it or
+     * when what it carries is not a links record this host will keep, which is a fact about the
+     * entry rather than a reason to drop the design.
+     */
+    val links: StoredLinks? = null,
   )
 
   private data class CachedIndex(
@@ -242,12 +253,35 @@ class ServeUiBuilderDesignLibrary(
         title = entry.text("title") ?: designId,
         description = entry.text("description"),
         file = file,
+        links = entry.links(system, designId),
       )
     }
   }
 
   private fun JsonObject.text(key: String): String? =
     this[key]?.jsonPrimitive?.contentOrNull?.trim()?.ifEmpty { null }
+
+  /**
+   * The entry's `links` object, or null when it has none or publishes one this host will not keep.
+   *
+   * Read leniently and validated with the store's own rule, so the index cannot be a way around it:
+   * an entry citing `javascript:` as its issue publishes a design with no links rather than a
+   * design with a link nothing else on this host would have accepted.
+   */
+  private fun JsonObject.links(system: String, designId: String): StoredLinks? {
+    val element = this["links"] as? JsonObject ?: return null
+    val links =
+      runCatching { json.decodeFromJsonElement(StoredLinks.serializer(), element) }
+        .onFailure { onLog("serve: $system publishes `$designId` with unreadable links") }
+        .getOrNull() ?: return null
+    if (links.isEmpty) return null
+    val refusal = ServeUiBuilderLinksStore.refusal(links)
+    if (refusal != null) {
+      onLog("serve: $system publishes `$designId` with links this host will not keep ($refusal)")
+      return null
+    }
+    return links
+  }
 
   companion object {
     /** Where a catalog project keeps the designs it publishes, relative to its branch root. */
