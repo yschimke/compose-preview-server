@@ -290,8 +290,9 @@ the bar are labelled by the question they answer.
 | **7** | Wall: every preview id written once, in one alias table | F2 | `ServeWeb.comparisonAliasTableHtml`, `compare/aliases.ts` |
 | **8** | Design pages: `Show` / `Diff against` over three sources, the paired catalog among them | F1, F5 | `design/lanes.ts`, `DesignPage.ts`, `ServeWeb.designPage`, `ServeHttpServer` design-page handler |
 | **9** | The paired comparison on the front door, and both ways out of the viewer | §1 | `ServeWeb` home card, `ServeWeb.viewerPage`, `ServeHttpServer` home systems |
+| **10** | Viewer toolbar: the ways out behind one `Full comparisons` menu, and stage presentation into the Overrides panel | F1 | `ServeWeb.viewerPage`, `serve.css` |
 
-All nine have landed.
+All ten have landed.
 
 **§1's "fewest ways in" was still true after row 4.** Putting the `parallel` chip on the catalog
 landing left two surfaces that knew about the pairing and did not say so, both of them audited on
@@ -320,11 +321,36 @@ the live deployment rather than inferred:
   that *also* carries a Figma reference (most of `remote-m3`) had no route to
   `/{system}/parallel/{preview}` but typing it. That is the surface answering *why* two
   implementations of one design differ rather than *whether* they do. Both links are now emitted,
-  and the layer link is named for the sibling — on a viewer with both, it is the only thing on the
-  resting page that says this catalog has a counterpart at all, since the source picker F1 describes
-  ships `hidden` until the chip is pressed. Offered only where at least one side publishes
+  and the layer link is named for the sibling. Offered only where at least one side publishes
   annotation layers: `handleParallelLayers` 404s on an empty diff, and a counterpart alone does not
   make one.
+
+  When this landed the layer link was also *the only thing on the resting page* that said this
+  catalog has a counterpart at all, since the source picker F1 describes ships `hidden` until the
+  chip is pressed. That is no longer load-bearing, and row 10 could not have moved the link into a
+  menu while it was: the sibling is now a **peer chip beside `Figma`** under the bar's one `Compare`
+  label, which answers the same need in the place a reader is already looking rather than in a grey
+  link at the end of a row.
+
+**Row 10 is F1's last piece: the bar itself.** F1 named the mixing of unrelated groups and the
+controls that changed rows with the length of a design tool's name; rows 6 and 8 grouped them, and
+what was left was a bar still carrying, on a paired Remote Compose preview, three small grey links
+(`compare players →`, `Wear M3 layers →`, `spec diff →`) spread either side of a wide spec lane, plus
+two chips — `Transparent` and `Fit width` — that present the stage rather than choosing what draws
+it.
+
+The links are alike in the one way that decides a click: each **leaves the page**, giving up the
+overrides, knobs and theme that produced the render worth comparing. So they are one `Full
+comparisons` menu, in reading order (what this render is specified by, what the other implementation
+does, how else it can be drawn). One destination is not a menu — a panel holding a single row costs a
+click to reach what a link already said — so a preview with one comparison surface, which is most of
+them, keeps the inline link it had.
+
+`Transparent` and `Fit width` moved into the Overrides panel's own `View` group, open by default.
+Neither renders anything, both are set once if ever, and they were charging every preview's resting
+toolbar for that. The panel's header comment records why an `Appearance` group was removed from it —
+a Background select there read as a duplicate of the bar's `Transparent` — and that reasoning is
+about the duplication, which survives: there is still one control, and the drawer is now where it is.
 
 **§3.1 landed smaller than it was drawn, deliberately.** The strip is server-rendered HTML with no
 JavaScript at all: it shows the design reference opposite each variant and the score the delivery

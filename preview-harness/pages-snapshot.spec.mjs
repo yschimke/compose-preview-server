@@ -2712,6 +2712,63 @@ const FIXTURE_STATES = [
     },
   },
   {
+    // FULL COMPARISONS, open. Three destinations that leave the page — the spec diff, the paired
+    // catalog's layer diff, every Remote Compose player — behind one affordance instead of three
+    // grey links spread either side of the spec lane. Closed it is a few words on the bar, which is
+    // the whole point, so the panel is the only part worth diffing: a change to the rows, their
+    // order or the menu surface moves this baseline and nothing else does.
+    //
+    // FIRST among this fixture's states deliberately. They run in order against one page, and the
+    // ones below enter the spec lane, which is a state this menu should be read against the resting
+    // bar rather than after.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "compare-menu",
+    apply: async (page) => {
+      await page.click(".cp-detail-menu > summary");
+      await page.waitForSelector(".cp-detail-menu[open] .cp-detail-menu-item");
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // …and closed again, so the states after this one diff a resting bar rather than one with a
+    // menu surface floating over it.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "compare-menu-closed",
+    apply: async (page) => {
+      await page.click(".cp-detail-menu > summary");
+      await page.waitForSelector(".cp-detail-menu:not([open])");
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // Transparent and Fit width, in the Overrides panel's View group — the two controls this change
+    // takes off the viewer bar. Neither renders anything: one paints a checkerboard behind bytes
+    // the server already sent, the other stops fitting them to the viewport, and a reader sets them
+    // once if ever. The group opens by default, so this is what a visitor finds on first opening
+    // the drawer.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "stage-view-group",
+    apply: async (page) => {
+      await openControlsDrawer(page);
+      await page.waitForSelector(
+        'details[data-cp-group="stage-view"][open] .cp-zoom-toggle',
+      );
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // Back out of the drawer, for the same reason the menu closes above.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "stage-view-closed",
+    apply: async (page) => {
+      await page.click("#cp-controls-toggle");
+      await expect(page.locator(".cp-viewer")).not.toHaveClass(
+        /cp-controls-open/,
+      );
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
     // A Remote Compose component can share both useful counterparts through its catalog pairing:
     // the Wear preview's imported Figma target and the Wear implementation itself. This fixture
     // deliberately publishes no local design reference; the lit Figma chip and two-source picker

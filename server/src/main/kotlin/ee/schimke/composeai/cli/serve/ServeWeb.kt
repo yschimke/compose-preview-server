@@ -14915,44 +14915,6 @@ ${scriptTag("known-differences.js")}
               "aria-pressed=\"${value == SPEC_DEFAULT_VIEW}\" " +
               "title=\"${WebEscaping.htmlEscape(viewTip)}\">${WebEscaping.htmlEscape(viewLabel)}</button>"
           }
-        // The step OUT of the lane, one link per surface this pair has that the lane itself is not.
-        //
-        // These were mutually exclusive, and the `when` chose the spec diff — so on the catalog
-        // this pairing exists for, every preview that also carries a Figma reference (the majority
-        // on `remote-m3`) had NO route to the cross-catalog layer diff at all. It was reachable
-        // only by typing `/{system}/parallel/{preview}`, which is the one surface that answers
-        // *why* two implementations of one design differ rather than *whether* they do. Two
-        // destinations are two links; picking one for the reader was a coincidence of the `when`,
-        // not a judgement that they wanted the other less.
-        //
-        // The layer link is also, on a viewer with both, the only thing on the resting page that
-        // NAMES the sibling: the source picker carries it but ships `hidden` until the lane is
-        // opened, so a reader who never clicks the spec chip has no way to learn that this catalog
-        // has a counterpart at all. Naming it here costs nothing the link did not already cost.
-        val specDiffLink =
-          if (specCompareHref == null) ""
-          else
-            "<a class=\"cp-format-link cp-spec-diff\" " +
-              "href=\"${WebEscaping.htmlEscape(specCompareHref)}\" " +
-              "title=\"${WebEscaping.htmlEscape(tip)}\">spec diff →</a>"
-        val layerDiffLink =
-          if (parallelLayersHref.isEmpty()) ""
-          else {
-            // Named for the sibling when this page knows what it is called. It may not: the layer
-            // diff is joined server-side and so survives on a top-level site, where the sibling's
-            // own routes — and with them [parallelSource] — are unreachable by construction. The
-            // neutral wording is what that host keeps.
-            val sibling = parallelSource?.label?.takeIf { it.isNotBlank() }
-            val text = if (sibling == null) "layer diff →" else "$sibling layers →"
-            val layerTip =
-              if (sibling == null) "Compare resolved layers across the paired catalogs"
-              else
-                "Compare resolved layers against $sibling — the fonts, tokens and insets a pixel comparison cannot report"
-            "<a class=\"cp-format-link cp-parallel-layers\" " +
-              "href=\"${WebEscaping.htmlEscape(parallelLayersHref)}\" " +
-              "title=\"${WebEscaping.htmlEscape(layerTip)}\">${WebEscaping.htmlEscape(text)}</a>"
-          }
-        val detailLink = specDiffLink + layerDiffLink
         "<span class=\"cp-spec-lane\" id=\"cp-spec-lane\" " +
           // The FIRST source's raster and label stay on these two attributes, unchanged. They are
           // what a single-source lane has always carried and what the backend badge still reads, so
@@ -14964,7 +14926,6 @@ ${scriptTag("known-differences.js")}
           "aria-label=\"$comparisonAriaLabel\" hidden>$viewButtons</span>" +
           "<span class=\"cp-spec-score\" id=\"cp-spec-score\" role=\"status\" " +
           "aria-live=\"polite\" hidden></span>" +
-          "$detailLink" +
           // The eyedropper's readout, LAST in the lane and on a row of its own (see `serve.css`):
           // the lane wraps, so a readout among the controls re-flowed them the moment a reading
           // arrived. Deliberately NOT a live region either — it is rewritten on every pointermove,
@@ -15403,7 +15364,7 @@ ${scriptTag("known-differences.js")}
     // The step from "look at one player" to "look at them all": the format-comparison page, focused
     // on this preview and opened on its Remote Compose lane. A subtle text link rather than another
     // chip — it navigates away, so it deliberately stays out of the picker's affordance set.
-    val comparePlayersLink =
+    val comparePlayersHref =
       if (enabledRcPlayers.size < 2) ""
       else {
         val compareQuery =
@@ -15414,9 +15375,94 @@ ${scriptTag("known-differences.js")}
             )
             .filter { it.isNotEmpty() }
             .joinToString("&")
-        "<a class=\"cp-format-link cp-compare-players\" href=\"$basePath/compare?$compareQuery\" " +
-          "title=\"See every Remote Compose player's render of this screen side by side\">" +
-          "compare players →</a>"
+        "$basePath/compare?$compareQuery"
+      }
+    // ---- The step OUT of the viewer -------------------------------------------------------------
+    //
+    // Every full-page comparison surface this preview has, in one place. They are alike in the one
+    // way that matters to a reader deciding whether to click: each LEAVES the page, giving up the
+    // overrides, knobs and theme that produced the render worth comparing. The controls before them
+    // all act on the stage in front of you; these do not.
+    //
+    // Loose in the row they neither read as a set nor stayed together — the players link sat before
+    // the spec lane and the layer link inside it, so a pairing that had both put two small grey
+    // links either side of a wide control that grows with the length of a design tool's name. They
+    // were also each other's competition for the same width: `compare players →` and
+    // `Wear M3 layers →` and `spec diff →` is 40-odd characters of link text on a bar whose actual
+    // controls had to wrap around them.
+    //
+    // The destinations are unchanged, and so is the fact that this is a subtle grey affordance
+    // rather than another chip. What changes is that they are one affordance instead of three.
+    val compareDestinations =
+      listOfNotNull(
+        specCompareHref?.let {
+          Triple(
+            "Spec diff",
+            it,
+            "Open the focused comparison page for this render and its imported design spec",
+          )
+        },
+        parallelLayersHref
+          .takeIf { it.isNotEmpty() }
+          ?.let {
+            // Named for the sibling when this page knows what it is called. It may not: the layer
+            // diff is joined server-side and so survives on a top-level site, where the sibling's
+            // own routes — and with them [parallelSource] — are unreachable by construction. The
+            // neutral wording is what that host keeps.
+            //
+            // This is also, on a viewer with both, the only thing on the resting page that NAMES
+            // the sibling: the source picker carries it but ships `hidden` until the lane is
+            // opened, so a reader who never opens this menu has no way to learn that this catalog
+            // has a counterpart at all — which is why the menu's own summary is not where the name
+            // was allowed to be lost.
+            val sibling = parallelSource?.label?.takeIf { name -> name.isNotBlank() }
+            Triple(
+              if (sibling == null) "Layer diff" else "$sibling layers",
+              it,
+              if (sibling == null) "Compare resolved layers across the paired catalogs"
+              else
+                "Compare resolved layers against $sibling — the fonts, tokens and insets a " +
+                  "pixel comparison cannot report",
+            )
+          },
+        comparePlayersHref
+          .takeIf { it.isNotEmpty() }
+          ?.let {
+            Triple(
+              "Compare players",
+              it,
+              "See every Remote Compose player's render of this screen side by side",
+            )
+          },
+      )
+    // ONE destination is not a menu. A control whose panel holds a single row costs a click and a
+    // guess to reach what a link already said, so a preview with one comparison surface — which is
+    // most of them, and every catalog that declares no `compareWith` pairing — keeps exactly the
+    // inline link it had. The menu appears where it earns its keep: a paired catalog's Remote
+    // Compose preview, which has three.
+    val compareMenuHtml =
+      when (compareDestinations.size) {
+        0 -> ""
+        1 -> {
+          val (text, href, title) = compareDestinations.first()
+          "<a class=\"cp-format-link\" href=\"${WebEscaping.htmlEscape(href)}\" " +
+            "title=\"${WebEscaping.htmlEscape(title)}\">" +
+            "${WebEscaping.htmlEscape(text.lowercase())} →</a>"
+        }
+        else ->
+          "<details class=\"cp-detail-menu\">" +
+            "<summary class=\"cp-detail-menu-btn\">" +
+            "<span class=\"cp-detail-menu-key\">Full comparisons</span>" +
+            "<span class=\"cp-detail-caret\" aria-hidden=\"true\">\u25be</span>" +
+            "</summary>" +
+            "<div class=\"cp-detail-menu-panel\">" +
+            "<nav class=\"cp-detail-menu-list\" aria-label=\"Full comparisons\">" +
+            compareDestinations.joinToString("") { (text, href, title) ->
+              "<a class=\"cp-detail-menu-item\" href=\"${WebEscaping.htmlEscape(href)}\" " +
+                "title=\"${WebEscaping.htmlEscape(title)}\">" +
+                "${WebEscaping.htmlEscape(text)}</a>"
+            } +
+            "</nav></div></details>"
       }
     val componentParametersHtml =
       if (!componentBrowser || preview.componentParameters.isEmpty()) ""
@@ -16316,31 +16362,30 @@ ${scriptTag("known-differences.js")}
             specGroupHtml,
             sourceChipHtml,
             motionChipHtml,
-            comparePlayersLink,
+            compareMenuHtml,
             specSelector,
             motionSelector,
             // ---- The VIEW group ---------------------------------------------------------------
             //
-            // One cluster, wrapping as a unit. These five answer a question none of the controls
-            // before them do — not "what is drawing this?" (the renderer picker) and not "what is
-            // it being compared against?" (the spec lane), but *how is it shown on this screen?*
-            // Loose in the row they were sorted by nothing, and because the spec lane is wide and
-            // grows with the length of a design tool's name, the line they landed on changed with
-            // the lane's state: pressing the design-spec chip moved `SVG` onto the row below and
-            // `Transparent` up beside the comparison views, so the bar a reader had just learned
-            // rearranged itself under the one control they pressed
-            // (`docs/design/COMPARE_NAVIGATION.md`, F1).
+            // One cluster, wrapping as a unit. These answer a question none of the controls before
+            // them do — not "what is drawing this?" (the renderer picker) and not "what is it being
+            // compared against?" (the spec lane), but *what am I looking at?* Loose in the row they
+            // were sorted by nothing, and because the spec lane is wide and grows with the length
+            // of a design tool's name, the line they landed on changed with the lane's state:
+            // pressing the design-spec chip moved `SVG` onto the row below and `Transparent` up
+            // beside the comparison views, so the bar a reader had just learned rearranged itself
+            // under the one control they pressed (`docs/design/COMPARE_NAVIGATION.md`, F1).
             //
             // Grouped, the row can still wrap — it has to, at phone width — but it wraps between
             // groups instead of through one, so a control never changes neighbours.
-            listOf(
-                svgFmtToggle,
-                explodeToggle,
-                svgMatch,
-                bgPickerHtml("Show the transparent checkerboard behind the preview"),
-                "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
-                  "title=\"Show the preview at full width instead of fitting it to the screen\">Fit width</button>",
-              )
+            //
+            // `Transparent` and `Fit width` used to be here and are now in the Overrides panel (see
+            // [stageViewGroupHtml]). What is left is the group of things that change the ARTEFACT
+            // on the stage — a vector export, an exploded projection, the raster it is matched
+            // against — rather than how the page presents it. On a preview with none of those the
+            // group collapses away entirely, which is most of the catalog: the commonest viewer bar
+            // is now the renderer control, the comparison chips and nothing else.
+            listOf(svgFmtToggle, explodeToggle, svgMatch)
               .filter { it.isNotBlank() }
               .let {
                 if (it.isEmpty()) ""
@@ -16354,6 +16399,35 @@ ${scriptTag("known-differences.js")}
           )
           .filter { it.isNotBlank() }
           .joinToString("\n")
+    // ---- Stage presentation, in the panel -------------------------------------------------------
+    //
+    // `Transparent` and `Fit width`, which used to sit on the viewer bar at the end of the View
+    // group. Neither renders anything: one paints a checkerboard behind bytes the server already
+    // sent, the other stops fitting them to the viewport. They are the two controls on that bar
+    // that a reader sets once — if ever — and then never touches again, and they were charging the
+    // resting toolbar of every preview in the catalog for that.
+    //
+    // The panel's own header comment explains why an "Appearance" group was removed from it: a
+    // Background select there read as a DUPLICATE of this Transparent toggle, "same word, same
+    // apparent job, two places, one of them buried behind a drawer". That reasoning was about the
+    // duplication, and it survives — this is the one control, moved, not a second one added. What
+    // it does mean is that the drawer is now where a reader looks for it, so the first thing in the
+    // panel is this group rather than the theme state.
+    //
+    // Open by default, unlike every other group in the panel. `<cp-group-memory>` remembers what a
+    // visitor folds, so this is only the state they arrive on: two toggles are a short group, and
+    // one collapsed to a summary reading "View" would have moved these controls twice — out of the
+    // bar and behind a second click.
+    val stageViewGroupHtml =
+      "<details class=\"cp-group\" data-cp-group=\"stage-view\" open>" +
+        "<summary>View</summary>" +
+        "<div class=\"cp-group-body\">" +
+        "<div class=\"cp-stage-view-row\">" +
+        bgPickerHtml("Show the transparent checkerboard behind the preview") +
+        "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
+        "title=\"Show the preview at full width instead of fitting it to the screen\">" +
+        "Fit width</button>" +
+        "</div></div></details>"
     val pinnedControlsNote =
       if (pinned == null) ""
       else
@@ -16592,15 +16666,19 @@ ${scriptTag("known-differences.js")}
                visually-hidden Theme state below, so an empty collapsible card would have sat at
                the top of every viewer's panel; the group goes with the control.
 
-               Neither affordance is lost. Transparent still shows a preview's real alpha on the
-               bar, and stripping a preview's *authored* background is still `background=clear` on
-               /render (and the VS Code extension's own override) — the authoring lane, which is
-               where it belongs, rather than the reading one.
+               Neither affordance is lost. Transparent still shows a preview's real alpha — from
+               the View group at the top of this panel, which is where it now lives — and
+               stripping a preview's *authored* background is still `background=clear` on /render
+               (and the VS Code extension's own override): the authoring lane, which is where it
+               belongs, rather than the reading one. The duplication that removed the select is
+               what still keeps it removed; there is one control, and this panel is now where it
+               is.
 
                The Theme select stays in the panel, outside any group: it is `aria-hidden` and out
                of the tab order, but it is the Theme axis's single state holder — viewer.js reads
                it on every render and Back/Forward hydration writes to it — so it has to remain in
                the DOM. The visible Theme control is the chip row on the viewer bar. -->
+          $stageViewGroupHtml
           $themeSelectorHtml
           $sizeControlsHtml
           ${if (componentBrowser) "" else exportShapeGroupsHtml(hasScrollExport, hasSvgExport)}

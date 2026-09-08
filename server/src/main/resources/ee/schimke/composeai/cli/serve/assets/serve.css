@@ -2161,6 +2161,41 @@ html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"] .cp-stage { backg
 cp-history-menu { display: contents; }
 .cp-head-toggles .cp-history-menu { font-size: inherit; }
 .cp-head-toggles .cp-history-btn { min-height: 34px; padding: 6px 14px; }
+/* --- The viewer bar's FULL COMPARISONS menu. Three destinations that leave the page — the spec
+   diff, the paired catalog's layer diff, every Remote Compose player — behind one grey affordance
+   instead of three grey links spread either side of the spec lane. The same `<details>` shape and
+   the same M3 menu surface as Theme and History beside it, so a reader who has opened one of those
+   has already learned this one; only the trigger differs, staying the small muted link text these
+   destinations have always been rather than becoming a fourth chip on a bar this change exists to
+   shorten. */
+.cp-detail-menu { position: relative; display: inline-block; }
+.cp-detail-menu > summary { list-style: none; cursor: pointer; display: inline-flex;
+  align-items: center; gap: 4px; color: var(--cp-fg-muted); font-size: 0.75rem;
+  white-space: nowrap; }
+.cp-detail-menu > summary::-webkit-details-marker { display: none; }
+.cp-detail-menu > summary:hover, .cp-detail-menu[open] > summary {
+  color: var(--cp-accent-strong); }
+.cp-detail-caret { font-size: 0.85em; opacity: 0.7; }
+.cp-detail-menu[open] .cp-detail-caret { transform: rotate(180deg); }
+/* Left-aligned, unlike Theme's panel: this control sits in the middle of the toolbar rather than
+   at its right edge, so a panel pinned to `right: 0` would open leftwards from a trigger with
+   plenty of room to its right. */
+.cp-detail-menu-panel { position: absolute; left: 0; top: calc(100% + 6px); z-index: 50;
+  width: max-content; max-width: min(360px, calc(100vw - 32px)); padding: 8px;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container-high);
+  box-shadow: var(--md-sys-elevation-level2); }
+.cp-detail-menu-list { display: flex; flex-direction: column; gap: 2px; }
+.cp-detail-menu-item { display: flex; align-items: center; min-height: 36px; padding: 6px 12px;
+  border-radius: var(--md-sys-shape-corner-small); color: var(--md-sys-color-on-surface);
+  font-size: var(--md-sys-typescale-label-large-size); text-decoration: none;
+  white-space: nowrap; }
+.cp-detail-menu-item:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+/* --- Transparent + Fit width, in the Overrides panel's View group. A row rather than the panel's
+   usual stacked labels: these are two chips of the same kind, and the panel's `<label>` column
+   would have given each a full-width row and made a two-item group look like a form. */
+.cp-stage-view-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .cp-theme-menu { position: relative; }
 .cp-theme-menu > summary { list-style: none; }
 .cp-theme-menu > summary::-webkit-details-marker { display: none; }

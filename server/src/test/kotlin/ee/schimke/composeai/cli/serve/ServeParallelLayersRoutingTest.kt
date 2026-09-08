@@ -237,15 +237,25 @@ class ServeParallelLayersRoutingTest {
     try {
       val (code, html) = get(server, "/remote-m3/p/button-child")
       assertEquals(200, code)
-      assertTrue(html.contains(">spec diff →</a>"), "the design comparison survives: $html")
+      // Both destinations, now as rows of the one `Full comparisons` menu rather than two grey
+      // links either side of the spec lane. The claim is unchanged and still the point of this
+      // test: a preview that carries a Figma reference must not lose its route to the layer diff.
+      assertTrue(html.contains("class=\"cp-detail-menu\""), "two destinations make a menu: $html")
+      assertTrue(html.contains(">Spec diff</a>"), "the design comparison survives: $html")
       assertTrue(
         html.contains("href=\"/remote-m3/parallel/button-child\""),
         "…and no longer at the cost of the layer diff: $html",
       )
-      // The layer link is also the only thing on the RESTING page that names the sibling: the
-      // source picker carries it and ships `hidden` until the spec lane is opened, so a reader who
-      // never clicks the chip had no way to learn this catalog has a counterpart at all.
-      assertTrue(html.contains(">wear-m3 layers →</a>"), "the sibling is named: $html")
+      assertTrue(html.contains(">wear-m3 layers</a>"), "the layer row names the sibling: $html")
+      // …and the sibling is still named on the RESTING bar, which the layer link used to be the
+      // only thing doing. It is a menu row now, so it takes a click to read — but #585 put the
+      // counterpart on the bar as a peer of the Figma chip, which is a better answer to the same
+      // need than a grey link was. Asserted here because moving the link into a menu is exactly the
+      // change that would have cost a reader that fact if the chip were not there.
+      assertTrue(
+        html.contains("data-cp-spec-open-source=\"parallel\""),
+        "the counterpart is a peer chip on the resting bar: $html",
+      )
     } finally {
       server.stop()
     }

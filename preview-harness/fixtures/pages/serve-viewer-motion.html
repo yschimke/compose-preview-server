@@ -96,8 +96,6 @@
           </button>
 <button type="button" id="cp-motion-chip" class="cp-spec-chip cp-motion-chip" aria-pressed="false" aria-controls="cp-motion-player cp-motion-img" data-motion-chip-tip="Play this preview&#39;s recorded interactions (2)" title="Play this preview&#39;s recorded interactions (2)">Motion</button>
 <span class="cp-motion-lane" id="cp-motion-lane" hidden><select class="cp-motion-select" id="cp-motion-select" aria-label="Recorded interaction" title="Which recorded interaction to play"><option value="switch-on__ideal__default__light" data-motion-src="/motion/switch-on__ideal__default__light.apng?token=demo-token-fixture&amp;session=compose-m3" data-motion-detail="Toggle on. The thumb travels the full width of the track and the container recolours to the checked state as it lands." selected>Toggle on</option><option value="switch-on__ideal__default__light__anim" data-motion-src="/motion/switch-on__ideal__default__light__anim.apng?token=demo-token-fixture&amp;session=compose-m3" data-motion-detail="Thumb settle. Released mid-travel, the thumb overshoots and settles back through the theme&#39;s spatial spring rather than snapping to the stop.">Thumb settle</option></select><span class="cp-motion-caption" id="cp-motion-caption" role="status" aria-live="polite"></span></span>
-<span class="cp-view-group" role="group" aria-label="How the preview is shown"><span class="cp-view-group-label" aria-hidden="true">View</span><cp-bg-toggle label="Show the transparent checkerboard behind the preview"></cp-bg-toggle>
-<button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false" title="Show the preview at full width instead of fitting it to the screen">Fit width</button></span>
         <span class="cp-mode-hint" id="cp-mode-hint"></span>
         <span class="cp-modes-inputs" aria-hidden="true">
       <input type="radio" name="cp-mode" value="png" id="cp-mode-png" tabindex="-1" checked>
@@ -118,15 +116,19 @@
                visually-hidden Theme state below, so an empty collapsible card would have sat at
                the top of every viewer's panel; the group goes with the control.
 
-               Neither affordance is lost. Transparent still shows a preview's real alpha on the
-               bar, and stripping a preview's *authored* background is still `background=clear` on
-               /render (and the VS Code extension's own override) — the authoring lane, which is
-               where it belongs, rather than the reading one.
+               Neither affordance is lost. Transparent still shows a preview's real alpha — from
+               the View group at the top of this panel, which is where it now lives — and
+               stripping a preview's *authored* background is still `background=clear` on /render
+               (and the VS Code extension's own override): the authoring lane, which is where it
+               belongs, rather than the reading one. The duplication that removed the select is
+               what still keeps it removed; there is one control, and this panel is now where it
+               is.
 
                The Theme select stays in the panel, outside any group: it is `aria-hidden` and out
                of the tab order, but it is the Theme axis's single state holder — viewer.js reads
                it on every render and Back/Forward hydration writes to it — so it has to remain in
                the DOM. The visible Theme control is the chip row on the viewer bar. -->
+          <details class="cp-group" data-cp-group="stage-view" open><summary>View</summary><div class="cp-group-body"><div class="cp-stage-view-row"><cp-bg-toggle label="Show the transparent checkerboard behind the preview"></cp-bg-toggle><button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false" title="Show the preview at full width instead of fitting it to the screen">Fit width</button></div></div></details>
           <span class="cp-modes-inputs" aria-hidden="true">
   <select id="cp-theme" class="cp-knob-theme" data-theme-active="0" data-default-theme="" data-theme-storage-key="cp-theme:compose-m3" data-has-declared-themes="false" data-fixed-theme="false" tabindex="-1" disabled>
     <option value="light" selected>Light (Default)</option>
