@@ -1493,6 +1493,38 @@ class ServeWebFixtureTest {
         enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
       )
+    // The SAME Remote Compose preview, behind GitHub auth — the one pair the renderer control has
+    // to keep apart, and the pair no other fixture holds. A Remote Compose preview has a renderer
+    // combo; an auth-gated live lane is independent of it; a box run with `--github-auth` serves
+    // both at once. But `serve-viewer-rc-players` has no auth prompt and `serve-viewer-signin` has
+    // no players, so the toolbar this combination lays out was captured nowhere, and #585 joined a
+    // DASHED sign-in anchor to a SOLID caret without moving a baseline. Here the chip's slot holds
+    // a link to another origin rather than a lane toggle, so the two controls must stand apart:
+    // that is what this shot pins.
+    val viewerRcSignIn =
+      ServeWeb.viewerPage(
+        ServePreview(
+          "appcard__ideal__default__compact",
+          "App card",
+          section = "Cards",
+          componentId = "AppCard",
+        ),
+        token,
+        sessionId = "remote-m3",
+        basePath = "/remote-m3",
+        canApplyOverrides = false,
+        canRenderOverrides = true,
+        hasLiveStream = true,
+        hasSvgExport = true,
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
+        liveAuthPrompt =
+          ServeWeb.LiveAuthPrompt(
+            loginHref =
+              "/auth/github/start?return=%2Fremote-m3%2Fp%2Fappcard__ideal__default__compact"
+          ),
+      )
     // A Remote Compose preview whose design target and ordinary implementation both come through
     // its paired Wear M3 catalog. This is the public remote-m3/Card shape: no duplicated local
     // Figma reference, but a Figma source inherited from the paired Wear preview and the Wear
@@ -4116,6 +4148,7 @@ class ServeWebFixtureTest {
         "serve-viewer-path.html" to viewerPath,
         "serve-viewer-spec-default-theme.html" to viewerSpecDefaultTheme,
         "serve-viewer-rc-players.html" to viewerRcPlayers,
+        "serve-viewer-rc-signin.html" to viewerRcSignIn,
         "serve-viewer-rc-parallel.html" to viewerRcParallel,
         "serve-viewer-wear-screen.html" to viewerWearScreen,
         "serve-landing-themed.html" to landingThemed,
