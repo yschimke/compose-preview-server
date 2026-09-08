@@ -6,7 +6,7 @@ Captures from the `preview-harness` pages run over the committed fixtures, light
 | File | What it shows |
 | --- | --- |
 | `front-door-before.png` | Each card carrying one long `compare to Figma` chip, and no card naming a paired catalog at all — `remote-m3` and its Wear sibling sit as neighbours with nothing saying they are a pair. |
-| `front-door-after.png` | `Compare to` said once by the row, then the destinations as compact chips: `Figma` and `wear-m3` side by side on `remote-m3`. |
+| `front-door-after.png` | `Compare to` said once by the row, then the destinations as compact chips: `Figma` and `wear-m3` side by side on `remote-m3`. That card also carries the UI Builder chip — the widest row this grid can produce — so the capture shows the row wrapping BETWEEN groups (builder on its own line, the compare group intact below) rather than through one. |
 | `viewer-before.png` | The `serve-viewer-rc-parallel` toolbar with a bare `layer diff →`. |
 | `viewer-after.png` | The same link named for the sibling — `Wear M3 layers →` — which on a viewer that also has a spec diff is the only thing on the resting page saying a counterpart exists. |
 
