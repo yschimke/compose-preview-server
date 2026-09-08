@@ -2742,6 +2742,17 @@ cp-history-menu { display: contents; }
   opacity: 0;
   cursor: pointer;
 }
+/* LIVE ON, and the pill has to stay one pill.
+   The lit chip drops its own outline for a filled green field (`border-color: transparent` above),
+   so a caret segment that kept its border left the two halves visibly coming apart — a borderless
+   green half against an outlined box. The segment takes the same field, and a divider stands in for
+   the edge that used to separate them: still two targets, still one control. */
+.cp-renderer:has(.cp-live-toggle[aria-pressed="true"]) .cp-renderer-more {
+  background: light-dark(#d7f0dd, #0d3a1c);
+  border-color: transparent;
+  color: light-dark(#10521f, #86dc9d);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, currentColor 25%, transparent);
+}
 /* The select carries the focus, and it cannot show a ring of its own at zero opacity — so the
    segment it sits on wears one. Without this a keyboard user tabbing onto the renderer menu would
    have no idea they were there. */

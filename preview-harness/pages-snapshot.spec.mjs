@@ -2811,6 +2811,41 @@ const FIXTURE_STATES = [
     },
   })),
   {
+    // THE LIT PILL. The renderer chip and the combo are one segmented control, and the lit state is
+    // the one that can come apart: `[aria-pressed="true"]` swaps the chip's outline for a filled
+    // green field, so a caret segment that kept its own border left a borderless green half against
+    // an outlined box — two controls again, at exactly the moment the page is claiming to be live.
+    //
+    // Dressed rather than driven, because there is no daemon here: `aria-pressed` is what
+    // `updateLiveToggle()` sets when the stream comes up, and it is what the stylesheet keys on, so
+    // setting it is the same state by the same switch. The alternative — no capture at all — is
+    // what let the seam ship in the first place.
+    fixture: "serve-viewer-rc-players",
+    suffix: "live-on",
+    apply: async (page) => {
+      await page.evaluate(() => {
+        document
+          .getElementById("cp-live-toggle")
+          ?.setAttribute("aria-pressed", "true");
+      });
+      await page.waitForSelector('#cp-live-toggle[aria-pressed="true"]');
+    },
+  },
+  {
+    // Back off the lit state, so the states after this one diff the resting bar rather than a green
+    // one. They run in order against the SAME page.
+    fixture: "serve-viewer-rc-players",
+    suffix: "live-off",
+    apply: async (page) => {
+      await page.evaluate(() => {
+        document
+          .getElementById("cp-live-toggle")
+          ?.setAttribute("aria-pressed", "false");
+      });
+      await page.waitForSelector('#cp-live-toggle[aria-pressed="false"]');
+    },
+  },
+  {
     // Switching player through the combo. The committed HTML always opens on the default
     // (`AndroidX Embedded`), so this is the only way the picker's *moved* state is diffed: the
     // combo on `AndroidX View`, and — the point of the whole control — the chip beside it renaming

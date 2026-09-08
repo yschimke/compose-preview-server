@@ -1158,6 +1158,43 @@ class ServeWebTest {
     assertEquals("button-filled__ideal__default__light", entries.single().previewId)
   }
 
+  /**
+   * The sign-in affordance is not a renderer control, and must not be dressed as half of one.
+   *
+   * When auth is the only thing between the visitor and the daemon lane, the chip's slot holds an
+   * ANCHOR to GitHub rather than a button that toggles a lane. Joined to the renderer caret it
+   * would put a dashed segment against a solid one — and the dash is load-bearing, not decoration:
+   * it marks the control as an action to take rather than a state to read, which is exactly the
+   * distinction a shared outline erases. It would also wrap a link to another origin in
+   * `role="group" aria-label="Renderer"`.
+   *
+   * Reachable and previously uncaptured: a Remote Compose preview HAS a renderer combo, and an
+   * auth-gated live lane is independent of it, so a server with `--github-auth` serves both at once
+   * and no fixture held the pair.
+   */
+  @Test
+  fun `the sign-in affordance is never joined to the renderer caret`() {
+    val preview = ServePreview(id = "widget.Chip", label = "chip")
+    val html =
+      ServeWeb.viewerPage(
+        preview,
+        token = "t",
+        basePath = "/remote-m3",
+        siblings = listOf(preview),
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("js", "java", "cmp-android"),
+        hasLiveStream = true,
+        liveAuthPrompt = ServeWeb.LiveAuthPrompt(loginHref = "/auth/github/start"),
+      )
+
+    // Both controls are there…
+    assertTrue(html.contains("id=\"cp-live-signin\""), "the sign-in link is offered: $html")
+    assertTrue(html.contains("id=\"cp-lane-select\""), "…beside a real renderer combo: $html")
+    // …and NOT as one pill.
+    assertFalse(html.contains("class=\"cp-renderer\""), "they are not joined: $html")
+    assertFalse(html.contains("cp-renderer-more"), "and there is no caret segment: $html")
+  }
+
   @Test
   fun `the renderer combo lists every player with the unavailable ones disabled`() {
     // A Remote Compose preview on an Android daemon: js (client canvas) + java + cmp-android are
