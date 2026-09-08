@@ -1,12 +1,14 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
+import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderPersistenceException
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -82,5 +84,32 @@ class ServeUiBuilderLaneGuardTest {
   @Test
   fun `an empty state directory opens to nothing rather than failing`() {
     assertEquals(null, open(stateDirectory()), "a first start has no state and is not a failure")
+  }
+
+  @Test
+  fun `on the per-design store the remedies are the store's, not the old file's`() {
+    val directory = stateDirectory()
+    UiBuilderDesignStateStore.open(directory.toPath())
+
+    val warning = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("marker"))
+
+    assertTrue(warning.contains("designs.broken"), warning)
+    assertTrue(warning.contains("--ui-builder-state-dir none"), warning)
+    assertFalse(
+      warning.contains(FileUiBuilderStateStorage.BACKUP_FILE),
+      "there is no one-generation backup to restore: retained revisions are the generations",
+    )
+  }
+
+  @Test
+  fun `a migrated store offers the file it was migrated from as the rollback`() {
+    val directory = stateDirectory()
+    UiBuilderDesignStateStore.open(directory.toPath())
+    // What the migration leaves behind: the v2 file, renamed rather than deleted.
+    File(directory, FileUiBuilderStateStorage.STATE_FILE + ".migrated").writeText("{}")
+
+    val warning = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("marker"))
+
+    assertTrue(warning.contains(FileUiBuilderStateStorage.STATE_FILE + ".migrated"), warning)
   }
 }

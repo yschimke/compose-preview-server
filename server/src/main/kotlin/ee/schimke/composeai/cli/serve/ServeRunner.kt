@@ -16,9 +16,9 @@ import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
-import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
+import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -2576,7 +2576,7 @@ public class ServeRunner(
       }
     val service =
       PersistentUiBuilderService(
-        storage = FileUiBuilderStateStorage(directory.toPath()),
+        designStore = UiBuilderDesignStateStore.open(directory.toPath()),
         catalogs = catalogs,
         exporter = RootSurfaceGroundAnnotatedExporter(exporter),
         assets = assetStore,

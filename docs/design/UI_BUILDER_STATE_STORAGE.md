@@ -79,13 +79,21 @@ One directory per design, one file per part of it, and nothing loaded until it i
   assets/                          unchanged — already one content-addressed file per digest
   designs/<slug>/
     design.json                    header: id, title, access, catalogPin, revision, lastSequence,
-                                   timestamps, retainedFromSequence, checksum
-    document.json                  the current document
-    positions.json                 the current position map
-    revisions/<revision>.json      one retained revision: document + positions, written once
-    log/<sequence>.jsonl           appended committed operations, outcomes and audit records
+                                   timestamps, retainedFromSequence, and which file each part is
+    document-<digest>.json         the current document
+    positions-<digest>.json        the current position map
+    revisions/<revision>-<digest>.json   one retained revision: document + positions, written once
+    journal.jsonl                  appended history, outcomes, undo records and audit
     quarantine.json                present only when this design could not be read or served
 ```
+
+**Part files are named by the digest of what is in them**, and `design.json` says which name is
+current. That is what makes a commit atomic without a second copy of anything: the parts a commit
+changes are written under names nothing points at yet, and the header rename is the single moment
+the design becomes the new one. A crash before it leaves the previous header pointing at a complete
+previous generation; a crash after it leaves files nothing references, which the next open sweeps.
+It also makes the diff fall out of the naming — a part whose content did not change has the name it
+already had, so there is nothing to write.
 
 `<slug>` is the first 32 hex characters of `sha256(designId)`, not the id. Design ids come from the
 protocol artifact and are not promised to be filename-safe; hashing sidesteps path traversal, case-
@@ -125,45 +133,71 @@ everything. Splitting files under it would be a lie — `load()` would still con
 The store therefore gets a port that can say which design and which part:
 
 ```kotlin
-public interface UiBuilderDesignStore {
-  /** Every design's header, and nothing else. Cheap enough to call at startup. */
-  public fun listHeaders(): List<StoredDesignHeader>
+internal interface UiBuilderDesignStore {
+  /** Every design stored here, read from the headers alone. */
+  fun listDesignIds(): List<String>
 
-  /** Header, current document and current positions for one design; null when it is not stored. */
-  public fun read(designId: String): StoredDesign?
+  /** One design, assembled from its parts; null when it is not stored. */
+  fun read(designId: String): StoredDesignRead?
 
-  /** One retained revision, read from its own file; null when it is no longer retained. */
-  public fun readRevision(designId: String, revision: Long): RetainedRevision?
+  /**
+   * Persist [next], writing only the parts in which it differs from [previous].
+   *
+   * [previous] is what this store last wrote for the design, or null when it wrote nothing.
+   */
+  fun commit(designId: String, previous: PersistedDesignV1?, next: PersistedDesignV1)
 
-  /** Apply exactly the parts [commit] names, atomically for this design. */
-  public fun commit(designId: String, commit: DesignCommit)
+  fun remove(designId: String)
 
-  public fun remove(designId: String)
+  /** Why a design cannot be read, recorded beside it rather than thrown. */
+  fun quarantine(designId: String, reason: String)
 
-  /** Why a design cannot be read or served, recorded rather than thrown. */
-  public fun quarantine(designId: String, reason: String)
+  fun usage(): UiBuilderStorageUsage?
 }
-
-public data class DesignCommit(
-  val header: StoredDesignHeader,
-  /** Null means unchanged — a rename touches the header and no document. */
-  val document: DesignDocumentV1? = null,
-  val positions: Map<String, StableNodePositionV1>? = null,
-  /** The revision to retain, written to its own file. */
-  val retain: RetainedRevision? = null,
-  /** Retained revisions below this are unlinked; this is the whole of retention enforcement. */
-  val retainFromRevision: Long,
-  val appendedOperations: List<CommittedOperationV1> = emptyList(),
-  val appendedOutcomes: Map<String, OperationOutcomeRecordV1> = emptyMap(),
-  val appendedAudit: List<AuditRecordV1> = emptyList(),
-)
 ```
 
+**The store computes the delta rather than being handed one.** The sketch this replaces had the
+caller describe its own commit — appended operations, appended audit, the revision to retain. That
+is knowledge every mutation site would have to carry, and there are ten of them: an applied batch, a
+compensation, a rename, an asset write, a create, a repair. Each already produces one immutable
+`PersistedDesignV1` candidate, and each would have had to produce a second description of how that
+candidate differs from the last one — the same fact, spelled twice, in ten places, with the store
+unable to tell when the two disagreed.
+
+Diffing costs nothing worth avoiding. The candidate is built with `copy()`, so every part the edit
+did not touch is *the same object*, and both `AbstractList.equals` and `AbstractMap.equals` answer
+an identical reference in constant time. So `previous.acceptedOperations == next.acceptedOperations`
+is a pointer comparison for a rename and a real comparison only for the part that changed — which
+is exactly the part about to be written.
+
+### The journal, and why three parts are not files
+
+`document`, `positions` and each retained revision are whole values that a commit replaces, so they
+are files named by their digest. The other four — `history`, `audit`, `operationOutcomes`,
+`acceptedOperations` and `tombstones` — are collections that grow by one entry per edit and are
+trimmed from the front. Writing each as a whole file would put the store back where it started, one
+scope smaller: a design holding 4 MiB of undo state would rewrite 4 MiB to record one 400-byte
+outcome.
+
+So those go to `journal.jsonl`, one line per change, appended: `historyAppend`, `auditAppend`,
+`outcomePut` / `outcomeRemove`, `acceptedPut` / `acceptedRemove`, `tombstonePut` / `tombstoneRemove`,
+and a `…Set` record for the case a list is replaced outright rather than extended (an asset write
+clears `history`). Replay is in file order, last write wins per key.
+
+Two things keep it bounded and honest:
+
+- **The header says how long the journal is.** `journalBytes` is written in `design.json`, so a
+  commit that appended and then died before the header rename leaves a tail that replay never reads.
+  The append is not the commit; the header is.
+- **It compacts when it stops paying.** Past 256 KiB, and past four times the size of writing the
+  live collections out whole, the next commit writes a fresh journal holding the current state and
+  unlinks the old one. That bounds a design's journal at roughly four times its live undo state,
+  which is the same trade the byte budget already makes for undo itself.
+
 `PersistentUiBuilderService` keeps its reducer, its single lock and its in-memory `WorkingDesign`
-for open designs. What changes is that `persisted: PersistedServiceV1` — one map holding everything
-— becomes a header map plus a bounded cache, and `commitPersisted(whole state)` becomes
-`store.commit(designId, …)` describing one design's delta. The reducer is not touched, and neither
-is a single wire shape.
+for open designs. What changes is that `commitPersisted(whole state)` becomes
+`store.commit(designId, previous, next)` for the one design an edit touched. The reducer is not
+touched, and neither is a single wire shape.
 
 `UiBuilderStateStorage` stays for the in-memory and test implementations, and for the v2 reader the
 migration needs.
@@ -211,25 +245,34 @@ The current file has one property worth keeping exactly: the checksum covers *th
 stored*, the parsed tree, never a re-encode of the decoded value. The comment in `decode` explains
 what re-encoding cost — `DesignEnvironmentV1.typeface` arriving with a default made every existing
 state file unreadable and the release crash-looped. Per-file checksums keep that discipline
-verbatim: `design.json`, `document.json` and each `revisions/<r>.json` carry a checksum of their own
-stored tree, verified on read, and a field the model gains later is simply absent from the stored
-tree and defaulted after.
+verbatim: `design.json`, each `document-<digest>.json` and each `revisions/<r>-<digest>.json` carry
+a checksum of their own stored tree, verified on read, and a field the model gains later is simply
+absent from the stored tree and defaulted after.
 
-- **Atomic per file.** Each file is written to a temporary in the same directory, forced, and
-  `ATOMIC_MOVE`d, as `FileUiBuilderStateStorage` already does. A commit that touches several files
-  orders them so a crash between any two leaves a readable design: the retained revision and the log
-  first, then `document.json` and `positions.json`, then `design.json` last. The header names the
-  revision, so a header that is behind means the newest revision is on disk but not yet current —
-  the load path replays it forward. A header ahead of the document cannot occur.
-- **The log is append-only.** Records are one JSON object per line with a length and a CRC; a torn
-  tail from a crash is detected and truncated to the last complete record. Nothing rewrites a
-  segment; segments roll at a size cap and are unlinked whole once every record in them is below
-  `retainFromRevision`.
+- **Atomic per design, not merely per file.** Each file is written to a temporary in the same
+  directory, forced, and `ATOMIC_MOVE`d, as `FileUiBuilderStateStorage` already does — but a commit
+  touching several files needs more than each one landing whole. Because a part file is named by
+  the digest of its content, the parts a commit writes are invisible until `design.json` names them,
+  and the header lands last. So the ordering is: new parts, then the journal append, then the
+  header. A crash anywhere before the header leaves the previous header pointing at a previous
+  generation that is complete in every part; a crash after it leaves unreferenced files, which the
+  next open of that design unlinks. There is no torn state to replay forward, because nothing
+  partially applied is ever reachable.
+- **The journal's tail is bounded by the header, not by a CRC.** Records are one JSON object per
+  line and appended before the header names their length. Replay reads `journalBytes` and stops,
+  so a partial line from a crash — or a complete one from a commit whose header never landed — is
+  never applied. It is truncated on the next commit. This replaces the per-record length and CRC the
+  first sketch called for: the header is already the atomic switch, and a second integrity mechanism
+  underneath it would be answering a question that cannot be asked.
 - **The backup goes away, per design.** The single global `.backup` is what makes today's write read
   and rewrite all 23.4 MB to save a copy nobody has ever restored automatically. Retained revisions
   under `revisions/` *are* the previous generations, per design, and `restoreBackup()` becomes
   "make revision r current", which is both a smaller operation and a more useful one. The
   `RecoverableUiBuilderMigrationStorage` pair stays only for the v2 reader.
+- **A design that cannot be read is quarantined, not thrown.** A missing part, a checksum mismatch
+  or a header that will not parse writes `quarantine.json` beside the design and leaves every other
+  design serving — the property the single file could not have, because its checksum covered all of
+  them at once.
 
 ## Migration
 
@@ -239,8 +282,9 @@ One direction, one shot, never at the same time as anything else:
 - Otherwise, if `ui-builder-service-v1.json` exists, it is read with the existing v1/v2 decoder and
   written out as the tree above, one design at a time; then `store.json` is written last, which is
   what makes the migration atomic. The old file is renamed to `ui-builder-service-v1.json.migrated`
-  and never deleted. A design that fails to decode is written as a quarantine and does not stop the
-  rest — the same posture #568 asks for.
+  and never deleted. The v2 envelope decodes as a whole — one checksum covers every design in it, so
+  there is no per-design failure to quarantine at this point; that granularity begins the moment the
+  designs are written out separately, which is the next paragraph and every read after it.
 - Otherwise the store is empty and starts at v3.
 
 Rollback is the old file, still on disk and still valid, plus `--ui-builder-state-dir` pointing at a
@@ -286,6 +330,19 @@ In order, with the first two done:
    surface is its own piece of work. The warning carries the diagnosis instead.
 4. **Per-design store, then keyframes.** In that order, because the first makes the second cheap and
    the second is the one that needs a byte-for-byte replay proof.
+
+   *The store is done.* `UiBuilderDesignStateStore.open(<state dir>)` is what `serve` now opens, a
+   v2 file beside it is migrated once and renamed, and `PersistentUiBuilderService` commits one
+   design at a time. What did **not** land with it, deliberately: the design map is still read whole
+   at startup and held in memory. The layout is what makes lazy reads possible — a document is its
+   own file — but the read path has a question the store cannot answer on its own: `unusableDesigns`
+   is computed today by validating **every** stored document against its catalog at startup, and a
+   host that stops reading documents it was not asked for stops knowing that answer until somebody
+   asks. Whether `adminUnusableDesigns()` should then mean "known to be unusable so far" or should
+   keep costing a full startup pass is a decision about an admin surface, not about a file layout,
+   and it deserves its own change.
+
+   The keyframe half is unchanged and still second.
 
 ## What this deliberately does not do
 

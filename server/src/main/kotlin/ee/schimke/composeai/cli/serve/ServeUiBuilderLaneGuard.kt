@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
+import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
 import java.io.File
 
 /**
@@ -8,24 +9,47 @@ import java.io.File
  *
  * The UI builder is one optional lane on a host that also serves previews, catalogs, renders and a
  * site. A design document the current catalog cannot serve already degrades to a quarantined design
- * rather than a dead host, but a failure in the **state file itself** — unreadable, oversize, bad
- * UTF-8, bad JSON, a checksum mismatch, an unsupported format — happens before any per-design
- * quarantine can apply, and used to propagate out of `main`. In production that meant the container
- * never bound 8080, the healthcheck never passed, and `docker rollout` rolled the deploy back while
- * the previous container kept serving: the deployed version silently stayed a release behind, twice
+ * rather than a dead host, but a failure in the **state itself** — unreadable, oversize, bad UTF-8,
+ * bad JSON, a checksum mismatch, an unsupported format — happened before any per-design quarantine
+ * could apply, and used to propagate out of `main`. In production that meant the container never
+ * bound 8080, the healthcheck never passed, and `docker rollout` rolled the deploy back while the
+ * previous container kept serving: the deployed version silently stayed a release behind, twice
  * (yschimke/compose-preview-server#568).
  *
- * So the lane is disabled and this is printed. It names the failure, the file, and the three things
- * an operator can actually do about it, because "UI-builder state failed to load" on its own sends
+ * So the lane is disabled and this is printed. It names the failure, the files, and the things an
+ * operator can actually do about it, because "UI-builder state failed to load" on its own sends
  * them reading source at the worst possible moment.
+ *
+ * The remedies differ by store. With the per-design store (#578) a design that cannot be read is
+ * one quarantined design and the host serves the rest, so reaching this warning at all means the
+ * store marker or the directory itself — and the recovery is the pre-migration file, which the
+ * migration renamed rather than deleted.
  */
 internal fun uiBuilderDisabledWarning(stateDirectory: File, failure: Throwable): String {
   val reason = failure.message?.takeIf { it.isNotBlank() } ?: failure::class.simpleName ?: "unknown"
+  val marker = File(stateDirectory, UiBuilderDesignStateStore.STORE_FILE)
   val stateFile = File(stateDirectory, FileUiBuilderStateStorage.STATE_FILE)
-  val backupFile = File(stateDirectory, FileUiBuilderStateStorage.BACKUP_FILE)
-  return "serve: WARNING the UI builder is disabled — its state could not be opened: $reason. " +
-    "Everything else on this host is unaffected and serving. To recover, either restore the " +
-    "one-generation backup (cp ${backupFile.path} ${stateFile.path}), or move ${stateFile.path} " +
-    "aside to start empty (the designs in it are then lost, so copy it first), or pass " +
-    "--ui-builder-state-dir none to run without the builder deliberately."
+  val migrated = File(stateDirectory, FileUiBuilderStateStorage.STATE_FILE + ".migrated")
+  val preamble =
+    "serve: WARNING the UI builder is disabled — its state could not be opened: $reason. " +
+      "Everything else on this host is unaffected and serving. To recover, "
+  return if (marker.exists()) {
+    preamble +
+      "either move the store aside to start empty (mv ${stateDirectory.path}/designs " +
+      "${stateDirectory.path}/designs.broken — the designs in it are then lost, so copy it " +
+      "first)" +
+      (if (migrated.exists()) {
+        ", or roll back to the state this store was migrated from (rm ${marker.path} && mv " +
+          "${migrated.path} ${stateFile.path})"
+      } else {
+        ""
+      }) +
+      ", or pass --ui-builder-state-dir none to run without the builder deliberately."
+  } else {
+    val backupFile = File(stateDirectory, FileUiBuilderStateStorage.BACKUP_FILE)
+    preamble +
+      "either restore the one-generation backup (cp ${backupFile.path} ${stateFile.path}), or " +
+      "move ${stateFile.path} aside to start empty (the designs in it are then lost, so copy it " +
+      "first), or pass --ui-builder-state-dir none to run without the builder deliberately."
+  }
 }

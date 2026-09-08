@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   DESIGN_SECTIONS,
   analyzeUiBuilderState,
+  analyzeUiBuilderStore,
   formatReport,
+  isDesignStore,
   projectRetention,
 } from "./state-size-report.mjs";
 
@@ -173,4 +179,95 @@ test("a file that is not a state envelope is refused by name", () => {
   assert.throws(() => analyzeUiBuilderState({ hello: "world" }), /no payload/);
   assert.throws(() => analyzeUiBuilderState({ payload: {} }), /no designs map/);
   assert.throws(() => analyzeUiBuilderState(null), /not a JSON object/);
+});
+
+/** A per-design store on disk, written the way `FileUiBuilderDesignStore` writes one. */
+function storeDirectory(designs) {
+  const root = mkdtempSync(join(tmpdir(), "ui-builder-store-"));
+  writeFileSync(join(root, "store.json"), JSON.stringify({ format: "ui-builder-store-v3" }));
+  for (const [id, spec] of Object.entries(designs)) {
+    const slug = createHash("sha256").update(id).digest("hex").slice(0, 32);
+    const designDirectory = join(root, "designs", slug);
+    mkdirSync(join(designDirectory, "revisions"), { recursive: true });
+    const part = (name, payload) => {
+      writeFileSync(join(designDirectory, name), JSON.stringify({ checksumSha256: "x", payload }));
+      return name;
+    };
+    const documentFile = part("document-aaaa.json", spec.document);
+    const positionsFile = part("positions-aaaa.json", { positions: {} });
+    const revisionFiles = {};
+    spec.revisions.forEach((revision, index) => {
+      const name = `revisions/${index}-aaaa.json`;
+      part(name, { revision: index, sequence: index, document: revision, positions: {} });
+      revisionFiles[String(index)] = name;
+    });
+    // Two records where the second supersedes the first: the slack a compaction would reclaim.
+    const journal =
+      `${JSON.stringify({ outcomesPut: { "op-1": { fingerprint: "a", outcome: spec.outcome } } })}\n` +
+      `${JSON.stringify({ outcomesPut: { "op-1": { fingerprint: "b", outcome: spec.outcome } } })}\n`;
+    writeFileSync(join(designDirectory, "journal-1.jsonl"), journal);
+    writeFileSync(
+      join(designDirectory, "design.json"),
+      JSON.stringify({
+        checksumSha256: "x",
+        payload: {
+          designId: id,
+          title: id,
+          revision: spec.document.revision,
+          lastSequence: spec.document.revision,
+          access: { accessRevision: 0, ownerActorId: "owner" },
+          catalogPin: { systemId: "m3" },
+          createdAtEpochMillis: 0,
+          updatedAtEpochMillis: 0,
+          documentFile,
+          positionsFile,
+          revisionFiles,
+          journalFile: "journal-1.jsonl",
+          journalBytes: Buffer.byteLength(journal, "utf8"),
+          journalCompactedBytes: 64,
+        },
+      }),
+    );
+  }
+  return root;
+}
+
+test("the per-design store reports the same sections the one file did", () => {
+  const root = storeDirectory({
+    checkout: {
+      document: document("checkout", 12, 20),
+      revisions: [document("checkout", 10, 20), document("checkout", 11, 20)],
+      outcome: { operationId: "op-1", revision: 12 },
+    },
+    settings: {
+      document: document("settings", 2, 3),
+      revisions: [document("settings", 1, 3)],
+      outcome: { operationId: "op-1", revision: 2 },
+    },
+  });
+
+  assert.ok(isDesignStore(root), "a directory with a marker is read as the store");
+  const report = analyzeUiBuilderStore(root);
+
+  assert.equal(report.format, "ui-builder-store-v3");
+  assert.equal(report.designCount, 2);
+  assert.equal(report.designs[0].id, "checkout", "the largest design is reported first");
+  assert.equal(report.designs[0].sections.revisionSnapshots.count, 2);
+  assert.equal(report.designs[0].sections.positionSnapshots.count, 2);
+  assert.equal(
+    report.designs[0].sections.operationOutcomes.count,
+    1,
+    "the journal is replayed, so a superseded record is not counted twice",
+  );
+  assert.ok(
+    report.designs[0].otherBytes > 0,
+    "and what the journal spends beyond what it still says is visible as slack",
+  );
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a state directory with no marker is not mistaken for the store", () => {
+  const root = mkdtempSync(join(tmpdir(), "ui-builder-store-"));
+  assert.equal(isDesignStore(root), false);
+  rmSync(root, { recursive: true, force: true });
 });

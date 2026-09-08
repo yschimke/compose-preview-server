@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /**
@@ -155,6 +156,185 @@ export function projectRetention(report, { keep = 64 } = {}) {
   };
 }
 
+/**
+ * The same report, read from the per-design store the single file became.
+ *
+ * The sections are deliberately the ones above, so a before/after against the same store reads as
+ * one table rather than two vocabularies. Where they come from changes: `document`, `positions` and
+ * the retained revisions are their own files, while the five collections that make up undo state
+ * live in the design's journal and are measured by replaying it — which is also how the journal's
+ * own slack becomes visible, as the difference between what the file costs and what it still says.
+ */
+export function analyzeUiBuilderStore(directory) {
+  const designsDirectory = join(directory, "designs");
+  const slugs = readdirSync(designsDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+
+  let totalBytes = fileBytes(join(directory, "store.json"));
+  const designs = [];
+  for (const slug of slugs) {
+    const designDirectory = join(designsDirectory, slug);
+    const header = payloadOf(join(designDirectory, "design.json"));
+    if (!header) continue;
+    const sections = {};
+    for (const section of DESIGN_SECTIONS) sections[section] = { bytes: 0, count: 0 };
+
+    const document = payloadOf(join(designDirectory, header.documentFile));
+    sections.document = { bytes: byteLength(document), count: 1 };
+    sections.positions = {
+      bytes: byteLength(payloadOf(join(designDirectory, header.positionsFile))?.positions),
+      count: countOf(payloadOf(join(designDirectory, header.positionsFile))?.positions),
+    };
+    sections.access = { bytes: byteLength(header.access), count: 1 };
+
+    for (const file of Object.values(header.revisionFiles ?? {})) {
+      const retained = payloadOf(join(designDirectory, file));
+      if (!retained) continue;
+      if (retained.document) {
+        sections.revisionSnapshots.bytes += byteLength(retained.document);
+        sections.revisionSnapshots.count += 1;
+      }
+      if (retained.positions) {
+        sections.positionSnapshots.bytes += byteLength(retained.positions);
+        sections.positionSnapshots.count += 1;
+      }
+    }
+
+    const journal = replayJournal(designDirectory, header);
+    for (const [section, value] of Object.entries(journal.live)) {
+      sections[section] = { bytes: byteLength(value), count: countOf(value) };
+    }
+
+    const designBytes = directoryBytes(designDirectory);
+    const sectionBytes = Object.values(sections).reduce((sum, it) => sum + it.bytes, 0);
+    totalBytes += designBytes;
+    designs.push({
+      id: header.designId ?? slug,
+      bytes: designBytes,
+      revision: header.revision ?? null,
+      nodes: countOf(document?.nodes),
+      sections,
+      // The journal records a later one superseded, the checksums and the JSON around every part:
+      // what the design costs on disk beyond what it still says. Compaction is what reclaims it.
+      otherBytes: designBytes - sectionBytes,
+    });
+  }
+  designs.sort((left, right) => right.bytes - left.bytes);
+
+  const designBytes = designs.reduce((sum, design) => sum + design.bytes, 0);
+  const sectionTotals = {};
+  for (const section of DESIGN_SECTIONS) {
+    sectionTotals[section] = designs.reduce((sum, design) => sum + design.sections[section].bytes, 0);
+  }
+  return {
+    format: markerFormat(directory),
+    totalBytes,
+    designCount: designs.length,
+    designBytes,
+    overheadBytes: totalBytes - designBytes,
+    sectionTotals,
+    designs,
+  };
+}
+
+/** True when [path] is a directory holding the per-design store rather than a v1/v2 file. */
+export function isDesignStore(path) {
+  try {
+    return statSync(path).isDirectory() && statSync(join(path, "store.json")).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function markerFormat(directory) {
+  try {
+    return JSON.parse(readFileSync(join(directory, "store.json"), "utf8")).format ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function fileBytes(path) {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
+function directoryBytes(directory) {
+  let total = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    total += entry.isDirectory() ? directoryBytes(path) : fileBytes(path);
+  }
+  return total;
+}
+
+function payloadOf(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")).payload;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The live collections a design's journal describes, replayed the way the store replays them.
+ *
+ * Only the bytes the header commits to are read: a commit that appended and died before its header
+ * landed left records that are not part of the design, and counting them would report bytes nothing
+ * will ever load.
+ */
+function replayJournal(designDirectory, header) {
+  const live = {
+    history: [],
+    audit: [],
+    operationOutcomes: {},
+    acceptedOperations: {},
+    tombstones: {},
+  };
+  if (!header.journalFile) return { live };
+  let committed;
+  try {
+    committed = readFileSync(join(designDirectory, header.journalFile)).subarray(
+      0,
+      header.journalBytes ?? 0,
+    );
+  } catch {
+    return { live };
+  }
+  for (const line of committed.toString("utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.historySet) live.history = entry.historySet;
+    if (entry.historyAppend) {
+      live.history = live.history.concat(entry.historyAppend);
+      if (entry.historyKeep) live.history = live.history.slice(-entry.historyKeep);
+    }
+    if (entry.auditSet) live.audit = entry.auditSet;
+    if (entry.auditAppend) {
+      live.audit = live.audit.concat(entry.auditAppend);
+      if (entry.auditKeep) live.audit = live.audit.slice(-entry.auditKeep);
+    }
+    applyMapDelta(live.operationOutcomes, entry.outcomesPut, entry.outcomesRemoved);
+    applyMapDelta(live.acceptedOperations, entry.acceptedPut, entry.acceptedRemoved);
+    applyMapDelta(live.tombstones, entry.tombstonesPut, entry.tombstonesRemoved);
+  }
+  return { live };
+}
+
+function applyMapDelta(target, put, removed) {
+  for (const [key, value] of Object.entries(put ?? {})) target[key] = value;
+  for (const key of removed ?? []) delete target[key];
+}
+
 function megabytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
@@ -225,7 +405,8 @@ function parseArguments(argv) {
   }
   if (!options.path) {
     throw new Error(
-      "usage: state-size-report.mjs <ui-builder-service-v1.json> [--maximum-bytes N] [--warn-percent N] [--top N]",
+      "usage: state-size-report.mjs <ui-builder-state-dir | ui-builder-service-v1.json> " +
+        "[--maximum-bytes N] [--warn-percent N] [--top N]",
     );
   }
   return options;
@@ -233,9 +414,11 @@ function parseArguments(argv) {
 
 function main(argv) {
   const options = parseArguments(argv);
-  const report = analyzeUiBuilderState(JSON.parse(readFileSync(options.path, "utf8")), {
-    totalBytes: statSync(options.path).size,
-  });
+  const report = isDesignStore(options.path)
+    ? analyzeUiBuilderStore(options.path)
+    : analyzeUiBuilderState(JSON.parse(readFileSync(options.path, "utf8")), {
+        totalBytes: statSync(options.path).size,
+      });
   process.stdout.write(`${formatReport(report, options)}\n`);
   const used = (report.totalBytes / options.maximumBytes) * 100;
   if (used >= options.warnPercent) {
