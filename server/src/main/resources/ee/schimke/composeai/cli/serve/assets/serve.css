@@ -1756,6 +1756,18 @@ cp-parity-scores { display: contents; }
 .cp-sys-actions { position: relative; z-index: 2; margin: 12px 0 0;
   display: flex; flex-wrap: wrap; gap: 8px; pointer-events: none; }
 .cp-sys-actions > a, .cp-sys-actions > details { pointer-events: auto; }
+/* A card action NAMES something, and what it names is not this stylesheet's to keep short: the
+   design tool a catalog declares, or the title of the catalog it pairs with — "compare to M3 Wear
+   OS Apps Design Kit" on the real front door. The row wraps between chips, but `white-space:
+   nowrap` on the chip itself means one chip wider than the tile cannot wrap INSIDE itself, so it
+   runs out past the card's own border instead. A card is a fixed grid track, so the text is what
+   has to give. Scoped to the card: a chip in `.cp-actions-panel` sits in a row that can scroll,
+   and keeps the single line it was drawn for. */
+.cp-sys-actions .cp-action-chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 /* Focus lands on the inner link now, so the card's own `:focus-visible` rules can never match (a
    `<div>` never takes focus) — every one of them has to be restated on `:focus-within` or keyboard
    focus silently loses the treatment pointer hover gets: the lift, the elevation, the state layer

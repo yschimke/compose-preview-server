@@ -7094,6 +7094,12 @@ class ServeHttpServer(
      */
     val hasReferenceComparison: Boolean,
     /**
+     * The sibling system this catalog pairs with, when both halves of the `compareWith` +
+     * `parallel` pairing resolve on this host ([CatalogFacts.compareWithSystem]). Null for every
+     * catalog that declares no pairing, which is most of them.
+     */
+    val compareWithSystem: String? = null,
+    /**
      * The design tool those references name ("Figma", …), or null when they name none — a `png`, an
      * `svg`, an unmapped provider. Only the action's **label**; whether there is an action at all
      * is [hasReferenceComparison] above.
@@ -7197,6 +7203,7 @@ class ServeHttpServer(
         themeOptimization = host.themeOptimizationSnapshot(),
         renderCache = host.catalogRenderCacheSnapshot(),
         hasReferenceComparison = facts.hasReferenceComparison,
+        compareWithSystem = facts.compareWithSystem?.takeIf { facts.hasParallelPairing },
         designToolLabel = facts.designToolLabel,
       )
   }
@@ -7236,6 +7243,18 @@ class ServeHttpServer(
     val darkStage: Boolean,
     val hasReferenceComparison: Boolean,
     val designToolLabel: String?,
+    /**
+     * The sibling SYSTEM this catalog declares itself a parallel rendition of, and whether any of
+     * its components actually name a counterpart in it — the two halves of the `compareWith` +
+     * `parallel` pairing that are fixed for the life of a host.
+     *
+     * The sibling's own residency and TITLE are deliberately not here: whether that catalog is
+     * served right now, and what it calls itself, change without this host changing, and a memo
+     * keyed on host identity would go on naming a neighbour that has since been unregistered. See
+     * [homeSystemsFor], which resolves those two at render.
+     */
+    val compareWithSystem: String?,
+    val hasParallelPairing: Boolean,
   )
 
   private val catalogFactsByHost = WeakHashMap<ServeHost, CatalogFacts>()
@@ -7283,6 +7302,15 @@ class ServeHttpServer(
             ServeWeb.designToolLabel(it.source.provider)
           }
         },
+      // BOTH halves of the pairing, because half of it means nothing: the catalog names the sibling
+      // system, and a component names the counterpart in it. A `compareWith` that no component
+      // pairs against would put a chip on the card over an empty wall.
+      compareWithSystem = bundle?.compareWithSystem?.takeIf { it.isNotBlank() },
+      hasParallelPairing =
+        bundle?.parallelByComponentId?.isNotEmpty() == true &&
+          host.previews.any {
+            it.componentId?.let(bundle.parallelByComponentId::containsKey) == true
+          },
     )
   }
 
@@ -8161,6 +8189,22 @@ class ServeHttpServer(
         // Whether the card offers the compare action, and — separately — what it calls it.
         hasReferenceComparison = meta.hasReferenceComparison,
         designToolLabel = meta.designToolLabel,
+        // The paired catalog, named by whatever IT currently calls itself.
+        //
+        // Resolved here rather than remembered beside the pairing, because the two facts have
+        // different lifetimes: that this catalog declares a sibling is fixed for the life of its
+        // host, while whether the sibling is served on this box at all — and under what title — is
+        // a property of a *different* catalog that can be registered, retitled or retired without
+        // this one changing. Remembering the name would leave a card advertising a comparison
+        // against a neighbour that is no longer here.
+        //
+        // `catalogMetaSeen`, not `peekHost`: the sibling is as likely to be suspended as any other
+        // catalog on a quiet server, and the front door must not resume a daemon to find out what a
+        // card should be labelled.
+        parallelComparisonLabel =
+          meta.compareWithSystem
+            ?.takeIf { it in ids }
+            ?.let { sibling -> catalogMetaSeen[sibling]?.title ?: sibling },
       )
     }
   }

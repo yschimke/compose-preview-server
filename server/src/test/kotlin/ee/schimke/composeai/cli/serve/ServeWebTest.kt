@@ -904,6 +904,57 @@ class ServeWebTest {
   }
 
   /**
+   * The PAIRED catalog's comparison, on the card.
+   *
+   * `remote-m3` and `wear-m3-catalog` sit as adjacent cards on the real front door and nothing
+   * there said they were a pair: "how does the Remote Compose rendition differ from the Wear one"
+   * cost a visit to one catalog's landing first, which is exactly the journey the Figma action
+   * above exists to remove. `docs/design/COMPARE_NAVIGATION.md` §1 names this the comparison the
+   * reader most wants and the one with the fewest ways in.
+   */
+  @Test
+  fun `a front-door card offers the paired catalog's comparison, named after the sibling`() {
+    fun system(id: String, sibling: String?) =
+      ServeWeb.HomeSystem(
+        system = id,
+        title = id,
+        subtitle = null,
+        previewCount = 1,
+        trust = null,
+        heroPreviewId = null,
+        hasReferenceComparison = true,
+        designToolLabel = "Figma",
+        parallelComparisonLabel = sibling,
+      )
+
+    val html =
+      ServeWeb.homeIndexPage(
+        listOf(
+          system("remote-m3", sibling = "M3 Wear OS Apps Design Kit"),
+          // Every catalog that declares no `compareWith`, which is most of them.
+          system("compose-m3", sibling = null),
+        ),
+        token = "unused",
+        isPublic = true,
+      )
+
+    assertTrue(
+      html.contains(
+        "<a class=\"cp-action-chip\" href=\"/remote-m3/compare?format=parallel\" " +
+          "aria-label=\"remote-m3: compare to M3 Wear OS Apps Design Kit\">" +
+          "compare to M3 Wear OS Apps Design Kit</a>"
+      ),
+      html,
+    )
+    // It stands BESIDE the design-tool action rather than replacing it: they are two different
+    // comparisons, and a catalog with a sibling still has a design file.
+    assertTrue(html.contains("/remote-m3/compare?format=reference"), html)
+    // …and a catalog with no pairing gets no second chip rather than a dead one.
+    assertFalse(html.contains("/compose-m3/compare?format=parallel"), html)
+    assertEquals(1, Regex("format=parallel").findAll(html).count(), html)
+  }
+
+  /**
    * A front door lists many catalogs, and several may name the same tool — so several sibling links
    * are announced identically as "compare to Figma". The tile that gives each one its context is a
    * SIBLING, so nothing labels the chip by it: a screen-reader link list or a voice command has

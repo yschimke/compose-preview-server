@@ -37,6 +37,7 @@ class ServeParallelLayersRoutingTest {
     family: String? = null,
     compareWith: String? = null,
     parallel: String? = null,
+    reference: Boolean = false,
   ): ServeBundleHost {
     val dir = Files.createTempDirectory("layers-$label").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText("<html></html>")
@@ -44,6 +45,20 @@ class ServeParallelLayersRoutingTest {
     File(dir, "previews/$previewId.png").writeBytes(png())
     File(dir, "previews/variants.json")
       .writeText("""{"$previewId":{"componentId":"$componentId"}}""")
+    if (reference) {
+      File(dir, ServeDesignReferenceStore.DIRECTORY).mkdirs()
+      File(dir, "${ServeDesignReferenceStore.DIRECTORY}/$previewId-figma.png").writeBytes(png())
+      File(dir, "${ServeDesignReferenceStore.DIRECTORY}/${ServeDesignReferenceStore.INDEX_FILE}")
+        .writeText(
+          """
+          {"schema":"${DesignReferenceManifest.SCHEMA}","references":[
+            {"id":"$previewId-figma","previewId":"$previewId","label":"Button",
+             "source":{"provider":"figma"},
+             "raster":{"path":"references/$previewId-figma.png"}}]}
+          """
+            .trimIndent()
+        )
+    }
     if (family != null) {
       File(dir, ServeAnnotationStore.DIRECTORY).mkdirs()
       File(dir, "${ServeAnnotationStore.DIRECTORY}/${ServeAnnotationStore.INDEX_FILE}")
@@ -71,6 +86,7 @@ class ServeParallelLayersRoutingTest {
   private fun newServer(
     hereFamily: String? = "Inter",
     thereFamily: String? = "Roboto",
+    reference: Boolean = false,
   ): ServeHttpServer {
     registry.register(
       "remote-m3",
@@ -82,6 +98,7 @@ class ServeParallelLayersRoutingTest {
           family = hereFamily,
           compareWith = "wear-m3",
           parallel = "Button/Child",
+          reference = reference,
         ),
       pinned = true,
     )
@@ -204,6 +221,31 @@ class ServeParallelLayersRoutingTest {
       )
       // …and a catalog with no sibling keeps the lane exactly as it was.
       assertFalse(get(server, "/wear-m3/p/child-button").second.contains("/parallel/"))
+    } finally {
+      server.stop()
+    }
+  }
+
+  @Test
+  fun `a render with BOTH a design spec and a counterpart offers both ways out`() {
+    // The two links were mutually exclusive and the spec diff won, so on the very catalog this
+    // pairing exists for — where most previews also carry a Figma reference — the layer diff was
+    // reachable only by typing `/{system}/parallel/{preview}`. It is the one surface that answers
+    // *why* two implementations of one design differ rather than *whether* they do, and picking
+    // one destination for the reader was a coincidence of a `when`, not a judgement.
+    val server = newServer(reference = true)
+    try {
+      val (code, html) = get(server, "/remote-m3/p/button-child")
+      assertEquals(200, code)
+      assertTrue(html.contains(">spec diff →</a>"), "the design comparison survives: $html")
+      assertTrue(
+        html.contains("href=\"/remote-m3/parallel/button-child\""),
+        "…and no longer at the cost of the layer diff: $html",
+      )
+      // The layer link is also the only thing on the RESTING page that names the sibling: the
+      // source picker carries it and ships `hidden` until the spec lane is opened, so a reader who
+      // never clicks the chip had no way to learn this catalog has a counterpart at all.
+      assertTrue(html.contains(">wear-m3 layers →</a>"), "the sibling is named: $html")
     } finally {
       server.stop()
     }
