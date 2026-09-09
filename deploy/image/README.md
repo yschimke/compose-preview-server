@@ -53,8 +53,9 @@ release tag exists and builds its inputs directly from that tag, in parallel
 with the core release. Trigger it either way:
 
 - **On a server release** (`v*` tag) — automatic; bundles that version + tags `latest`.
-- **Manually** — Actions → *Publish preview-host image* → provide `server_version` and the
-  `tools_version` supplying the Android daemon.
+- **Manually** — Actions → *Publish preview-host image* → provide `server_version`, the
+  `tools_version` supplying `lib-rcjvm/` and `lib-bta/`, and the `daemon_version` (a
+  compose-preview-daemon release) supplying the Android and desktop daemons.
 
 First publish makes the GHCR package; set it **public** (Packages → settings) if
 you want hosts to pull without auth.

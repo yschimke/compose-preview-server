@@ -7,7 +7,10 @@ on:
         description: Released compose-preview-server version (leading v optional)
         required: true
       tools_version:
-        description: Released compose-ai-tools version supplying the Android daemon
+        description: Released compose-ai-tools version supplying lib-rcjvm and lib-bta
+        required: true
+      daemon_version:
+        description: Released compose-preview-daemon version supplying the Android and desktop daemons
         required: true
   workflow_call:
     inputs:
@@ -15,6 +18,9 @@ on:
         required: true
         type: string
       tools_version:
+        required: true
+        type: string
+      daemon_version:
         required: true
         type: string
     secrets:
@@ -38,13 +44,17 @@ jobs:
         env:
           RAW_SERVER: ${{ inputs.server_version }}
           RAW_TOOLS: ${{ inputs.tools_version }}
+          RAW_DAEMON: ${{ inputs.daemon_version }}
         run: |
           server="${RAW_SERVER#v}"
           tools="${RAW_TOOLS#v}"
+          daemon="${RAW_DAEMON#v}"
           test -n "${server}" || { echo "::error::server_version is empty"; exit 1; }
           test -n "${tools}" || { echo "::error::tools_version is empty"; exit 1; }
+          test -n "${daemon}" || { echo "::error::daemon_version is empty"; exit 1; }
           echo "server=${server}" >> "$GITHUB_OUTPUT"
           echo "tools=${tools}" >> "$GITHUB_OUTPUT"
+          echo "daemon=${daemon}" >> "$GITHUB_OUTPUT"
       - name: Prepare image context
         run: |
           mkdir -p deploy/image/m2 deploy/image/release-assets deploy/image/scripts
@@ -84,6 +94,7 @@ jobs:
           build-args: |
             SERVER_VERSION=${{ steps.versions.outputs.server }}
             TOOLS_VERSION=${{ steps.versions.outputs.tools }}
+            DAEMON_VERSION=${{ steps.versions.outputs.daemon }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

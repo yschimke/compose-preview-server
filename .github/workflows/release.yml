@@ -266,12 +266,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tools.outputs.version }}
+      daemon_version: ${{ steps.tools.outputs.daemon_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
           persist-credentials: false
-      - name: Read the compose-ai-tools version used by the server
+      - name: Read the compose-ai-tools and compose-preview-daemon versions used by the server
         id: tools
         run: |
           set -euo pipefail
@@ -281,6 +282,14 @@ jobs:
             exit 1
           }
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # The daemon sidecars left compose-ai-tools for compose-preview-daemon
+          # (compose-ai-tools#5336); the image fetches them at this pin.
+          daemon="$(sed -n 's/^composeai-preview-daemon = "\([^"]*\)"$/\1/p' gradle/libs.versions.toml)"
+          test -n "${daemon}" || {
+            echo "::error::composeai-preview-daemon is missing from gradle/libs.versions.toml"
+            exit 1
+          }
+          echo "daemon_version=${daemon}" >> "$GITHUB_OUTPUT"
 
   preview-host-image:
     needs: [release-please, finish-release, resolve-preview-host-tools]
@@ -292,10 +301,13 @@ jobs:
     uses: ./.github/workflows/preview-host-image.yml
     with:
       server_version: ${{ needs.release-please.outputs.tag_name }}
-      # The image's daemon sidecars must be the same compose-ai-tools release as the server's
-      # runtime dependencies. A separate repository variable silently stayed at 1.53.0 while the
-      # Gradle pin moved on, so new server images kept shipping an old Android daemon (#4822).
+      # The image's sidecars must be the same releases as the server's runtime dependencies. A
+      # separate repository variable silently stayed at 1.53.0 while the Gradle pin moved on, so
+      # new server images kept shipping an old Android daemon (#4822). Two pins since the daemons
+      # moved to compose-preview-daemon: `tools_version` for what still ships from compose-ai-tools
+      # (`lib-rcjvm/`, `lib-bta/`), `daemon_version` for the Android and desktop daemons.
       tools_version: ${{ needs.resolve-preview-host-tools.outputs.version }}
+      daemon_version: ${{ needs.resolve-preview-host-tools.outputs.daemon_version }}
     secrets:
       DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
       SERVE_ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}

@@ -61,11 +61,14 @@ someone deciding that what ships is a different thing, and saying so in the conf
 ## What follows the version automatically
 
 `deploy/image/Dockerfile`'s `ARG SERVER_VERSION` is a release-please `extra-files` entry, so it
-tracks each release without anyone remembering to bump it. `ARG TOOLS_VERSION` in the same file is
-**not** the server's version — it names the compose-ai-tools release supplying the daemon sidecars.
-It has no Dockerfile default: automatic releases read the value from `composeai-tools` in
-`gradle/libs.versions.toml`, keeping the separately packaged daemons aligned with the server's
-runtime dependencies, while manual image builds must name the tools release explicitly.
+tracks each release without anyone remembering to bump it. `ARG TOOLS_VERSION` and
+`ARG DAEMON_VERSION` in the same file are **not** the server's version — they name the
+compose-ai-tools release supplying `lib-rcjvm/` and `lib-bta/` and the compose-preview-daemon
+release supplying the Android and desktop daemon sidecars (which moved there in
+compose-ai-tools#5336). Neither has a Dockerfile default: automatic releases read them from
+`composeai-tools` and `composeai-preview-daemon` in `gradle/libs.versions.toml`, keeping the
+separately packaged daemons aligned with the server's runtime dependencies, while manual image
+builds must name both releases explicitly.
 
 ## Not to be confused with compose-preview-contracts 2.x
 
