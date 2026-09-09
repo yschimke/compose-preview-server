@@ -995,6 +995,9 @@ fun UiBuilderEditor(
           if (state.addBeside) reducer.besideRefusal(state, it) == null
           else reducer.dropTarget(state, it) != null
         },
+        // Only in beside mode: outside it a disabled row means "no compatible slot is selected",
+        // which the destination line already says once for the whole panel.
+        catalogAddRefusal = { if (state.addBeside) reducer.besideRefusal(state, it) else null },
         besideRefusal = reducer.besideRefusal(state),
         onCatalogAdd = { componentId, variant ->
           focusEditor()
@@ -3441,6 +3444,15 @@ private fun EditorNavigator(
   onCatalogDrag: (String, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
   canAddCatalogComponent: (String) -> Boolean,
+  /**
+   * Why an Add beside would refuse *this component*, or null.
+   *
+   * Separate from [besideRefusal], which is the document's answer and belongs on the destination
+   * line: this one is about the thing being added, so it belongs on that thing's row. Without it a
+   * Wear scaffold on a design that already has a board was a disabled Add and no reason anywhere —
+   * the row knew why and did not say.
+   */
+  catalogAddRefusal: (String) -> String? = { null },
   /** Why an Add beside would refuse, or null — see `UiBuilderEditorReducer.besideRefusal`. */
   besideRefusal: String? = null,
   onCatalogAdd: (String, EditorCatalogVariant?) -> Unit,
@@ -3477,6 +3489,7 @@ private fun EditorNavigator(
             onCatalogDrag = onCatalogDrag,
             onCatalogDrop = onCatalogDrop,
             canAddCatalogComponent = canAddCatalogComponent,
+            catalogAddRefusal = catalogAddRefusal,
             besideRefusal = besideRefusal,
             onCatalogAdd = onCatalogAdd,
             remoteComposeSources = remoteComposeSources,
@@ -3528,6 +3541,15 @@ private fun InsertPanel(
   onCatalogDrag: (String, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
   canAddCatalogComponent: (String) -> Boolean,
+  /**
+   * Why an Add beside would refuse *this component*, or null.
+   *
+   * Separate from [besideRefusal], which is the document's answer and belongs on the destination
+   * line: this one is about the thing being added, so it belongs on that thing's row. Without it a
+   * Wear scaffold on a design that already has a board was a disabled Add and no reason anywhere —
+   * the row knew why and did not say.
+   */
+  catalogAddRefusal: (String) -> String? = { null },
   /** Why an Add beside would refuse, or null — see `UiBuilderEditorReducer.besideRefusal`. */
   besideRefusal: String? = null,
   onCatalogAdd: (String, EditorCatalogVariant?) -> Unit,
@@ -3604,6 +3626,7 @@ private fun InsertPanel(
               onDrag = { onCatalogDrag(row.item.componentId, it) },
               onDrop = { onCatalogDrop(row.item.componentId, null, it) },
               canAdd = canAddCatalogComponent(row.item.componentId),
+              refusal = catalogAddRefusal(row.item.componentId),
               onAdd = { onCatalogAdd(row.item.componentId, null) },
               onToggleVariants = {
                 dispatch(UiBuilderEditorEvent.ToggleCatalogComponent(row.item.componentId))
@@ -3617,6 +3640,7 @@ private fun InsertPanel(
               onDrag = { onCatalogDrag(row.variant.componentId, it) },
               onDrop = { onCatalogDrop(row.variant.componentId, row.variant, it) },
               canAdd = canAddCatalogComponent(row.variant.componentId),
+              refusal = catalogAddRefusal(row.variant.componentId),
               onAdd = { onCatalogAdd(row.variant.componentId, row.variant) },
             )
         }
@@ -4806,11 +4830,16 @@ private fun CatalogRow(
   onDrag: (Offset?) -> Unit,
   onDrop: (Offset) -> Unit,
   canAdd: Boolean,
+  /** Why Add is refused for this component, shown in place of the id — see [CatalogRow]'s KDoc. */
+  refusal: String?,
   onAdd: () -> Unit,
   onToggleVariants: () -> Unit,
 ) {
   Row(
-    Modifier.fillMaxWidth().height(44.dp).padding(end = 4.dp),
+    // `heightIn` rather than `height`: a refused row carries a sentence where an addable one
+    // carries an id, and only the refused ones grow. Every row keeping 44 dp would truncate the
+    // one piece of text on the row that the reader needs.
+    Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(end = 4.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     IndentGuide(depth = 1)
@@ -4840,11 +4869,20 @@ private fun CatalogRow(
     }
     Column(Modifier.padding(start = 6.dp).weight(1f).unexportable(unexportable)) {
       Text(item.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+      // The id is what a row says when there is nothing more pressing to say. A refusal is more
+      // pressing: the reader is looking at a disabled Add and asking why, and the id does not
+      // answer that. One line for one row, so the answer is never somewhere else.
       Text(
-        item.componentId,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        refusal ?: item.componentId,
+        color =
+          if (refusal != null) MaterialTheme.colorScheme.error
+          else MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.labelSmall,
-        maxLines = 1,
+        // A refusal wraps to whatever it needs: there are two of them, both a sentence long, and
+        // clipping one costs exactly the clause that says what to do instead. An id still gets one
+        // line, because an id that does not fit is no less identifiable for being cut.
+        maxLines = if (refusal != null) Int.MAX_VALUE else 1,
+        overflow = TextOverflow.Ellipsis,
       )
     }
     if (unexportable) UnexportableBadge(item.displayName)
@@ -4856,7 +4894,7 @@ private fun CatalogRow(
         style = MaterialTheme.typography.labelSmall,
       )
     }
-    CatalogAddButton(canAdd, onAdd, item.displayName)
+    CatalogAddButton(canAdd, onAdd, item.displayName, refusal)
   }
 }
 
@@ -4917,6 +4955,14 @@ private fun CatalogVariantRow(
   onDrag: (Offset?) -> Unit,
   onDrop: (Offset) -> Unit,
   canAdd: Boolean,
+  /**
+   * Why Add is refused for this variant, or null.
+   *
+   * Carried to the button's label and not drawn: a variant's refusal is its component's, and the
+   * component's own row is directly above with the sentence already on it. Repeating it once per
+   * variant would say the same thing four times under one heading.
+   */
+  refusal: String?,
   onAdd: () -> Unit,
 ) {
   val label = variant.label
@@ -4965,7 +5011,7 @@ private fun CatalogVariantRow(
         )
       }
     }
-    CatalogAddButton(canAdd, onAdd, qualified)
+    CatalogAddButton(canAdd, onAdd, qualified, refusal)
   }
 }
 
@@ -5008,13 +5054,25 @@ private fun UnexportableBadge(componentName: String) {
  * The one verb every palette row carries, sized so two levels of indent still leave room for it.
  */
 @Composable
-private fun CatalogAddButton(canAdd: Boolean, onAdd: () -> Unit, label: String) {
+private fun CatalogAddButton(
+  canAdd: Boolean,
+  onAdd: () -> Unit,
+  label: String,
+  refusal: String? = null,
+) {
   TextButton(
     onClick = onAdd,
     enabled = canAdd,
     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
   ) {
-    Text("Add", Modifier.semantics { contentDescription = "Add $label" })
+    // A disabled button is not reachable by touch exploration in every reader, so the reason rides
+    // on the label rather than only on the row's own text.
+    Text(
+      "Add",
+      Modifier.semantics {
+        contentDescription = if (refusal == null) "Add $label" else "Add $label — $refusal"
+      },
+    )
   }
 }
 
