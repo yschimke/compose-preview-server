@@ -245,7 +245,24 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # the stitched `ScrollMode.LONG` capture matches the builder's own picture to a dp. Enabling an
   # adapter is a claim that what an author sees is what they get, and that claim now has a render
   # behind it.
-  args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}")
+  #
+  # `wear-m3` is OFF by default as of the catalog contract's phase 4. It is a Wear/Android catalog —
+  # its previews need Robolectric and its native lane an Android SDK — and wear-m3-catalog's
+  # components carry no `@BuilderComponent` policy, so the `ui-builder.json` it now publishes
+  # derives every id from the prefix and collides 28 of them (`wear-m3/alert-dialog` alone is
+  # claimed by ConfirmButton, DismissButton, EdgeButton and AlertDialogContent). The equivalence
+  # gate scores that published file 23 differences against the frozen catalog. Serving it was
+  # costing an Android dependency for a catalog whose shelf would not have matched; a deployment
+  # that wants it back says so, and should run the gate first.
+  args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}")
+  # Which of those may be served from their own published `ui-builder.json` rather than from the
+  # catalog this build writes in Kotlin. Unset means all of them, which is what the loader shipped
+  # with; `none` keeps every catalog on its built-in definition, and a list opts in one at a time.
+  # The lever exists because a published catalog and a synthesised one can differ, and reversing it
+  # used to mean asking another repository to withdraw a file.
+  if [ -n "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}" ]; then
+    args+=(--ui-builder-published-catalogs "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS}")
+  fi
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")
@@ -270,6 +287,11 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   #
   # A catalog absent from the map compiles against a served catalog of its own name, which is what
   # `m3-catalog` has always done and why it is not listed.
+  #
+  # The `wear-m3` mapping is kept even though `wear-m3` is no longer served by default. It is inert
+  # while the catalog is off — nothing asks for a wear-m3 compile — and keeping it means putting
+  # `wear-m3` back in SERVE_UI_BUILDER_CATALOGS restores the whole lane in one variable rather than
+  # producing a catalog whose native render silently compiles against the wrong bundle.
   args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
   # Served catalogs offered as COMPONENT PACKS inside the builder's catalogs: `confetti-mobile=mobile`
   # puts Confetti's own composables on a shelf of their own in every Material 3 design, drawn as

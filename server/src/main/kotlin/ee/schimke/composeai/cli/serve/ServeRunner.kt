@@ -2549,49 +2549,71 @@ public class ServeRunner(
           ))
         .copy(composeCode = composeExportConfigured)
     val publishedCatalogs = mutableMapOf<String, CatalogCapabilityV1>()
+    // Which catalogs the operator lets read their own published file. Null is "every enabled one",
+    // which is the behaviour the loader shipped with; an empty set turns the whole path off without
+    // a release, and a named set opts in one catalog at a time.
+    val publishedAllowed = options.uiBuilderPublishedCatalogs
+    if (publishedAllowed != null) {
+      // Said once, at startup, because the difference between "this catalog has no published file"
+      // and "this host was told not to read it" is invisible in the per-catalog lines below and is
+      // exactly what somebody debugging a shelf needs to know.
+      val withheld = uiBuilderCatalogs.filterNot(publishedAllowed::contains).sorted()
+      System.err.println(
+        if (publishedAllowed.isEmpty())
+          "serve: no UI-builder catalog reads its published ui-builder.json " +
+            "(--ui-builder-published-catalogs none); every catalog keeps its built-in definition"
+        else
+          "serve: only ${publishedAllowed.sorted().joinToString()} may read a published " +
+            "ui-builder.json; ${withheld.joinToString()} keep their built-in definition"
+      )
+    }
     if (catalogStore != null) {
-      uiBuilderCatalogs.forEach { systemId ->
-        val config = catalogLoads?.stateFor(systemId)?.config
-        val file =
-          catalogStore.fetchUiBuilderCatalog(
-            system = systemId,
-            sourceRepo = config?.repo,
-            sourceBranchPrefix = config?.branch?.removeSuffix(systemId),
-          ) ?: return@forEach
-        // The catalog's own record, fetched now if this host has never loaded it.
-        //
-        // Without this a cold start composes the published policy against NOTHING — the store only
-        // has a record once a load generation exists — and a policy with no inventory composes to
-        // its builtins alone. That would not fail; it would quietly serve a near-empty shelf in
-        // place of the synthesised catalog, which is the one outcome worse than not reading the
-        // published file at all. Fetched by the same route a pack's record is, for the same reason.
-        if (records.record(systemId) !is ComponentRecordSource.Lookup.Found) {
-          catalogStore
-            .fetchComponentRecord(
+      uiBuilderCatalogs
+        .filter { publishedAllowed?.contains(it) ?: true }
+        .forEach { systemId ->
+          val config = catalogLoads?.stateFor(systemId)?.config
+          val file =
+            catalogStore.fetchUiBuilderCatalog(
               system = systemId,
               sourceRepo = config?.repo,
               sourceBranchPrefix = config?.branch?.removeSuffix(systemId),
-            )
-            ?.let { startupRecords[systemId] = it }
-        }
-        // The same record the export reads, through the same source, so the shelf the builder
-        // offers and the code the export writes cannot disagree about what a component is.
-        val record = (records.record(systemId) as? ComponentRecordSource.Lookup.Found)?.record
-        when (
-          val composed =
-            PublishedUiBuilderCatalog.compose(file.readText(), record, uiBuilderExports)
-        ) {
-          is PublishedUiBuilderCatalog.Result.Composed -> {
-            publishedCatalogs[systemId] = composed.catalog
-            System.err.println("serve: UI-builder catalog ${composed.note}")
+            ) ?: return@forEach
+          // The catalog's own record, fetched now if this host has never loaded it.
+          //
+          // Without this a cold start composes the published policy against NOTHING — the store
+          // only
+          // has a record once a load generation exists — and a policy with no inventory composes to
+          // its builtins alone. That would not fail; it would quietly serve a near-empty shelf in
+          // place of the synthesised catalog, which is the one outcome worse than not reading the
+          // published file at all. Fetched by the same route a pack's record is, for the same
+          // reason.
+          if (records.record(systemId) !is ComponentRecordSource.Lookup.Found) {
+            catalogStore
+              .fetchComponentRecord(
+                system = systemId,
+                sourceRepo = config?.repo,
+                sourceBranchPrefix = config?.branch?.removeSuffix(systemId),
+              )
+              ?.let { startupRecords[systemId] = it }
           }
-          is PublishedUiBuilderCatalog.Result.Unusable ->
-            System.err.println(
-              "serve: UI-builder catalog $systemId keeps its built-in definition — " +
-                composed.reason
-            )
+          // The same record the export reads, through the same source, so the shelf the builder
+          // offers and the code the export writes cannot disagree about what a component is.
+          val record = (records.record(systemId) as? ComponentRecordSource.Lookup.Found)?.record
+          when (
+            val composed =
+              PublishedUiBuilderCatalog.compose(file.readText(), record, uiBuilderExports)
+          ) {
+            is PublishedUiBuilderCatalog.Result.Composed -> {
+              publishedCatalogs[systemId] = composed.catalog
+              System.err.println("serve: UI-builder catalog ${composed.note}")
+            }
+            is PublishedUiBuilderCatalog.Result.Unusable ->
+              System.err.println(
+                "serve: UI-builder catalog $systemId keeps its built-in definition — " +
+                  composed.reason
+              )
+          }
         }
-      }
     }
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(

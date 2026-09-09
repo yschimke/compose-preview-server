@@ -708,6 +708,46 @@ public class ServeCommandOptions(
       ?.toSet() ?: setOf("m3-catalog")
 
   /**
+   * `--ui-builder-published-catalogs <all|none|<id>[,<id>]>`.
+   *
+   * Absent means `all`, which is the behaviour the loader shipped with. `none` keeps every catalog
+   * on its built-in definition, and a list opts in exactly the named ones — the per-catalog,
+   * reversible cutover the contract describes, made operable without another repository's help.
+   *
+   * `none` is spelled rather than expressed as an empty value because an empty
+   * `SERVE_UI_BUILDER_PUBLISHED_CATALOGS=` is what an unset environment variable looks like after
+   * substitution, and "the operator cleared it" and "the operator never set it" must not mean
+   * opposite things.
+   */
+  override val uiBuilderPublishedCatalogs: Set<String>? =
+    args.flagValue("--ui-builder-published-catalogs")?.trim()?.let { raw ->
+      when (raw.lowercase()) {
+        "all" -> null
+        "none" -> emptySet()
+        else -> {
+          val entries = raw.split(",").map(String::trim).filter(String::isNotEmpty)
+          require(entries.isNotEmpty()) {
+            "--ui-builder-published-catalogs is empty; use `all` or `none` to say which you meant"
+          }
+          require(entries.all(UI_BUILDER_CATALOG_ID::matches)) {
+            "--ui-builder-published-catalogs contains an invalid catalog id"
+          }
+          require(entries.distinct().size == entries.size) {
+            "--ui-builder-published-catalogs contains a duplicate catalog id"
+          }
+          // Naming a catalog that is not served is a typo with a silent failure mode: the operator
+          // meant to opt something in and nothing happens. Refused rather than ignored.
+          val unknown = entries.filterNot(uiBuilderCatalogs::contains)
+          require(unknown.isEmpty()) {
+            "--ui-builder-published-catalogs names ${unknown.joinToString()}, which " +
+              "--ui-builder-catalogs does not serve"
+          }
+          entries.toSet()
+        }
+      }
+    }
+
+  /**
    * Each catalog's discovered `components.json`, which the Compose export path generates from.
    *
    * `<system>=<path>` pairs rather than a bare path, because a host serving `m3-catalog,remote-m3`

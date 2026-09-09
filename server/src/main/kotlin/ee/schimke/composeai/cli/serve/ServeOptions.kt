@@ -613,6 +613,27 @@ public interface ServeOptions {
     get() = setOf("m3-catalog")
 
   /**
+   * Which enabled catalogs may be served from the `ui-builder.json` they publish, rather than from
+   * the catalog this build writes in Kotlin.
+   *
+   * The lever the cutover of `docs/design/UI_BUILDER_CATALOG_CONTRACT.md` calls "per catalog and
+   * reversible". Reversing it used to mean asking another repository to withdraw its file, which is
+   * not a thing an operator can do at 3am: a published catalog is preferred the moment it appears,
+   * and it appears when somebody else's CI runs. This is the switch that makes the sentence true.
+   *
+   * Null — the default — means every enabled catalog may. `emptySet()` means none may, so every
+   * catalog keeps its built-in definition. A non-empty set names the only catalogs allowed to.
+   *
+   * It exists because the two can differ in ways nothing here would catch. `wear-m3` published a
+   * real file whose components carry no `@BuilderComponent` policy at all, so 28 of its derived ids
+   * collided and its shelf came out materially different from the one this server synthesises —
+   * caught by `.github/scripts/ui-builder-equivalence.sh`, which is worth running against a
+   * catalog's published file before letting it flip.
+   */
+  public val uiBuilderPublishedCatalogs: Set<String>?
+    get() = null
+
+  /**
    * Discovered component records for the UI-builder's catalogs (`--ui-builder-components
    * <system>=<components.json>[,<system>=<file>]`).
    *
