@@ -1,5 +1,47 @@
 # Changelog
 
+## [3.20.0](https://github.com/yschimke/compose-preview-server/compare/v3.19.0...v3.20.0) (2026-09-09)
+
+
+### Features
+
+* give the spec source, the vector lane and the sheet controls permalinks ([#594](https://github.com/yschimke/compose-preview-server/issues/594)) ([6c892e8](https://github.com/yschimke/compose-preview-server/commit/6c892e85da32ed0456aac25b86fb2eb3e805b487))
+* **serve:** count this container's subprocesses on /status ([#604](https://github.com/yschimke/compose-preview-server/issues/604)) ([307d717](https://github.com/yschimke/compose-preview-server/commit/307d717bb650af83ec5e42693bf2b408d93af6cc))
+* **ui-builder:** a board node for several items, and variant panes beside the design ([#600](https://github.com/yschimke/compose-preview-server/issues/600)) ([ec307ed](https://github.com/yschimke/compose-preview-server/commit/ec307ed363d48363db968d2e916b965945994a1a))
+* **ui-builder:** carry a design's chat thread on its comment notifications ([#608](https://github.com/yschimke/compose-preview-server/issues/608)) ([a0f3ec8](https://github.com/yschimke/compose-preview-server/commit/a0f3ec88ac73b81dbea494588eda9dc56a15028a))
+* **ui-builder:** draw the rectangular host container on the canvas and the native pane ([#605](https://github.com/yschimke/compose-preview-server/issues/605)) ([e18e651](https://github.com/yschimke/compose-preview-server/commit/e18e651be1e738850374c4a0d7327a94cd1ca0c6))
+* **ui-builder:** draw the round host container too ([#609](https://github.com/yschimke/compose-preview-server/issues/609)) ([de68b15](https://github.com/yschimke/compose-preview-server/commit/de68b150ecbf4a33ddd19412e203ae5ee3b953eb))
+* **ui-builder:** freeze the synthesised catalogs and gate a catalog's readiness ([#596](https://github.com/yschimke/compose-preview-server/issues/596)) ([7488865](https://github.com/yschimke/compose-preview-server/commit/74888653ab532671ff174cd464b8bf9077f1c3ac))
+* **ui-builder:** generate the rectangular widget preview beside the squircle ([#597](https://github.com/yschimke/compose-preview-server/issues/597)) ([ffedcf4](https://github.com/yschimke/compose-preview-server/commit/ffedcf4d193f46b45c6ab57d8a38d87e69017a26))
+* **ui-builder:** keep a links record beside each design ([#598](https://github.com/yschimke/compose-preview-server/issues/598)) ([5d878cb](https://github.com/yschimke/compose-preview-server/commit/5d878cb2051f0f1509054b27337ff81ec060fcd5))
+* **ui-builder:** keep designs in the browser, edit them offline, and sync them back ([#536](https://github.com/yschimke/compose-preview-server/issues/536)) ([be96931](https://github.com/yschimke/compose-preview-server/commit/be96931eecfdf961c8a6061725f3b2ca448d2e5b))
+* **ui-builder:** let a design URL name a revision, node and thread ([#602](https://github.com/yschimke/compose-preview-server/issues/602)) ([8aa45f4](https://github.com/yschimke/compose-preview-server/commit/8aa45f4335aa6b54b700b2ebc897c9308cbbf2cc))
+* **ui-builder:** post comment activity to an outbound webhook ([#599](https://github.com/yschimke/compose-preview-server/issues/599)) ([0203f0b](https://github.com/yschimke/compose-preview-server/commit/0203f0b04066e620a44440be8135679c3651d64f))
+* **ui-builder:** say why an Add beside is refused, on the row that refuses ([#607](https://github.com/yschimke/compose-preview-server/issues/607)) ([410dfa3](https://github.com/yschimke/compose-preview-server/commit/410dfa364c670df58eb2935ddca697bf8ab122d9))
+* **ui-builder:** serve a catalog from its own published ui-builder.json ([#610](https://github.com/yschimke/compose-preview-server/issues/610)) ([a1d681d](https://github.com/yschimke/compose-preview-server/commit/a1d681df6f69bfece18a0d3f141e3c1b3541b60f))
+* **ui-builder:** store designs per design, so an edit stops rewriting all of them ([#601](https://github.com/yschimke/compose-preview-server/issues/601)) ([c5698a6](https://github.com/yschimke/compose-preview-server/commit/c5698a69a257a969fcfaf2342e33543e4a4132e0))
+* **ui-builder:** take wear-m3 out of the default allowlist, add a lever to flip it ([#628](https://github.com/yschimke/compose-preview-server/issues/628)) ([0f9d0d0](https://github.com/yschimke/compose-preview-server/commit/0f9d0d090f3c0e65c1a4881a11e685dfc3da331d))
+
+
+### Bug Fixes
+
+* **build:** match wasm producer tasks case-insensitively so main goes green ([#631](https://github.com/yschimke/compose-preview-server/issues/631)) ([5c5ea2d](https://github.com/yschimke/compose-preview-server/commit/5c5ea2d90324ef593e04891e3fb4a99ad64dd02f))
+* **build:** order composePreviewBundle after the wasm producers too ([#632](https://github.com/yschimke/compose-preview-server/issues/632)) ([4a5a3af](https://github.com/yschimke/compose-preview-server/commit/4a5a3af4d15c3adb5da835fb9331a5f261546a3d))
+* **deps:** update compose-ai-tools to v2.4.0 ([#616](https://github.com/yschimke/compose-preview-server/issues/616)) ([6b23f6b](https://github.com/yschimke/compose-preview-server/commit/6b23f6b5cf19a8d34a2e8c905222040ce74969cb))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.60.0 ([#617](https://github.com/yschimke/compose-preview-server/issues/617)) ([89fa9e9](https://github.com/yschimke/compose-preview-server/commit/89fa9e9fc6ee26298c486765d9e474870d99f008))
+* **serve:** scope the process census, read cgroup v1, and sample it ([#618](https://github.com/yschimke/compose-preview-server/issues/618)) ([67bb5c1](https://github.com/yschimke/compose-preview-server/commit/67bb5c119fbd3f80f15175434cd3a5d779636b29))
+* **ui-builder:** collapse legacy case-variant grants before authorizing ([#625](https://github.com/yschimke/compose-preview-server/issues/625)) ([77b6d51](https://github.com/yschimke/compose-preview-server/commit/77b6d5166c264290185fc4688019cc92cf195175))
+* **ui-builder:** default the published-catalog path to none, m3-catalog is the one at risk ([#629](https://github.com/yschimke/compose-preview-server/issues/629)) ([43f7fa0](https://github.com/yschimke/compose-preview-server/commit/43f7fa056d702e32c33bb5d8efd6a9ca5eba75f2))
+* **ui-builder:** keep the beside refusal to the row it belongs to ([#619](https://github.com/yschimke/compose-preview-server/issues/619)) ([bc27480](https://github.com/yschimke/compose-preview-server/commit/bc27480cc20c23dda82970d82a04652070a71eee))
+* **ui-builder:** refuse what a widget brush cannot draw, and agree on the gradient axis ([#620](https://github.com/yschimke/compose-preview-server/issues/620)) ([5fd6bec](https://github.com/yschimke/compose-preview-server/commit/5fd6bec074d065852c600bf9238f3865662fab4e))
+* **ui-builder:** take a design's own write action before changing its sidecars ([#606](https://github.com/yschimke/compose-preview-server/issues/606)) ([b288786](https://github.com/yschimke/compose-preview-server/commit/b28878621be29a3f4d208c6717b35642fe1d8146))
+* **ui-builder:** undo the journal a refused commit wrote, and rename what it discards ([#611](https://github.com/yschimke/compose-preview-server/issues/611)) ([b1d73d2](https://github.com/yschimke/compose-preview-server/commit/b1d73d2d78d9937dc2097fce85f9a8f34f11531c))
+
+
+### Performance Improvements
+
+* **serve:** stop computing status-only progress counters on the front door ([#624](https://github.com/yschimke/compose-preview-server/issues/624)) ([53dd3cd](https://github.com/yschimke/compose-preview-server/commit/53dd3cd5065fcf801bfec5bf268fc8167879c738))
+
 ## [3.19.0](https://github.com/yschimke/compose-preview-server/compare/v3.18.0...v3.19.0) (2026-09-08)
 
 
