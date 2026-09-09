@@ -246,9 +246,14 @@ class ServeAgentGrantImageUploadTest {
       )
     val (code, page) = get("/agent-access/${str(opened, "requestId")}?token=$operatorToken")
     assertEquals(200, code)
-    assertTrue(page.contains("""<input type="checkbox" name="capability" value="images">"""), page)
-    // Unticked by default: an extra permission is an act, not something to click past.
-    assertFalse(page.contains("""value="images" checked"""), page)
+    // Ticked by default: the row is only offered because the agent asked for it and this approver
+    // may give it, so the page states the ask rather than charging a click to re-enter it. Consent
+    // is pressing Approve — `asking is not granting` above holds the other half, that an approval
+    // with the row unticked confers nothing.
+    assertTrue(
+      page.contains("""<input type="checkbox" name="capability" value="images" checked>"""),
+      page,
+    )
   }
 
   @Test

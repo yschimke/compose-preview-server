@@ -82,6 +82,33 @@ public val REMOTE_CONTENT_COMPONENT_IDS: Set<String> =
   )
 
 /**
+ * Which widget file a [RemoteContentEmitter] body is being written into, which decides its imports.
+ *
+ * The two are not variants of one file. [Exported] is the artifact a designer keeps: a
+ * `GlanceWearWidget`, the `WearWidgetDocument` it provides, and a `@Preview` per host container
+ * shape driven by the shipped `WidgetPreviewParams` providers, because those are the only container
+ * specs a file somebody pastes into their own module can name. [NativePreview] is the source this
+ * server compiles and renders for the builder's Native pane, which names no widget class at all —
+ * it is the body, its brush and the container spec the *design* declares, and nothing downstream of
+ * it ever constructs a widget.
+ *
+ * Null is the third answer and it is not a widget: [InlineRemoteContentExporter] writes a
+ * `@RemoteComposable` fragment for somebody else's screen, so none of `androidx.glance.wear` is
+ * involved.
+ */
+internal sealed interface WidgetSourceShape {
+
+  /**
+   * @property previewParamsProviders the shipped providers the generated `@Preview`s unroll, one
+   *   per host container shape the file previews the widget in.
+   */
+  data class Exported(val previewParamsProviders: List<String>) : WidgetSourceShape
+
+  /** The native lane's source: body, brush and the design's own `WearWidgetParams`. */
+  data object NativePreview : WidgetSourceShape
+}
+
+/**
  * Writes a widget's designed content as Remote Compose source, and its background as a
  * `WearWidgetBrush`.
  *
@@ -94,6 +121,33 @@ internal class RemoteContentEmitter(
   private val document: UiBuilderDocument,
   private val refusals: MutableList<String>,
   private val assets: WidgetAssetBytes = WidgetAssetBytes { null },
+  /**
+   * Whether a picture in the **content** carries its bytes rather than naming a parameter.
+   *
+   * Off for everything a designer keeps. A widget's content picture is application data — album
+   * art, an avatar — that changes long after the file is written, so the export asks for it as a
+   * parameter ([imageParameters]) rather than freezing today's bytes into source.
+   *
+   * On for the native preview lane, where the opposite is true. Nothing downstream of it can pass
+   * an argument: the lane compiles a body and renders it, so a parameter is a picture that can only
+   * arrive as the blank placeholder the widget class defaults to — a render showing a hole where
+   * the canvas beside it shows the artwork, which is the one disagreement between the two surfaces
+   * that is this lane's own fault. Inlined, the two draw the same picture.
+   */
+  private val inlineContentImages: Boolean = false,
+  /**
+   * The registry for the **bundle** lane, or null for the inlining one.
+   *
+   * Which of the two is set decides what a picture becomes: a base64 literal the file carries, or a
+   * file beside it and a path the source opens. Nothing else about the walk changes, which is why
+   * this is one nullable field rather than a second emitter
+   * (`docs/design/UI_BUILDER_EXPORT_BUNDLE.md`).
+   *
+   * Independent of [inlineContentImages], and never set with it: that flag is the native preview
+   * lane asking for bytes because it has no argument to pass, and this one is an export shipping
+   * files because it has somewhere to put them.
+   */
+  private val bundled: WidgetAssetContents? = null,
 ) {
   /** True once a colour or type token has been written, which only reads inside a theme. */
   var usesTheme: Boolean = false
@@ -151,10 +205,28 @@ internal class RemoteContentEmitter(
           val reversed = "listOf(${end.argbLiteral()}.rc, ${start.argbLiteral()}.rc)"
           elements +=
             when (node.properties["direction"]?.stringOrNull()) {
-              "leftToRight" -> horizontal("horizontalGradient($stops)")
+              // `horizontal`/`vertical` name the axis without a sense, and they are what the widget
+              // templates write. Reading them here — and identically in the canvas — is what stops
+              // the silent case: an unknown direction fell through to `else`, so a side scrim drew
+              // vertically AND generated Kotlin that agreed with the wrong picture. The two were
+              // consistent, and consistently wrong.
+              "leftToRight",
+              "horizontal" -> horizontal("horizontalGradient($stops)")
               "rightToLeft" -> horizontal("horizontalGradient($reversed)")
               "bottomToTop" -> vertical("verticalGradient($reversed)")
-              else -> vertical("verticalGradient($stops)")
+              "topToBottom",
+              "vertical",
+              null,
+              "" -> vertical("verticalGradient($stops)")
+              // Refused rather than redrawn, for the same reason: a direction nobody reads should
+              // say so instead of picking an axis.
+              else -> {
+                refusals +=
+                  "the gradient `$id` names the direction " +
+                    "`${node.properties["direction"]?.stringOrNull()}`, which is not one this " +
+                    "generator or the canvas draws"
+                return@forEach
+              }
             }
         }
         // `WearWidgetBrush.image` takes a `RemoteImageBitmap`, and this lane inlines the bytes
@@ -168,7 +240,7 @@ internal class RemoteContentEmitter(
         // (`docs/design/UI_BUILDER_EXPORT_BUNDLE.md`, yschimke/compose-preview-server#528).
         "asset/image" -> {
           val key = node.properties["assetKey"]?.stringOrNull().orEmpty()
-          when (val encoded = key.takeIf(String::isNotEmpty)?.let(assets::base64)) {
+          when (val identifier = backgroundBitmap(key)) {
             null ->
               refusals +=
                 "the image background `$id` names " +
@@ -177,7 +249,7 @@ internal class RemoteContentEmitter(
                   " — pick a picture for it in the inspector"
             else -> {
               usesBrushImage = true
-              elements += "image(${inlineBitmap(key, encoded)})"
+              elements += "image($identifier)"
             }
           }
         }
@@ -371,7 +443,7 @@ internal class RemoteContentEmitter(
         arguments += "verticalArrangement = RemoteArrangement.spacedBy(${it.dpLiteral()})"
       }
     (crossAxisAlignment(node, "alignHorizontal") ?: node.canvasHorizontalAlignment())
-      ?.takeIf { it != "start" }
+      .takeIf { it != "start" }
       ?.let {
         usesAlignment = true
         arguments += "horizontalAlignment = RemoteAlignment.${it.remoteHorizontal()}"
@@ -404,7 +476,7 @@ internal class RemoteContentEmitter(
         arguments += "horizontalArrangement = RemoteArrangement.spacedBy(${it.dpLiteral()})"
       }
     (crossAxisAlignment(node, "alignVertical") ?: node.canvasVerticalAlignment())
-      ?.takeIf { it != "top" }
+      .takeIf { it != "top" }
       ?.let {
         usesAlignment = true
         arguments += "verticalAlignment = RemoteAlignment.${it.remoteVertical()}"
@@ -624,9 +696,12 @@ internal class RemoteContentEmitter(
    * avatar, a logo — that changes long after this file is written, and baking today's bytes in as a
    * constant would generate a widget that draws the picture the design was built with forever. So
    * the key becomes a **parameter**: [imageParameters] names one per distinct key, the content
-   * function takes it, and `provideWidgetData` hands it on. That is the same split
-   * `docs/UI_BUILDER_GETTING_STARTED.md` already describes for an image *background*, applied to
-   * the content slot rather than to the brush chain.
+   * function takes it, and `provideWidgetData` hands it on. The bundle lane keeps the parameter and
+   * changes only what it defaults to: the design's own artwork, shipped as a file and opened where
+   * the `Context` is, so the generated `@Preview` draws the design rather than a blank bitmap — and
+   * the picture the application supplies still wins (`docs/design/UI_BUILDER_EXPORT_BUNDLE.md`).
+   * That is the same split `docs/UI_BUILDER_GETTING_STARTED.md` already describes for an image
+   * *background*, applied to the content slot rather than to the brush chain.
    *
    * `contentDescription` is not optional in the call: upstream declares it `RemoteString?` with no
    * default, so a node without one passes `null` explicitly rather than leaving it out.
@@ -639,8 +714,25 @@ internal class RemoteContentEmitter(
           "resolve — pick an asset for it in the inspector"
       return null
     }
+    // The native preview lane wants the bytes here rather than a parameter — see
+    // [inlineContentImages]. A key with no bytes on this host is refused by name for the same
+    // reason a background one is: the lane has no argument to pass and a picture nothing can
+    // resolve would render as an empty box the designer cannot explain.
+    val bitmap =
+      if (!inlineContentImages) imageParameter(key)
+      else
+        when (val encoded = assets.base64(key)) {
+          null -> {
+            refusals +=
+              "the image `${node.id}` draws the asset `$key`, whose bytes this host could not " +
+                "read — a native render carries the picture inside the document, so there is " +
+                "nothing to draw it from"
+            return null
+          }
+          else -> inlineBitmap(key, encoded)
+        }
     usesRemoteImage = true
-    val arguments = mutableListOf("remoteBitmap = ${imageParameter(key)}")
+    val arguments = mutableListOf("remoteBitmap = $bitmap")
     val description = node.properties["contentDescription"]?.stringOrNull().orEmpty()
     arguments +=
       if (description.isEmpty()) "contentDescription = null"
@@ -682,8 +774,97 @@ internal class RemoteContentEmitter(
       if (base !in taken) base
       else generateSequence(2) { it + 1 }.map { "$base$it" }.first { it !in taken }
     imageAssets[key] = name
+    // In the bundle lane the design's own artwork travels too, so the parameter can default to it
+    // instead of to a blank bitmap — which is what makes the generated `@Preview` draw the design
+    // rather than the hole the picture goes in. A key the registry cannot answer is not a refusal
+    // here: a content picture is the application's to supply, and the parameter it becomes says so
+    // whether or not the archive carries a stand-in.
+    bundled?.contents(key)?.let { content ->
+      bundledParameters[key] = bundleFile(name, key, content)
+    }
     return name
   }
+
+  /**
+   * The identifier a widget **background** picture is drawn through, or null when there is none.
+   *
+   * The two lanes answer the same question with different sources: inlining allocates a file-level
+   * `val` holding the bytes, and a bundle allocates a local that opens the file the archive
+   * carries. Both are identifiers the brush chain can name, which is why the caller needs to know
+   * nothing about which lane it is in.
+   */
+  private fun backgroundBitmap(key: String): String? {
+    if (key.isEmpty()) return null
+    bundled?.let { registry ->
+      val content = registry.contents(key) ?: return null
+      bundledBackgroundAssets[key]?.let {
+        return it.identifier
+      }
+      val name = allocateBitmapIdentifier(key)
+      bundledBackgroundAssets[key] = bundleFile(name, key, content)
+      return name
+    }
+    return assets.base64(key)?.let { inlineBitmap(key, it) }
+  }
+
+  /**
+   * Where an asset key's bytes go inside the archive.
+   *
+   * `uibuilder/<design>/<key>.<extension>` — scoped by design because asset paths are global to the
+   * application, and two designs unpacked into one app would otherwise collide on a shared key like
+   * `cover`. No renaming happens inside the segment: an asset key is 1-64 characters of
+   * `[A-Za-z0-9][A-Za-z0-9._-]*`, which is already a safe path segment, so the mapping is injective
+   * and there is nothing to disambiguate. The design id is written through the same alphabet as a
+   * precaution rather than as a rule — a server-issued id already satisfies it.
+   *
+   * The extension is for the person reading the archive. `AssetManager` serves bytes by path and
+   * `BitmapFactory` sniffs them, so nothing at runtime reads it.
+   */
+  private fun bundleFile(identifier: String, key: String, content: WidgetAssetContent) =
+    BundledAsset(
+      identifier = identifier,
+      assetKey = key,
+      path =
+        "$BUNDLE_DIRECTORY/${document.id.bundleSegment()}/$key.${content.mediaType.pictureExtension()}",
+      mediaType = content.mediaType,
+      base64 = content.base64,
+    )
+
+  private fun allocateBitmapIdentifier(key: String): String {
+    val base = exportedStateIdentifier(key)
+    val taken =
+      inlineAssets.values.map(InlineAsset::identifier).toSet() +
+        bundledBackgroundAssets.values.map(BundledAsset::identifier) +
+        imageAssets.values
+    return if (base !in taken) base
+    else generateSequence(2) { it + 1 }.map { "$base$it" }.first { it !in taken }
+  }
+
+  private val bundledBackgroundAssets = linkedMapOf<String, BundledAsset>()
+
+  private val bundledParameters = linkedMapOf<String, BundledAsset>()
+
+  /** The background pictures the archive carries, in the order they were reached. */
+  val bundledBackgrounds: List<BundledAsset>
+    get() = bundledBackgroundAssets.values.toList()
+
+  /** True once a picture has been written as a file rather than as bytes in the source. */
+  val usesBundledBitmap: Boolean
+    get() = bundledBackgroundAssets.isNotEmpty() || bundledParameters.isNotEmpty()
+
+  /**
+   * One picture shipped beside the source.
+   *
+   * @property identifier the local or parameter the source draws it through.
+   * @property path where it goes inside the archive, and what the generated source opens.
+   */
+  data class BundledAsset(
+    val identifier: String,
+    val assetKey: String,
+    val path: String,
+    val mediaType: String,
+    val base64: String,
+  )
 
   /**
    * The identifier for a picture whose **bytes** the file carries, allocating one per asset key.
@@ -725,10 +906,21 @@ internal class RemoteContentEmitter(
    * default, and deliberately — see each.
    */
   val imageParameters: List<ImageParameter>
-    get() = imageAssets.map { (key, identifier) -> ImageParameter(identifier, key) }
+    get() = imageAssets.map { (key, identifier) ->
+      ImageParameter(identifier, key, bundledParameters[key])
+    }
 
-  /** @property assetKey the design's own key, which the parameter's doc comment names. */
-  data class ImageParameter(val identifier: String, val assetKey: String)
+  /**
+   * @property assetKey the design's own key, which the parameter's doc comment names.
+   * @property bundled the design's own artwork for this parameter when the archive carries it, and
+   *   therefore what the parameter falls back to; null in the inlining lane, and in the bundle lane
+   *   for a key whose bytes the registry could not answer.
+   */
+  data class ImageParameter(
+    val identifier: String,
+    val assetKey: String,
+    val bundled: BundledAsset? = null,
+  )
 
   /**
    * Top-level declarations the body refers to, in emission order.
@@ -748,10 +940,13 @@ internal class RemoteContentEmitter(
    * Gated on what was actually written rather than emitted wholesale: an unused import is a warning
    * in the reader's IDE the moment they paste this in, and "generated" is not a licence to hand
    * someone code they have to tidy.
+   *
+   * @param widget which widget file this body is going into, or null for a fragment that is not a
+   *   widget at all — see [WidgetSourceShape].
    */
-  fun imports(previewParamsProvider: String?): List<String> {
+  fun imports(widget: WidgetSourceShape?): List<String> {
     val imports = mutableSetOf<String>()
-    if (previewParamsProvider != null) imports += "android.content.Context"
+    if (widget is WidgetSourceShape.Exported) imports += "android.content.Context"
     if (usesBox) imports += "androidx.compose.remote.creation.compose.layout.RemoteBox"
     if (usesColumn) imports += "androidx.compose.remote.creation.compose.layout.RemoteColumn"
     imports += "androidx.compose.remote.creation.compose.layout.RemoteComposable"
@@ -788,38 +983,52 @@ internal class RemoteContentEmitter(
     if (usesColorLiteral) imports += "androidx.compose.ui.graphics.Color"
     if (usesContentScale) imports += "androidx.compose.ui.layout.ContentScale"
     if (usesTextAlign) imports += "androidx.compose.ui.text.style.TextAlign"
-    // The widget half. A Wear widget is delivered as a `WearWidgetDocument` and previewed through
-    // the Glance host tooling; inline remote content inside a phone or watch *screen* is neither,
-    // so it takes the vocabulary above and none of this. Gated rather than always-on for the reason
-    // every other import here is: an unused import is a warning in the reader's IDE on their first
-    // paste.
-    if (previewParamsProvider != null) {
-      imports += "androidx.compose.ui.tooling.preview.Preview"
-      imports += "androidx.glance.wear.GlanceWearWidget"
+    // The widget half. A Wear widget is delivered as a `WearWidgetDocument` and drawn inside the
+    // host's container; inline remote content inside a phone or watch *screen* is neither, so it
+    // takes the vocabulary above and none of this. Gated rather than always-on for the reason every
+    // other import here is: an unused import is a warning in the reader's IDE on their first paste.
+    if (widget != null) {
       imports += "androidx.glance.wear.WearWidgetBrush"
-      imports += "androidx.glance.wear.WearWidgetData"
-      imports += "androidx.glance.wear.WearWidgetDocument"
       if (usesBrushColor) imports += "androidx.glance.wear.color"
       if (usesBrushImage) imports += "androidx.glance.wear.image"
       if (usesHorizontalGradient) imports += "androidx.glance.wear.horizontalGradient"
       if (usesVerticalGradient) imports += "androidx.glance.wear.verticalGradient"
+      imports += "androidx.glance.wear.core.WearWidgetParams"
+      // A picture whose bytes this file carries decodes them itself, which is Android's decoder
+      // rather than a Compose one: the base64 becomes a `Bitmap` and then the `ImageBitmap` the
+      // `.rb` wraps. Gated on there being one rather than on which slot it fills, since the widget
+      // lane inlines a background and the preview lane inlines the content pictures too.
+      if (inlineAssets.isNotEmpty() || usesBundledBitmap) {
+        imports += "android.graphics.BitmapFactory"
+        imports += "androidx.compose.remote.creation.compose.state.rb"
+        imports += "androidx.compose.ui.graphics.asImageBitmap"
+      }
+      // The one import that separates the lanes: a bundled picture is read from the byte
+      // `AssetManager` opens the file at, and needs no base64 to get there.
+      if (inlineAssets.isNotEmpty()) imports += "android.util.Base64"
+    }
+    if (widget is WidgetSourceShape.Exported) {
+      imports += "androidx.compose.ui.tooling.preview.Preview"
+      imports += "androidx.glance.wear.GlanceWearWidget"
+      imports += "androidx.glance.wear.WearWidgetData"
+      imports += "androidx.glance.wear.WearWidgetDocument"
       // The blank placeholder the generated widget class defaults an image parameter to, so the
       // `@Preview` beside it compiles without a bitmap only the application has.
       if (usesRemoteImage) {
         imports += "androidx.compose.remote.creation.compose.state.rb"
         imports += "androidx.compose.ui.graphics.ImageBitmap"
       }
-      // An inlined background decodes its own bytes, which is Android's decoder rather than a
-      // Compose one: the base64 becomes a `Bitmap` and then the `ImageBitmap` the `.rb` wraps.
-      if (usesBrushImage) {
-        imports += "android.graphics.BitmapFactory"
-        imports += "android.util.Base64"
-        imports += "androidx.compose.remote.creation.compose.state.rb"
-        imports += "androidx.compose.ui.graphics.asImageBitmap"
+      widget.previewParamsProviders.forEach {
+        imports += "androidx.glance.wear.tooling.preview.$it"
       }
-      imports += "androidx.glance.wear.core.WearWidgetParams"
-      imports += "androidx.glance.wear.tooling.preview.$previewParamsProvider"
       imports += "androidx.glance.wear.tooling.preview.WearWidgetPreview"
+    }
+    if (widget is WidgetSourceShape.NativePreview) {
+      // The container spec this lane builds itself, from the design's own scaffold, rather than
+      // reading one of the shipped providers: a design authors its padding and radius and the
+      // providers only carry the published defaults.
+      imports += "androidx.glance.wear.core.ContainerInfo"
+      imports += "androidx.glance.wear.core.WidgetInstanceId"
     }
     if (usesRemoteColorScheme) {
       imports += "androidx.wear.compose.remote.material3.RemoteColorScheme"
@@ -1135,8 +1344,47 @@ internal class RemoteContentEmitter(
 
     /** A JVM string constant's cap, in modified-UTF-8 bytes. */
     const val MAX_STRING_CONSTANT_BYTES = 65535
+
+    /**
+     * The directory a bundle's pictures sit in, under the module's `assets/`.
+     *
+     * One level of its own rather than the root, so unpacking an archive into a source set that
+     * already has assets adds a directory instead of mixing files into one nobody owns.
+     */
+    const val BUNDLE_DIRECTORY = "uibuilder"
   }
 }
+
+/**
+ * The design id, as one path segment.
+ *
+ * A server-issued id is already within the segment alphabet
+ * (`ServeUiBuilderDesignLibrary.DESIGN_ID`), so this normally returns it unchanged; anything else —
+ * a hand-written document, a fixture — is folded into it rather than allowed to write a path with a
+ * `/` or a space in it. Two ids differing only outside the alphabet would fold together, which a
+ * host cannot produce and which costs a shared directory rather than a lost file: the archive's own
+ * paths stay distinct, because an asset key is unique within a design.
+ */
+private fun String.bundleSegment(): String {
+  val folded = map { if (it.isLetterOrDigit() || it == '.' || it == '_' || it == '-') it else '-' }
+  return folded.joinToString("").trimStart('-').ifEmpty { "design" }
+}
+
+/**
+ * The file extension for a picture's media type.
+ *
+ * Cosmetic, and deliberately forgiving: `AssetManager` serves bytes by path and `BitmapFactory`
+ * sniffs them, so an extension nobody recognises costs a reader a moment and costs the widget
+ * nothing. The four listed are the four the asset upload route accepts.
+ */
+private fun String.pictureExtension(): String =
+  when (substringBefore(';').trim().lowercase()) {
+    "image/png" -> "png"
+    "image/jpeg" -> "jpg"
+    "image/gif" -> "gif"
+    "image/webp" -> "webp"
+    else -> "bin"
+  }
 
 private fun String.remoteAlignment(): String =
   when (this) {

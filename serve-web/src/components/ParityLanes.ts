@@ -11,6 +11,7 @@
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { whenParsed } from "../dom/whenParsed.js";
 import { filterLanes } from "../parity/laneFilter.js";
+import { urlState } from "../urlState.js";
 
 @customElement("cp-parity-lanes")
 export class ParityLanes extends ControllerElement {
@@ -26,13 +27,32 @@ export class ParityLanes extends ControllerElement {
     private bind(): void {
         if (!this.isConnected) return;
         for (const button of this.buttons()) {
-            const onClick = () =>
-                this.apply(button.dataset.parityLane ?? "all");
+            const onClick = () => {
+                const lane = button.dataset.parityLane ?? "all";
+                this.apply(lane);
+                // A discrete choice, so it earns a history entry: Back returns to the lane the
+                // reader came from. `all` is the resting feed the page is served as, so it clears
+                // the parameter rather than pinning the default onto a copied link.
+                urlState()?.push({ lane: lane === "all" ? null : lane });
+            };
             button.addEventListener("click", onClick);
             this.cleanups.push(() =>
                 button.removeEventListener("click", onClick),
             );
         }
+        // The feed is server-rendered unfiltered, so a shared `?lane=…` link (and every Back into
+        // one) has to narrow it here. A lane no button offers falls back to the whole feed rather
+        // than hiding every entry behind a filter nothing can lift.
+        const restore = () => {
+            const wanted = urlState()?.get("lane") || "all";
+            const offered = this.buttons().some(
+                (button) => button.dataset.parityLane === wanted,
+            );
+            this.apply(offered ? wanted : "all");
+        };
+        restore();
+        const offPop = urlState()?.onPop(restore);
+        if (offPop) this.cleanups.push(offPop);
     }
 
     disconnectedCallback(): void {

@@ -985,7 +985,20 @@ private fun remoteM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
           // this component: it is synthesized here. Shelved rather than left to fall back to its
           // role heading ("Leaf") for the reason `ComponentMenu` gives — a menu is presentation,
           // and an author looking for an animation looks under Content.
-          ("componentMenu" to base.statusSemantics.withMenuEntry("remote-m3/lottie", "Content"))
+          ("componentMenu" to base.statusSemantics.withMenuEntry("remote-m3/lottie", "Content")) +
+          // Which daemon draws this catalog natively, and it is not a preference: a widget's body
+          // is `androidx.compose.remote.creation.compose`, its container is `androidx.glance.wear`,
+          // and both are Android AARs. Left undeclared this defaulted to `desktop`, so the native
+          // lane sent a widget to Skiko — a compile that fails on every import and reads like the
+          // design is broken. The Wasm claim is left alone: unlike `wear-m3`'s Material 3
+          // lookalikes, the canvas draws this catalog's own borrowed components.
+          ("previewSurfaces" to
+            buildJsonObject {
+              putJsonObject("native") {
+                put("fidelity", JsonPrimitive("authoritative"))
+                put("backend", JsonPrimitive("android"))
+              }
+            })
       ),
     benchmark =
       base.benchmark.copy(
@@ -2057,6 +2070,16 @@ public class ProductionUiBuilderExportExecutor(
       ExportFormatV1.COMPOSE -> compose.export(request)
       ExportFormatV1.PNG -> request.binaryArtifact(renderer.renderPng(request.toRenderRequest()))
       ExportFormatV1.SVG -> request.svgArtifact(renderer.renderSvg(request.toRenderRequest()))
+      // Unreachable through the service: [capabilities] leaves `bundle` at its false default, and
+      // PersistentUiBuilderService refuses any format the pinned catalog does not advertise before
+      // an executor is reached. Thrown rather than folded into an `else`, so that implementing
+      // yschimke/compose-preview-server#528 starts from a compile error here instead of silently
+      // handing back Compose source for a caller that asked for a bundle. The service already
+      // wraps this call, so the throw surfaces as an export error, not a crash.
+      ExportFormatV1.BUNDLE ->
+        throw UnsupportedOperationException(
+          "bundle export is not implemented; ExportCapabilitiesV1.bundle is false for this executor"
+        )
     }
 
   override fun close(): Unit = renderer.close()
@@ -2340,18 +2363,6 @@ private fun JsonElement?.kotlinLiteral(): String =
         .joinToString(prefix = "mapOf(", postfix = ")") { (key, value) ->
           "\"${key.escapeKotlin()}\" to ${value.kotlinLiteral()}"
         }
-  }
-
-private fun canonicalJson(element: JsonElement): String =
-  when (element) {
-    is JsonObject ->
-      element.entries
-        .sortedBy { it.key }
-        .joinToString(",", "{", "}") { (key, value) ->
-          "${JsonPrimitive(key)}:${canonicalJson(value)}"
-        }
-    is JsonArray -> element.joinToString(",", "[", "]") { canonicalJson(it) }
-    is JsonPrimitive -> element.toString()
   }
 
 private fun String.identifier(): String {

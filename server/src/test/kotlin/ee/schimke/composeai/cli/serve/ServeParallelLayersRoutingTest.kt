@@ -37,6 +37,7 @@ class ServeParallelLayersRoutingTest {
     family: String? = null,
     compareWith: String? = null,
     parallel: String? = null,
+    reference: Boolean = false,
   ): ServeBundleHost {
     val dir = Files.createTempDirectory("layers-$label").toFile().also { it.deleteOnExit() }
     File(dir, "index.html").writeText("<html></html>")
@@ -44,6 +45,20 @@ class ServeParallelLayersRoutingTest {
     File(dir, "previews/$previewId.png").writeBytes(png())
     File(dir, "previews/variants.json")
       .writeText("""{"$previewId":{"componentId":"$componentId"}}""")
+    if (reference) {
+      File(dir, ServeDesignReferenceStore.DIRECTORY).mkdirs()
+      File(dir, "${ServeDesignReferenceStore.DIRECTORY}/$previewId-figma.png").writeBytes(png())
+      File(dir, "${ServeDesignReferenceStore.DIRECTORY}/${ServeDesignReferenceStore.INDEX_FILE}")
+        .writeText(
+          """
+          {"schema":"${DesignReferenceManifest.SCHEMA}","references":[
+            {"id":"$previewId-figma","previewId":"$previewId","label":"Button",
+             "source":{"provider":"figma"},
+             "raster":{"path":"references/$previewId-figma.png"}}]}
+          """
+            .trimIndent()
+        )
+    }
     if (family != null) {
       File(dir, ServeAnnotationStore.DIRECTORY).mkdirs()
       File(dir, "${ServeAnnotationStore.DIRECTORY}/${ServeAnnotationStore.INDEX_FILE}")
@@ -71,6 +86,7 @@ class ServeParallelLayersRoutingTest {
   private fun newServer(
     hereFamily: String? = "Inter",
     thereFamily: String? = "Roboto",
+    reference: Boolean = false,
   ): ServeHttpServer {
     registry.register(
       "remote-m3",
@@ -82,6 +98,7 @@ class ServeParallelLayersRoutingTest {
           family = hereFamily,
           compareWith = "wear-m3",
           parallel = "Button/Child",
+          reference = reference,
         ),
       pinned = true,
     )
@@ -204,6 +221,41 @@ class ServeParallelLayersRoutingTest {
       )
       // …and a catalog with no sibling keeps the lane exactly as it was.
       assertFalse(get(server, "/wear-m3/p/child-button").second.contains("/parallel/"))
+    } finally {
+      server.stop()
+    }
+  }
+
+  @Test
+  fun `a render with BOTH a design spec and a counterpart offers both ways out`() {
+    // The two links were mutually exclusive and the spec diff won, so on the very catalog this
+    // pairing exists for — where most previews also carry a Figma reference — the layer diff was
+    // reachable only by typing `/{system}/parallel/{preview}`. It is the one surface that answers
+    // *why* two implementations of one design differ rather than *whether* they do, and picking
+    // one destination for the reader was a coincidence of a `when`, not a judgement.
+    val server = newServer(reference = true)
+    try {
+      val (code, html) = get(server, "/remote-m3/p/button-child")
+      assertEquals(200, code)
+      // Both destinations, now as rows of the one `Full comparisons` menu rather than two grey
+      // links either side of the spec lane. The claim is unchanged and still the point of this
+      // test: a preview that carries a Figma reference must not lose its route to the layer diff.
+      assertTrue(html.contains("class=\"cp-detail-menu\""), "two destinations make a menu: $html")
+      assertTrue(html.contains(">Spec diff</a>"), "the design comparison survives: $html")
+      assertTrue(
+        html.contains("href=\"/remote-m3/parallel/button-child\""),
+        "…and no longer at the cost of the layer diff: $html",
+      )
+      assertTrue(html.contains(">wear-m3 layers</a>"), "the layer row names the sibling: $html")
+      // …and the sibling is still named on the RESTING bar, which the layer link used to be the
+      // only thing doing. It is a menu row now, so it takes a click to read — but #585 put the
+      // counterpart on the bar as a peer of the Figma chip, which is a better answer to the same
+      // need than a grey link was. Asserted here because moving the link into a menu is exactly the
+      // change that would have cost a reader that fact if the chip were not there.
+      assertTrue(
+        html.contains("data-cp-spec-open-source=\"parallel\""),
+        "the counterpart is a peer chip on the resting bar: $html",
+      )
     } finally {
       server.stop()
     }

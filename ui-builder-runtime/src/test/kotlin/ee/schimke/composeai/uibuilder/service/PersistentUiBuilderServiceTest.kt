@@ -2598,6 +2598,316 @@ class PersistentUiBuilderServiceTest {
     assertEquals("timed out after 30s", RuntimeException("timed out after 30s").clientMessage())
   }
 
+  @Test
+  fun `retention depth follows the byte budget, and never cuts below its floor`() {
+    // A budget too small for even one copy of the document: the floor is what is left, and the
+    // floor is what a client rebasing on a recent revision needs.
+    val service =
+      service(
+        limits =
+          UiBuilderServiceLimits(
+            retainedCommittedOperations = 64,
+            retainedRevisionSnapshots = 64,
+            retainedRevisionBytes = 64,
+            minimumRetainedRevisionSnapshots = 2,
+          )
+      )
+    create(service)
+    editFourTimes(service)
+
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 4)),
+      "the current revision is retained",
+    )
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 3)),
+      "the floor keeps one revision behind the current one",
+    )
+    assertEquals(
+      ServiceErrorCodeV1.SNAPSHOT_REQUIRED,
+      error(execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 2))).code,
+      "anything below the floor is dropped rather than kept for a thousand revisions",
+    )
+  }
+
+  @Test
+  fun `a dropped revision reports the snapshot floor, not the operation log's`() {
+    val service =
+      service(
+        limits =
+          UiBuilderServiceLimits(
+            // The operation log keeps everything; only the whole-document snapshots are shallow.
+            retainedCommittedOperations = 64,
+            retainedRevisionSnapshots = 64,
+            retainedRevisionBytes = 64,
+            minimumRetainedRevisionSnapshots = 2,
+          )
+      )
+    create(service)
+    editFourTimes(service)
+
+    val refused = error(execute(service, owner, UiBuilderServiceRequest.GetSnapshot("design", 1)))
+
+    assertEquals(ServiceErrorCodeV1.SNAPSHOT_REQUIRED, refused.code)
+    // The delta path still reports 0 here, because every operation is retained. Quoting that floor
+    // for a missing snapshot would send the client back for a revision that is still gone.
+    assertEquals(
+      3,
+      refused.retainedFromSequence,
+      "the floor quoted is the oldest revision still retained",
+    )
+    assertEquals(
+      0,
+      delta(execute(service, owner, UiBuilderServiceRequest.GetDelta("design", 0, 50)))
+        .retainedFromSequence,
+      "the operation log's own floor is unchanged, and is what a delta answers with",
+    )
+  }
+
+  @Test
+  fun `the file storage reports what it holds against the ceiling that would refuse it`() {
+    val storage = FileUiBuilderStateStorage(temporaryDirectory, maximumBytes = 4_096)
+
+    val empty = assertNotNull(storage.usage())
+    assertEquals(0, empty.bytes, "nothing stored yet")
+    assertEquals(4_096, empty.maximumBytes)
+    assertEquals(0.0, empty.usedFraction)
+
+    storage.replace(ByteArray(1_024) { '.'.code.toByte() })
+
+    val used = assertNotNull(storage.usage())
+    assertEquals(1_024, used.bytes)
+    assertEquals(0.25, used.usedFraction)
+  }
+
+  @Test
+  fun `diagnostics carry the storage headroom, and omit it when nothing bounds the store`() {
+    val bounded =
+      service(storage = FileUiBuilderStateStorage(temporaryDirectory, maximumBytes = 1_048_576))
+    create(bounded)
+
+    val measured = bounded.diagnostics()
+    assertEquals(1_048_576, measured.storageMaximumBytes)
+    assertTrue(measured.storageBytes > 0, "a created design is bytes on disk")
+    assertTrue(measured.storageBytes < measured.storageMaximumBytes)
+
+    val unbounded = service()
+    create(unbounded)
+
+    assertEquals(
+      0,
+      unbounded.diagnostics().storageMaximumBytes,
+      "a storage that bounds nothing reports no ceiling rather than a made-up one",
+    )
+  }
+
+  @Test
+  fun `undo records are bounded by bytes, and undoing past the floor is refused not broken`() {
+    // A budget too small for the records this design produces: the floor is all that survives.
+    val service =
+      service(
+        limits =
+          UiBuilderServiceLimits(
+            retainedCommittedOperations = 64,
+            retainedOperationOutcomes = 64,
+            retainedRevisionSnapshots = 64,
+            retainedUndoBytes = 1,
+            minimumRetainedUndoOperations = 2,
+          )
+      )
+    create(service)
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("insert-root", 0, InsertNodeMutationV1(textNode("root"), NodeLocationV1()))
+        ),
+      )
+    )
+    repeat(5) { index ->
+      accepted(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            batch(
+              "insert-$index",
+              index + 1L,
+              InsertNodeMutationV1(
+                textNode("node-$index"),
+                NodeLocationV1(ParentSlotV1("root", "content")),
+              ),
+            )
+          ),
+        )
+      )
+    }
+
+    // The newest operation is still undoable: the floor keeps the most recent records.
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          UiBuilderSubmission.Undo("design", "undo-latest", "browser", 6, "insert-4")
+        ),
+      )
+    )
+
+    // The first one has aged out of the budget, and says so rather than failing some other way.
+    val refused =
+      rejected(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            UiBuilderSubmission.Undo("design", "undo-oldest", "browser", 7, "insert-root")
+          ),
+        )
+      )
+    assertEquals(RejectionCodeV1.UNKNOWN_OPERATION, refused.code)
+  }
+
+  @Test
+  fun `a generous undo budget retains every record`() {
+    val service =
+      service(
+        limits =
+          UiBuilderServiceLimits(
+            retainedCommittedOperations = 64,
+            retainedOperationOutcomes = 64,
+            retainedRevisionSnapshots = 64,
+            retainedUndoBytes = 8L * 1024 * 1024,
+            minimumRetainedUndoOperations = 2,
+          )
+      )
+    create(service)
+    editFourTimes(service)
+
+    // The oldest of the four is still undoable when nothing forced it out.
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          UiBuilderSubmission.Undo("design", "undo-oldest", "browser", 4, "insert-2")
+        ),
+      )
+    )
+  }
+
+  /** A root and three children, so the design reaches revision 4 through four accepted commits. */
+  private fun editFourTimes(service: PersistentUiBuilderService) {
+    accepted(
+      execute(
+        service,
+        owner,
+        UiBuilderServiceRequest.ApplyOperation(
+          batch("insert-root", 0, InsertNodeMutationV1(textNode("root"), NodeLocationV1()))
+        ),
+      )
+    )
+    repeat(3) { index ->
+      accepted(
+        execute(
+          service,
+          owner,
+          UiBuilderServiceRequest.ApplyOperation(
+            batch(
+              "insert-$index",
+              index + 1L,
+              InsertNodeMutationV1(
+                textNode("node-$index"),
+                NodeLocationV1(ParentSlotV1("root", "content")),
+              ),
+            )
+          ),
+        )
+      )
+    }
+  }
+
+  @Test
+  fun `a github grant matches its actor whatever case it was shared in`() {
+    val storage = MemoryStorage()
+    var service = service(storage = storage)
+    // The owner signs in, so the host presents the lowercased login it signs its session over.
+    val ghOwner = AuthenticatedUiBuilderActor("github:yschimke")
+    val ghCollaborator = AuthenticatedUiBuilderActor("github:ashleyingram")
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, ghOwner, UiBuilderServiceRequest.CreateDesign(document()))
+    )
+
+    // Shared the way a human spells the login on GitHub, which is not how the login arrives.
+    val access =
+      assertIs<UiBuilderServiceResponse.DesignAccess>(
+        execute(
+          service,
+          ghOwner,
+          UiBuilderServiceRequest.UpdateDesignAccess(
+            "design",
+            0,
+            listOf(
+              GrantActorAccessMutationV1(
+                "github:AshleyIngram",
+                DesignAccessRoleV1.VIEWER,
+                listOf(DesignAccessActionV1.READ),
+              )
+            ),
+          ),
+        )
+      )
+    // Stored canonical, so the owner reading the access record sees the id that will match.
+    assertEquals(listOf("github:ashleyingram"), access.access.actorGrants.map { it.actorId })
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(service, ghCollaborator, UiBuilderServiceRequest.OpenDesign("design"))
+    )
+    assertEquals(
+      listOf("design"),
+      assertIs<UiBuilderServiceResponse.Designs>(
+          execute(service, ghCollaborator, UiBuilderServiceRequest.ListDesigns(null, 50))
+        )
+        .designs
+        .map { it.designId },
+    )
+
+    // A mis-cased revoke still finds the grant it names.
+    assertIs<UiBuilderServiceResponse.DesignAccess>(
+      execute(
+        service,
+        ghOwner,
+        UiBuilderServiceRequest.UpdateDesignAccess(
+          "design",
+          1,
+          listOf(RevokeActorAccessMutationV1("github:ASHLEYINGRAM")),
+        ),
+      )
+    )
+    assertEquals(
+      ServiceErrorCodeV1.FORBIDDEN,
+      error(execute(service, ghCollaborator, UiBuilderServiceRequest.OpenDesign("design"))).code,
+    )
+
+    // Survives a reload, and a non-github actor is still compared exactly: case is meaningful in
+    // an agent fingerprint, so folding one would make two distinct agents equal.
+    service = service(storage = storage)
+    assertEquals(
+      ServiceErrorCodeV1.FORBIDDEN,
+      error(
+          execute(
+            service,
+            AuthenticatedUiBuilderActor("agent:ABCD"),
+            UiBuilderServiceRequest.OpenDesign("design"),
+          )
+        )
+        .code,
+    )
+    assertIs<UiBuilderServiceResponse.DesignAccess>(
+      execute(service, ghOwner, UiBuilderServiceRequest.GetDesignAccess("design"))
+    )
+  }
+
   private fun service(
     storage: UiBuilderStateStorage = MemoryStorage(),
     retained: Int = 16,
@@ -2854,6 +3164,9 @@ private fun <T> runSuspend(block: suspend () -> T): T {
 
 private fun error(response: UiBuilderServiceResponse): UiBuilderServiceError =
   assertIs<UiBuilderServiceResponse.Error>(response).error
+
+private fun delta(response: UiBuilderServiceResponse): ServiceDeltaV1 =
+  assertIs<UiBuilderServiceResponse.Delta>(response).delta
 
 private fun accepted(response: UiBuilderServiceResponse): AcceptedOutcomeV1 =
   assertIs<AcceptedOutcomeV1>(assertIs<UiBuilderServiceResponse.OperationOutcome>(response).outcome)

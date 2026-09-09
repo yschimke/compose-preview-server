@@ -281,6 +281,42 @@ class ServeUiBuilderDesignLibraryTest {
     assertEquals(emptyList(), library.index(local))
   }
 
+  @Test
+  fun `an entry says what its design is for, and an unusable link is dropped rather than the design`() {
+    val logged = mutableListOf<String>()
+    val library =
+      library(onLog = logged::add) {
+        index(
+          """
+          {"id":"checkout","title":"Checkout","links":{
+            "issue":"https://github.com/yschimke/compose-preview-server/issues/12",
+            "reference":"https://www.figma.com/design/abc/Checkout?node-id=1-2",
+            "previous":"checkout-v1",
+            "somethingLater":"ignored"
+          }}
+          """
+            .trimIndent(),
+          """{"id":"basket","title":"Basket","links":{"issue":"javascript:alert(1)"}}""",
+          """{"id":"plain","title":"Plain"}""",
+        )
+      }
+
+    val entries = library.index(m3).associateBy { it.designId }
+
+    val checkout = assertNotNull(entries["checkout"]?.links)
+    assertEquals("https://github.com/yschimke/compose-preview-server/issues/12", checkout.issue)
+    assertEquals("https://www.figma.com/design/abc/Checkout?node-id=1-2", checkout.reference)
+    assertEquals("checkout-v1", checkout.previous)
+    assertNull(checkout.pr)
+    // The index cannot be a way around the store's rule, and a link it will not keep costs the
+    // entry its links rather than costing the project its design.
+    assertNotNull(entries["basket"])
+    assertNull(entries["basket"]?.links)
+    assertTrue(logged.any { "will not keep" in it }, logged.toString())
+    // The field is additive: an index published before it existed reads exactly as it did.
+    assertNull(entries["plain"]?.links)
+  }
+
   private fun library(
     asked: MutableList<String>? = null,
     onLog: (String) -> Unit = {},

@@ -293,6 +293,7 @@ describe("keepRow", () => {
     const facts = {
         hay: "filled button · buttons",
         previewIds: "com.example.FilledButtonPreview",
+        componentId: "Button",
         hasFormat: true,
     };
 
@@ -334,6 +335,45 @@ describe("keepRow", () => {
         assert.equal(keepRow(grouped, "", "com.example.IconPreview"), true);
         assert.equal(keepRow(grouped, "", "example.IconPreview"), false);
         assert.equal(keepRow(grouped, "", "com.example.Icon"), false);
+    });
+
+    it("narrows to one component, and composes with the search box", () => {
+        // The scope a reader ARRIVES with rather than types: a component page and the parity index
+        // both link in this way, and neither is asking about one variant. It has to survive typing
+        // — someone who arrives scoped and then searches is narrowing within the component, not
+        // starting a new search across the catalog.
+        // See `docs/design/COMPARE_NAVIGATION.md`, F4.
+        assert.equal(keepRow(facts, "", "", "Button"), true);
+        assert.equal(keepRow(facts, "filled", "", "Button"), true);
+        assert.equal(keepRow(facts, "slider", "", "Button"), false);
+        assert.equal(keepRow(facts, "", "", "Slider"), false);
+    });
+
+    it("matches a component id case-insensitively, and only whole", () => {
+        // The id travels through a URL, where case is not guaranteed to survive a hand-typed link.
+        assert.equal(keepRow(facts, "", "", "  button  "), true);
+        // …but a prefix is a different component. `Butt` selecting `Button` would make a scoped
+        // wall quietly show rows the link did not ask for.
+        assert.equal(keepRow(facts, "", "", "Butt"), false);
+    });
+
+    it("leaves a row with no component id out of every component scope", () => {
+        // Rather than in all of them: an unscopeable row under a chip claiming a component is a
+        // wrong answer, where an absent row is a missing one.
+        const orphan = { ...facts, componentId: "" };
+        assert.equal(keepRow(orphan, "", "", "Button"), false);
+        assert.equal(keepRow(orphan, "", "", ""), true);
+    });
+
+    it("finds a row by a preview id that is no longer in its haystack", () => {
+        // The ids used to be copied into `data-hay` so a typed id matched there. They are written
+        // once in the page's alias table now, so the search has to look at the resolved ids too —
+        // otherwise typing an id the reader can see on the page empties the wall.
+        // See `docs/design/COMPARE_NAVIGATION.md`, F2.
+        const row = { ...facts, hay: "filled button · buttons" };
+        assert.equal(keepRow(row, "FilledButtonPreview", ""), true);
+        assert.equal(keepRow(row, "com.example.FilledButton", ""), true);
+        assert.equal(keepRow(row, "SliderPreview", ""), false);
     });
 });
 

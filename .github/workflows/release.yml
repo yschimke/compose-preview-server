@@ -140,6 +140,12 @@ jobs:
   # `compose-preview mcp serve` in the CLI fetch THESE, so a release missing either is a command
   # that cannot start. Deliberately does NOT un-draft - `finish-release` does that once every lane
   # this release asked for has succeeded.
+  #
+  # It also attaches the UI-builder web bundle on its own. The server archive already carries it
+  # (`server/build.gradle.kts` unpacks it into `ui-builder/`), and it is on Maven Central as
+  # `compose-preview-ui-builder-web` - but neither is reachable for someone who wants only the
+  # bundle: to serve it themselves, to put it in an image, or to point an existing `serve` at it
+  # with `--ui-builder-dir`. A release asset is the one form that needs no Gradle and no Maven.
   publish-distributions:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
@@ -173,7 +179,7 @@ jobs:
           cache-provider: basic
           cache-read-only: true
       - name: Build the standalone distributions
-        run: ./gradlew :server:distTar :mcp:distTar
+        run: ./gradlew :server:distTar :mcp:distTar :ui-builder-web:webArchive
       - name: Upload standalone server distribution
         run: >-
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
@@ -183,6 +189,13 @@ jobs:
         run: >-
           gh release upload "${{ needs.release-please.outputs.tag_name }}"
           "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
+          --clobber
+      # The same archive `:ui-builder-web` publishes to Maven Central, attached under the same name
+      # it has there, so the two can be compared byte for byte.
+      - name: Upload UI-builder web bundle
+        run: >-
+          gh release upload "${{ needs.release-please.outputs.tag_name }}"
+          "ui-builder-web/build/distributions/compose-preview-ui-builder-web-${PLUGIN_VERSION}.zip"
           --clobber
 
   # The Maven lane. WHICH modules it publishes is not decided here: `publishReleaseArtifacts` in the

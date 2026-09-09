@@ -25,6 +25,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.double
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -298,8 +300,57 @@ class ServeStatusTest {
     assertEquals(41, pressure.getValue("timedOutExports").jsonPrimitive.long)
     assertEquals(43, pressure.getValue("activeMutationBuckets").jsonPrimitive.int)
     assertEquals(47, pressure.getValue("persistenceMigrations").jsonPrimitive.long)
+    // A storage that bounds nothing reports no ceiling, and the row stays null rather than
+    // claiming a measured 0% an alert would then never fire on.
+    assertTrue(pressure.getValue("storageMaximumBytes") is JsonNull, body)
+    assertTrue(pressure.getValue("storageUsedPercent") is JsonNull, body)
     assertFalse(body.contains("actorId"), body)
     assertFalse(body.contains("designId"), body)
+  }
+
+  @Test
+  fun `status_json reports UI builder storage headroom when the store is bounded`() {
+    val diagnostics =
+      UiBuilderServiceDiagnostics(
+        activeSubscribers = 0,
+        peakSubscribers = 0,
+        rejectedBatchLimit = 0,
+        rejectedSubscriberLimit = 0,
+        slowSubscribersClosed = 0,
+        rejectedPresenceLimit = 0,
+        activeExports = 0,
+        peakExports = 0,
+        rejectedExportLimit = 0,
+        rejectedMutationRate = 0,
+        rejectedDocumentBytes = 0,
+        rejectedAssetBytes = 0,
+        timedOutExports = 0,
+        activeMutationBuckets = 0,
+        persistenceMigrations = 0,
+        storageBytes = 24L * 1024 * 1024,
+        storageMaximumBytes = 32L * 1024 * 1024,
+      )
+    val uiBuilder =
+      object : UiBuilderServicePort, UiBuilderServiceDiagnosticsSource {
+        override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
+          error("not used")
+
+        override fun subscribe(
+          call: UiBuilderSubscriptionCall,
+          listener: (UiBuilderServiceUpdate) -> Unit,
+        ): Closeable = Closeable {}
+
+        override fun diagnostics(): UiBuilderServiceDiagnostics = diagnostics
+      }
+    server = newServer(public = true, token = "unused", uiBuilderService = uiBuilder)
+
+    val (code, body) = get("/status.json")
+
+    assertEquals(200, code)
+    val pressure = assertNotNull(Json.parseToJsonElement(body).jsonObject["uiBuilder"]).jsonObject
+    assertEquals(24L * 1024 * 1024, pressure.getValue("storageBytes").jsonPrimitive.long)
+    assertEquals(32L * 1024 * 1024, pressure.getValue("storageMaximumBytes").jsonPrimitive.long)
+    assertEquals(75.0, pressure.getValue("storageUsedPercent").jsonPrimitive.double)
   }
 
   @Test

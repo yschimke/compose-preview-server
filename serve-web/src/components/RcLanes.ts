@@ -16,6 +16,7 @@
 // a number came from).
 
 import { ControllerElement, customElement } from "../controllerElement.js";
+import { aliasesFor, readAliasTable } from "../compare/aliases.js";
 import { whenParsed } from "../dom/whenParsed.js";
 import { urlState } from "../urlState.js";
 import {
@@ -59,6 +60,8 @@ export class RcLanes extends ControllerElement {
     private threshold = DEFAULT_THRESHOLD;
     private section: HTMLElement | null = null;
     private rows: HTMLElement[] = [];
+    /** The page's alias table, read on the first filter pass. See `compare/aliases.ts`. */
+    private aliases: import("../compare/aliases.js").AliasTable | null = null;
     private reference = NO_REFERENCE;
     /**
      * Bumped on every reference change. Every asynchronous step carries the token it started under
@@ -222,10 +225,18 @@ export class RcLanes extends ControllerElement {
     private filter(query: string): void {
         const preview =
             new URLSearchParams(location.search).get("preview") ?? "";
+        const aliases = (this.aliases ??= readAliasTable(document));
         const { keep, visible, empty } = filterRows(
             this.rows.map((row) => ({
                 hay: row.getAttribute("data-hay") ?? "",
-                previewIds: row.getAttribute("data-preview-ids") ?? "",
+                // The lane wall does NOT subtract the rowed ids: its rows are one per preview
+                // rather than one per design mapping, so every id on a card selects its row.
+                previewIds: aliasesFor(
+                    aliases,
+                    row.getAttribute("data-preview-ids") ?? "",
+                    row.getAttribute("data-alias-card"),
+                    false,
+                ).join(" "),
             })),
             query,
             preview,

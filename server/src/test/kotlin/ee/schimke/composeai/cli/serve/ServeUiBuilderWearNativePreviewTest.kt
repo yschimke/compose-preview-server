@@ -1,10 +1,12 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
+import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
+import ee.schimke.composeai.uibuilder.protocol.EmbeddedAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
@@ -37,9 +39,10 @@ import kotlin.test.assertTrue
  * standing up a Kotlin compiler and a Wear classpath to check the contents of a string would be
  * testing the compiler.
  *
- * A **widget** is the deliberate counter-case at the bottom: it is record-free too and it still
- * refuses, because its source is a Remote Compose document rather than a `@Preview` this lane can
- * discover.
+ * A **widget** is record-free too and reaches the same compiler by a fourth road, asserted at the
+ * bottom: its source is Remote Compose, so the lane submits a body, a brush and the container spec
+ * the design authored, and the entry draws them inside the Glance Wear container rather than
+ * composing a screen.
  */
 class ServeUiBuilderWearNativePreviewTest {
 
@@ -138,19 +141,56 @@ class ServeUiBuilderWearNativePreviewTest {
   }
 
   /**
-   * A widget is record-free too, and still has nothing for this lane to render.
+   * A widget renders, and what it submits is not the file a designer exports.
    *
-   * `WearWidgetCodeExporter` writes a `WearWidgetDocument` of Remote Compose — played by a player,
-   * not composed — so compiling it would produce no `@Preview` and no frame. The refusal is the
-   * right answer here, and keeping it while the screen passes is the whole shape of this change.
+   * `WearWidgetCodeExporter` writes the artifact: a `GlanceWearWidget`, its `WearWidgetDocument`,
+   * and a `@Preview` driven by a shipped params provider. None of that is submittable here — the
+   * class's picture parameters default to a blank 1×1 bitmap nothing downstream can replace, and
+   * the providers carry only the published container spec. So this lane submits the three
+   * declarations `WearWidgetNativePreviewExporter` writes instead, and the entry hands them to
+   * `WearWidgetPreview`.
    */
   @Test
-  fun `a wear widget is still refused, because Remote Compose has no preview to render`() {
-    val refused = assertIs<UiBuilderNativePreviewOutcome.Refused>(lane().render(wearWidget()))
+  fun `a wear widget submits its body, its brush and its own container spec`() {
+    val rendered = assertIs<UiBuilderNativePreviewOutcome.Rendered>(lane().render(wearWidget()))
 
-    assertEquals(ScreenGeneratorComposeExportExecutor.RECORD_FREE_DESIGN, refused.code)
-    assertTrue("Remote Compose" in refused.reasons.single(), refused.reasons.single())
-    assertTrue(submitted.isEmpty())
+    val request = submitted.single()
+    assertTrue(request.wearWidget, "the submission must take the widget entry")
+    assertEquals(UiBuilderGeneratedCompose.COMPOSE_ANDROID, request.confType)
+    assertEquals("Widget", request.composableName)
+    assertTrue("fun WidgetContent() {" in request.source, request.source)
+    assertTrue("fun WidgetBackground(): WearWidgetBrush {" in request.source, request.source)
+    assertTrue("ContainerInfo.CONTAINER_TYPE_LARGE" in request.source, request.source)
+    // No widget class: there is nothing here for the lane to construct one with.
+    assertTrue("GlanceWearWidget" !in request.source, request.source)
+    // The Large container's frame — 200×108dp of content inside 8dp of padding — rather than the
+    // 192×496 watch screen this design's environment describes.
+    assertEquals(216, request.widthDp)
+    assertEquals(124, request.heightDp)
+    // Remote Compose carries no test tag, so the frame comes back as a picture with no overlay.
+    // Reported as none rather than as every node, so a client does not look up bounds that a
+    // tagless render was never going to have.
+    assertEquals(emptyList(), rendered.taggedNodeIds)
+    assertEquals(emptyMap(), rendered.nodeBounds)
+  }
+
+  /**
+   * A widget's pictures travel inside the source, because nothing downstream can pass one.
+   *
+   * The export asks for them as parameters — a widget's artwork is application data — and defaults
+   * them to a blank bitmap so its `@Preview` compiles. Submitted here that would render a hole
+   * where the canvas beside it draws the picture, which is the one disagreement between the two
+   * surfaces this lane would have caused itself.
+   */
+  @Test
+  fun `a widget picture is inlined into the native preview source`() {
+    lane().render(wearWidget(assetKey = "cover"))
+
+    val source = submitted.single().source
+    assertTrue("RemoteImage(" in source, source)
+    assertTrue(ONE_PIXEL_PNG_BASE64 in source, source)
+    assertTrue("decodeInlineBitmap(" in source, source)
+    assertTrue("RemoteImageBitmap)" !in source, source)
   }
 
   private fun environment() =
@@ -199,7 +239,14 @@ class ServeUiBuilderWearNativePreviewTest {
         ),
     )
 
-  private fun wearWidget(): DesignDocumentV1 =
+  /**
+   * A **Large** container, so the frame this lane reports is not the same number as the Small one's
+   * and an assertion about it cannot pass by accident.
+   *
+   * @param assetKey a picture in the container's content, whose bytes ride in the design's own
+   *   asset map — an embedded binding rather than an uploaded one, so the fixture needs no store.
+   */
+  private fun wearWidget(assetKey: String? = null): DesignDocumentV1 =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",
       id = "widget",
@@ -209,8 +256,41 @@ class ServeUiBuilderWearNativePreviewTest {
       environment = environment(),
       roots = listOf("host"),
       nodes =
-        mapOf(
-          "host" to DesignNodeV1(id = "host", componentId = "remote-m3/widget-container-small")
-        ),
+        buildMap {
+          put(
+            "host",
+            DesignNodeV1(
+              id = "host",
+              componentId = "remote-m3/widget-container-large",
+              slots = if (assetKey == null) emptyMap() else mapOf("content" to listOf("art")),
+            ),
+          )
+          if (assetKey != null) {
+            put(
+              "art",
+              DesignNodeV1(
+                id = "art",
+                componentId = "asset/image",
+                properties = mapOf("assetKey" to StringValueV1(assetKey)),
+              ),
+            )
+          }
+        },
+      assets =
+        if (assetKey == null) emptyMap()
+        else
+          mapOf(
+            assetKey to
+              AssetBindingV1(
+                mediaType = "image/png",
+                contentDigest = "sha256:unused",
+                source = EmbeddedAssetSourceV1(ONE_PIXEL_PNG_BASE64),
+              )
+          ),
     )
+
+  private companion object {
+    /** Stands in for artwork: the bytes are never decoded here, only carried into the source. */
+    const val ONE_PIXEL_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUg"
+  }
 }

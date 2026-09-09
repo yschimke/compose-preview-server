@@ -233,6 +233,59 @@ class LocalUiBuilderTest {
     assertTrue(!destination.exists())
   }
 
+  /**
+   * The whole projectless mode, which is the one command this lane exists to make possible.
+   *
+   * Everything a project needs is absent — no `--discover`, no `--ui-builder-components` naming a
+   * record no build is going to write — and the packaged design systems are offered instead of only
+   * the one being opened, so trying the other does not mean relaunching.
+   */
+  @Test
+  fun `no-project opens the packaged design systems and asks for no build`() {
+    val serve =
+      LocalUiBuilder.serveArgs(
+        args = listOf(LocalUiBuilder.NO_PROJECT),
+        catalog = LocalUiBuilder.DEFAULT_CATALOG,
+        componentRecord = File("/tmp/record/components.json"),
+        builderDir = File("/opt/compose-preview-server/ui-builder"),
+      )
+    assertEquals(
+      listOf(
+        "--ui-builder-dir",
+        "/opt/compose-preview-server/ui-builder",
+        "--ui-builder-catalogs",
+        "m3-catalog,remote-m3",
+        "--open-browser",
+        "--open-path",
+        "/ui-builder/m3-catalog/",
+      ),
+      serve,
+    )
+  }
+
+  /** This lane's flag, like `--no-open`: the server would not know what to do with it. */
+  @Test
+  fun `no-project never reaches the server`() {
+    val serve = serveArgs(listOf(LocalUiBuilder.NO_PROJECT))
+    assertTrue(LocalUiBuilder.NO_PROJECT !in serve, serve.toString())
+    assertTrue(LocalUiBuilder.isProjectless(listOf(LocalUiBuilder.NO_PROJECT)))
+    assertTrue(!LocalUiBuilder.isProjectless(listOf("--module", "app")))
+  }
+
+  /** A caller who names catalogs themselves gets those, and the one they named first is opened. */
+  @Test
+  fun `no-project leaves a chosen catalog set alone`() {
+    val serve =
+      LocalUiBuilder.serveArgs(
+        args = listOf(LocalUiBuilder.NO_PROJECT, "--ui-builder-catalogs", "remote-m3"),
+        catalog = LocalUiBuilder.catalog(listOf("--ui-builder-catalogs", "remote-m3")),
+        componentRecord = File("components.json"),
+        builderDir = null,
+      )
+    assertEquals(1, serve.count { it == "--ui-builder-catalogs" }, serve.toString())
+    assertTrue("--open-path" in serve && "/ui-builder/remote-m3/" in serve, serve.toString())
+  }
+
   private fun serveArgs(args: List<String>) =
     LocalUiBuilder.serveArgs(
       args = args,

@@ -28,6 +28,8 @@ import {
     activeSource,
     changesSource,
     isSpecSource,
+    sourceForParam,
+    sourceParam,
     offersChoice,
     sourceNote,
     type SpecSource,
@@ -249,6 +251,11 @@ function applyZoom(rawMode: string | null) {
 if (zoomToggle) {
     zoomToggle.addEventListener("click", function () {
         applyZoom(root.getAttribute("data-zoom") === "width" ? "fit" : "width");
+        // A discrete choice about how the render is framed, and one a refresh used to undo: a long
+        // page read at Fit width reopened capped to the viewport's height. `refit()` on a resize
+        // deliberately does NOT come through here — it re-measures the fit cap rather than choosing.
+        urlPush = true;
+        syncUrl();
     });
 }
 applyZoom("fit");
@@ -2083,6 +2090,29 @@ function specPressedId(): string | null {
             return specSourceButtons[i].getAttribute("data-cp-spec-source");
     return null;
 }
+/** The picker's button for [id], or null when the lane offers no such source. */
+function specSourceButton(id: string): HTMLButtonElement | null {
+    for (var i = 0; i < specSourceButtons.length; i++)
+        if (specSourceButtons[i].getAttribute("data-cp-spec-source") === id)
+            return specSourceButtons[i];
+    return null;
+}
+/** What `?specSource=` should say: the picked source when it is not the default, else nothing. */
+function specSourceParam(): string {
+    return sourceParam(specSourceList(), specPressedId());
+}
+// The compare strip under the render carries BOTH baselines per row (`data-cp-strip-source`) and
+// shows the one the section names — see `comparisonStripHtml`. The picker is the strip's source of
+// truth, so the strip follows every press the picker takes, whether or not the lane is on the
+// stage: a strip that flipped back to the kit the moment the lane closed would describe a
+// comparison the visitor had just stopped making, and one that ignored the picker described a
+// comparison they were not making at all.
+const specStrip = may<HTMLElement>("cp-compare-strip");
+function syncSpecStrip() {
+    if (!specStrip || !specStrip.hasAttribute("data-cp-strip-source")) return;
+    var active = activeSource(specSourceList(), specPressedId());
+    if (active) specStrip.setAttribute("data-cp-strip-source", active.id);
+}
 /** The picked source's raster, else the carrier's — the single-source lane's original behaviour. */
 function specSrcRaw(): string {
     var active = activeSource(specSourceList(), specPressedId());
@@ -2189,16 +2219,17 @@ function openSpec() {
  * one pixel space — the two sources can differ in scale, and a cached normalisation from the old
  * pair would line the new one up against the wrong geometry.
  */
-function pickSpecSource(button: HTMLButtonElement) {
-    if (!button) return;
+function pickSpecSource(button: HTMLButtonElement | null): boolean {
+    if (!button) return false;
     var nextId = button.getAttribute("data-cp-spec-source") || "";
-    if (!changesSource(specSourceList(), specPressedId(), nextId)) return;
+    if (!changesSource(specSourceList(), specPressedId(), nextId)) return false;
     for (var i = 0; i < specSourceButtons.length; i++)
         specSourceButtons[i].setAttribute(
             "aria-pressed",
             specSourceButtons[i] === button ? "true" : "false",
         );
     specSrc = specSrcRaw();
+    syncSpecStrip();
     // The label follows the source, so the badge never names the panel it is no longer showing.
     if (specLane) {
         specLane.setAttribute(
@@ -2206,9 +2237,9 @@ function pickSpecSource(button: HTMLButtonElement) {
             button.getAttribute("data-spec-label") || "",
         );
     }
-    if (!specImg) return;
+    if (!specImg) return true;
     specLoaded = false;
-    if (root.getAttribute("data-mode") !== "spec") return;
+    if (root.getAttribute("data-mode") !== "spec") return true;
     // Re-enter the lane on the new pair. `openSpec` owns the request and the compare handshake, so
     // the switch has one path into the stage rather than a second copy of it.
     specImg.hidden = false;
@@ -2217,6 +2248,7 @@ function pickSpecSource(button: HTMLButtonElement) {
     // catalog's render — and nothing else on this path reconciles it: a source switch is not a
     // lane transition, so `enterMode` never runs.
     updateLiveToggle();
+    return true;
 }
 function closeSpec() {
     if (window.cpSpecCompare) window.cpSpecCompare.close();
@@ -2232,7 +2264,12 @@ function closeSpec() {
 // needs no delegation and no re-binding.
 specSourceButtons.forEach(function (button) {
     button.addEventListener("click", function () {
-        pickSpecSource(button);
+        // A press is a discrete choice, and the one this page used to forget: `?specSource=` is
+        // what makes the pair on the stage (and the strip under it) survive a refresh, and pushing
+        // rather than replacing is what lets Back return to the source the visitor came from.
+        if (!pickSpecSource(button)) return;
+        urlPush = true;
+        syncUrl();
     });
 });
 // ---- The Motion lane -------------------------------------------------------------------------
@@ -3550,6 +3587,11 @@ if (svgToggle) {
     svgToggle.addEventListener("click", function () {
         var turnOn = !svgOn();
         svgToggle.setAttribute("aria-pressed", turnOn ? "true" : "false");
+        // The vector lane is a lane, and until now the only lane with no name in the address bar:
+        // a refresh of a page someone was reading as SVG served the PNG back. Both branches below
+        // end in a sync (through `refreshSnapshot` or through `enterMode`), so this only has to
+        // say that the sync is a push.
+        urlPush = true;
         // Every non-static lane has to be LEFT before the vector snapshot can own the stage —
         // otherwise the badge flips to SVG and a hidden snapshot reloads underneath a canvas /
         // iframe / spec image that is still on screen, with its chip still pressed. The daemon and
@@ -4175,6 +4217,45 @@ if (liveToggle) {
 // returns to the static snapshot — the same place the Live chip returns to — rather than to
 // whichever interactive lane was up before, because the spec is entered to compare against the
 // *render*, and that is the lane the comparison views (Diff / Triptych / Slider) draw from.
+// The comparison group's OTHER sources, on the resting bar beside the kit's chip.
+//
+// Each one is a way INTO the lane on its own source. The picker inside the lane is still what
+// switches between them once it is up; these are what make a second source discoverable at all,
+// since that picker ships hidden until the kit's chip is pressed.
+//
+// Order matters, and it is the opposite of the obvious one. `pickSpecSource` presses the source and
+// updates `specSrc`, then returns early while the page is not on the spec lane — so pressing FIRST
+// and entering SECOND means `setMode("spec")` opens directly on the requested pair. Entering first
+// would open on the kit and then re-request, which is a visible flash of the wrong panel and a
+// wasted raster.
+var specPeerChips: HTMLButtonElement[] = Array.prototype.slice.call(
+    document.querySelectorAll<HTMLButtonElement>("[data-cp-spec-open-source]"),
+);
+for (var pi = 0; pi < specPeerChips.length; pi++) {
+    (function (chip: HTMLButtonElement) {
+        chip.addEventListener("click", function () {
+            if (!specAvailable()) return;
+            var wanted = chip.getAttribute("data-cp-spec-open-source") || "";
+            var target: HTMLButtonElement | null = null;
+            for (var i = 0; i < specSourceButtons.length; i++) {
+                if (
+                    specSourceButtons[i].getAttribute("data-cp-spec-source") ===
+                    wanted
+                )
+                    target = specSourceButtons[i];
+            }
+            if (!target) return;
+            var changed = pickSpecSource(target);
+            if (!specActive()) setMode("spec");
+            // Already on the lane: `enterMode` is not run, so the sync it would have done is
+            // done here — the same push a press on the in-lane picker makes.
+            else if (changed) {
+                urlPush = true;
+                syncUrl();
+            }
+        });
+    })(specPeerChips[pi]);
+}
 if (specChip) {
     specChip.addEventListener("click", function () {
         if (specActive()) setMode("png");
@@ -4731,6 +4812,15 @@ function syncUrl() {
     }
     var mode = currentMode();
     if (mode !== "png") values.mode = mode;
+    // The vector lane, but never alongside `exploded` — the 3D view IS a view of the vector export
+    // and turns the lane on by itself, so naming both would pin a parameter that the other one
+    // already implies and that the way back out of 3D has to reason about (see `explodeEnabledSvg`
+    // in `hydrateFromUrl`).
+    if (svgOn() && !explodeOn()) values.svg = "1";
+    // How the render is framed. Only the departure from the default is written: `fit` is what
+    // every page opens on, and pinning it would put a parameter on every copied link.
+    if (rules.zoomMode(root.getAttribute("data-zoom")) === "width")
+        values.zoom = "width";
     var sizeModeEl = may<HTMLSelectElement>("cp-sizeMode");
     if (sizeModeEl && sizeModeEl.value) values.sizeMode = sizeModeEl.value;
     // The spec lane's comparison view (diff / triptych / slider). Re-emitted on every sync because
@@ -4743,6 +4833,12 @@ function syncUrl() {
         ? viewParam(window.cpSpecCompare.view())
         : "";
     if (mode === "spec" && specView) values.specView = specView;
+    // Which source that pair (and the strip under the render) is taken against. Unlike the view
+    // it is NOT gated on the lane: the picker keeps its press when the lane closes and the strip
+    // keeps following it, so the parameter describes the page in every mode. `sourceParam` — not a
+    // literal — decides what may go unsaid: the default is whichever source the server pressed.
+    var specSource = specSourceParam();
+    if (specSource) values.specSource = specSource;
     // Which recording is playing, on the same terms: only while the lane is up (`?motion=` beside a
     // render describes nothing), and only past the first, which is what the lane opens on anyway.
     // Without it a multi-capture preview's shared link always restored the FIRST capture, so the
@@ -4873,6 +4969,21 @@ function hydrateFromUrl(popped: boolean) {
             root.setAttribute("data-mode", "snapshot");
         }
     }
+    // The vector lane on its own, after the 3D block above has had its say: `exploded=1` turns the
+    // lane on by itself and remembers that it did, so an entry carrying both must not leave the
+    // toggle pressed by two owners. A restored entry that names neither puts the raster back,
+    // which is what makes Back out of the SVG lane land on the PNG the visitor came from.
+    if (svgToggle && !explodeOn()) {
+        var wantSvg = q.get("svg") === "1";
+        if (wantSvg !== svgOn()) {
+            svgToggle.setAttribute("aria-pressed", wantSvg ? "true" : "false");
+            snapshotExt = wantSvg ? ".svg" : ".png";
+            root.setAttribute("data-mode", wantSvg ? "svg" : "snapshot");
+        }
+    }
+    // …and the framing. Applied on the first pass too (the load-time `applyZoom("fit")` runs
+    // before this), so a shared `?zoom=width` link opens at full width rather than snapping to it.
+    applyZoom(rules.zoomMode(q.get("zoom")));
     ["focus", "gestures"].forEach(function (f) {
         var el = may<HTMLInputElement>("cp-" + f);
         if (el) el.checked = q.get(f) !== null;
@@ -5002,6 +5113,18 @@ function hydrateFromUrl(popped: boolean) {
         rcPlayerBackend =
             (playerOffered ? wantedPlayer : rcDefaultBackend) || "";
     }
+    // Restore the picked source FIRST, for the reason the peer chips press before they enter:
+    // `pickSpecSource` returns early while the page is not on the lane, so a bookmarked
+    // `?mode=spec&specSource=parallel` opens straight onto the paired render rather than on the
+    // kit and then re-requesting. On Back/Forward the lane may already be up, and then the pick
+    // re-enters it on the restored pair. A URL naming no source (or one this lane does not offer)
+    // presses the default, which is also what clears a stale press on the way Back.
+    if (specSourceButtons.length)
+        pickSpecSource(
+            specSourceButton(
+                sourceForParam(specSourceList(), q.get("specSource") || ""),
+            ),
+        );
     // Restore the spec lane's comparison view before the lane itself is entered (the bookmarked
     // `?mode=spec` lands at the very bottom of this file), so a shared
     // `?mode=spec&specView=slider` link opens on the wipe rather than flashing the plain spec.
@@ -5016,18 +5139,28 @@ function hydrateFromUrl(popped: boolean) {
     syncLaneSelect();
 }
 hydrateFromUrl(false);
+// The strip's baseline is server-rendered from the same default the picker is; this reconciles
+// the two when hydration pressed something else.
+syncSpecStrip();
 // Read the bookmarked lane NOW, before the first refreshSnapshot's sync clears a param no
 // control is holding yet. It is applied at the very bottom of this file, once the snapshot every
 // lane falls back to has been requested.
 var initialUrlMode = new URLSearchParams(location.search).get("mode") || "";
 if (window.cpUrlState) {
     window.cpUrlState.onPop(function () {
+        // The vector lane is a snapshot FORMAT rather than an override, so the paths below cannot
+        // see that it moved: `onControlsChanged` re-renders for a fresh override, and a fully
+        // static published catalog does not re-render at all. Read across the restore and ask for
+        // the frame directly when the entry named a different format.
+        var wasSvg = svgOn();
         hydrateFromUrl(true);
+        var svgMoved = svgOn() !== wasSvg;
         var mode = currentMode();
         var wanted = new URLSearchParams(location.search).get("mode") || "png";
         // A lane change re-renders through enterMode; otherwise the restored overrides go out over
         // whichever transport is already up. Either way nothing reloads.
         if (wanted !== mode) setMode(wanted);
+        else if (svgMoved) refreshSnapshot();
         // Same lane, and Motion is the one where that still means something changed: it carries no
         // overrides for onControlsChanged() to push and no transport to push them over, but a
         // restored entry can name a different capture. hydrateFromUrl() has already pressed that

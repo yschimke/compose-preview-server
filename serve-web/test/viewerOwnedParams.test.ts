@@ -44,6 +44,20 @@ describe("ownsUrlParam", () => {
         }
     });
 
+    it("claims the lanes and framings that have no control of their own", () => {
+        // `svg` and `zoom` are written by a pressed button rather than by a form field, and both
+        // were memory-only: a page read as SVG at full width reopened as a fitted PNG. Owned, so
+        // the press that turns either off also removes its parameter.
+        assert.equal(ownsUrlParam("svg"), true);
+        assert.equal(ownsUrlParam("zoom"), true);
+    });
+
+    it("claims the spec lane's source, which the picker supplies on every sync", () => {
+        // Over-claiming deletes a parameter the viewer does not write; this one is safe because
+        // `syncUrl` emits it from the picker in every mode, not only while the lane is up.
+        assert.equal(ownsUrlParam("specSource"), true);
+    });
+
     it("claims the exploded view and every one of its knobs", () => {
         // The angle someone tuned is part of the link they copy; a knob left unowned would survive
         // in the URL after the view it belongs to was turned off.

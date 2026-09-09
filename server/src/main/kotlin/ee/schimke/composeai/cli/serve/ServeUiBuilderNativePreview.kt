@@ -135,6 +135,11 @@ internal class ServeUiBuilderNativePreview(
           ),
         )
     val environment = document.environment
+    // A widget is measured by its container, not by the screen its design environment describes:
+    // the generator reports the frame the host draws — the content box plus the padding this design
+    // authored — and rendering at the environment's size instead would put a 216×124 container in
+    // the middle of a watch face.
+    val widget = generated.widgetFrame
     val response =
       compile(
         UiBuilderGeneratedCompose(
@@ -143,20 +148,28 @@ internal class ServeUiBuilderNativePreview(
           catalog = target.catalog,
           // The document's own frame, so the streamed render and the browser canvas are the same
           // size and a bounds rectangle means the same thing in both.
-          widthDp = environment.widthDp,
-          heightDp = environment.heightDp,
+          widthDp = widget?.widthDp ?: environment.widthDp,
+          heightDp = widget?.heightDp ?: environment.heightDp,
           confType = target.confType,
+          wearWidget = widget != null,
         )
       )
     // Only asked for a frame: a compile that failed has no render to read bounds off, and asking
     // anyway would stand up a second daemon session to answer nothing.
-    val bounds = if (response.image == null) emptyMap() else captureNodeBounds(response)
+    // A widget's body is Remote Compose rather than Compose UI, so its nodes carry no test tag and
+    // the annotation lane has nothing to report. Asked only where an answer exists, rather than
+    // standing up a second daemon session to come back empty.
+    val bounds =
+      if (response.image == null || widget != null) emptyMap() else captureNodeBounds(response)
     // The tag set is reported rather than inferred by the caller: it is what a bounds lookup is
     // keyed by, and a client that recomputed it from the document would drift the moment the
     // projection stopped tagging something.
     return UiBuilderNativePreviewOutcome.Rendered(
       response,
-      document.nodes.keys.sorted(),
+      // Nothing is tagged in a widget's source, and saying otherwise would have a client look up
+      // bounds for every node and find none — a silent "the overlay is broken" where the truth is
+      // that this frame has none.
+      if (widget != null) emptyList() else document.nodes.keys.sorted(),
       bounds,
       failure = if (response.image == null) response.noFrameReason() else null,
     )

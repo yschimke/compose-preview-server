@@ -938,10 +938,10 @@ class ServeWebFixtureTest {
               height = 68,
             ),
           // Publishes Figma-backed design references, so its card carries the "compare to Figma"
-          // action. Set on two of the three design systems deliberately: the golden then holds a
-          // row where one card has the action and its neighbour does not, which is the case the
-          // `.cp-sys-cell` grid template exists for — the tiles still have to line their artwork
-          // and their footers up.
+          // action. The golden still holds a row where one card has an action and its neighbour has
+          // none — `meshcore-mobile` beside `homeassistant-remotecompose` in the app group below —
+          // which is the case the `.cp-sys-cell` grid template exists for: the tiles have to line
+          // their artwork and their footers up either way.
           hasReferenceComparison = true,
           designToolLabel = "Figma",
         ),
@@ -977,6 +977,15 @@ class ServeWebFixtureTest {
           // Remote Compose draws the dark-first Wear scheme, so its catalog declares
           // `display.surface: "dark"` and the hero backs on the dark stage too.
           darkStage = true,
+          // The card with BOTH comparisons, exactly as the live box renders `remote-m3`: it
+          // publishes Figma-backed references AND declares `compareWith` against the Wear catalog.
+          // The two sit side by side because they are different questions — "does this match the
+          // design file" and "does this match the other implementation of it" — and until now only
+          // the first had a way onto the front door, so two catalogs of one design system sat as
+          // adjacent cards with nothing saying they were a pair.
+          hasReferenceComparison = true,
+          designToolLabel = "Figma",
+          parallelComparison = ServeWeb.ParallelComparison("wear-m3", "Wear Compose Material 3"),
         ),
         // App systems published UNLISTED from their own repos but promoted to the LISTED set
         // (`--catalogs`), so they show on the front door alongside the design systems.
@@ -1032,13 +1041,19 @@ class ServeWebFixtureTest {
             logoutHref = "/auth/github/logout?return=%2F",
             login = "yschimke",
           ),
-        // Signed in AND permitted, on one of the three design systems: the golden then holds a card
+        // Signed in AND permitted, on two of the three design systems: the golden then holds a card
         // carrying both actions beside a card carrying only the comparison, which is the row the
         // chip row's alignment exists for. The refused shape is a unit-test concern — it turns on
         // the visitor, not on the page, so a second golden of the same grid would pin nothing new.
+        //
+        // `remote-m3` is the SECOND, and it is the widest card this grid can produce: the builder
+        // chip, the `Compare to` label and BOTH destinations, in a fixed grid track. Without it the
+        // golden held the two halves separately — a card with the builder and one comparison, and a
+        // card with two comparisons and no builder — and never the case where they meet, which is
+        // the one that decides whether the row still fits.
         uiBuilder =
           ServeWeb.UiBuilderInvite(
-            systems = setOf("compose-m3"),
+            systems = setOf("compose-m3", "remote-m3"),
             signedIn = true,
             permitted = true,
           ),
@@ -1394,6 +1409,35 @@ class ServeWebFixtureTest {
         siblings = previews,
         figmaSpec = fixtureFigmaSpec,
         designReference = fixtureDesignReference,
+        // The compare strip under the render: every variant of the component on the stage, against
+        // the same baseline (`docs/design/COMPARE_NAVIGATION.md`, §3.1). Shaped like the real
+        // thing — a scored variant, a worse one, and one the design file has nothing mapped to, so
+        // the golden pins all three states the strip can draw rather than a run of green rows.
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__default__light",
+              variant = "default · light",
+              referenceId = "contact-chat-figma",
+              matchPercent = 96.4,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__default__dark",
+              variant = "default · dark",
+              referenceId = "contact-chat-figma-dark",
+              matchPercent = 88.1,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__no-avatar__light",
+              variant = "no avatar",
+              referenceId = "contact-chat-figma-no-avatar",
+              matchPercent = 71.9,
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "profile-screen__ideal__long-name__light",
+              variant = "long name",
+            ),
+          ),
       )
     // A **Remote Compose** viewer, the shape preview.coo.ee serves for `remote-m3`: the same
     // captured `.rc` document is drawable by five different players, so this is the page the
@@ -1449,6 +1493,38 @@ class ServeWebFixtureTest {
         enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
       )
+    // The SAME Remote Compose preview, behind GitHub auth — the one pair the renderer control has
+    // to keep apart, and the pair no other fixture holds. A Remote Compose preview has a renderer
+    // combo; an auth-gated live lane is independent of it; a box run with `--github-auth` serves
+    // both at once. But `serve-viewer-rc-players` has no auth prompt and `serve-viewer-signin` has
+    // no players, so the toolbar this combination lays out was captured nowhere, and #585 joined a
+    // DASHED sign-in anchor to a SOLID caret without moving a baseline. Here the chip's slot holds
+    // a link to another origin rather than a lane toggle, so the two controls must stand apart:
+    // that is what this shot pins.
+    val viewerRcSignIn =
+      ServeWeb.viewerPage(
+        ServePreview(
+          "appcard__ideal__default__compact",
+          "App card",
+          section = "Cards",
+          componentId = "AppCard",
+        ),
+        token,
+        sessionId = "remote-m3",
+        basePath = "/remote-m3",
+        canApplyOverrides = false,
+        canRenderOverrides = true,
+        hasLiveStream = true,
+        hasSvgExport = true,
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("js", "cmp-wasm", "java", "cmp-android"),
+        trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
+        liveAuthPrompt =
+          ServeWeb.LiveAuthPrompt(
+            loginHref =
+              "/auth/github/start?return=%2Fremote-m3%2Fp%2Fappcard__ideal__default__compact"
+          ),
+      )
     // A Remote Compose preview whose design target and ordinary implementation both come through
     // its paired Wear M3 catalog. This is the public remote-m3/Card shape: no duplicated local
     // Figma reference, but a Figma source inherited from the paired Wear preview and the Wear
@@ -1481,6 +1557,35 @@ class ServeWebFixtureTest {
             provenance = "Wear M3's own render under that catalog's theme and knobs.",
           ),
         parallelLayers = true,
+        // The compare strip's SECOND baseline, which only a paired catalog has: every row carries
+        // the design reference and the sibling's render of the same variant, and the lane's source
+        // picker chooses which is shown. This is the fixture that captures it — the unpaired
+        // viewers above render the single-baseline strip they always did, so without a paired page
+        // in the harness the switch would be a visual surface with no picture on any pull request.
+        componentVariants =
+          listOf(
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__default__compact",
+              variant = "default",
+              referenceId = "card-figma",
+              matchPercent = 96.4,
+              parallelRenderUrl = "/wear-m3-catalog/render/card__ideal__default.png",
+            ),
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__outlined__compact",
+              variant = "outlined",
+              referenceId = "card-outlined-figma",
+              matchPercent = 88.1,
+              parallelRenderUrl = "/wear-m3-catalog/render/card__ideal__outlined.png",
+            ),
+            // A variant the sibling does not draw, and one the design file does not map. Both
+            // frames are empty rather than filled with a stand-in, which is what the strip has to
+            // show for the pairing to stay honest about what it could not pair.
+            ServeWeb.ComponentVariant(
+              previewId = "card__ideal__long__compact",
+              variant = "long text",
+            ),
+          ),
         trust = "branch:yschimke/wear-m3-catalog@design-artifacts/remote-m3",
       )
     // The same rich viewer, PINNED. Captured as the twin of [viewerRcPlayers] because that is the
@@ -2569,6 +2674,20 @@ class ServeWebFixtureTest {
         // Everything except the pill, so the fixture covers a node the producer mapped but this
         // catalog cannot draw.
         renderablePreviewIds = setOf("com.example.ProfileCardPreview"),
+        // A `compareWith` sibling's rendition of the same cells. Deliberately NOT every node this
+        // catalog can draw: the sibling implements the circle and the square and does not implement
+        // the triangle, which is the state a parity sheet exists to make visible. On the sibling's
+        // lane that slot falls back to the design's own drawing exactly as a failed render does, so
+        // it carries `data-cp-unpaired` and a dotted outline — unmarked it would read as "the
+        // sibling draws it just like the design", which is the direction that makes two diverging
+        // catalogs look aligned.
+        parallelRenders =
+          mapOf(
+            "1:1" to "/wear-m3/render/com.example.WearProfileCardPreview.png",
+            "1:2" to "/wear-m3/render/com.example.WearProfileCardPreview.png",
+          ),
+        parallelLabel = "wear-m3",
+        ownLabel = "compose-m3",
         token = token,
         sessionId = "compose-m3",
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
@@ -3502,7 +3621,8 @@ class ServeWebFixtureTest {
       )
 
     // The same page on a box that offers a CAPABILITY beside the scopes — the second fieldset, its
-    // checkboxes unticked, and one capability the approver may not pass on. Its own fixture rather
+    // checkboxes ticked (every row is an ask this approver may grant), and one capability the
+    // approver may not pass on. Its own fixture rather
     // than a variant of the one above, because the control that matters here (an independent
     // checkbox, where the scopes are a radio) only exists on a box whose operator opted in, and a
     // golden that never renders it would let that control change unseen.
@@ -4057,6 +4177,7 @@ class ServeWebFixtureTest {
         "serve-viewer-path.html" to viewerPath,
         "serve-viewer-spec-default-theme.html" to viewerSpecDefaultTheme,
         "serve-viewer-rc-players.html" to viewerRcPlayers,
+        "serve-viewer-rc-signin.html" to viewerRcSignIn,
         "serve-viewer-rc-parallel.html" to viewerRcParallel,
         "serve-viewer-wear-screen.html" to viewerWearScreen,
         "serve-landing-themed.html" to landingThemed,
@@ -4349,31 +4470,32 @@ class ServeWebFixtureTest {
         "the $name page carries the palette",
       )
     }
-    // One assist chip per comparable format, each deep-linking the format it names, rather than a
-    // single "compare formats" text link that hid what this catalog can actually compare.
+    // One assist chip per BASELINE this catalog can compare against, under one group heading that
+    // carries the verb they all used to repeat — so a chip is the name of the thing on the other
+    // side of the comparison and nothing else. See `docs/design/COMPARE_NAVIGATION.md`, §3.3.
     assertTrue(
-      landingThemed.contains(
-        "<a class=\"cp-action-chip\" href=\"/compare?format=svg&amp;session=compose-m3\">" +
-          "compare SVG</a>"
-      ) &&
+      landingThemed.contains("<span class=\"cp-actions-group-label\">Compare against</span>") &&
+        landingThemed.contains(
+          "<a class=\"cp-action-chip\" href=\"/compare?format=svg&amp;session=compose-m3\">SVG</a>"
+        ) &&
         landingThemed.contains(
           "<a class=\"cp-action-chip\" href=\"/compare?format=rc&amp;session=compose-m3\">" +
-            "compare RC players</a>"
+            "Remote Compose players</a>"
         ),
       "a catalog with alternate formats links each one separately: $landingThemed",
     )
     // …and the reference comparison is one of them, named after the tool it compares against and
-    // deep-linking the same comparison page as its siblings — not the parity dashboard, which is a
-    // different question and keeps its own name.
+    // deep-linking the same comparison page as its siblings. The parity index is NOT one of them:
+    // it is the list that says which comparisons are worth opening, so it sits under `Reports`.
     assertTrue(
       landingPath.contains(
-        "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">" +
-          "compare to Figma</a>"
+        "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">Figma</a>"
       ) &&
         landingPath.contains(
-          "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/parity\">design parity</a>"
+          "<div class=\"cp-actions-group\"><span class=\"cp-actions-group-label\">Reports</span>" +
+            "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/parity\">design parity</a></div>"
         ),
-      "a Figma-specified catalog compares against Figma and links the parity dashboard separately",
+      "a Figma-specified catalog compares against Figma and links the parity index separately",
     )
     assertTrue(
       formatComparison.contains("data-compare-format=\"svg\"") &&
@@ -4836,10 +4958,13 @@ class ServeWebFixtureTest {
         sessionId = "compose-m3",
         hasSvgFor = { true },
       )
-    val variantComparisonIds =
-      variantComparison.substringAfter("data-preview-ids=\"").substringBefore('"')
+    // The fold is published in the page's ONE alias table now, not copied onto every row that
+    // stands for it — see `docs/design/COMPARE_NAVIGATION.md`, F2. The claim is unchanged: a
+    // deep link naming a folded-away variant still selects the row that stands for it.
+    val variantAliases =
+      variantComparison.substringAfter("id=\"cp-compare-aliases\">").substringBefore("</script>")
     assertTrue(
-      variantComparisonIds.contains("button-filled__ideal__default__light__direction-rtl"),
+      variantAliases.contains("button-filled__ideal__default__light__direction-rtl"),
       "a folded non-default variant deep-link aliases to its included component comparison row",
     )
     val sizedVariantPreviews =
@@ -4880,19 +5005,39 @@ class ServeWebFixtureTest {
         .map { it.groupValues[1] }
         .toList()
     assertEquals(2, sizedComparisonIds.size)
+    // The claim is about the FOLD, which the page now publishes once in its alias table keyed by
+    // comparison card rather than copying onto each row (`docs/design/COMPARE_NAVIGATION.md`, F2).
+    // Read there: the compact card folds its own state and props variants and nothing from the
+    // expanded one — a breakpoint is a different comparison, not a variant of this one.
+    val sizedTable =
+      sizedVariantComparison
+        .substringAfter("id=\"cp-compare-aliases\">")
+        .substringBefore("</script>")
+    val compactCard =
+      Regex("\"([^\"]*compact[^\"]*)\":\"([^\"]*)\"")
+        .find(sizedTable)
+        ?.groupValues
+        ?.get(2)
+        .orEmpty()
     assertTrue(
-      sizedComparisonIds[0].contains("__compact") &&
-        sizedComparisonIds[0].contains("__pressed__light__compact") &&
-        sizedComparisonIds[0].contains("__compact__direction-rtl") &&
-        !sizedComparisonIds[0].contains("__expanded"),
-      "compact aliases fold state and props without selecting the expanded comparison row",
+      compactCard.contains("__pressed__light__compact") &&
+        compactCard.contains("__compact__direction-rtl") &&
+        !compactCard.contains("__expanded"),
+      "compact aliases fold state and props without selecting the expanded comparison row: " +
+        sizedTable,
     )
+    val expandedCard =
+      Regex("\"([^\"]*expanded[^\"]*)\":\"([^\"]*)\"")
+        .find(sizedTable)
+        ?.groupValues
+        ?.get(2)
+        .orEmpty()
     assertTrue(
-      sizedComparisonIds[1].contains("__expanded") &&
-        sizedComparisonIds[1].contains("__pressed__light__expanded") &&
-        sizedComparisonIds[1].contains("__expanded__direction-rtl") &&
-        !sizedComparisonIds[1].contains("__compact"),
-      "expanded aliases fold state and props without selecting the compact comparison row",
+      expandedCard.contains("__pressed__light__expanded") &&
+        expandedCard.contains("__expanded__direction-rtl") &&
+        !expandedCard.contains("__compact"),
+      "expanded aliases fold state and props without selecting the compact comparison row: " +
+        sizedTable,
     )
     // Long-press a card and its preview streams from the daemon in place. The page carries the
     // gesture's configuration — each card's streamable ids, emitted in document order rather than
@@ -5470,9 +5615,14 @@ class ServeWebFixtureTest {
     )
     // …and the fallback: no tree to list them in (too few previews to synthesize families from)
     // means the chip is the only route, so it stays.
+    //
+    // "design pages", not "pages": #553 gave the chip the same vocabulary the rest of the catalog
+    // uses for the surface it leads to, and this assertion kept the old label — which is why
+    // `main` has been red on this line since that merge. The chip's own emission is the authority
+    // (`actionChip("$basePath/pages$q", "N design page(s)")`).
     assertTrue(
       !landingPublic.contains("cp-tree-pages") &&
-        landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 pages</a>"),
+        landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 design pages</a>"),
       "a catalog with no tree keeps the header chip, or its pages would be unreachable",
     )
     // `reflectTree` walks every expandable row on every open/close; the Pages branch is expandable
@@ -6734,7 +6884,7 @@ class ServeWebFixtureTest {
   }
 
   @Test
-  fun `theme choices use a dropdown and secondary actions stay in the renderer row`() {
+  fun `theme choices use a dropdown and stage presentation moves into the panel`() {
     val css = assetText("serve.css")
     assertTrue(
       css.contains(".cp-theme-menu-panel { position: absolute;") &&
@@ -6759,9 +6909,22 @@ class ServeWebFixtureTest {
       "the dropdown contains one theme choice group",
     )
     assertFalse(crowded.contains("class=\"cp-viewer-bar\""), "the old horizontal row is gone")
+    // Transparent and Fit width are no longer on this row. They present the stage rather than
+    // choosing what draws it, a reader sets them once if ever, and on the crowded shape this test
+    // builds they were the two chips paying for that on a bar already carrying eight theme choices.
+    // Asserted from both ends, because "not in the renderer row" on its own is also what a page
+    // that lost the controls entirely looks like.
     val rendererRow =
       crowded.substringAfter("<div class=\"cp-preview-primary\"").substringBefore("</div>")
-    assertTrue(rendererRow.contains("<cp-bg-toggle") && rendererRow.contains("Fit width"))
+    assertFalse(
+      rendererRow.contains("<cp-bg-toggle") || rendererRow.contains("Fit width"),
+      "stage presentation is not on the renderer row",
+    )
+    val panel = crowded.substringAfter("<div class=\"cp-controls\" id=\"cp-controls\">")
+    assertTrue(
+      panel.contains("<cp-bg-toggle") && panel.contains("Fit width"),
+      "…it is in the Overrides panel, where the drawer's own View group holds it",
+    )
   }
 
   /**

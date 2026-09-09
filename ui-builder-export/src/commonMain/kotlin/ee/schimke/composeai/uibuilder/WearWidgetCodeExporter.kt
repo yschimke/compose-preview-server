@@ -2,7 +2,9 @@ package ee.schimke.composeai.uibuilder
 
 /**
  * Generates the Kotlin a Wear widget design becomes: a `GlanceWearWidget`, its Remote Compose
- * content, and the `@Preview` that draws it through the real host tooling.
+ * content, and a `@Preview` per host container shape that draws it through the real host tooling —
+ * the squircle the design is authored against, and the rectangular frame the widget picker editor
+ * shows.
  *
  * ## Why this is not the Compose exporter
  *
@@ -19,7 +21,7 @@ package ee.schimke.composeai.uibuilder
  * `androidx.glance.wear.composable.WearWidgetContainer`, and on-device that container belongs to
  * the host: the launcher draws it around widget content from `WearWidgetParams`. So the generated
  * code names it nowhere. Its background becomes the `WearWidgetBrush` handed to
- * `WearWidgetDocument`, its size picks the preview-params provider, and its padding and radius are
+ * `WearWidgetDocument`, its size picks the preview-params providers, and its padding and radius are
  * asserted against the shipped spec rather than emitted — a widget cannot choose them.
  *
  * ## Refusals are by name
@@ -37,6 +39,13 @@ object WearWidgetCodeExporter {
     data class Refused(val reasons: List<String>) : Result
   }
 
+  /** What a design bundles, or why it does not: [Result] with the archive's other files. */
+  sealed interface BundleResult {
+    data class Emitted(val bundle: WidgetBundle) : BundleResult
+
+    data class Refused(val reasons: List<String>) : BundleResult
+  }
+
   /**
    * @param packageName the package the emitted file declares, or null for the pane's snippet. A
    *   snippet is written to be pasted into a file that already has one; an export is the file, so
@@ -47,7 +56,66 @@ object WearWidgetCodeExporter {
     document: UiBuilderDocument,
     packageName: String? = null,
     assets: WidgetAssetBytes = WidgetAssetBytes { null },
-  ): Result {
+  ): Result =
+    when (val outcome = generate(document, packageName, assets, bundled = null)) {
+      is Outcome.Refused -> Result.Refused(outcome.reasons)
+      is Outcome.Generated -> Result.Emitted(outcome.source)
+    }
+
+  /**
+   * The same widget as a **project fragment**: readable source, and its pictures as files.
+   *
+   * The design, and why it is a second entry point rather than a size threshold on [export], is
+   * `docs/design/UI_BUILDER_EXPORT_BUNDLE.md` (yschimke/compose-preview-server#528). Both lanes
+   * walk the same document through the same emitter and refuse the same designs for the same
+   * reasons; they differ over one question — where a picture's bytes go — and over the two things
+   * that follow from it: the source opens files instead of decoding literals, and a content
+   * picture's parameter can default to the design's own artwork instead of to a blank bitmap.
+   */
+  fun exportBundle(
+    document: UiBuilderDocument,
+    packageName: String? = null,
+    assets: WidgetAssetContents,
+  ): BundleResult =
+    when (val outcome = generate(document, packageName, WidgetAssetBytes { null }, assets)) {
+      is Outcome.Refused -> BundleResult.Refused(outcome.reasons)
+      is Outcome.Generated ->
+        BundleResult.Emitted(
+          WidgetBundle(
+            sourceFileName = "${outcome.name}.kt",
+            source = outcome.source,
+            readme = readme(outcome),
+            files = outcome.files,
+          )
+        )
+    }
+
+  private sealed interface Outcome {
+    data class Generated(
+      val name: String,
+      val source: String,
+      val files: List<WidgetBundleFile>,
+      val parameters: List<RemoteContentEmitter.ImageParameter>,
+    ) : Outcome
+
+    data class Refused(val reasons: List<String>) : Outcome
+  }
+
+  /**
+   * The one walk both lanes take.
+   *
+   * [bundled] decides the lane: null inlines a picture's bytes into the source, and a registry
+   * ships them beside it. Everything between — the scaffold checks, the depth probe, the body, the
+   * refusals — is the same code answering the same questions, which is the point of writing it
+   * once: two emitters would be two answers to "does this design export?", and this generator
+   * exists because that question already had two answers once.
+   */
+  private fun generate(
+    document: UiBuilderDocument,
+    packageName: String?,
+    assets: WidgetAssetBytes,
+    bundled: WidgetAssetContents?,
+  ): Outcome {
     val rootId = document.roots.singleOrNull() ?: return refuse("a widget design has one root")
     val root = document.nodes[rootId] ?: return refuse("the root node `$rootId` is missing")
     val size =
@@ -58,6 +126,7 @@ object WearWidgetCodeExporter {
         )
 
     val refusals = mutableListOf<String>()
+
     // The host owns these, and only the shipped providers can be named in a `@Preview`. A design
     // that moved them would generate a preview drawing a frame the design does not have, which is
     // exactly the silent disagreement this generator exists to avoid.
@@ -86,7 +155,7 @@ object WearWidgetCodeExporter {
     // refusals are dropped, the real emitter below being the one that reports them.
     val depth =
       if (
-        RemoteContentEmitter(document, mutableListOf(), assets).let { probe ->
+        RemoteContentEmitter(document, mutableListOf(), assets, bundled = bundled).let { probe ->
           probe.background(root)
           contentIds.singleOrNull()?.let { probe.emit(it, depth = 1) }
           probe.usesTheme
@@ -95,7 +164,7 @@ object WearWidgetCodeExporter {
         2
       else 1
 
-    val emitter = RemoteContentEmitter(document, refusals, assets)
+    val emitter = RemoteContentEmitter(document, refusals, assets, bundled = bundled)
     val background = emitter.background(root)
     val body =
       when (contentIds.size) {
@@ -106,124 +175,178 @@ object WearWidgetCodeExporter {
           emptyList()
         }
       }
-    if (refusals.isNotEmpty()) return Result.Refused(refusals.distinct())
+    if (refusals.isNotEmpty()) return Outcome.Refused(refusals.distinct())
 
     val name = document.widgetIdentifier()
-    return Result.Emitted(
-      buildString {
-        appendLine("// Generated from a Compose UI builder design. Do not edit by hand.")
-        appendLine("@file:Suppress(\"RestrictedApi\")")
+    val parameters = emitter.imageParameters
+    val source = buildString {
+      appendLine("// Generated from a Compose UI builder design. Do not edit by hand.")
+      appendLine("@file:Suppress(\"RestrictedApi\")")
+      appendLine()
+      if (packageName != null) {
+        appendLine("package $packageName")
         appendLine()
-        if (packageName != null) {
-          appendLine("package $packageName")
-          appendLine()
-        }
-        emitter.imports(size.previewParamsProvider).forEach { appendLine("import $it") }
-        appendLine()
-        appendLine("@RemoteComposable")
-        appendLine("@Composable")
-        appendLine("fun ${name}Content(${parameterList(emitter.imageParameters)}) {")
-        if (emitter.usesTheme) {
-          appendLine("${INDENT}RemoteMaterialTheme {")
-          body.forEach(::appendLine)
-          appendLine("$INDENT}")
-        } else {
-          body.forEach(::appendLine)
-        }
-        appendLine("}")
-        appendLine()
-        appendLine(widgetClassHeader(name, emitter.imageParameters))
-        appendLine("${INDENT}override suspend fun provideWidgetData(")
-        appendLine("$INDENT${INDENT}context: Context,")
-        appendLine("$INDENT${INDENT}params: WearWidgetParams,")
-        appendLine("$INDENT): WearWidgetData {")
-        background.locals.forEach { appendLine("$INDENT$INDENT$it") }
-        documentReturn(background).forEach(::appendLine)
-        appendLine(
-          "$INDENT$INDENT${INDENT}${name}Content(${argumentList(emitter.imageParameters)})"
-        )
-        appendLine("$INDENT$INDENT}")
+      }
+      emitter
+        .imports(WidgetSourceShape.Exported(size.previewShapes.map { it.paramsProvider }))
+        .forEach { appendLine("import $it") }
+      appendLine()
+      appendLine("@RemoteComposable")
+      appendLine("@Composable")
+      appendLine("fun ${name}Content(${parameterList(parameters)}) {")
+      if (emitter.usesTheme) {
+        appendLine("${INDENT}RemoteMaterialTheme {")
+        body.forEach(::appendLine)
         appendLine("$INDENT}")
-        appendLine("}")
+      } else {
+        body.forEach(::appendLine)
+      }
+      appendLine("}")
+      appendLine()
+      appendLine(widgetClassHeader(name, parameters, bundled != null))
+      appendLine("${INDENT}override suspend fun provideWidgetData(")
+      appendLine("$INDENT${INDENT}context: Context,")
+      appendLine("$INDENT${INDENT}params: WearWidgetParams,")
+      appendLine("$INDENT): WearWidgetData {")
+      // The bundle lane's pictures are opened here and nowhere else: `provideWidgetData` is where
+      // the `Context` is, and a constructor default — which is where the inlining lane puts a
+      // picture — has none. That is also what lets a parameter default to the design's own
+      // artwork rather than to a blank bitmap.
+      bundledLocals(bundled != null, emitter.bundledBackgrounds, parameters).forEach {
+        appendLine("$INDENT$INDENT$it")
+      }
+      background.locals.forEach { appendLine("$INDENT$INDENT$it") }
+      documentReturn(background).forEach(::appendLine)
+      appendLine("$INDENT$INDENT${INDENT}${name}Content(${argumentList(parameters)})")
+      appendLine("$INDENT$INDENT}")
+      appendLine("$INDENT}")
+      appendLine("}")
+      // One preview per host shape, and one entry per shape rather than the provider's fan-out.
+      // `@PreviewParameter` unrolls a preview per footprint the container ships — for the Large
+      // squircle that is a constrained 182×112dp beside the 216×124dp the design is authored
+      // against — and a scaffold does not need both to show what it looks like. The largest is
+      // picked by width rather than by position, so the choice does not rest on the order a
+      // provider happens to yield.
+      size.previewShapes.forEach { shape ->
         appendLine()
-        // One preview, not the provider's fan-out. `@PreviewParameter` unrolls a preview per
-        // footprint the container ships — for Large that is a constrained 182×112dp beside the
-        // 216×124dp the design is authored against — and a scaffold does not need both to show
-        // what it looks like. The largest is picked by width rather than by position, so the
-        // choice does not rest on the order a provider happens to yield.
-        appendLine("@Preview(name = \"Squircle Preview\")")
+        appendLine("@Preview(name = \"${shape.label} Preview\")")
         appendLine("@Composable")
-        appendLine("fun ${name}SquirclePreview() =")
+        appendLine("fun $name${shape.label}Preview() =")
         appendLine("${INDENT}WearWidgetPreview(")
         appendLine("$INDENT$INDENT$name(),")
-        appendLine("$INDENT$INDENT${size.previewParamsProvider}().values.maxBy { it.widthDp },")
+        appendLine("$INDENT$INDENT${shape.paramsProvider}().values.maxBy { it.widthDp },")
         appendLine("$INDENT)")
-        // The inlined pictures sit below the preview for the same reason the declarations do:
-        // a base64 PNG is thousands of columns, and a reader who has to scroll past it to reach
-        // the widget has been handed a worse file than one who can stop reading at the preview.
-        inlineBitmaps(emitter.inlineBitmaps).forEach {
-          appendLine()
-          appendLine(it)
-        }
-        // Last in the file, and deliberately: a Lottie animation is a few thousand columns of
-        // minified JSON, and a reader who has to scroll past it to reach the widget has been
-        // handed a worse file than one who can stop reading at the preview.
-        emitter.declarations.forEach {
-          appendLine()
-          appendLine(it)
-        }
       }
+      // The inlined pictures sit below the preview for the same reason the declarations do:
+      // a base64 PNG is thousands of columns, and a reader who has to scroll past it to reach
+      // the widget has been handed a worse file than one who can stop reading at the preview.
+      inlineBitmapDeclarations(emitter.inlineBitmaps).forEach {
+        appendLine()
+        appendLine(it)
+      }
+      // The bundle lane's one declaration, and it is four lines: the archive holds the bytes, so
+      // all the file needs is the way in to them.
+      bundledBitmapReader(emitter.usesBundledBitmap)?.let {
+        appendLine()
+        appendLine(it)
+      }
+      // Last in the file, and deliberately: a Lottie animation is a few thousand columns of
+      // minified JSON, and a reader who has to scroll past it to reach the widget has been
+      // handed a worse file than one who can stop reading at the preview.
+      emitter.declarations.forEach {
+        appendLine()
+        appendLine(it)
+      }
+    }
+    return Outcome.Generated(
+      name = name,
+      source = source,
+      // `assets/` here and not in the path the source opens: `AssetManager` is already rooted at
+      // the source set's `assets/` directory, so the widget asks for `uibuilder/...` while the
+      // archive has to say where that directory goes.
+      files =
+        (emitter.bundledBackgrounds + parameters.mapNotNull { it.bundled }).map {
+          WidgetBundleFile(
+            path = "$ASSET_SOURCE_DIRECTORY/${it.path}",
+            mediaType = it.mediaType,
+            base64 = it.base64,
+          )
+        },
+      parameters = parameters,
     )
   }
 
   /**
-   * The `val`s a background picture becomes: its bytes, and the decode that turns them into one.
+   * The locals a bundled picture becomes, in the order the reader meets them.
    *
-   * Chunked into a list of literals joined at runtime rather than one long `const val`, because a
-   * JVM string constant is capped at 65535 **bytes** of modified UTF-8 and a photograph passes that
-   * easily. Concatenating literals with `+` would not help — the compiler folds those into the
-   * single constant the cap applies to — so the chunks are joined by code instead, and a picture of
-   * any size compiles.
-   *
-   * One decoder per file, not per picture, and `NO_WRAP` because the encoder above emits no line
-   * breaks.
+   * A background is unconditional — the design draws that picture and no application supplies it. A
+   * content picture is the application's, so its local keeps the parameter and falls back: to the
+   * design's own artwork where the archive carries it, and to the blank bitmap the inlining lane
+   * uses where it does not. Every parameter gets a line, not only the ones the archive can answer:
+   * in this lane they are all nullable, and the content function takes bitmaps that are not.
    */
-  private fun inlineBitmaps(assets: List<RemoteContentEmitter.InlineAsset>): List<String> {
-    if (assets.isEmpty()) return emptyList()
-    val blocks = mutableListOf<String>()
-    assets.forEach { asset ->
-      // The bytes first: a top-level `val` is initialised in declaration order, so a decode that
-      // read its constant from above it would compile to "must be initialized".
-      blocks += buildString {
-        appendLine("/** The design's `${asset.assetKey.escapeComment()}` asset, inlined. */")
-        appendLine("private val ${asset.identifier.uppercaseConstant()}: String =")
-        appendLine("${INDENT}listOf(")
-        asset.base64.chunked(BASE64_CHUNK).forEach { appendLine("$INDENT$INDENT\"$it\",") }
-        appendLine("$INDENT)")
-        append("$INDENT${INDENT}.joinToString(\"\")")
+  private fun bundledLocals(
+    bundled: Boolean,
+    backgrounds: List<RemoteContentEmitter.BundledAsset>,
+    parameters: List<RemoteContentEmitter.ImageParameter>,
+  ): List<String> {
+    if (!bundled) return emptyList()
+    return backgrounds.map { "val ${it.identifier} = context.bundledBitmap(\"${it.path}\")" } +
+      parameters.map { parameter ->
+        val fallback =
+          parameter.bundled?.let { "context.bundledBitmap(\"${it.path}\")" }
+            ?: "ImageBitmap(1, 1).rb"
+        "val ${parameter.identifier} = ${parameter.identifier} ?: $fallback"
       }
-      blocks +=
-        "private val ${asset.identifier}: RemoteImageBitmap =\n" +
-          "${INDENT}decodeInlineBitmap(${asset.identifier.uppercaseConstant()})"
-    }
-    blocks += buildString {
-      appendLine("private fun decodeInlineBitmap(encoded: String): RemoteImageBitmap {")
-      appendLine("${INDENT}val bytes = Base64.decode(encoded, Base64.NO_WRAP)")
-      appendLine("${INDENT}return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)")
-      appendLine("$INDENT$INDENT.asImageBitmap()")
-      appendLine("$INDENT$INDENT.rb")
-      append("}")
-    }
-    return blocks
   }
 
-  /** `coverWide` becomes `COVER_WIDE_PNG`, the constant beside it. */
-  private fun String.uppercaseConstant(): String = buildString {
-    this@uppercaseConstant.forEach {
-      if (it.isUpperCase() && isNotEmpty()) append('_')
-      append(it.uppercaseChar())
+  /** The archive's own reader: one file, opened by path and decoded where it is drawn. */
+  private fun bundledBitmapReader(used: Boolean): String? {
+    if (!used) return null
+    return buildString {
+      appendLine("/** A picture this widget's bundle ships, under the module's `assets/`. */")
+      appendLine("private fun Context.bundledBitmap(path: String): RemoteImageBitmap =")
+      appendLine("${INDENT}assets.open(path).use { BitmapFactory.decodeStream(it) }")
+      appendLine("$INDENT$INDENT.asImageBitmap()")
+      append("$INDENT$INDENT.rb")
     }
-    append("_PNG")
+  }
+
+  /** What the archive says about itself: where the files go, and what the application passes. */
+  private fun readme(outcome: Outcome.Generated): String = buildString {
+    appendLine("# ${outcome.name}")
+    appendLine()
+    appendLine("Generated from a Compose UI builder design.")
+    appendLine()
+    appendLine("## Where the files go")
+    appendLine()
+    appendLine("- `${outcome.name}.kt` — anywhere in your source set; set its package to match.")
+    if (outcome.files.isNotEmpty()) {
+      appendLine(
+        "- everything under `$ASSET_SOURCE_DIRECTORY/` — into the module's " +
+          "`src/main/$ASSET_SOURCE_DIRECTORY/`, keeping the paths."
+      )
+      appendLine()
+      appendLine("The widget opens each picture through `AssetManager`, by the path written in the")
+      appendLine("source, so the directories have to survive the copy:")
+      appendLine()
+      outcome.files.forEach { appendLine("- `${it.path}` (`${it.mediaType}`)") }
+    }
+    if (outcome.parameters.isNotEmpty()) {
+      appendLine()
+      appendLine("## What your application passes")
+      appendLine()
+      appendLine("The widget's constructor takes one bitmap per content picture. Each defaults to")
+      appendLine("the artwork the design was drawn with, so the `@Preview` shows the design; pass")
+      appendLine("your own to draw real data:")
+      appendLine()
+      outcome.parameters.forEach {
+        val default =
+          if (it.bundled != null) "the design's `${it.assetKey}` artwork"
+          else "a blank bitmap — the design's `${it.assetKey}` is not in this archive"
+        appendLine("- `${it.identifier}` — $default")
+      }
+    }
   }
 
   /** `albumArt: RemoteImageBitmap`, once per picture the body draws, or nothing at all. */
@@ -242,23 +365,32 @@ object WearWidgetCodeExporter {
    *
    * The parameters are the honest half: a widget's picture is application data, and the design
    * carries an asset key rather than bytes source could name. The **default** is what makes the
-   * generated `@Preview` below still compile — it constructs this class with no arguments — and it
-   * is a 1×1 transparent bitmap rather than anything drawn, because a placeholder that looked like
-   * a picture would be a preview showing something the design does not have. An application passes
-   * the real bitmap; a preview shows the hole it goes in.
+   * generated `@Preview` below still compile — it constructs this class with no arguments.
+   *
+   * What that default can be is the difference between the lanes. Inlining has nowhere to put a
+   * second picture, so it is a 1×1 transparent bitmap: a placeholder that looked like a picture
+   * would be a preview showing something the design does not have, and the hole is the honest
+   * preview. A bundle carries the artwork, so the parameter is nullable and `null` means "what the
+   * design was drawn with" — resolved in `provideWidgetData`, where the `Context` is, because a
+   * constructor default cannot open a file (`docs/design/UI_BUILDER_EXPORT_BUNDLE.md`).
    */
   private fun widgetClassHeader(
     name: String,
     parameters: List<RemoteContentEmitter.ImageParameter>,
+    bundled: Boolean,
   ): String {
     if (parameters.isEmpty()) return "class $name : GlanceWearWidget() {"
     return buildString {
       appendLine("class $name(")
       parameters.forEach {
         appendLine("$INDENT// The design's `${it.assetKey.escapeComment()}` asset.")
-        appendLine(
-          "${INDENT}private val ${it.identifier}: RemoteImageBitmap = ImageBitmap(1, 1).rb,"
-        )
+        if (bundled) {
+          appendLine("${INDENT}private val ${it.identifier}: RemoteImageBitmap? = null,")
+        } else {
+          appendLine(
+            "${INDENT}private val ${it.identifier}: RemoteImageBitmap = ImageBitmap(1, 1).rb,"
+          )
+        }
       }
       append(") : GlanceWearWidget() {")
     }
@@ -294,7 +426,7 @@ object WearWidgetCodeExporter {
       listOf("$INDENT${INDENT}return WearWidgetDocument(background = background) {")
   }
 
-  private fun refuse(reason: String) = Result.Refused(listOf(reason))
+  private fun refuse(reason: String) = Outcome.Refused(listOf(reason))
 
   /**
    * The value this property holds when it differs from [expected], or null when it agrees.
@@ -315,33 +447,64 @@ object WearWidgetCodeExporter {
 
   private const val INDENT = "    "
 
-  /** ktfmt's own default, as [RemoteContentEmitter] keeps for the body. */
-  private const val BASE64_CHUNK = 96
-
   private const val MAX_LINE = 100
 
   internal const val WEAR_WIDGET_SPEC_PADDING_DP = 8f
 
   internal const val WEAR_WIDGET_SPEC_CORNER_RADIUS_DP = 26f
+
+  /** Where an Android module's `AssetManager` root is, which is what the archive has to name. */
+  private const val ASSET_SOURCE_DIRECTORY = "assets"
 }
 
 /**
- * The size-specific squircle provider.
+ * A host container shape the generated file previews the widget in.
  *
- * Size-specific rather than the samples' `SquircleAllWidgetPreviewParams`, because a design is
- * authored at one container size: previewing a Small design at both sizes would show a Large frame
- * nobody drew. The provider still yields both screen diameters, which is the axis the design does
- * not fix.
+ * @property label the shape's own name, spelled the way `androidx.glance.wear.tooling.preview`
+ *   spells it. It is both the `@Preview` name a reader reads in the preview pane and the middle of
+ *   the function's identifier, so the two cannot drift apart.
+ * @property paramsProvider the shipped `WidgetPreviewParams` provider carrying that shape's spec.
  */
-private val WearWidgetScaffoldSize.previewParamsProvider: String
+internal data class WearWidgetPreviewShape(val label: String, val paramsProvider: String)
+
+/**
+ * The shapes a generated widget file previews itself in: the squircle it is authored against, and
+ * the rectangular frame beside it.
+ *
+ * The squircle is the host's default and the frame the builder's canvas draws, so it stays first
+ * and it is what a reader compares against the design. The rectangular one is not a second opinion
+ * about the same frame — its spec is genuinely different (Small 192×60dp content inside 16/12dp
+ * padding, Large 168×112dp inside 32/16dp, corner radius 0 for both, against the squircle's 200×60
+ * and 200×108 inside a uniform 8dp) — and it is the render the widget picker editor is meant to
+ * show, which is the whole reason a designer needs it without leaving the generated file.
+ *
+ * Both are size-specific rather than the samples' `…AllWidgetPreviewParams`, because a design is
+ * authored at one container size: previewing a Small design at both sizes would show a Large frame
+ * nobody drew. Each provider still yields the screen diameters it ships, which is the axis the
+ * design does not fix.
+ *
+ * The widget itself is unchanged between them. A `GlanceWearWidget` describes content; the frame
+ * around it is the host's, handed in as `WearWidgetParams` — so drawing the same widget in a second
+ * container is a second `@Preview` and nothing else, and the design's authored padding and radius
+ * (which the refusals above pin to the squircle spec) are not what either preview reads.
+ */
+internal val WearWidgetScaffoldSize.previewShapes: List<WearWidgetPreviewShape>
   get() =
     when (this) {
-      WearWidgetScaffoldSize.Small -> "SquircleSmallWidgetPreviewParams"
-      WearWidgetScaffoldSize.Large -> "SquircleLargeWidgetPreviewParams"
+      WearWidgetScaffoldSize.Small ->
+        listOf(
+          WearWidgetPreviewShape("Squircle", "SquircleSmallWidgetPreviewParams"),
+          WearWidgetPreviewShape("Rectangular", "RectangularSmallWidgetPreviewParams"),
+        )
+      WearWidgetScaffoldSize.Large ->
+        listOf(
+          WearWidgetPreviewShape("Squircle", "SquircleLargeWidgetPreviewParams"),
+          WearWidgetPreviewShape("Rectangular", "RectangularLargeWidgetPreviewParams"),
+        )
     }
 
 /** `Hello widget · Small (216×76dp)` becomes `HelloWidget`. */
-private fun UiBuilderDocument.widgetIdentifier(): String {
+internal fun UiBuilderDocument.widgetIdentifier(): String {
   val words =
     title
       .substringBefore('·')

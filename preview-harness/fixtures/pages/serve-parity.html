@@ -84,7 +84,17 @@
 </div>
         <p class="cp-muted">33% of 3 component(s) carry a
           design reference.</p>
-                <h2 class="cp-status-sec">Activity</h2>
+                <!-- Behind a disclosure, closed. The feed is a list of commits with dates — a CHANGELOG,
+             which this catalog already publishes with an RSS feed — and it was the tallest thing
+             on a page whose job is to point at components. Kept rather than dropped because it is
+             the one changelog joined to the design file's own history, and folded because a
+             reader who wants that asks for it. See `docs/design/COMPARE_NAVIGATION.md`, §3.4. -->
+        <details class="cp-parity-activity cp-disclosure">
+          <summary>
+            <span class="cp-parity-comparisons-title">Activity</span>
+            <span class="cp-disclosure-hint">How the code and the design file have moved</span>
+          </summary>
+          <div class="cp-disclosure-body">
         <div class="cp-states" role="group" aria-label="Filter activity by lane">
         <button type="button" class="cp-state-btn" data-parity-lane="all" aria-current="page">All</button>
 <button type="button" class="cp-state-btn" data-parity-lane="code">Code</button>
@@ -149,6 +159,8 @@
 </li>
         </ul>
         <p class="cp-muted" id="cp-parity-feed-empty" hidden>No activity in this lane.</p>
+          </div>
+        </details>
         <!-- Wires the lane buttons above to the feed. Renders nothing, and the feed is fully
              readable without it; `serve.css` hides the tag. -->
         <cp-parity-lanes></cp-parity-lanes>
@@ -189,18 +201,18 @@
               </table>
             </div>
         <cp-parity-scores></cp-parity-scores>
-                <details class="cp-parity-comparisons cp-disclosure">
+                <details class="cp-parity-comparisons cp-disclosure" open>
           <summary>
             <span class="cp-parity-comparisons-title">All comparisons (3)</span>
-            <span class="cp-disclosure-hint">Browse every code component and its design mapping</span>
+            <span class="cp-disclosure-hint">Open a component to compare every variant of it</span>
           </summary>
           <div class="cp-disclosure-body cp-status-scroll">
             <table class="cp-table">
               <thead><tr><th>Component</th><th>Code</th><th>Design reference</th><th>Structural match</th><th>Review</th></tr></thead>
               <tbody>
-              <tr><td>Badge</td><td><a href="/compose-m3/p/badge">Open render</a></td><td><span class="cp-parity-missing">Missing</span></td><td>—</td><td>—</td></tr>
-<tr data-parity-comparison data-reference="/compose-m3/reference/design-button-filled-light.png" data-actual="/compose-m3/render/button-filled__ideal__default__light.png" data-name="Button filled" data-review="/compose-m3/compare/button-filled__ideal__default__light"><td>Button filled</td><td><a href="/compose-m3/compare/button-filled__ideal__default__light">Open render</a></td><td><span class="cp-ok">Mapped</span></td><td><span class="cp-parity-score cp-muted">Checking…</span></td><td><a href="/compose-m3/compare/button-filled__ideal__default__light">Compare</a></td></tr>
-<tr><td>Switch on</td><td><a href="/compose-m3/p/switch-on__ideal__default__light">Open render</a></td><td><span class="cp-parity-missing">Missing</span></td><td>—</td><td>—</td></tr>
+              <tr><td><a href="/compose-m3/compare?format=reference&component=badge" title="Compare every Badge variant against the design">Badge</a></td><td><a href="/compose-m3/p/badge">Open render</a></td><td><span class="cp-parity-missing">Missing</span></td><td>—</td><td>—</td></tr>
+<tr data-parity-comparison data-reference="/compose-m3/reference/design-button-filled-light.png" data-actual="/compose-m3/render/button-filled__ideal__default__light.png" data-name="Button filled" data-review="/compose-m3/compare/button-filled__ideal__default__light"><td><a href="/compose-m3/compare?format=reference&component=button-filled" title="Compare every Button filled variant against the design">Button filled</a></td><td><a href="/compose-m3/compare/button-filled__ideal__default__light">Open render</a></td><td><span class="cp-ok">Mapped</span></td><td><span class="cp-parity-score cp-muted">Checking…</span></td><td><a href="/compose-m3/compare/button-filled__ideal__default__light">Compare</a></td></tr>
+<tr><td><a href="/compose-m3/compare?format=reference&component=switch-on" title="Compare every Switch on variant against the design">Switch on</a></td><td><a href="/compose-m3/p/switch-on__ideal__default__light">Open render</a></td><td><span class="cp-parity-missing">Missing</span></td><td>—</td><td>—</td></tr>
               </tbody>
             </table>
           </div>

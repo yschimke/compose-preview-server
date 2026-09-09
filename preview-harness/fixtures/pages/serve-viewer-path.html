@@ -96,9 +96,8 @@
             <span id="cp-live-toggle-label">Snapshot</span>
           </button>
 <button type="button" id="cp-spec-chip" class="cp-spec-chip" aria-pressed="false" data-spec-chip-label="Figma" data-spec-chip-name="Figma" data-spec-chip-tip="Put the imported Figma spec on the stage instead of the render" title="Put the imported Figma spec on the stage instead of the render">Figma</button>
-<span class="cp-spec-lane" id="cp-spec-lane" data-spec-src="/meshcore-mobile/reference/contact-chat-figma.png?token=demo-token-fixture" data-spec-label="Figma"><span class="cp-spec-views" id="cp-spec-views" role="group" aria-label="Design comparison" hidden><button type="button" class="cp-spec-view" data-cp-spec-view="spec" aria-pressed="false" title="The imported design reference on its own">Spec</button><button type="button" class="cp-spec-view" data-cp-spec-view="diff" aria-pressed="false" title="Highlight every pixel where the render and the spec disagree">Diff</button><button type="button" class="cp-spec-view" data-cp-spec-view="triptych" aria-pressed="true" title="Spec, diff and render side by side">Triptych</button><button type="button" class="cp-spec-view" data-cp-spec-view="slider" aria-pressed="false" title="One frame, wiped between the spec and the render">Slider</button></span><span class="cp-spec-score" id="cp-spec-score" role="status" aria-live="polite" hidden></span><a class="cp-format-link cp-spec-diff" href="/meshcore-mobile/compare/com.example.ProfileScreenPreview?token=demo-token-fixture&amp;reference=contact-chat-figma" title="Compare this render against the imported design spec — Contact chat">spec diff →</a><span class="cp-spec-pick" id="cp-spec-pick" hidden></span><span class="cp-spec-pick-live" id="cp-spec-pick-live" aria-live="polite"></span></span>
-<cp-bg-toggle label="Show the transparent checkerboard behind the preview"></cp-bg-toggle>
-<button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false" title="Show the preview at full width instead of fitting it to the screen">Fit width</button>
+<a class="cp-format-link" href="/meshcore-mobile/compare/com.example.ProfileScreenPreview?token=demo-token-fixture&amp;reference=contact-chat-figma" title="Open the focused comparison page for this render and its imported design spec">spec diff →</a>
+<span class="cp-spec-lane" id="cp-spec-lane" data-spec-src="/meshcore-mobile/reference/contact-chat-figma.png?token=demo-token-fixture" data-spec-label="Figma"><span class="cp-spec-views" id="cp-spec-views" role="group" aria-label="Design comparison" hidden><button type="button" class="cp-spec-view" data-cp-spec-view="spec" aria-pressed="false" title="The imported design reference on its own">Spec</button><button type="button" class="cp-spec-view" data-cp-spec-view="diff" aria-pressed="false" title="Highlight every pixel where the render and the spec disagree">Diff</button><button type="button" class="cp-spec-view" data-cp-spec-view="triptych" aria-pressed="true" title="Spec, diff and render side by side">Triptych</button><button type="button" class="cp-spec-view" data-cp-spec-view="slider" aria-pressed="false" title="One frame, wiped between the spec and the render">Slider</button></span><span class="cp-spec-score" id="cp-spec-score" role="status" aria-live="polite" hidden></span><span class="cp-spec-pick" id="cp-spec-pick" hidden></span><span class="cp-spec-pick-live" id="cp-spec-pick-live" aria-live="polite"></span></span>
         <span class="cp-mode-hint" id="cp-mode-hint"></span>
         <span class="cp-modes-inputs" aria-hidden="true">
       <input type="radio" name="cp-mode" value="png" id="cp-mode-png" tabindex="-1" checked>
@@ -132,15 +131,19 @@
                visually-hidden Theme state below, so an empty collapsible card would have sat at
                the top of every viewer's panel; the group goes with the control.
 
-               Neither affordance is lost. Transparent still shows a preview's real alpha on the
-               bar, and stripping a preview's *authored* background is still `background=clear` on
-               /render (and the VS Code extension's own override) — the authoring lane, which is
-               where it belongs, rather than the reading one.
+               Neither affordance is lost. Transparent still shows a preview's real alpha — from
+               the View group at the top of this panel, which is where it now lives — and
+               stripping a preview's *authored* background is still `background=clear` on /render
+               (and the VS Code extension's own override): the authoring lane, which is where it
+               belongs, rather than the reading one. The duplication that removed the select is
+               what still keeps it removed; there is one control, and this panel is now where it
+               is.
 
                The Theme select stays in the panel, outside any group: it is `aria-hidden` and out
                of the tab order, but it is the Theme axis's single state holder — viewer.js reads
                it on every render and Back/Forward hydration writes to it — so it has to remain in
                the DOM. The visible Theme control is the chip row on the viewer bar. -->
+          <details class="cp-group" data-cp-group="stage-view" open><summary>View</summary><div class="cp-group-body"><div class="cp-stage-view-row"><cp-bg-toggle label="Show the transparent checkerboard behind the preview"></cp-bg-toggle><button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false" title="Show the preview at full width instead of fitting it to the screen">Fit width</button></div></div></details>
           <span class="cp-modes-inputs" aria-hidden="true">
   <select id="cp-theme" class="cp-knob-theme" data-theme-active="0" data-default-theme="" data-theme-storage-key="cp-theme:meshcore-mobile" data-has-declared-themes="false" data-fixed-theme="false" tabindex="-1" disabled>
     <option value="light" selected>Light (Default)</option>

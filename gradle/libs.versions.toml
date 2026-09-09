@@ -50,11 +50,11 @@ maven-publish = "0.37.0"
 # .screenSizes` here. 2.1.0 is the first release carrying `ScreenGenerator.Preview.devices`
 # (compose-ai-tools#5248), which is what turns a design's export-device set into one
 # `@Preview(device = …)` per id rather than a multipreview that discards which devices it named.
-composeai-tools = "2.1.0"
+composeai-tools = "2.3.0"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in.
-composeai-contracts = "2.10.0"
-rc-players = "1.59.1"
+composeai-contracts = "2.11.0"
+rc-players = "1.59.4"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.5.2"
@@ -68,7 +68,7 @@ junit = "4.13.2"
 truth = "1.4.5"
 okhttp = "5.5.0"
 okio = "3.18.2"
-classgraph = "4.8.194"
+classgraph = "4.8.195"
 jmdns = "3.6.3"
 # The UI builder's Kotlin syntax highlighter, behind the Code pane. Pure Kotlin with a published
 # wasmJs variant, which is the whole reason it is this library: the pane is a Compose `Text` on a

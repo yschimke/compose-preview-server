@@ -133,13 +133,14 @@ tar -xzf server/build/distributions/compose-preview-server-*.tar.gz
 ./compose-preview-server-*/bin/compose-preview-server help
 ```
 
-The binary has four commands, and `help` lists them:
+The binary has five commands, and `help` lists them:
 
 | Command | What it does |
 | --- | --- |
 | `serve` | Host previews — fetched bundles, published catalogs, or a local module's `@Preview` functions with `--module` / `--discover`. |
 | `ui` | Build this project's previews and open the Compose UI builder against them. |
 | `playground` | `serve` with the snippet compile lane admitted. |
+| `design` | Render, export or read a UI-builder design from a server that is already up. The one command that does not serve. |
 | `help [command]` | The command list, or one command's options. |
 
 Flags may still be passed with no command in front of them: `compose-preview-server --module app`
@@ -154,6 +155,45 @@ generates call sites for your composables. From a checkout with the CLI installe
 ```shell
 compose-preview-server ui --module app
 ```
+
+`design` is the client half of that lane, and the one command here that starts no server: it talks
+to one that is already up — a local `serve`, or a deployment — and writes a design's pixels or its
+generated source to a file, which is what a session otherwise re-invents as a `curl` into `/mcp`, a
+`jq` to unwrap the envelope and a `base64 -d`
+([#529](https://github.com/yschimke/compose-preview-server/issues/529)):
+
+```shell
+export COMPOSE_PREVIEW_TOKEN=...          # or let the command ask a human to approve a grant
+compose-preview-server design list --server https://preview.coo.ee
+compose-preview-server design render spotify-wear-widget -o cover.png
+compose-preview-server design export spotify-wear-widget -o Widget.kt
+compose-preview-server design get spotify-wear-widget > design.json
+```
+
+The credential is read from `$COMPOSE_PREVIEW_TOKEN` (or the older
+`$COMPOSE_PREVIEW_UI_BUILDER_TOKEN` that `scripts/ui-builder/design-sync.mjs` reads), never from a
+flag. With neither set — or after a restart has dropped the grant — the command runs the server's
+own device-code flow: it prints an approval link and a code, waits for a human, and carries on.
+A refused export prints the generator's own diagnostics to stderr and exits non-zero, writing
+nothing, so it composes in CI.
+
+`--local` is the half of that command which needs no server at all: it runs the same generator,
+compiler and render daemon a server would, **here**, against a catalog bundle on disk — and says
+why a frame is missing rather than only that it is, which the wire reply cannot
+([#551](https://github.com/yschimke/compose-preview-server/issues/551)). That is what makes a
+broken host debuggable: `design get` captures its document (a read, not the render lane under
+suspicion) and the file replays anywhere.
+
+```shell
+compose-preview-server design get spotify-wear-widget --server https://preview.coo.ee > doc.json
+compose-preview-server design render --document doc.json --local \
+  --catalog wear-m3.bundle --assets ./assets -o replay.png
+compose-preview-server design export --document doc.json --local   # the generated Kotlin, no server
+```
+
+A local render prints the classpath it resolved, the daemon opener it built and the compiler's own
+diagnostics; `--components <catalog>=<components.json>` names the record a record-driven catalog's
+call sites are proven against, exactly as `serve --ui-builder-components` does.
 
 A served catalog's own composables can also be offered *inside* the builder's catalogs as a
 component pack (`--ui-builder-packs confetti-mobile=mobile,confetti-wear=wear`), switched on by an

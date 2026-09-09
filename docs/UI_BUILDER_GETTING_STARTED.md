@@ -18,9 +18,72 @@ on startup — one line naming the version it found and the version it needs. Po
 Java 21 JDK and restart to get the export back. `README.md` has the full picture, including why the
 rest of the distribution stays on 17.
 
+## Running it locally
+
+One command:
+
+```bash
+compose-preview-server ui --no-project
+```
+
+That opens the builder against the design systems packaged inside it — `m3-catalog` and
+`remote-m3` — and needs nothing else: no Gradle project, no `compose-preview` build host, and no
+catalog to fetch. Designs are saved under `~/.compose-preview/ui-builder-state` and survive a
+restart. A browser is opened on the builder; `--no-open` prints the URL instead.
+
+The builder bundle it serves is already inside the server distribution, so downloading
+`compose-preview-server-<version>.tar.gz` from a release is the whole install. Releases also carry
+`compose-preview-ui-builder-web-<version>.zip` on its own, for serving the bundle yourself or
+pointing an existing server at it with `--ui-builder-dir`; the same archive is on Maven Central as
+`compose-preview-ui-builder-web`. To build it from this repository instead:
+
+```bash
+./gradlew :ui-builder:wasmFrontendDist   # writes ui-builder/build/wasmDist
+```
+
+### Against your own project
+
+`ui` without `--no-project` is the other mode, and the one the rest of this guide's export sections
+assume:
+
+```bash
+compose-preview-server ui --module app
+```
+
+It discovers and builds the module's `@Preview` functions and hands the builder that module's
+`components.json`, so the Compose export writes code that calls **your** composables rather than
+only the packaged design system's. That needs the `compose-preview` build host, because discovering
+and building a Gradle project is work the server asks for over a pipe rather than doing itself —
+without one it says so rather than serving a builder that looks like it worked.
+
+### The flags underneath, and one that is easy to confuse
+
+Both modes are `serve` with flags added, and every flag stays available:
+
+- **`--ui-builder-catalogs <system>[,…]`** — the design systems the builder may author against. Each
+  must have a *packaged adapter*; a catalog with none is refused at startup rather than fetched.
+  This is the one that matters for the builder.
+- **`--ui-builder-state-dir <dir>|none`** — where saved designs live. Defaults to
+  `ui-builder-state` beside `--catalogs-file`, or `~/.compose-preview/ui-builder-state` standalone.
+  `none` serves the builder's assets with no editable design API at all.
+- **`--ui-builder-dir <dir>`** — the bundle to serve. Defaults to the one packaged beside the binary.
+- **`--catalogs <system>[@<owner>/<repo>][,…]`** is **not** part of this. It fetches published
+  catalogs from their `design-artifacts/<system>` branches and serves them as browsable preview
+  sites at `/<system>/`. Publishing a catalog never enables authoring for it, and authoring against
+  one never requires serving it — they are separate features that happen to share catalog ids.
+
+The designs, the reference overlays and the comment threads are separate directories under the
+state dir, so losing one loses only what it was.
+
+Two things worth knowing before the first run. Export needs Java 21, as above. And on `remote-m3`
+the **native preview lane cannot compile a widget**: a widget's generated source is Remote Compose
+rather than Jetpack Compose, so `--ui-builder-native-catalog` has nothing to offer it and the Wasm
+canvas is the authority — which is why the canvas and the generator have to agree about the same
+design, and are tested against each other rather than separately.
+
 ## Create a design in the website
 
-Start the server with UI-builder persistence and open `/ui-builder/`. The website opens its New
+Start the server as above and open `/ui-builder/`. The website opens its New
 design chooser when no design is named. The same chooser is available from **New design** in every
 live editor.
 
@@ -297,6 +360,7 @@ import androidx.glance.wear.WearWidgetData
 import androidx.glance.wear.WearWidgetDocument
 import androidx.glance.wear.color
 import androidx.glance.wear.core.WearWidgetParams
+import androidx.glance.wear.tooling.preview.RectangularSmallWidgetPreviewParams
 import androidx.glance.wear.tooling.preview.SquircleSmallWidgetPreviewParams
 import androidx.glance.wear.tooling.preview.WearWidgetPreview
 import androidx.wear.compose.remote.material3.RemoteColorScheme
@@ -336,15 +400,31 @@ fun HelloWidgetSquirclePreview() =
         HelloWidget(),
         SquircleSmallWidgetPreviewParams().values.maxBy { it.widthDp },
     )
+
+@Preview(name = "Rectangular Preview")
+@Composable
+fun HelloWidgetRectangularPreview() =
+    WearWidgetPreview(
+        HelloWidget(),
+        RectangularSmallWidgetPreviewParams().values.maxBy { it.widthDp },
+    )
 ```
 
 Read what is *not* there: the host container. `remote-m3/widget-container-*` is this builder's
 stand-in for `WearWidgetContainer`, and on-device the launcher draws that around widget content from
 `WearWidgetParams`. So the scaffold's background becomes the `WearWidgetBrush` handed to
-`WearWidgetDocument`, its size picks the preview-params provider, and its padding and radius are
+`WearWidgetDocument`, its size picks the preview-params providers, and its padding and radius are
 checked against the shipped spec rather than emitted — a widget cannot choose them, and a design
 that moved them is refused by name rather than generating a preview that draws a frame it does not
 have.
+
+Read what *is* there twice: the widget is previewed in both host container shapes. The squircle is
+the host's default and the frame the builder's canvas draws, so it is the one to compare the design
+against; the rectangular frame is a genuinely different spec — 192×60dp of content inside 16/12dp of
+padding at the Small size, against the squircle's 200×60 inside a uniform 8dp — and it is the render
+recommended as the image for the widget picker editor. Both come from the shipped size-specific
+providers, so neither invents a frame, and the widget itself is the same in both: a
+`GlanceWearWidget` describes content, and the container around it is the host's.
 
 The `@Preview` carries **no `device`**, and that is deliberate rather than an omission. A widget's
 canvas is its `WearWidgetParams`, so a screen spec beside it says nothing the params do not, and a
@@ -529,6 +609,73 @@ copied link carries **no credential**: whoever opens it presents their own token
 A design's catalog decides which rows appear — a catalog whose renderer cannot draw SVG has no SVG
 rows, and one that cannot render at all has no Export button. On a server running below Java 21
 there is no render lane, so there is no menu; the startup line says so.
+
+### From a shell: `compose-preview-server design`
+
+The menu is the browser's door. The shell's is `design`, a command on the server binary that is a
+**client**: it talks to a server that is already up and exits, rather than starting one
+([#529](https://github.com/yschimke/compose-preview-server/issues/529)).
+
+```shell
+compose-preview-server design list                       # what this credential can see
+compose-preview-server design render my-widget -o cover.png   # or --format svg
+compose-preview-server design export my-widget -o Widget.kt   # the generated Kotlin
+compose-preview-server design get    my-widget > design.json  # the document
+```
+
+`--server <url>` picks the host (a local one by default, `$COMPOSE_PREVIEW_SERVER` otherwise) and
+`--revision N` pins, exactly as `?revision=` does on the URLs above. Every verb runs the same
+export lane as the menu and the MCP tool: same gate, same renderer, same artifact.
+
+Three things it does deliberately:
+
+- **The credential comes from the environment**, `$COMPOSE_PREVIEW_TOKEN` or the older
+  `$COMPOSE_PREVIEW_UI_BUILDER_TOKEN`, and there is no `--token` flag — a credential on a command
+  line lands in a shell history and a CI log. Each verb asks the server for the least it needs:
+  `ui-builder-read` to list, get and render, `ui-builder-export` to export.
+- **With no credential it asks a human**, through the server's own device-code flow: it prints the
+  approval link and the code, waits, and carries on. So does a token a restart has invalidated,
+  which is otherwise the most confusing failure on this surface — an unauthorised caller and a
+  design that does not exist are deliberately indistinguishable
+  ([#509](https://github.com/yschimke/compose-preview-server/issues/509)). `--no-authorize` turns
+  that off for CI, where nobody is there to approve.
+- **A refusal is not an empty file.** When the generator cannot express a design — `asset/image`
+  has no Remote Compose counterpart, an image background needs a `RemoteImageBitmap` — those
+  diagnostics go to stderr, nothing is written, and the exit code is non-zero.
+
+### When the server is the thing that is broken
+
+Everything above asks a host to render, which is no help when that host's render lane is what you
+are trying to debug: `exception: null` + `image: null` + a valid preview id is the identical
+observable for a missing sidecar, a render that timed out and a render that threw, and the reason
+only ever reaches the server's log
+([#481](https://github.com/yschimke/compose-preview-server/issues/481)). `--local` runs the same
+generator, compiler and daemon **in this process** instead, and says which of those it was
+([#551](https://github.com/yschimke/compose-preview-server/issues/551)):
+
+```shell
+compose-preview-server design get my-widget --server https://preview.coo.ee > doc.json
+compose-preview-server design render --document doc.json --local \
+  --catalog wear-m3.bundle --assets ./assets -o replay.png
+compose-preview-server design export my-widget --local --components m3-catalog=components.json
+```
+
+- `--document <file>` reads the design off disk, so a document captured from a broken host replays
+  against a known-good tree — or yesterday's bundle, or under a debugger. Without it, `--local`
+  still asks a server for the design, but only to **read** it; the render happens here.
+- `--catalog <bundle>` is the classpath a render compiles against, and its manifest picks the
+  daemon (an `android` bundle renders on Robolectric, a desktop one on Skiko). `--assets <dir>` is
+  the uploaded bytes a widget inlines; `--components <catalog>=<components.json>` is the record a
+  record-driven catalog's call sites are proven against. A local `export` needs none of the three.
+- **The output says why.** A missing frame prints the compiler's own diagnostics, the classpath
+  entry count and which daemon opener was built — being chattier than the HTTP surface is the point
+  of the mode rather than a slip.
+
+It does **not** replace [`scripts/ui-builder/design-sync.mjs`](../scripts/ui-builder/design-sync.mjs),
+which moves a design's *document* between a live host and a committed operations fixture in both
+directions ([below](#keep-a-design-in-the-repository)). `design` gets artifacts out; the script
+versions the design itself. They read the same environment variables, so a shell set up for one
+works with the other.
 
 ## Letting somebody else in
 

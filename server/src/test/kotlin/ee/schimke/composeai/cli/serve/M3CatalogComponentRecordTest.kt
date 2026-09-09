@@ -126,8 +126,17 @@ class M3CatalogComponentRecordTest {
       "layout/horizontal-carousel" to
         "takes a CarouselState from rememberCarouselState { n }, whose argument is a lambda, and its content slot is called per item index rather than per child (compose-ai-tools#5218)",
       "layout/supporting-pane-scaffold" to "adaptive API; panes are not plain composable slots",
+      // Not the factory. `rememberDatePickerState` carries a `$default` bridge, so every parameter
+      // defaults and the no-arg call compiles — the same shape a dozen covered components use. What
+      // blocks it is one property: `selectedDate` is an ISO-8601 `YYYY-MM-DD` string and the
+      // factory
+      // takes `initialSelectedDateMillis: Long?`. Turning one into the other is a computation, and
+      // a
+      // wrong date that compiles is the failure this projection exists to refuse (#441).
       "m3/date-picker" to
-        "takes a DatePickerState from rememberDatePickerState, which no ScreenValue expresses",
+        "selectedDate is an ISO-8601 YYYY-MM-DD string and rememberDatePickerState takes " +
+          "initialSelectedDateMillis: Long?; converting between them is a computation this " +
+          "projection will not invent",
       "m3/dialog" to
         "AlertDialog is a window and needs an onDismissRequest a design cannot write; the builder draws and emits its surface inline instead",
       "m3/horizontal-floating-toolbar" to "experimental; content is a FlowRow-shaped scope",
@@ -137,8 +146,16 @@ class M3CatalogComponentRecordTest {
       "m3/snackbar-host" to "takes a SnackbarHostState, which no ScreenValue expresses",
       "m3/tab" to
         "onClick is required and a design's tab selection is not an action it can express",
+      // Also not the factory, and unlike the date picker nothing about the component blocks it:
+      // `hour`, `minute` and `is24Hour` map straight onto `rememberTimePickerState`'s defaulted
+      // parameters, and `mode` picks between `TimePicker` and `TimeInput` exactly as `m3/card`'s
+      // `variant` picks between its three. What is missing is upstream of this file — the record
+      // carries neither callable, so a COMPONENT_VARIANTS entry would name an id that cannot
+      // resolve and the export would refuse with NO_COMPONENT_RECORD. Coverable as soon as the
+      // record carries them (#441).
       "m3/time-picker" to
-        "takes a TimePickerState from rememberTimePickerState, which no ScreenValue expresses",
+        "the record carries neither TimePicker nor TimeInput, so no variant entry could name a " +
+          "callable that resolves",
       "remote-compose/document" to "typed embed, kept out of the Compose exporter by design",
       "remote-compose/inline" to
         "the vocabulary switch: its subtree is @RemoteComposable and InlineRemoteContentExporter writes it, not the Compose exporter",

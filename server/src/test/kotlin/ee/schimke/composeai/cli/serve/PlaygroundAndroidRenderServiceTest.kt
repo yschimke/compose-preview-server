@@ -218,4 +218,59 @@ class PlaygroundAndroidRenderServiceTest {
 
     assertNull(svc.render(snippet(previewId)))
   }
+
+  // The cold-start budget. Every render on this lane opens its own daemon and closes it again, so
+  // the number that governs it is the cold one — and until #481 it was a constant no deployment
+  // could reach, while `ServeRenderHost` read `renderTimeoutSeconds` for the same quantity.
+
+  @Test
+  fun `the render budget follows the cold-start property`() {
+    assertEquals(
+      900.seconds,
+      PlaygroundAndroidRenderService.renderBudgetFrom("900"),
+      "an operator who raises renderTimeoutSeconds is answering this budget's question too",
+    )
+  }
+
+  @Test
+  fun `an absent or unusable property keeps the value this budget always had`() {
+    listOf(null, "", "   ", "soon", "12.5", "-").forEach { property ->
+      assertEquals(
+        PlaygroundAndroidRenderService.FALLBACK_RENDER_BUDGET,
+        PlaygroundAndroidRenderService.renderBudgetFrom(property),
+        "a host that sets nothing usable renders exactly as it did before: $property",
+      )
+    }
+  }
+
+  @Test
+  fun `a zero or negative budget is clamped rather than expiring instantly`() {
+    listOf("0", "-1", "-900").forEach { property ->
+      assertEquals(
+        1.seconds,
+        PlaygroundAndroidRenderService.renderBudgetFrom(property),
+        "a non-positive budget would report an expiry it never waited for: $property",
+      )
+    }
+  }
+
+  @Test
+  fun `the default reads the property the deploy image already sets`() {
+    assertEquals(
+      "composeai.serve.renderTimeoutSeconds",
+      PlaygroundAndroidRenderService.RENDER_BUDGET_PROPERTY,
+      "the same name ServeRenderHost reads, so one setting governs both cold budgets",
+    )
+    val previous = System.getProperty(PlaygroundAndroidRenderService.RENDER_BUDGET_PROPERTY)
+    try {
+      System.setProperty(PlaygroundAndroidRenderService.RENDER_BUDGET_PROPERTY, "900")
+      assertEquals(900.seconds, PlaygroundAndroidRenderService.DEFAULT_RENDER_BUDGET)
+    } finally {
+      if (previous == null) {
+        System.clearProperty(PlaygroundAndroidRenderService.RENDER_BUDGET_PROPERTY)
+      } else {
+        System.setProperty(PlaygroundAndroidRenderService.RENDER_BUDGET_PROPERTY, previous)
+      }
+    }
+  }
 }
