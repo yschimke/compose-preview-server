@@ -2097,6 +2097,26 @@ function specSourceButton(id: string): HTMLButtonElement | null {
             return specSourceButtons[i];
     return null;
 }
+/**
+ * The source the PRIMARY chip stands for: the picker's first button, or null when there is no
+ * picker at all.
+ *
+ * Not `KIT_SOURCE`. `ServeWeb` builds the peer chips as `specSources.drop(1)`, so the primary chip
+ * is whatever `specSources.first()` happens to be — and on a catalog that declares a `compareWith`
+ * pairing but publishes no design reference, that first source is `parallel`. Such a lane also
+ * emits its picker despite holding a single source (the `size < 2` collapse is overridden by
+ * `parallelOnly`), so `specPressedId()` there reports `parallel` rather than nothing. Testing for
+ * the kit would leave that catalog's only comparison chip reading unpressed with its own lane open.
+ */
+function specPrimaryId(): string | null {
+    if (specSourceButtons.length === 0) return null;
+    return specSourceButtons[0].getAttribute("data-cp-spec-source");
+}
+/** Whether the source the primary chip names is the one on the stage. True when there is no picker. */
+function specPrimaryOnStage(): boolean {
+    var primary = specPrimaryId();
+    return primary === null || specPressedId() === primary;
+}
 /** What `?specSource=` should say: the picked source when it is not the default, else nothing. */
 function specSourceParam(): string {
     return sourceParam(specSourceList(), specPressedId());
@@ -4085,14 +4105,43 @@ function updateLiveToggle() {
             onLane: onSpecLane,
             available: specAvailable(),
         });
+        // Pressed reports WHICH source is on the stage, not merely that the lane is open. The peer
+        // chips beside this one are its equals now, and the picker they drive is hidden until the
+        // lane is up — so a toolbar that lit "Figma" while the sibling's render was showing named
+        // the wrong reference in the one place a reader would look to check it. A lane with a
+        // single source has no pressed id and no peers, and reads exactly as it always did.
+        var primaryOnStage = specPrimaryOnStage();
         specChip.setAttribute(
             "aria-pressed",
-            specState.pressed ? "true" : "false",
+            specState.pressed && primaryOnStage ? "true" : "false",
         );
         specChip.disabled = specState.disabled;
-        specChip.title = onSpecLane
-            ? "Showing the imported design spec — click to return to the render"
-            : specChip.getAttribute("data-spec-chip-tip") || specChip.title;
+        // The title has to follow the same fact the pressed state does. A chip reading unpressed
+        // while claiming "Showing the imported design spec — click to return to the render" states
+        // the lane it is not on AND offers the one action it no longer takes: with a sibling on the
+        // stage this chip selects its own source rather than closing the lane.
+        specChip.title =
+            onSpecLane && primaryOnStage
+                ? "Showing the imported design spec — click to return to the render"
+                : specChip.getAttribute("data-spec-chip-tip") || specChip.title;
+    }
+    // …and the peer chips follow the same source, so exactly one of the group ever reads pressed.
+    // Queried here rather than closed over: this runs before the chips are collected for their
+    // click handlers further down the file, and the group is two elements on the pages that have
+    // one at all.
+    var peers = document.querySelectorAll<HTMLButtonElement>(
+        "[data-cp-spec-open-source]",
+    );
+    for (var peerIndex = 0; peerIndex < peers.length; peerIndex++) {
+        var peerChip = peers[peerIndex];
+        peerChip.setAttribute(
+            "aria-pressed",
+            specActive() &&
+                peerChip.getAttribute("data-cp-spec-open-source") ===
+                    specPressedId()
+                ? "true"
+                : "false",
+        );
     }
     // The Source chip reports its lane the same way, and from the same place, so every route out
     // of it (the Live chip, a combo pick, the spec chip, Back/Forward) un-presses it too.
@@ -4288,7 +4337,12 @@ for (var pi = 0; pi < specPeerChips.length; pi++) {
 }
 if (specChip) {
     specChip.addEventListener("click", function () {
-        if (specActive()) setMode("png");
+        // Leaving the lane is what this chip does when its OWN source is the one on the stage.
+        // With a sibling showing, the chip reads unpressed, and a control that reads unpressed
+        // must select rather than dismiss: closing the comparison there made the visibly inactive
+        // chip do the one thing its appearance ruled out, and made it disagree with the peer chip
+        // beside it, which selects.
+        if (specActive() && specPrimaryOnStage()) setMode("png");
         else if (specAvailable()) {
             // No entry view is requested here any more (#4376). The chip used to ask for Diff,
             // because the chip STATES the divergence ("Figma 96.3%") and a number like that raises
@@ -4297,7 +4351,28 @@ if (specChip) {
             // on arrival AND keeps the two frames the diff was taken from beside it, so the chip
             // has nothing left to override: see DEFAULT_VIEW in `spec/views.ts`. A URL that names a
             // view still wins over that default, exactly as it won over the chip's request.
-            setMode("spec");
+            //
+            // The SOURCE, though, this chip does own. It names the imported kit — "Figma 96.3%" —
+            // while the picker keeps whatever was pressed last, so a reader who tried a sibling,
+            // left the lane, and came back through this chip was shown the SIBLING's render under
+            // a chip that said Figma: the wrong reference, silently, which is the one thing a
+            // comparison must not get wrong. Press the kit first and enter second, the same order
+            // the peer chips use and for the same reason — `pickSpecSource` returns early off the
+            // lane, so `setMode` opens directly on the requested pair instead of flashing the old
+            // one. A no-op when the kit is already pressed, and when the lane has one source and
+            // therefore no picker at all.
+            var primaryId = specPrimaryId();
+            var changed = primaryId
+                ? pickSpecSource(specSourceButton(primaryId))
+                : false;
+            if (!specActive()) setMode("spec");
+            // Already on the lane with a sibling showing: `enterMode` does not run, so the push
+            // it would have made is made here — the same one a press on the in-lane picker makes,
+            // and the same one the peer chips make on this path.
+            else if (changed) {
+                urlPush = true;
+                syncUrl();
+            }
         }
     });
 }
