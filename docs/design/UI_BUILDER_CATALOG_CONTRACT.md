@@ -456,9 +456,18 @@ Each phase is releasable on its own and leaves every catalog working.
    repository has to answer before it deletes anything. Non-blocking until phase 4: a catalog that
    publishes nothing reports "not yet", not red.
 
-   Under `--strict` — what the cutover PR turns on — five things fail: an unaccepted difference, a
-   fact the frozen catalog states that the catalog is silent about, a stale exemption, a missing
-   policy file, and **a policy that is not this catalog's**. `--catalog-id` states which catalog
+   Under `--strict` — what the cutover PR turns on — seven things fail: an unaccepted difference, a
+   fact the frozen catalog states that the catalog is silent about, **a fact the catalog states that
+   the frozen one cannot check**, a stale exemption, a missing policy file, **a policy that is not
+   this catalog's**, and a schema this gate cannot vouch for.
+
+   The third is the mirror of the second and was informational for too long: `platformLabel`,
+   `frame.adapter` and `frame.geometry` are absent from every frozen catalog — the server holds them
+   as `when (catalogSystemId)` branches and transcribed constants rather than as data — and phase 4
+   *consumes* all three. An arbitrary label or a wrong padding table would have reached the cutover
+   with the gate reporting ready. They are accepted per catalog with `"frozen": null`, which is
+   somebody recording that they read a value nothing here can check; wear-m3's geometry is reviewed
+   against its own Robolectric probe, which is a stronger check than the golden could have been. `--catalog-id` states which catalog
    the caller MEANT, and is checked against the golden's id and the policy's alike — so asking for
    one catalog while holding another's policy *and* its matching golden fails, which no comparison
    of those two files against each other can catch. Required for a catalog whose policy defaults its

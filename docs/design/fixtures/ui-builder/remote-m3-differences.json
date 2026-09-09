@@ -52,5 +52,36 @@
         "fidelity": "authoritative"
       }
     }
+  },
+  {
+    "field": "platformLabel",
+    "why": "As with wear-m3, the frozen catalog carries no label. 'RemoteCompose' is the name the catalog and its documents use; the platform word `remote-compose` would title-case to 'Remote-compose', which is not what anybody calls it.",
+    "policy": "RemoteCompose",
+    "frozen": null
+  },
+  {
+    "field": "frame.adapter",
+    "why": "The frozen catalog names no adapter, and this is the one place the two Wear catalogs genuinely differ: a Remote Compose widget is drawn into a host container of fixed size, not onto a watch face, so `frame/widget-host` rather than the sibling's `frame/round-screen`. Reviewed against the renderer's own remote branch, which draws exactly that.",
+    "policy": "frame/widget-host",
+    "frozen": null
+  },
+  {
+    "field": "frame.geometry",
+    "why": "The two host sizes, which the server carries as constants (216x76 and 216x124) and the frozen catalog does not state. Unlike the Wear padding these are DECLARED rather than measured: remote-catalog/src/main/kotlin/.../WidgetContainerPreviews.kt pins @Preview(widthDp = 216, heightDp = 76) and (216, 124), and every widget sticker renders at one of them. Reviewed against those annotations — the preview contract is the source, so a drift would break the stickers before it reached a design.",
+    "policy": {
+      "sizesDp": [
+        {
+          "widthDp": 216,
+          "heightDp": 76,
+          "label": "Small container"
+        },
+        {
+          "widthDp": 216,
+          "heightDp": 124,
+          "label": "Large container"
+        }
+      ]
+    },
+    "frozen": null
   }
 ]

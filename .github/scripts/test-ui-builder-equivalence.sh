@@ -106,7 +106,8 @@ JSON
 # The same facts as the golden, with object members in the other order.
 cat >"${work}/reordered-golden.json" <<'JSON'
 { "statusSemantics": { "platform": "wear",
-  "frame": { "geometry": { "contentPadding": [ { "screenDp": 192, "horizontalDp": 10 } ] } } } }
+  "frame": { "adapter": "frame/round-screen",
+    "geometry": { "contentPadding": [ { "screenDp": 192, "horizontalDp": 10 } ] } } } }
 JSON
 
 cat >"${work}/reordered-policy.json" <<'JSON'
@@ -275,13 +276,32 @@ cat >"${work}/policy-only-golden.json" <<'JSON'
 JSON
 cat >"${work}/waiver-for-policy-only.json" <<'JSON'
 [ { "field": "componentMenu.groupOrder", "why": "reviewed back when the frozen catalog had one",
-    "policy": ["B", "A"], "frozen": ["A", "B"] } ]
+    "policy": ["A", "B"], "frozen": ["A", "B"] } ]
 JSON
 "${gate}" --policy "${work}/agrees.json" --golden "${work}/policy-only-golden.json" \
   --differences "${work}/waiver-for-policy-only.json" --strict >"${work}/out" 2>&1
-check "a waiver the frozen catalog no longer disagrees with fails --strict" 1 $?
-grep -q "is obsolete and should be deleted" "${work}/out" ||
-  { echo "FAIL policy-only waiver not reported"; failures=$((failures + 1)); }
+check "a waiver pinning a frozen value the frozen catalog dropped fails --strict" 1 $?
+grep -q "frozen catalog changed since this was accepted" "${work}/out" ||
+  { echo "FAIL dropped frozen value not reported"; failures=$((failures + 1)); }
+
+# The same shape, reviewed honestly: `"frozen": null` is somebody saying they looked at a fact the
+# frozen catalog cannot check. That is the ONLY way a policy-only fact passes --strict now.
+cat >"${work}/waiver-frozen-null.json" <<'JSON'
+[ { "field": "componentMenu.groupOrder", "why": "the frozen catalog states no menu; read against the catalog's own sections",
+    "policy": ["A", "B"], "frozen": null } ]
+JSON
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/policy-only-golden.json" \
+  --differences "${work}/waiver-frozen-null.json" --strict >"${work}/out" 2>&1
+check "a policy-only fact passes once reviewed with \"frozen\": null" 0 $?
+
+# …and without any entry it blocks, because nothing has checked it. This is the mirror of the
+# silence check: one catches a catalog that describes too little, this one a catalog that describes
+# something WRONG.
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/policy-only-golden.json" \
+  --strict >"${work}/out" 2>&1
+check "an unreviewed policy-only fact fails --strict" 1 $?
+grep -q "the frozen catalog says nothing, so" "${work}/out" ||
+  { echo "FAIL unreviewed policy-only fact not reported"; failures=$((failures + 1)); }
 
 # A future major on the FROZEN side is as unreadable as one on the policy side, and the golden is
 # the likelier of the two to move — it is regenerated from this repository's own types.
@@ -326,6 +346,28 @@ JSON
 check "a waiver naming no compared field fails --strict" 1 $?
 grep -q "no such compared field" "${work}/out" ||
   { echo "FAIL unknown-field waiver not reported"; failures=$((failures + 1)); }
+
+# A schema that is PRESENT and unreadable is refused: `family-version` says nothing this gate can
+# check, and it previously skipped every schema check and let matching fields report readiness.
+cat >"${work}/malformed-schema.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy-v999", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+"${gate}" --policy "${work}/malformed-schema.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a schema that is not family/version is refused" 1 $?
+grep -q "not" "${work}/out" ||
+  { echo "FAIL malformed schema not reported"; failures=$((failures + 1)); }
+
+# A policy with NO schema is refused too — only a capability document may omit one.
+cat >"${work}/no-schema-policy.json" <<'JSON'
+{ "catalogId": "wear-m3", "platform": "wear", "menu": { "groupOrder": ["A", "B"] } }
+JSON
+"${gate}" --policy "${work}/no-schema-policy.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a policy declaring no schema is refused" 1 $?
+grep -q "only a capability document may" "${work}/out" ||
+  { echo "FAIL missing schema not reported"; failures=$((failures + 1)); }
 
 # A waiver outlives its disagreement. Left valid, it would silently re-authorise a return to the
 # exact value it once waived, with nobody re-reading it.

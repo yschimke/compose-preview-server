@@ -55,9 +55,14 @@
 #                  accidentally emptied menu passing under the entry that reviewed a deliberate
 #                  reordering — so a changed value re-surfaces as a stale exemption.
 #
-# Six things fail under `--strict`: a difference nobody has accepted, a fact the frozen catalog
-# states that the catalog is silent about, a stale or unexplained exemption, a MISSING policy file,
-# a policy that is not this catalog's, and a FUTURE SCHEMA MAJOR on EITHER document — refused
+# Seven things fail under `--strict`: a difference nobody has accepted, a fact the frozen catalog
+# states that the catalog is silent about, a fact the CATALOG states that the frozen one cannot
+# check (accepted with `"frozen": null` once somebody has read it — the mirror of the silence rule,
+# because one catches a catalog describing too little and the other a catalog describing something
+# WRONG), a stale or unexplained exemption, a MISSING policy file, a policy that is not this
+# catalog's, and a SCHEMA this gate cannot vouch for on EITHER document — a future major, an
+# unrecognised family, an unreadable string, or none at all where only a capability document may
+# omit one. Refused
 # outright rather than compared, because the fields this gate happens to recognise in a `…/v2` say
 # nothing about the semantics it does not. The last three matter most: `--strict` is the cutover
 # asserting readiness, so "there is no catalog here", "this describes nothing at all" and "somebody
@@ -162,9 +167,28 @@ const SCHEMA_FAMILIES = {
 // types, so `CatalogCapabilityV1` moving to a v2 is the likelier of the two — and a v1 policy
 // against a v2 golden is exactly as unreadable as the reverse, for the same reason: the fields that
 // still line up say nothing about the ones whose meaning changed.
-const refuseFutureMajor = (label, doc) => {
+const refuseFutureMajor = (label, doc, mustDeclare) => {
   const schema = doc?.schema;
-  if (typeof schema !== "string" || !schema.includes("/")) return false;
+  // A schema that is PRESENT and unreadable is refused, and a shape that must declare one and does
+  // not is refused too. Only `family/version` says anything; `compose-ui-builder-policy-v999`, a
+  // number, or an object all skipped every check below and let matching fields report readiness.
+  // The exemption stays exactly where it was argued for: a CAPABILITY document (one carrying
+  // `benchmark`) legitimately has no schema, and refusing those would make this an allowlist.
+  if (schema === undefined || schema === null) {
+    if (!mustDeclare) return false;
+    console.log(`  x schema: the ${label} declares none, and only a capability document may.`);
+    console.log(`      Without one this gate cannot say whether it understands the document.`);
+    console.log("");
+    console.log(`ui-builder-equivalence: refused — the ${label} declares no schema.`);
+    return true;
+  }
+  if (typeof schema !== "string" || !schema.includes("/")) {
+    console.log(`  x schema: the ${label} is ${JSON.stringify(schema)}, which is not`);
+    console.log(`      'family/version', so this gate cannot tell what it is looking at.`);
+    console.log("");
+    console.log(`ui-builder-equivalence: refused — unreadable schema ${JSON.stringify(schema)}.`);
+    return true;
+  }
   const family = schema.slice(0, schema.lastIndexOf("/"));
   const major = Number.parseInt(String(schema.slice(schema.lastIndexOf("/") + 1)).replace(/^v/, ""), 10);
   const known = SCHEMA_FAMILIES[family];
@@ -197,7 +221,13 @@ const refuseFutureMajor = (label, doc) => {
   console.log(`ui-builder-equivalence: refused — unsupported schema ${schema}.`);
   return true;
 };
-if (refuseFutureMajor("catalog", source) || refuseFutureMajor("frozen catalog", golden)) {
+// A capability document is the one shape allowed to be schema-less; everything else must say what
+// it is. `capabilities` is computed above from the source's own `benchmark`; the golden is a
+// capability document by construction.
+if (
+  refuseFutureMajor("catalog", source, !capabilities) ||
+  refuseFutureMajor("frozen catalog", golden, false)
+) {
   process.exit(strict ? 1 : 2);
 }
 
@@ -251,10 +281,15 @@ const waiverVerdict = (waiver, stated, frozen) => {
   }
   if (waiver.policy === undefined) return "the accepted difference names no reviewed policy value";
   if (waiver.frozen === undefined) return "the accepted difference names no reviewed frozen value";
-  if (canonical(waiver.policy) !== canonical(stated)) {
+  // `null` is how a waiver says "and the other side states NOTHING", which is a reviewed fact like
+  // any other — the field is absent, and somebody looked at that. `undefined` still means the entry
+  // forgot to say, which is the thing the presence checks above are for. Normalising them here
+  // keeps those two apart while letting an absent side be pinned.
+  const same = (a, b) => canonical(a ?? null) === canonical(b ?? null);
+  if (!same(waiver.policy, stated)) {
     return `the catalog changed since this was accepted\n      reviewed: ${show(waiver.policy)}\n      now:      ${show(stated)}`;
   }
-  if (canonical(waiver.frozen) !== canonical(frozen)) {
+  if (!same(waiver.frozen, frozen)) {
     return `the frozen catalog changed since this was accepted\n      reviewed: ${show(waiver.frozen)}\n      now:      ${show(frozen)}`;
   }
   return null;
@@ -285,18 +320,24 @@ const waiverIsObsolete = (field, why) => {
 // rule, because the branches no longer carry it.
 const comparedFields = new Set(fields.map(([field]) => field));
 for (const [field, stated, frozen] of fields) {
-  const disagrees =
-    stated !== undefined && frozen !== undefined && canonical(stated) !== canonical(frozen);
-  if (disagrees) continue;
+  // What a waiver can legitimately be reviewing, now that a policy-only fact needs one too:
+  //
+  //   both sides state it and the values differ  — a difference somebody accepted
+  //   the catalog states it and the frozen one does not — a fact nothing here can check
+  //
+  // Anything else and the thing the waiver describes has stopped existing: the two agree again,
+  // both went silent, or the catalog dropped the field while the frozen one kept it (which is a
+  // gap, and blocking on its own — a waiver cannot make a missing fact present).
+  const reviewable =
+    stated !== undefined && (frozen === undefined || canonical(stated) !== canonical(frozen));
+  if (reviewable) continue;
   waiverIsObsolete(
     field,
     stated === undefined && frozen === undefined
       ? "neither the catalog nor the frozen catalog states this"
       : stated === undefined
         ? "the catalog does not state this at all"
-        : frozen === undefined
-          ? "the frozen catalog does not state this at all"
-          : "this agrees with the frozen catalog",
+        : "this agrees with the frozen catalog",
   );
 }
 // And a waiver naming a field NOTHING compares. Iterating `fields` judged every waiver that could
@@ -324,8 +365,31 @@ for (const [field, stated, frozen] of fields) {
     continue;
   }
   if (frozen === undefined) {
-    unstated += 1;
-    console.log(`  ~ ${field}: stated as ${show(stated)}; the frozen catalog says nothing`);
+    // The catalog states a fact the frozen one has no opinion about — and phase 4 CONSUMES these:
+    // `platformLabel` names the platform in the chooser, `frame.adapter` picks what draws the
+    // canvas, `frame.geometry` is the measured padding a design is laid out against. Nothing has
+    // compared them to anything, so an arbitrary label or a wrong padding table would have reached
+    // the cutover with the gate reporting ready.
+    //
+    // This was informational while its mirror image — the frozen catalog states it and the policy
+    // is silent — was blocking, and that asymmetry is indefensible: both are a fact nobody
+    // compared. One risks a catalog that describes too little, the other a catalog that describes
+    // something WRONG, and only the first was being caught. Accepted with a reviewed entry pinning
+    // `"frozen": null`, which is somebody saying they looked at a value the golden cannot check.
+    const waiver = accepted.get(field);
+    if (waiver === undefined) {
+      unstated += 1;
+      console.log(`  x ${field}: stated as ${show(stated)}; the frozen catalog says nothing, so`);
+      console.log(`      nothing here has checked it. Accept it with "frozen": null once read.`);
+      continue;
+    }
+    const problem = waiverVerdict(waiver, stated, frozen);
+    if (problem !== null) {
+      stale += 1;
+      console.log(`  ! ${field}: ${problem}`);
+      continue;
+    }
+    console.log(`  ! ${field}: unchecked by the frozen catalog, accepted — ${waiver.why}`);
     continue;
   }
   if (canonical(stated) === canonical(frozen)) {
@@ -444,11 +508,11 @@ if (goldenId === null) {
 }
 
 const id = declaredId ?? expectedId ?? "(unidentified)";
-const blocking = differences + gaps + stale + misidentified;
+const blocking = differences + gaps + stale + misidentified + unstated;
 console.log("");
 console.log(
   `ui-builder-equivalence: ${id} — ${differences} difference(s), ${gaps} unstated fact(s) the ` +
-    `frozen catalog has, ${stale} unusable exemption(s), ${unstated} field(s) the frozen catalog ` +
+    `frozen catalog has, ${stale} unusable exemption(s), ${unstated} unreviewed field(s) the frozen catalog ` +
     `has no opinion about.`,
 );
 if (misidentified > 0 && strict) {
