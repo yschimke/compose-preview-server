@@ -112,6 +112,18 @@ class ServeUiBuilderMcp(
    * does, and this door must not do less.
    */
   private val references: ServeUiBuilderReferenceStore? = null,
+  /**
+   * What each design is for, on a host that records it.
+   *
+   * Null on a host with no durable UI-builder state, where the links routes are absent too — the
+   * tools then do not appear in `tools/list` rather than appearing and failing, which is the rule
+   * the whole surface follows.
+   *
+   * This is what turns "here is a design" into "here is what this design is for": an agent opening
+   * one is told the issue behind it, the frame it reproduces and the pull request that implemented
+   * it, on the reply it was already reading, and can record the same for a design it creates.
+   */
+  private val links: ServeUiBuilderLinksStore? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
   /**
    * The bytes behind a design's `assets` map, on a host that keeps them.
@@ -131,6 +143,10 @@ class ServeUiBuilderMcp(
   /** Whether this host keeps design assets, and so whether [PUT_ASSET] exists. */
   val supportsAssets: Boolean
     get() = assets != null
+
+  /** Whether this host records what a design is for, and so whether the links tools exist. */
+  val supportsLinks: Boolean
+    get() = links != null
 
   /** What a tool needs from the caller before it may run. Null when the name is not ours. */
   fun capabilityFor(tool: String): UiBuilderRouteCapability? =
@@ -163,6 +179,11 @@ class ServeUiBuilderMcp(
       // A write to the design — the registry is part of the document and moves its revision —
       // gated as one, and absent where the host has nowhere to keep the bytes.
       PUT_ASSET -> if (assets == null) null else UiBuilderRouteCapability.WRITE
+      // Reading and writing what a design is for are gated as the design's own read and write,
+      // even though neither touches the document: a link names an issue and a pull request, which
+      // is exactly as much as the design it is beside says about the work it belongs to.
+      GET_LINKS -> if (links == null) null else UiBuilderRouteCapability.READ
+      SET_LINKS -> if (links == null) null else UiBuilderRouteCapability.WRITE
       // The same capability as an export, and for the same reason: a native render compiles and
       // runs the Kotlin an export hands back, so an actor who may not read that source may not
       // run it. Absent entirely on a host that cannot compile.
@@ -181,7 +202,8 @@ class ServeUiBuilderMcp(
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
     callId: String,
-  ): String = withCommentNotice(tool, args, actor, run(tool, args, actor, callId))
+  ): String =
+    withCommentNotice(tool, args, actor, withLinks(tool, args, run(tool, args, actor, callId)))
 
   private suspend fun run(
     tool: String,
@@ -223,6 +245,8 @@ class ServeUiBuilderMcp(
         RESOLVE_COMMENT_THREAD,
         ACKNOWLEDGE_COMMENT,
         REACT_TO_COMMENT -> return commentTool(tool, args, actor)
+        GET_LINKS,
+        SET_LINKS -> return linksTool(tool, args, actor)
         else -> throw McpRequestException("unknown UI-builder tool '$tool'")
       }
     return envelope(callId, execute(request, actor), includeCatalog = args.includeCatalog())
@@ -373,6 +397,15 @@ class ServeUiBuilderMcp(
           .onFailure { onLog("serve: reference overlay for $designId not removed (${it.message})") }
         runCatching { comments?.delete(designId) }
           .onFailure { onLog("serve: comment board for $designId not removed (${it.message})") }
+        runCatching {
+          // The store answers with an enum rather than throwing, so a failure reaches this
+          // `runCatching` as an ordinary value: the check has to be on the result, or a record
+          // left on disk is inherited by whatever takes the id next.
+          if (links?.delete(designId) == LinksDeleteResult.FAILED) {
+            onLog("serve: links record for $designId not removed")
+          }
+        }
+          .onFailure { onLog("serve: links record for $designId not removed (${it.message})") }
         UI_BUILDER_JSON.encodeToString(
           DesignDeletedV1.serializer(),
           DesignDeletedV1(callId = callId, designId = designId),
@@ -653,6 +686,132 @@ class ServeUiBuilderMcp(
       }
     return UI_BUILDER_JSON.encodeToString(StoredCommentBoard.serializer(), board)
   }
+
+  /**
+   * Read or replace what a design is for.
+   *
+   * Authorised twice, exactly as the links routes are: the tool's capability decides whether this
+   * caller may use the builder, and then the design is read *through the service, as this actor*,
+   * so a design they cannot open is "no such design" rather than a record they may write against.
+   *
+   * [SET_LINKS] replaces the whole record rather than merging into it, for the reason the route
+   * gives: a partial write is how a design ends up citing the issue it used to be for, and clearing
+   * one link has to be expressible.
+   */
+  private suspend fun linksTool(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val store = links ?: throw McpRequestException("this host does not record what designs are for")
+    val designId = args.requiredText("designId")
+    if (!service.canRead(actor, designId)) {
+      throw McpRequestException("no design `$designId` this actor can read")
+    }
+    val stored =
+      when (tool) {
+        GET_LINKS -> store.read(designId) ?: StoredLinks(designId = designId)
+        SET_LINKS ->
+          when (val result = store.replace(designId, args.linksArgument())) {
+            is LinksWriteResult.Refused -> throw McpRequestException(result.reason)
+            is LinksWriteResult.Failed -> throw McpRequestException(result.reason)
+            is LinksWriteResult.Stored -> result.links
+          }
+        else -> throw McpRequestException("unknown UI-builder links tool '$tool'")
+      }
+    return UI_BUILDER_JSON.encodeToString(StoredLinks.serializer(), stored)
+  }
+
+  /**
+   * The five links out of a tool call's arguments; an omitted one is unset, not unchanged.
+   *
+   * A call naming none of them clears the record, which is a thing an agent may legitimately ask
+   * for — but only by asking for it. A call that names *other* things and no link got there by
+   * misspelling a field, and reading that as a clear is how one typo deletes the issue and the pull
+   * request behind a design.
+   */
+  private fun JsonObject.linksArgument(): StoredLinks {
+    val links =
+      StoredLinks(
+        issue = text("issue"),
+        reference = text("reference"),
+        pr = text("pr"),
+        thread = text("thread"),
+        previous = text("previous"),
+      )
+    if (links.isEmpty && keys.any { it !in LINKS_CALL_KEYS }) {
+      throw McpRequestException(
+        "this call names no link this host knows; pass only `designId` to clear the record"
+      )
+    }
+    return links
+  }
+
+  /**
+   * The reply, plus what the design is for, when anybody has said.
+   *
+   * ## Why it is spliced onto the reply rather than left to the agent to ask for
+   *
+   * The same reason the comment notice is: an agent handed a design reads the document and starts
+   * work, and the question it does not think to ask is what the screen is *for*. One extra call
+   * would answer it, and an agent mid-task does not make that call — so the issue, the frame and
+   * the pull request arrive on the reply it is already reading, and an agent asked to change a
+   * screen can see the brief behind it without being told one exists.
+   *
+   * Only [GET_DESIGN], only where the reply is a *successful snapshot*, and only where a record
+   * exists: a design nobody has linked pays one stat call and hands the original string back
+   * untouched. A reply that is not a JSON object is handed back as it is — a link is worth having,
+   * and never worth mangling the answer the agent asked for.
+   *
+   * ## Why the snapshot check is load-bearing
+   *
+   * A refused read is not an exception here. [run] hands a `GetSnapshotRequestV1` to the service
+   * and serialises whatever comes back, so a design this actor may not open returns a perfectly
+   * ordinary JSON envelope carrying an error response. Splicing onto that would hand the issue, the
+   * frame, the pull request and the thread of a private design to anyone holding a read capability
+   * who can guess its id — the links would be the answer the access check just refused. So the
+   * record is attached to a snapshot and to nothing else.
+   */
+  private fun withLinks(tool: String, args: JsonObject, reply: String): String {
+    val store = links ?: return reply
+    if (tool != GET_DESIGN) return reply
+    val designId = args.text("designId") ?: return reply
+    val parsed =
+      try {
+        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+      } catch (_: SerializationException) {
+        return reply
+      }
+    // The access check is this line. Only a snapshot means the service opened the design as this
+    // actor; an error envelope means it refused, and a refused read must not come back carrying
+    // the links of the design it refused.
+    if (!parsed.isSnapshotReply()) return reply
+    val stored =
+      try {
+        store.read(designId)
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        // A record this host cannot read must never cost the agent the answer it asked for.
+        null
+      } ?: return reply
+    return JsonObject(
+        parsed +
+          (LINKS_KEY to UI_BUILDER_JSON.encodeToJsonElement(StoredLinks.serializer(), stored))
+      )
+      .toString()
+  }
+
+  /**
+   * Whether this envelope carries a design the service actually handed over.
+   *
+   * Read off the response's own discriminator rather than by decoding it: the envelope a default
+   * agent call produces has had the catalog dropped ([envelope]), so the released serialiser would
+   * reject the very reply this needs to recognise.
+   */
+  private fun JsonObject.isSnapshotReply(): Boolean =
+    (this[RESPONSE_KEY] as? JsonObject)?.get(RESPONSE_TYPE_KEY)?.jsonPrimitive?.contentOrNull ==
+      SNAPSHOT_RESPONSE_TYPE
 
   /**
    * The reply, plus what this actor has not been told, when there is any.
@@ -940,6 +1099,8 @@ class ServeUiBuilderMcp(
     const val REACT_TO_COMMENT = "ui_builder_react_to_comment"
     const val AWAIT_DESIGN = "ui_builder_await_design"
     const val DESIGN_ACCESS = "ui_builder_design_access"
+    const val GET_LINKS = "ui_builder_get_links"
+    const val SET_LINKS = "ui_builder_set_links"
     const val SHARE_DESIGN = "ui_builder_share_design"
     const val RENAME_DESIGN = "ui_builder_rename_design"
     const val DELETE_DESIGN = "ui_builder_delete_design"
@@ -1001,6 +1162,9 @@ class ServeUiBuilderMcp(
     /** Separate because it exists only where the host keeps design assets. */
     val ASSET_TOOL_NAMES = listOf(PUT_ASSET)
 
+    /** Separate because they exist only where the host records what a design is for. */
+    val LINKS_TOOL_NAMES = listOf(GET_LINKS, SET_LINKS)
+
     /** Separate because they exist only where the host keeps a discussion. */
     val COMMENT_TOOL_NAMES =
       listOf(
@@ -1030,9 +1194,22 @@ class ServeUiBuilderMcp(
 
     private const val MAX_DESIGN_WAIT_SECONDS = 120L
     private const val MCP_CLIENT_ID = "mcp"
+    /** What a links call may carry besides a link: the design it is about, and nothing else. */
+    private val LINKS_CALL_KEYS = setOf("designId")
+
+    /** The envelope field carrying the protocol response, and the response's own type tag. */
+    private const val RESPONSE_KEY = "response"
+
+    private const val RESPONSE_TYPE_KEY = "type"
+
+    /** `SnapshotResponseV1`'s `@SerialName`: the one response that means "here is the design". */
+    private const val SNAPSHOT_RESPONSE_TYPE = "snapshot"
 
     /** The key [CommentNoticeV1] is spliced onto a reply under. */
     internal const val COMMENTS_NOTICE_KEY = "comments"
+
+    /** The key [StoredLinks] is spliced onto a $GET_DESIGN reply under. */
+    internal const val LINKS_KEY = "links"
 
     /**
      * Tool declarations, built with the caller's own `tool` helper so this list has the same shape
@@ -1043,6 +1220,7 @@ class ServeUiBuilderMcp(
       native: Boolean = false,
       comments: Boolean = false,
       assets: Boolean = false,
+      links: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
         tool(
@@ -1214,6 +1392,45 @@ class ServeUiBuilderMcp(
           },"required":["designId","actorId"],"additionalProperties":false}
           """,
         ),
+        if (!links) null
+        else
+          tool(
+            GET_LINKS,
+            "Read what a design is **for**: the `issue` it was drawn for, the `reference` frame in " +
+              "the design tool it reproduces, the `pr` that implemented it, the `thread` it is " +
+              "being discussed in, and the `previous` design it continues. Start a session on " +
+              "somebody else's design here — it is the brief, and it is what $GET_DESIGN cannot " +
+              "tell you. Every field is optional; a reply with none of them means nobody has said " +
+              "yet. The record is kept beside the design and is never part of it: no node holds " +
+              "it, no export sees it, and writing one does not move the revision.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
+        if (!links) null
+        else
+          tool(
+            SET_LINKS,
+            "Say what a design is for. **Replaces the whole record**: send every link you want " +
+              "kept, and omit one to clear it — so read $GET_LINKS first if you are adding to " +
+              "what is already there. `issue`, `reference`, `pr` and `thread` are absolute http " +
+              "or https URLs, at most 2 KB each; `previous` is a design id on this host, not a " +
+              "URL. Anything else is refused with the reason. Sending an empty record clears it. " +
+              "Record the `pr` when you open one for a design you built here: it is what lets " +
+              "the next session, and the person who filed the issue, find one from the other.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "issue":{"type":"string","description":"The tracker issue this design is for."},
+              "reference":{"type":"string","description":"The frame in the design tool it reproduces."},
+              "pr":{"type":"string","description":"The pull request that implemented it."},
+              "thread":{"type":"string","description":"The chat thread it is discussed in, as a permalink."},
+              "previous":{"type":"string","description":"The design id on this host that this one continues."}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
         tool(
           RENAME_DESIGN,
           "Give a design a new title. The title is the one thing about a design nothing else " +

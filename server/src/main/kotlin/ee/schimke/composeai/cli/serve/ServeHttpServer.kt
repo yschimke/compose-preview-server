@@ -481,6 +481,13 @@ class ServeHttpServer(
    */
   private val uiBuilderCommentStore: ServeUiBuilderCommentStore? = null,
   /**
+   * Per-design back-links — the issue, the frame, the pull request, the thread, the design this one
+   * continues. Null leaves the links routes unregistered, for the same reason the reference and
+   * comment stores do: a record of what a design is for that the next restart forgets is not the
+   * feature.
+   */
+  private val uiBuilderLinksStore: ServeUiBuilderLinksStore? = null,
+  /**
    * The asset lane of [uiBuilderService] — the bytes behind a design's `assets` map. Null leaves
    * the asset routes and the `ui_builder_put_asset` tool unregistered, which is what a host with no
    * durable UI-builder state honestly has: a picture the next restart forgets is not the feature.
@@ -676,6 +683,7 @@ class ServeHttpServer(
               uiBuilderNativePreview,
               uiBuilderCommentStore,
               references = uiBuilderReferenceStore,
+              links = uiBuilderLinksStore,
               assets = uiBuilderAssets,
             )
           },
@@ -981,6 +989,13 @@ class ServeHttpServer(
               uiBuilderService,
               uiBuilderAuthorization,
               uiBuilderCommentStore,
+            )
+          }
+          if (uiBuilderLinksStore != null) {
+            installUiBuilderLinksRoutes(
+              uiBuilderService,
+              uiBuilderAuthorization,
+              uiBuilderLinksStore,
             )
           }
           if (uiBuilderAssets != null) {
@@ -5163,7 +5178,10 @@ class ServeHttpServer(
       )
       return
     }
-    val document = withContext(Dispatchers.IO) { library.document(catalog, designId) }
+    // One index read for both, so the links written below belong to the document created above.
+    val entry =
+      withContext(Dispatchers.IO) { library.index(catalog).firstOrNull { it.designId == designId } }
+    val document = entry?.let { withContext(Dispatchers.IO) { library.document(catalog, it) } }
     if (document == null) {
       call.respondText(
         "$system publishes no design called $designId",
@@ -5177,6 +5195,38 @@ class ServeHttpServer(
           .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    if (outcome is ServeUiBuilderCreate.Outcome.Created) {
+      // What the project says the design is for, carried across with it. Only on the design this
+      // call actually opened: a design already here has a links record of its own, possibly edited
+      // since, and the published index does not get to overwrite somebody's work by being re-read.
+      // And only when the document is the one the entry describes. A stale or wrongly renamed
+      // export can publish an entry for design A whose document carries id B; the design created
+      // is B, and B is not what the entry's issue and pull request are about.
+      entry
+        ?.takeIf { it.designId == document.id }
+        ?.links
+        ?.let { links ->
+          val written =
+            withContext(Dispatchers.IO) { uiBuilderLinksStore?.replace(document.id, links) }
+          // The design opened; only its sidecar did not. Saying so is the difference between an
+          // operator knowing why the reverse lookup omits this design and being left to guess.
+          val why =
+            when (written) {
+              is LinksWriteResult.Refused -> written.reason
+              is LinksWriteResult.Failed -> written.reason
+              else -> null
+            }
+          if (why != null) {
+            System.err.println("serve: links for library design ${document.id} not stored ($why)")
+          }
+        }
+      if (entry != null && entry.designId != document.id) {
+        System.err.println(
+          "serve: ${catalog.system} publishes design ${entry.designId} as a document with id " +
+            "${document.id}; its links were not carried across"
+        )
+      }
+    }
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,
       is ServeUiBuilderCreate.Outcome.AlreadyExists ->
@@ -5200,27 +5250,46 @@ class ServeHttpServer(
   private suspend fun RoutingContext.respondAdminUiBuilderDesigns(admin: ServeUiBuilderAdmin) {
     val designs = withContext(Dispatchers.IO) { admin.list() }
     val unusable = withContext(Dispatchers.IO) { admin.unusable() }
+    val unreadable = withContext(Dispatchers.IO) { admin.unreadable() }
+    val listed = designs.map {
+      AdminUiBuilderDesignDto(
+        designId = it.designId,
+        title = it.title,
+        revision = it.revision,
+        catalogSystemId = it.catalogPin.systemId,
+        ownerActorId = it.ownerActorId,
+        collaborators = it.collaborators,
+        createdAtEpochMillis = it.createdAtEpochMillis,
+        updatedAtEpochMillis = it.updatedAtEpochMillis,
+        activeSubscribers = it.activeSubscribers,
+        unusableReason = unusable[it.designId],
+      )
+    }
+    // A design whose own stored files would not read is not in the map above — it never became a
+    // design in memory — so it would have no row here, on the page the startup warning sends an
+    // operator to, offering the one recovery it actually has. It gets a row of its own, with what
+    // is knowable about it: the id it is reported under, and why the host will not serve it.
+    val quarantined =
+      (unusable.keys - designs.map { it.designId }.toSet()).sorted().map { designId ->
+        AdminUiBuilderDesignDto(
+          designId = designId,
+          title = designId,
+          revision = 0,
+          catalogSystemId = "",
+          ownerActorId = "",
+          collaborators = 0,
+          createdAtEpochMillis = 0,
+          updatedAtEpochMillis = 0,
+          activeSubscribers = 0,
+          unusableReason = unusable.getValue(designId),
+          documentAvailable = designId !in unreadable,
+        )
+      }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
       JSON.encodeToString(
         AdminUiBuilderDesignsResponse.serializer(),
-        AdminUiBuilderDesignsResponse(
-          designs =
-            designs.map {
-              AdminUiBuilderDesignDto(
-                designId = it.designId,
-                title = it.title,
-                revision = it.revision,
-                catalogSystemId = it.catalogPin.systemId,
-                ownerActorId = it.ownerActorId,
-                collaborators = it.collaborators,
-                createdAtEpochMillis = it.createdAtEpochMillis,
-                updatedAtEpochMillis = it.updatedAtEpochMillis,
-                activeSubscribers = it.activeSubscribers,
-                unusableReason = unusable[it.designId],
-              )
-            }
-        ),
+        AdminUiBuilderDesignsResponse(designs = listed + quarantined),
       ),
       ContentType.Application.Json,
     )
@@ -15310,6 +15379,13 @@ private data class AdminUiBuilderDesignDto(
    * schema: a client that does not know the field sees exactly what it saw before.
    */
   val unusableReason: String? = null,
+  /**
+   * Whether this design's document can still be produced, and so whether download and repair are
+   * offered. False only for a quarantine where the stored files themselves would not read, which is
+   * the case where retiring it is the only move an operator has. Additive, and true by default: a
+   * client that does not know the field behaves exactly as it did.
+   */
+  val documentAvailable: Boolean = true,
 )
 
 @Serializable

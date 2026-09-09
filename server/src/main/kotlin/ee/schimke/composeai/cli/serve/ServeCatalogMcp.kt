@@ -310,6 +310,7 @@ class ServeCatalogMcp(
           uiBuilderNative,
           it.supportsComments,
           it.supportsAssets,
+          it.supportsLinks,
         )
       )
     }

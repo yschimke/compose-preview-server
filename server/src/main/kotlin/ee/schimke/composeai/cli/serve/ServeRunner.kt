@@ -16,9 +16,9 @@ import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
-import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
+import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -2305,6 +2305,14 @@ public class ServeRunner(
      */
     val comments: ServeUiBuilderCommentStore?,
     /**
+     * The back-links that say what each design is for, in their own directory beside the state.
+     *
+     * Beside rather than inside for the third time, and for the third reason: a link is a fact
+     * *about* a design rather than content of it, and recording one must not advance the revision
+     * every open client is holding.
+     */
+    val links: ServeUiBuilderLinksStore?,
+    /**
      * The Compose half of the export, kept so the native render lane can ask it the same question
      * with node tagging on. Not reached through [service]: the service's exporter may be the
      * production wrapper around several formats, and the native lane wants exactly this one.
@@ -2576,7 +2584,7 @@ public class ServeRunner(
       }
     val service =
       PersistentUiBuilderService(
-        storage = FileUiBuilderStateStorage(directory.toPath()),
+        designStore = UiBuilderDesignStateStore.open(directory.toPath()),
         catalogs = catalogs,
         exporter = RootSurfaceGroundAnnotatedExporter(exporter),
         assets = assetStore,
@@ -2586,11 +2594,21 @@ public class ServeRunner(
     // diagnostics counter nobody reads until a design is reported missing. Named, not counted — the
     // id and the reason are what an operator needs to decide between repairing the catalog and
     // retiring the design, and a bare count sends them looking for which one.
+    val unreadable = service.adminUnreadableDesigns()
     service.adminUnusableDesigns().forEach { (designId, reason) ->
+      // Two kinds of unusable, two remedies, and offering the wrong one costs an operator the worst
+      // minutes to spend looking for a download that cannot exist: a design the catalog outgrew has
+      // a document to take out and put back, and a design whose files would not decode has none.
+      val remedy =
+        if (designId in unreadable) {
+          "the stored files are what failed, so there is nothing to download or repair — restore " +
+            "this design's directory from a backup, or retire it through /admin/ui-builder"
+        } else {
+          "repair the catalog it pins and restart, or take the design through /admin/ui-builder: " +
+            "download it, edit it to satisfy the rule, put it back, or retire it"
+        }
       System.err.println(
-        "serve: WARNING UI-builder design $designId cannot be served: " +
-          "$reason — repair the catalog it pins and restart, or take the design through " +
-          "/admin/ui-builder: download it, edit it to satisfy the rule, put it back, or retire it"
+        "serve: WARNING UI-builder design $designId cannot be served: $reason — $remedy"
       )
     }
     // The other startup condition nothing announced: a state file near the ceiling every save is
@@ -2631,6 +2649,15 @@ public class ServeRunner(
             System.err.println(
               "serve: UI-builder comments unavailable (${it.message}); " +
                 "the builder works, and a design cannot be discussed on it"
+            )
+          }
+          .getOrNull(),
+      links =
+        runCatching { ServeUiBuilderLinksStore(directory.resolve("links").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder links unavailable (${it.message}); " +
+                "the builder works, and a design cannot say what it is for"
             )
           }
           .getOrNull(),
@@ -2872,6 +2899,7 @@ public class ServeRunner(
           service = uiBuilderLane.service,
           references = uiBuilderLane.references,
           comments = uiBuilderLane.comments,
+          links = uiBuilderLane.links,
         )
       } else {
         null
@@ -3041,6 +3069,7 @@ public class ServeRunner(
         uiBuilderService = uiBuilderLane?.service,
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
+        uiBuilderLinksStore = uiBuilderLane?.links,
         uiBuilderAssets = uiBuilderLane?.service,
         uiBuilderAuthorization =
           uiBuilderLane?.let {

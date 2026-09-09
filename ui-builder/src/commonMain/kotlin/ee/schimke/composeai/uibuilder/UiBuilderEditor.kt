@@ -108,6 +108,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -167,6 +168,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -310,6 +312,24 @@ fun UiBuilderEditor(
   onReconnect: (() -> Unit)? = null,
   onSubmission: ((EditorSubmission) -> Unit)? = null,
   authoritativeGeneration: Int = 0,
+  /**
+   * The revision a link to one node may name: the last the server accepted, and only if that
+   * revision is one the node was in. Null everywhere else, and null by default.
+   *
+   * Two questions rather than one, because a layer link gets them both wrong in opposite
+   * directions. `state.document.revision` is not the answer to the first: the reducer raises it the
+   * moment an edit is applied so the canvas can draw it, which is a claim about a submission still
+   * in the queue — a link at that number resolves to nothing, or, once a collaborator's edit
+   * claimed the number first, to a document the person who copied it never saw. But the last
+   * accepted revision is not the answer either for a node that only exists because of a queued
+   * insert, duplicate or paste: pairing it with the new node's id makes a link that is *reliably*
+   * stale, opening on the missing-layer notice.
+   *
+   * So a host answers per node, and a null means the link names no revision and opens the living
+   * design at that layer — which is right in both cases, and arrives at the layer as soon as the
+   * edit that made it lands.
+   */
+  authoritativeRevisionFor: (String) -> Long? = { null },
   initialSelectedNodeId: String? = null,
   initialCatalogQuery: String = "",
   initialLayerQuery: String = "",
@@ -346,6 +366,17 @@ fun UiBuilderEditor(
   initialComponentsOpen: Boolean = false,
   initialLayersOpen: Boolean = false,
   initialInspectorOpen: Boolean = false,
+  /**
+   * The two tool modes a host may want a picture of: whether an Add starts a top-level item, and
+   * which unstored axes the variant strip draws.
+   *
+   * Both are editor state rather than document state, so without these the previews that exist to
+   * diff them would have to click their way into the mode — which a static render cannot do. Every
+   * other host leaves them at their defaults, which are the same off state a person's editor opens
+   * in.
+   */
+  initialAddBeside: Boolean = false,
+  initialVariantAxes: Set<EditorVariantAxis> = emptySet(),
   /**
    * The scale the canvas opens at, or null to frame the design in the workspace.
    *
@@ -429,6 +460,62 @@ fun UiBuilderEditor(
   onResolveCommentThread: ((threadId: String, resolved: Boolean) -> Unit)? = null,
   /** A sentence from the host — a refused comment, a feed that dropped. */
   commentStatus: String? = null,
+  /**
+   * The thread the address bar names — now, not only when the editor mounted.
+   *
+   * Separate from the selection the panel keeps for itself: a link says where to start reading, and
+   * the reader is free to move off it, which is why this is not simply the panel's state. But it is
+   * *not* read once. A fragment-only navigation — a second `#thread=` link followed from inside the
+   * open design, or Back over one — never reloads the page, so a host that reported only the
+   * startup value would leave the panel on the previous conversation while the address bar named
+   * the new one. Each new non-null value is opened and scrolled to exactly once, the way the first
+   * one is.
+   */
+  linkedThreadId: String? = null,
+  /**
+   * How many times the browser has changed the fragment, and the only thing that moves this
+   * selection after the first paint.
+   *
+   * [linkedThreadId] answers *what* the address bar names; this answers *whether the address bar
+   * just changed*, and the two come apart. A host keeps that id in step with the URL, which means
+   * clearing it when the reader opens a different thread — the fragment stops naming the old one at
+   * that moment. Keyed on the id alone, this editor would read its own host's bookkeeping as a
+   * navigation and immediately close the thread that caused it.
+   */
+  threadNavigations: Int = 0,
+  /**
+   * Which thread the panel has open now, told to the host on every change.
+   *
+   * The host uses it to keep the address bar honest: a `#thread=` naming a conversation the reader
+   * has since closed is a URL that lies about what is on screen.
+   */
+  onSelectedThreadChanged: ((String?) -> Unit)? = null,
+  /**
+   * The committed revision `?revision=` pinned this editor to, or null for the living design.
+   *
+   * See [DesignRevisionPin] — it carries both the revision the link asked for and whether that is
+   * what the canvas got, because a banner that cannot tell those apart cannot be trusted.
+   */
+  revisionPin: DesignRevisionPin? = null,
+  /** Leaves a pinned revision for the design as it stands now. Null where the host cannot. */
+  onGoToLatest: (() -> Unit)? = null,
+  /**
+   * A sentence about the link that opened this editor — a node id this design does not have.
+   *
+   * A notice rather than a refusal, and never an error: a selector that names nothing is a stale
+   * link, and the design behind it still opens.
+   */
+  openingNotice: String? = null,
+  /**
+   * Copies a link to one place in this design and answers with a sentence, or null where the host
+   * cannot reach a clipboard.
+   *
+   * The editor says *what* the link means — this node, this thread, at this revision — and the host
+   * turns that into an address against its own origin; see [designUrlPath]. Null in every preview
+   * and test, where the affordance is then absent rather than present and failing, which is the
+   * rule [onPickReference] and [exportHost] already follow.
+   */
+  onCopyDesignLink: (suspend (DesignUrlSelectors) -> String)? = null,
   newDesignCatalogs: List<UiBuilderNewDesignCatalog> = emptyList(),
   onCreateDesign:
     ((
@@ -515,6 +602,8 @@ fun UiBuilderEditor(
             catalogQuery = initialCatalogQuery,
             layerQuery = initialLayerQuery,
             inspectorMode = initialInspectorMode,
+            addBeside = initialAddBeside,
+            variantAxes = initialVariantAxes,
             previewMode = initialPreviewMode,
             codePaneVisible = initialCodePaneVisible,
             enabledPacks =
@@ -595,7 +684,17 @@ fun UiBuilderEditor(
   // value being edited and cleared the moment it lands.
   var hoverFocusTarget by remember(document.id) { mutableStateOf<String?>(null) }
   var textInputFocused by remember { mutableStateOf(false) }
-  var mobilePanel by remember(document.id) { mutableStateOf(MobileEditorPanel.None) }
+  // Opened where the URL asked for a panel, on a narrow viewport as much as a wide one. The
+  // compact layout draws its docks from this rather than from [inspectorOpen], so initialising only
+  // that flag left `?node=` and `#thread=` selecting silently on a phone: the state was right and
+  // nothing was on screen. `Properties` is the compact dock that hosts every inspector mode, Talk
+  // included — the same pairing `onOpenProperties` already makes.
+  var mobilePanel by
+    remember(document.id) {
+      mutableStateOf(
+        if (initialInspectorOpen) MobileEditorPanel.Properties else MobileEditorPanel.None
+      )
+    }
   // Which panels are open. Local rather than in [UiBuilderEditorState] on purpose: what a
   // collaborator has open is not part of the document, and an editor that reopened someone else's
   // panels on every reconcile would be worse than one that remembers nothing.
@@ -639,19 +738,73 @@ fun UiBuilderEditor(
   var captureFailure by remember(document.id) { mutableStateOf<String?>(null) }
   // Which conversation is open, in the panel and under the pin. Editor state rather than document
   // state, and per design: which thread somebody has expanded is a fact about a moment.
-  var selectedThreadId by remember(document.id) { mutableStateOf<String?>(null) }
+  var selectedThreadId by remember(document.id) { mutableStateOf(linkedThreadId) }
+  // A sentence the editor itself put up — a refused edit under a pinned revision, the answer to a
+  // Copy link — kept apart from [openingNotice], which is the host's and does not expire.
+  var transientNotice by remember(document.id) { mutableStateOf<String?>(null) }
+  var transientNoticeGeneration by remember(document.id) { mutableStateOf(0) }
+  LaunchedEffect(transientNoticeGeneration) {
+    if (transientNotice == null) return@LaunchedEffect
+    delay(EXPORT_STATUS_MILLIS)
+    transientNotice = null
+  }
+  fun say(sentence: String) {
+    transientNotice = sentence
+    transientNoticeGeneration += 1
+  }
+  val editorScope = rememberCoroutineScope()
+  fun selectThread(threadId: String?) {
+    selectedThreadId = threadId
+    onSelectedThreadChanged?.invoke(threadId)
+  }
   val draggedTarget = draggedComponentId?.let { reducer.dropTarget(state, it) }
   val canvasDropHovered =
     catalogDragPosition?.let(canvasBounds::contains) == true && draggedTarget != null
+  /**
+   * One editor event, and the one place a pinned revision stops being editable.
+   *
+   * The guard is the operation sequence rather than a list of which events are edits: the reducer
+   * bumps it for every command it forms, accepted or rejected, and for nothing else. So selecting,
+   * filtering, opening a panel, marking up the reference and switching a pack all pass through a
+   * pinned editor untouched, while every change to the *document* is dropped before it can reach
+   * the local state — which matters, because an optimistic edit that never becomes a submission
+   * would leave the canvas showing a revision that exists nowhere.
+   */
   fun dispatch(event: UiBuilderEditorEvent) {
     val previous = state
     val current = reducer.reduce(previous, event)
+    if (revisionPin?.readOnly == true && current.operationSequence != previous.operationSequence) {
+      say("Revision ${revisionPin.requested} is read-only. Go to latest to edit.")
+      return
+    }
     state = current
     reducer.acceptedSubmission(previous, current)?.let { onSubmission?.invoke(it) }
   }
   fun focusEditor() {
     textInputFocused = false
     editorFocusRequester.requestFocus()
+  }
+  // Following the address bar after the first paint, for the navigation the browser answers without
+  // reloading: a fragment-only move between two thread links, or Back over one.
+  //
+  // Null is a case and not a no-op. Back out of a `#thread=` URL to the fragment-free design is a
+  // same-document navigation like any other, and leaving the previous conversation selected while
+  // the address bar has stopped naming it is the same disagreement this effect exists to prevent.
+  // Deselecting cannot fight the reader who closed a thread by hand: that path has already set the
+  // selection to null, so this finds nothing to do. The panel is opened for a thread and not shut
+  // again for a null — where the reader ended up is the board, and closing it under them would be
+  // answering a navigation with more than it asked for.
+  LaunchedEffect(threadNavigations) {
+    // The value the editor mounted with is already the selection; only a later navigation acts.
+    if (threadNavigations == 0) return@LaunchedEffect
+    val threadId = linkedThreadId
+    if (threadId == selectedThreadId) return@LaunchedEffect
+    selectThread(threadId)
+    if (threadId != null) {
+      dispatch(UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Comments))
+      inspectorOpen = true
+      mobilePanel = MobileEditorPanel.Properties
+    }
   }
   /**
    * Bake the reference stack into one picture and make it the base.
@@ -742,6 +895,33 @@ fun UiBuilderEditor(
         inspectorOpen = true
         mobilePanel = MobileEditorPanel.Properties
       },
+      // The link names the *anchor* rather than the whole selection: a URL selects one node, and
+      // the anchor is the node every other single-selection question in this editor is asked of.
+      // Pinned to the revision the host confirmed this layer was in, and offered only where there
+      // is one. A layer that exists solely because of a queued insert, duplicate or paste is in no
+      // revision yet, and neither shape of link to it works: pinned, it names a revision the layer
+      // was not in; unpinned, it opens the living design, where the recipient's own first snapshot
+      // has no such node — so the editor falls back to the root and never reselects when the edit
+      // lands. Nothing here can make that link correct, so the row is withheld for the moment the
+      // queue takes rather than copying an address that is wrong on arrival.
+      onCopyLink =
+        onCopyDesignLink?.let { copy ->
+          state.selectedNodeId?.let { nodeId ->
+            authoritativeRevisionFor(nodeId)?.let { revision ->
+              {
+                editorScope.launch {
+                  say(
+                    copyLinkSentence(
+                      copy,
+                      DesignUrlSelectors(revision = revision, nodeId = nodeId),
+                    )
+                  )
+                }
+                Unit
+              }
+            }
+          }
+        },
       onDismiss = close,
       dispatch = ::dispatch,
     )
@@ -791,13 +971,25 @@ fun UiBuilderEditor(
           draggedComponentId = null
           catalogDragPosition = null
         },
-        canAddCatalogComponent = { reducer.dropTarget(state, it) != null },
+        // Beside the design, every component can be added: a top-level item is in no slot, so there
+        // is no compatibility to satisfy. The one thing that can still refuse is the wrap itself.
+        canAddCatalogComponent = {
+          // The component as well as the document: beside the design there is no slot to satisfy,
+          // but a component whose emitter demands the root is still not one a board can hold.
+          if (state.addBeside) reducer.besideRefusal(state, it) == null
+          else reducer.dropTarget(state, it) != null
+        },
+        besideRefusal = reducer.besideRefusal(state),
         onCatalogAdd = { componentId, variant ->
           focusEditor()
-          reducer.dropTarget(state, componentId)?.let { target ->
-            dispatch(UiBuilderEditorEvent.InsertComponent(componentId, target, variant))
+          if (state.addBeside) {
+            dispatch(UiBuilderEditorEvent.InsertComponentBeside(componentId, variant))
             if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
-          }
+          } else
+            reducer.dropTarget(state, componentId)?.let { target ->
+              dispatch(UiBuilderEditorEvent.InsertComponent(componentId, target, variant))
+              if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
+            }
         },
         remoteComposeSources =
           if (resolveRemoteComposeDocument == null) emptyList() else remoteComposeSources,
@@ -815,9 +1007,17 @@ fun UiBuilderEditor(
         modifier = modifier,
       )
     }
+  // The strip beside the design: the devices it claims, plus whichever unstored axes are switched
+  // on. Computed here rather than in the canvas because it is a question about the *design* — its
+  // stored `exportDevices` and the editor's own axes — and the canvas draws what it is handed.
+  val variantPanes =
+    remember(state.document, devicePresets, state.variantAxes) {
+      state.document.variantPanes(devicePresets, state.variantAxes)
+    }
   val canvas: @Composable (Modifier, Alignment) -> Unit = { modifier, alignment ->
     PinnedDesignCanvas(
       document = state.document,
+      variants = variantPanes,
       selectedNodeId = state.selectedNodeId,
       onNodeSelected = {
         focusEditor()
@@ -844,7 +1044,7 @@ fun UiBuilderEditor(
       commentThreads = comments.pinned(state.reference.marks),
       selectedThreadId = selectedThreadId,
       onCommentThreadSelected = { threadId ->
-        selectedThreadId = threadId
+        selectThread(threadId)
         dispatch(UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Comments))
       },
       onInspectionSnapshot = { snapshot ->
@@ -966,6 +1166,20 @@ fun UiBuilderEditor(
     // Resolved against the selection as it stands NOW, not as it stood when the row was pressed: a
     // fetch takes a round trip, and the reducer would refuse a target the author has since moved
     // away from. Asking again is what makes the insert land where the canvas says it will.
+    // Beside the design when that is the mode, resolved here for the same reason the target below
+    // is: both are read as they stand NOW rather than as they stood when the row was pressed, and a
+    // fetch is a round trip. Dispatching the ordinary insert regardless is what made a Remote
+    // Compose row offered under Add beside either refuse after its fetch or land inside the
+    // selection while the panel promised a top-level item.
+    if (state.addBeside) {
+      val refusal = reducer.besideRefusal(state, REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID)
+      remoteSourceFailure = refusal?.let { "${source.label}: $it" }
+      if (refusal == null) {
+        dispatch(UiBuilderEditorEvent.InsertRemoteComposeDocumentBeside(source, encoded))
+      }
+      pendingRemoteSource = null
+      return@LaunchedEffect
+    }
     val target = reducer.dropTarget(state, REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID)
     if (target == null) {
       remoteSourceFailure = "${source.label}: no compatible slot is selected"
@@ -1092,7 +1306,13 @@ fun UiBuilderEditor(
         .map { it.name }
         .toSet()
     } ?: emptySet()
-  val inspector: @Composable (Modifier) -> Unit = { modifier ->
+  // `variantsDrawn` is a parameter rather than a captured value because only the layout knows it:
+  // the
+  // compact branch draws the canvas unconditionally, while the wide one hands the pane to the
+  // host's
+  // renderer when that is the chosen surface. Deciding it up here got the narrow window wrong — the
+  // strip was visibly drawn while the inspector said it was not.
+  val inspector: @Composable (Modifier, Boolean) -> Unit = { modifier, variantsDrawn ->
     PropertyInspector(
       state = state,
       onClose = { inspectorOpen = false },
@@ -1104,6 +1324,7 @@ fun UiBuilderEditor(
       operationHistory = operationHistory,
       themeSettings = reducer.themeSettings(state),
       devicePresets = devicePresets,
+      variantsDrawn = variantsDrawn,
       onPickReference = onPickReference,
       onSnapshotDesign = onSnapshotDesign,
       onFlatten = ::flattenCurrentReference,
@@ -1122,9 +1343,29 @@ fun UiBuilderEditor(
       comments = comments,
       commentStatus = commentStatus,
       selectedThreadId = selectedThreadId,
-      onSelectThread = { selectedThreadId = it },
+      onSelectThread = ::selectThread,
+      // Read once. The panel scrolls to the thread the URL named as it opens, and never again —
+      // a later scroll would be the page fighting somebody who has started reading elsewhere.
+      revealThreadId = linkedThreadId,
       onPostComment = onPostComment,
       onResolveCommentThread = onResolveCommentThread,
+      // A thread's link carries the thread in the fragment and, where the thread is pinned to a
+      // layer, that layer too: a conversation about a button is worth opening beside the button.
+      // No revision — a discussion is about the living design, not the moment it was linked.
+      onCopyThreadLink =
+        onCopyDesignLink?.let { copy ->
+          { thread: DesignCommentThread ->
+            editorScope.launch {
+              say(
+                copyLinkSentence(
+                  copy,
+                  DesignUrlSelectors(nodeId = thread.anchor?.nodeId, threadId = thread.id),
+                )
+              )
+            }
+            Unit
+          }
+        },
       onTextInputFocusChanged = { textInputFocused = it },
       dispatch = ::dispatch,
       modifier = modifier,
@@ -1221,6 +1462,15 @@ fun UiBuilderEditor(
               dispatch = ::dispatch,
             )
           }
+          // Under the toolbar and over everything else, on both layouts: what a link asked for is
+          // the first thing to know about this page, and a strip inside one of the docks would be
+          // behind a panel that starts closed.
+          EditorUrlBanner(
+            revisionPin = revisionPin,
+            onGoToLatest = onGoToLatest,
+            openingNotice = openingNotice,
+            transientNotice = transientNotice,
+          )
           Box(Modifier.fillMaxSize()) {
             if (!compact) {
               // Which dock is showing, derived rather than stored: the code pane and the inspector
@@ -1338,7 +1588,12 @@ fun UiBuilderEditor(
                         }
                       }
                     }
-                  else -> inspector(Modifier.width(INSPECTOR_WIDTH).fillMaxHeight())
+                  else ->
+                    inspector(
+                      Modifier.width(INSPECTOR_WIDTH).fillMaxHeight(),
+                      // The same condition the canvas is drawn under, a few lines above.
+                      state.previewSurface != EditorPreviewSurface.Native || !nativeRequested,
+                    )
                 }
                 EditorRail(
                   EditorDock.entries.map { entry ->
@@ -1403,7 +1658,11 @@ fun UiBuilderEditor(
                   Modifier.align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(0.72f)
-                    .padding(bottom = 56.dp)
+                    .padding(bottom = 56.dp),
+                  // Always, here: this branch draws the canvas whatever surface is chosen, and
+                  // never
+                  // the host's pane.
+                  true,
                 )
               }
               if (mobilePanel == MobileEditorPanel.Code && generatedCode != null) {
@@ -2304,6 +2563,8 @@ private fun EditorSelectionMenuItems(
   wrapCandidates: List<EditorCatalogItem>,
   canUnwrap: Boolean,
   onOpenProperties: (() -> Unit)?,
+  /** Copies a link that opens this design on this layer, or null where nothing is selected. */
+  onCopyLink: (() -> Unit)? = null,
   onDismiss: () -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -2320,8 +2581,23 @@ private fun EditorSelectionMenuItems(
         onOpenProperties()
       },
     )
-    HorizontalDivider()
   }
+  // Beside Properties rather than among the clipboard verbs, because both of these are ways of
+  // *pointing at* the selected layer while Copy and Cut are ways of moving it. The Export menu's
+  // Copy link is the design's address; this one is a layer's, which is the thing somebody pastes
+  // when they mean "this button, here".
+  if (onCopyLink != null) {
+    DropdownMenuItem(
+      text = { Text("Copy link") },
+      leadingIcon = { Icon(Icons.Filled.Link, contentDescription = null) },
+      modifier = Modifier.semantics { contentDescription = "Copy link to this layer" },
+      onClick = {
+        onDismiss()
+        onCopyLink()
+      },
+    )
+  }
+  if (onOpenProperties != null || onCopyLink != null) HorizontalDivider()
   DropdownMenuItem(
     text = { Text("Duplicate") },
     enabled = canDuplicate,
@@ -2413,6 +2689,84 @@ private fun EditorSelectionMenuItems(
       text = { Text("Unwrap") },
       onClick = { act(UiBuilderEditorEvent.UnwrapSelection) },
     )
+  }
+}
+
+/**
+ * Runs one Copy link against the host and hands back the sentence to show.
+ *
+ * A failure is a sentence too, for the reason the export host gives: the affordance is a button in
+ * a menu, and a clipboard the browser refused should be reported where the button was rather than
+ * swallowed into a console nobody has open.
+ */
+private suspend fun copyLinkSentence(
+  copy: suspend (DesignUrlSelectors) -> String,
+  selectors: DesignUrlSelectors,
+): String =
+  try {
+    copy(selectors)
+  } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+    throw cancelled
+  } catch (failure: Exception) {
+    "Copy link failed: ${failure.message ?: "unknown error"}"
+  }
+
+/**
+ * What a pinned revision, a stale selector or a just-copied link has to say, over the canvas.
+ *
+ * One strip rather than three, because all three are the same kind of sentence — something about
+ * *this opening of this design* that the canvas cannot show — and a page that grows a new bar per
+ * kind of news is a page whose design moves under the reader. The revision line is the only one
+ * that persists; the rest expire, which is why they are drawn after it rather than instead of it.
+ */
+@Composable
+private fun EditorUrlBanner(
+  revisionPin: DesignRevisionPin?,
+  onGoToLatest: (() -> Unit)?,
+  openingNotice: String?,
+  transientNotice: String?,
+) {
+  val pinned = revisionPin?.pinned == true
+  val message =
+    when {
+      pinned -> "Showing revision ${revisionPin.requested} · read-only"
+      revisionPin != null ->
+        "Revision ${revisionPin.requested} is not available — showing the latest design."
+      else -> null
+    }
+  if (message == null && openingNotice == null && transientNotice == null) return
+  Surface(
+    Modifier.fillMaxWidth(),
+    color =
+      if (pinned) MaterialTheme.colorScheme.secondaryContainer
+      else MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Row(
+      Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Icon(
+        if (pinned) Icons.Filled.History else Icons.Filled.Link,
+        contentDescription = null,
+        modifier = Modifier.size(18.dp),
+      )
+      Text(
+        listOfNotNull(message, openingNotice, transientNotice).joinToString("  ·  "),
+        Modifier.weight(1f).semantics { contentDescription = "Design link notice" },
+        style = MaterialTheme.typography.labelMedium,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+      if (revisionPin != null && onGoToLatest != null) {
+        TextButton(
+          onClick = onGoToLatest,
+          modifier = Modifier.semantics { contentDescription = "Go to latest revision" },
+        ) {
+          Text("Go to latest")
+        }
+      }
+    }
   }
 }
 
@@ -3027,6 +3381,8 @@ private fun EditorNavigator(
   onCatalogDrag: (String, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
   canAddCatalogComponent: (String) -> Boolean,
+  /** Why an Add beside would refuse, or null — see `UiBuilderEditorReducer.besideRefusal`. */
+  besideRefusal: String? = null,
   onCatalogAdd: (String, EditorCatalogVariant?) -> Unit,
   remoteComposeSources: List<RemoteComposeSource>,
   pendingRemoteComposeSource: RemoteComposeSource?,
@@ -3061,6 +3417,7 @@ private fun EditorNavigator(
             onCatalogDrag = onCatalogDrag,
             onCatalogDrop = onCatalogDrop,
             canAddCatalogComponent = canAddCatalogComponent,
+            besideRefusal = besideRefusal,
             onCatalogAdd = onCatalogAdd,
             remoteComposeSources = remoteComposeSources,
             pendingRemoteComposeSource = pendingRemoteComposeSource,
@@ -3111,6 +3468,8 @@ private fun InsertPanel(
   onCatalogDrag: (String, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
   canAddCatalogComponent: (String) -> Boolean,
+  /** Why an Add beside would refuse, or null — see `UiBuilderEditorReducer.besideRefusal`. */
+  besideRefusal: String? = null,
   onCatalogAdd: (String, EditorCatalogVariant?) -> Unit,
   remoteComposeSources: List<RemoteComposeSource>,
   pendingRemoteComposeSource: RemoteComposeSource?,
@@ -3133,17 +3492,36 @@ private fun InsertPanel(
     }
     // Where an Add would land, said before it is pressed rather than after it is refused. The
     // beginner's question about this panel is not what the components are called.
+    // Where an Add beside would land, in the same voice as the line above it: a board says how many
+    // items it already holds, and a design that has to be wrapped says that is what will happen.
+    val boardRootId = state.document.boardRootId
+    val besideDestination =
+      when {
+        besideRefusal != null -> null
+        boardRootId != null -> {
+          val held =
+            state.document.nodes[boardRootId]?.slots?.get(UiBuilderBoard.SLOT).orEmpty().size
+          "Adds beside $held item(s) on the board"
+        }
+        state.document.roots.isEmpty() -> "Adds as this design's first item"
+        else -> "Adds beside the design, on a new board"
+      }
     Text(
-      dropTarget?.let { "Adds into ${it.nodeId}.${it.slot}" }
-        ?: "Select a layer that can hold a component",
+      when {
+        state.addBeside -> besideDestination ?: besideRefusal.orEmpty()
+        dropTarget != null -> "Adds into ${dropTarget.nodeId}.${dropTarget.slot}"
+        else -> "Select a layer that can hold a component"
+      },
       Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
       color =
-        if (dropTarget == null) MaterialTheme.colorScheme.onSurfaceVariant
+        if (if (state.addBeside) besideDestination == null else dropTarget == null)
+          MaterialTheme.colorScheme.onSurfaceVariant
         else MaterialTheme.colorScheme.primary,
       style = MaterialTheme.typography.labelSmall,
-      maxLines = 1,
+      maxLines = 2,
       overflow = TextOverflow.Ellipsis,
     )
+    AddBesideSwitch(state.addBeside) { dispatch(UiBuilderEditorEvent.ToggleAddBeside) }
     if (!packs.isEmpty && onManagePacks != null) {
       PacksSummaryRow(packs, state.enabledPacks, onManagePacks)
     }
@@ -3535,6 +3913,17 @@ private fun NavigatorTab.icon(): ImageVector =
 @Composable
 internal fun PinnedDesignCanvas(
   document: UiBuilderDocument,
+  /**
+   * The read-only panes drawn beside the design, in strip order — see [UiBuilderVariantPane].
+   *
+   * Exactly one pane on this canvas takes edits, and it is the extent below: no variant carries a
+   * selection overlay, a hit-test, a drop target or a comment pin. That is the load-bearing rule of
+   * the feature rather than a limitation of it — a design has one document, so an edit made on the
+   * tablet pane would be an edit to the same tree the phone pane draws, and offering a coordinate
+   * space per pane for one shared outcome is what makes a multi-variant editor confusing
+   * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+   */
+  variants: List<UiBuilderVariantPane> = emptyList(),
   selectedNodeId: String?,
   onNodeSelected: (String) -> Unit,
   onCanvasMetrics: (Int, Int, Float) -> Unit,
@@ -3606,12 +3995,25 @@ internal fun PinnedDesignCanvas(
     // Only a design that outgrows its frame gets the second pane. One that fits would be drawn
     // twice identically, and two identical pictures side by side say nothing the one said.
     val overflowsFrame = expandedHeightDp > sourceHeight + 0.5f
-    val pairWidth = if (overflowsFrame) sourceWidth * 2f + CANVAS_PANE_GAP_DP.value else sourceWidth
-    // Fit frames the pair, not the extent alone: zooming to fit a design whose companion is off
-    // the right edge is not fitting the design. Height is the extent's, which is the taller of
-    // the two by construction.
+    // Every pane in the strip, gap included, because fit has to frame what is actually drawn.
+    val stripWidth =
+      (if (overflowsFrame) sourceWidth + CANVAS_PANE_GAP_DP.value else 0f) +
+        variants.sumOf { (CANVAS_PANE_GAP_DP.value + it.widthDp).toDouble() }.toFloat()
+    val pairWidth = sourceWidth + stripWidth
+    // Fit frames the whole row, not the extent alone: zooming to fit a design whose companion or
+    // whose tablet variant is off the right edge is not fitting the design. Height is the tallest
+    // pane, which is the extent unless a variant's frame is longer than the design is.
+    val stripHeight = maxOf(expandedHeightDp, variants.maxOfOrNull { it.heightDp } ?: 0f)
+    // A variant's label is laid out *above* its scaled frame at a fixed size, so it does not shrink
+    // with the zoom: the room it needs comes off the workspace before the scale is worked out,
+    // rather than being scaled along with the frame. Folding it into `stripHeight` instead made the
+    // tallest variant overflow a workspace that claimed to be fitting it.
+    val labelRoom = if (variants.isEmpty()) 0f else VARIANT_LABEL_ROOM_DP
     val fitScale =
-      minOf(workspaceWidth.value / pairWidth, workspaceHeight.value / expandedHeightDp)
+      minOf(
+          workspaceWidth.value / pairWidth,
+          (workspaceHeight.value - labelRoom).coerceAtLeast(0f) / stripHeight,
+        )
         .coerceIn(MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM)
     val scale = zoom ?: fitScale
     // The frame is laid out in the design's pixels, so it is drawn back down by the same ratio it
@@ -3779,6 +4181,13 @@ internal fun PinnedDesignCanvas(
               densityRatio = densityRatio,
             )
           }
+          // Keyed by the pane rather than by its position in the row. Every pane draws the same
+          // document id, and `UiBuilderSurface` remembers its bounds and its design state against
+          // that id, so an unkeyed loop hands a removed pane's composition — and its scroll
+          // positions — to whichever pane slid into its slot.
+          variants.forEach { variant ->
+            key(variant.id) { VariantPane(pane = variant, scale = scale, hostDensity = density) }
+          }
         }
       }
     }
@@ -3842,6 +4251,8 @@ private fun ConstrainedFramePane(
   scale: Float,
   /** The design's pixels per workspace pixel — see the same value in [PinnedDesignCanvas]. */
   densityRatio: Float,
+  /** Distinct per pane, for the reason the function doc gives. */
+  renderSessionId: String = FRAME_COMPANION_SESSION,
 ) {
   Box(Modifier.size((widthDp * scale).dp, (heightDp * scale).dp)) {
     Surface(
@@ -3873,7 +4284,7 @@ private fun ConstrainedFramePane(
       UiBuilderSurface(
         document = document,
         editorOverlay = false,
-        renderSessionId = FRAME_COMPANION_SESSION,
+        renderSessionId = renderSessionId,
         unrolled = false,
       )
     }
@@ -3885,6 +4296,41 @@ private const val FRAME_COMPANION_SESSION = "frame-companion"
 
 /** Canvas dp between the extent and the frame beside it. */
 private val CANVAS_PANE_GAP_DP = 24.dp
+
+/**
+ * One read-only pane of the variant strip: what it is called, and the design under that frame.
+ *
+ * The label sits outside the scaled frame, like the hover editor and for its reason: it names a
+ * picture rather than being part of one, so it stays legible however far the design is zoomed out.
+ * Which is also why it is the pane's own [Column] rather than an overlay — a name drawn on top of a
+ * variant would be the one thing in the strip that is not the design.
+ */
+@Composable
+private fun VariantPane(pane: UiBuilderVariantPane, scale: Float, hostDensity: Density) {
+  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Text(
+      pane.label,
+      Modifier.height(VARIANT_LABEL_ROOM_DP.dp).widthIn(max = (pane.widthDp * scale).dp),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    ConstrainedFramePane(
+      document = pane.document,
+      widthDp = pane.widthDp,
+      heightDp = pane.heightDp,
+      scale = scale,
+      // The variant's own, not the design's: a preset carries a density as well as a size, and a
+      // Pixel Fold drawn at the watch's 2.0 would be the right box around the wrong measurements.
+      densityRatio = pane.document.renderDensity(hostDensity).density / hostDensity.density,
+      renderSessionId = pane.id,
+    )
+  }
+}
+
+/** Room above a variant pane for its label, in canvas dp. */
+private const val VARIANT_LABEL_ROOM_DP = 18f
 
 /** How wide the editor that follows the selection is, and how much room it needs under a node. */
 private val HOVER_EDITOR_WIDTH = 268.dp
@@ -4351,6 +4797,45 @@ private fun CatalogRow(
       )
     }
     CatalogAddButton(canAdd, onAdd, item.displayName)
+  }
+}
+
+/**
+ * The insert panel's mode switch: does an Add fill a slot, or start an item beside the design?
+ *
+ * A row under the destination line because that is the line it changes — the switch and the
+ * sentence saying where the next Add lands read as one statement, and a control that changes what a
+ * button does belongs beside the description of what the button does rather than in a menu.
+ *
+ * Off is the behaviour every design has had. On, an Add appends a top-level item, wrapping the
+ * design in a board first if it is not already on one
+ * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+ */
+@Composable
+private fun AddBesideSwitch(checked: Boolean, onToggle: () -> Unit) {
+  Row(
+    Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, bottom = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Column(Modifier.weight(1f)) {
+      Text("Add beside", style = MaterialTheme.typography.labelMedium)
+      Text(
+        "Place items side by side instead of inside the selection",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+    Switch(
+      checked = checked,
+      onCheckedChange = { onToggle() },
+      modifier =
+        Modifier.semantics {
+          contentDescription =
+            if (checked) "Add into the selected layer instead" else "Add beside the design instead"
+        },
+    )
   }
 }
 
@@ -5188,6 +5673,10 @@ private fun PropertyInspector(
   operationHistory: List<EditorOperationEntry>,
   themeSettings: EditorThemeSettings,
   devicePresets: List<UiBuilderDevicePreset>,
+  /**
+   * Whether the builder's own canvas — the surface the variant strip is drawn on — is on screen.
+   */
+  variantsDrawn: Boolean,
   onPickReference: (suspend () -> ReferenceImportOutcome)?,
   onSnapshotDesign: (suspend () -> ReferenceImportOutcome)?,
   onFlatten: () -> Unit,
@@ -5200,8 +5689,10 @@ private fun PropertyInspector(
   commentStatus: String?,
   selectedThreadId: String?,
   onSelectThread: (String?) -> Unit,
+  revealThreadId: String?,
   onPostComment: ((DesignCommentDraft) -> Unit)?,
   onResolveCommentThread: ((String, Boolean) -> Unit)?,
+  onCopyThreadLink: ((DesignCommentThread) -> Unit)?,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
   modifier: Modifier = Modifier.width(INSPECTOR_WIDTH).fillMaxHeight(),
@@ -5246,6 +5737,7 @@ private fun PropertyInspector(
         operationHistory = operationHistory,
         themeSettings = themeSettings,
         devicePresets = devicePresets,
+        variantsDrawn = variantsDrawn,
         onPickReference = onPickReference,
         onSnapshotDesign = onSnapshotDesign,
         onFlatten = onFlatten,
@@ -5258,8 +5750,10 @@ private fun PropertyInspector(
         commentStatus = commentStatus,
         selectedThreadId = selectedThreadId,
         onSelectThread = onSelectThread,
+        revealThreadId = revealThreadId,
         onPostComment = onPostComment,
         onResolveCommentThread = onResolveCommentThread,
+        onCopyThreadLink = onCopyThreadLink,
         onTextInputFocusChanged = onTextInputFocusChanged,
         dispatch = dispatch,
       )
@@ -5280,6 +5774,10 @@ private fun InspectorBody(
   operationHistory: List<EditorOperationEntry>,
   themeSettings: EditorThemeSettings,
   devicePresets: List<UiBuilderDevicePreset>,
+  /**
+   * Whether the builder's own canvas — the surface the variant strip is drawn on — is on screen.
+   */
+  variantsDrawn: Boolean,
   onPickReference: (suspend () -> ReferenceImportOutcome)?,
   onSnapshotDesign: (suspend () -> ReferenceImportOutcome)?,
   onFlatten: () -> Unit,
@@ -5292,8 +5790,10 @@ private fun InspectorBody(
   commentStatus: String?,
   selectedThreadId: String?,
   onSelectThread: (String?) -> Unit,
+  revealThreadId: String?,
   onPostComment: ((DesignCommentDraft) -> Unit)?,
   onResolveCommentThread: ((String, Boolean) -> Unit)?,
+  onCopyThreadLink: ((DesignCommentThread) -> Unit)?,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -5312,7 +5812,11 @@ private fun InspectorBody(
       // Scrolled for the same reason the Screen panel is: a design with a dozen threads on it
       // fills the dock, and a panel that silently clips its last thread is worse than one that
       // scrolls.
-      Column(Modifier.verticalScroll(rememberScrollState())) {
+      // The scroll state is held here rather than inside the panel because the panel has to be
+      // able to move it: a `#thread=` link opens a design and then has to bring one conversation
+      // out of a dozen into view.
+      val commentScroll = rememberScrollState()
+      Column(Modifier.verticalScroll(commentScroll)) {
         CommentsInspector(
           board = comments,
           reference = state.reference,
@@ -5320,8 +5824,11 @@ private fun InspectorBody(
           nodeLabel = { nodeId -> state.document.nodes[nodeId]?.componentId ?: nodeId },
           selectedThreadId = selectedThreadId,
           onSelectThread = onSelectThread,
+          revealThreadId = revealThreadId,
+          scrollState = commentScroll,
           onPost = onPostComment,
           onResolve = onResolveCommentThread,
+          onCopyLink = onCopyThreadLink,
           hostStatus = commentStatus,
           onTextInputFocusChanged = onTextInputFocusChanged,
         )
@@ -5340,6 +5847,8 @@ private fun InspectorBody(
         ScreenEnvironmentInspector(
           document = state.document,
           devicePresets = devicePresets,
+          variantAxes = state.variantAxes,
+          variantsDrawn = variantsDrawn,
           onTextInputFocusChanged = onTextInputFocusChanged,
           dispatch = dispatch,
         )
@@ -6287,6 +6796,17 @@ private fun NativeRenderFrame(
 private fun ScreenEnvironmentInspector(
   document: UiBuilderDocument,
   devicePresets: List<UiBuilderDevicePreset>,
+  /** The unstored axes the strip is drawing — see [UiBuilderEditorState.variantAxes]. */
+  variantAxes: Set<EditorVariantAxis>,
+  /**
+   * Whether the surface that draws the strip is the one on screen.
+   *
+   * False on the host's renderer, which draws one render of one frame and has no strip to put a
+   * variant in. The controls then say so instead of accepting a choice nothing acts on — the
+   * devices still reach the export, which is why the picker stays live and only the comparison
+   * chips go quiet.
+   */
+  variantsDrawn: Boolean,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -6300,17 +6820,36 @@ private fun ScreenEnvironmentInspector(
   var layoutDirection by remember(document.id, current) { mutableStateOf(current.layoutDirection) }
   var validationError by remember(document.id, current) { mutableStateOf<String?>(null) }
 
+  // "Frame" rather than "Screen environment", and the two are not the same claim. What these fields
+  // describe is a measuring surface — a width, a density, a theme — and a device is one way to fill
+  // it in, not what it is. Presenting the two as one thing was wrong in both directions: a
+  // hand-typed 1400 x 1000 frame sat under a heading that claimed a device, and a design of loose
+  // assets on a board appeared to be a phone
+  // ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+  Text("Frame", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
   Text(
-    "Screen environment",
-    style = MaterialTheme.typography.titleSmall,
-    fontWeight = FontWeight.Bold,
-  )
-  Text(
-    "Applies to the complete render, never an individual component.",
+    "What the design is measured in. Applies to the complete render, never an individual component.",
     color = MaterialTheme.colorScheme.onSurfaceVariant,
     style = MaterialTheme.typography.bodySmall,
   )
   HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
+  // Said on a board, and nothing is hidden because of it. The frame still applies — the items are
+  // laid out down the middle of that width, at that density, under that theme — so removing the
+  // width, the density or the presets would take away controls the picture still obeys. What
+  // changes is only the claim.
+  if (document.isBoard) {
+    Text(
+      "A board of ${document.boardItemCount} items",
+      style = MaterialTheme.typography.labelLarge,
+    )
+    Text(
+      "This design holds several top-level items rather than one screen, so its frame is a canvas " +
+        "to lay them out in rather than a device it runs on.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.bodySmall,
+    )
+    HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
+  }
   if (devicePresets.isNotEmpty()) {
     DevicePresetPicker(
       presets = devicePresets,
@@ -6331,6 +6870,7 @@ private fun ScreenEnvironmentInspector(
     ExportDevicePicker(
       presets = devicePresets,
       selected = current.exportDevices,
+      drawn = variantsDrawn,
       onToggle = { id ->
         // The whole set per edit, matching the protocol change and for its reason: a toggle that
         // sent an add or a remove would let two people's ideas of the set drift apart between them.
@@ -6340,6 +6880,9 @@ private fun ScreenEnvironmentInspector(
         dispatch(UiBuilderEditorEvent.UpdateEnvironment(current.copy(exportDevices = next)))
       },
     )
+  }
+  VariantAxisPicker(variantAxes, variantsDrawn) {
+    dispatch(UiBuilderEditorEvent.ToggleVariantAxis(it))
   }
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     EnvironmentTextField(
@@ -6460,7 +7003,10 @@ private fun DevicePresetPicker(
   onPick: (UiBuilderDevicePreset) -> Unit,
 ) {
   var expanded by remember { mutableStateOf(false) }
-  Text("Device", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+  // "Set frame from" rather than "Device": picking one writes the width, the height and the density
+  // and then stops mattering. The design does not become that device, which is why a frame that
+  // matches no preset reads as "Custom size" below rather than as the nearest phone.
+  Text("Set frame from", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
   Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp)) {
     Button(
       onClick = { expanded = true },
@@ -6522,18 +7068,83 @@ private fun DevicePresetPicker(
  * the answer. Nothing here is the frame device, which is why picking none is a legitimate state and
  * reads as "exports at its own frame alone" rather than as an empty selection nobody finished.
  */
+/**
+ * The unstored axes the variant strip draws, as chips.
+ *
+ * Chips rather than another dropdown, and beside the export devices rather than under them, because
+ * they are the other half of the same question — what am I looking at this design as? — while being
+ * a different kind of answer. The devices above are the design's own claim and travel with it into
+ * the export; these three are a way of looking, held in editor state, off again when the design is
+ * reopened. Wording says so: "Also shown and exported as" against "Also compare"
+ * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
+ */
+@Composable
+private fun VariantAxisPicker(
+  selected: Set<EditorVariantAxis>,
+  drawn: Boolean,
+  onToggle: (EditorVariantAxis) -> Unit,
+) {
+  Text("Also compare", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+  if (!drawn) {
+    Text(
+      "The comparison strip is drawn on the builder's own canvas. This design is being previewed " +
+        "on the host's renderer, which draws one frame.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+    )
+  }
+  Row(
+    Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    EditorVariantAxis.entries.forEach { axis ->
+      FilterChip(
+        selected = axis in selected,
+        enabled = drawn,
+        onClick = { onToggle(axis) },
+        label = { Text(axis.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+      )
+    }
+  }
+}
+
 @Composable
 private fun ExportDevicePicker(
   presets: List<UiBuilderDevicePreset>,
   selected: List<String>,
+  /** Whether the strip that draws these devices is on screen — see the heading below. */
+  drawn: Boolean,
   onToggle: (String) -> Unit,
 ) {
   var expanded by remember { mutableStateOf(false) }
+  // The list says what it does in both directions: it is still the set the export writes as
+  // `@Preview(device = …)`, and it is also the set the workspace draws beside the design. Before
+  // the
+  // variant strip existed a design could claim three devices and show its author one, and the two
+  // decisions were made in different places with neither showing the other.
+  //
+  // Which is exactly why the heading drops "shown" where the strip is not drawn. The picker stays
+  // live — these devices still reach the export, and that is worth choosing on any surface — but a
+  // heading promising a picture the host's renderer never draws is the same disagreement in the
+  // other direction.
+  // An id this host has no preset for is exported but never drawn: the strip skips it rather than
+  // inventing a frame for it (see `variantPanes`), and a preset carries the only geometry there is.
+  // So the heading must not count it among the shown — a design that arrived from MCP naming a
+  // device this deployment does not offer would otherwise tell its author every exported target had
+  // been looked at.
+  val undrawable = selected.count { id -> presets.none { it.id == id } }
   Text(
-    "Also exports as",
+    if (drawn && undrawable == 0) "Also shown and exported as" else "Also exported as",
     style = MaterialTheme.typography.labelMedium,
     fontWeight = FontWeight.Bold,
   )
+  if (drawn && undrawable > 0) {
+    Text(
+      "$undrawable of these is not a device this host can draw, so it is exported without a pane.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+    )
+  }
   Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp)) {
     Button(
       onClick = { expanded = true },

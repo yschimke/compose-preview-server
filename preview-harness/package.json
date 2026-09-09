@@ -11,6 +11,8 @@
         "harness:ui-builder-editor": "playwright test -c ui-builder-editor.config.mjs",
         "harness:ui-builder-evidence": "playwright test -c capture-evidence.config.mjs",
         "harness:ui-builder-renderer": "playwright test -c ui-builder-renderer.config.mjs",
+        "harness:ui-builder-design-url": "playwright test -c ui-builder-design-url.config.mjs",
+        "harness:ui-builder-design-url-evidence": "playwright test -c ui-builder-design-url-evidence.config.mjs",
         "harness:ui-builder-gate2": "playwright test -c ui-builder-gate2.config.mjs",
         "harness:ui-builder-visual-replay": "playwright test -c ui-builder-gate2.config.mjs --grep \"checked-in Jetcaster\"",
         "harness:ui-builder-performance": "playwright test -c ui-builder-performance.config.mjs",

@@ -15,6 +15,7 @@ class ServeUiBuilderAdminTest {
   private val root = Files.createTempDirectory("ui-builder-admin")
   private val references = ServeUiBuilderReferenceStore(root.resolve("references"))
   private val comments = ServeUiBuilderCommentStore(root.resolve("comments"))
+  private val links = ServeUiBuilderLinksStore(root.resolve("links"))
   private val designs =
     linkedMapOf("design-1" to summary("design-1"), "design-2" to summary("design-2"))
   private val service =
@@ -24,7 +25,7 @@ class ServeUiBuilderAdminTest {
       override fun adminDeleteDesign(designId: String) = designs.remove(designId) != null
     }
   private val logs = mutableListOf<String>()
-  private val admin = ServeUiBuilderAdmin(service, references, comments, onLog = logs::add)
+  private val admin = ServeUiBuilderAdmin(service, references, comments, links, onLog = logs::add)
 
   @AfterTest
   fun cleanUp() {
@@ -40,12 +41,18 @@ class ServeUiBuilderAdminTest {
   fun `a delete removes the design and its sidecars`() {
     comments.post("design-1", "designer", CommentPostRequest(null, null, "Why a card?"))
     assertNotNull(comments.read("design-1"))
+    links.replace("design-1", StoredLinks(issue = "https://example.com/issues/1"))
+    assertNotNull(links.read("design-1"))
 
     assertEquals(ServeUiBuilderAdmin.Result.Deleted("design-1"), admin.delete(" design-1 "))
 
     assertEquals(listOf("design-2"), admin.list().map { it.designId })
     assertNull(comments.read("design-1"), "the discussion does not outlive the design")
     assertNull(references.read("design-1"))
+    assertNull(
+      links.read("design-1"),
+      "a links record left behind is inherited by whatever takes the id next",
+    )
     assertEquals(listOf("serve: admin deleted UI-builder design design-1"), logs)
   }
 

@@ -12,14 +12,17 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderAdminRepair
  * deletes without an ACL, which is why it is reachable only through the `--admin-token` routes
  * (`/admin/ui-builder`) and never through a `ui-builder-*` grant. Deleting a design also drops its
  * sidecars — the reference overlay ([ServeUiBuilderReferenceStore]) and the comment board
- * ([ServeUiBuilderCommentStore]) — so nothing is left on disk that names a design no longer there.
- * The sidecar removals are best-effort: the design state is the record, and a stray overlay file is
- * an orphan, not a resurrected design.
+ * ([ServeUiBuilderCommentStore]) and the links record ([ServeUiBuilderLinksStore]) — so nothing is
+ * left on disk that names a design no longer there. Leaving one behind is not merely untidy: a
+ * design id recreated or re-imported later would inherit the previous design's issue, pull request
+ * and thread. The sidecar removals are best-effort: the design state is the record, and a stray
+ * overlay file is an orphan, not a resurrected design.
  */
 class ServeUiBuilderAdmin(
   private val service: UiBuilderAdminPort,
   private val references: ServeUiBuilderReferenceStore? = null,
   private val comments: ServeUiBuilderCommentStore? = null,
+  private val links: ServeUiBuilderLinksStore? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   sealed interface Result {
@@ -41,6 +44,16 @@ class ServeUiBuilderAdmin(
 
   /** Designs this build cannot serve, by id, each with the reason. */
   fun unusable(): Map<String, String> = service.adminUnusableDesigns()
+
+  /**
+   * Of those, the ones whose document cannot be produced at all.
+   *
+   * The two kinds of quarantine look alike in [unusable] and are not: a design the catalog outgrew
+   * still has a document to download and repair, and a design whose stored files would not read
+   * does not. Offering those two actions on a row where they cannot work is worse than not offering
+   * them, because retiring it is then the operator's only move and they have no way to know that.
+   */
+  fun unreadable(): Set<String> = service.adminUnreadableDesigns()
 
   /**
    * The stored document for one design as JSON, or null when there is no such design.
@@ -85,6 +98,12 @@ class ServeUiBuilderAdmin(
       .onFailure { onLog("serve: reference overlay for $designId not removed (${it.message})") }
     runCatching { comments?.delete(designId) }
       .onFailure { onLog("serve: comment board for $designId not removed (${it.message})") }
+    runCatching {
+      if (links?.delete(designId) == LinksDeleteResult.FAILED) {
+        onLog("serve: links record for $designId not removed")
+      }
+    }
+      .onFailure { onLog("serve: links record for $designId not removed (${it.message})") }
     return Result.Deleted(designId)
   }
 }

@@ -177,7 +177,11 @@ jobs:
           BRANCH: ${{ needs.resolve.outputs.ref }}
         run: |
           set -euo pipefail
-          git add -- preview-harness/fixtures/pages 'renders/exploded-view/*.svg'
+          # Every path scripts/regenerate-goldens.sh rewrites. A golden the script regenerates
+          # but this line does not stage is a golden the workflow reports as "already matching"
+          # while pushing nothing — the failure is silent and looks like success.
+          git add -- preview-harness/fixtures/pages 'renders/exploded-view/*.svg' \
+            'docs/design/fixtures/ui-builder/*-capabilities-v1.json'
           if git diff --cached --quiet; then
             echo "the goldens already match what the code renders"
             echo "pushed=false" >> "$GITHUB_OUTPUT"
