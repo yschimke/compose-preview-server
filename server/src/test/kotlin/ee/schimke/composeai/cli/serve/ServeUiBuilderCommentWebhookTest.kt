@@ -1,5 +1,9 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookCommentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookDesignV1
+import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookEventV1
+import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookThreadV1
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -579,18 +583,18 @@ class ServeUiBuilderCommentWebhookTest {
     authorId: String? = null,
     chatThread: String? = null,
   ) =
-    CommentWebhookEventV1(
+    DesignCommentWebhookEventV1(
       event = "thread",
       design =
-        CommentWebhookDesignV1(
+        DesignCommentWebhookDesignV1(
           id = "checkout",
           title = "Checkout",
           catalog = "m3-catalog",
           thread = chatThread,
         ),
-      thread = CommentWebhookThreadV1(id = "t-1", anchor = "node play-button", comments = 1),
+      thread = DesignCommentWebhookThreadV1(id = "t-1", anchor = "node play-button", comments = 1),
       comment =
-        CommentWebhookCommentV1(
+        DesignCommentWebhookCommentV1(
           author = author,
           authorId = authorId,
           authorKind = kind,

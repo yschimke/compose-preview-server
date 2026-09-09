@@ -1,5 +1,9 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookCommentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookDesignV1
+import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookEventV1
+import ee.schimke.composeai.uibuilder.protocol.DesignCommentWebhookThreadV1
 import ee.schimke.composeai.web.WebEscaping
 import java.io.Closeable
 import java.net.URI
@@ -18,8 +22,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -86,8 +88,8 @@ import kotlinx.serialization.json.putJsonObject
  *
  * [`MULTIPLAYER_WORKFLOW.md`](../../../../../../../../docs/design/MULTIPLAYER_WORKFLOW.md)'s build
  * item 3 asks for "a per-design override in `links.thread`". This deliberately does not do that,
- * and carries the value instead: [CommentWebhookDesignV1.thread] is on every event, so a relay that
- * knows how to talk to the chat platform can put the message in the right conversation.
+ * and carries the value instead: [DesignCommentWebhookDesignV1.thread] is on every event, so a
+ * relay that knows how to talk to the chat platform can put the message in the right conversation.
  *
  * Two reasons, and the second is the load-bearing one.
  *
@@ -191,7 +193,7 @@ internal class ServeUiBuilderCommentWebhook(
     }
   }
 
-  private suspend fun deliver(event: CommentWebhookEventV1) {
+  private suspend fun deliver(event: DesignCommentWebhookEventV1) {
     val body = config.format.body(event)
     if (send(body)) return
     // Exactly one retry, and only one. A chat platform's incoming webhook is either up or it is
@@ -204,20 +206,20 @@ internal class ServeUiBuilderCommentWebhook(
   }
 
   /** The change, plus everything the store does not know: the design's name and where to click. */
-  private fun describe(queued: QueuedCommentChange): CommentWebhookEventV1 {
+  private fun describe(queued: QueuedCommentChange): DesignCommentWebhookEventV1 {
     val change = queued.change
     val design = queued.design
-    return CommentWebhookEventV1(
+    return DesignCommentWebhookEventV1(
       event = change.kind.wire,
       design =
-        CommentWebhookDesignV1(
+        DesignCommentWebhookDesignV1(
           id = change.designId,
           title = design?.title.orEmpty().ifBlank { change.designId },
           catalog = design?.catalogSystemId,
           thread = design?.chatThread,
         ),
       thread =
-        CommentWebhookThreadV1(
+        DesignCommentWebhookThreadV1(
           id = change.thread.id,
           anchor = change.thread.anchor.summarize(),
           comments = change.thread.comments.size,
@@ -379,9 +381,9 @@ internal enum class CommentWebhookFormat(val wire: String) {
   /** `{"text": …}` in Google Chat's markup, which is Slack's for the two things used here. */
   GOOGLE_CHAT("google-chat");
 
-  fun body(event: CommentWebhookEventV1): String =
+  fun body(event: DesignCommentWebhookEventV1): String =
     when (this) {
-      PLAIN -> WEBHOOK_JSON.encodeToString(CommentWebhookEventV1.serializer(), event)
+      PLAIN -> WEBHOOK_JSON.encodeToString(DesignCommentWebhookEventV1.serializer(), event)
       SLACK -> WEBHOOK_JSON.encodeToString(JsonObject.serializer(), slackBody(event))
       TEAMS -> WEBHOOK_JSON.encodeToString(JsonObject.serializer(), teamsBody(event))
       GOOGLE_CHAT -> WEBHOOK_JSON.encodeToString(JsonObject.serializer(), googleChatBody(event))
@@ -396,67 +398,6 @@ internal enum class CommentWebhookFormat(val wire: String) {
     val WIRE_NAMES: List<String> = entries.map { it.wire }
   }
 }
-
-/** The plain body, and the thing every adapter is a pure function of. */
-@Serializable
-internal data class CommentWebhookEventV1(
-  val schema: String = "compose-preview/ui-builder-comment-event/v1",
-  /** `thread`, `reply`, `resolved` or `reopened`. */
-  val event: String,
-  val design: CommentWebhookDesignV1,
-  val thread: CommentWebhookThreadV1,
-  val comment: CommentWebhookCommentV1,
-  /** The thread permalink. The one field a person in a chat window actually uses. */
-  val url: String,
-)
-
-@Serializable
-internal data class CommentWebhookDesignV1(
-  val id: String,
-  /** The design's own title, falling back to its id on a host that cannot name it. */
-  val title: String,
-  /** The catalog it is pinned to — the `<catalog>` segment of [CommentWebhookEventV1.url]. */
-  val catalog: String? = null,
-  /**
-   * The chat thread this design is being discussed in, from `links.thread`.
-   *
-   * Carried, never posted to. See [ServeUiBuilderCommentWebhook]'s note on the per-design
-   * destination: this is a permalink a reader follows, not an endpoint this server may call.
-   */
-  val thread: String? = null,
-)
-
-@Serializable
-internal data class CommentWebhookThreadV1(
-  val id: String,
-  /**
-   * Where the thread is pinned, in words: the node id, `a mark`, or a point on the frame.
-   *
-   * A sentence rather than the anchor's three fields because the reader is a person in a chat
-   * window, and "on node play-button" tells them what is being discussed while `{"markId": "m-4"}`
-   * does not. Null for a thread about the design as a whole.
-   */
-  val anchor: String? = null,
-  val comments: Int = 1,
-  val resolved: Boolean = false,
-)
-
-@Serializable
-internal data class CommentWebhookCommentV1(
-  /** The author's display name, else their actor id. Absent where the act has no named actor. */
-  val author: String? = null,
-  /**
-   * The actor the authorization layer established, which [author] is not.
-   *
-   * A display name is whatever the writer typed, so it is a label and never evidence. This is the
-   * field a relay checks when it cares who really spoke.
-   */
-  @SerialName("authorId") val authorId: String? = null,
-  /** `human` or `agent`, as declared. Cosmetic here exactly as it is on the board. */
-  @SerialName("authorKind") val authorKind: String? = null,
-  /** What was said, trimmed by [commentExcerpt] — the same rule the `comments` notice uses. */
-  val excerpt: String,
-)
 
 /** Title and catalog for one design, as the service knows them and the comment store does not. */
 internal data class CommentWebhookDesign(
@@ -479,7 +420,7 @@ internal data class CommentBoardChange(
   val designId: String,
   val kind: CommentBoardChangeKind,
   val thread: StoredCommentThread,
-  val comment: CommentWebhookCommentV1,
+  val comment: DesignCommentWebhookCommentV1,
 )
 
 /**
@@ -558,8 +499,8 @@ internal fun diffCommentBoards(
  * then repeats as fact — and leave a relay with nothing to check it against. So the label stays
  * cosmetic and the authenticated actor rides alongside it.
  */
-private fun StoredComment.asWebhookComment(): CommentWebhookCommentV1 =
-  CommentWebhookCommentV1(
+private fun StoredComment.asWebhookComment(): DesignCommentWebhookCommentV1 =
+  DesignCommentWebhookCommentV1(
     author = displayName.ifBlank { authorId },
     authorId = authorId,
     authorKind = authorKind,
@@ -574,10 +515,10 @@ private fun StoredComment.asWebhookComment(): CommentWebhookCommentV1 =
  * as a fact. So a reopen names no author and the sentence reads "a thread was reopened", which is
  * what is actually known.
  */
-private fun StoredCommentThread.resolutionComment(): CommentWebhookCommentV1 {
+private fun StoredCommentThread.resolutionComment(): DesignCommentWebhookCommentV1 {
   val actor = resolvedBy?.takeIf { it.isNotBlank() }
   val byActor = comments.lastOrNull { it.authorId == actor }
-  return CommentWebhookCommentV1(
+  return DesignCommentWebhookCommentV1(
     author = byActor?.displayName?.ifBlank { null } ?: actor,
     // The resolver, as the store recorded it — null on a reopen, where nothing is known.
     authorId = actor,
@@ -614,18 +555,18 @@ private fun StoredCommentAnchor?.summarize(): String? {
 // testable without a channel to post into.
 // ---------------------------------------------------------------------------------------------
 
-private fun slackBody(event: CommentWebhookEventV1): JsonObject = buildJsonObject {
+private fun slackBody(event: DesignCommentWebhookEventV1): JsonObject = buildJsonObject {
   put("text", event.chatText(::slackEscape) { url, label -> "<$url|${slackEscape(label)}>" })
 }
 
-private fun googleChatBody(event: CommentWebhookEventV1): JsonObject = buildJsonObject {
+private fun googleChatBody(event: DesignCommentWebhookEventV1): JsonObject = buildJsonObject {
   // Google Chat's own markup: the same `*bold*` and the same `<url|label>` anchor, and the same
   // three characters to escape. Kept as its own function rather than aliased to Slack's so a
   // divergence between them is one edit here rather than a shared helper nobody may change.
   put("text", event.chatText(::slackEscape) { url, label -> "<$url|${slackEscape(label)}>" })
 }
 
-private fun teamsBody(event: CommentWebhookEventV1): JsonObject = buildJsonObject {
+private fun teamsBody(event: DesignCommentWebhookEventV1): JsonObject = buildJsonObject {
   put("type", "message")
   putJsonArray("attachments") {
     add(
@@ -699,7 +640,7 @@ private fun textBlock(text: String, bold: Boolean, subtle: Boolean = false): Jso
  * saying somebody commented is one more notification among many, and the sentence itself is what
  * tells a reader whether it is about them.
  */
-private fun CommentWebhookEventV1.chatText(
+private fun DesignCommentWebhookEventV1.chatText(
   escape: (String) -> String,
   link: (String, String) -> String,
 ): String = buildString {
@@ -712,7 +653,7 @@ private fun CommentWebhookEventV1.chatText(
   design.thread?.let { append("\n").append(link(it, "Discussion for this design")) }
 }
 
-private fun CommentWebhookEventV1.headline(
+private fun DesignCommentWebhookEventV1.headline(
   plain: Boolean,
   escape: (String) -> String = { it },
   link: (String, String) -> String = { _, label -> label },
@@ -735,7 +676,7 @@ private fun CommentWebhookEventV1.headline(
 }
 
 /** Where it is pinned and how long the thread is, when either is worth a line. */
-private fun CommentWebhookEventV1.contextLine(): String? {
+private fun DesignCommentWebhookEventV1.contextLine(): String? {
   val parts = buildList {
     thread.anchor?.let { add("on $it") }
     if (thread.comments > 1) add("${thread.comments} comments")
