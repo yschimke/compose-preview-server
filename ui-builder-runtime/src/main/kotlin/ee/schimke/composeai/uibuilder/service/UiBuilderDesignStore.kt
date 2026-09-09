@@ -272,6 +272,8 @@ internal class FileUiBuilderDesignStore(
    */
   private val quarantinedSlugs = linkedMapOf<String, String>()
   private var storedBytes = 0L
+  /** Whether [storedBytes] has been measured, by a load or by the first [usage] before one. */
+  private var counted = false
 
   init {
     Files.createDirectories(directory)
@@ -362,6 +364,7 @@ internal class FileUiBuilderDesignStore(
       quarantined[renamed] = quarantined.remove(key)!!
       quarantinedSlugs[renamed] = quarantinedSlugs.remove(key)!!
     }
+    counted = true
     StoredDesigns(designs, quarantined)
   }
 
@@ -596,8 +599,17 @@ internal class FileUiBuilderDesignStore(
     return quarantinedSlugs.entries.firstOrNull { it.value == slug }?.key
   }
 
-  override fun usage(): UiBuilderStorageUsage =
-    UiBuilderStorageUsage(storedBytes, limits.maximumBytes)
+  override fun usage(): UiBuilderStorageUsage {
+    // `load` is what counts the store, and a host is not obliged to have called it: the store is
+    // published, so a capacity check at startup can reach this before any service is built and
+    // would otherwise be told an existing store is empty. Measured here instead, once, and only on
+    // that path — after a load this is the number load computed, which is the accurate one.
+    if (!counted) {
+      storedBytes = runCatching { directoryBytes(designsDirectory) }.getOrDefault(0L)
+      counted = true
+    }
+    return UiBuilderStorageUsage(storedBytes, limits.maximumBytes)
+  }
 
   // ---------------------------------------------------------------- reading
 
@@ -1248,6 +1260,13 @@ internal class FileUiBuilderDesignStore(
           "${limits.maximumDesignBytes}; the state it was migrated from is kept as " +
           "${FileUiBuilderStateStorage.STATE_FILE}$MIGRATED_SUFFIX",
       )
+      // The directory was just deleted and made again, after the fsync above and before the marker
+      // that ends the migration. Forcing a directory does not make its own name durable in its
+      // parent, so without this a power loss can leave a store whose marker says the migration
+      // finished and whose `designs/` has no entry for this design at all — not even the quarantine
+      // saying why it did not come across, while the `.migrated` file it is still in is ignored.
+      forceDirectory(designDirectory)
+      forceDirectory(designsDirectory)
       return
     }
     writeHeader(designDirectory, encodedHeader)

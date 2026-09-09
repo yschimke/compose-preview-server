@@ -97,9 +97,14 @@ internal fun uiBuilderDisabledWarning(stateDirectory: File, failure: Throwable):
     if (migrated.exists() && !stateFile.exists()) {
       return preamble +
         "put the migrated state back and let the migration run again (mv ${migrated.path} " +
-        "${stateFile.path}$partialNote), or move it aside to start empty (the designs in it are " +
-        "then lost, so copy it first), or pass --ui-builder-state-dir none to run without the " +
-        "builder deliberately."
+        "${stateFile.path}$partialNote), or move it aside to start empty (mv ${migrated.path} " +
+        "${migrated.path}.aside" +
+        // The same partial tree, and it has to go on this path too: left in place, the next start
+        // finds neither a marker nor a state file, writes a fresh marker, and serves whichever
+        // subset of the designs the migration had written — which is not starting empty.
+        (if (partial.exists()) " && mv ${partial.path} ${partial.path}.aside" else "") +
+        " — the designs in it are then lost, so copy it first), or pass --ui-builder-state-dir " +
+        "none to run without the builder deliberately."
     }
     preamble +
       "either restore the one-generation backup (cp ${backupFile.path} ${stateFile.path}), or " +

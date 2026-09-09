@@ -92,6 +92,10 @@ class ServeUiBuilderLaneGuardTest {
     )
     assertFalse(warning.contains("cp "), "there is no backup of a file that has been renamed away")
     assertTrue(warning.contains("${directory.path}/designs"), warning)
+    // And starting empty has to move the partial tree too: left in place, the next start finds
+    // neither a marker nor a state file, writes a fresh marker, and serves whichever subset of the
+    // designs the migration had written.
+    assertTrue(warning.contains("${directory.path}/designs.aside"), warning)
   }
 
   @Test

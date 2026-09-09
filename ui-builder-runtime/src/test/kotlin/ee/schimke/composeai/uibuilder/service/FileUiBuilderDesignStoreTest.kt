@@ -586,6 +586,20 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `the gauge counts an existing store before anything has loaded it`() {
+    val root = createTempDirectory("ui-builder-store")
+    FileUiBuilderDesignStore(root).commit("checkout", null, design("checkout"))
+
+    // A capacity check at startup, before any service is built. `load` is what counts the store,
+    // and a host reaching the published store directly is not obliged to have called it — being
+    // told an existing store is empty is worse than the walk this costs.
+    val usage = FileUiBuilderDesignStore(root).usage()
+
+    assertEquals(directorySize(root), usage.bytes)
+    assertTrue(usage.bytes > 0)
+  }
+
+  @Test
   fun `the gauge is taken after the sweep, not before it`() {
     val root = createTempDirectory("ui-builder-store")
     FileUiBuilderDesignStore(root).commit("checkout", null, design("checkout"))
