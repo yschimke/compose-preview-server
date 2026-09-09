@@ -112,7 +112,7 @@ it gets the window. Everything else is a panel behind a switch on one of the two
 | Left | **Layers** | The document as a tree. Filter it, ctrl/⌘-click and shift-click to build a selection, drag a row to reorder. |
 | Right | **Properties** | The selected layer's catalog properties, its state bindings and its modifiers. |
 | Right | **Theme** | The colours and typography the whole design is drawn with. |
-| Right | **Screen** | The frame, the density, the device preset and the reference picture. |
+| Right | **Screen** | The frame and its density, the presets that fill it in, the variant panes drawn beside the design, and the reference picture. |
 | Right | **Issues** | What the export would refuse, counted on the rail itself. |
 | Right | **Code** | The Kotlin the Compose export would write. |
 
@@ -260,6 +260,70 @@ ground. Or set `environment.theme` to `dark`, and the ground is the dark theme's
 attaches `ROOT_SURFACE_DOES_NOT_FILL_FRAME` to every artifact of a design whose coloured root does
 neither, and the **Issues** panel shows the same line, so the fact is stated where an agent and a
 person each look rather than inferred from a picture.
+
+## Several items, and several views of them
+
+A design is usually one screen on one device, drawn once. Two switches let go of that, and they are
+independent: what is *in* the design, and how many pictures of it you look at.
+
+### A board holds several items
+
+**Add beside**, a switch in the insert panel under the line that says where the next Add lands,
+places what you add as a new top-level item rather than inside the selection. The first one wraps
+the design in a **board** and puts the two side by side; every one after joins it. The line above
+the switch says which is about to happen — "Adds beside the design, on a new board", then "Adds
+beside 3 item(s) on the board" — so the panel tells you where the next Add lands before you press it.
+
+A board is an ordinary `layout/column`, not a mode. It is in the document, the layers panel lists
+it, and selecting it gives you the **Properties** panel's `verticalSpacingDp` and
+`horizontalAlignment` — which is the whole of the arrangement. Items are reordered by dragging them
+in Layers, exactly like any other children. Nothing downstream treats it specially: the Kotlin
+export writes the `Column` it is, and the screen projection sees the same.
+
+Two things it will not do:
+
+- **An Add with no compatible slot is still refused.** Add beside is a switch you reach for, not a
+  fallback: a scaffold does not grow a neighbour every time a chip fails to fit inside it.
+- **A Wear screen scaffold or a widget container cannot become a board item.** Both record-free
+  emitters route on the root component, so an item that stopped being the root would lose its
+  emitter and its native preview lane. The panel refuses that Add and says so.
+
+Unwrapping is deleting the board, which takes its children with it. Undo takes back a board the
+last Add created; one that has outlived that command has no one-press way back to a single screen.
+
+### The frame is not the device
+
+The **Screen** panel's first field is **Frame** — the width, height, density and theme the design is
+measured in. **Set frame from** fills those in from a device preset; a hand-typed 1400 × 1000 frame
+is a frame and reads as `Custom size` rather than claiming a phone.
+
+A board obeys the frame like anything else: its items are laid out down the middle of that width, at
+that density, under that theme. Nothing is hidden on one.
+
+### Variants are extra panes, not extra documents
+
+Below the frame, two lists put more pictures of the same document beside the one you are editing:
+
+| Field | What it draws | Stored? |
+| --- | --- | --- |
+| **Also shown and exported as** | the devices the design claims — the same list `@Preview(device = …)` is written from | yes, shared with collaborators |
+| **Also compare** | Dark, RTL and 1.5× font | no — a way of looking, off again when the design is reopened |
+
+The first is worth knowing about: that list was always stored and always written into the Compose
+export, and the editor used not to draw it. A design could claim three devices and show its author
+one. Now the set you look at is the set the export writes.
+
+The panes are for checking, and **exactly one of them takes edits** — the first, at the design's own
+frame. No variant pane carries a selection, a drop target or a comment pin. That is deliberate
+rather than unfinished: there is one document behind all of them, so an edit made on the tablet pane
+would be an edit to the tree the phone pane draws.
+
+Point a tablet pane at an adaptive design and it draws the supporting pane the phone does not, which
+is the whole point: the adaptive behaviour is checkable without leaving the design.
+
+On a catalog the host's own renderer previews, the builder's canvas is not drawn at all, so the
+compare chips say why they are inert instead of accepting a choice that would draw nothing. The
+device list stays live there, because those still reach the export.
 
 ## Starting from a worked widget
 
@@ -529,7 +593,7 @@ counterpart is named, with the reason and the route that does work, rather than 
 **New design → Wear Material 3** offers two templates: **Wear screen**, an empty `ScreenScaffold`
 with its clock over an empty `TransformingLazyColumn`, and **Activity list**, the same shape with
 wear-m3-catalog's own rows in it. Either opens on the small round watch frame — the scaffold reads
-its diameter from the document, so picking a watch in the Screen inspector's Wear OS presets is what
+its diameter from the document, so picking a watch under the Screen inspector's **Set frame from** is what
 changes it.
 
 The list comes with the scaffold rather than being something to add afterwards: `ScreenScaffold`
