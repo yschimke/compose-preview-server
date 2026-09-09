@@ -8312,6 +8312,9 @@ class ServeHttpServer(
    */
   private fun homeSystemsFor(ids: List<String>): List<ServeWeb.HomeSystem> {
     val views = engagementStore.systemViews(ids)
+    // The front door's own set, for the sibling gate below. A list here and a membership test per
+    // paired catalog would be quadratic in the number of catalogs on the box.
+    val listed = ids.toSet()
     return ids.mapNotNull { system ->
       sessions.peekHost(system)?.let { rememberCatalogMeta(system, it, progress = false) }
       val meta = catalogMetaSeen[system] ?: return@mapNotNull null
@@ -8371,6 +8374,12 @@ class ServeHttpServer(
         // lookup per preview of the paired sibling, and only for the few catalogs that declare one.
         parallelComparison =
           meta.compareWithSystem?.let { sibling ->
+            // LISTED, first. An unlisted catalog is served at `/<system>/` and deliberately kept
+            // off the front door, and a pairing is not a way around that: naming one here puts its
+            // system id, its title and a working link onto the public home page of the catalog that
+            // happens to point at it. Residency and components say the comparison would WORK; this
+            // says it is one this page is allowed to offer.
+            if (sibling !in listed) return@let null
             val siblingHost = sessions.peekHost(sibling) ?: return@let null
             if (siblingHost.previews.none { it.componentId in meta.parallelComponentIds }) {
               return@let null
