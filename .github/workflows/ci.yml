@@ -47,6 +47,9 @@ jobs:
         with:
           persist-credentials: false
       - run: .github/scripts/ui-builder-project-boundary.sh
+      # The catalog names, which shrink to nothing over phases 4 and 5. Runs beside the project
+      # boundary because it is the same kind of line for the same reason: an undrawn one rots.
+      - run: .github/scripts/ui-builder-catalog-literals.sh
 
   gradle:
     runs-on: ubuntu-latest

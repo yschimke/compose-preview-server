@@ -14,6 +14,7 @@ import ee.schimke.composeai.render.session.RenderSessionException
 import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
+import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
@@ -2527,9 +2528,75 @@ public class ServeRunner(
     val exporter =
       renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
         ?: compose
+    // The published half of the catalog contract: an enabled catalog that publishes its own
+    // `ui-builder.json` is served from that file rather than from a catalog written here.
+    //
+    // Read at startup, from the delivery branch, for the same reason a pack's record is: which
+    // catalogs exist and what shape each has is a startup fact, and catalogs themselves load in the
+    // background for minutes. Per catalog and reversible — anything that will not compose leaves
+    // the synthesised catalog in place and says why, because a host that refused to start over
+    // another repository's bad publish would be down until that repository's CI ran again.
+    // One export-capability value, computed once. The published catalogs below and the executor
+    // must be handed the SAME one: a published catalog does not go through the executor's
+    // `baseCatalog` copy, so a hardcoded value here would have made every published catalog
+    // advertise no SVG or PNG export on a host whose renderer supports both.
+    val uiBuilderExports =
+      ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
+          ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
+            composeCode = true,
+            svg = false,
+            png = false,
+          ))
+        .copy(composeCode = composeExportConfigured)
+    val publishedCatalogs = mutableMapOf<String, CatalogCapabilityV1>()
+    if (catalogStore != null) {
+      uiBuilderCatalogs.forEach { systemId ->
+        val config = catalogLoads?.stateFor(systemId)?.config
+        val file =
+          catalogStore.fetchUiBuilderCatalog(
+            system = systemId,
+            sourceRepo = config?.repo,
+            sourceBranchPrefix = config?.branch?.removeSuffix(systemId),
+          ) ?: return@forEach
+        // The catalog's own record, fetched now if this host has never loaded it.
+        //
+        // Without this a cold start composes the published policy against NOTHING — the store only
+        // has a record once a load generation exists — and a policy with no inventory composes to
+        // its builtins alone. That would not fail; it would quietly serve a near-empty shelf in
+        // place of the synthesised catalog, which is the one outcome worse than not reading the
+        // published file at all. Fetched by the same route a pack's record is, for the same reason.
+        if (records.record(systemId) !is ComponentRecordSource.Lookup.Found) {
+          catalogStore
+            .fetchComponentRecord(
+              system = systemId,
+              sourceRepo = config?.repo,
+              sourceBranchPrefix = config?.branch?.removeSuffix(systemId),
+            )
+            ?.let { startupRecords[systemId] = it }
+        }
+        // The same record the export reads, through the same source, so the shelf the builder
+        // offers and the code the export writes cannot disagree about what a component is.
+        val record = (records.record(systemId) as? ComponentRecordSource.Lookup.Found)?.record
+        when (
+          val composed =
+            PublishedUiBuilderCatalog.compose(file.readText(), record, uiBuilderExports)
+        ) {
+          is PublishedUiBuilderCatalog.Result.Composed -> {
+            publishedCatalogs[systemId] = composed.catalog
+            System.err.println("serve: UI-builder catalog ${composed.note}")
+          }
+          is PublishedUiBuilderCatalog.Result.Unusable ->
+            System.err.println(
+              "serve: UI-builder catalog $systemId keeps its built-in definition — " +
+                composed.reason
+            )
+        }
+      }
+    }
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = uiBuilderCatalogs,
+        published = publishedCatalogs,
         // `composeCode` answers a **configuration** question — is this host set up to export
         // Compose? — and deliberately not a filesystem one.
         //
@@ -2552,14 +2619,7 @@ public class ServeRunner(
         // better failure. The refusal names the catalog, the file and the reason, an operator who
         // repairs the file is served on the next request, and nothing needs a restart. The
         // alternative trades a precise per-request diagnostic for a silent permanent one.
-        exportCapabilities =
-          ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
-              ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-                composeCode = true,
-                svg = false,
-                png = false,
-              ))
-            .copy(composeCode = composeExportConfigured),
+        exportCapabilities = uiBuilderExports,
         // A record, **or** a catalog whose designs are written by an emitter that needs none. The
         // second half is what makes the Compose-export action appear for a Wear widget design: the
         // source has existed since `WearWidgetCodeExporter` landed, and only the editor's Code pane

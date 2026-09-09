@@ -880,6 +880,7 @@ class ServeCatalogStore(
     writeDesignPages(base, staging)
     writeKnownDifferences(base, staging)
     writeComponentRecord(base, staging, catalog)
+    writeUiBuilderCatalog(base, staging, catalog)
 
     // The staged catalog is usable — move it into place as this load's generation. Nothing serves
     // from `dir` yet (no host names it until [publishGeneration] below), so this is a rename onto a
@@ -1574,12 +1575,96 @@ class ServeCatalogStore(
     .getOrDefault(false)
 
   /**
+   * Stage the builder catalog a catalog declares, at `<staging>/ui-builder.json`.
+   *
+   * The same fail-soft shape as [writeComponentRecord], for the same reason: a catalog that
+   * declares none, or whose file will not fetch, is served without one and the UI builder falls
+   * back to what it can synthesise. Structural only — a JSON object carrying `schema` — because the
+   * reader checks the schema it understands and refusing an unknown future version here would
+   * report a newer producer's catalog as a malformed one.
+   */
+  private fun writeUiBuilderCatalog(base: String, staging: File, catalog: Catalog) {
+    val name = catalog.uiBuilderFile?.trim('/')?.takeIf { it.isNotEmpty() } ?: return
+    if (".." in name.split("/")) return
+    val bytes = runCatching { fetchCatalogAsset("$base$name") }.getOrNull() ?: return
+    if (!looksLikeUiBuilderCatalog(bytes)) return
+    File(staging, UI_BUILDER_CATALOG_FILE).writeBytes(bytes)
+  }
+
+  private fun looksLikeUiBuilderCatalog(bytes: ByteArray): Boolean = runCatching {
+    val root = json.parseToJsonElement(bytes.decodeToString()) as? JsonObject ?: return false
+    root["schema"] is JsonPrimitive && root["statusSemantics"] is JsonObject
+  }
+    .getOrDefault(false)
+
+  /**
+   * The builder catalog of [system]'s currently served generation, or null where the catalog
+   * publishes none.
+   */
+  fun uiBuilderCatalog(system: String): File? =
+    liveDir(system)?.let { File(it, UI_BUILDER_CATALOG_FILE) }?.takeIf { it.isFile }
+
+  /**
    * The discovered component record of [system]'s currently served generation, or null where the
    * catalog has not published or carries none. The UI builder's export path reads this per request,
    * so a refreshed catalog's record is the one in force.
    */
   fun componentRecord(system: String): File? =
     liveDir(system)?.let { File(it, COMPONENT_RECORD_FILE) }?.takeIf { it.isFile }
+
+  /**
+   * Fetch [system]'s published builder catalog from its delivery branch **now**, without loading
+   * the catalog.
+   *
+   * The same startup-fact argument as [fetchComponentRecord], for the same reason: which catalogs
+   * the builder serves, and what shape each has, is fixed before the first request, while catalogs
+   * themselves load in the background for minutes. A shelf that changed under an open design
+   * because a background load finished is exactly what the catalog pin exists to rule out.
+   *
+   * Best-effort and quiet about the ordinary case: a catalog that declares no `uiBuilderFile` has
+   * simply not opted in, which is every catalog until it does, and returns null with nothing on
+   * stderr. Only a declared file that will not fetch is worth a line.
+   */
+  fun fetchUiBuilderCatalog(
+    system: String,
+    sourceRepo: String? = null,
+    sourceBranchPrefix: String? = null,
+  ): File? {
+    val safe = ServeBundleStore.sanitizeName(system) ?: return null
+    val repo = sourceRepo?.takeIf { it.isNotBlank() } ?: this.repo
+    val branchPrefix = sourceBranchPrefix?.takeIf { it.isNotBlank() } ?: this.branchPrefix
+    val branch = "$branchPrefix$system"
+    val deliveryCommit = fetchRevisions(repo, branch).firstOrNull()?.commit
+    val base =
+      deliveryCommit?.let { "https://raw.githubusercontent.com/$repo/$it/" }
+        ?: "https://raw.githubusercontent.com/$repo/$branch/"
+    val catalog =
+      runCatching {
+        fetchCatalogAsset(base + CATALOG_FILE)?.let {
+          json.decodeFromString(Catalog.serializer(), it.toString(Charsets.UTF_8))
+        }
+      }
+        .getOrNull() ?: return null
+    val declared = catalog.uiBuilderFile?.trim('/')?.takeIf { it.isNotEmpty() } ?: return null
+    if (".." in declared.split("/")) return null
+    val bytes =
+      runCatching { fetchCatalogAsset("$base$declared") }.getOrNull()
+        ?: run {
+          System.err.println(
+            "serve: $system declares uiBuilderFile $declared and it could not be fetched from $branch"
+          )
+          return null
+        }
+    if (!looksLikeUiBuilderCatalog(bytes)) {
+      System.err.println("serve: $system's $declared is not a builder catalog")
+      return null
+    }
+    val dir = File(File(root, COMPONENT_RECORD_CACHE_DIR), safe)
+    dir.mkdirs()
+    val target = File(dir, UI_BUILDER_CATALOG_FILE)
+    target.writeBytes(bytes)
+    return target
+  }
 
   /**
    * Fetch [system]'s component record from its delivery branch **now**, without loading the
@@ -3011,6 +3096,17 @@ class ServeCatalogStore(
      * authorable from.
      */
     val componentsFile: String? = null,
+    /**
+     * The branch-relative builder catalog (`ui-builder.json`) — what this catalog tells a UI
+     * builder about itself: its platform, shelves, frame, templates and screen-writing strategy,
+     * generated from the catalog's own component record and `ui-builder.policy.json` by the Gradle
+     * plugin's discovery task and copied to the branch root by `catalog-ui-builder.mjs`.
+     *
+     * Staged by [writeUiBuilderCatalog] and read back by [uiBuilderCatalog]. Absent for a catalog
+     * that authors no policy, which is every catalog until it opts in — and the reason the reader
+     * falls back rather than refusing.
+     */
+    val uiBuilderFile: String? = null,
     /** Optional in-browser render descriptor (the CMP-Wasm app carried in the branch). */
     val webRender: WebRender? = null,
     /** Optional buildable source for trusted server-side re-render (`--allow-render-trusted`). */
@@ -3557,6 +3653,12 @@ class ServeCatalogStore(
      * [componentRecord].
      */
     const val COMPONENT_RECORD_FILE = "components.json"
+
+    /**
+     * The staged builder catalog (`ui-builder.json`), copied from the branch's declared
+     * `uiBuilderFile`. Read back by [uiBuilderCatalog].
+     */
+    const val UI_BUILDER_CATALOG_FILE = "ui-builder.json"
 
     /**
      * Where [fetchComponentRecord] keeps a record read ahead of any load: under the store root, per

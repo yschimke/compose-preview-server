@@ -214,7 +214,8 @@ internal object ComponentRecordPacks {
   }
 
   /** The JSON Schema type a parameter's literal has, or null for a parameter with no literal. */
-  private fun jsonTypeOf(parameter: TargetParameter): String? =
+  /** Shared with [PublishedUiBuilderCatalog]: one rule for which parameters become properties. */
+  internal fun jsonTypeOf(parameter: TargetParameter): String? =
     when (parameter.typeFqn) {
       "kotlin.String" -> "string"
       "kotlin.Boolean" -> "boolean"

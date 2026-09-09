@@ -1,0 +1,413 @@
+package ee.schimke.composeai.cli.serve
+
+import ee.schimke.composeai.discovery.ComponentRecord
+import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.CodeCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
+import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.SlotCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.SlotCardinalityV1
+import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
+import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
+import java.security.MessageDigest
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
+
+/**
+ * A catalog's published `ui-builder.json`, composed with its component record into the capability
+ * catalog the builder serves.
+ *
+ * This is the read half of `docs/design/UI_BUILDER_CATALOG_CONTRACT.md`. The catalog repositories
+ * publish two files and this composes them:
+ *
+ * - **`components.json`** is the INVENTORY: every composable the catalog's previews render, with
+ *   the signature discovery recovered. It says what exists.
+ * - **`ui-builder.json`** is the POLICY: platform, shelves, frame, templates, screen strategy, and
+ *   per-component editor knowledge no signature holds. It says what a builder should do with it.
+ *
+ * Neither restates the other, and [UiBuilderComponentPolicy.record] is the join — the record's
+ * `canonicalId`. Composing them here is what lets a catalog this binary has never heard of appear
+ * in the chooser, which is the whole point of the contract.
+ *
+ * ## Why the policy is read from the published file rather than the record
+ *
+ * The record also carries each component's resolved `builder` policy, which would make this a
+ * one-file read. The published file is used anyway, and not as a workaround:
+ *
+ * - **A catalog need not have a record here at all.** The whole point is that a catalog this binary
+ *   has never heard of can be served, and its record is a separate file that may be absent, stale,
+ *   or on a schema this build will not read. Policy that only arrives with an inventory is policy
+ *   that cannot describe a catalog of builtins.
+ * - **`statusSemantics.components` exists for exactly this reader.** It is published so a consumer
+ *   holding the file can pair a builder id with a record entry, and dropping it in favour of the
+ *   record's copy would make a published field nothing reads — which is how a field stops being
+ *   maintained.
+ *
+ * The two agree by construction, because the generator writes this file FROM that field, so this is
+ * a choice about which of two equal sources is the contract — not about which is available.
+ *
+ * ## What this does not do
+ *
+ * It does not decide anything the published file does not say. A component the file has no policy
+ * for is still admitted — an unannotated record component belongs on the shelf, which is why
+ * [UiBuilderStatusSemantics.componentIdPrefix] is published at all — and it is admitted with the
+ * defaults the record supports, not with values invented on the catalog's behalf. Where the file
+ * and this reader could disagree about a derived id, the frozen goldens and
+ * `.github/scripts/ui-builder-equivalence.sh` are what catch it: that gate exists so this
+ * composition can be proved equal to what the server synthesises today, per catalog, before any
+ * catalog stops being synthesised.
+ */
+internal object PublishedUiBuilderCatalog {
+
+  /** The outcome of composing one catalog, which is never an exception. */
+  sealed interface Result {
+    /** [catalog] is ready to serve; [note] is the one startup line saying where it came from. */
+    data class Composed(val catalog: CatalogCapabilityV1, val note: String) : Result
+
+    /**
+     * The published file could not be used, and [reason] says why in a form an operator can act on.
+     *
+     * Never fatal by itself. A catalog whose published file will not compose falls back to whatever
+     * the server can synthesise, exactly as one that publishes nothing does — the cutover is per
+     * catalog and reversible, and a host that refused to start over another repository's bad
+     * publish would be down until that repository's CI ran again.
+     */
+    data class Unusable(val reason: String) : Result
+  }
+
+  private val json = Json {
+    ignoreUnknownKeys = true
+    isLenient = false
+  }
+
+  /**
+   * Compose [publishedJson] with [record] into a capability catalog.
+   *
+   * [record] may be null: a catalog that publishes policy and no inventory is still a catalog — one
+   * whose components are all builtins — and refusing it here would be refusing the simplest thing
+   * the contract can express.
+   */
+  fun compose(
+    publishedJson: String,
+    record: ComponentRecordFile?,
+    exportCapabilities: ExportCapabilitiesV1,
+  ): Result {
+    val root =
+      runCatching { json.parseToJsonElement(publishedJson) as? JsonObject }
+        .getOrElse {
+          return Result.Unusable("ui-builder.json did not parse: ${it.message}")
+        } ?: return Result.Unusable("ui-builder.json is not a JSON object")
+    val file = runCatching {
+      json.decodeFromJsonElement<PublishedFile>(root)
+    }
+      .getOrElse {
+        return Result.Unusable("ui-builder.json did not parse: ${it.message}")
+      }
+    // The whole published block, kept verbatim for the readers this one does not interpret.
+    val rawSemantics = root["statusSemantics"] as? JsonObject ?: JsonObject(emptyMap())
+    if (file.schema != UI_BUILDER_CATALOG_SCHEMA) {
+      // A major this reader does not know is refused by name rather than read optimistically. The
+      // fallback keeps the catalog served, so the cost of refusing is a stale shelf and a line
+      // saying so, and the cost of guessing is a shelf that silently means something else.
+      return Result.Unusable(
+        "ui-builder.json declares schema ${file.schema}; this server reads $UI_BUILDER_CATALOG_SCHEMA"
+      )
+    }
+    val semantics = file.statusSemantics
+    val prefix = semantics.componentIdPrefix.trim()
+    if (prefix.isEmpty()) {
+      return Result.Unusable("ui-builder.json declares no componentIdPrefix")
+    }
+    val id = file.catalog.id.trim()
+    if (id.isEmpty()) return Result.Unusable("ui-builder.json declares no catalog id")
+
+    val policyByRecordId =
+      semantics.components.entries.associateBy({ it.value.record }, { it.key to it.value })
+    val taken = linkedMapOf<String, ComponentCapabilityV1>()
+    val skipped = mutableListOf<String>()
+
+    record?.components.orEmpty().forEach { component ->
+      val declared = policyByRecordId[component.canonicalId]
+      val policy = declared?.second
+      val componentId = declared?.first ?: derivedId(prefix, component)
+      val excluded = policy?.excluded
+      when {
+        excluded != null -> skipped += "$componentId — $excluded"
+        // A duplicate id is the catalog's to fix and is reported rather than resolved: picking a
+        // winner silently would bind saved designs to whichever entry happened to sort first.
+        taken.containsKey(componentId) ->
+          skipped += "$componentId — a component of the same id was already taken from this record"
+        else -> taken[componentId] = capability(componentId, component, policy)
+      }
+    }
+
+    semantics.builtins.forEach { (builtinId, builtin) ->
+      if (taken.containsKey(builtinId)) {
+        skipped += "$builtinId — declared as a builtin, but a record component publishes this id"
+      } else {
+        taken[builtinId] = builtinCapability(builtinId, builtin)
+      }
+    }
+
+    if (taken.isEmpty()) {
+      return Result.Unusable(
+        "composing ui-builder.json with the component record yielded no components"
+      )
+    }
+    // The file says how many record components it was generated against. If it expected an
+    // inventory and none arrived, this composed to its builtins alone — which does not fail, it
+    // quietly serves a near-empty shelf in place of whatever the server would otherwise offer.
+    // Refusing is the safe direction: the fallback keeps the catalog whole, and the reason names
+    // the missing file rather than leaving an operator to notice that a shelf got shorter.
+    val expected = file.record?.components ?: 0
+    if (expected > 0 && record == null) {
+      return Result.Unusable(
+        "ui-builder.json was generated against a $expected-component record and none is available " +
+          "here, so it would compose to its builtins alone"
+      )
+    }
+
+    val catalog =
+      CatalogCapabilityV1(
+        schema = CAPABILITY_SCHEMA,
+        benchmark =
+          CatalogBenchmarkV1(
+            catalogRevision = revisionOf(publishedJson),
+            sourceRevision = file.record?.file ?: UI_BUILDER_CATALOG_FILE_NAME,
+            catalogSystemId = id,
+            nativeRuntimeId = NATIVE_RUNTIME_ID,
+            id = id,
+          ),
+        components = taken.values.toList(),
+        exportCapabilities = exportCapabilities,
+        statusSemantics = rawSemantics,
+      )
+    val note =
+      "$id — published ui-builder.json (${taken.size} component(s)" +
+        (if (skipped.isEmpty()) "" else ", ${skipped.size} skipped") +
+        ")"
+    return Result.Composed(catalog, note)
+  }
+
+  /**
+   * The builder id of a record component the published file says nothing about.
+   *
+   * Reproduces the generator's derivation, which is the one place this reader and the producer have
+   * to agree without a field to agree through: an unannotated component is deliberately absent from
+   * `statusSemantics.components` and still belongs on the shelf, so its id must be DERIVABLE. The
+   * leaf is the component's own catalog id where it has one, because that is the name its author
+   * chose; the equivalence gate is what proves the two derivations still match.
+   */
+  private fun derivedId(prefix: String, component: ComponentRecord): String {
+    val leaf =
+      component.componentIds.firstOrNull()?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        ?: component.symbol.name
+    return "$prefix${slug(leaf)}"
+  }
+
+  /**
+   * `CheckboxButton` → `checkbox-button`, `RTLText` → `rtl-text`, `Button2` → `button2`.
+   *
+   * Splits on a lower-to-upper boundary and on any run of non-alphanumerics; a run of capitals is
+   * one word, because splitting it letter by letter produces ids nobody would type. The same rule
+   * the generator applies, stated here because a derived id is a saved design's identity and the
+   * two sides must not drift.
+   */
+  internal fun slug(name: String): String {
+    val out = StringBuilder()
+    name.forEachIndexed { index, ch ->
+      when {
+        ch.isLetterOrDigit() -> {
+          val previous = name.getOrNull(index - 1)
+          val next = name.getOrNull(index + 1)
+          val startsWord =
+            previous != null &&
+              ch.isUpperCase() &&
+              (previous.isLowerCase() ||
+                previous.isDigit() ||
+                (previous.isUpperCase() && next?.isLowerCase() == true))
+          if (startsWord && out.isNotEmpty() && out.last() != '-') out.append('-')
+          out.append(ch.lowercaseChar())
+        }
+        out.isNotEmpty() && out.last() != '-' -> out.append('-')
+      }
+    }
+    return out.toString().trim('-')
+  }
+
+  /** One record component, as the builder offers it, with the catalog's policy applied. */
+  private fun capability(
+    componentId: String,
+    component: ComponentRecord,
+    policy: UiBuilderComponentPolicy?,
+  ): ComponentCapabilityV1 {
+    val slots =
+      component.slots.map { slot ->
+        SlotCapabilityV1(
+          name = slot.name,
+          cardinality = SlotCardinalityV1(min = 0, max = null),
+          ordered = true,
+        )
+      }
+    val slotNames = slots.map { it.name }.toSet()
+    val properties =
+      component.parameters
+        .filterNot { it.composableSlot || it.name in slotNames }
+        .mapNotNull { parameter ->
+          val jsonType = ComponentRecordPacks.jsonTypeOf(parameter) ?: return@mapNotNull null
+          PropertyCapabilityV1(
+            name = parameter.name,
+            jsonType = JsonPrimitive(jsonType),
+            required = !parameter.hasDefault && !parameter.nullable,
+            notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`.",
+          )
+        }
+    return ComponentCapabilityV1(
+      componentId = componentId,
+      displayName = policy?.displayName ?: component.symbol.name,
+      role = if (slots.isNotEmpty()) "Container" else "Leaf",
+      traits = policy?.traits.orEmpty(),
+      slots = slots,
+      properties = properties,
+      modifierCapabilities = emptyList(),
+      wasm = wasm(policy?.canvas, policy?.nativeOnly == true, component.symbol.callable),
+      code =
+        CodeCapabilityV1(
+          symbol = component.symbol.callable,
+          imports = component.code?.imports.orEmpty().ifEmpty { listOf(component.symbol.callable) },
+        ),
+    )
+  }
+
+  /**
+   * A builtin, as a component.
+   *
+   * A builtin exists because it has NO call site — there is nothing in the record to discover — so
+   * everything it offers comes from the policy. It carries no [CodeCapabilityV1] for the same
+   * reason: the templates named by its role are what write it.
+   */
+  private fun builtinCapability(id: String, builtin: UiBuilderBuiltin): ComponentCapabilityV1 =
+    ComponentCapabilityV1(
+      componentId = id,
+      displayName = builtin.displayName ?: id.substringAfterLast('/'),
+      role = if (builtin.slots.isNotEmpty()) "Container" else "Leaf",
+      traits = emptyList(),
+      slots =
+        builtin.slots.keys.map { name ->
+          SlotCapabilityV1(
+            name = name,
+            cardinality = SlotCardinalityV1(min = 0, max = null),
+            ordered = true,
+          )
+        },
+      properties = emptyList(),
+      modifierCapabilities = emptyList(),
+      wasm = wasm(builtin.canvas, nativeOnly = false, callable = null),
+    )
+
+  /**
+   * How the canvas draws this component.
+   *
+   * The catalog's `canvas` word is an ADAPTER ID, and a build that lacks the adapter draws a named
+   * placeholder rather than nothing — the same honest shape a pack component already uses. Which
+   * adapters exist is the renderer's business, so this reports what the catalog asked for and lets
+   * the canvas resolve it; a catalog naming an adapter this build has never heard of degrades to a
+   * placeholder instead of failing to load.
+   */
+  private fun wasm(canvas: String?, nativeOnly: Boolean, callable: String?): WasmCapabilityV1 {
+    val drawn = !nativeOnly && canvas != null && canvas != PLACEHOLDER_CANVAS
+    return WasmCapabilityV1(
+      platformSupported = JsonPrimitive(drawn),
+      adapterStatus = if (drawn) WasmAdapterStatusV1.SUPPORTED else WasmAdapterStatusV1.UNSUPPORTED,
+      notes =
+        when {
+          nativeOnly ->
+            "Rendered only on the native lane; the canvas draws a named placeholder." +
+              (callable?.let { " The native preview compiles `$it`." } ?: "")
+          drawn -> "Drawn on the canvas by the `$canvas` adapter."
+          else -> "Drawn on the canvas as a named placeholder: this catalog claims no adapter."
+        },
+    )
+  }
+
+  /**
+   * The revision this catalog is pinned by: a digest of the published bytes.
+   *
+   * A design pins the catalog it was authored against, and the pin has to change when the catalog
+   * does. A published catalog has no revision of its own to borrow — the delivery branch's commit
+   * describes the whole branch, not this file — so the file's own content is what identifies it.
+   * Two hosts fetching the same published file therefore agree on the pin without coordinating,
+   * which a branch commit would not give.
+   */
+  private fun revisionOf(published: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(published.toByteArray())
+    return "sha256:" + digest.joinToString("") { "%02x".format(it) }.take(32)
+  }
+
+  private const val UI_BUILDER_CATALOG_SCHEMA = "compose-ui-builder-catalog/v1"
+  private const val CAPABILITY_SCHEMA = "compose-catalog-capabilities/v1"
+  private const val UI_BUILDER_CATALOG_FILE_NAME = "ui-builder.json"
+  private const val PLACEHOLDER_CANVAS = "placeholder"
+
+  /**
+   * What a published catalog claims of the native lane.
+   *
+   * `candidate` is what every catalog this server serves already declares, and a published catalog
+   * is not making a stronger claim than a synthesised one; the native lane's own compile is the
+   * check either way.
+   */
+  private const val NATIVE_RUNTIME_ID = "candidate"
+
+  // The wire shape of `ui-builder.json`, as this reader needs it. Deliberately a narrow mirror of
+  // the generator's output rather than a shared type: the generator's model lives in a
+  // compose-ai-tools module `checkUiBuilderRuntimeBoundary` keeps off this classpath, and a reader
+  // that decodes only what it reads cannot be broken by a field it ignores.
+
+  @Serializable
+  private data class PublishedFile(
+    val schema: String = "",
+    val catalog: PublishedIdentity = PublishedIdentity(),
+    val record: PublishedRecordRef? = null,
+    val statusSemantics: UiBuilderStatusSemantics = UiBuilderStatusSemantics(),
+  )
+
+  @Serializable private data class PublishedIdentity(val id: String = "", val title: String = "")
+
+  @Serializable
+  private data class PublishedRecordRef(val file: String? = null, val components: Int = 0)
+
+  @Serializable
+  internal data class UiBuilderStatusSemantics(
+    val componentIdPrefix: String = "",
+    val builtins: Map<String, UiBuilderBuiltin> = emptyMap(),
+    val components: Map<String, UiBuilderComponentPolicy> = emptyMap(),
+  )
+
+  @Serializable
+  internal data class UiBuilderBuiltin(
+    val role: String = "",
+    val displayName: String? = null,
+    val canvas: String? = null,
+    val slots: Map<String, JsonElement> = emptyMap(),
+  )
+
+  @Serializable
+  internal data class UiBuilderComponentPolicy(
+    /** The record's `canonicalId` — the join back to the inventory. */
+    val record: String = "",
+    @SerialName("catalogId") val catalogId: String? = null,
+    val displayName: String? = null,
+    val canvas: String? = null,
+    val nativeOnly: Boolean = false,
+    val traits: List<String> = emptyList(),
+    val excluded: String? = null,
+  )
+}
