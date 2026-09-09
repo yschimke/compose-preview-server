@@ -126,6 +126,30 @@ class RepeatedSiblingFoldTest {
     assertEquals(12, emittedCellBodies(source))
   }
 
+  /**
+   * The other way the qualifier can be taken: an adapter's own import.
+   *
+   * `ComposeAssetAdapter.renderer.importName` is supplied by the caller rather than by the design,
+   * so no check over the document can see it — and a declaration imported as `kotlin` would capture
+   * the qualifier and leave `repeat` unresolved.
+   */
+  @Test
+  fun `an asset renderer imported as kotlin turns the fold off`() {
+    val adapter =
+      ComposeAssetAdapter(
+        id = "test-adapter/v1",
+        bindings = emptyMap(),
+        renderer = ComposeAssetRenderer(symbol = "kotlin", importName = "app.artwork.kotlin"),
+      )
+    val document = contributionRow(cells = 12)
+    val result = CapabilityComposeCodeExporter.export(document, catalog, adapter)
+    val source = assertNotNull(result.source)
+
+    assertTrue(result.successful, result.diagnostics.joinToString { it.message })
+    assertFalse(source.contains("kotlin.repeat("), source)
+    assertEquals(12, emittedCellBodies(source))
+  }
+
   private fun UiBuilderDocument.withState(name: String) =
     copy(
       stateVariables =

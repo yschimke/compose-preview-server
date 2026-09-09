@@ -469,13 +469,15 @@ private class ComposeEmitter(
    * what else is in scope, which is the honest position for an exporter whose imports include one
    * the caller supplies (`ComposeAssetAdapter.renderer`).
    *
-   * That leaves one name to protect rather than two, and it is protected the same way: a design
-   * whose state is called `kotlin` has its cells printed the long way, since the local would
-   * capture the qualifier. Spent on the fold rather than on a refusal — the design is legal and the
-   * canvas draws it.
+   * That leaves one name to protect rather than two, and both ways it can be taken are: a design
+   * whose state is called `kotlin` gets a local that captures the qualifier, and an adapter whose
+   * renderer imports a declaration of that simple name captures it too. Either has its cells
+   * printed the long way. Spent on the fold rather than on a refusal — the design is legal, the
+   * canvas draws it, and the adapter is the caller's to supply.
    */
   private val foldsRepeatedSiblings: Boolean by lazy {
-    document.stateVariables.keys.none { it.identifier() == "kotlin" }
+    document.stateVariables.keys.none { it.identifier() == "kotlin" } &&
+      assetAdapter?.renderer?.importName?.substringAfterLast('.') != "kotlin"
   }
 
   /**
