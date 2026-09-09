@@ -459,24 +459,6 @@ private class ComposeEmitter(
   }
 
   /**
-   * A slot's children, with runs of identical siblings written as one `repeat`.
-   *
-   * A design says a twelve-cell contribution row by holding twelve nodes, because that is the only
-   * thing the document can say: there is no loop in the format, and the canvas draws what is there.
-   * Printing it back as twelve identical `Surface` calls is faithful and unreadable, and the person
-   * reading the generated screen is the one this export exists for.
-   *
-   * The fold is purely how the same composition is *spelled*. The run emits the calls it replaced,
-   * in the same order, in the same parent scope; nothing about what is drawn moves. So the rule for
-   * what may fold is the rule for what is genuinely interchangeable — see [foldSignature], which
-   * refuses a subtree asserting an identity the fold would erase.
-   *
-   * Only in the non-lazy containers. `LazyColumn` and the grid wrap each child in `item(key = …)`,
-   * and a folded run would have to invent one key for what were separate keys — laziness is where
-   * item identity has consequences, so the readability trade is not obviously worth it there and is
-   * not taken.
-   */
-  /**
    * Whether a `repeat` written into this screen would still mean `kotlin.repeat`, and whether the
    * `it` it binds would shadow anything a folded child reads.
    *
@@ -492,6 +474,29 @@ private class ComposeEmitter(
     document.stateVariables.keys.map { it.identifier() }.none { it == "it" || it == "repeat" }
   }
 
+  /**
+   * A slot's children, with runs of identical siblings written as one `repeat`.
+   *
+   * A design says a twelve-cell contribution row by holding twelve nodes, because that is the only
+   * thing the document can say: there is no loop in the format, and the canvas draws what is there.
+   * Printing it back as twelve identical `Surface` calls is faithful and unreadable, and the person
+   * reading the generated screen is the one this export exists for.
+   *
+   * The fold is purely how the same composition is *spelled*. The run emits the calls it replaced,
+   * in the same order, in the same parent scope; nothing about what is drawn moves. So the rule for
+   * what may fold is the rule for what is genuinely interchangeable — see [foldSignature], which
+   * refuses a subtree asserting an identity the fold would erase.
+   *
+   * The comment above a run names the folded **siblings**; the body carries the located node
+   * comments of the first of them, and a copy's descendants are found through the sibling id that
+   * stands for them. Naming every descendant of every copy would put back, as comments, the text
+   * the fold just removed — and the copies are identical, which is the whole premise.
+   *
+   * Only in the non-lazy containers. `LazyColumn` and the grid wrap each child in `item(key = …)`,
+   * and a folded run would have to invent one key for what were separate keys — laziness is where
+   * item identity has consequences, so the readability trade is not obviously worth it there and is
+   * not taken.
+   */
   private fun emitChildren(children: List<String>, level: Int) {
     var index = 0
     while (index < children.size) {

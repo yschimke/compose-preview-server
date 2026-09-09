@@ -70,15 +70,27 @@ class RepeatedSiblingFoldTest {
     assertEquals(12, Regex("key\\(\"cell-").findAll(source).count())
   }
 
+  /**
+   * Which ids survive a fold, stated exactly.
+   *
+   * Every folded **sibling** is named in the comment above its run. Their descendants are not, and
+   * deliberately: the emitted body carries the located comments of the first copy, and naming
+   * `cell-1-label` through `cell-11-label` too would put back, as comments, the text the fold just
+   * removed. The copies are identical — that is the premise — so a descendant is found through the
+   * sibling id that stands for it.
+   */
   @Test
-  fun `folding does not change which nodes were exported`() {
+  fun `every folded sibling is named, and a copy's descendants are found through it`() {
     val folded = exportSource(contributionRow(cells = 12))
 
-    // Every node still appears in the generated source's own node index, folded or not: the
-    // comment above a run names the nodes it stands for, so nothing becomes unfindable.
     (0 until 12).forEach { index ->
-      assertTrue(folded.contains("cell-$index"), "cell-$index is not named in the generated source")
+      assertTrue(
+        folded.contains("cell-$index,") || folded.contains("cell-$index\n"),
+        "cell-$index is not named in the generated source",
+      )
     }
+    assertEquals(1, Regex("// node:cell-\\d+-label ").findAll(folded).count())
+    assertTrue(folded.contains("// node:cell-0-label "), folded)
   }
 
   /**
