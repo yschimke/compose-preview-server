@@ -236,6 +236,15 @@ internal class ScreenGeneratorComposeExportExecutor(
   internal fun generate(
     document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
     tagNodes: Boolean = false,
+    /**
+     * Which host container to frame a **widget** design in; ignored by every other design.
+     *
+     * Not read from the document, because the shape is not the design's — the launcher draws the
+     * frame from `WearWidgetParams`. It arrives from whoever asked for the render, which is the
+     * editor, whose canvas is drawing the same shape beside this render.
+     */
+    widgetHostShape: ee.schimke.composeai.uibuilder.WearWidgetHostShape =
+      ee.schimke.composeai.uibuilder.WearWidgetHostShape.Default,
   ): Generated {
     // A record-free design never reaches `ScreenGenerator` below — `remote-m3` and `wear-m3` have
     // no component record and the record-driven generator can only refuse them — so the emitter
@@ -261,7 +270,12 @@ internal class ScreenGeneratorComposeExportExecutor(
     if (RecordFreeExport.isWearWidget(document)) {
       return when (
         val preview =
-          RecordFreeExport.nativePreview(document, packageName, document.widgetAssetBytes())
+          RecordFreeExport.nativePreview(
+            document,
+            packageName,
+            document.widgetAssetBytes(),
+            widgetHostShape,
+          )
       ) {
         // Unreachable: `isWearWidget` was true, so the widget emitter owns this document. Reported
         // rather than asserted, for the reason the screen branch below reports its own null.

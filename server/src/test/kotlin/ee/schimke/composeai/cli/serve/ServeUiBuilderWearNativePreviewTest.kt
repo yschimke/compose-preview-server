@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
@@ -172,6 +173,46 @@ class ServeUiBuilderWearNativePreviewTest {
     // tagless render was never going to have.
     assertEquals(emptyList(), rendered.taggedNodeIds)
     assertEquals(emptyMap(), rendered.nodeBounds)
+  }
+
+  /**
+   * The rectangular host container is a different frame, and the lane draws it when asked.
+   *
+   * Not a radius swap on the squircle: at Large the content box is 168×112dp inside 32/16dp of
+   * padding against the squircle's 200×108dp inside a uniform 8dp, so the submitted params and the
+   * `@Preview` canvas both move. That is the whole reason a designer needs to see it — a layout
+   * that just fits the squircle can clip here — and it is the frame recommended as the widget
+   * picker editor's image (yschimke/compose-preview-server#587).
+   *
+   * The shape is the host's, so it arrives as an argument rather than being read from the document:
+   * nothing in the design changes between these two renders.
+   */
+  @Test
+  fun `a widget asked for the rectangular container gets that frame`() {
+    lane().render(wearWidget(), WearWidgetHostShape.Rectangular)
+
+    val request = submitted.single()
+    assertTrue("widthDp = 168f" in request.source, request.source)
+    assertTrue("heightDp = 112f" in request.source, request.source)
+    assertTrue("horizontalPaddingDp = 32f" in request.source, request.source)
+    assertTrue("verticalPaddingDp = 16f" in request.source, request.source)
+    assertTrue("cornerRadiusDp = 0f" in request.source, request.source)
+    // The container type is the size, not the shape — a Large widget stays Large in both frames.
+    assertTrue("ContainerInfo.CONTAINER_TYPE_LARGE" in request.source, request.source)
+    // 168 + 2×32 by 112 + 2×16, which is what `WearWidgetPreview` sizes itself to.
+    assertEquals(232, request.widthDp)
+    assertEquals(144, request.heightDp)
+  }
+
+  /** Asking for nothing draws the squircle, which is what every caller got before the shape. */
+  @Test
+  fun `a widget with no shape asked for keeps the squircle frame`() {
+    lane().render(wearWidget())
+
+    val request = submitted.single()
+    assertTrue("cornerRadiusDp = 26f" in request.source, request.source)
+    assertEquals(216, request.widthDp)
+    assertEquals(124, request.heightDp)
   }
 
   /**
