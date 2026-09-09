@@ -149,17 +149,48 @@ internal object PublishedUiBuilderCatalog {
     // — a component nobody can author, on a shelf that loaded cleanly.
     val unreadable = mutableListOf<String>()
     fun checkProperties(owner: String, properties: List<UiBuilderPropertyPolicy>) {
+      // Unique names, because `CapabilityCatalogParser.validateCatalogShape` requires them and
+      // THROWS while installing the catalog — so a duplicate does not degrade the editor, it stops
+      // it opening, which is the one outcome the per-catalog fallback exists to prevent.
+      properties
+        .groupBy { it.name }
+        .filterValues { it.size > 1 }
+        .keys
+        .forEach { unreadable += "$owner.$it (declared twice)" }
       for (property in properties) {
-        val readable =
-          when (val type = property.jsonType) {
-            is JsonArray -> type.all { it is JsonPrimitive && it.isString }
-            is JsonPrimitive -> type.isString
-            else -> false
+        when (val type = property.jsonType) {
+          is JsonArray -> {
+            // `[]` is a union of nothing: no value satisfies it, so a required property declaring
+            // it is a component nobody can author. `all {}` is vacuously true, which is how it got
+            // past the first cut of this check.
+            if (type.isEmpty()) unreadable += "$owner.${property.name} (jsonType is empty)"
+            else
+              type.forEach { entry ->
+                val name = (entry as? JsonPrimitive)?.takeIf { it.isString }?.content
+                if (name == null || name !in SUPPORTED_JSON_TYPES)
+                  unreadable += "$owner.${property.name} (jsonType $entry is not a type name)"
+              }
           }
-        if (!readable) unreadable += "$owner.${property.name} (jsonType)"
+          is JsonPrimitive ->
+            if (!type.isString || type.content !in SUPPORTED_JSON_TYPES)
+              unreadable += "$owner.${property.name} (jsonType $type is not a type name)"
+          else -> unreadable += "$owner.${property.name} (jsonType is neither a name nor a list)"
+        }
+        // The EDITOR seeds a new node from the first allowed value and reads it as a primitive, so
+        // a non-primitive one is a component that cannot be inserted. Refused rather than
+        // stringified: a summary can degrade, an authoring path cannot.
+        property.allowedValues.forEachIndexed { index, value ->
+          if (value !is JsonPrimitive)
+            unreadable += "$owner.${property.name}.allowedValues[$index] (not a literal)"
+        }
       }
     }
     fun checkSlots(owner: String, slots: List<UiBuilderSlotPolicy>) {
+      slots
+        .groupBy { it.name }
+        .filterValues { it.size > 1 }
+        .keys
+        .forEach { unreadable += "$owner.$it (slot declared twice)" }
       for (slot in slots) {
         val min = slot.cardinality.min
         val max = slot.cardinality.max
@@ -177,9 +208,7 @@ internal object PublishedUiBuilderCatalog {
     }
     if (unreadable.isNotEmpty()) {
       return Result.Unusable(
-        "${unreadable.size} declaration(s) the builder cannot serve — a jsonType the design " +
-          "validator reads with `jsonPrimitive` and throws on, or a slot cardinality no child " +
-          "count satisfies: " +
+        "${unreadable.size} declaration(s) the builder cannot serve: " +
           unreadable.sorted().take(8).joinToString(", ") +
           (if (unreadable.size > 8) ", …" else "")
       )
@@ -505,6 +534,23 @@ internal object PublishedUiBuilderCatalog {
    * resolve, by declaring `statusSemantics.components` rather than leaving every id to be derived.
    */
   private const val COLLISION_REFUSAL_RATE = 0.10
+
+  /**
+   * The type names a design's value can be checked against.
+   *
+   * `ProductionUiBuilderRuntime`'s `JsonElement.accepts` is the list, and this mirrors it — a name
+   * outside it matches nothing, so a property declaring one can never hold a value and a REQUIRED
+   * property declaring one is a component nobody can author. I argued in review that an unknown
+   * name degrades safely to a type mismatch; that is true for an optional property and false for a
+   * required one, which is the same "impossible to author" this file already refuses a `max < min`
+   * cardinality for.
+   *
+   * Mirrored rather than shared because `accepts` is a private `when` in a module `:server` does
+   * not depend on. Adding a name there means adding it here; the equivalence test's check that
+   * every frozen catalog's declared types are in this set is what makes the drift visible.
+   */
+  private val SUPPORTED_JSON_TYPES =
+    setOf("null", "string", "boolean", "number", "integer", "array", "object")
 
   private const val UI_BUILDER_CATALOG_SCHEMA = "compose-ui-builder-catalog/v1"
   private const val CAPABILITY_SCHEMA = "compose-catalog-capabilities/v1"

@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * Does the shelf composed from m3-catalog's published files match the shelf this server
@@ -322,6 +323,139 @@ class PublishedM3CatalogEquivalenceTest {
       (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("cardinality"),
       "the refusal does not name the cardinality: ${result.reason}",
     )
+  }
+
+  /** Every refusal this round added, each as the smallest document that triggers it. */
+  @Test
+  fun `declarations the builder cannot serve are refused`() {
+    val record = json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-record-v1.json"))
+    val published = fixture("m3-catalog-published-v1.json")
+    fun refusalFor(edit: (String) -> String, what: String): String {
+      val broken = edit(published)
+      assertTrue(broken != published, "precondition failed for $what")
+      val result = PublishedUiBuilderCatalog.compose(broken, record, exports)
+      assertTrue(
+        result is PublishedUiBuilderCatalog.Result.Unusable,
+        "$what composed instead of being refused",
+      )
+      return (result as PublishedUiBuilderCatalog.Result.Unusable).reason
+    }
+    // `[]` is a union of nothing, and `all {}` is vacuously true — which is how it passed the
+    // first cut of the readability check.
+    assertTrue(
+      refusalFor(
+          { it.replaceFirst("\"jsonType\": \"string\"", "\"jsonType\": []") },
+          "an empty jsonType",
+        )
+        .contains("empty"),
+      "the refusal does not say the jsonType is empty",
+    )
+    // A name the runtime's `accepts` does not know matches nothing, so a required property
+    // declaring one is a component nobody can author.
+    assertTrue(
+      refusalFor(
+          { it.replaceFirst("\"jsonType\": \"string\"", "\"jsonType\": \"date\"") },
+          "an unknown type name",
+        )
+        .contains("not a type name"),
+      "the refusal does not name the unknown type",
+    )
+    // The editor seeds a new node from the first allowed value and reads it as a primitive.
+    assertTrue(
+      refusalFor(
+          { it.replaceFirst("\"allowedValues\": [", "\"allowedValues\": [ {},") },
+          "a non-primitive allowed value",
+        )
+        .contains("not a literal"),
+      "the refusal does not name the non-literal allowed value",
+    )
+  }
+
+  /**
+   * The set this file mirrors from the runtime's `accepts`, checked against the catalogs that
+   * exist.
+   *
+   * Not proof the two agree — they are in different modules and the runtime's is a private `when` —
+   * but it makes the drift visible from the side that matters: a catalog starting to declare a type
+   * name this server would refuse fails here rather than in the field.
+   */
+  @Test
+  fun `every type name the frozen catalogs declare is one the server accepts`() {
+    val known = setOf("null", "string", "boolean", "number", "integer", "array", "object")
+    val declared =
+      frozen.components
+        .flatMap { it.properties }
+        .flatMap { property ->
+          when (val type = property.jsonType) {
+            is JsonArray -> type.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            is JsonPrimitive -> listOf(type.content)
+            else -> emptyList()
+          }
+        }
+        .toSortedSet()
+    assertEquals(
+      emptySet<String>(),
+      declared - known,
+      "the frozen catalog declares a type name this server's SUPPORTED_JSON_TYPES does not carry",
+    )
+  }
+
+  /**
+   * The builder's shelves land where the donor puts them, not where the injection loop reached
+   * them.
+   */
+  @Test
+  fun `injected groups follow the donor's order, not the injection order`() {
+    val served =
+      CurrentM3UiBuilderCatalogExecutor(
+          catalogSystemIds = linkedSetOf("m3-catalog"),
+          published = mapOf("m3-catalog" to composed),
+        )
+        .listCatalogs()
+        .single()
+    val order =
+      ((served.statusSemantics["componentMenu"] as JsonObject)["groupOrder"] as JsonArray).map {
+        (it as JsonPrimitive).content
+      }
+    val donorOrder =
+      ((frozen.statusSemantics["componentMenu"] as JsonObject)["groupOrder"] as JsonArray).map {
+        (it as JsonPrimitive).content
+      }
+    // Every group the donor knows is present, and any two of them appear in the donor's relative
+    // order — "Layout" before "Content", "Scaffolds" before "Layout".
+    val shared = donorOrder.filter { it in order }
+    assertEquals(
+      shared,
+      order.filter { it in donorOrder },
+      "the shelves are not in the donor's relative order",
+    )
+    assertTrue(
+      order.indexOf("Layout") < order.indexOf("Styles"),
+      "Layout landed below Styles: $order",
+    )
+  }
+
+  /** The donor's asset keys are unioned in, not only used to fill an absent registry. */
+  @Test
+  fun `the donor's asset keys are merged into a catalog's own registry`() {
+    val ownRegistry =
+      JsonObject(
+        composed.statusSemantics +
+          ("assetRegistry" to
+            JsonObject(mapOf("keys" to JsonArray(listOf(JsonPrimitive("catalog.own"))))))
+      )
+    val served =
+      CurrentM3UiBuilderCatalogExecutor(
+          catalogSystemIds = linkedSetOf("m3-catalog"),
+          published = mapOf("m3-catalog" to composed.copy(statusSemantics = ownRegistry)),
+        )
+        .listCatalogs()
+        .single()
+    val keys = CurrentM3UiBuilderCatalogExecutor.declaredAssetKeys(served).orEmpty()
+    assertTrue("catalog.own" in keys, "the catalog's own key was dropped: $keys")
+    // The editor seeds a new image with this builder-owned key, so an injected `asset/image`
+    // without it is a palette component that cannot be inserted.
+    assertTrue("editor.placeholder" in keys, "the donor's placeholder key was not merged: $keys")
   }
 
   @Test
