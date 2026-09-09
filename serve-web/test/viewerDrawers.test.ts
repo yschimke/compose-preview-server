@@ -137,6 +137,29 @@ describe("<cp-viewer-drawers>", () => {
         assert.equal(menu.open, false, "and so does opening Components");
     });
 
+    it("closes the comparisons sheet when the page narrows into the phone layout", async () => {
+        // The other way the sheet lands on a drawer, and `setOpen` never sees it: the breakpoint
+        // handler passes `false` for the nav on a phone, and an already-open Overrides drawer is
+        // not re-opened at all — so rotating a wide page with both showing recreated the overlap
+        // without a single open call.
+        stubStorage();
+        const viewer = await mount("wide", true);
+        const menu = document.getElementById(
+            "cp-compare-menu",
+        ) as HTMLDetailsElement;
+        menu.open = true;
+        assert.equal(viewer.classList.contains("cp-controls-open"), true);
+
+        viewport.resizeTo("phone");
+        await flush();
+
+        assert.equal(
+            menu.open,
+            false,
+            "the sheet goes when the phone layout arrives",
+        );
+    });
+
     it("leaves the comparisons sheet alone when a drawer CLOSES", async () => {
         // Only opening competes for the space. Closing a drawer gives it back, and a reader who
         // had the menu open has no reason to lose it.

@@ -245,6 +245,13 @@ export class ViewerDrawers extends ControllerElement {
                         ),
                     );
                 }
+                // Arriving at the phone layout is the other way the sheet ends up over a drawer,
+                // and `setOpen` never sees it: the call above passes `false` on a phone, and an
+                // already-open Overrides drawer is not re-opened at all. So a page held wide with
+                // both showing, then rotated, would land with the sheet (fixed, z-index 70) over
+                // the drawer (fixed, 40) and its scrim — the same trap, reached by turning the
+                // device rather than by tapping.
+                if (this.viewport().mobile) this.closeComparisonMenus();
                 this.reflowRows();
             };
             list.addEventListener("change", handler);
