@@ -93,6 +93,76 @@ describe("design sheet URL state", () => {
         );
     });
 
+    it("refuses a sibling LANE on that sheet too, and the self-baseline it would license", () => {
+        // The other side of the same claim, and the one that used to get through. `laneOf` only
+        // parses, so `?lane=parallel` survived onto an unpaired sheet — and `allowsBaseline` then
+        // read `code` as legal, because it is legal *opposite `parallel`*. Hydration cannot check a
+        // radio the page never rendered, so the sheet settled back on `code` while holding the
+        // `code` baseline: every render scored against itself, a wall of `0.0%` from a stale link.
+        assert.deepEqual(
+            pageStateFrom(
+                {
+                    lane: "parallel",
+                    baseline: "code",
+                    outlines: null,
+                    unlinked: null,
+                },
+                false,
+            ),
+            {
+                lane: "code",
+                baseline: "off",
+                outlines: false,
+                unlinked: false,
+            },
+        );
+    });
+
+    it("keeps a baseline the fallback lane still allows", () => {
+        // Normalising the lane must not cost the reader a pairing that is still real: `design` is
+        // not the lane it falls back to, so it survives the fallback rather than being swept up
+        // with it.
+        assert.deepEqual(
+            pageStateFrom(
+                {
+                    lane: "parallel",
+                    baseline: "design",
+                    outlines: null,
+                    unlinked: null,
+                },
+                false,
+            ),
+            {
+                lane: "code",
+                baseline: "design",
+                outlines: false,
+                unlinked: false,
+            },
+        );
+    });
+
+    it("honours the sibling lane on a sheet that DOES carry the renders", () => {
+        // The fallback is about the pairing, not about the parameter — a paired sheet still opens
+        // where the link says.
+        assert.deepEqual(
+            pageStateFrom(
+                {
+                    lane: "parallel",
+                    baseline: "code",
+                    outlines: null,
+                    unlinked: null,
+                },
+                true,
+            ),
+            {
+                lane: "parallel",
+                baseline: "code",
+                outlines: false,
+                unlinked: false,
+            },
+        );
+    });
+
     it("turns the outlines on with the filter that needs them", () => {
         // Pressing the unlinked filter does this, so restoring it has to as well — otherwise a
         // Back landed on a filter with nothing visible to filter.
