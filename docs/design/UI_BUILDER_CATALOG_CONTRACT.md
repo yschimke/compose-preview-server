@@ -483,7 +483,12 @@ Each phase is releasable on its own and leaves every catalog working.
    `componentIdPrefix` — each stated entry against the frozen one, *and* each frozen one against the
    catalog's. Sweeping only the catalog's keys caught a shelf that moved and not one that vanished,
    so a generated menu omitting a component — an empty map included — reached no comparison at all
-   and passed while that component lost its shelf and its variant control. A missing entry is a
+   and passed while that component lost its shelf and its variant control. Which ids are the catalog's is read from the
+   **published** `componentIdPrefix` and never derived from the catalog id — m3-catalog's components
+   are `m3/…` while its id is `m3-catalog`, so a derived prefix would match none of its 25 frozen
+   entries and disable the sweep as surely as a wrong one. A prefix the frozen catalog has never
+   heard of blocks; a shape that publishes none (a capability document does not) reports that the
+   sweep could not run rather than passing quietly. A missing entry is a
    difference rather than a gap, and reviewable: the catalog publishes a menu and that menu does not
    list the id, which is an assertion that the component is gone, not the silence of a catalog that
    has not been written yet. An authored policy states none of them — a component's shelf comes from

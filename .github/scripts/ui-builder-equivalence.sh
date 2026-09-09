@@ -244,7 +244,19 @@ const refuseFutureMajor = (label, doc, mustDeclare, expectedFamily) => {
     return true;
   }
   const family = schema.slice(0, schema.lastIndexOf("/"));
-  const major = Number.parseInt(String(schema.slice(schema.lastIndexOf("/") + 1)).replace(/^v/, ""), 10);
+  // The WHOLE version token has to be a version, not a number with something after it.
+  // `Number.parseInt` reads a numeric prefix and discards the rest, so `v1junk` and `v999x` both
+  // arrived here as a supported major and every field then compared cleanly — the same "it parsed,
+  // therefore I understand it" the `.includes("/")` guard was fixed for one round earlier, one
+  // character further along.
+  //
+  // A pre-release suffix stays legal (`v1-candidate` is what the frozen catalogs declare today) and
+  // so does a minor (`v1.5` is the same major, which a reader is required to accept). What is
+  // refused is a token this gate cannot read as a version at all.
+  const version = String(schema.slice(schema.lastIndexOf("/") + 1));
+  const major = /^v?(\d+)(\.\d+)*(-[A-Za-z0-9.]+)?$/.exec(version)
+    ? Number.parseInt(version.replace(/^v/, ""), 10)
+    : Number.NaN;
   const known = SCHEMA_FAMILIES[family];
   // An UNRECOGNISED family is refused for the same reason a future major is, and the reason is the
   // one this gate keeps coming back to: `compose-ui-builder-polciy/v999` still spells `platform` and
@@ -391,7 +403,17 @@ for (const id of unknownBuiltins) {
   fields.push([`builtins.${id}`, facts.builtins?.[id] ?? null, undefined]);
 }
 
-const statedEntries = menu?.components;
+// A menu with NO `components` member is a menu that lists no components.
+//
+// The guard was `if (statedEntries && …)`, so an omitted map skipped both sweeps entirely while an
+// empty one `{}` was handled — and those two documents say exactly the same thing. Every
+// catalog-owned component would have vanished at cutover with the gate reporting ready, which is
+// the finding from one round ago arriving through the shape I did not think of rather than the one
+// I did. The published shapes carry a `componentMenu`; an authored policy carries `menu` with no
+// components at all, and asking it for per-component shelves is what this must not start doing.
+let unrecognisedPrefix = null;
+let unresolvedPrefix = false;
+const statedEntries = published && menu !== undefined ? (menu.components ?? {}) : undefined;
 const frozenEntries = semantics.componentMenu?.components;
 let agreeingEntries = 0;
 if (statedEntries && typeof statedEntries === "object" && !Array.isArray(statedEntries)) {
@@ -421,12 +443,38 @@ if (statedEntries && typeof statedEntries === "object" && !Array.isArray(statedE
   // has not been reviewed, it is unfinished. Here the catalog publishes a menu and that menu does
   // not list this id, which is an assertion: the component is gone. So it is a DIFFERENCE, and a
   // deliberate retirement can be reviewed and pinned like any other.
-  const catalogPrefix =
-    facts.componentIdPrefix ||
-    (source.catalogId || source.catalog?.id || source.benchmark?.catalogSystemId
-      ? `${source.catalogId || source.catalog?.id || source.benchmark?.catalogSystemId}/`
-      : null);
-  if (frozenEntries && catalogPrefix) {
+  // The PUBLISHED prefix, and no fallback derived from the catalog id.
+  //
+  // Deriving `<catalogId>/` looks harmless and is wrong for a real catalog: m3-catalog's components
+  // are `m3/…`, so the derived `m3-catalog/` matches none of its 25 frozen entries. A guess that
+  // silently matches nothing disables the sweep exactly as a wrong published prefix would.
+  // `componentIdPrefix` is published on the generated shape precisely so a consumer can name a
+  // component this file says nothing about, which is the same question asked here.
+  const catalogPrefix = facts.componentIdPrefix || null;
+  // CORROBORATED, not trusted. The prefix decides which frozen entries this catalog is answerable
+  // for, and it is supplied by the document being checked — so a wrong one silently suppresses the
+  // whole sweep, which is the thing under test deciding what gets tested. It is not hypothetical:
+  // m3-catalog's components are `m3/…` while its catalog id is `m3-catalog`, so the id-derived
+  // fallback matches none of its 25 frozen entries, and remote-m3's frozen menu is mostly the
+  // packaged Material 3 catalog's `m3/…` with a single `remote-m3/…` of its own.
+  //
+  // So the golden has to recognise the prefix. If no frozen entry carries it, either the prefix is
+  // wrong or these two files are not about the same catalog — both of which `--strict` exists to
+  // refuse, and neither of which may read as "nothing to compare".
+  //
+  // Two different answers for two different situations. A prefix the frozen catalog has never heard
+  // of is a disagreement about which components belong to this catalog, and blocks. NO prefix is
+  // not a disagreement — a capability document publishes none, because its builtins have been
+  // materialised in and it does not distinguish them — so the sweep says it could not run rather
+  // than passing quietly or failing a document that is not the shape this checks.
+  const prefixCorroborated =
+    catalogPrefix !== null &&
+    Object.keys(frozenEntries ?? {}).some((id) => id.startsWith(catalogPrefix));
+  if (frozenEntries && catalogPrefix !== null && !prefixCorroborated) {
+    unrecognisedPrefix = catalogPrefix;
+  } else if (frozenEntries && catalogPrefix === null) {
+    unresolvedPrefix = true;
+  } else if (frozenEntries && catalogPrefix) {
     for (const id of Object.keys(frozenEntries).sort()) {
       if (!id.startsWith(catalogPrefix)) continue;
       if (statedEntries[id] !== undefined) continue;
@@ -611,6 +659,26 @@ if (capabilities) {
   // The unknown ones were reported above, by the field loop, one per id.
 }
 
+// The prefix the catalog names, which the frozen catalog does not recognise. Reported with the
+// identity checks below rather than as a difference, because that is what it means: the two files
+// disagree about which components belong to this catalog, and no per-component comparison beneath
+// that disagreement is worth reading.
+if (unrecognisedPrefix !== null) {
+  console.log("");
+  console.log(
+    `  x componentIdPrefix: this catalog's components are ${JSON.stringify(unrecognisedPrefix)}, ` +
+      `and the frozen catalog has no component under it`,
+  );
+  console.log(`      So nothing could be compared: either the prefix is wrong, or this policy and`);
+  console.log(`      this golden are not about the same catalog. Not a difference to waive.`);
+}
+
+if (unresolvedPrefix) {
+  console.log(`  ~ componentMenu.components: this shape publishes no componentIdPrefix, so which`);
+  console.log(`      frozen entries are this catalog's cannot be told from the builder's own. The`);
+  console.log(`      entries it DOES state were compared; a dropped one could not be.`);
+}
+
 // WHICH CATALOG IS THIS? Asked before anything above is believed.
 //
 // Every comparison so far has been of catalog-level SEMANTICS, and semantics do not identify a
@@ -649,7 +717,7 @@ const [shapeField, shapeId] = IDENTIFIERS[shape];
 const [identifyingField, declaredId] =
   shapeId !== undefined ? [shapeField, shapeId] : (namedIds[0] ?? [shapeField, null]);
 const goldenId = golden.benchmark?.catalogSystemId ?? null;
-let misidentified = 0;
+let misidentified = unrecognisedPrefix === null ? 0 : 1;
 
 // A document that names itself TWICE must agree with itself, whichever name won above. Two
 // identifiers disagreeing is not a difference to waive and not a question of precedence: one of

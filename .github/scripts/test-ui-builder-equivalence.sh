@@ -620,6 +620,74 @@ JSON
   --differences "${work}/drop-reviewed.json" --catalog-id wear-m3 --strict >"${work}/out" 2>&1
 check "a reviewed retirement passes --strict" 0 $?
 
+# A menu with no `components` member says exactly what an empty one says. The guard handled `{}`
+# and skipped an omitted map entirely, so every catalog-owned component could vanish at cutover
+# with the gate reporting ready.
+cat >"${work}/drop-nomap.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "componentMenu": { "groupOrder": ["A"] } } }
+JSON
+"${gate}" --policy "${work}/drop-nomap.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a generated menu with no components member fails --strict" 1 $?
+grep -q "x componentMenu.components.wear-m3/card" "${work}/out" ||
+  { echo "FAIL absent map not swept"; failures=$((failures + 1)); }
+
+# The prefix decides which frozen entries the catalog answers for, and it comes from the document
+# being checked — so a wrong one silently suppresses the whole sweep. m3-catalog makes this real:
+# its components are `m3/…` while its catalog id is `m3-catalog`.
+cat >"${work}/drop-badprefix.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "nope/",
+    "componentMenu": { "groupOrder": ["A"], "components": {} } } }
+JSON
+"${gate}" --policy "${work}/drop-badprefix.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a prefix the frozen catalog does not recognise fails --strict" 1 $?
+grep -q "x componentIdPrefix" "${work}/out" ||
+  { echo "FAIL unrecognised prefix not reported"; failures=$((failures + 1)); }
+
+# NO prefix is a different answer from a WRONG one. A capability document publishes none — its
+# builtins are materialised in and it does not distinguish them — so the sweep says it could not
+# run rather than failing a document that is simply not the shape it checks. The frozen catalogs
+# are that shape, and one checked against itself has to pass.
+cat >"${work}/drop-noprefix.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear",
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" },
+                      "layout/box": { "group": "A" } } } } }
+JSON
+"${gate}" --policy "${work}/drop-noprefix.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a shape publishing no prefix says so rather than failing or passing quietly" 0 $?
+grep -q "publishes no componentIdPrefix" "${work}/out" ||
+  { echo "FAIL unresolvable prefix not reported"; failures=$((failures + 1)); }
+
+# A version token has to be a version all the way through: `parseInt` reads a numeric prefix and
+# discards the rest, so `v1junk` arrived as a supported major and every field compared cleanly.
+cat >"${work}/version-junk.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1junk", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+"${gate}" --policy "${work}/version-junk.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a version with trailing text is refused" 1 $?
+
+# And the two shapes that are real versions still pass: a pre-release suffix is what the frozen
+# catalogs declare today, and a minor is the same major, which a reader must accept.
+for ok_version in "v1-candidate" "v1.5"; do
+  cat >"${work}/version-ok.json" <<JSON
+{ "schema": "compose-ui-builder-policy/${ok_version}", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+  "${gate}" --policy "${work}/version-ok.json" --golden "${work}/golden.json" \
+    --strict >/dev/null 2>&1
+  check "a ${ok_version} schema is still read" 0 $?
+done
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then
