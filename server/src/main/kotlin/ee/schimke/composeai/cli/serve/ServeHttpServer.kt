@@ -7239,10 +7239,30 @@ class ServeHttpServer(
    * Record [host]'s browse-card facts under [id]. Bundle hosts contribute their richer publishing
    * metadata; local module sessions still contribute a title, preview count and representative
    * render so project-wide component browsing can use the same front door.
+   *
+   * [progress] governs the two **progress counters** — the theme-optimization and render-cache
+   * snapshots — which are read by `/status` and by nothing else. They are not free:
+   * `themeOptimizationSnapshot` asks the theme cache whether it holds each of the catalog's themed
+   * renders, and every one of those membership tests builds a cache file name through
+   * `String.format`. Across the front door's catalogs that is tens of thousands of formatter parses
+   * per request, and thread dumps of `preview.coo.ee` under load put ~88% of the home index's
+   * server time inside this function, essentially all of it under `themeOptimizationSnapshot`.
+   *
+   * So the callers that do not read them do not pay for them. `homeSystemsFor` builds
+   * [ServeWeb.HomeSystem], which has no progress fields at all, and the global component index
+   * reads only `components`; both pass `progress = false` and carry the previously remembered
+   * values forward untouched. The status path and the suspend listener pass true — the listener
+   * especially, since that is the last chance to capture a catalog's final counters before its host
+   * goes away, and `/status` renders them for a suspended catalog out of exactly that memory.
+   *
+   * `buildStatusData` re-reads both from the live host anyway, so a `false` here can never make
+   * `/status` show a staler number than it would otherwise: the remembered pair is only ever the
+   * fallback for a catalog whose host is gone.
    */
-  private fun rememberCatalogMeta(id: String, host: ServeHost) {
+  private fun rememberCatalogMeta(id: String, host: ServeHost, progress: Boolean = true) {
     val bundle = catalogBundleHost(host)
     val facts = catalogFactsFor(id, host)
+    val remembered = catalogMetaSeen[id]
     // A LIVE read, deliberately not carried in [CatalogFacts]. `ServeBundleHost.contentCrop`
     // answers null (or a provisional gutter) *without memoising* while the render PNG or the
     // component vector is still landing, so that a card starts cropping as soon as they do.
@@ -7274,8 +7294,9 @@ class ServeHttpServer(
         degradation = host.degradations.firstOrNull()?.detail,
         provenance = bundle?.provenance,
         catalogSourceRepo = bundle?.catalogSource?.repo?.takeIf { it.isNotBlank() },
-        themeOptimization = host.themeOptimizationSnapshot(),
-        renderCache = host.catalogRenderCacheSnapshot(),
+        themeOptimization =
+          if (progress) host.themeOptimizationSnapshot() else remembered?.themeOptimization,
+        renderCache = if (progress) host.catalogRenderCacheSnapshot() else remembered?.renderCache,
         hasReferenceComparison = facts.hasReferenceComparison,
         compareWithSystem =
           facts.compareWithSystem?.takeIf { facts.parallelComponentIds.isNotEmpty() },
@@ -8293,7 +8314,7 @@ class ServeHttpServer(
   private fun homeSystemsFor(ids: List<String>): List<ServeWeb.HomeSystem> {
     val views = engagementStore.systemViews(ids)
     return ids.mapNotNull { system ->
-      sessions.peekHost(system)?.let { rememberCatalogMeta(system, it) }
+      sessions.peekHost(system)?.let { rememberCatalogMeta(system, it, progress = false) }
       val meta = catalogMetaSeen[system] ?: return@mapNotNull null
       ServeWeb.HomeSystem(
         // The front-page section this catalog was published under, straight from the operator's
@@ -8940,7 +8961,7 @@ class ServeHttpServer(
     val suffix = if (isPublic) "" else "?token=" + WebEscaping.urlEncodeSegment(linkToken())
     val components =
       listedCatalogs().flatMap { system ->
-        sessions.peekHost(system)?.let { rememberCatalogMeta(system, it) }
+        sessions.peekHost(system)?.let { rememberCatalogMeta(system, it, progress = false) }
         val meta = catalogMetaSeen[system] ?: return@flatMap emptyList()
         val systemSegment = WebEscaping.urlEncodeSegment(system)
         meta.components.map { component ->
