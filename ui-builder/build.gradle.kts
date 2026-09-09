@@ -134,6 +134,19 @@ kotlin {
       implementation(libs.snipme.highlights)
     }
     commonTest.dependencies { implementation(kotlin("test")) }
+    getByName("jvmTest").dependencies {
+      // The Compose UI-test harness. Until this, everything the editor *draws* was verified by
+      // rendering a `@Preview` to PNG and comparing bytes, which catches a changed picture but
+      // cannot ask a question about it — "is this row's Add disabled", "does this sentence appear
+      // once or forty-one times". Both regressions #619 fixes were of the second kind, and both
+      // reached `main`.
+      //
+      // `compose.desktop.currentOs` supplies the Skiko the test scene renders on; the same software
+      // rendering the preview lane already uses headlessly here.
+      @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class) @Suppress("DEPRECATION")
+      implementation(compose.uiTest)
+      implementation(compose.desktop.currentOs)
+    }
     getByName("jvmMain").dependencies {
       // Feasibility spike only: the saved-document bridge executes ComposeScene against SVGCanvas.
       // It remains NO-GO for production/Figma until a representative nested scene succeeds and the
