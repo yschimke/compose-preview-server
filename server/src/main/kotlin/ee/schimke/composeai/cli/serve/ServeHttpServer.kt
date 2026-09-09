@@ -7250,9 +7250,9 @@ class ServeHttpServer(
    * So the callers that do not read them do not pay for them. `homeSystemsFor` builds
    * [ServeWeb.HomeSystem], which has no progress fields at all, and the global component index
    * reads only `components`; both pass `progress = false` and carry the remembered values forward
-   * untouched. The status path and the suspend listener pass true — the listener
-   * especially, since that is the last chance to capture a catalog's final counters before its host
-   * goes away, and `/status` renders them for a suspended catalog out of exactly that memory.
+   * untouched. The status path and the suspend listener pass true — the listener especially, since
+   * that is the last chance to capture a catalog's final counters before its host goes away, and
+   * `/status` renders them for a suspended catalog out of exactly that memory.
    *
    * `buildStatusData` re-reads both from the live host anyway, so a `false` here can never make
    * `/status` show a staler number than it would otherwise: the remembered pair is only ever the

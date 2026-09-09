@@ -3249,12 +3249,12 @@ ${captureControlsHtml().prependIndent("          ")}
    * is to open it and read. The tree publishes both levels at once: every group in the selected
    * section is a destination you can see and click, and the selected one is marked as you scroll.
    *
-   * The DOM contract the section rows carry is deliberately the tab bar's —
-   * `.cp-tab[data-tab]`, `#cp-tab-<slug>`, `aria-controls`, `aria-selected`, and the
-   * `href="#cp-panel-<slug>"` fallback — because that is what [catalogFilterScript]'s section
-   * switching, the remembered-tab key, and the `?tab=` URL param all key off. What is new is the
-   * nesting: a `role="group"` list of `.cp-tree-group` links, each pointing at its
-   * `#cp-group-<section>-<group>` anchor on the sub-group divider the grid already emits.
+   * The DOM contract the section rows carry is deliberately the tab bar's — `.cp-tab[data-tab]`,
+   * `#cp-tab-<slug>`, `aria-controls`, `aria-selected`, and the `href="#cp-panel-<slug>"` fallback
+   * — because that is what [catalogFilterScript]'s section switching, the remembered-tab key, and
+   * the `?tab=` URL param all key off. What is new is the nesting: a `role="group"` list of
+   * `.cp-tree-group` links, each pointing at its `#cp-group-<section>-<group>` anchor on the
+   * sub-group divider the grid already emits.
    *
    * A section is **expanded exactly when it is selected**, which is the same statement its panel
    * makes — one section's contents at a time, rather than a second piece of state that can disagree
@@ -17690,8 +17690,8 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
    * Open rather than exhaustive: these drop down for quick picking, and any valid BCP-47 tag the
    * server accepts stays typeable, which is why the control remains an `<input list>` rather than
    * becoming a `<select>`. Declared here as data so it renders through the same
-   * [datalistOptionsHtml] an author-declared value set does instead of being hand-written HTML.
-   * The labels are the whole reason a bare tag list is a poor control, so they belong somewhere
+   * [datalistOptionsHtml] an author-declared value set does instead of being hand-written HTML. The
+   * labels are the whole reason a bare tag list is a poor control, so they belong somewhere
    * reusable.
    *
    * Pseudolocales lead (they are the reason to reach for this control at all), then the real RTL
