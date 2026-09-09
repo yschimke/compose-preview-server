@@ -639,62 +639,184 @@ if (recordPath) {
   const isPlainObject = (value) =>
     typeof value === "object" && value !== null && !Array.isArray(value);
 
+  // The shapes, spelled the way the decoders spell them.
+  //
+  // Each entry is one Kotlin property: its `kind`, whether the key may be ABSENT (the property has
+  // a default) and whether an explicit NULL decodes (the property's type is nullable). Those are
+  // different questions and kotlinx answers them separately — an absent `parameters` takes its
+  // `emptyList()` default while `"parameters": null` throws, because the property is not nullable
+  // and neither reader sets `coerceInputValues`. A hand-written check tends to conflate them; a
+  // table cannot, and it stays legible next to the data class it mirrors.
+  //
+  // Unknown keys are deliberately NOT errors: both readers set `ignoreUnknownKeys = true`, so a
+  // field this table has not heard of is a field the reader skips, and refusing it here would fail
+  // catalogs for being newer than the gate.
+  const symbolShape = {
+    // ComponentSymbol
+    jvmOwner: { kind: "string" },
+    callable: { kind: "string" },
+    name: { kind: "string" },
+    origin: { kind: "enum", values: ["PROJECT", "LIBRARY"] },
+    jvmName: { kind: "string", optional: true, nullable: true },
+    descriptor: { kind: "string", optional: true, nullable: true },
+    sourceFile: { kind: "string", optional: true, nullable: true },
+    docs: { kind: "string", optional: true },
+    receiver: { kind: "string", optional: true, nullable: true },
+  };
+  const recordComponentShape = {
+    // ComponentRecord
+    canonicalId: { kind: "string" },
+    componentIds: { kind: "stringList", optional: true },
+    symbol: { kind: "object", members: symbolShape },
+    parameters: { kind: "objectList", optional: true },
+    slots: { kind: "objectList", optional: true },
+    bindings: { kind: "objectList", optional: true },
+    code: { kind: "object", optional: true, nullable: true },
+    signatureKnown: { kind: "boolean", optional: true },
+    callableFromAnotherFile: { kind: "boolean", optional: true },
+    hasTypeParameters: { kind: "boolean", optional: true },
+    hasContextReceivers: { kind: "boolean", optional: true },
+    overloadsCollided: { kind: "boolean", optional: true },
+    builder: { kind: "object", optional: true, nullable: true },
+    requiredOptIns: { kind: "stringList", optional: true },
+    androidxOptIns: { kind: "stringList", optional: true },
+  };
+  const recordFileShape = {
+    // ComponentRecordFile
+    schemaVersion: { kind: "int", optional: true },
+    module: { kind: "string" },
+    variant: { kind: "string" },
+    components: { kind: "objectList", members: recordComponentShape },
+    builderOrphans: { kind: "objectList", optional: true },
+  };
+  const componentPolicyShape = {
+    // PublishedUiBuilderCatalog.UiBuilderComponentPolicy
+    record: { kind: "string", optional: true },
+    catalogId: { kind: "string", optional: true, nullable: true },
+    displayName: { kind: "string", optional: true, nullable: true },
+    canvas: { kind: "string", optional: true, nullable: true },
+    nativeOnly: { kind: "boolean", optional: true },
+    traits: { kind: "stringList", optional: true },
+    excluded: { kind: "string", optional: true, nullable: true },
+  };
+
+  // One walker for all three. `errors` collects `<path> <what is wrong>` so a message can name the
+  // field rather than the document.
+  const checkShape = (value, shape, at, errors) => {
+    if (!isPlainObject(value)) {
+      errors.push(`${at} is not an object`);
+      return;
+    }
+    for (const [key, spec] of Object.entries(shape)) {
+      const path = `${at}.${key}`;
+      const present = Object.prototype.hasOwnProperty.call(value, key);
+      if (!present) {
+        // Absent is only fine where Kotlin has a default; otherwise the decoder throws
+        // MissingFieldException before any consumer sees the record.
+        if (!spec.optional) errors.push(`${path} is missing, and the property has no default`);
+        continue;
+      }
+      const entry = value[key];
+      if (entry === null) {
+        if (!spec.nullable) errors.push(`${path} is null, and the property is not nullable`);
+        continue;
+      }
+      switch (spec.kind) {
+        case "string":
+          if (typeof entry !== "string") errors.push(`${path} is not a string`);
+          break;
+        case "boolean":
+          if (typeof entry !== "boolean") errors.push(`${path} is not a boolean`);
+          break;
+        case "int":
+          if (typeof entry !== "number" || !Number.isInteger(entry))
+            errors.push(`${path} is not an integer`);
+          break;
+        case "enum":
+          if (typeof entry !== "string" || !spec.values.includes(entry))
+            errors.push(`${path} is not one of ${spec.values.join(", ")}`);
+          break;
+        case "stringList":
+          if (!Array.isArray(entry) || entry.some((item) => typeof item !== "string"))
+            errors.push(`${path} is not a list of strings`);
+          break;
+        case "objectList":
+          if (!Array.isArray(entry)) errors.push(`${path} is not a list`);
+          else
+            entry.forEach((item, index) => {
+              if (spec.members) checkShape(item, spec.members, `${path}[${index}]`, errors);
+              else if (!isPlainObject(item)) errors.push(`${path}[${index}] is not an object`);
+            });
+          break;
+        case "object":
+          if (spec.members) checkShape(entry, spec.members, path, errors);
+          else if (!isPlainObject(entry)) errors.push(`${path} is not an object`);
+          break;
+        default:
+          throw new Error(`unknown shape kind ${spec.kind}`);
+      }
+    }
+  };
+
   // `--record` answers "which components would this catalog put on the shelf", and only the
   // GENERATED artifact can answer it. An authored `ui-builder.policy.json` carries catalog-level
   // facts; per-component ids live in `@BuilderComponent` annotations and reach the shelf through
   // the generator, so deriving from an authored policy silently ignores every id an annotation
   // overrides and can agree with the golden by luck.
-  if (!published) {
+  //
+  // Tested on the detected SHAPE, not on `published`: a capability document also carries
+  // `statusSemantics`, so `published` is true for one, and it is the shape this question is least
+  // able to answer — its builtins have already been materialised into `components`, so the ids it
+  // holds are an OUTPUT of the composition this flag exists to predict. Checking the shape covers
+  // both wrong shapes and any third one added later, which checking a flag that happens to exclude
+  // one of them does not.
+  if (shape !== "generated ui-builder.json") {
+    const article = /^[aeiou]/i.test(shape) ? "an " : "a ";
     unservable += 1;
     console.log("");
     console.log(
-      `  x components: --record needs the GENERATED ui-builder.json. This is an authored policy, ` +
-        `whose per-component ids live in @BuilderComponent annotations that only the generator ` +
-        `resolves — deriving them here would ignore every id an annotation overrides.`,
+      `  x components: --record needs the GENERATED ui-builder.json, and this is ${article}${shape}. ` +
+        (published
+          ? `A capability document's components are the RESULT of composing a policy with a ` +
+            `record, so deriving ids from it would compare the composition against itself.`
+          : `An authored policy's per-component ids live in @BuilderComponent annotations that ` +
+            `only the generator resolves — deriving them here would ignore every id an ` +
+            `annotation overrides.`),
     );
   }
 
-  // Every policy VALUE decodes as `UiBuilderComponentPolicy`, so a null or an array fails the
-  // reader's decode exactly as a malformed map does.
-  const badPolicyValues = isPlainObject(facts.components)
-    ? Object.entries(facts.components)
-        .filter(([, entry]) => !isPlainObject(entry))
-        .map(([componentId]) => componentId)
-    : [];
+  // Every policy VALUE decodes as `UiBuilderComponentPolicy`, so a null, an array, or a MEMBER of
+  // the wrong type fails the reader's decode exactly as a malformed map does. Checking only that
+  // the value is an object was the container half of the same mistake this block exists to close:
+  // `{"record": 7}` is an object, and `record` is a `String`.
+  const badPolicyValues = [];
+  if (isPlainObject(facts.components)) {
+    for (const [componentId, entry] of Object.entries(facts.components)) {
+      const errors = [];
+      checkShape(entry, componentPolicyShape, `components[${JSON.stringify(componentId)}]`, errors);
+      badPolicyValues.push(...errors);
+    }
+  }
   if (badPolicyValues.length > 0) {
     unservable += 1;
     console.log("");
     console.log(
-      `  x components: ${badPolicyValues.length} entr(y|ies) in statusSemantics.components are not ` +
-        `policy objects, which fails the reader's decode: ${badPolicyValues.slice(0, 8).join(", ")}`,
+      `  x components: ${badPolicyValues.length} problem(s) in statusSemantics.components that ` +
+        `fail the reader's decode:`,
     );
+    for (const problem of badPolicyValues.slice(0, 8)) console.log(`      ${problem}`);
+    if (badPolicyValues.length > 8)
+      console.log(`      … and ${badPolicyValues.length - 8} more`);
   }
 
-  // And the record itself. `ComponentRecordSource` decodes it as `ComponentRecordFile`; a document
-  // that is merely valid JSON can carry a `componentIds` STRING, which `[0]` reads as a character
-  // and `.split("/").pop()` turns into a plausible-looking id. The reader would have no record at
-  // all, and a catalog expecting one falls back.
+  // And the record itself, in full. `ComponentRecordSource` decodes it as `ComponentRecordFile`; a
+  // document that is merely valid JSON can carry a `componentIds` STRING, which `[0]` reads as a
+  // character and `.split("/").pop()` turns into a plausible-looking id. Checking the three fields
+  // the DERIVATION happens to read left every other one to fail at the reader instead — an absent
+  // `symbol`, a `module` the file never states, a `parameters: null` — and the reader failing means
+  // no record at all, not one component short.
   const recordShapeErrors = [];
-  if (!isPlainObject(recordFile) || !Array.isArray(recordFile.components)) {
-    recordShapeErrors.push("components is not an array");
-  } else {
-    recordFile.components.forEach((component, index) => {
-      const at = `components[${index}]`;
-      if (!isPlainObject(component)) recordShapeErrors.push(`${at} is not an object`);
-      else {
-        if (typeof component.canonicalId !== "string")
-          recordShapeErrors.push(`${at}.canonicalId is not a string`);
-        if (
-          component.componentIds !== undefined &&
-          (!Array.isArray(component.componentIds) ||
-            component.componentIds.some((id) => typeof id !== "string"))
-        )
-          recordShapeErrors.push(`${at}.componentIds is not a list of strings`);
-        if (component.symbol !== undefined && !isPlainObject(component.symbol))
-          recordShapeErrors.push(`${at}.symbol is not an object`);
-      }
-    });
-  }
+  checkShape(recordFile, recordFileShape, "record", recordShapeErrors);
   if (recordShapeErrors.length > 0) {
     unservable += 1;
     console.log("");
@@ -744,7 +866,11 @@ if (recordPath) {
   const underivable = [];
   let collisions = 0;
   let eligible = 0;
-  for (const component of recordFile.components ?? []) {
+  // Only ever iterate a real list. A `components` that is a string is iterable and would
+  // yield CHARACTERS as components; one that is a number throws. Either way the shape check
+  // above has already refused the file, so there is nothing to derive from it.
+  const recordComponents = Array.isArray(recordFile.components) ? recordFile.components : [];
+  for (const component of recordComponents) {
     const declared = policyByRecordId.get(component.canonicalId);
     // An excluded component never enters the shelf, so it can neither claim an id nor collide with
     // one — the loader skips it before its collision check and so must this. Counting it would
@@ -821,7 +947,7 @@ if (recordPath) {
 
   console.log("");
   console.log(
-    `  components: ${recordFile.components?.length ?? 0} record entries, ${eligible} eligible -> ` +
+    `  components: ${recordComponents.length} record entries, ${eligible} eligible -> ` +
       `${takenSet.size} id(s)${collisions > 0 ? `, ${collisions} collided` : ""}; ` +
       `${shared.length} of the frozen catalog's ${goldenOwned.length} matched`,
   );
