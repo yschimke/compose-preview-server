@@ -64,7 +64,10 @@ data class ServeProcessCensusSnapshot(
      * listing and its own `stat` read is the normal case, not an error, and must not lose the whole
      * census.
      */
-    fun read(procDir: File = File("/proc")): ServeProcessCensusSnapshot? {
+    fun read(
+      procDir: File = File("/proc"),
+      cgroupDir: File = File(ServeProcessCensus.DEFAULT_CGROUP_DIR),
+    ): ServeProcessCensusSnapshot? {
       val pids = procDir.listFiles { f: File -> f.isDirectory && f.name.toIntOrNull() != null }
       if (pids == null) return null
       var total = 0
@@ -97,18 +100,83 @@ data class ServeProcessCensusSnapshot(
             .sortedByDescending { it.value }
             .take(MAX_ZOMBIE_COMMANDS)
             .associate { it.key to it.value },
-        pidsCurrent = readCgroupCount("/sys/fs/cgroup/pids.current"),
-        pidsMax = readCgroupCount("/sys/fs/cgroup/pids.max"),
+        pidsCurrent = readCgroupCount(cgroupDir, "pids.current"),
+        pidsMax = readCgroupCount(cgroupDir, "pids.max"),
       )
     }
 
-    /** A cgroup counter file, or null when absent or reporting the literal `max`. */
-    private fun readCgroupCount(path: String): Long? {
-      return try {
-        File(path).readText().trim().toLongOrNull()
+    /**
+     * A cgroup PID counter, or null when absent or reporting the literal `max`.
+     *
+     * Both layouts are read, because this repository already supports both: the deployment
+     * entrypoint reads `cpu.max` then `cpu/cpu.cfs_quota_us`, and `memory.max` then
+     * `memory/memory.limit_in_bytes`, for exactly the hosts this would otherwise skip. Under cgroup
+     * v1 the PID controller is mounted at `pids/`, so reading only the v2 path answers null on a v1
+     * host with a perfectly finite budget — and the PID meter, which is the whole point of
+     * publishing these two, silently disappears on the hosts most likely to be old enough to have
+     * an unbounded one.
+     *
+     * v2 is tried first because that is what the measured deployment runs; a host with both sees
+     * the unified hierarchy, which is the one its kernel is actually enforcing.
+     */
+    private fun readCgroupCount(cgroupDir: File, name: String): Long? =
+      readLongOrNull(File(cgroupDir, name)) ?: readLongOrNull(File(File(cgroupDir, "pids"), name))
+
+    /** A counter file's value, or null when it is absent, unreadable, or the literal `max`. */
+    private fun readLongOrNull(file: File): Long? =
+      try {
+        file.readText().trim().toLongOrNull()
       } catch (e: Exception) {
         null
       }
+  }
+}
+
+/**
+ * A [ServeProcessCensusSnapshot] resampled at most once per [intervalMillis], shared by every
+ * caller.
+ *
+ * `/status` and `/status.json` are unauthenticated on the public deployment and are not cached, and
+ * a census opens and reads one `stat` file per PID. At the size this feature exists to diagnose —
+ * 2099 defunct children — an ordinary monitor polling every few seconds turns that into thousands
+ * of filesystem operations per request, and concurrent callers multiply it, on a box whose problem
+ * is already that it has too many processes. The diagnostic loses nothing to a few seconds of
+ * staleness: the measured leak accumulated at ~157 children an hour, so a reading taken up to
+ * [intervalMillis] ago names the same number.
+ *
+ * The walk happens under the lock rather than beside it, so a burst of concurrent requests produces
+ * one traversal that they all read, instead of one traversal each.
+ */
+class ServeProcessCensus(
+  private val intervalMillis: Long = DEFAULT_INTERVAL_MILLIS,
+  private val procDir: File = File("/proc"),
+  private val cgroupDir: File = File(DEFAULT_CGROUP_DIR),
+  private val clock: () -> Long = { System.currentTimeMillis() },
+) {
+  private val lock = Any()
+  private var sampledAtMillis: Long? = null
+  private var last: ServeProcessCensusSnapshot? = null
+
+  /** The current census, reusing the previous one while it is younger than [intervalMillis]. */
+  fun sample(): ServeProcessCensusSnapshot? =
+    synchronized(lock) {
+      val now = clock()
+      val taken = sampledAtMillis
+      // A clock that went backwards resamples rather than serving a reading from the future.
+      if (taken != null && now >= taken && now - taken < intervalMillis) return last
+      last = ServeProcessCensusSnapshot.read(procDir, cgroupDir)
+      sampledAtMillis = now
+      last
     }
+
+  companion object {
+    /**
+     * Long enough that a monitor polling every second costs one traversal in five, short enough
+     * that an operator refreshing `/status` while watching a leak grow sees it move.
+     */
+    const val DEFAULT_INTERVAL_MILLIS: Long = 5_000
+
+    /** The unified-hierarchy mount; the v1 PID controller sits at `pids/` beneath it. */
+    const val DEFAULT_CGROUP_DIR: String = "/sys/fs/cgroup"
   }
 }

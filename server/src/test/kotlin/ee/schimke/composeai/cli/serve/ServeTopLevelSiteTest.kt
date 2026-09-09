@@ -615,6 +615,52 @@ class ServeTopLevelSiteTest {
   }
 
   @Test
+  fun `a site host does not report the box's subprocess census`() {
+    // Same rule as the branch counters above, for the counter with the sharpest edge: a census
+    // cannot say which catalog a JVM or a defunct child belongs to, so a neighbour's reaping leak
+    // would appear on this site's `/status.json` and trip this site's monitor — while also
+    // disclosing how many processes the box runs and which executables are dying on it.
+    registry.register(
+      "compose-m3",
+      host = bundle("compose-m3", listOf("button-filled"), "Compose Material 3"),
+      pinned = true,
+    )
+    server =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "unused",
+          sessions = registry,
+          defaultSessionId = "",
+          isPublic = true,
+          catalogSessions = listOf("compose-m3"),
+          sites = ServeSiteRegistry.of(listOf(siteHost to "compose-m3")),
+        )
+        .also { it.start() }
+
+    val (siteCode, siteBody, _) = get("/status.json", host = siteHost)
+    assertEquals(200, siteCode)
+    // The key is always present — the field is nullable and the encoder is explicit about nulls —
+    // so the assertion is that it carries no census, not that the name is absent.
+    assertTrue(
+      siteBody.contains("\"processes\":null"),
+      "a site must not surface the box's process census: $siteBody",
+    )
+
+    // The main host still reports it — this scopes the field, it does not remove it. Asserted only
+    // where there is a `/proc` to census, so the check does not quietly become a platform
+    // assertion: on macOS the census is legitimately null everywhere.
+    if (ServeProcessCensusSnapshot.read() != null) {
+      val (mainCode, mainBody, _) = get("/status.json")
+      assertEquals(200, mainCode)
+      assertFalse(
+        mainBody.contains("\"processes\":null"),
+        "the box's own status still censuses its processes: $mainBody",
+      )
+    }
+  }
+
+  @Test
   fun `an unauthenticated refusal never carries the access token`() {
     // The interceptor runs BEFORE the routes' own token gate, and the styled 404 threads the access
     // token through its links — so on a token-gated box a made-up path would have handed the secret
