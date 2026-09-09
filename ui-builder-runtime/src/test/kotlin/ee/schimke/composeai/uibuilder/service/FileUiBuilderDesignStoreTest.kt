@@ -529,6 +529,61 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `a quarantine never answers for a design that loaded`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    store.commit("settings", null, design("settings"))
+    store.commit("checkout", null, design("checkout"))
+    // An in-place backup an operator left under a name that happens to be another design's id.
+    // Reported under that name it would mark a design that loads perfectly well unusable, and a
+    // delete aimed at the quarantine would take the live design out of the service while removing
+    // the backup from the disk.
+    copyRecursively(
+      root.resolve("designs").resolve(FileUiBuilderDesignStore.slug("checkout")),
+      root.resolve("designs").resolve("settings"),
+    )
+
+    val reopened = FileUiBuilderDesignStore(root)
+    val loaded = reopened.load()
+
+    assertEquals(setOf("checkout", "settings"), loaded.designs.keys, "both designs still load")
+    val reported = loaded.quarantined.keys.single()
+    assertNotEquals("settings", reported, "the quarantine yields the name, not the design")
+    assertTrue(reported.contains("settings"), "and still says which directory it is: $reported")
+
+    reopened.remove(reported)
+
+    assertFalse(Files.exists(root.resolve("designs/settings")))
+    assertEquals(
+      setOf("checkout", "settings"),
+      FileUiBuilderDesignStore(root).load().designs.keys,
+      "retiring the backup is not retiring the design whose name it borrowed",
+    )
+  }
+
+  @Test
+  fun `the gauge is taken after the sweep, not before it`() {
+    val root = createTempDirectory("ui-builder-store")
+    FileUiBuilderDesignStore(root).commit("checkout", null, design("checkout"))
+    val designDirectory = root.resolve("designs").resolve(FileUiBuilderDesignStore.slug("checkout"))
+    // What a crash between writing a part and committing the header leaves: a file the header does
+    // not name. The next open unlinks it — and a gauge measured before that would charge those
+    // bytes against the ceiling for the life of the process, refusing writes for disk that the
+    // same startup had already given back.
+    Files.writeString(designDirectory.resolve("document-deadbeefdeadbeef.json"), "x".repeat(20_000))
+
+    val store = FileUiBuilderDesignStore(root)
+    store.load()
+
+    assertFalse(Files.exists(designDirectory.resolve("document-deadbeefdeadbeef.json")))
+    assertEquals(
+      directorySize(root),
+      store.usage().bytes,
+      "the gauge is what is on the disk once the sweep has finished",
+    )
+  }
+
+  @Test
   fun `a commit whose reused part has gone is refused rather than committed`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)
@@ -867,6 +922,12 @@ class FileUiBuilderDesignStoreTest {
     }
     return entries
   }
+
+  /** Every byte under the designs of [root], which is what the gauge claims to report. */
+  private fun directorySize(root: Path): Long =
+    Files.walk(root.resolve("designs")).use { stream ->
+      stream.filter { Files.isRegularFile(it) }.mapToLong { Files.size(it) }.sum()
+    }
 
   /** The `document-<digest>.json` name the stored header points at. */
   private fun readHeaderDocumentFile(header: Path): String =

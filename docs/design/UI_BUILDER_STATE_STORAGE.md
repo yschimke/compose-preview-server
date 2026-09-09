@@ -297,6 +297,12 @@ absent from the stored tree and defaulted after.
   refuses the commit for the same reason and not as free space: a commit reuses the name of every
   part it did not rewrite, so counting a missing one as zero bytes would land a header naming a file
   that has gone — an edit acknowledged here and a design quarantined at the next open.
+- **A quarantine key never names a design that loaded.** A quarantine is reported under the id in
+  its header and, where there is no id to read, under the directory holding it — a name an operator
+  chose, which can be anything, including the id of a design that loads perfectly well from its own
+  directory. On a collision the quarantine yields the name: it is the one of the two with no id of
+  its own to insist on, and left colliding it would mark a working design unusable and let a delete
+  aimed at the quarantine take it out of the service.
 - **Creating a design asks the store for the place, not the id.** A quarantine is not always
   reported under the id it holds: a design whose header will not parse has no id to be read out of
   it and is reported under its directory. Both still occupy the directory an id resolves to, and

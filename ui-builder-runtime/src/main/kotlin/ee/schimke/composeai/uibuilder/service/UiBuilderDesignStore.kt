@@ -318,10 +318,14 @@ internal class FileUiBuilderDesignStore(
         val header = readHeader(designDirectory)
         val design = readDesign(designDirectory, header)
         designs[header.designId] = design
+        // Swept before it is measured. A crash or a refused commit leaves files the header does not
+        // name, and this is where they go; measured first, the gauge would charge them for the life
+        // of the process — against a ceiling that refuses writes — and only a later commit of that
+        // same design would put it right.
+        sweep(designDirectory, header)
         val bytes = directoryBytes(designDirectory)
         files[header.designId] = DesignFiles(header, bytes)
         storedBytes += bytes
-        sweep(designDirectory, header)
       } catch (failure: Exception) {
         val designId = quarantineDesignId(designDirectory, slug)
         val reason = failure.message ?: failure::class.simpleName ?: "unreadable"
@@ -330,6 +334,20 @@ internal class FileUiBuilderDesignStore(
         quarantinedSlugs[designId] = slug
         storedBytes += runCatching { directoryBytes(designDirectory) }.getOrDefault(0L)
       }
+    }
+    // A quarantine is reported under the id in its header, and where there is no id to read, under
+    // the directory holding it — which an operator chose and which can be anything, including the
+    // id of a design that loads perfectly well from its own directory. Left colliding, the live
+    // design is reported unusable and a delete aimed at the quarantine takes it out of the service
+    // while removing the backup from the disk. So the quarantine yields the name: it is the one of
+    // the two that has no id of its own to insist on.
+    for (key in quarantined.keys.toList()) {
+      if (key !in designs) continue
+      val slug = quarantinedSlugs.getValue(key)
+      var renamed = "$DESIGNS_DIRECTORY/$slug"
+      while (renamed in designs || renamed in quarantined) renamed += "'"
+      quarantined[renamed] = quarantined.remove(key)!!
+      quarantinedSlugs[renamed] = quarantinedSlugs.remove(key)!!
     }
     StoredDesigns(designs, quarantined)
   }

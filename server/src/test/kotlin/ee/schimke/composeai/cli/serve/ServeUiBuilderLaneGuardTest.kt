@@ -131,6 +131,13 @@ class ServeUiBuilderLaneGuardTest {
     // The marker is one of the things that can fail here, so a recovery that left it in place
     // would send the operator round the same failure on the next start.
     assertTrue(warning.contains("store.json.broken"), warning)
+    // And the marker goes last: a recovery that removed it first and then failed to move the
+    // designs would leave the next start writing a fresh marker over the tree it was told to
+    // start without.
+    assertTrue(
+      warning.indexOf("designs.broken") < warning.indexOf("store.json.broken"),
+      warning,
+    )
     assertTrue(warning.contains("--ui-builder-state-dir none"), warning)
     assertFalse(
       warning.contains(FileUiBuilderStateStorage.BACKUP_FILE),

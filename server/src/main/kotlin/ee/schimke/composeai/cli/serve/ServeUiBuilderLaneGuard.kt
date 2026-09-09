@@ -35,9 +35,16 @@ internal fun uiBuilderDisabledWarning(stateDirectory: File, failure: Throwable):
       "Everything else on this host is unaffected and serving. To recover, "
   return if (marker.exists()) {
     preamble +
-      "either move the store aside to start empty (mv ${marker.path} ${marker.path}.broken && mv " +
-      "${stateDirectory.path}/designs ${stateDirectory.path}/designs.broken — the marker goes too, " +
-      "or the next start reads the same one back; the designs are then lost, so copy them first)" +
+      // The designs go first and the marker last, because the marker is the commit point here as
+      // well: a second rename that fails — and the thing that could not be moved is a fair
+      // candidate for what stopped the store opening — would otherwise leave the marker gone and
+      // the designs in place, and the next start would write a fresh marker and load the very
+      // designs this was supposed to start without. In this order a half-done recovery leaves a
+      // store that still opens, on nothing.
+      "either move the store aside to start empty (mv ${stateDirectory.path}/designs " +
+      "${stateDirectory.path}/designs.broken && mv ${marker.path} ${marker.path}.broken — the " +
+      "marker goes second, so a rename that fails leaves a store that still opens; the designs " +
+      "are then lost, so copy them first)" +
       (if (migrated.exists()) {
         // The store may hold designs created since the migration, and the next start would migrate
         // the old file straight back into the same tree — so a rollback that left `designs/` in
