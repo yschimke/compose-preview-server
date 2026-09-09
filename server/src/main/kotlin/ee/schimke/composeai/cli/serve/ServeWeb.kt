@@ -93,8 +93,8 @@ object ServeWeb {
    * why not.
    *
    * The builder is where a design system stops being a gallery and starts being a tool: a signed-in
-   * visitor can start a document from any catalog the builder runs for. Until this it was reachable
-   * only by knowing the URL, so the whole surface was invisible from `/`.
+   * visitor can start a document from any catalog the builder runs for. Advertised nowhere, the
+   * whole surface is reachable only by knowing the URL.
    *
    * The invite carries the **decision**, not the credential. The front-door handler asks the same
    * [ServeUiBuilderAuthorization] the create route will ask ([UiBuilderRouteCapability.WRITE]), so
@@ -102,10 +102,9 @@ object ServeWeb {
    * action the POST behind it refuses, and never hides one it would have allowed.
    *
    * [deniedReason] is the other half of that, and the reason this is a data class rather than a
-   * boolean. A signed-in visitor whose account lacks the repository access the write capability
-   * gates on used to get nothing at all: no chip, no explanation, and no way to find out that the
-   * builder exists or what would let them in. Refusing in silence is the failure mode; the card
-   * says what is missing instead.
+   * boolean. Refusing in silence is the failure mode: a signed-in visitor whose account lacks the
+   * repository access the write capability gates on would otherwise get no chip, no explanation,
+   * and no way to find out that the builder exists or what would let them in.
    */
   data class UiBuilderInvite(
     /** The catalogs this host actually runs the builder for; every other card offers nothing. */
@@ -212,11 +211,10 @@ object ServeWeb {
    *
    * Restates `matchBand` in `scripts/design-artifacts/design-reference-score.mjs`, where the number
    * is minted. The thresholds come from the distribution a real catalog produces rather than from
-   * round numbers, so they moved with the metric (issue #4290): the score is now measured over the
-   * pixels the two frames actually drew on rather than over the whole canvas, and across
-   * wear-m3-catalog's 186 published pairs that runs 4%..100% with a median of 91. 63 sit at or
-   * above 95, and the 59 below 85 are the genuine divergences — a 4% scroll indicator, a 52%
-   * picker, a 70% stepper that lost its button fills.
+   * round numbers (issue #4290): the score is measured over the pixels the two frames actually drew
+   * on rather than over the whole canvas, and across wear-m3-catalog's 186 published pairs that
+   * runs 4%..100% with a median of 91. 63 sit at or above 95, and the 59 below 85 are the genuine
+   * divergences — a 4% scroll indicator, a 52% picker, a 70% stepper that lost its button fills.
    *
    * A band never decides whether the number is SHOWN, only how it is coloured, so a drift between
    * the two copies costs a hue and can never hide a finding.
@@ -225,11 +223,11 @@ object ServeWeb {
    * One variant of the component a viewer page is showing, for the **compare strip** under its
    * render ([comparisonStripHtml]).
    *
-   * The viewer used to be able to put ONE baseline behind ONE variant, on the stage. Seeing the
-   * same component's other variants compared meant leaving for the wall, which opens on the whole
-   * catalog and has to be filtered by hand — from a page that already knew which component you were
-   * looking at (`docs/design/COMPARE_NAVIGATION.md`, F4). The strip is that filter, applied without
-   * anyone typing it.
+   * The stage itself can put ONE baseline behind ONE variant. Seeing the same component's other
+   * variants compared otherwise means leaving for the wall, which opens on the whole catalog and
+   * has to be filtered by hand — from a page that already knew which component you were looking at
+   * (`docs/design/COMPARE_NAVIGATION.md`, F4). The strip is that filter, applied without anyone
+   * typing it.
    *
    * **Identity only.** Every URL on the strip is built by [comparisonStripHtml] out of `basePath`,
    * the link query and the asset generation, exactly as the rest of the viewer's links are — the
@@ -275,38 +273,27 @@ object ServeWeb {
    * The **compare strip** under a viewer's render: every variant of the component on the stage,
    * measured against the same baseline, without anyone typing a filter.
    *
-   * ## Why it is here and not a link to the wall
-   *
-   * The question a reader has while looking at one variant is almost never about that variant alone
-   * — it is "is this component wrong, or is this *state* of it wrong?". Answering it used to mean
-   * opening the comparison wall on four hundred rows and narrowing by hand, from a page that
-   * already knew the answer. The strip is that narrowing, applied on arrival; `?component=` on the
-   * wall is the same scope for a reader who wants the full instruments.
-   *
-   * ## What it deliberately does not do
+   * It is here rather than a link to the wall because the reader's question is almost never about
+   * the one variant — it is "is this component wrong, or is this *state* of it wrong?". The strip
+   * is that narrowing applied on arrival; `?component=` on the wall is the same scope with the full
+   * instruments. It costs one server-rendered `<img>` per cell and one attribute write of
+   * JavaScript, which is what lets it appear on every viewer page.
    *
    * **It does not score.** Numbers are the ones the delivery branch published for these exact
    * pixels; a variant with none says `not scored` and links to the focused comparison, which
-   * measures live. The viewer bundle is within two kilobytes of budget, and a per-row scorer would
-   * charge every viewer page the wall's machinery for an answer that is already published.
+   * measures live. A per-row scorer would charge every viewer page the wall's machinery for an
+   * already-published answer, and the viewer bundle is within two kilobytes of budget.
    *
-   * **It does not pick its own baseline.** The strip follows the lane's source picker rather than
-   * carrying a second one: every row is rendered with BOTH baselines — the design reference and,
-   * where the pairing resolves, the paired catalog's render — each cell tagged
-   * `data-cp-strip-source`, and the section's own `data-cp-strip-source` names the one on show.
-   * `serve.css` hides the other; `viewer.ts` moves the attribute when the picker is pressed
-   * (`syncSpecStrip`) and `?specSource=` restores it. So switching the pair on the stage switches
-   * the pairs under it, and a refresh shows the same page. Only the published match is baseline-
-   * bound: it was measured against the design reference and says `not scored` opposite anything
-   * else, rather than lending a design number to a comparison nobody measured.
+   * **It does not pick its own baseline.** Every row is rendered with BOTH — the design reference
+   * and, where the pairing resolves, the paired catalog's render — each cell tagged
+   * `data-cp-strip-source`, with the section's own attribute naming the one on show. `serve.css`
+   * hides the other; `viewer.ts` moves the attribute when the lane's source picker is pressed
+   * (`syncSpecStrip`) and `?specSource=` restores it. Only the published match is baseline-bound:
+   * measured against the design reference, it says `not scored` opposite anything else rather than
+   * lending a design number to a comparison nobody measured.
    *
-   * Both are one server-rendered `<img>` per cell and one attribute write of JavaScript, which is
-   * what lets the strip appear on every viewer page rather than only on the ones a reader thought
-   * to ask for.
-   *
-   * Returns empty for a component with a single variant and no reference — there is nothing to
-   * compare and nothing to navigate between, and an empty panel under every one-off preview is
-   * worse than no panel.
+   * Returns empty for a component with a single variant and no reference — an empty panel under
+   * every one-off preview is worse than no panel.
    */
   private fun comparisonStripHtml(
     variants: List<ComponentVariant>,
@@ -1023,11 +1010,10 @@ object ServeWeb {
    * by [document] at the bottom of **every** browser-facing page, below the body. [version]
    * null/blank just drops the build span; the other entries stay, so the footer is never empty.
    *
-   * The **GitHub** entry — the repo that ships this server — is the site's only link to it; the
-   * header used to carry a second copy (see [siteHeader]). It reads "GitHub" rather than the
-   * "source" it once did, because it opens the repo's front page, and the label "source" is already
+   * The **GitHub** entry — the repo that ships this server — is the site's only link to it. It
+   * reads "GitHub" rather than "source", because it opens the repo's front page and "source" is
    * spoken for by [sourceLinkHtml], the per-preview link that opens the *file* a preview is
-   * declared in. Two links a click apart, both saying "source", went to different kinds of place.
+   * declared in. Two links a click apart both saying "source" go to different kinds of place.
    *
    * [note] is the page's own footer block, rendered *above* the links row: on a catalog landing
    * that's the provenance disclosure ([provenanceSection]), which belongs with the build/source
@@ -1230,11 +1216,10 @@ ${captureControlsHtml().prependIndent("          ")}
    * emits all three slots whether or not they have content, so nothing shifts position from one
    * page to the next. That matters because two of the slots are conditional: the render-server
    * badge only appears on pages that poll a daemon (and only once the first poll answers), and the
-   * GitHub session control only on pages that were served with OAuth configured. Laid out as a
-   * plain flex row those absences dragged the nav around — centred on a catalog page, hard right on
-   * the home page. Here the brand is pinned left, the status badge centred, and the nav (including
-   * [action], the GitHub session control) pinned right, so the same element sits in the same place
-   * on every page regardless of which optional pieces are present.
+   * GitHub session control only on pages served with OAuth configured. In a plain flex row those
+   * absences drag the nav around — centred on a catalog page, hard right on the home page. Here the
+   * brand is pinned left, the status badge centred, and the nav (including [action], the GitHub
+   * session control) pinned right.
    *
    * The status slot is server-rendered but starts empty and `hidden`; `presenceScript` fills and
    * unhides it when the daemon poll answers, so a page that never polls simply shows nothing there
@@ -1242,16 +1227,15 @@ ${captureControlsHtml().prependIndent("          ")}
    *
    * [breadcrumb] rides in the brand slot, immediately after the mark: a page's "where am I / how do
    * I get back" (a [crumbHtml] trail, or a catalog landing's [backButton]) is *navigation*, and the
-   * bar is where a visitor already looks for navigation. It used to be the first line of the page
-   * BODY, which spent a whole row — plus its margin — restating the header's own job and pushed the
-   * thing the page exists to show (the render) further below the fold on every viewer.
+   * bar is where a visitor already looks for navigation. In the page BODY it would spend a whole
+   * row — plus its margin — restating the header's own job, pushing the render further below the
+   * fold on every viewer.
    *
    * The nav panel carries only what is *about this server's pages*: **Status**, the GitHub session
-   * control ([action]), and **Settings**. Two entries used to sit alongside them and no longer do.
-   * A "Catalogs" link, because it went to `/` — exactly where the brand beside it already goes, so
-   * the bar offered the same destination twice. And a "GitHub" link to the repo that ships the
-   * server, which is a fact *about the software*, not a way around the site: it belongs with the
-   * build number and the bug report, so it lives in [siteFooter] instead.
+   * control ([action]), and **Settings**. Deliberately not here: a "Catalogs" link, which would go
+   * to `/` — exactly where the brand beside it already goes — and a "GitHub" link to the repo that
+   * ships the server, which is a fact *about the software* and belongs in [siteFooter] with the
+   * build number and the bug report.
    */
   private fun siteHeader(
     navSuffix: String,
@@ -1598,13 +1582,11 @@ ${captureControlsHtml().prependIndent("          ")}
    * disclosure styled as a link, opening a small panel whose one visible control is a **required**
    * Summary the reporter writes themselves.
    *
-   * **Why the reporter types the title.** This used to be one click straight to a prefilled issue
-   * whose title the server wrote (`Preview issue: <preview> (<system>)`) — which named the preview
-   * and said nothing about what was wrong, so a repo collected a queue of issues distinguishable
-   * only by opening them. The preview's identity was never the interesting part and is not lost: it
-   * is the `| Preview |` row of the body's "Which preview" table, which every report still carries.
-   * This is the same trade `/report-bug` already makes — see [bugReportPage]'s Summary input — so
-   * the two reporting affordances now ask for the same thing.
+   * **Why the reporter types the title.** A server-written title (`Preview issue: <preview>
+   * (<system>)`) names the preview and says nothing about what is wrong, so a repo collects a queue
+   * of issues distinguishable only by opening them. The preview's identity is not lost by asking:
+   * it is the `| Preview |` row of the body's "Which preview" table, which every report carries.
+   * Same trade `/report-bug` makes — see [bugReportPage]'s Summary input.
    *
    * **Why a script-free `<details>`.** The form has to keep working with JS off, which is also what
    * enforces the title: `required` is the browser's own check, so a reporter cannot submit an
@@ -3262,17 +3244,17 @@ ${captureControlsHtml().prependIndent("          ")}
    * standing beside the grid rather than above it.
    *
    * This replaces the row of section tabs. The tabs showed only the top level of a structure that
-   * is two deep — a catalog's groups (Foundation, Contacts, Scanner, …) existed solely as headings
-   * you had to scroll a panel to find, so the only way to learn what a section *contained* was to
-   * open it and read. The tree publishes both levels at once: every group in the selected section
-   * is a destination you can see and click, and the selected one is marked as you scroll.
+   * is two deep — a tab bar leaves a catalog's groups (Foundation, Contacts, Scanner, …) as
+   * headings you have to scroll a panel to find, so the only way to learn what a section *contains*
+   * is to open it and read. The tree publishes both levels at once: every group in the selected
+   * section is a destination you can see and click, and the selected one is marked as you scroll.
    *
-   * The DOM contract the section rows carry is deliberately unchanged from the tab bar —
-   * `.cp-tab[data-tab]`, `#cp-tab-<slug>`, `aria-controls`, `aria-selected`, and the
-   * `href="#cp-panel-<slug>"` fallback — because that is what [catalogFilterScript]'s section
-   * switching, the remembered-tab key, and the `?tab=` URL param all key off. What is new is the
-   * nesting: a `role="group"` list of `.cp-tree-group` links, each pointing at its
-   * `#cp-group-<section>-<group>` anchor on the sub-group divider the grid already emits.
+   * The DOM contract the section rows carry is deliberately the tab bar's — `.cp-tab[data-tab]`,
+   * `#cp-tab-<slug>`, `aria-controls`, `aria-selected`, and the `href="#cp-panel-<slug>"` fallback
+   * — because that is what [catalogFilterScript]'s section switching, the remembered-tab key, and
+   * the `?tab=` URL param all key off. What is new is the nesting: a `role="group"` list of
+   * `.cp-tree-group` links, each pointing at its `#cp-group-<section>-<group>` anchor on the
+   * sub-group divider the grid already emits.
    *
    * A section is **expanded exactly when it is selected**, which is the same statement its panel
    * makes — one section's contents at a time, rather than a second piece of state that can disagree
@@ -3284,13 +3266,12 @@ ${captureControlsHtml().prependIndent("          ")}
    * Sections whose groups are all unnamed render as leaves — there is nothing to list under them.
    *
    * The tree leads with an **All** row ([ALL_TAB]) whenever there is more than one section, and it
-   * is what the page lands on. A sectioned catalog used to open on its first section with the rest
-   * of itself hidden, so the default view of a catalog was a fraction of it and the filter below
-   * only searched the whole thing once you had typed into it. All is the browsing state the front
-   * door should have: every panel showing, one scroll through the lot, and a filter that spans the
-   * catalog because nothing is narrowing it. Picking a section still narrows to it; All is a row
-   * you can come back to. Under All every section is expanded, since the tree beside a grid showing
-   * everything is the outline of everything.
+   * is what the page lands on. Opening on the first section instead would make the default view of
+   * a catalog a fraction of it. All is the browsing state a front door should have: every panel
+   * showing, one scroll through the lot, and a filter that spans the catalog because nothing is
+   * narrowing it. Picking a section still narrows to it; All is a row you can come back to. Under
+   * All every section is expanded, since the tree beside a grid showing everything is the outline
+   * of everything.
    */
   private fun catalogTreeHtml(
     sections: List<LandingSection>,
@@ -3396,11 +3377,11 @@ ${captureControlsHtml().prependIndent("          ")}
    * leads to the index.
    *
    * This used to be an action chip in the header row, beside "compare SVG" and "download all". A
-   * chip could only say *how many* pages there were — the names, which are the thing you actually
-   * choose between, were a page away — and it sat in a row of one-off actions while being the one
-   * entry there that is a place. The tree is where this catalog's places already live, so it goes
-   * in the tree, at the foot: a page is a view of the *design file*, not part of the catalog's own
-   * inventory, and it should not push that inventory down the column.
+   * chip can only say *how many* pages there are — the names, which are the thing you actually
+   * choose between, are a page away — and it sits in a row of one-off actions while being the one
+   * entry there that is a place. The tree is where this catalog's places already live, so the
+   * branch goes in the tree, at the foot: a page is a view of the *design file*, not part of the
+   * catalog's own inventory, and it should not push that inventory down the column.
    *
    * Two things make it unlike every other branch, and both are deliberate:
    * - **It carries no `data-group`.** Every other row names an id on this page and is intercepted
@@ -5738,8 +5719,8 @@ ${captureControlsHtml().prependIndent("          ")}
    *   and pings immediately on becoming visible so a tab returned to after an hour doesn't wait out
    *   another interval before saying so.
    * - **Fires on arrival.** The page load itself is a request, but a *baked* one — it warms no
-   *   daemon. Since catalogs are no longer warmed at boot, this first ping is what readies the one
-   *   the visitor actually opened.
+   *   daemon. Catalogs are not warmed at boot, so this first ping is what readies the one the
+   *   visitor actually opened.
    * - **Errors ignored.** A heartbeat is not something a page can act on — offline, a catalog since
    *   removed, a server restarted. The next one tries again.
    */
@@ -6347,48 +6328,41 @@ ${captureControlsHtml().prependIndent("          ")}
     /**
      * The card's action row, or nothing at all when this card has no actions.
      *
-     * A `<div>` rather than the `<p>` it used to be: the locked builder chip is a `<details>`,
-     * which is flow content and cannot live inside a paragraph — a browser would close the `<p>`
-     * before it and leave the explanation dangling outside the row. Nothing else about the row
-     * changes; `.cp-sys-actions` still passes pointer events through to the tile link underneath.
+     * A `<div>` rather than a `<p>`: the locked builder chip is a `<details>`, flow content that a
+     * browser would push out of a paragraph, leaving the explanation dangling outside the row.
+     * `.cp-sys-actions` passes pointer events through to the tile link underneath.
      */
     /**
      * The card's **compare to Figma** action: a chip in the card's own meta block, under the
      * preview count, deep-linking that catalog's comparison page straight to its `reference`
      * format.
      *
-     * It is on the front door because the comparison is a destination people arrive *for*, and
-     * until this it was reachable only from the chip row on a catalog's own landing page — so
-     * "compare this system against its Figma" cost a visit to the catalog first, and was invisible
-     * from `/` (compose-ai-tools#4324).
+     * It is on the front door because the comparison is a destination people arrive *for*;
+     * reachable only from a catalog's own landing chip row, it was invisible from `/`
+     * (compose-ai-tools#4324).
      *
-     * The label names the design tool the catalog is actually specified by, for the same reason the
-     * landing chip does: "compare to Figma" says what you get where "compare reference" would name
-     * the format slug — and falls back to the landing's own neutral "compare to design references"
-     * for a catalog whose references name no tool (a checked-in `png`, an `svg`, an unmapped
-     * provider). Whether there is an action at all is [HomeSystem.hasReferenceComparison], never
-     * the label: those are two questions, and answering the first with the second dropped the
-     * action from every provider-neutral catalog (#4349).
+     * The label names the design tool the catalog is actually specified by — "compare to Figma"
+     * says what you get where "compare reference" would name the format slug — falling back to the
+     * neutral "compare to design references" for a catalog whose references name no tool (a
+     * checked-in `png`, an `svg`, an unmapped provider). Whether there is an action at all is
+     * [HomeSystem.hasReferenceComparison], never the label: those are two questions, and answering
+     * the first with the second drops the action from every provider-neutral catalog (#4349).
      *
      * The accessible name carries the catalog's title ("Compose Material 3: compare to Figma")
-     * while the visible text stays short. A front door lists many catalogs and several may name the
-     * same tool, so half a dozen links otherwise announce identically as "compare to Figma" with
-     * nothing in a screen-reader link list to tell them apart. The visible string is kept intact
-     * inside the accessible name (WCAG 2.5.3 Label in Name), so "click compare to Figma" still
-     * matches.
+     * while the visible text stays short, so half a dozen cards naming the same tool do not all
+     * announce identically in a screen-reader link list. The visible string is kept intact inside
+     * it (WCAG 2.5.3 Label in Name), so "click compare to Figma" still matches.
      *
      * It lives INSIDE the card, which is why the card is a `<div>` whose title carries the
-     * `.cp-sys-open` link rather than being one big `<a>`: a link inside a link is not a thing HTML
-     * has. `.cp-sys-open` stretches an overlay across the whole tile, so the tile is still one
-     * click target, and the chip sits above that overlay as the one region that goes somewhere
-     * else. The earlier shape hung the chip under the card in a wrapper cell, which meant a card
-     * with an action was taller than one without unless an empty row was reserved for it — with the
-     * chip inside, the grid's own stretch makes every card in a section the same size and the
-     * reservation is gone.
+     * `.cp-sys-open` link rather than being one big `<a>` — a link inside a link is not a thing
+     * HTML has. `.cp-sys-open` stretches an overlay across the tile so it is still one click
+     * target, and the chip sits above that overlay as the one region that goes somewhere else.
+     * Inside the card, the grid's own stretch keeps every card in a section the same height with no
+     * reserved row.
      *
      * Suppressed in the component-browser ("Catalog") interface mode, which hides the format
-     * comparisons on the catalog landing too — the mode is for browsing components, not for
-     * auditing them against a design file.
+     * comparisons on the catalog landing too — the mode is for browsing components, not auditing
+     * them against a design file.
      */
     fun compareAction(s: HomeSystem, sysSeg: String): String {
       if (componentBrowser) return ""
@@ -6651,9 +6625,10 @@ ${captureControlsHtml().prependIndent("          ")}
    * when the script runs: it is emitted at the very end of the body, so at parse time — this script
    * is inside `<main>` — it does not exist yet, and a lookup taken then finds nothing for ever. It
    * answers the question the old box could not: a visitor who wants a *Slider* does not know which
-   * of a dozen catalogs publishes one, and typing "slider" used to empty the page. Now the matching
-   * components are listed by name, each a link straight to its preview, and a card stays visible
-   * when one of ITS components matched even though nothing in its own title did.
+   * of a dozen catalogs publishes one. The matching components are listed by name, each a link
+   * straight to its preview, and a card stays visible when one of ITS components matched even
+   * though nothing in its own title did — a visitor who wants a *Slider* does not know which of a
+   * dozen catalogs publishes one, and a catalog-only match empties the page for them.
    *
    * The list is built with `createElement`/`textContent`, never `innerHTML`: every field in that
    * JSON — a component's label and keywords especially — comes from a catalog's own export, which
@@ -11730,40 +11705,32 @@ ${captureControlsHtml().prependIndent("          ")}
    * and the reference the offline run scored everything against) first.
    *
    * Nothing is diffed until asked. Picking a column as the reference gives every *other* column a
-   * pixel diff and a mismatch chip — which is the point of the view: "how far is cmp-wasm from
-   * cmp-jvm?" is a question no build-time artifact answers, because the offline run only ever
-   * diffed each player against the baked render.
+   * pixel diff and a mismatch chip — the point of the view, since "how far is cmp-wasm from
+   * cmp-jvm?" is a question no build-time artifact answers: the offline run only ever diffed each
+   * player against the baked render.
    *
-   * The whole thing replays what the delivery branch already published, so the page costs a few
-   * `<img>` loads rather than a `.rc` fetch plus a canvas render per preview — and it shows five
-   * players where the in-browser lane could only ever show the one that runs in a browser. The
-   * mirror of the published `rc-compare.html` (`render-rc-compare-html.mjs`), which is built from
-   * the same data.
+   * It replays what the delivery branch already published, so the page costs a few `<img>` loads
+   * rather than a `.rc` fetch plus a canvas render per preview, and it shows five players where the
+   * in-browser lane can only show the one that runs in a browser. Mirror of the published
+   * `rc-compare.html` (`render-rc-compare-html.mjs`), built from the same data.
    */
   /**
    * The comparison page's **alias table**: every preview id the wall can be narrowed by, written
    * once.
    *
-   * ## Why this exists
-   *
    * Both tables on this page fold a component's variants into one row, and both let a `?preview=`
-   * naming a folded-away sibling select the row that stands for it. Each row used to carry that
-   * whole list itself, and the haystack carried it a second time. On `remote-m3` that came to
-   * **19,188 mentions of 538 distinct ids** — 967 KB of `data-preview-ids` and most of another 1.08
-   * MB of `data-hay`, on a 6.4 MB page that took two minutes to arrive. The ids are 26 KB. See
+   * naming a folded-away sibling select the row that stands for it. Carried per row instead, that
+   * list is quadratic: on `remote-m3` it came to 19,188 mentions of 538 distinct ids — 2 MB of
+   * `data-preview-ids` and `data-hay` on a 6.4 MB page, for 26 KB of ids. See
    * `docs/design/COMPARE_NAVIGATION.md`, F2.
    *
-   * ## What it carries, and why both halves
-   *
-   * `cards` is each comparison card's full id list. `rowed` is every id that has a row of its own.
-   *
-   * The two consumers want different slices and the difference is a RULE, not a preference: a
-   * design reference names one exact state/props mapping, so that variant is kept out of the fold
-   * and gets its own row — which means it must not also alias onto its siblings' rows, or filtering
-   * by it would match the lot. The wall subtracts `rowed`; the Remote Compose lane wall, whose rows
-   * are one per preview and not per mapping, does not. Publishing both facts once and naming the
-   * rule here is what keeps the browser from re-deriving it — the failure that comment at
-   * `rowPreviewIds` records having already happened once.
+   * `cards` is each comparison card's full id list; `rowed` is every id that has a row of its own.
+   * The two consumers want different slices, and the difference is a RULE: a design reference names
+   * one exact state/props mapping, so that variant is kept out of the fold and gets its own row —
+   * which means it must not also alias onto its siblings' rows, or filtering by it would match the
+   * lot. The wall subtracts `rowed`; the Remote Compose lane wall, whose rows are one per preview
+   * and not per mapping, does not. Publishing both facts once and naming the rule here is what
+   * keeps the browser from re-deriving it (see the comment at `rowPreviewIds`).
    *
    * Empty ⇒ no element at all, so a catalog that folds nothing pays nothing.
    */
@@ -15956,20 +15923,20 @@ ${scriptTag("known-differences.js")}
     // viewer.js drive one from the other: a chip click writes the select and fires its `change`,
     // and every existing lane (daemon re-render, Wasm ?uiMode, URL state, the catalog-scoped sticky
     // key) keeps working untouched. Day/Night rather than Light/Dark to match the labels the select
-    // used; a dark-first (Wear) system offers Night alone, as its select did.
+    // used; a dark-first (Wear) system offers Night alone.
     // …and, like the axes rows above, the bar FOLDS once a catalog declares enough themes that the
     // chips stop fitting. Eight chips is the published compose-m3 shape: they ellipsise to stubs
     // ("Light Medi…", "Dark Hig…") and the group scrolls within itself, so the row is spending full
     // width to show names it has already truncated. Behind the title-bar toggle the *current*
     // theme's full name is always readable and the chips are one click away. Under
     // [THEME_CHIPS_INLINE] — a plain light/dark catalog, or one with a theme or two — the bar shows
-    // as it always has.
+    // the chips inline.
     // A built-in chip whose mode this catalog already BAKED as its own card links there instead of
     // overriding this one. The pair differs in the theme axis alone ([ServeBakedTheme.twinIn]), so
     // the twin's card is the same sticker in the other mode — with its own annotations, parity
     // references and axes, all of which describe the frame the visitor lands on. Re-rendering this
-    // id under `uiMode` instead produced the same picture at the cost of a daemon render, and left
-    // the page's published overlays describing a frame that was no longer on screen.
+    // id under `uiMode` instead gives the same picture at the cost of a daemon render, and leaves
+    // the page's published overlays describing a frame that is not on screen.
     //
     // Withheld on a pinned revision (its pixels are a permalink to what that commit published, and
     // must not silently become the tip's) and on a theme specimen (the axis is withdrawn there
@@ -16440,21 +16407,21 @@ ${scriptTag("known-differences.js")}
             // One cluster, wrapping as a unit. These answer a question none of the controls before
             // them do — not "what is drawing this?" (the renderer picker) and not "what is it being
             // compared against?" (the spec lane), but *what am I looking at?* Loose in the row they
-            // were sorted by nothing, and because the spec lane is wide and grows with the length
-            // of a design tool's name, the line they landed on changed with the lane's state:
-            // pressing the design-spec chip moved `SVG` onto the row below and `Transparent` up
-            // beside the comparison views, so the bar a reader had just learned rearranged itself
-            // under the one control they pressed (`docs/design/COMPARE_NAVIGATION.md`, F1).
+            // sorted by nothing wrap unpredictably, and because the spec lane is wide and grows
+            // with the length of a design tool's name, the line a control lands on changes with the
+            // lane's state — pressing the design-spec chip moves `SVG` onto the row below and
+            // `Transparent` up beside the comparison views, rearranging the bar a reader had just
+            // learned under the one control they pressed (`docs/design/COMPARE_NAVIGATION.md`, F1).
             //
             // Grouped, the row can still wrap — it has to, at phone width — but it wraps between
             // groups instead of through one, so a control never changes neighbours.
             //
-            // `Transparent` and `Fit width` used to be here and are now in the Overrides panel (see
-            // [stageViewGroupHtml]). What is left is the group of things that change the ARTEFACT
-            // on the stage — a vector export, an exploded projection, the raster it is matched
-            // against — rather than how the page presents it. On a preview with none of those the
-            // group collapses away entirely, which is most of the catalog: the commonest viewer bar
-            // is now the renderer control, the comparison chips and nothing else.
+            // `Transparent` and `Fit width` live in the Overrides panel instead (see
+            // [stageViewGroupHtml]): this group is things that change the ARTEFACT on the stage — a
+            // vector export, an exploded projection, the raster it is matched against — rather than
+            // how the page presents it. On a preview with none of those the group collapses away
+            // entirely, which is most of the catalog, leaving the renderer control and the
+            // comparison chips.
             listOf(svgFmtToggle, explodeToggle, svgMatch)
               .filter { it.isNotBlank() }
               .let {
@@ -17723,9 +17690,9 @@ ${ServeSiteIcon.linkTags().prependIndent("        ")}
    * Open rather than exhaustive: these drop down for quick picking, and any valid BCP-47 tag the
    * server accepts stays typeable, which is why the control remains an `<input list>` rather than
    * becoming a `<select>`. Declared here as data so it renders through the same
-   * [datalistOptionsHtml] an author-declared value set does instead of being hand-written HTML —
-   * the labels are the whole reason a bare tag list is a poor control, and they were previously
-   * spelled out inline where nothing could reuse them.
+   * [datalistOptionsHtml] an author-declared value set does instead of being hand-written HTML. The
+   * labels are the whole reason a bare tag list is a poor control, so they belong somewhere
+   * reusable.
    *
    * Pseudolocales lead (they are the reason to reach for this control at all), then the real RTL
    * languages, then common tags.
