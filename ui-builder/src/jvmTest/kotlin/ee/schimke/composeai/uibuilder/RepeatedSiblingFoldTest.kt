@@ -151,6 +151,33 @@ class RepeatedSiblingFoldTest {
   }
 
   /**
+   * An import binds its alias, not its last segment.
+   *
+   * `import app.artwork.Renderer as kotlin` puts `kotlin` in scope, and reading the dotted tail of
+   * that string answers `Renderer as kotlin` — a name nothing collides with, so the fold would have
+   * gone ahead and qualified through a captured name.
+   */
+  @Test
+  fun `a renderer aliased to kotlin turns the fold off as surely as one named it`() {
+    val adapter =
+      ComposeAssetAdapter(
+        id = "test-adapter/v1",
+        bindings = emptyMap(),
+        renderer =
+          ComposeAssetRenderer(
+            symbol = "kotlin",
+            importName = "app.artwork.Renderer as kotlin",
+          ),
+      )
+    val result = CapabilityComposeCodeExporter.export(contributionRow(cells = 12), catalog, adapter)
+    val source = assertNotNull(result.source)
+
+    assertTrue(result.successful, result.diagnostics.joinToString { it.message })
+    assertFalse(source.contains("kotlin.repeat("), source)
+    assertEquals(12, emittedCellBodies(source))
+  }
+
+  /**
    * The carousel folds too, wrapper and all.
    *
    * `BuilderHorizontalCarousel` is a `Row` and its items carry no key, so it is a non-lazy

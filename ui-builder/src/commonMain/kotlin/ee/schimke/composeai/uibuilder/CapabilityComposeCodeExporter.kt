@@ -471,13 +471,14 @@ private class ComposeEmitter(
    *
    * That leaves one name to protect rather than two, and both ways it can be taken are: a design
    * whose state is called `kotlin` gets a local that captures the qualifier, and an adapter whose
-   * renderer imports a declaration of that simple name captures it too. Either has its cells
-   * printed the long way. Spent on the fold rather than on a refusal — the design is legal, the
-   * canvas draws it, and the adapter is the caller's to supply.
+   * renderer *binds* that name captures it too — by its last segment, or by an `as` alias, which is
+   * what the import statement actually puts in scope. Either has its cells printed the long way.
+   * Spent on the fold rather than on a refusal — the design is legal, the canvas draws it, and the
+   * adapter is the caller's to supply.
    */
   private val foldsRepeatedSiblings: Boolean by lazy {
     document.stateVariables.keys.none { it.identifier() == "kotlin" } &&
-      assetAdapter?.renderer?.importName?.substringAfterLast('.') != "kotlin"
+      assetAdapter?.renderer?.importName?.importedSimpleName() != "kotlin"
   }
 
   /**
@@ -1916,6 +1917,18 @@ private fun shapeDp(value: String?): Float =
 // The emitter and design creation must agree about what a name becomes, so there is one
 // implementation of it, in `:ui-builder-export` beside the export projection.
 private fun String.identifier(): String = exportedStateIdentifier(this)
+
+/**
+ * The name an import statement actually binds: its alias where it has one, its last segment where
+ * it does not.
+ *
+ * `import app.artwork.Renderer as kotlin` binds `kotlin`, and reading the last dotted segment of
+ * that string answers `Renderer as kotlin` — a name nothing can collide with, which is the wrong
+ * answer twice over. The renderer import is written verbatim into the generated file, so whatever
+ * it binds is what the file's own names have to be checked against.
+ */
+private fun String.importedSimpleName(): String =
+  substringAfterLast(" as ").trim().substringAfterLast('.')
 
 private fun String.escape(): String =
   replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
