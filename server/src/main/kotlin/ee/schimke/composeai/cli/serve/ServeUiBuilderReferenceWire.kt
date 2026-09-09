@@ -1,142 +1,74 @@
 package ee.schimke.composeai.cli.serve
 
-import kotlinx.serialization.SerialName
+import ee.schimke.composeai.uibuilder.protocol.DesignReferenceImageV1
+import ee.schimke.composeai.uibuilder.protocol.DesignReferenceMarkV1
+import ee.schimke.composeai.uibuilder.protocol.DesignReferencePieceV1
+import ee.schimke.composeai.uibuilder.protocol.DesignReferenceSettingsV1
+import ee.schimke.composeai.uibuilder.protocol.DesignReferenceV1
 import kotlinx.serialization.Serializable
 
 /**
- * The reference-overlay payload, on the wire and on disk.
+ * The reference-overlay payload, on the wire and on disk — [DesignReferenceV1] and its parts,
+ * published.
  *
- * One shape for both because they carry the same facts and nothing is gained by translating between
- * two of them: the file *is* the response body, plus a design id and a timestamp an operator
- * looking at the directory will want.
+ * These shapes moved to `compose-preview-contracts` for the reason the whole sidecar family did:
+ * each is a response body, an on-disk record and a payload a second implementation has to agree on.
+ * The aliases stay because the names describe what this server does with them, and because the
+ * editor's own mirror in `:ui-builder` decodes the same JSON leniently — the two modules still
+ * cannot share a type, and a tolerant client is what lets this payload gain a field without
+ * blanking somebody's overlay mid-release.
  *
- * Its mirror in the editor (`:ui-builder`'s wasm host) is a separate declaration decoding the same
- * JSON leniently, the way the device-preset payload already works — the two modules cannot share a
- * type, and a tolerant client is what lets this payload gain a field without blanking someone's
- * overlay mid-release.
+ * The JSON is unchanged: same field names, same `@SerialName`, so a host reads what it wrote.
+ *
+ * The clamping did **not** move. [sanitized] below is behaviour, and behaviour stays out of a
+ * shape-only module; it lives here because the store is reachable by anything holding a write
+ * capability rather than only by the editor that also clamps for drawing.
  */
-@Serializable
-data class StoredReference(
-  @SerialName("schemaVersion") val schemaVersion: Int = SCHEMA_VERSION,
-  val designId: String,
-  /** The base picture, fitted to the frame. Null when only pieces and marks have been left here. */
-  val image: StoredReferenceImage? = null,
-  val settings: StoredReferenceSettings = StoredReferenceSettings(),
-  /** Pictures placed at a point on the frame rather than fitted to it. */
-  val pieces: List<StoredReferencePiece> = emptyList(),
-  /** Annotations drawn over the frame, each removable on its own. */
-  val marks: List<StoredReferenceMark> = emptyList(),
-  val updatedAtEpochMillis: Long = 0,
-) {
-  /** Every embedded picture this record carries, for the byte budget. */
-  val images: List<StoredReferenceImage>
-    get() = listOfNotNull(image) + pieces.map { it.image }
+typealias StoredReference = DesignReferenceV1
 
-  companion object {
-    const val SCHEMA_VERSION: Int = 1
-  }
-}
+/** Every embedded picture this record carries, for the byte budget. */
+val StoredReference.images: List<StoredReferenceImage>
+  get() = listOfNotNull(image) + pieces.map { it.image }
 
-@Serializable
-data class StoredReferenceImage(
-  /** Content digest, assigned by the host. A client's proposal is overwritten, never trusted. */
-  val id: String = "",
-  /** What the operator will recognise it by; the file name they chose, usually. */
-  val name: String = "reference",
-  val mediaType: String,
-  /** Standard base64, no data-URI prefix. */
-  val base64: String,
-  /** Natural size, read from the bytes by the host where the format allows it; 0 when unknown. */
-  val widthPx: Int = 0,
-  val heightPx: Int = 0,
-  /**
-   * Where the picture came from, kept for provenance and never fetched.
-   *
-   * A Figma node URL belongs here. This host holds no Figma credential and makes no outbound call
-   * for a reference — the import path is an export from Figma pasted or picked by the operator, and
-   * this field is the link back, not a fetch instruction.
-   */
-  val sourceUrl: String? = null,
-)
+typealias StoredReferenceImage = DesignReferenceImageV1
 
-@Serializable
-data class StoredReferenceSettings(
-  val mode: String = "overlay",
-  val visible: Boolean = true,
-  val opacityPercent: Int = 50,
-  val offsetXDp: Float = 0f,
-  val offsetYDp: Float = 0f,
-  val scalePercent: Int = 100,
-  val splitPercent: Int = 50,
-  val alwaysShowBoxes: Boolean = false,
-) {
-  /**
-   * Clamped before storage, so a client cannot persist an overlay nobody can see back out of.
-   *
-   * The editor clamps the same values for its own drawing; this one exists because the store is
-   * reachable by anything holding a write capability, not only by that editor.
-   */
-  fun sanitized(): StoredReferenceSettings =
-    copy(
-      mode = if (mode in KNOWN_MODES) mode else "overlay",
-      opacityPercent = opacityPercent.coerceIn(0, 100),
-      offsetXDp =
-        if (offsetXDp.isFinite()) offsetXDp.coerceIn(-MAX_OFFSET_DP, MAX_OFFSET_DP) else 0f,
-      offsetYDp =
-        if (offsetYDp.isFinite()) offsetYDp.coerceIn(-MAX_OFFSET_DP, MAX_OFFSET_DP) else 0f,
-      scalePercent = scalePercent.coerceIn(MIN_SCALE_PERCENT, MAX_SCALE_PERCENT),
-      splitPercent = splitPercent.coerceIn(0, 100),
-    )
-
-  companion object {
-    /**
-     * Mirrors `ReferenceDiffMode` in `:ui-builder`; an unknown value falls back rather than 400s.
-     */
-    val KNOWN_MODES: Set<String> = setOf("overlay", "difference", "split", "boxes")
-
-    const val MIN_SCALE_PERCENT: Int = 10
-    const val MAX_SCALE_PERCENT: Int = 400
-    const val MAX_OFFSET_DP: Float = 4000f
-  }
-}
+typealias StoredReferenceSettings = DesignReferenceSettingsV1
 
 /**
- * A picture placed on the frame rather than fitted to it, in fractions of the frame.
+ * Clamped before storage, so a client cannot persist an overlay nobody can see back out of.
  *
- * Fractions rather than dp so a piece survives a device-frame change: one placed over the top third
- * of a phone is still over the top third of the tablet the operator switches to.
+ * The editor clamps the same values for its own drawing; this one exists because the store is
+ * reachable by anything holding a write capability, not only by that editor.
  */
-@Serializable
-data class StoredReferencePiece(
-  val id: String,
-  val image: StoredReferenceImage,
-  val left: Float,
-  val top: Float,
-  val right: Float,
-  val bottom: Float,
-  val opacityPercent: Int = 100,
-  /**
-   * The catalog component this piece is a picture of, when it is a picture of one.
-   *
-   * Provenance, never behaviour: this host draws nothing from it and resolves nothing with it. It
-   * exists so that a piece rasterised out of a live preview can later be rebuilt as real nodes by
-   * whoever asks for that, rather than being a picture nobody can trace.
-   */
-  val componentId: String? = null,
-)
+fun StoredReferenceSettings.sanitized(): StoredReferenceSettings =
+  copy(
+    mode = if (mode in StoredReferenceSettings.KNOWN_MODES) mode else "overlay",
+    opacityPercent = opacityPercent.coerceIn(0, 100),
+    offsetXDp =
+      if (offsetXDp.isFinite())
+        offsetXDp.coerceIn(
+          -StoredReferenceSettings.MAX_OFFSET_DP,
+          StoredReferenceSettings.MAX_OFFSET_DP,
+        )
+      else 0f,
+    offsetYDp =
+      if (offsetYDp.isFinite())
+        offsetYDp.coerceIn(
+          -StoredReferenceSettings.MAX_OFFSET_DP,
+          StoredReferenceSettings.MAX_OFFSET_DP,
+        )
+      else 0f,
+    scalePercent =
+      scalePercent.coerceIn(
+        StoredReferenceSettings.MIN_SCALE_PERCENT,
+        StoredReferenceSettings.MAX_SCALE_PERCENT,
+      ),
+    splitPercent = splitPercent.coerceIn(0, 100),
+  )
 
-/** One annotation. [points] alternates x and y, in frame fractions, tail first. */
-@Serializable
-data class StoredReferenceMark(
-  val id: String,
-  val kind: String,
-  val points: List<Float>,
-  /** `0xAARRGGBB`. A Long because JSON has no unsigned integer and this one has the top bit set. */
-  val colorArgb: Long,
-  val strokeWidthDp: Float = 2f,
-  /** The words a text mark draws, and the caption on an image placeholder. */
-  val text: String? = null,
-)
+typealias StoredReferencePiece = DesignReferencePieceV1
+
+typealias StoredReferenceMark = DesignReferenceMarkV1
 
 /**
  * The request body for `PUT …/reference`.
