@@ -488,6 +488,13 @@ Each phase is releasable on its own and leaves every catalog working.
    compose-ai-tools' `validate-ui-builder-policy.mjs` and a second implementation here would
    disagree with the real one exactly where it matters.
 
+   A builtin the frozen catalog carries no component for lands on that same path, as
+   `builtins.<id>` — one field per builtin. It used to be counted straight into the difference
+   total, outside the model, so it could not be waived at all: the failure told the reader to record
+   the decision in `--differences` and the sweep for waivers naming no compared field then reported
+   that entry a second time. Per id rather than one entry for the set, because a catalog that
+   deliberately adds one builtin has reviewed *that* builtin.
+
    Two of the seven read wider than their names suggest. "A policy that is not this catalog's" also
    covers a document that names **two** catalogs: a capability document is identified by
    `benchmark.catalogSystemId` while carrying `catalog.id` as ordinary payload, so reading the

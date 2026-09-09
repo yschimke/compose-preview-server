@@ -91,7 +91,9 @@
 # there re-authorising a return to the waived value with nobody re-reading it.
 #
 # What `builtins` can and cannot tell you. A declared builtin the frozen catalog carries no
-# component for is a real difference and is reported. The reverse — a builtin the catalog OUGHT to
+# component for is a real difference and is reported — one field per id, `builtins.<id>`, so a
+# deliberate addition can be reviewed and pinned like any other fact the frozen catalog cannot
+# check, and so a waiver approves the builtin somebody read rather than the whole set. The reverse — a builtin the catalog OUGHT to
 # declare and does not — is not checkable here, because the frozen catalog does not distinguish a
 # builtin from a record component; that one is caught by the generator's `policy.builtin.*`
 # diagnostics and by the phase-4 loader. Said plainly rather than left as a field that silently
@@ -364,6 +366,31 @@ const fields = [
 // a second implementation of those rules here is how they would start to disagree. Only entries
 // that DIFFER or already carry a waiver are added: adding the agreeing ones would print thirty `=`
 // lines, and a waiver for an entry that has come back into agreement still has to be judged stale.
+// A builtin the frozen catalog carries no component for, as one field per id.
+//
+// This was counted straight into `differences`, outside the model every other discrepancy goes
+// through — so it could not be waived at all. Worse than that: the failure told the reader to put
+// it in `--differences`, and an entry naming `builtins` was then reported a SECOND time by the
+// sweep for waivers naming no compared field. The gate asked for a review decision and then
+// refused the only place to record one, which is a check that cannot be satisfied rather than a
+// check that can be answered.
+//
+// Per id, because a catalog that deliberately adds one builtin has reviewed THAT builtin, and a
+// waiver naming the whole set would approve the next one nobody looked at. Each lands on the
+// policy-only path — the catalog states it and the frozen catalog has no component to check it
+// against — so it is accepted with `"frozen": null`, exactly like `frame.adapter`.
+//
+// The frozen catalog's own component ids are the one thing this can be checked against; a
+// capability document does not distinguish a builtin from a record component, so it states nothing
+// here and the note below says so rather than printing a silent pass.
+const frozenIds = new Set((golden.components ?? []).map((component) => component.componentId));
+const unknownBuiltins = capabilities
+  ? []
+  : declaredBuiltins.filter((id) => !frozenIds.has(id));
+for (const id of unknownBuiltins) {
+  fields.push([`builtins.${id}`, facts.builtins?.[id] ?? null, undefined]);
+}
+
 const statedEntries = menu?.components;
 const frozenEntries = semantics.componentMenu?.components;
 let agreeingEntries = 0;
@@ -543,10 +570,6 @@ if (agreeingEntries > 0) {
   console.log(`  = componentMenu.components (${agreeingEntries} shelf assignment(s) agree)`);
 }
 
-// The one thing `builtins` can be checked against: the frozen catalog's own component ids. A
-// builtin it carries no component for is a component this build has never had under that id.
-const frozenIds = new Set((golden.components ?? []).map((component) => component.componentId));
-const unknownBuiltins = declaredBuiltins.filter((id) => !frozenIds.has(id));
 if (capabilities) {
   // Not "no builtins" — "this shape cannot tell". Reporting nothing here would look identical to a
   // catalog that declares none, which is the difference between a check and its absence.
@@ -555,10 +578,8 @@ if (capabilities) {
 } else if (declaredBuiltins.length > 0) {
   if (unknownBuiltins.length === 0) {
     console.log(`  = builtins (${declaredBuiltins.length}, all present in the frozen catalog)`);
-  } else {
-    differences += unknownBuiltins.length;
-    console.log(`  x builtins the frozen catalog has no component for: ${unknownBuiltins.join(", ")}`);
   }
+  // The unknown ones were reported above, by the field loop, one per id.
 }
 
 // WHICH CATALOG IS THIS? Asked before anything above is believed.

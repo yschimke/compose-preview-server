@@ -534,6 +534,47 @@ check "an authored policy is not asked for per-component shelves" 0 $?
 grep -q "componentMenu.components" "${work}/out" &&
   { echo "FAIL authored policy asked for shelves"; failures=$((failures + 1)); }
 
+# A builtin the frozen catalog has no component for was counted straight into `differences`, outside
+# the model every other discrepancy goes through — so it could not be waived at all, and an entry
+# naming `builtins` was then reported a SECOND time as a waiver naming no compared field. The gate
+# asked for a review decision and refused the only place to record one.
+cat >"${work}/builtin-golden.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "components": [ { "componentId": "wear-m3/screen-scaffold" } ],
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A"] } } }
+JSON
+cat >"${work}/builtin-policy.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A"] },
+  "builtins": { "wear-m3/screen-scaffold": { "role": "screen-root" },
+                "wear-m3/new-thing": { "role": "list" } } }
+JSON
+"${gate}" --policy "${work}/builtin-policy.json" --golden "${work}/builtin-golden.json" \
+  --strict >"${work}/out" 2>&1
+check "an unknown builtin fails --strict" 1 $?
+grep -q "x builtins.wear-m3/new-thing: stated as" "${work}/out" ||
+  { echo "FAIL unknown builtin not reported per id"; failures=$((failures + 1)); }
+
+# Per id, and reviewable exactly like any other fact the frozen catalog cannot check.
+cat >"${work}/builtin-reviewed.json" <<'JSON'
+[ { "field": "builtins.wear-m3/new-thing", "why": "a deliberate addition, reviewed",
+    "policy": { "role": "list" }, "frozen": null } ]
+JSON
+"${gate}" --policy "${work}/builtin-policy.json" --golden "${work}/builtin-golden.json" \
+  --differences "${work}/builtin-reviewed.json" --strict >"${work}/out" 2>&1
+check "a reviewed builtin addition passes --strict" 0 $?
+
+# And the waiver goes stale when the builtin it describes is gone, rather than sitting there ready
+# to re-authorise it.
+cat >"${work}/builtin-dropped.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A"] },
+  "builtins": { "wear-m3/screen-scaffold": { "role": "screen-root" } } }
+JSON
+"${gate}" --policy "${work}/builtin-dropped.json" --golden "${work}/builtin-golden.json" \
+  --differences "${work}/builtin-reviewed.json" --strict >"${work}/out" 2>&1
+check "a waiver for a builtin no longer declared fails --strict" 1 $?
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then
