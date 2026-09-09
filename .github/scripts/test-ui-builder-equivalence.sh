@@ -1102,6 +1102,57 @@ JSON
     { echo "FAIL malformed components map (${shape}) not reported"; failures=$((failures + 1)); }
 done
 
+# DECODE BEFORE COMPARING. Three shapes the reader's typed decode rejects and a raw JSON traversal
+# reads as ordinary data. All reported by Codex on #655 in one round, and all one mistake: the gate
+# was comparing where the reader was decoding.
+
+# 1. A policy VALUE that is not an object.
+cat >"${work}/rec-badvalue.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "components": { "wear-m3/unused": null },
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+"${gate}" --policy "${work}/rec-badvalue.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-ok.json" --strict \
+  >"${work}/out" 2>&1
+check "a policy value that is not an object is refused" 1 $?
+grep -q "are not policy objects" "${work}/out" ||
+  { echo "FAIL non-object policy value not reported"; failures=$((failures + 1)); }
+
+# 2. An AUTHORED policy cannot answer the component-id question: per-component ids live in
+#    @BuilderComponent annotations, which only the generator resolves. Deriving from it ignores
+#    every id an annotation overrides, and can agree with the golden by luck.
+cat >"${work}/rec-authored.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "componentIdPrefix": "wear-m3/",
+  "menu": { "groupOrder": ["A"],
+    "components": { "wear-m3/button": { "group": "A" }, "wear-m3/card": { "group": "A" } } } }
+JSON
+"${gate}" --policy "${work}/rec-authored.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-ok.json" --strict \
+  >"${work}/out" 2>&1
+check "an authored policy cannot answer --record" 1 $?
+grep -q "needs the GENERATED ui-builder.json" "${work}/out" ||
+  { echo "FAIL authored policy accepted for component ids"; failures=$((failures + 1)); }
+
+# 3. A record that is valid JSON but not a `ComponentRecordFile`. A `componentIds` STRING is the
+#    dangerous shape: `[0]` reads a character and `.split("/").pop()` makes a plausible id out of it.
+cat >"${work}/rec-badrecord.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.Button", "componentIds": "Button",
+    "symbol": { "name": "Button", "callable": "a.Button", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-badrecord.json" \
+  --strict >"${work}/out" 2>&1
+check "a record the reader could not decode is refused" 1 $?
+grep -q "componentIds is not a list of strings" "${work}/out" ||
+  { echo "FAIL malformed record shape not reported"; failures=$((failures + 1)); }
+
 # A record path that does not exist is a usage error, not a pass. The same argument as the missing
 # golden: a caller asserting readiness against a file nobody could read has asserted nothing.
 "${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
