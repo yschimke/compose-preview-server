@@ -48,7 +48,7 @@
 #
 # Usage:
 #   .github/scripts/ui-builder-equivalence.sh --policy <path> --golden <path> [--differences <path>]
-#                                             [--catalog-id <id>] [--strict]
+#                                             [--catalog-id <id>] [--record <path>] [--strict]
 #
 #   --policy       a catalog's authored ui-builder.policy.json, or its generated ui-builder.json
 #                  (a local checkout, or fetched from the delivery branch)
@@ -70,6 +70,11 @@
 #                  the cover sheet (:remote-catalog and m3-catalog both do). Semantics never
 #                  identify a catalog — a second `wear` catalog can agree on every compared field —
 #                  so without an id `--strict` cannot tell "ready" from "you read the wrong file".
+#   --record       the catalog's components.json. Turns on the COMPONENT ID comparison: which ids
+#                  the catalog would put on the shelf, how many collided, and which the frozen
+#                  catalog has that this one would not. Off without it, so a caller who omits it
+#                  gets the catalog-level checks only and can read `--strict` success for a shelf
+#                  that shares almost nothing with the frozen one. Pass it at the cutover.
 #   --differences  a JSON array of {"field": …, "why": …, "policy": …} — differences somebody has,
 #                  each field named at most ONCE: a second entry for a field would silently replace
 #                  the first, leaving a review decision nothing ever judged.
@@ -521,45 +526,45 @@ const SLUG_PINS = [
   // and expands U+0130 to `i` + a combining dot. Taking the first code unit matches the Kotlin, and
   // this pin is what proves it — the ASCII cases above cannot see the difference.
   ["\u0130Button", "i-button"],
+  // Above the BMP: Kotlin's `Char` loop sees two surrogates, neither a letter, so both separate.
+  ["A\u{10400}B", "a-b"],
 ];
 
-// Single-character lowercase, matching Kotlin's `Char.lowercaseChar()`. See the pin above.
+// Single-character lowercase, matching Kotlin's `Char.lowercaseChar()`. JavaScript's
+// `toLowerCase()` is not single-character — it expands U+0130 to `i` plus a combining dot — and the
+// first code unit is what Kotlin produces. Safe because the loop below hands this ONE code unit.
 const lowerChar = (ch) => {
   const lowered = ch.toLowerCase();
   return lowered.length > 0 ? lowered[0] : ch;
 };
 
+// Iterated by UTF-16 CODE UNIT, not by code point, because `String.forEachIndexed` in Kotlin walks
+// `Char`s and a `Char` is a code unit. The difference is only visible above the BMP and it is not
+// cosmetic: for `A𐐀B` Kotlin sees two surrogate `Char`s, neither of which is a letter, so both
+// become separators and the id is `a-b`. A code-point loop sees one letter and keeps it — and
+// `lowerChar` then truncates the surrogate pair to its high half, putting an unpaired surrogate in
+// the id. Two divergences, both from iterating the string the way JavaScript makes natural rather
+// than the way the reader does.
 const slug = (name) => {
   let out = "";
-  for (const ch of name) {
+  for (let index = 0; index < name.length; index += 1) {
+    const ch = name[index];
     if (/[\p{L}\p{N}]/u.test(ch)) {
-      out += lowerChar(ch);
-    } else if (out.length > 0 && !out.endsWith("-")) {
-      out += "-";
-    }
-  }
-  // Word boundaries are decided on the ORIGINAL string, so the pass above cannot see them; done as
-  // a second pass over the characters with their neighbours, which is what the Kotlin does inline.
-  const chars = [...name];
-  let built = "";
-  for (let index = 0; index < chars.length; index += 1) {
-    const ch = chars[index];
-    if (/[\p{L}\p{N}]/u.test(ch)) {
-      const previous = index > 0 ? chars[index - 1] : null;
-      const next = index + 1 < chars.length ? chars[index + 1] : null;
+      const previous = index > 0 ? name[index - 1] : null;
+      const next = index + 1 < name.length ? name[index + 1] : null;
       const isUpper = (c) => c !== null && c === c.toUpperCase() && c !== c.toLowerCase();
       const isLower = (c) => c !== null && c === c.toLowerCase() && c !== c.toUpperCase();
       const startsWord =
         previous !== null &&
         isUpper(ch) &&
         (isLower(previous) || /[0-9]/.test(previous) || (isUpper(previous) && isLower(next)));
-      if (startsWord && built.length > 0 && !built.endsWith("-")) built += "-";
-      built += lowerChar(ch);
-    } else if (built.length > 0 && !built.endsWith("-")) {
-      built += "-";
+      if (startsWord && out.length > 0 && !out.endsWith("-")) out += "-";
+      out += lowerChar(ch);
+    } else if (out.length > 0 && !out.endsWith("-")) {
+      out += "-";
     }
   }
-  return built.replace(/^-+|-+$/g, "");
+  return out.replace(/^-+|-+$/g, "");
 };
 
 for (const [name, expected] of SLUG_PINS) {
@@ -632,11 +637,16 @@ if (recordPath) {
       "none",
     ]);
   }
+  // BOTH sides asserted, never `undefined`. An absence spelled `undefined` lands on the
+  // policy-silent path, which counts a gap and returns before any waiver is read — so a catalog
+  // deliberately retiring one component could not record that decision anywhere, and an exact
+  // `--differences` entry for it was reported obsolete on top. Stating "not offered" makes it an
+  // ordinary difference between two known values, which is what it is.
   for (const componentId of goldenOwned.filter((id) => !composedSet.has(id))) {
-    fields.push([`components.${componentId}`, undefined, "offered by the frozen catalog"]);
+    fields.push([`components.${componentId}`, "not offered", "offered by the frozen catalog"]);
   }
   for (const componentId of composedOwned.filter((id) => !frozenIds.has(id))) {
-    fields.push([`components.${componentId}`, "offered by this catalog", undefined]);
+    fields.push([`components.${componentId}`, "offered by this catalog", "not offered"]);
   }
   if (collisions === 0 && shared.length === goldenOwned.length &&
       composedOwned.length === goldenOwned.length) {

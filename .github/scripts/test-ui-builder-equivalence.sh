@@ -879,6 +879,36 @@ check "no --record leaves the component comparison out entirely" 0 $?
 grep -q "components:" "${work}/out" &&
   { echo "FAIL component line printed without --record"; failures=$((failures + 1)); }
 
+# A component the catalog deliberately retires must be WAIVABLE. Spelling the absence `undefined`
+# put it on the policy-silent path, which counts a gap and returns before any waiver is read — so
+# the decision could not be recorded anywhere, and an exact `--differences` entry for it was
+# reported obsolete on top. Reported by Codex on #655; the same bug this file already carries a
+# correction for under `builtins`.
+cat >"${work}/rec-retire.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.Button", "componentIds": ["Controls/Button"],
+    "symbol": { "name": "Button", "callable": "a.Button", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-retire.json" --strict \
+  >"${work}/out" 2>&1
+check "a retired component fails --strict when nobody has reviewed it" 1 $?
+grep -q "components.wear-m3/card" "${work}/out" ||
+  { echo "FAIL retired component not named"; failures=$((failures + 1)); }
+
+cat >"${work}/rec-waiver.json" <<'JSON'
+[ { "field": "components.wear-m3/card", "why": "retired on purpose",
+    "policy": "not offered", "frozen": "offered by the frozen catalog" } ]
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --differences "${work}/rec-waiver.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-retire.json" --strict \
+  >"${work}/out" 2>&1
+check "a reviewed retirement passes --strict" 0 $?
+grep -q "no such compared field" "${work}/out" &&
+  { echo "FAIL the waiver was reported as naming nothing"; failures=$((failures + 1)); }
+
 # A record path that does not exist is a usage error, not a pass. The same argument as the missing
 # golden: a caller asserting readiness against a file nobody could read has asserted nothing.
 "${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
