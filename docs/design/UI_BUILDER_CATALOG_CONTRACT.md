@@ -477,10 +477,16 @@ Each phase is releasable on its own and leaves every catalog working.
    arrived the same way and for the same reason: `groupOrder` names the sections, and only the
    sections were compared, so a generated catalog could move every component to a different shelf or
    drop every `variantProperty` and still report ready — the insert panel at cutover bearing no
-   resemblance to the frozen one while the headings matched. It is compared as a **subset**: the
+   resemblance to the frozen one while the headings matched. It is compared as a **subset**, in both directions: the
    frozen catalog's menu also carries the builder's own components (`asset/image`, `layout/box`,
-   `remote-compose/*`), so only the entries the catalog states are checked, each against the frozen
-   entry for the same id. An authored policy states none of them — a component's shelf comes from
+   `remote-compose/*`), so what is checked is the entries whose id carries the catalog's
+   `componentIdPrefix` — each stated entry against the frozen one, *and* each frozen one against the
+   catalog's. Sweeping only the catalog's keys caught a shelf that moved and not one that vanished,
+   so a generated menu omitting a component — an empty map included — reached no comparison at all
+   and passed while that component lost its shelf and its variant control. A missing entry is a
+   difference rather than a gap, and reviewable: the catalog publishes a menu and that menu does not
+   list the id, which is an assertion that the component is gone, not the silence of a catalog that
+   has not been written yet. An authored policy states none of them — a component's shelf comes from
    its `@CatalogGroup`, not from the policy — so this asks nothing of the three catalogs today and
    everything of the generated files they will publish. That is the same omission
    `previewSurfaces` was fixed for. What the gate does *not* do is validate them — whether

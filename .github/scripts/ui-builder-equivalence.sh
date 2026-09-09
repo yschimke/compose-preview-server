@@ -404,6 +404,35 @@ if (statedEntries && typeof statedEntries === "object" && !Array.isArray(statedE
     }
     fields.push([field, statedEntries[id], frozenEntry]);
   }
+  // And the other end. Sweeping only the catalog's own keys detected a shelf that MOVED and not one
+  // that vanished: a generated menu omitting a component — an empty `components` map included —
+  // matched nothing, reached no field, and passed. The component then loses its shelf and its
+  // variant control at cutover with the gate reporting ready, which is the failure this comparison
+  // was added for, arriving from the direction I did not sweep.
+  //
+  // Restricted to the catalog's OWN ids, because the frozen menu also carries the builder's
+  // (`asset/image`, `layout/box`, `remote-compose/*`) and a catalog is not silent about those — it
+  // has nothing to say about them. `componentIdPrefix` is published for exactly this kind of
+  // question; without it there is no way to tell the two apart and the sweep is skipped rather than
+  // guessed at.
+  //
+  // Stated as `null` rather than left undefined, and the difference is deliberate. For a top-level
+  // fact, silence is a GAP that no waiver can fill — a catalog that says nothing about its platform
+  // has not been reviewed, it is unfinished. Here the catalog publishes a menu and that menu does
+  // not list this id, which is an assertion: the component is gone. So it is a DIFFERENCE, and a
+  // deliberate retirement can be reviewed and pinned like any other.
+  const catalogPrefix =
+    facts.componentIdPrefix ||
+    (source.catalogId || source.catalog?.id || source.benchmark?.catalogSystemId
+      ? `${source.catalogId || source.catalog?.id || source.benchmark?.catalogSystemId}/`
+      : null);
+  if (frozenEntries && catalogPrefix) {
+    for (const id of Object.keys(frozenEntries).sort()) {
+      if (!id.startsWith(catalogPrefix)) continue;
+      if (statedEntries[id] !== undefined) continue;
+      fields.push([`componentMenu.components.${id}`, null, frozenEntries[id]]);
+    }
+  }
 }
 
 let differences = 0;

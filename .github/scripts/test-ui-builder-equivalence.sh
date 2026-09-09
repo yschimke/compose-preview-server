@@ -575,6 +575,51 @@ JSON
   --differences "${work}/builtin-reviewed.json" --strict >"${work}/out" 2>&1
 check "a waiver for a builtin no longer declared fails --strict" 1 $?
 
+# The other end of the menu. Sweeping only the catalog's own keys detected a shelf that MOVED and
+# not one that VANISHED, so a generated menu omitting a component — an empty map included — matched
+# nothing, reached no field, and passed while that component lost its shelf at cutover.
+cat >"${work}/drop-golden.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear",
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" },
+                      "layout/box": { "group": "A" } } } } }
+JSON
+cat >"${work}/drop-policy.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" } } } } }
+JSON
+"${gate}" --policy "${work}/drop-policy.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a component missing from a generated menu fails --strict" 1 $?
+grep -q "x componentMenu.components.wear-m3/card" "${work}/out" ||
+  { echo "FAIL dropped component not reported"; failures=$((failures + 1)); }
+# The builder's own components are not this catalog's to state, so their absence is not a difference.
+grep -q "componentMenu.components.layout/box" "${work}/out" &&
+  { echo "FAIL builder-owned id reported as dropped"; failures=$((failures + 1)); }
+
+cat >"${work}/drop-empty.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "componentMenu": { "groupOrder": ["A"], "components": {} } } }
+JSON
+"${gate}" --policy "${work}/drop-empty.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "an empty generated menu fails --strict" 1 $?
+
+# A retirement is a decision somebody can record: the catalog publishes a menu and that menu does
+# not list this id, which is an assertion rather than the silence a waiver may not fill.
+cat >"${work}/drop-reviewed.json" <<'JSON'
+[ { "field": "componentMenu.components.wear-m3/card", "why": "retired at cutover, reviewed",
+    "policy": null, "frozen": { "group": "A" } } ]
+JSON
+"${gate}" --policy "${work}/drop-policy.json" --golden "${work}/drop-golden.json" \
+  --differences "${work}/drop-reviewed.json" --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a reviewed retirement passes --strict" 0 $?
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then
