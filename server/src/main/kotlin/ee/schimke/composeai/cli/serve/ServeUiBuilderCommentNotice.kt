@@ -54,7 +54,7 @@ internal data class CommentNoticeThreadV1(
   val id: String,
   /** Who said the last thing in it: their display name where they gave one, else their actor id. */
   val author: String,
-  /** The last thing said, trimmed to [MAX_NOTICE_EXCERPT] characters. */
+  /** The last thing said, trimmed to [MAX_COMMENT_EXCERPT] characters. */
   val excerpt: String,
   /** Where the thread is pinned, where it is — the node an agent can act on without asking. */
   val nodeId: String? = null,
@@ -86,7 +86,7 @@ internal fun StoredCommentBoard.noticeFor(actorId: String): CommentNoticeV1? {
           CommentNoticeThreadV1(
             id = thread.id,
             author = last.displayName.ifBlank { last.authorId },
-            excerpt = last.body.excerpt(),
+            excerpt = last.body.commentExcerpt(),
             nodeId = thread.anchor?.nodeId,
             markId = thread.anchor?.markId,
             comments = thread.comments.size,
@@ -96,11 +96,23 @@ internal fun StoredCommentBoard.noticeFor(actorId: String): CommentNoticeV1? {
   )
 }
 
-/** One line of what was said, with an ellipsis where the rest of it is. */
-private fun String.excerpt(): String {
+/**
+ * One line of what was said, with an ellipsis where the rest of it is.
+ *
+ * Shared with [ServeUiBuilderCommentWebhook] rather than reimplemented there, so a sentence quoted
+ * into Slack and the same sentence quoted into an agent's reply are trimmed by one rule. Two rules
+ * would drift, and the drift would be invisible: both outputs look right on their own.
+ */
+internal fun String.commentExcerpt(): String {
   val flattened = trim().replace(Regex("\\s+"), " ")
-  return if (flattened.length <= MAX_NOTICE_EXCERPT) flattened
-  else flattened.take(MAX_NOTICE_EXCERPT - 1).trimEnd() + "…"
+  if (flattened.length <= MAX_COMMENT_EXCERPT) return flattened
+  // Back off a unit when the cut lands between the halves of a surrogate pair. Keeping the high
+  // half alone would emit malformed UTF-16 — an emoji arriving at a chat platform as a replacement
+  // character, or a receiver rejecting the body outright — and an emoji is exactly the kind of
+  // character a 160th position is likely to hold.
+  var cut = MAX_COMMENT_EXCERPT - 1
+  if (flattened[cut - 1].isHighSurrogate()) cut -= 1
+  return flattened.take(cut).trimEnd() + "…"
 }
 
 /**
@@ -111,4 +123,5 @@ private fun String.excerpt(): String {
  */
 private const val MAX_NOTICE_THREADS = 3
 
-private const val MAX_NOTICE_EXCERPT = 160
+/** How much of a sentence is quoted, wherever one is quoted. */
+internal const val MAX_COMMENT_EXCERPT: Int = 160

@@ -66,6 +66,25 @@ class ServeUiBuilderCommentStore(
   private val subscribers = ConcurrentHashMap<String, MutableSet<(StoredCommentBoard) -> Unit>>()
 
   /**
+   * Subscribers to **every** design on this host, told what the board looked like before the write
+   * as well as after it.
+   *
+   * The outbound webhook is the caller. It cannot use [subscribe], because that is keyed by a
+   * design id and the webhook has no list of the designs it should be watching — a design created a
+   * minute from now is one it has to hear about too. And it needs the pair rather than the result,
+   * because "somebody replied" and "somebody reacted" are the same board arriving with a higher
+   * sequence; only the difference between two boards says which.
+   *
+   * Announced from the same statement as [subscribers], deliberately: an outbound notification that
+   * could learn about a comment the browser socket and `ui_builder_await_comments` do not — or miss
+   * one they see — would be a second, quieter feed with its own bugs. There is one feed.
+   *
+   * The listener runs on the writer's thread and must not block, exactly as [subscribe]'s does.
+   */
+  private val hostSubscribers =
+    ConcurrentHashMap.newKeySet<(StoredCommentBoard?, StoredCommentBoard) -> Unit>()
+
+  /**
    * Ids are minted here rather than accepted from the caller.
    *
    * A client-chosen thread id is a way to overwrite somebody else's thread by guessing its name,
@@ -368,6 +387,19 @@ class ServeUiBuilderCommentStore(
     return Closeable { listeners.remove(listener) }
   }
 
+  /**
+   * Every accepted write on **every** design, as the pair `(before, after)`, until the handle is
+   * closed. See [hostSubscribers] for why this is not [subscribe] with a loop around it.
+   *
+   * `before` is null only for the very first write to a design that had no board at all, which is
+   * exactly the state in which every thread on `after` is new — so a subscriber diffing the two
+   * needs no special case and no seeding pass at startup.
+   */
+  fun subscribeToHost(listener: (StoredCommentBoard?, StoredCommentBoard) -> Unit): Closeable {
+    hostSubscribers.add(listener)
+    return Closeable { hostSubscribers.remove(listener) }
+  }
+
   private sealed interface CommentMutation {
     data class Applied(val board: StoredCommentBoard) : CommentMutation
 
@@ -395,6 +427,10 @@ class ServeUiBuilderCommentStore(
     designId: String,
     change: (StoredCommentBoard, Long) -> CommentMutation,
   ): CommentWriteResult {
+    // What the board was, for [subscribeToHost]. Read under the same lock as the write it precedes,
+    // so the pair a whole-host subscriber receives is a real before/after and not two boards from
+    // two overlapping writes.
+    var previous: StoredCommentBoard? = null
     val stored =
       synchronized(lockFor(designId)) {
         val file = fileFor(designId)
@@ -404,29 +440,46 @@ class ServeUiBuilderCommentStore(
             "this host already holds discussions for $maximumDesigns designs"
           )
         }
+        previous = current
         val board = current ?: StoredCommentBoard(designId = designId)
         // The sequence this write will land at, handed to the change rather than stamped after it:
         // a thread records the sequence it was last spoken at and an acknowledgement records the
         // sequence it was made at, and neither can be written by a caller that does not know it.
-        when (val outcome = change(board, board.sequence + 1)) {
-          is CommentMutation.Refused -> return CommentWriteResult.Refused(outcome.reason)
-          is CommentMutation.Unchanged -> return CommentWriteResult.Stored(board)
-          is CommentMutation.Applied -> {
-            val next =
-              outcome.board.copy(
-                designId = designId,
-                sequence = board.sequence + 1,
-                updatedAtEpochMillis = now(),
-              )
-            when (val written = write(file, next)) {
-              is CommentWriteResult.Refused -> return written
-              is CommentWriteResult.Stored -> written.board
+        val applied =
+          when (val outcome = change(board, board.sequence + 1)) {
+            is CommentMutation.Refused -> return CommentWriteResult.Refused(outcome.reason)
+            is CommentMutation.Unchanged -> return CommentWriteResult.Stored(board)
+            is CommentMutation.Applied -> {
+              val next =
+                outcome.board.copy(
+                  designId = designId,
+                  sequence = board.sequence + 1,
+                  updatedAtEpochMillis = now(),
+                )
+              when (val written = write(file, next)) {
+                is CommentWriteResult.Refused -> return written
+                is CommentWriteResult.Stored -> written.board
+              }
             }
           }
-        }
+        // Host subscribers are announced *inside* the lock, unlike the per-design ones below.
+        //
+        // They are told what changed, as a before and an after, so the order they are told in is
+        // part of the message: two actors writing the same board concurrently both release this
+        // lock before announcing, and the second write can then be announced first — a reply
+        // reaching a chat channel above the thread it answers. Holding the lock across the
+        // announcement makes the announcement order the write order, which is the only order that
+        // reads correctly.
+        //
+        // Affordable only because this listener is bounded by construction: it diffs two small
+        // in-memory boards and offers the result to a queue that never blocks
+        // ([ServeUiBuilderCommentWebhook]). A listener that did I/O here would serialize writes to
+        // the design behind it, so this seam stays deliberately narrow.
+        hostSubscribers.forEach { listener -> runCatching { listener(previous, applied) } }
+        applied
       }
-    // Announced outside the lock: a slow subscriber must not hold the next writer up, and neither
-    // caller does anything but hand the board on.
+    // Announced outside the lock: a slow subscriber must not hold the next writer up, and this
+    // caller does nothing but hand the board on.
     subscribers[designId]?.forEach { listener -> runCatching { listener(stored) } }
     return CommentWriteResult.Stored(stored)
   }

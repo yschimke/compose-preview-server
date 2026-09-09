@@ -771,6 +771,43 @@ public class ServeCommandOptions(
       ?.toMap() ?: emptyMap()
 
   /**
+   * Where comment activity is posted (`--ui-builder-comment-webhook`).
+   *
+   * Validated here rather than at the first delivery, the way every other URL-shaped option is: a
+   * hook that is refused on startup is a line an operator reads while they are still deploying,
+   * where one that fails on the first comment is a channel that is quietly never told anything.
+   *
+   * The refusal names the rule and **never echoes the value**. The URL is the credential (a Slack
+   * hook's secret is its path), and a startup error is exactly the string that ends up in a
+   * deployment log, a CI transcript and a screenshot.
+   */
+  override val uiBuilderCommentWebhook: String? =
+    args
+      .flagValue("--ui-builder-comment-webhook")
+      ?.trim()
+      ?.takeIf { it.isNotEmpty() }
+      ?.also { url ->
+        val rejection = CommentWebhookConfig(url).rejection()
+        require(rejection == null) { "--ui-builder-comment-webhook $rejection" }
+      }
+
+  /**
+   * Which dialect that hook speaks. Refused rather than defaulted when it is a word nobody wrote.
+   */
+  override val uiBuilderCommentWebhookFormat: String? =
+    args
+      .flagValue("--ui-builder-comment-webhook-format")
+      ?.trim()
+      ?.takeIf { it.isNotEmpty() }
+      ?.also {
+        require(CommentWebhookFormat.parse(it) != null) {
+          "--ui-builder-comment-webhook-format must be one of " +
+            CommentWebhookFormat.WIRE_NAMES.joinToString(", ") +
+            "; got `$it`"
+        }
+      }
+
+  /**
    * Which served catalog compiles each UI-builder catalog's designs for the native preview lane.
    *
    * Same `<key>=<value>` shape as `--ui-builder-components` and for the same reason: a host serving
@@ -1317,6 +1354,17 @@ public class ServeCommandOptions(
         --ui-builder-migrate-state
                           Explicitly migrate a validated v1 design store to v2 before serving.
                           Retains the exact v1 generation for rollback; never runs implicitly.
+        --ui-builder-comment-webhook <url>
+                          Post UI-builder comment activity to one URL: a new thread, a reply, a
+                          resolve and a reopen, each carrying the thread permalink. Reactions and
+                          acknowledgements are deliberately silent. Delivery is fire-and-forget, so
+                          a slow endpoint never delays a comment. https only, except
+                          http://127.0.0.1 and http://localhost; the URL is treated as a credential
+                          and is never logged.
+        --ui-builder-comment-webhook-format plain|slack|teams|google-chat
+                          The body shape --ui-builder-comment-webhook posts. Defaults to plain,
+                          this server's own event JSON, for a bespoke receiver or a relay. The
+                          other three are the incoming-webhook bodies those chat platforms accept.
         --open-browser    Open a browser on the served URL at startup. Used by the `browse` and
                           `ui` launchers; plain `serve` prints the link instead.
         --open-path <path>
