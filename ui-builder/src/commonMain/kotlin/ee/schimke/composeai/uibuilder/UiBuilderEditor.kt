@@ -6825,11 +6825,24 @@ private fun ExportDevicePicker(
   // live — these devices still reach the export, and that is worth choosing on any surface — but a
   // heading promising a picture the host's renderer never draws is the same disagreement in the
   // other direction.
+  // An id this host has no preset for is exported but never drawn: the strip skips it rather than
+  // inventing a frame for it (see `variantPanes`), and a preset carries the only geometry there is.
+  // So the heading must not count it among the shown — a design that arrived from MCP naming a
+  // device this deployment does not offer would otherwise tell its author every exported target had
+  // been looked at.
+  val undrawable = selected.count { id -> presets.none { it.id == id } }
   Text(
-    if (drawn) "Also shown and exported as" else "Also exported as",
+    if (drawn && undrawable == 0) "Also shown and exported as" else "Also exported as",
     style = MaterialTheme.typography.labelMedium,
     fontWeight = FontWeight.Bold,
   )
+  if (drawn && undrawable > 0) {
+    Text(
+      "$undrawable of these is not a device this host can draw, so it is exported without a pane.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+    )
+  }
   Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp)) {
     Button(
       onClick = { expanded = true },
