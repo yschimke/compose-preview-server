@@ -516,9 +516,31 @@ const frozenComponents = new Map(
 // straight into `differences`, also for the reason recorded above — a discrepancy the gate reports
 // but gives no way to record a decision about is a check that cannot be satisfied.
 //
-// `slug` is the one piece of the loader duplicated here. `SLUG_PINS` are the same cases
-// `PublishedUiBuilderCatalogTest` pins against the Kotlin, so the two are nailed to one table and a
-// drift in either fails rather than silently changing what this gate reports.
+// `slug` is the one piece of the loader duplicated here, and it is trusted ONLY on ASCII.
+//
+// Six rounds of review found five ways a JavaScript port of a Kotlin `Char` loop diverges — a case
+// conversion for a case property, a code point for a code unit, an ASCII digit class for a Unicode
+// category, that category at one of two call sites — and each was fixed. The sixth has no fix in
+// that style: Node and the JVM simply disagree about a character.
+//
+//   U+0295  ʕ   Java isLowerCase() = true    Node \p{Lowercase} = false
+//   U+02B0  ʰ   Java isLowerCase() = true    Node \p{Lowercase} = true
+//
+// Measured on this box, Java 17 against Node 22. There is no property regex that fixes that,
+// because it is not a wrong predicate — it is two different Unicode tables, and chasing them would
+// mean shipping a copy of the JVM's in bash.
+//
+// So the derivation is REFUSED where it cannot be trusted rather than guessed at. A record leaf
+// that is not pure ASCII is reported and blocks, and the reason says the gate cannot reproduce the
+// reader's id for it. Every id this gate does derive is one the two implementations provably agree
+// on; the alternative is an id that is silently wrong, which is the failure this whole comparison
+// exists to prevent. Component leaves come from Kotlin identifiers and `componentIds`, so in
+// practice this refuses nothing — and when it does fire, a human should look.
+//
+// `SLUG_PINS` stay, and the non-ASCII ones now document the divergences rather than guarantee the
+// behaviour: they are unreachable in the comparison, because a non-ASCII leaf never gets that far.
+// The four ASCII pins are the live contract, checked against the Kotlin in
+// `PublishedUiBuilderCatalogTest`.
 const SLUG_PINS = [
   ["RTLText", "rtl-text"],
   ["CheckboxButton", "checkbox-button"],
@@ -616,6 +638,7 @@ if (recordPath) {
   );
 
   const takenSet = new Set();
+  const underivable = [];
   let collisions = 0;
   let eligible = 0;
   for (const component of recordFile.components ?? []) {
@@ -628,8 +651,15 @@ if (recordPath) {
     let componentId = declared?.[0];
     if (componentId === undefined) {
       const first = (component.componentIds ?? [])[0];
-      const leaf = first ? first.split("/").pop() : "";
-      componentId = prefix + slug(leaf && leaf.trim() ? leaf : (component.symbol?.name ?? ""));
+      const candidate = first ? first.split("/").pop() : "";
+      const leaf = candidate && candidate.trim() ? candidate : (component.symbol?.name ?? "");
+      // See the note above `SLUG_PINS`: outside ASCII this port and the reader are not provably the
+      // same function, so the id is refused rather than derived.
+      if (/[^\x20-\x7E]/.test(leaf)) {
+        underivable.push(`${component.canonicalId} (leaf ${JSON.stringify(leaf)})`);
+        continue;
+      }
+      componentId = prefix + slug(leaf);
     }
     if (takenSet.has(componentId)) collisions += 1;
     else takenSet.add(componentId);
@@ -665,7 +695,19 @@ if (recordPath) {
   // `Unusable` — so it cannot be waived here either. Without this the missing frozen ids each go
   // down the ordinary retirement path, and a differences file accepting them all made an EMPTY
   // catalog pass readiness.
-  if (takenSet.size === 0) {
+  if (underivable.length > 0) {
+    unservable += 1;
+    console.log("");
+    console.log(
+      `  x components: ${underivable.length} record component(s) have a non-ASCII name, and this ` +
+        `gate cannot reproduce the reader's id for them — Node and the JVM disagree about some ` +
+        `characters, so a derived id here would be a guess. Declare these in ` +
+        `\`statusSemantics.components\` and the gate reads the id instead of deriving it.`,
+    );
+    for (const entry of underivable.slice(0, 10)) console.log(`      ${entry}`);
+    if (underivable.length > 10) console.log(`      … and ${underivable.length - 10} more`);
+  }
+  if (takenSet.size === 0 && underivable.length === 0) {
     unservable += 1;
     console.log("");
     console.log(

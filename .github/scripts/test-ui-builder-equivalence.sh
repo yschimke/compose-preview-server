@@ -1039,6 +1039,47 @@ check "an empty composition cannot be waived through" 1 $?
 grep -q "no components at all" "${work}/out" ||
   { echo "FAIL empty composition not reported"; failures=$((failures + 1)); }
 
+# A non-ASCII leaf is REFUSED, not derived. Node and the JVM disagree about some characters
+# (U+0295 is lowercase to Java 17 and not to Node 22), so an id derived here would be a guess —
+# and a guessed id produces exactly the false missing/surplus pair this comparison exists to
+# detect. Reported by Codex on #655 as the sixth Unicode divergence, and the first with no fix in
+# the same style.
+cat >"${work}/rec-nonascii.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.Button", "componentIds": ["Controls/Button"],
+    "symbol": { "name": "Button", "callable": "a.Button", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } },
+  { "canonicalId": ":w/A.Odd", "componentIds": ["Controls/\u0295Card"],
+    "symbol": { "name": "Odd", "callable": "a.Odd", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-nonascii.json" \
+  --strict >"${work}/out" 2>&1
+check "a non-ASCII leaf is refused rather than derived" 1 $?
+grep -q "cannot reproduce the reader's id" "${work}/out" ||
+  { echo "FAIL undecidable derivation not reported"; failures=$((failures + 1)); }
+grep -q "statusSemantics.components" "${work}/out" ||
+  { echo "FAIL the remedy does not say how to resolve it"; failures=$((failures + 1)); }
+
+# Declaring the id makes it decidable again: the gate READS the id instead of deriving one, so
+# nothing about the character matters. The escape hatch has to actually work or the refusal is a
+# dead end rather than a redirection.
+cat >"${work}/rec-declared.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "components": { "wear-m3/card": { "record": ":w/A.Odd" } },
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+"${gate}" --policy "${work}/rec-declared.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-nonascii.json" \
+  --strict >"${work}/out" 2>&1
+check "a declared id needs no derivation and passes" 0 $?
+grep -q "= components: the same 2 id(s) on both sides" "${work}/out" ||
+  { echo "FAIL declared non-ASCII component not compared"; failures=$((failures + 1)); }
+
 # A record path that does not exist is a usage error, not a pass. The same argument as the missing
 # golden: a caller asserting readiness against a file nobody could read has asserted nothing.
 "${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
