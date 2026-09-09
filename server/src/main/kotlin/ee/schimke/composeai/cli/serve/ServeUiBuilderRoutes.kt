@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
@@ -328,7 +329,37 @@ internal fun Route.installUiBuilderRoutes(
         return@post
       }
       val document = snapshot.snapshot.state.document
-      val result = withContext(Dispatchers.IO) { nativePreview.render(document) }
+      // Which host container to frame a widget in, from the body. Absent means the squircle, which
+      // is what every caller sent before this existed and what the editor's canvas opens on.
+      //
+      // Two different failures, deliberately answered differently. A body that does not *decode* —
+      // malformed JSON, or `hostShape` sent as something other than a string — is a client or
+      // protocol bug, and answering it with a valid-looking render in the default frame hides the
+      // bug behind a picture that looks right; that is a 400. A body that decodes and names a shape
+      // this host does not know is forward compatibility, not a bug — a newer editor naming a
+      // container this build predates — and falls back to the default, because the shape is a
+      // *view* and refusing over one leaves a pane empty where the honest answer is a frame.
+      val requestBytes =
+        withContext(Dispatchers.IO) {
+          call.receiveStream().use { input -> input.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
+        }
+      if (requestBytes.size > MAX_UI_BUILDER_REQUEST_BYTES) {
+        call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+        return@post
+      }
+      val decoded =
+        try {
+          val body = requestBytes.toString(StandardCharsets.UTF_8).ifBlank { "{}" }
+          UI_BUILDER_JSON.decodeFromString(NativePreviewRequestV1.serializer(), body)
+        } catch (_: SerializationException) {
+          call.respondText(
+            "native render request body is not valid JSON for this route",
+            status = HttpStatusCode.BadRequest,
+          )
+          return@post
+        }
+      val hostShape = WearWidgetHostShape.fromId(decoded.hostShape)
+      val result = withContext(Dispatchers.IO) { nativePreview.render(document, hostShape) }
       when (result) {
         is UiBuilderNativePreviewOutcome.Refused ->
           call.respondText(
@@ -751,6 +782,17 @@ internal data class InlineCaptureRefusalV1(
   val code: String,
   val reasons: List<String>,
 )
+
+/**
+ * What a native-render request may say, which is currently one thing.
+ *
+ * Its own type rather than a query parameter, because the shape is a property of what to draw
+ * rather than of which design to read — the revision beside it names the design's version, and
+ * mixing the two on one line reads like they are the same kind of choice. Every field optional, so
+ * the `{}` the editor posted before this existed still parses.
+ */
+@kotlinx.serialization.Serializable
+internal data class NativePreviewRequestV1(val hostShape: String? = null)
 
 /** Why there was no native render — the generator's own reasons, not a second vocabulary. */
 @kotlinx.serialization.Serializable

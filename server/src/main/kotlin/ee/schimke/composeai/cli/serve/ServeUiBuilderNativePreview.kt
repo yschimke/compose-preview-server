@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 
 /**
@@ -94,7 +95,10 @@ internal class ServeUiBuilderNativePreview(
   private val packs: Set<String> = emptySet(),
 ) : UiBuilderNativePreviewLane {
 
-  override fun render(document: DesignDocumentV1): UiBuilderNativePreviewOutcome {
+  override fun render(
+    document: DesignDocumentV1,
+    widgetHostShape: WearWidgetHostShape,
+  ): UiBuilderNativePreviewOutcome {
     // Asked before anything is generated: a design drawing on two packs has no bundle to compile
     // against whatever its Kotlin says, and this is a sentence about the design rather than about
     // a record, so it should not be pre-empted by a missing record for the second pack.
@@ -110,7 +114,10 @@ internal class ServeUiBuilderNativePreview(
       )
     }
     val generated =
-      when (val outcome = executor.generate(document, tagNodes = true)) {
+      when (
+        val outcome =
+          executor.generate(document, tagNodes = true, widgetHostShape = widgetHostShape)
+      ) {
         is ScreenGeneratorComposeExportExecutor.Generated.Emitted -> outcome
         is ScreenGeneratorComposeExportExecutor.Generated.Refused ->
           return UiBuilderNativePreviewOutcome.Refused(outcome.code, outcome.reasons)
@@ -261,8 +268,27 @@ private const val MAX_REPORTED_DIAGNOSTICS = 5
  * three implementation types to make one wiring possible.
  */
 fun interface UiBuilderNativePreviewLane {
-  fun render(document: DesignDocumentV1): UiBuilderNativePreviewOutcome
+  /**
+   * @param widgetHostShape which host container to frame a Wear widget design in. Ignored by every
+   *   other design.
+   *
+   * No default on the parameter, because a `fun interface`'s abstract method may not carry one —
+   * the overload below is where a caller with no opinion goes.
+   */
+  fun render(
+    document: DesignDocumentV1,
+    widgetHostShape: WearWidgetHostShape,
+  ): UiBuilderNativePreviewOutcome
 }
+
+/**
+ * Render in the frame the editor opens on, for a caller that has no opinion about the shape.
+ *
+ * The MCP tool and the local runner are both such callers: they ask for "the picture of this
+ * design", and the squircle is what that meant before a shape could be chosen.
+ */
+fun UiBuilderNativePreviewLane.render(document: DesignDocumentV1): UiBuilderNativePreviewOutcome =
+  render(document, WearWidgetHostShape.Default)
 
 sealed interface UiBuilderNativePreviewOutcome {
   /**
