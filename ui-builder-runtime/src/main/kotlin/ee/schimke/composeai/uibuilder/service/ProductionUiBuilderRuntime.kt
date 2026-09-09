@@ -183,7 +183,7 @@ public class CurrentM3UiBuilderCatalogExecutor(
     if (missing.isEmpty()) return catalog
     val registryKey = CurrentM3UiBuilderCatalogExecutor.ASSET_REGISTRY_KEY
     val donorRegistry = donor.statusSemantics[registryKey]
-    val semantics =
+    var semantics =
       if (
         missing.any { it.componentId.startsWith("asset/") } &&
           catalog.statusSemantics[registryKey] == null &&
@@ -191,6 +191,23 @@ public class CurrentM3UiBuilderCatalogExecutor(
       )
         JsonObject(catalog.statusSemantics + (registryKey to donorRegistry))
       else catalog.statusSemantics
+    // A component's shelf comes with it. The insert panel groups by `componentMenu`, and an entry
+    // with no group falls back to a generic role heading — so injecting `layout/box` without the
+    // donor's "Layout" would put the whole builder vocabulary under "Container"/"Leaf" instead of
+    // the shelves it was written for. `withMenuEntry` adds the group to `groupOrder` too, which is
+    // what stops a carried entry naming a shelf the panel does not render.
+    val donorGroups = donor.statusSemantics.menuGroups()
+    for (component in missing) {
+      val group = donorGroups[component.componentId] ?: continue
+      if (semantics.menuGroups()[component.componentId] != null) continue
+      // `withMenuEntry` returns the MENU, not the semantics carrying it — every other caller
+      // spells that `("componentMenu" to …)`. Assigning its result to `semantics` replaced the
+      // whole block with just the menu and took `assetRegistry` with it.
+      semantics =
+        JsonObject(
+          semantics + ("componentMenu" to semantics.withMenuEntry(component.componentId, group))
+        )
+    }
     return catalog.copy(components = catalog.components + missing, statusSemantics = semantics)
   }
 
@@ -789,6 +806,17 @@ private fun CatalogCapabilityV1.withPacks(
  * group name the order does not carry is appended rather than dropped. A wrong menu must never be
  * the reason a component cannot be inserted.
  */
+/** Each component's shelf, as `componentMenu.components` states it. */
+private fun JsonObject.menuGroups(): Map<String, String> {
+  val menu = (this["componentMenu"] as? JsonObject) ?: return emptyMap()
+  val entries = (menu["components"] as? JsonObject) ?: return emptyMap()
+  return entries
+    .mapNotNull { (id, entry) ->
+      ((entry as? JsonObject)?.get("group") as? JsonPrimitive)?.contentOrNull?.let { id to it }
+    }
+    .toMap()
+}
+
 private fun JsonObject.withMenuEntry(componentId: String, group: String): JsonObject {
   val menu = (this["componentMenu"] as? JsonObject) ?: JsonObject(emptyMap())
   val order = (menu["groupOrder"] as? JsonArray) ?: JsonArray(emptyList())

@@ -130,34 +130,58 @@ internal object PublishedUiBuilderCatalog {
     val id = file.catalog.id.trim()
     if (id.isEmpty()) return Result.Unusable("ui-builder.json declares no catalog id")
 
-    // A `jsonType` the design validator can read, or the file is refused.
+    // A `jsonType` the design validator can read, and a slot cardinality that can be satisfied,
+    // or the file is refused.
     //
     // `PropertyCapabilityV1.jsonType` is a free-form `JsonElement`, and the runtime's
     // `JsonElement.accepts` reads it as `jsonPrimitive.content` — or, for an array, each entry's.
     // So `"jsonType": {}`, or `["string", 7]`, decodes here and THROWS there, while a design is
     // being written. That is the worst shape a bad catalog can take: not a shelf that refuses to
-    // load, but an authoring path that crashes on save. The reader's own rule applies — where the
-    // runtime cannot read it, this refuses rather than composes.
-    val unreadableTypes =
-      semantics.components.entries
-        .flatMap { (componentId, policy) ->
-          policy.propertyCapabilities.orEmpty().mapNotNull { property ->
-            val readable =
-              when (val type = property.jsonType) {
-                is JsonArray -> type.all { it is JsonPrimitive && it.isString }
-                is JsonPrimitive -> type.isString
-                else -> false
-              }
-            if (readable) null else "$componentId.${property.name}"
+    // load, but an authoring path that crashes on save.
+    //
+    // BUILTINS are checked alongside components, and were not on the first cut of this — the same
+    // "some of the places" this file keeps being corrected for. A builtin's properties reach
+    // `builtinCapability` by the identical route and are read by the identical validator.
+    //
+    // Cardinality is here rather than in the runtime's `validateCatalog` because that function
+    // requires `catalogSystemId == "m3-catalog"` and so can only ever see the packaged catalog. A
+    // published one reaches the shelf unvalidated, and `max < min` makes every child count invalid
+    // — a component nobody can author, on a shelf that loaded cleanly.
+    val unreadable = mutableListOf<String>()
+    fun checkProperties(owner: String, properties: List<UiBuilderPropertyPolicy>) {
+      for (property in properties) {
+        val readable =
+          when (val type = property.jsonType) {
+            is JsonArray -> type.all { it is JsonPrimitive && it.isString }
+            is JsonPrimitive -> type.isString
+            else -> false
           }
-        }
-        .sorted()
-    if (unreadableTypes.isNotEmpty()) {
+        if (!readable) unreadable += "$owner.${property.name} (jsonType)"
+      }
+    }
+    fun checkSlots(owner: String, slots: List<UiBuilderSlotPolicy>) {
+      for (slot in slots) {
+        val min = slot.cardinality.min
+        val max = slot.cardinality.max
+        if (min < 0) unreadable += "$owner.${slot.name} (cardinality min $min is negative)"
+        else if (max != null && max < min)
+          unreadable += "$owner.${slot.name} (cardinality max $max is below min $min)"
+      }
+    }
+    semantics.components.forEach { (componentId, policy) ->
+      checkProperties(componentId, policy.propertyCapabilities.orEmpty())
+      checkSlots(componentId, policy.slotCapabilities.orEmpty())
+    }
+    semantics.builtins.forEach { (builtinId, builtin) ->
+      checkProperties(builtinId, builtin.propertyCapabilities.orEmpty())
+    }
+    if (unreadable.isNotEmpty()) {
       return Result.Unusable(
-        "${unreadableTypes.size} propert(y|ies) declare a jsonType that is neither a type name nor " +
-          "a list of them, which the design validator reads with `jsonPrimitive` and throws on: " +
-          unreadableTypes.take(8).joinToString(", ") +
-          (if (unreadableTypes.size > 8) ", …" else "")
+        "${unreadable.size} declaration(s) the builder cannot serve — a jsonType the design " +
+          "validator reads with `jsonPrimitive` and throws on, or a slot cardinality no child " +
+          "count satisfies: " +
+          unreadable.sorted().take(8).joinToString(", ") +
+          (if (unreadable.size > 8) ", …" else "")
       )
     }
 

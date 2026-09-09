@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -242,6 +243,84 @@ class PublishedM3CatalogEquivalenceTest {
     assertTrue(
       (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("jsonType"),
       "the refusal does not name the field: ${result.reason}",
+    )
+  }
+
+  /**
+   * An injected component arrives on the shelf it was written for.
+   *
+   * The insert panel groups by `componentMenu`, and an entry with no group falls back to a generic
+   * role heading — so injecting the builder vocabulary without the donor's groups would file the
+   * whole of it under "Container" / "Leaf" instead of Layout, Content, Styles and Embedded.
+   */
+  @Test
+  fun `the donor's menu entries travel with the injected components`() {
+    val served =
+      CurrentM3UiBuilderCatalogExecutor(
+          catalogSystemIds = linkedSetOf("m3-catalog"),
+          published = mapOf("m3-catalog" to composed),
+        )
+        .listCatalogs()
+        .single()
+    val menu = served.statusSemantics["componentMenu"] as? JsonObject
+    val entries = menu?.get("components") as? JsonObject ?: JsonObject(emptyMap())
+    val order =
+      (menu?.get("groupOrder") as? JsonArray).orEmpty().mapNotNull {
+        (it as? JsonPrimitive)?.content
+      }
+    val frozenGroups =
+      (frozen.statusSemantics["componentMenu"] as JsonObject)["components"] as JsonObject
+    for (builderOwned in
+      frozen.components.map { it.componentId }.filterNot { it.startsWith("m3/") }) {
+      val want =
+        ((frozenGroups[builderOwned] as? JsonObject)?.get("group") as? JsonPrimitive)?.content
+          ?: continue
+      val got = ((entries[builderOwned] as? JsonObject)?.get("group") as? JsonPrimitive)?.content
+      assertEquals(want, got, "$builderOwned reached the shelf with no group, or the wrong one")
+      assertTrue(want in order, "group $want is not in groupOrder, so the panel cannot render it")
+    }
+  }
+
+  @Test
+  fun `a builtin's malformed jsonType is refused too, not only a component's`() {
+    val record = json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-record-v1.json"))
+    // A builtin's properties reach `builtinCapability` by the same route and are read by the same
+    // validator; checking only `components` was the container half of this fix.
+    val withBuiltin =
+      fixture("m3-catalog-published-v1.json")
+        .replaceFirst(
+          "\"components\": {",
+          "\"builtins\": { \"layout/box\": { \"role\": \"Container\", " +
+            "\"propertyCapabilities\": [ { \"name\": \"pad\", \"jsonType\": {} } ] } }, " +
+            "\"components\": {",
+        )
+    val result = PublishedUiBuilderCatalog.compose(withBuiltin, record, exports)
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Unusable,
+      "a builtin with a jsonType of {} composed instead of being refused",
+    )
+    assertTrue(
+      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("layout/box.pad"),
+      "the refusal does not name the builtin property: ${result.reason}",
+    )
+  }
+
+  @Test
+  fun `a slot cardinality no child count satisfies is refused`() {
+    val record = json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-record-v1.json"))
+    val published = fixture("m3-catalog-published-v1.json")
+    // `validateCatalog` requires `catalogSystemId == "m3-catalog"`, so it only ever sees the
+    // packaged catalog; a published one reaches the shelf unvalidated.
+    val impossible = published.replaceFirst("\"cardinality\": {", "\"cardinality\": { \"max\": 0,")
+    assertTrue(impossible != published, "precondition: the fixture states a cardinality")
+    val result = PublishedUiBuilderCatalog.compose(impossible, record, exports)
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Unusable,
+      "max below min composed into a component nobody can author",
+    )
+    assertTrue(
+      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("cardinality"),
+      "the refusal does not name the cardinality: ${result.reason}",
     )
   }
 
