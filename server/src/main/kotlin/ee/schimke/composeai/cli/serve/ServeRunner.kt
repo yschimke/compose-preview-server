@@ -284,7 +284,7 @@ public class ServeRunner(
     get() = usableUiBuilderDir() != null && uiBuilderStateDirFlag != "none"
 
   /**
-   * Whether the builder is the ONLY thing keeping this server alive.
+   * Whether nothing but the builder could keep this server alive — the CONFIGURED half.
    *
    * [uiBuilderLaneConfigured] answers a question about configuration, and the empty-server check
    * runs long before [openUiBuilderService] has tried anything — so a builder that is configured
@@ -293,8 +293,14 @@ public class ServeRunner(
    * serving static assets whose design API was absent, instead of failing the command. This is what
    * [bringUpServer] re-asks once the answer is known, so the failure is fatal exactly when there is
    * nothing else to be.
+   *
+   * The **sessions** are the other half, and they are not a flag: a `--bundle`, a `--bundles` or a
+   * discovered project registers one, and a server holding any of them has previews to serve
+   * whatever the builder did. [bringUpServer] adds that condition from the registry, because it is
+   * the only place the answer exists — asking it here would make a builder failure kill a host that
+   * is serving perfectly well, which is the opposite of what this check is for.
    */
-  private val uiBuilderIsOnlySurface: Boolean
+  private val uiBuilderIsOnlyConfiguredSurface: Boolean
     get() =
       catalogRefs.isEmpty() &&
         !acceptBundles &&
@@ -2994,7 +3000,13 @@ public class ServeRunner(
     // Fail-soft everywhere else — a host with previews to serve keeps serving them and simply has
     // no builder — but fatal when the builder was the whole server, which is `ui --no-project`.
     // Serving its assets over an absent design API is a builder that opens and cannot save.
-    if (uiBuilderLane == null && uiBuilderLaneConfigured && uiBuilderIsOnlySurface) {
+    if (
+      uiBuilderLane == null &&
+        uiBuilderLaneConfigured &&
+        uiBuilderIsOnlyConfiguredSurface &&
+        defaultSessionId.isEmpty() &&
+        registry.anySessionId() == null
+    ) {
       System.err.println(
         "serve: the UI builder is the only surface on this server and its service could not be " +
           "opened, so there is nothing left to serve."
@@ -4801,7 +4813,13 @@ public class ServeRunner(
     // The page this server is actually about, when the builder is a lane. `--no-open` prints no
     // URL of its own and the root landing page has no session behind a projectless server, so
     // without this line a headless caller was handed a 404 as the way in.
-    if (uiBuilderLaneConfigured && openBrowserPath.startsWith("/ui-builder/")) {
+    // `/ui-builder` exactly, as well as anything under it: that spelling is a registered route
+    // which redirects to `/ui-builder/`, so a caller who passes it explicitly must not be sent back
+    // to the root landing page — the very case this line exists to fix.
+    if (
+      uiBuilderLaneConfigured &&
+        (openBrowserPath == "/ui-builder" || openBrowserPath.startsWith("/ui-builder/"))
+    ) {
       System.err.println("  Builder: ${localUrlFor(localHost, port, token, openBrowserPath)}")
     }
     if (acceptDocs) {
