@@ -66,6 +66,9 @@ import org.junit.jupiter.api.io.TempDir
 class ServeUiBuilderCommentWebhookIntegrationTest {
   @TempDir lateinit var stateDirectory: Path
 
+  /** The links store [start] built, so a test can set a design's `links.thread` before writing. */
+  private lateinit var linksStore: ServeUiBuilderLinksStore
+
   private val json = Json {
     encodeDefaults = true
     explicitNulls = false
@@ -228,6 +231,53 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
 
   /** A real HTTP endpoint that records what it was sent, and can be told to never answer. */
   @Test
+  fun `the design's own chat thread rides along, read at the moment the comment is written`() {
+    // The per-design value from `links` is carried, never posted to: the destination stays the one
+    // URL the operator configured. See `ServeUiBuilderCommentWebhook`'s KDoc for why.
+    val receiver = receiver()
+    val server = start(receiver.url)
+    createDesign(server)
+
+    val stored =
+      linksStore.replace(DESIGN_ID, StoredLinks(thread = "https://chat.example/c/design/p1"))
+    assertTrue(stored is LinksWriteResult.Stored, stored.toString())
+
+    comments(
+      server,
+      "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
+      """{"body":"The gap above the card is wrong."}""",
+    )
+
+    val design =
+      Json.parseToJsonElement(receiver.awaitOne()).jsonObject.getValue("design").jsonObject
+
+    assertEquals(
+      "https://chat.example/c/design/p1",
+      design.getValue("thread").jsonPrimitive.content,
+    )
+    // And the destination is unchanged: it arrived at the configured receiver, not at that link.
+    assertEquals(DESIGN_ID, design.getValue("id").jsonPrimitive.content)
+  }
+
+  @Test
+  fun `a design with no links carries no thread`() {
+    val receiver = receiver()
+    val server = start(receiver.url)
+    createDesign(server)
+
+    comments(
+      server,
+      "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
+      """{"body":"No links on this one."}""",
+    )
+
+    val design =
+      Json.parseToJsonElement(receiver.awaitOne()).jsonObject.getValue("design").jsonObject
+
+    assertTrue("thread" !in design, design.toString())
+  }
+
+  @Test
   fun `a redirect is a failed delivery, because nothing was delivered`() {
     // Redirects are not followed: a webhook URL is a credential and the destination of a 302 is
     // chosen by whatever answered rather than by the operator. So a 3xx means the body went
@@ -307,6 +357,7 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
 
   private fun start(webhookUrl: String, format: String = "plain"): ServeHttpServer {
     val comments = ServeUiBuilderCommentStore(stateDirectory.resolve("comments"))
+    val links = ServeUiBuilderLinksStore(stateDirectory.resolve("links")).also { linksStore = it }
     val registry = ServeSessionRegistry(open = { null })
     val service =
       PersistentUiBuilderService(
@@ -348,10 +399,13 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
       ServeUiBuilderCommentWebhook(
         config = CommentWebhookConfig(webhookUrl, CommentWebhookFormat.parse(format)!!),
         designs = { designId ->
-          service
-            .adminListDesigns()
-            .firstOrNull { it.designId == designId }
-            ?.let { CommentWebhookDesign(it.title, it.catalogPin.systemId) }
+          service.adminDesignSummary(designId)?.let {
+            CommentWebhookDesign(
+              it.title,
+              it.catalogPin.systemId,
+              links.read(designId)?.thread,
+            )
+          }
         },
         baseUrl = { ServeUrls.origin("127.0.0.1", server.port) },
       )

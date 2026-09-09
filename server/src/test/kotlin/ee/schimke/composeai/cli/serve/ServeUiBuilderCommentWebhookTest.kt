@@ -502,6 +502,63 @@ class ServeUiBuilderCommentWebhookTest {
   }
 
   @Test
+  fun `an event carries the design's own chat thread, and omits it when there is none`() {
+    // The design document asks for a per-design override in `links.thread`. This carries that
+    // value rather than posting to it: `links` is written by any actor with WRITE on the design,
+    // and a permalink is not an endpoint. See the class KDoc.
+    val withThread =
+      CommentWebhookFormat.PLAIN.body(event(chatThread = "https://chat.example/c/123/p456"))
+    val design = Json.parseToJsonElement(withThread).jsonObject.getValue("design").jsonObject
+
+    assertEquals("https://chat.example/c/123/p456", design.getValue("thread").jsonPrimitive.content)
+
+    // Absent rather than null where the design has no links: `explicitNulls = false`.
+    val without = Json.parseToJsonElement(CommentWebhookFormat.PLAIN.body(event())).jsonObject
+    assertTrue(
+      "thread" !in without.getValue("design").jsonObject,
+      without.getValue("design").toString(),
+    )
+  }
+
+  @Test
+  fun `the chat formats offer the design's discussion as a second link`() {
+    val thread = "https://chat.example/c/123/p456"
+
+    val slack =
+      Json.parseToJsonElement(CommentWebhookFormat.SLACK.body(event(chatThread = thread)))
+        .jsonObject
+        .getValue("text")
+        .jsonPrimitive
+        .content
+    assertTrue(slack.contains("<$thread|Discussion for this design>"), slack)
+
+    // A card offers a second destination as a second button, not as a line of text.
+    val actions =
+      Json.parseToJsonElement(CommentWebhookFormat.TEAMS.body(event(chatThread = thread)))
+        .jsonObject
+        .getValue("attachments")
+        .jsonArray
+        .single()
+        .jsonObject
+        .getValue("content")
+        .jsonObject
+        .getValue("actions")
+        .jsonArray
+        .map { it.jsonObject }
+    assertEquals(2, actions.size, actions.toString())
+    assertEquals(thread, actions[1].getValue("url").jsonPrimitive.content)
+
+    // And nothing extra is added when the design has no thread.
+    val plainSlack =
+      Json.parseToJsonElement(CommentWebhookFormat.SLACK.body(event()))
+        .jsonObject
+        .getValue("text")
+        .jsonPrimitive
+        .content
+    assertTrue(!plainSlack.contains("Discussion for this design"), plainSlack)
+  }
+
+  @Test
   fun `a fingerprint identifies a hook without carrying it`() {
     val url = "https://hooks.slack.com/services/T000/B000/SUPERSECRET"
     val fingerprint = ServeUiBuilderCommentWebhook.fingerprintOf(url)
@@ -520,10 +577,17 @@ class ServeUiBuilderCommentWebhookTest {
     kind: String? = StoredComment.AUTHOR_KIND_HUMAN,
     excerpt: String = "This row should be a card.",
     authorId: String? = null,
+    chatThread: String? = null,
   ) =
     CommentWebhookEventV1(
       event = "thread",
-      design = CommentWebhookDesignV1(id = "checkout", title = "Checkout", catalog = "m3-catalog"),
+      design =
+        CommentWebhookDesignV1(
+          id = "checkout",
+          title = "Checkout",
+          catalog = "m3-catalog",
+          thread = chatThread,
+        ),
       thread = CommentWebhookThreadV1(id = "t-1", anchor = "node play-button", comments = 1),
       comment =
         CommentWebhookCommentV1(
