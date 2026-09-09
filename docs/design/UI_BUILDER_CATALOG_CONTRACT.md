@@ -449,11 +449,7 @@ Each phase is releasable on its own and leaves every catalog working.
    constructing them** — this is the one change from the original phase 0, and it is what makes the
    phase free: no loader, no fallback, no rollback. The goldens exist to be read by people and by
    the equivalence gate.
-2. **Templates become documents.** `wearScreenUiBuilderDocument`, the widget samples and the blank
-   seeds are serialised to `ui-builder/designs/*.json` fixtures with a `template` marker and the
-   seed device in `environment`, and the Kotlin builders assert against them. `UiBuilderNewDesignSeed`
-   still reads the Kotlin; the documents are the thing wear-m3-catalog copies.
-3. **The equivalence gate**, `.github/scripts/ui-builder-equivalence.sh`: fetch a catalog's published
+2. **The equivalence gate**, `.github/scripts/ui-builder-equivalence.sh`: fetch a catalog's published
    `ui-builder.json` from its delivery branch, normalise both sides (key order, formatting, and a
    checked-in list of reviewed differences), diff it against the frozen golden, and report. It lives
    here because the golden lives here, and because "is wear-m3-catalog ready?" is a question this
@@ -483,6 +479,22 @@ Each phase is releasable on its own and leaves every catalog working.
 
 Everything else that was phase 0 — the platform word, the emitter routing, the canvas mapping, the
 loader — is now phase 4.
+
+**Freezing the seed documents is NOT phase 0**, and the earlier draft of this list was wrong to put
+it here. `UiBuilderNewDesignSeed` builds the Wear screen, the widget samples and the blank seeds in
+Kotlin, and serialising them to `ui-builder/designs/*.json` with a `template` marker is the same
+kind of freeze as step 1 — but it freezes a different artifact for a different consumer, and phase 0
+delivers neither the fixtures nor the assertions. Saying otherwise made phase 0 look complete while
+one of its three steps had not been done.
+
+It belongs immediately before a catalog authors its first `templates` entry, which is a real
+dependency rather than a preference: a catalog repository is told to *copy* these documents, and
+without a frozen reference there is nothing for phase 2 or 3 to be checked against — the same
+argument that put the catalog goldens in phase 0. Neither wear-m3-catalog nor m3-catalog declares a
+template today (both policies carry a `$comment_templates` saying the seeds are still Kotlin here),
+so nothing is blocked by the ordering; what was blocked was the claim.
+
+Sequenced as **phase 3a**, below.
 
 ### Phase 1 — compose-ai-tools: a catalog *can* publish a builder catalog
 
@@ -539,6 +551,23 @@ Nothing here reads the result yet. The output of the phase is a green equivalenc
     (fifty-nine rendered components against twenty-five transcribed ones), so here the reviewed
     difference list is the point and a byte-equal result would be the surprising outcome. The record
     plan's phase 2 asks for exactly this diff; the gate is where it gets written down.
+
+### Phase 3a — this repository: freeze the seed documents
+
+Only needed before a catalog authors its first `templates` entry, and no catalog does yet. Listed as
+its own step because it was previously miscounted as part of phase 0, which made that phase look
+finished while this was not done.
+
+15. **Templates become documents.** `UiBuilderNewDesignSeed`'s Wear screen, the widget samples and
+    the blank seeds are serialised to `ui-builder/designs/*.json` fixtures — one per
+    `templateIds(catalog)` entry, per catalog — with a `template` marker and the seed device in
+    `environment`, and a golden test asserts the Kotlin builders still produce them. The same
+    `-PuiBuilderGoldens=write` mechanism and the same input declaration as the catalog goldens, for
+    the same reason: a golden the build can skip reading is not a golden.
+16. `UiBuilderNewDesignSeed` keeps reading the Kotlin. The documents are what a catalog repository
+    copies onto its delivery branch and names in `templates`, and what the gate can then check a
+    catalog's copies against — without a frozen reference, "did wear-m3-catalog reproduce the seed?"
+    has no answer, which is the argument that put the catalog goldens in phase 0.
 
 ### Phase 4 — this repository: read the published file
 

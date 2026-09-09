@@ -168,7 +168,28 @@ const refuseFutureMajor = (label, doc) => {
   const family = schema.slice(0, schema.lastIndexOf("/"));
   const major = Number.parseInt(String(schema.slice(schema.lastIndexOf("/") + 1)).replace(/^v/, ""), 10);
   const known = SCHEMA_FAMILIES[family];
-  if (known === undefined || !Number.isFinite(major) || major <= known) return false;
+  // An UNRECOGNISED family is refused for the same reason a future major is, and the reason is the
+  // one this gate keeps coming back to: `compose-ui-builder-polciy/v999` still spells `platform` and
+  // `componentMenu` the way this gate reads them, so every comparison passes and `--strict` reports
+  // readiness for a document it has never heard of. "Not a family I know" and "a version I know is
+  // too new" are the same answer — I do not know what this means — and only one of them was being
+  // given.
+  if (known === undefined) {
+    console.log(`  x schema: the ${label} is ${JSON.stringify(schema)}, which is not a family this`);
+    console.log(`      gate knows (${Object.keys(SCHEMA_FAMILIES).join(", ")}). The fields it`);
+    console.log(`      happens to recognise say nothing about what the document means.`);
+    console.log("");
+    console.log(`ui-builder-equivalence: refused — unrecognised schema ${schema}.`);
+    return true;
+  }
+  if (!Number.isFinite(major)) {
+    console.log(`  x schema: the ${label} is ${JSON.stringify(schema)}, whose version is not a`);
+    console.log(`      number, so this gate cannot tell whether it understands it.`);
+    console.log("");
+    console.log(`ui-builder-equivalence: refused — unreadable schema ${schema}.`);
+    return true;
+  }
+  if (major <= known) return false;
   console.log(`  x schema: the ${label} is ${JSON.stringify(schema)}, a future major of '${family}'.`);
   console.log(`      This gate understands v${known}. Comparing the fields it happens to`);
   console.log(`      recognise would report readiness for semantics it does not know.`);
@@ -262,6 +283,7 @@ const waiverIsObsolete = (field, why) => {
 // DESCRIBES STILL EXIST? It does only when both sides state the field and the two values differ.
 // Asked here, a field shape nobody has thought of yet cannot acquire a fourth exemption from the
 // rule, because the branches no longer carry it.
+const comparedFields = new Set(fields.map(([field]) => field));
 for (const [field, stated, frozen] of fields) {
   const disagrees =
     stated !== undefined && frozen !== undefined && canonical(stated) !== canonical(frozen);
@@ -276,6 +298,17 @@ for (const [field, stated, frozen] of fields) {
           ? "the frozen catalog does not state this at all"
           : "this agrees with the frozen catalog",
   );
+}
+// And a waiver naming a field NOTHING compares. Iterating `fields` judged every waiver that could
+// be reached from a compared field and silently skipped the rest — so a mistyped `colorTokens.rolez`
+// sat in the differences file being counted as nothing at all, which is the same "an unchecked
+// exemption is worse than none" this whole rule exists for. "Every waiver is judged" has to mean
+// every waiver, not every waiver whose field happens to be on the list.
+for (const field of accepted.keys()) {
+  if (comparedFields.has(field)) continue;
+  stale += 1;
+  console.log(`  ! ${field}: no such compared field, so this exemption waives nothing.`);
+  console.log(`      Compared fields are: ${[...comparedFields].join(", ")}.`);
 }
 
 for (const [field, stated, frozen] of fields) {

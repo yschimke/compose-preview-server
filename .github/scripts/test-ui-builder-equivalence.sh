@@ -296,6 +296,37 @@ check "a future schema major on the frozen catalog is refused" 1 $?
 grep -q "frozen catalog is" "${work}/out" ||
   { echo "FAIL future golden major not reported"; failures=$((failures + 1)); }
 
+# An unrecognised family is refused for the same reason a future major is: a misspelled
+# `compose-ui-builder-polciy` still spells `platform` and `componentMenu` the way this gate reads
+# them, so every comparison passes and readiness is reported for a document it has never heard of.
+cat >"${work}/foreign-schema.json" <<'JSON'
+{ "schema": "compose-ui-builder-polciy/v999", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+"${gate}" --policy "${work}/foreign-schema.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "an unrecognised schema family is refused" 1 $?
+grep -q "not a family this" "${work}/out" ||
+  { echo "FAIL unrecognised family not reported"; failures=$((failures + 1)); }
+
+# A schema-less document is NOT refused — capability fixtures legitimately carry none, and refusing
+# them would be an allowlist rather than a version check.
+"${gate}" --policy "${work}/capability-shaped.json" --golden "${work}/golden.json" \
+  --strict >/dev/null 2>&1
+check "a document with no schema at all is still read" 0 $?
+
+# Every waiver is judged means EVERY waiver — including one naming a field nothing compares, which
+# the sweep over compared fields could never reach.
+cat >"${work}/waiver-unknown-field.json" <<'JSON'
+[ { "field": "colorTokens.rolez", "why": "a typo nobody noticed",
+    "policy": ["primary"], "frozen": ["secondary"] } ]
+JSON
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json" \
+  --differences "${work}/waiver-unknown-field.json" --strict >"${work}/out" 2>&1
+check "a waiver naming no compared field fails --strict" 1 $?
+grep -q "no such compared field" "${work}/out" ||
+  { echo "FAIL unknown-field waiver not reported"; failures=$((failures + 1)); }
+
 # A waiver outlives its disagreement. Left valid, it would silently re-authorise a return to the
 # exact value it once waived, with nobody re-reading it.
 "${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json"   --differences "${work}/converged.json" --strict >"${work}/out" 2>&1
