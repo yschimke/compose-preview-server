@@ -13,6 +13,12 @@ unpins: what is *in* a design, what it is *measured in*, and how many pictures o
 | `frame-inspector.before.png` | `UiBuilderDevicePresetPhonePreview` rendered at `origin/main` |
 | `frame-inspector.after.png` | the same preview on this branch |
 
+The strip's preview puts its design under the **light** scheme, which is not incidental: the
+Jetcaster fixture's own environment is `"theme": "dark"`, so a Dark axis over it drew a third pane
+identical in theme to the first two — a picture proving a pane is laid out and nothing about the
+override reaching the colours. A variant that matches the design it varies is a finding, the same way
+a before/after pair of identical images is.
+
 ## What each pair shows
 
 **The board.** Read the two side by side: the insert panel's destination line goes from "Adds beside

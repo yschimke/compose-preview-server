@@ -779,7 +779,12 @@ fun UiBuilderBoardPreview() {
 @Composable
 fun UiBuilderVariantStripPreview() {
   UiBuilderEditor(
-    document = editorChromePreviewDocument.onDevice(PREVIEW_PHONE).claiming(PREVIEW_TABLET),
+    // Light, deliberately: the fixture's own environment is `"theme": "dark"`, so a Dark axis over
+    // it drew a third pane identical in theme to the first two — a picture that proves a pane is
+    // laid out and nothing about the override reaching the colours. A before/after pair whose two
+    // images match is a finding, and so is a variant that matches the design it varies.
+    document =
+      editorChromePreviewDocument.onDevice(PREVIEW_PHONE).claiming(PREVIEW_TABLET).inLightTheme(),
     catalog = editorChromePreviewCatalog,
     initialSelectedNodeId = "discover-grid",
     initialVariantAxes = setOf(EditorVariantAxis.Dark),
@@ -812,6 +817,10 @@ private fun UiBuilderDocument.onCanvasFrame(): UiBuilderDocument =
           )
       )
   )
+
+/** This design under the light scheme, so a Dark variant beside it is visibly a variant. */
+private fun UiBuilderDocument.inLightTheme(): UiBuilderDocument =
+  copy(environment = JsonObject(environment + mapOf("theme" to JsonPrimitive("light"))))
 
 /** This design claiming it also works on [preset] — the stored set the variant strip draws. */
 private fun UiBuilderDocument.claiming(preset: UiBuilderDevicePreset): UiBuilderDocument =

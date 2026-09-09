@@ -205,6 +205,24 @@ point 2). Rather than smuggle them through a field that means something else, th
 they are: a way of *looking*, which costs nothing to be wrong about and is reversible by switching it
 off. If one later earns a place in the document, it graduates when the contract can carry it.
 
+### Two people wrapping the same root at once
+
+The wrap is an insert plus a move, and it does not rebase. Two collaborators who press Add beside on
+the same *non-board* root from one base revision each build their own board; the second command's
+move then pulls the root out of the first board and leaves two of them at the top, so
+`requireSingleRoot` refuses the whole second Add — including the item that motivated it.
+
+That is narrower than it sounds and it loses nothing: the refusal is a rejection, not a corruption,
+and the second author's next Add appends into the board that now exists and succeeds. It is still a
+gap against the concurrent-insertion guarantee in
+[`UI_BUILDER_PRODUCT_SPEC.md`](UI_BUILDER_PRODUCT_SPEC.md) ("concurrent insertions retain both nodes
+in server order/position-key order"), and it is the one place this feature does not meet it.
+
+Closing it means rebasing a command against a concurrent one — recognising at apply time that the
+root has become somebody else's board and appending into that instead of wrapping again. The reducer
+rebases nothing today, so that is a change to the collaboration model rather than to this feature,
+and it belongs with the structural-versioning work the same review surfaced.
+
 ## What this is not
 
 - **Not a second document.** A variant is the same tree under a different frame. There is nothing to
