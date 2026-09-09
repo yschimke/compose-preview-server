@@ -2305,6 +2305,14 @@ public class ServeRunner(
      */
     val comments: ServeUiBuilderCommentStore?,
     /**
+     * The back-links that say what each design is for, in their own directory beside the state.
+     *
+     * Beside rather than inside for the third time, and for the third reason: a link is a fact
+     * *about* a design rather than content of it, and recording one must not advance the revision
+     * every open client is holding.
+     */
+    val links: ServeUiBuilderLinksStore?,
+    /**
      * The Compose half of the export, kept so the native render lane can ask it the same question
      * with node tagging on. Not reached through [service]: the service's exporter may be the
      * production wrapper around several formats, and the native lane wants exactly this one.
@@ -2644,6 +2652,15 @@ public class ServeRunner(
             )
           }
           .getOrNull(),
+      links =
+        runCatching { ServeUiBuilderLinksStore(directory.resolve("links").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: UI-builder links unavailable (${it.message}); " +
+                "the builder works, and a design cannot say what it is for"
+            )
+          }
+          .getOrNull(),
       compose = compose,
       nativeBackends = nativeBackends,
     )
@@ -2882,6 +2899,7 @@ public class ServeRunner(
           service = uiBuilderLane.service,
           references = uiBuilderLane.references,
           comments = uiBuilderLane.comments,
+          links = uiBuilderLane.links,
         )
       } else {
         null
@@ -2986,6 +3004,7 @@ public class ServeRunner(
         uiBuilderService = uiBuilderLane?.service,
         uiBuilderReferenceStore = uiBuilderLane?.references,
         uiBuilderCommentStore = uiBuilderLane?.comments,
+        uiBuilderLinksStore = uiBuilderLane?.links,
         uiBuilderAssets = uiBuilderLane?.service,
         uiBuilderAuthorization =
           uiBuilderLane?.let {

@@ -154,6 +154,8 @@ JSON-RPC messages use `POST`, notifications receive `202 Accepted`, and optional
 | `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
 | `ui_builder_design_access` | `ui-builder-read` | Who can open a design — its owner, and everyone it has been shared with |
 | `ui_builder_share_design` | `ui-builder-write` | Share a design with another actor as `viewer` or `editor`, or take that back |
+| `ui_builder_get_links` | `ui-builder-read` | What a design is **for**: the issue, the design-tool frame, the pull request, the chat thread, and the design it continues; present only where the host records them |
+| `ui_builder_set_links` | `ui-builder-write` | Say what a design is for, replacing the whole record — an omitted link is cleared, not left alone |
 | `ui_builder_list_comments`, `ui_builder_await_comments` | `ui-builder-read` | Read a design's discussion, and **wait** for the next thing said in it |
 | `ui_builder_post_comment`, `ui_builder_resolve_comment_thread` | `ui-builder-write` | Say something on a design, and close a thread once it is answered |
 | `ui_builder_acknowledge_comment`, `ui_builder_react_to_comment` | `ui-builder-write` | Say you have **read** a thread — which is not resolving it — or react to one comment with an emoji |
@@ -226,6 +228,13 @@ whenever somebody has said something you have not acknowledged. Clear it with
 `ui_builder_react_to_comment`, which is the lightest way to say the same thing; neither claims the
 question is settled, which is what `ui_builder_resolve_comment_thread` is for.
 [`UI_BUILDER_COMMENTS.md`](UI_BUILDER_COMMENTS.md) has the three acts and why they are separate.
+
+**And what the design is for, on the same reply.** `ui_builder_get_design` also grows a `links`
+object — the issue, the design-tool frame, the pull request, the chat thread and the design this one
+continues — whenever anybody has recorded one, so an agent opening somebody else's design sees the
+brief behind it without a second call. Read it on its own with `ui_builder_get_links` and write it
+with `ui_builder_set_links`, which replaces the whole record.
+[`UI_BUILDER_LINKS.md`](UI_BUILDER_LINKS.md) has the record and its routes.
 
 **Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, and this
 endpoint deliberately cannot send one: `/mcp` is stateless JSON-RPC, `GET /mcp` — the

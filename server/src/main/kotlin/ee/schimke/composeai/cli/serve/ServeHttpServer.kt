@@ -481,6 +481,13 @@ class ServeHttpServer(
    */
   private val uiBuilderCommentStore: ServeUiBuilderCommentStore? = null,
   /**
+   * Per-design back-links — the issue, the frame, the pull request, the thread, the design this one
+   * continues. Null leaves the links routes unregistered, for the same reason the reference and
+   * comment stores do: a record of what a design is for that the next restart forgets is not the
+   * feature.
+   */
+  private val uiBuilderLinksStore: ServeUiBuilderLinksStore? = null,
+  /**
    * The asset lane of [uiBuilderService] — the bytes behind a design's `assets` map. Null leaves
    * the asset routes and the `ui_builder_put_asset` tool unregistered, which is what a host with no
    * durable UI-builder state honestly has: a picture the next restart forgets is not the feature.
@@ -676,6 +683,7 @@ class ServeHttpServer(
               uiBuilderNativePreview,
               uiBuilderCommentStore,
               references = uiBuilderReferenceStore,
+              links = uiBuilderLinksStore,
               assets = uiBuilderAssets,
             )
           },
@@ -981,6 +989,13 @@ class ServeHttpServer(
               uiBuilderService,
               uiBuilderAuthorization,
               uiBuilderCommentStore,
+            )
+          }
+          if (uiBuilderLinksStore != null) {
+            installUiBuilderLinksRoutes(
+              uiBuilderService,
+              uiBuilderAuthorization,
+              uiBuilderLinksStore,
             )
           }
           if (uiBuilderAssets != null) {
@@ -5163,7 +5178,10 @@ class ServeHttpServer(
       )
       return
     }
-    val document = withContext(Dispatchers.IO) { library.document(catalog, designId) }
+    // One index read for both, so the links written below belong to the document created above.
+    val entry =
+      withContext(Dispatchers.IO) { library.index(catalog).firstOrNull { it.designId == designId } }
+    val document = entry?.let { withContext(Dispatchers.IO) { library.document(catalog, it) } }
     if (document == null) {
       call.respondText(
         "$system publishes no design called $designId",
@@ -5177,6 +5195,38 @@ class ServeHttpServer(
           .install(actor = AuthenticatedUiBuilderActor(ADMIN_LIBRARY_ACTOR), document = document)
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    if (outcome is ServeUiBuilderCreate.Outcome.Created) {
+      // What the project says the design is for, carried across with it. Only on the design this
+      // call actually opened: a design already here has a links record of its own, possibly edited
+      // since, and the published index does not get to overwrite somebody's work by being re-read.
+      // And only when the document is the one the entry describes. A stale or wrongly renamed
+      // export can publish an entry for design A whose document carries id B; the design created
+      // is B, and B is not what the entry's issue and pull request are about.
+      entry
+        ?.takeIf { it.designId == document.id }
+        ?.links
+        ?.let { links ->
+          val written =
+            withContext(Dispatchers.IO) { uiBuilderLinksStore?.replace(document.id, links) }
+          // The design opened; only its sidecar did not. Saying so is the difference between an
+          // operator knowing why the reverse lookup omits this design and being left to guess.
+          val why =
+            when (written) {
+              is LinksWriteResult.Refused -> written.reason
+              is LinksWriteResult.Failed -> written.reason
+              else -> null
+            }
+          if (why != null) {
+            System.err.println("serve: links for library design ${document.id} not stored ($why)")
+          }
+        }
+      if (entry != null && entry.designId != document.id) {
+        System.err.println(
+          "serve: ${catalog.system} publishes design ${entry.designId} as a document with id " +
+            "${document.id}; its links were not carried across"
+        )
+      }
+    }
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,
       is ServeUiBuilderCreate.Outcome.AlreadyExists ->
