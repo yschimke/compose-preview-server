@@ -55,14 +55,16 @@
 #                  accidentally emptied menu passing under the entry that reviewed a deliberate
 #                  reordering — so a changed value re-surfaces as a stale exemption.
 #
-# Five things fail under `--strict`: a difference nobody has accepted, a fact the frozen catalog
+# Six things fail under `--strict`: a difference nobody has accepted, a fact the frozen catalog
 # states that the catalog is silent about, a stale or unexplained exemption, a MISSING policy file,
-# and a policy that is not this catalog's. The last three matter most: `--strict` is the cutover
+# a policy that is not this catalog's, and a FUTURE SCHEMA MAJOR on EITHER document — refused
+# outright rather than compared, because the fields this gate happens to recognise in a `…/v2` say
+# nothing about the semantics it does not. The last three matter most: `--strict` is the cutover
 # asserting readiness, so "there is no catalog here", "this describes nothing at all" and "somebody
 # fetched a real file belonging to a different catalog" must none of them read as success. An
 # exemption counts as stale once the disagreement it describes stops existing — whether the two
-# sides AGREE again or both go SILENT. Either way it sits there re-authorising a return to the
-# waived value with nobody re-reading it.
+# sides AGREE again, both go SILENT, or either one stops stating the field. Any of those and it sits
+# there re-authorising a return to the waived value with nobody re-reading it.
 #
 # What `builtins` can and cannot tell you. A declared builtin the frozen catalog carries no
 # component for is a real difference and is reported. The reverse — a builtin the catalog OUGHT to
