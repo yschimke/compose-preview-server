@@ -28,6 +28,7 @@ import {
     activeSource,
     changesSource,
     isSpecSource,
+    KIT_SOURCE,
     sourceForParam,
     sourceParam,
     offersChoice,
@@ -4267,6 +4268,17 @@ if (specChip) {
             // on arrival AND keeps the two frames the diff was taken from beside it, so the chip
             // has nothing left to override: see DEFAULT_VIEW in `spec/views.ts`. A URL that names a
             // view still wins over that default, exactly as it won over the chip's request.
+            //
+            // The SOURCE, though, this chip does own. It names the imported kit — "Figma 96.3%" —
+            // while the picker keeps whatever was pressed last, so a reader who tried a sibling,
+            // left the lane, and came back through this chip was shown the SIBLING's render under
+            // a chip that said Figma: the wrong reference, silently, which is the one thing a
+            // comparison must not get wrong. Press the kit first and enter second, the same order
+            // the peer chips use and for the same reason — `pickSpecSource` returns early off the
+            // lane, so `setMode` opens directly on the requested pair instead of flashing the old
+            // one. A no-op when the kit is already pressed, and when the lane has one source and
+            // therefore no picker at all.
+            pickSpecSource(specSourceButton(KIT_SOURCE));
             setMode("spec");
         }
     });
