@@ -968,11 +968,6 @@ fun UiBuilderEditor(
   // surface is the setting, and a second flag that could disagree with it is a bug waiting.
   val nativeRequested =
     onRequestNativeRender != null && state.previewSurface != EditorPreviewSurface.Wasm
-  // Whether the builder's own canvas is on screen, which is the only surface the variant strip is
-  // drawn on: the layout below omits it entirely when the host's renderer has taken the pane. The
-  // Screen inspector reads this so its comparison controls say that rather than accepting a choice
-  // that would draw nothing.
-  val variantsDrawn = state.previewSurface != EditorPreviewSurface.Native || !nativeRequested
   var nativePending by remember(document.id) { mutableStateOf(false) }
   // Keyed on the revision as well as the request, so asking again after an edit re-renders rather
   // than showing the frame the design used to have — a stale native render beside a live canvas is
@@ -1146,7 +1141,13 @@ fun UiBuilderEditor(
         .map { it.name }
         .toSet()
     } ?: emptySet()
-  val inspector: @Composable (Modifier) -> Unit = { modifier ->
+  // `variantsDrawn` is a parameter rather than a captured value because only the layout knows it:
+  // the
+  // compact branch draws the canvas unconditionally, while the wide one hands the pane to the
+  // host's
+  // renderer when that is the chosen surface. Deciding it up here got the narrow window wrong — the
+  // strip was visibly drawn while the inspector said it was not.
+  val inspector: @Composable (Modifier, Boolean) -> Unit = { modifier, variantsDrawn ->
     PropertyInspector(
       state = state,
       onClose = { inspectorOpen = false },
@@ -1393,7 +1394,12 @@ fun UiBuilderEditor(
                         }
                       }
                     }
-                  else -> inspector(Modifier.width(INSPECTOR_WIDTH).fillMaxHeight())
+                  else ->
+                    inspector(
+                      Modifier.width(INSPECTOR_WIDTH).fillMaxHeight(),
+                      // The same condition the canvas is drawn under, a few lines above.
+                      state.previewSurface != EditorPreviewSurface.Native || !nativeRequested,
+                    )
                 }
                 EditorRail(
                   EditorDock.entries.map { entry ->
@@ -1458,7 +1464,11 @@ fun UiBuilderEditor(
                   Modifier.align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(0.72f)
-                    .padding(bottom = 56.dp)
+                    .padding(bottom = 56.dp),
+                  // Always, here: this branch draws the canvas whatever surface is chosen, and
+                  // never
+                  // the host's pane.
+                  true,
                 )
               }
               if (mobilePanel == MobileEditorPanel.Code && generatedCode != null) {
