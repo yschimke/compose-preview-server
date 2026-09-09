@@ -305,8 +305,12 @@ That is the honest consequence of a board being an ordinary node — but it does
 beside on such a design changes nothing structurally, and the items simply join what was there.
 
 A board is an ordinary `layout/column`, not a mode. It is in the document, the layers panel lists
-it, and selecting it gives you the **Properties** panel's `verticalSpacingDp` and
-`horizontalAlignment` — which is the whole of the arrangement. Items are reordered by dragging them
+it, and selecting it gives you the **Properties** panel's `verticalSpacingDp`,
+`horizontalAlignment` and `verticalArrangement`. The third one matters most on an imported design,
+because it can override the first: `spaceBetween`, `spaceAround` and `spaceEvenly` position the
+items from the height available and **ignore `verticalSpacingDp` entirely**, while `center` and
+`bottom` keep the spacing and move the block. A column whose items refuse to sit where the spacing
+says is usually carrying one of those three. Items are reordered by dragging them
 in Layers, exactly like any other children. Nothing downstream treats it specially: the Kotlin
 export writes the `Column` it is, and the screen projection sees the same.
 
@@ -332,8 +336,11 @@ has no one-press way back to a single screen.
 ### The frame is not the device
 
 The **Screen** panel's first field is **Frame** — the width, height, density and theme the design is
-measured in. **Set frame from** fills those in from a device preset; a hand-typed 1400 × 1000 frame
-is a frame and reads as `Custom size` rather than claiming a phone.
+measured in. **Set frame from** fills in the *geometry* from a device preset — width, height and
+density, and nothing else. Theme, locale, font scale and layout direction survive the pick on
+purpose: a device is a frame rather than a whole environment, and someone checking an RTL screen
+across three devices should not have to re-pick RTL three times. A hand-typed 1400 × 1000 frame is
+a frame and reads as `Custom size` rather than claiming a phone.
 
 A board obeys the frame like anything else: its items are laid out down the middle of that width, at
 that density, under that theme. Nothing is hidden on one.
@@ -361,16 +368,30 @@ rather than unfinished: there is one document behind all of them, so an edit mad
 would be an edit to the tree the phone pane draws.
 
 A wider pane is worth having when the design actually responds to width. A supporting-pane scaffold
-does when its `layoutMode` is `expandedTwoPane` or `twoPane`: the tablet pane then draws the
-supporting pane the phone does not, which is the adaptive behaviour checkable without leaving the
-design. Note that the editor inserts `adaptive` by default, and that value does **not** expand —
-set the mode explicitly if the second pane is what you are trying to see.
+does, and it takes three things at once — the tablet pane draws the supporting pane the phone does
+not only when all of them hold:
+
+- `layoutMode` is `expandedTwoPane` or `twoPane`. The editor inserts **`adaptive`** by default and
+  that value does *not* expand, whatever its name suggests;
+- both `mainPaneVisible` and `supportingPaneVisible` are on;
+- the pane is at least `mainPanePreferredWidthDp + supportingPanePreferredWidthDp + paneSpacingDp`
+  wide. On the defaults that is 744 + 512 + spacing, so **a tablet preset narrower than about
+  1256 dp stays single-pane** however the mode is set — and raising either preferred width raises
+  the threshold with it.
+
+The last one is the usual reason a correctly-moded design still shows one pane: the mode was set,
+the preset was not wide enough.
 
 In the wide editor layout, choosing a host-rendered preview surface replaces the builder's canvas
 with the host's pane, and the compare chips say why they are inert rather than accepting a choice
-that would draw nothing. The device list stays live, because those still reach the export. The
-compact layout below 840 dp is different: it draws the builder canvas whatever surface is selected,
-so the chips stay active there.
+that would draw nothing. The device list stays live, on the same terms as above: it reaches the
+record-driven Compose export. On the designs most likely to be host-rendered — a `wear-m3` screen,
+a `remote-m3` widget — the record-free exporters write their own fixed preview annotations, so
+there the list reaches neither the generated Kotlin nor a variant pane the host's own pane has
+replaced. It is live, and on those designs it is not doing anything.
+
+The compact layout below 840 dp is different: it draws the builder canvas whatever surface is
+selected, so the chips stay active there.
 
 ## Starting from a worked widget
 
