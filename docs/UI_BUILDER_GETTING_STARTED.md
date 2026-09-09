@@ -310,9 +310,18 @@ it, and selecting it gives you the **Properties** panel's `verticalSpacingDp`,
 because it can override the first: `spaceBetween`, `spaceAround` and `spaceEvenly` position the
 items from the height available and **ignore `verticalSpacingDp` entirely**, while `center` and
 `bottom` keep the spacing and move the block. A column whose items refuse to sit where the spacing
-says is usually carrying one of those three. Items are reordered by dragging them
-in Layers, exactly like any other children. Nothing downstream treats it specially: the Kotlin
-export writes the `Column` it is, and the screen projection sees the same.
+says is usually carrying one of those three.
+
+The spacing is kept only while it is **positive**, and that catches out the one case you would reach
+for it: the Properties panel lets you type a negative `verticalSpacingDp` so children overlap, and
+every arrangement drops it. `center` and `bottom` fall back to plain `Arrangement.Center` and
+`Arrangement.Bottom`, and so does the default top arrangement — the renderer and the Kotlin export
+agree, both testing `spacing > 0f`, so the overlap is missing from the canvas and from the generated
+`Column` alike.
+
+Items are reordered by dragging them in Layers, exactly like any other children. Nothing downstream
+treats it specially: the Kotlin export writes the `Column` it is, and the screen projection sees the
+same.
 
 Two Adds it will not do:
 
