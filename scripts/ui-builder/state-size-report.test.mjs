@@ -157,6 +157,39 @@ test("a store whose designs are all shallower than the cut saves nothing", () =>
   assert.equal(projection.affectedDesigns, 0);
 });
 
+test("a growing design's saving is the prefix that goes, not an average of the whole", () => {
+  // Retention removes the OLDEST snapshots. On a design that grew, those are the small ones, so
+  // scaling the whole section by `keep / count` charged the cut for bytes it would never reclaim —
+  // and the overstatement is worst on exactly the designs a cut is aimed at.
+  const growing = design("growing", { retained: 20 });
+  growing.revisionSnapshots = Array.from({ length: 20 }, (_, index) => ({
+    // One node at revision 0 up to twenty at revision 19.
+    document: document("growing", index, index + 1),
+    sequence: index,
+  }));
+  const report = analyzeUiBuilderState(envelopeV2({ growing }));
+  const section = report.designs[0].sections.revisionSnapshots;
+
+  const projection = projectRetention(report, { keep: 15 });
+
+  // The five oldest revision snapshots, summed exactly, plus the five position snapshots (which
+  // are uniform, so both readings agree there).
+  const droppedRevisions = section.entryBytes
+    .slice(0, 5)
+    .reduce((sum, it) => sum + it, 0);
+  const positions = report.designs[0].sections.positionSnapshots;
+  const droppedPositions = positions.entryBytes.slice(0, 5).reduce((sum, it) => sum + it, 0);
+  assert.equal(projection.savedBytes, droppedRevisions + droppedPositions);
+
+  // And it is materially less than what scaling by the average claimed, which is the whole point.
+  const averaged =
+    Math.round(section.bytes * (1 - 15 / 20)) + Math.round(positions.bytes * (1 - 15 / 20));
+  assert.ok(
+    projection.savedBytes < averaged * 0.8,
+    `prefix ${projection.savedBytes} should be well under the averaged ${averaged}`,
+  );
+});
+
 test("only the designs deeper than the cut contribute to the saving", () => {
   const report = analyzeUiBuilderState(
     envelopeV2({ deep: design("deep", { retained: 80 }), shallow: design("shallow", { retained: 5 }) }),
