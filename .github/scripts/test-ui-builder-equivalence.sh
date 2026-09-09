@@ -234,6 +234,39 @@ JSON
   --strict >"${work}/out" 2>&1
 check "a document naming its catalog at benchmark.catalogSystemId is identified" 0 $?
 
+# The other way a waiver outlives its disagreement: both sides go SILENT. The entry then survives
+# to re-authorise the exact old discrepancy the day it returns.
+cat >"${work}/absent-both.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+cat >"${work}/waiver-for-absent.json" <<'JSON'
+[ { "field": "colorTokens.roles", "why": "reviewed back when both sides had one",
+    "policy": ["primary"], "frozen": ["secondary"] } ]
+JSON
+"${gate}" --policy "${work}/absent-both.json" --golden "${work}/golden.json" \
+  --differences "${work}/waiver-for-absent.json" --strict >"${work}/out" 2>&1
+check "a waiver for a field neither side states fails --strict" 1 $?
+grep -q "is obsolete and should be deleted" "${work}/out" ||
+  { echo "FAIL both-absent waiver not reported"; failures=$((failures + 1)); }
+
+# A future MAJOR is refused rather than compared. Comparing the fields it happens to recognise
+# would report readiness for semantics this gate does not know.
+cat >"${work}/future-major.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v2", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+"${gate}" --policy "${work}/future-major.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a future schema major is refused under --strict" 1 $?
+grep -q "future major" "${work}/out" ||
+  { echo "FAIL future major not reported"; failures=$((failures + 1)); }
+
+# The current major still passes, so the refusal is a version check and not a schema allowlist that
+# breaks on the next minor.
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json" --strict >/dev/null 2>&1
+check "the current schema major still passes" 0 $?
+
 # A waiver outlives its disagreement. Left valid, it would silently re-authorise a return to the
 # exact value it once waived, with nobody re-reading it.
 "${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json"   --differences "${work}/converged.json" --strict >"${work}/out" 2>&1

@@ -60,8 +60,9 @@
 # and a policy that is not this catalog's. The last three matter most: `--strict` is the cutover
 # asserting readiness, so "there is no catalog here", "this describes nothing at all" and "somebody
 # fetched a real file belonging to a different catalog" must none of them read as success. An
-# exemption counts as stale once the field it waives AGREES again — it has outlived its
-# disagreement, and leaving it would silently re-authorise a return to the waived value.
+# exemption counts as stale once the disagreement it describes stops existing — whether the two
+# sides AGREE again or both go SILENT. Either way it sits there re-authorising a return to the
+# waived value with nobody re-reading it.
 #
 # What `builtins` can and cannot tell you. A declared builtin the frozen catalog carries no
 # component for is a real difference and is reported. The reverse — a builtin the catalog OUGHT to
@@ -133,9 +134,44 @@ const semantics = golden.statusSemantics ?? {};
 // pipeline release or after the cutover, and it is the same facts either way.
 const published = source.statusSemantics !== undefined;
 const facts = published ? source.statusSemantics : source;
-const shape = published ? "generated ui-builder.json" : "authored ui-builder.policy.json";
+// A capability document is a third shape: it also carries `statusSemantics`, but its builtins have
+// been materialised into top-level `components` alongside the record ones, so nothing in it says
+// which were builtins. Named rather than lumped in with the generated artifact, because the two
+// differ in exactly the way the builtin check depends on.
+const capabilities = published && source.benchmark !== undefined;
+const shape = !published
+  ? "authored ui-builder.policy.json"
+  : capabilities
+    ? "capability document"
+    : "generated ui-builder.json";
 const menu = published ? facts.componentMenu : facts.menu;
 const declaredBuiltins = Object.keys(facts.builtins ?? {}).sort();
+
+// A future MAJOR is refused rather than compared. The contract's compatibility rule is that a
+// reader ignores fields it does not understand and refuses a future major — and a gate that
+// compared `…/v2` field by field would be reporting readiness for a document whose semantics it
+// does not know, which is the readiness question answered by assuming the answer.
+const SCHEMA_FAMILIES = {
+  "compose-ui-builder-policy": 1,
+  "compose-ui-builder-catalog": 1,
+  "compose-ui-builder-capabilities": 1,
+};
+if (typeof source.schema === "string" && source.schema.includes("/")) {
+  const [family, version] = [
+    source.schema.slice(0, source.schema.lastIndexOf("/")),
+    source.schema.slice(source.schema.lastIndexOf("/") + 1),
+  ];
+  const major = Number.parseInt(String(version).replace(/^v/, ""), 10);
+  const known = SCHEMA_FAMILIES[family];
+  if (known !== undefined && Number.isFinite(major) && major > known) {
+    console.log(`  x schema: ${JSON.stringify(source.schema)} is a future major of '${family}'.`);
+    console.log(`      This gate understands v${known}. Comparing the fields it happens to`);
+    console.log(`      recognise would report readiness for semantics it does not know.`);
+    console.log("");
+    console.log(`ui-builder-equivalence: refused — unsupported schema ${source.schema}.`);
+    process.exit(strict ? 1 : 2);
+  }
+}
 
 const fields = [
   ["platform", facts.platform, semantics.platform],
@@ -197,9 +233,25 @@ const waiverVerdict = (waiver, stated, frozen) => {
 };
 
 console.log(`  read ${policyPath} as a ${shape}`);
+// An exemption is only ever as good as the disagreement it describes — the third and last way that
+// can stop being true. Convergence was one; both sides going SILENT is the other, and this branch
+// returned before the waiver was consulted, so the entry survived to re-authorise the exact old
+// discrepancy the day it came back.
+const waiverIsObsolete = (field, why) => {
+  if (!accepted.has(field)) return false;
+  stale += 1;
+  console.log(`  ! ${field}: ${why}.`);
+  console.log(`      The accepted difference for it is obsolete and should be deleted; left in`);
+  console.log(`      place it would silently re-authorise a return to ${show(accepted.get(field).policy)}`);
+  return true;
+};
+
 for (const [field, stated, frozen] of fields) {
   if (stated === undefined) {
-    if (frozen === undefined) continue;
+    if (frozen === undefined) {
+      waiverIsObsolete(field, "neither the catalog nor the frozen catalog states this");
+      continue;
+    }
     // The golden states this and the catalog does not. Silently skipping it is how a gate goes
     // green for a catalog that has described nothing at all — the failure that makes a readiness
     // check worse than no check, because it answers the question wrongly.
@@ -218,13 +270,7 @@ for (const [field, stated, frozen] of fields) {
     // that was waived, the old entry would authorise the regression with nobody re-reading it —
     // which is the failure the reviewed-value pinning exists to prevent, reintroduced by the happy
     // path. An exemption is only ever as good as the disagreement it describes.
-    if (accepted.has(field)) {
-      stale += 1;
-      console.log(`  ! ${field}: agrees with the frozen catalog, so the accepted difference for it`);
-      console.log(`      is obsolete and should be deleted — it would silently re-authorise a`);
-      console.log(`      return to ${show(accepted.get(field).policy)}`);
-      continue;
-    }
+    if (waiverIsObsolete(field, "this agrees with the frozen catalog")) continue;
     console.log(`  = ${field}`);
     continue;
   }
@@ -249,7 +295,12 @@ for (const [field, stated, frozen] of fields) {
 // builtin it carries no component for is a component this build has never had under that id.
 const frozenIds = new Set((golden.components ?? []).map((component) => component.componentId));
 const unknownBuiltins = declaredBuiltins.filter((id) => !frozenIds.has(id));
-if (declaredBuiltins.length > 0) {
+if (capabilities) {
+  // Not "no builtins" — "this shape cannot tell". Reporting nothing here would look identical to a
+  // catalog that declares none, which is the difference between a check and its absence.
+  console.log(`  ~ builtins: a capability document does not distinguish them from record`);
+  console.log(`      components, so there is nothing here to check.`);
+} else if (declaredBuiltins.length > 0) {
   if (unknownBuiltins.length === 0) {
     console.log(`  = builtins (${declaredBuiltins.length}, all present in the frozen catalog)`);
   } else {
