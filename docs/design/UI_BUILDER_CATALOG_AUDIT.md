@@ -17,8 +17,8 @@ Four inventories, taken at `d629fb6`:
 | Inventory | Source | Count |
 | --- | --- | --- |
 | `m3-catalog` authoring catalog | [`fixtures/ui-builder/m3-catalog-capabilities-v1.json`](fixtures/ui-builder/m3-catalog-capabilities-v1.json) | **41** components |
-| `wear-m3` authoring catalog | `ProductionUiBuilderRuntime.wearM3Catalog` | **24** `wear-m3/*` ids + borrowed foundation |
-| `remote-m3` authoring catalog | `ProductionUiBuilderRuntime.remoteM3Catalog` | **11** (8 borrowed + 2 widget containers + lottie) |
+| `wear-m3` authoring catalog | [`fixtures/ui-builder/wear-m3-capabilities-v1.json`](fixtures/ui-builder/wear-m3-capabilities-v1.json) | **30** components (23 `wear-m3/*` + 7 borrowed) |
+| `remote-m3` authoring catalog | [`fixtures/ui-builder/remote-m3-capabilities-v1.json`](fixtures/ui-builder/remote-m3-capabilities-v1.json) | **12** components (3 `remote-m3/*` + 9 borrowed) |
 | What the catalogs publish | `@CatalogComponent` ids in `yschimke/m3-catalog`, `yschimke/wear-m3-catalog` | **58** mobile, **79** Wear, **53** Remote |
 
 The authoring catalogs are the smaller number in every row, which is expected — the builder is not
@@ -35,8 +35,8 @@ variant is not.
 | 2 | Missing structural layout: `Spacer`, pager, flow row/column, drawer, pull-to-refresh, staggered grid | builder | **high** |
 | 3 | Missing Material 3 components every app has: FAB sizes, navigation bar/rail, bottom app bar, toggle button, segmented button, badge, menu, sheets, tooltip | split: catalog record (some), builder policy (rest) | **high** |
 | 4 | Modifier vocabulary stops short of `graphicsLayer`, `clickable`, window insets, brush fills and non-rounded shapes | builder (`CapabilityComposeCodeExporter` + capability lists) | **medium** |
-| 5 | `remote-m3` offers 11 of the ~35 real components `wear-m3-catalog:remote-catalog` publishes | catalog contract / record projection | **medium** |
-| 6 | `wear-m3` offers 24 of 79 — the whole picker, pager, swipe and media-control families are absent | catalog contract / record projection | **medium** |
+| 5 | `remote-m3` offers 12 of the ~35 real components `wear-m3-catalog:remote-catalog` publishes | catalog contract / record projection | **medium** |
+| 6 | `wear-m3` offers 30 of 79 — the whole picker, pager, swipe and media-control families are absent | catalog contract / record projection | **medium** |
 | 7 | Four popup-surfaced families are missing from the *catalogs*, not just the builder | `yschimke/m3-catalog` + compose-ai-tools#3916 | **medium** |
 
 ---
@@ -121,7 +121,6 @@ marks `implemented`. Everything in this table can be authored once and exported 
 | `draw/path` | `drawPath` | `DRAW_PATH` (124) + `DATA_PATH` (123) / `PATH_CREATE` (159) |
 | `draw/image` | `drawImage` | `DRAW_BITMAP` (44), `DRAW_BITMAP_SCALED` (149) |
 | `draw/text` | `drawText` | `DRAW_TEXT_RUN` (43), `DRAW_TEXT_ANCHOR` (133) |
-| `draw/text-on-path` | `drawTextOnPath` (via `Canvas.nativeCanvas`) | `DRAW_TEXT_ON_PATH` (53) |
 | `draw/clip` | `clipRect` / `clipPath` | `CLIP_RECT` (39), `CLIP_PATH` (38), `MODIFIER_ROUNDED_CLIP_RECT` (54) |
 | `draw/transform` | `withTransform { translate/scale/rotate }` | `MATRIX_TRANSLATE` (127), `MATRIX_SCALE` (126), `MATRIX_ROTATE` (129), `MATRIX_SKEW` (128), `MATRIX_SAVE`/`RESTORE` (130/131) |
 
@@ -129,6 +128,11 @@ Deliberately outside the first cut, and why:
 
 - **`drawPoints`, `drawOutline`, blend modes** — Compose-side only; no `implemented` opcode answers
   them, so authoring one would produce a design that exports on one lane and refuses on the other.
+- **Text on a path** — `DRAW_TEXT_ON_PATH` (53) is `implemented` on the Remote side, but Compose
+  publishes no `DrawScope.drawTextOnPath`: reaching it means `nativeCanvas`, which is
+  `android.graphics.Canvas` on Android and Skia elsewhere. The editor's canvas is Wasm, so a node
+  the portable set promised would be one the editor cannot draw. It belongs with the Remote-only
+  set below, `wasm.adapterStatus = unsupported`.
 - **`DRAW_TEXT_ON_CIRCLE` (57), `DRAW_TWEEN_PATH` (125), `PATH_TWEEN` (158), `PATH_EXPRESSION` (193),
   `MATRIX_EXPRESSION` (187)** — Remote-side only. `DRAW_TEXT_ON_CIRCLE` is additionally
   `implemented_upstream_unavailable`: writable by the CMP player, readable by no Java-player
@@ -190,8 +194,10 @@ themselves are not the gap. These are:
 | **`AnimatedVisibility` / `Crossfade` / `Modifier.animateContentSize`** | There is no motion vocabulary anywhere in the document model. | Probably a separate decision, not a component. |
 | **Sticky headers in `lazy-column`** | `stickyHeader` is a `LazyListScope` call, not a component, so it needs a slot or an item flag. | |
 
-Two smaller ones inside what exists: `lazy-column`/`lazy-row` have no `item key` or `contentType`
-(both matter for real list performance and neither is expressible), and `scaffold` has no
+One smaller one inside what exists: `lazy-column`/`lazy-row` have no `contentType`, which matters
+for real list performance in a heterogeneous list. Item *keys* are not a gap — `emitLazy` already
+wraps every child in `item(key = …)`, using the child's `stableKey` when it has one and its stable
+node id otherwise. And `scaffold` has no
 `bottomBar` or `floatingActionButton` slot — which is §3's problem showing up in §2.
 
 ---
@@ -283,13 +289,13 @@ thing:
 
 ---
 
-## 5. `remote-m3` is 11 components against a catalog of ~35
+## 5. `remote-m3` is 12 components against a catalog of ~35
 
 `wear-m3-catalog:remote-catalog` publishes 53 `@CatalogComponent` ids. Setting aside the 15 theme,
 typography and typeface specimens, that is roughly 35 real components. The builder's `remote-m3`
-catalog offers eight borrowed foundation ids (`layout/box`, `layout/column`, `layout/row`,
+catalog offers nine borrowed foundation ids (`layout/box`, `layout/column`, `layout/row`,
 `m3/surface`, `m3/text`, `remote-compose/document`, `remote-compose/custom`, `shape/linear-gradient`,
-`asset/image`) plus two widget containers and `remote-m3/lottie`.
+`asset/image`) plus two widget containers and `remote-m3/lottie` — 12 in all.
 
 Absent, and each published and rendered by the catalog today: the whole `Button` family (filled,
 tonal, outlined, child, compact, custom-shape, image-background, loading, named-label), `IconButton`
@@ -304,15 +310,21 @@ the gap is now large enough that a Remote widget of any complexity is not author
 clearest case for the catalog contract: `remote-catalog` publishes a component record, and a
 projection of that record is most of this list without anybody transcribing a capability table.
 
-## 6. `wear-m3` is 24 components against a catalog of 79
+## 6. `wear-m3` is 30 components against a catalog of 79
 
-Same shape, less acute — the 24 cover the common Wear screen. Absent families, each published by
-`wear-m3-catalog`: `Picker` / `PickerGroup` (7 ids), `Pager` and the three `PageIndicator` families,
-`SwipeToDismissBox` / `SwipeToReveal`, `Media` controls (7 ids), `Auth` (5 ids), `Placeholder`
-(3 ids), `AnimatedText` / `FadingExpandingLabel`, `TimeText`, `IconToggleButton` /
-`TextToggleButton`, `LevelIndicator` / `ScrollIndicator` / `ArcProgressIndicator` /
-`SegmentedCircularProgressIndicator`, `AppCard` / `TitleCard`, `FastScrollingTransformingLazyColumn`,
-and the one-handed-gesture set.
+Same shape, less acute — the 23 `wear-m3/*` ids plus seven borrowed foundation ids cover the common
+Wear screen. Absent families, each published by `wear-m3-catalog`: `Picker` / `PickerGroup` (7 ids),
+`Pager` and the three `PageIndicator` families, `SwipeToDismissBox` / `SwipeToReveal`, `Media`
+controls (7 ids), `Auth` (5 ids), `Placeholder` (3 ids), `AnimatedText` / `FadingExpandingLabel`,
+`IconToggleButton` / `TextToggleButton`, `LevelIndicator`,
+`FastScrollingTransformingLazyColumn`, and the one-handed-gesture set.
+
+Four things that *look* absent are already authorable as variant values or scaffold properties, and
+are listed here so a follow-up does not go looking for them: `TimeText` and `ScrollIndicator` are
+`wear-m3/screen-scaffold` properties (`timeText` is emitted as the `AppScaffold(timeText = …)`
+wrapper by `WearScreenCodeExporter`); `ArcProgressIndicator` and `SegmentedCircularProgressIndicator`
+are `wear-m3/progress-indicator.variant` values (`circular\|segmented-circular\|linear\|arc`); and
+`AppCard` / `TitleCard` are `wear-m3/card.variant` values (`title\|app\|outlined\|plain`).
 
 ---
 
@@ -329,8 +341,8 @@ a release of this repository:
 **The catalog contract, once catalogs publish `ui-builder.json`:**
 - §3's variant axes and nine new Material 3 components
 - §5 and §6 in bulk — these are the plan's whole justification, and this audit is the size of the
-  prize: 35 + 55 components that exist, render and are measured today, and that the builder cannot
-  place.
+  prize: roughly 23 Remote and 49 Wear components that exist, render and are measured today, and
+  that the builder cannot place.
 
 **Upstream of everything:**
 - §3b — compose-ai-tools#3916 (popup capture), then `@CatalogComponent` annotations in
