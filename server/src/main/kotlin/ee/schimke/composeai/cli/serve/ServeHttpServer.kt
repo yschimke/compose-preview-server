@@ -5443,14 +5443,13 @@ class ServeHttpServer(
    * Whether [first] — a request's first path segment on a **site host** — names one of the server's
    * own routes, and so is not a session at all. Everything else 404s there.
    *
-   * This is an **allowlist**, deliberately. The gate used to enumerate what was *foreign* — catalog
-   * ids, then registered sessions, then `<system>@<rev>` — and each review round found another way
-   * for a session to exist that the enumeration had not met: an uploaded bundle, a suspended entry
-   * that `peekHost` reports as absent, and finally a `--revisions` ref like `main`, which is not
-   * registered at all until the generic route leases it and the factory *builds* it. A list of
-   * things to refuse can only ever chase that. The set of constant first segments is closed and
-   * already written down ([ServeSites.RESERVED_SYSTEMS]), so a site host now serves its own system,
-   * serves the routes, and refuses everything else — including whatever the next session kind is.
+   * This is an **allowlist**, deliberately. Enumerating what is *foreign* instead — catalog ids,
+   * registered sessions, `<system>@<rev>` — can only chase the ways a session can exist: an
+   * uploaded bundle, a suspended entry that `peekHost` reports as absent, a `--revisions` ref like
+   * `main` that is not registered at all until the generic route leases it and the factory *builds*
+   * it. The set of constant first segments is closed and already written down
+   * ([ServeSites.RESERVED_SYSTEMS]), so a site host serves its own system, serves the routes, and
+   * refuses everything else — including whatever the next session kind is.
    *
    * The cost is that a top-level route missing from that list 404s on a site host. That is a
    * visible, tested failure rather than a silent leak, which is the right way round for a feature
@@ -7250,8 +7249,8 @@ class ServeHttpServer(
    *
    * So the callers that do not read them do not pay for them. `homeSystemsFor` builds
    * [ServeWeb.HomeSystem], which has no progress fields at all, and the global component index
-   * reads only `components`; both pass `progress = false` and carry the previously remembered
-   * values forward untouched. The status path and the suspend listener pass true — the listener
+   * reads only `components`; both pass `progress = false` and carry the remembered values forward
+   * untouched. The status path and the suspend listener pass true — the listener
    * especially, since that is the last chance to capture a catalog's final counters before its host
    * goes away, and `/status` renders them for a suspended catalog out of exactly that memory.
    *
@@ -10641,13 +10640,12 @@ class ServeHttpServer(
    *
    * The catalog's offline parity run already drew every `ir/<id>.rc` document with every player, so
    * the commonest Remote Compose page view there is — a viewer opening on its default player, with
-   * nothing else selected — is answerable from published bytes. Before this it went to the daemon:
-   * `?rcPlayer=cmp-jvm` measured ~0.75s warm on a warm public box, and on a cold one it fell back
-   * to baked pixels and refused.
+   * nothing else selected — is answerable from published bytes. Through the daemon instead,
+   * `?rcPlayer=cmp-jvm` measures ~0.75s on a warm public box, and on a cold one it falls back to
+   * baked pixels and refuses.
    *
-   * This used to add "the catalog's ordinary baked PNG cannot stand in, because it is the **Java**
-   * player's capture". That has not been true since `RemoteOverridablePreview` began defaulting to
-   * `RemoteComposePlayerKind.EMBEDDED` — so the backend that matches the session's own
+   * The catalog's ordinary baked PNG **can** stand in, because `RemoteOverridablePreview` defaults
+   * to `RemoteComposePlayerKind.EMBEDDED` — so the backend matching the session's own
    * [ServeHost.bakedRcPlayer] is excluded below and answered from baked instead, which for an
    * ordinary preview means cmp-android.
    *
@@ -10655,7 +10653,7 @@ class ServeHttpServer(
    * theme — asks for pixels the parity run never drew, so the player selection is stripped and what
    * remains must be something the baked snapshot would itself satisfy
    * ([CatalogLiveRouting.overridesAffectRender]). Otherwise this returns null and the request
-   * routes to the renderer exactly as before.
+   * routes to the renderer.
    */
   private fun publishedRcPlayerRender(
     renderHost: ServeHost,
@@ -11475,13 +11473,13 @@ class ServeHttpServer(
   }
 
   /**
-   * Respond one inspection payload — `<id>.a11y` or `<id>.annotations` — with the validators and
-   * lifetime the rest of this route has always had and these two lanes never did.
+   * Respond one inspection payload — `<id>.a11y` or `<id>.annotations` — with the same validators
+   * and lifetime the rest of this route carries.
    *
-   * They used to end in a bare `respondBytes`: no `Cache-Control`, no `ETag`, no `Last-Modified`.
-   * `cp-inspect-layers` keeps only a per-page in-memory map keyed on the frame URL, so every
-   * navigation into an `?inspect=` link refetched a payload that had not moved, and no revalidation
-   * was possible because there was nothing to revalidate against.
+   * A bare `respondBytes` here (no `Cache-Control`, no `ETag`, no `Last-Modified`) costs a refetch
+   * per navigation: `cp-inspect-layers` keeps only a per-page in-memory map keyed on the frame URL,
+   * so every navigation into an `?inspect=` link refetches a payload that has not moved, with
+   * nothing to revalidate against.
    *
    * The `ETag` is unconditional and strong: these payloads are deterministic and a couple of
    * kilobytes at most, so hashing one costs nothing next to the request it saves, and it gives even
@@ -11494,8 +11492,8 @@ class ServeHttpServer(
    *   generation and therefore the URL — so it takes the `immutable` lifetime
    *   ([carriesCurrentGeneration], [prebakedImageCacheControl]);
    * - anything else is the moving target an unscoped URL always is, and gets the short public
-   *   lifetime with `stale-while-revalidate` ([STATIC_RESOURCE_CACHE_CONTROL]) — which the `ETag`
-   *   now lets end in a 304.
+   *   lifetime with `stale-while-revalidate` ([STATIC_RESOURCE_CACHE_CONTROL]), which the `ETag`
+   *   lets end in a 304.
    *
    * A private (token-gated) box never caches any of it, exactly as [prebakedImageCacheControl]
    * decides for the hero lane.
