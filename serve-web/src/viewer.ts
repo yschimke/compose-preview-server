@@ -4056,14 +4056,40 @@ function updateLiveToggle() {
             onLane: onSpecLane,
             available: specAvailable(),
         });
+        // Pressed reports WHICH source is on the stage, not merely that the lane is open. The peer
+        // chips beside this one are its equals now, and the picker they drive is hidden until the
+        // lane is up — so a toolbar that lit "Figma" while the sibling's render was showing named
+        // the wrong reference in the one place a reader would look to check it. A lane with a
+        // single source has no pressed id and no peers, and reads exactly as it always did.
+        var activeSourceId = specPressedId();
+        var kitOnStage =
+            activeSourceId === null || activeSourceId === KIT_SOURCE;
         specChip.setAttribute(
             "aria-pressed",
-            specState.pressed ? "true" : "false",
+            specState.pressed && kitOnStage ? "true" : "false",
         );
         specChip.disabled = specState.disabled;
         specChip.title = onSpecLane
             ? "Showing the imported design spec — click to return to the render"
             : specChip.getAttribute("data-spec-chip-tip") || specChip.title;
+    }
+    // …and the peer chips follow the same source, so exactly one of the group ever reads pressed.
+    // Queried here rather than closed over: this runs before the chips are collected for their
+    // click handlers further down the file, and the group is two elements on the pages that have
+    // one at all.
+    var peers = document.querySelectorAll<HTMLButtonElement>(
+        "[data-cp-spec-open-source]",
+    );
+    for (var peerIndex = 0; peerIndex < peers.length; peerIndex++) {
+        var peerChip = peers[peerIndex];
+        peerChip.setAttribute(
+            "aria-pressed",
+            specActive() &&
+                peerChip.getAttribute("data-cp-spec-open-source") ===
+                    specPressedId()
+                ? "true"
+                : "false",
+        );
     }
     // The Source chip reports its lane the same way, and from the same place, so every route out
     // of it (the Live chip, a combo pick, the spec chip, Back/Forward) un-presses it too.
