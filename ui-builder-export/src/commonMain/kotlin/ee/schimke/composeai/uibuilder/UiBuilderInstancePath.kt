@@ -1,7 +1,5 @@
 package ee.schimke.composeai.uibuilder
 
-import kotlin.jvm.JvmInline
-
 /**
  * Which drawn box a measurement, a selection or a comment belongs to.
  *
@@ -23,19 +21,39 @@ import kotlin.jvm.JvmInline
  *   chain begins at the **outermost repeat above the box**, never at the root: above every repeat
  *   there is nothing to disambiguate, and below one the copies are exactly what a bare id loses.
  *
- * [nodeId] is therefore always available, and always the document node this box drew — which is
- * what a consumer needs to look up properties, a component id, or a comment's anchor.
+ * ## The path is the segments, not the spelling
+ *
+ * [value] is a rendering for a log line, a `testTag` or a wire field — never the state. A node id
+ * is whatever the document says it is: `InsertNode` rejects a blank or an already-used id and
+ * nothing else, so `section/title` and `foo#bar` are ids a design may legitimately carry. Parsing
+ * [nodeId] back out of a joined string would answer `title` and `foo` for those, and the renderer
+ * looks the node up by that answer — `document.nodes.getValue(path.nodeId)` — so a punctuated id
+ * would have published its bounds under the wrong name and taken the canvas down on a text node.
+ * Holding the segments means the id comes back exactly as it went in, whatever it contains, and two
+ * paths are equal when their segments are.
  */
-@JvmInline
-value class UiBuilderInstancePath(val value: String) {
+class UiBuilderInstancePath private constructor(internal val segments: List<Segment>) {
 
-  /** The document node this box drew. */
+  /** One step of a path: a node, and which copy of it if it is drawn more than once. */
+  internal data class Segment(val nodeId: String, val occurrence: Int? = null)
+
+  /** The document node this box drew, exactly as the document spells it. */
   val nodeId: String
-    get() = value.substringAfterLast(SEPARATOR).substringBefore(OCCURRENCE)
+    get() = segments.last().nodeId
 
   /** Whether any repeat stands between this box and the root. */
   val isAuthored: Boolean
-    get() = OCCURRENCE !in value
+    get() = segments.none { it.occurrence != null }
+
+  /**
+   * A rendering, for a log line or a tag — `cell#3/label`. Two different paths can only be told
+   * apart by their segments, so nothing decides identity by comparing this.
+   */
+  val value: String
+    get() =
+      segments.joinToString(SEPARATOR.toString()) { segment ->
+        segment.occurrence?.let { "${segment.nodeId}$OCCURRENCE$it" } ?: segment.nodeId
+      }
 
   /**
    * The path of a child drawn inside this one.
@@ -45,8 +63,7 @@ value class UiBuilderInstancePath(val value: String) {
    * from the same node in the copy beside it.
    */
   fun child(childNodeId: String): UiBuilderInstancePath =
-    if (isAuthored) UiBuilderInstancePath(childNodeId)
-    else UiBuilderInstancePath("$value$SEPARATOR$childNodeId")
+    if (isAuthored) of(childNodeId) else UiBuilderInstancePath(segments + Segment(childNodeId))
 
   /**
    * One copy of this node, by its index in the run.
@@ -55,7 +72,12 @@ value class UiBuilderInstancePath(val value: String) {
    * the path of the node being repeated, before its children are drawn.
    */
   fun occurrence(index: Int): UiBuilderInstancePath =
-    UiBuilderInstancePath("$value$OCCURRENCE$index")
+    UiBuilderInstancePath(segments.dropLast(1) + segments.last().copy(occurrence = index))
+
+  override fun equals(other: Any?): Boolean =
+    this === other || (other is UiBuilderInstancePath && segments == other.segments)
+
+  override fun hashCode(): Int = segments.hashCode()
 
   override fun toString(): String = value
 
@@ -64,6 +86,6 @@ value class UiBuilderInstancePath(val value: String) {
     private const val OCCURRENCE = '#'
 
     /** The path of a node drawn once, which is every node the format can express today. */
-    fun of(nodeId: String): UiBuilderInstancePath = UiBuilderInstancePath(nodeId)
+    fun of(nodeId: String): UiBuilderInstancePath = UiBuilderInstancePath(listOf(Segment(nodeId)))
   }
 }

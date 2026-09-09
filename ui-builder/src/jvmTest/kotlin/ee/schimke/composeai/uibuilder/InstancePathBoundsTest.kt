@@ -37,6 +37,44 @@ class InstancePathBoundsTest {
   }
 
   /**
+   * A node id may legitimately contain the punctuation a path renders with — `InsertNode` refuses a
+   * blank id and an already-used one, and nothing else. Read back out of a rendered string, `a/b`
+   * would answer `b`, and the renderer looks its node up by that answer, so the box would publish
+   * under a name nothing could match and a text node would take the canvas down looking for it.
+   */
+  @Test
+  fun `a node id carrying path punctuation is measured under itself`() {
+    val document = tabRowSelectionPreviewDocument.withPunctuatedIds()
+    var snapshot: UiBuilderInspectionSnapshot? = null
+
+    renderComposeScene(FRAME_PX, FRAME_PX, Density(1f)) {
+      UiBuilderSurface(document = document, onInspectionSnapshot = { snapshot = it })
+    }
+
+    val measured = checkNotNull(snapshot) { "the canvas published no inspection snapshot" }
+    assertEquals(
+      document.nodes.keys.sorted(),
+      measured.nodes.filter { it.bounds != null }.map { it.nodeId }.sorted(),
+    )
+  }
+
+  /** Every id given the punctuation a path renders with, slots and roots kept in step. */
+  private fun UiBuilderDocument.withPunctuatedIds(): UiBuilderDocument {
+    fun rename(id: String) = "section/$id#0"
+    return copy(
+      roots = roots.map(::rename),
+      nodes =
+        nodes.entries.associate { (id, node) ->
+          rename(id) to
+            node.copy(
+              id = rename(id),
+              slots = node.slots.mapValues { (_, children) -> children.map(::rename) },
+            )
+        },
+    )
+  }
+
+  /**
    * The same claim from the other end: what the renderer would key a box by, for a node with no
    * repeat above it, is the id itself.
    */

@@ -74,4 +74,39 @@ class UiBuilderInstancePathTest {
     assertEquals("row#2/cell#4/label", inner.value)
     assertEquals("label", inner.nodeId)
   }
+
+  /**
+   * A node id is whatever the document says it is.
+   *
+   * `InsertNode` rejects a blank id and an already-used one, and nothing else, so an id carrying
+   * the punctuation a path renders with is legitimate. Read back out of a joined string these
+   * answered `title` and `foo` — a node the renderer would then fail to find, having published its
+   * bounds under a name no consumer could match.
+   */
+  @Test
+  fun `an id carrying path punctuation survives, and is still one box`() {
+    val slashed = UiBuilderInstancePath.of("section/title")
+    val hashed = UiBuilderInstancePath.of("foo#bar")
+    val insideACopy = UiBuilderInstancePath.of("row").occurrence(1).child("section/title")
+
+    assertEquals("section/title", slashed.nodeId)
+    assertEquals("foo#bar", hashed.nodeId)
+    assertEquals("section/title", insideACopy.nodeId)
+    assertTrue(slashed != hashed)
+  }
+
+  /**
+   * The spelling is a rendering, and identity is the segments: a path that happens to print like
+   * another is not that other one.
+   */
+  @Test
+  fun `two paths that print alike are still two paths`() {
+    val copy = UiBuilderInstancePath.of("cell").occurrence(3)
+    val punctuatedId = UiBuilderInstancePath.of("cell#3")
+
+    assertEquals(copy.value, punctuatedId.value)
+    assertTrue(copy != punctuatedId)
+    assertEquals("cell", copy.nodeId)
+    assertEquals("cell#3", punctuatedId.nodeId)
+  }
 }
