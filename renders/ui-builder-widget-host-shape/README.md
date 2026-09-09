@@ -8,19 +8,23 @@ could not see their own design inside it without exporting the file and opening 
 
 `canvas-both-shapes.png` is `WearWidgetHostShapesPreview` (`:ui-builder`,
 `WearWidgetSamplePreview.kt`): the same Weather widget document, drawn by the editor's own canvas
-renderer, in each host container the platform ships.
+renderer, in each host container the platform ships. (The file keeps its name from when there were
+two; renaming it would break the commit-pinned URL in the pull request that introduced it.)
 
-| | Left | Right |
-| --- | --- | --- |
-| Shape | Squircle | Rectangular |
-| Frame | 216×124dp | 232×144dp |
-| Content | 200×108dp | 168×112dp |
-| Padding (h/v) | 8 / 8dp | 32 / 16dp |
-| Radius | 26dp | 0dp |
+| | Left | Middle | Right |
+| --- | --- | --- | --- |
+| Shape | Squircle | Rectangular | Round |
+| Frame | 216×124dp | 232×144dp | 230×168dp |
+| Content | 200×108dp | 168×112dp | 160×136dp |
+| Padding (h/v) | 8 / 8dp | 32 / 16dp | 35 / 16dp |
+| Radius | 26dp | 0dp | 999dp |
 
-The two frames differ in more than their corners, which is the whole reason the view is worth
-having: the rectangular container lays the design out in a **narrower, taller** content box, so a
-widget that just fits the squircle can clip in the other frame. Both footprints come from
+The frames differ in more than their corners, which is the whole reason the view is worth having:
+each container lays the design out in a **narrower, taller** content box than the last, so a widget
+that just fits the squircle can clip in the other two. Round is the tightest of the three at 160dp
+of content width — the frame has to fit inside a circle rather than beside one — which makes it the
+case a designer most wants to look at. Its 999dp radius is upstream's own spelling for "fully
+round", clamped by the renderer to the stadium the picture shows. All three footprints come from
 [`hostSpec`](../../ui-builder-export/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/WearWidgetHostShape.kt),
 which is also what the native render lane builds its `WearWidgetParams` from — one table, so the two
 panes cannot disagree about what the host reserves.
