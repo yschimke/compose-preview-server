@@ -39,8 +39,13 @@ internal fun uiBuilderDisabledWarning(stateDirectory: File, failure: Throwable):
       "${stateDirectory.path}/designs ${stateDirectory.path}/designs.broken — the marker goes too, " +
       "or the next start reads the same one back; the designs are then lost, so copy them first)" +
       (if (migrated.exists()) {
-        ", or roll back to the state this store was migrated from (rm ${marker.path} && mv " +
-          "${migrated.path} ${stateFile.path})"
+        // The store may hold designs created since the migration, and the next start would migrate
+        // the old file straight back into the same tree — so a rollback that left `designs/` in
+        // place would not be the state being rolled back to. It goes first, and it is kept.
+        ", or roll back to the state this store was migrated from (mv ${stateDirectory.path}" +
+          "/designs ${stateDirectory.path}/designs.v3 && rm ${marker.path} && mv " +
+          "${migrated.path} ${stateFile.path} — designs created since the migration are in " +
+          "designs.v3 and are not in that file)"
       } else {
         ""
       }) +

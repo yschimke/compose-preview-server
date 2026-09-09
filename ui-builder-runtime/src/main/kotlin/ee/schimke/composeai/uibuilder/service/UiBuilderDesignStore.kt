@@ -397,7 +397,8 @@ internal class FileUiBuilderDesignStore(
         // caller would be told its edit failed and a restart would load the edit it was told had
         // failed. Refusing here leaves the previous generation whole and the parts this commit
         // wrote unreferenced, which the cleanup below unlinks and the next open would sweep anyway.
-        var bytes = referencedBytes(designDirectory, header)
+        var encodedHeader = encodeHeader(header)
+        var bytes = referencedBytes(designDirectory, header) + encodedHeader.size
         if (bytes > limits.maximumDesignBytes && !compacted) {
           // Compaction is decided from the journal's length against what it describes, and a design
           // whose live collections are large enough can reach the budget before that ratio is ever
@@ -412,7 +413,8 @@ internal class FileUiBuilderDesignStore(
             )
           compacted = true
           header = headerFor(journal)
-          bytes = referencedBytes(designDirectory, header)
+          encodedHeader = encodeHeader(header)
+          bytes = referencedBytes(designDirectory, header) + encodedHeader.size
         }
         if (bytes > limits.maximumDesignBytes) {
           discardUncommitted(designDirectory, current, written)
@@ -420,9 +422,13 @@ internal class FileUiBuilderDesignStore(
             "UI-builder design $designId is $bytes bytes; limit is ${limits.maximumDesignBytes}"
           )
         }
-        writeHeader(designDirectory, header)
-        Files.deleteIfExists(designDirectory.resolve(QUARANTINE_FILE))
-        sweep(designDirectory, header)
+        writeHeader(designDirectory, encodedHeader)
+        // Past this line the design *is* the new one, so nothing below may roll anything back: the
+        // rollback path deletes parts the durable header now names, and for a first commit it would
+        // delete the design itself. Tidying is best-effort, and the next open finishes any of it
+        // that did not happen here.
+        runCatching { Files.deleteIfExists(designDirectory.resolve(QUARANTINE_FILE)) }
+        runCatching { sweep(designDirectory, header) }
         storedBytes += bytes - (current?.bytes ?: 0)
         files[designId] = DesignFiles(header, bytes)
       } catch (failure: UiBuilderPersistenceException) {
@@ -463,6 +469,7 @@ internal class FileUiBuilderDesignStore(
       val designDirectory = designsDirectory.resolve(quarantinedSlugs[designId] ?: slug(designId))
       val bytes =
         files[designId]?.bytes ?: runCatching { directoryBytes(designDirectory) }.getOrDefault(0L)
+      var reclaimed = true
       try {
         // The rename is the deletion. A recursive unlink that fails halfway would leave the design
         // half gone while the caller was told the delete failed and the service kept it in memory —
@@ -476,15 +483,19 @@ internal class FileUiBuilderDesignStore(
             )
           Files.move(designDirectory, tombstone, StandardCopyOption.ATOMIC_MOVE)
           forceDirectory(designsDirectory)
-          runCatching { deleteRecursively(tombstone) }
+          // The design is gone either way; the disk is only given back when the unlink finishes, so
+          // the gauge follows the disk rather than the design.
+          if (runCatching { deleteRecursively(tombstone) }.isFailure) reclaimed = false
         }
         // Only now: the rename is what made the design gone, and bookkeeping that ran ahead of it
         // would leave the store believing a design it still holds was deleted — after which a retry
         // finds nothing, reports success, and the directory comes back on the next open.
         files.remove(designId)
         quarantinedSlugs.remove(designId)
-        storedBytes -= bytes
-        if (storedBytes < 0) storedBytes = 0
+        if (reclaimed) {
+          storedBytes -= bytes
+          if (storedBytes < 0) storedBytes = 0
+        }
       } catch (failure: IOException) {
         throw UiBuilderPersistenceException(
           "cannot remove UI-builder design $designId at $designDirectory",
@@ -507,8 +518,14 @@ internal class FileUiBuilderDesignStore(
         val name = it.fileName.toString()
         // A tombstone is a design that was deleted and whose cleanup did not finish. It is not a
         // design, and the next open is where the disk it holds is given back.
-        if (Files.isDirectory(it) && DELETED_SUFFIX in name) runCatching { deleteRecursively(it) }
-        else if (Files.isDirectory(it)) slugs.add(name)
+        if (Files.isDirectory(it) && DELETED_SUFFIX in name) {
+          // Cleanup that did not finish. Retried here, and while it keeps failing its bytes are
+          // still charged: a gauge that called a tombstone free would report disk nothing can use
+          // as available, and it is the deletes that fail which leave the most of it.
+          if (runCatching { deleteRecursively(it) }.isFailure) {
+            storedBytes += runCatching { directoryBytes(it) }.getOrDefault(0L)
+          }
+        } else if (Files.isDirectory(it)) slugs.add(name)
       }
     }
     return slugs.sorted()
@@ -867,12 +884,23 @@ internal class FileUiBuilderDesignStore(
     return name
   }
 
-  private fun writeHeader(designDirectory: Path, header: StoredDesignHeaderV3) {
+  /**
+   * The header as it will be stored, so its size can be counted before it is written.
+   *
+   * `design.json` is a part like any other and can be substantial — an access list has no bound of
+   * its own — so leaving it out of the budget let a design commit a header that the next open would
+   * then refuse to read, quarantining a design that was accepted.
+   */
+  private fun encodeHeader(header: StoredDesignHeaderV3): ByteArray {
     val payload = json.encodeToJsonElement(header)
     val checksum = sha256(canonicalJson(payload).encodeToByteArray())
-    val bytes =
-      json.encodeToString(StoredPartSerializer, StoredPart(checksum, payload)).encodeToByteArray()
-    val temporary = writeTemporary(designDirectory, HEADER_FILE, bytes)
+    return json
+      .encodeToString(StoredPartSerializer, StoredPart(checksum, payload))
+      .encodeToByteArray()
+  }
+
+  private fun writeHeader(designDirectory: Path, encoded: ByteArray) {
+    val temporary = writeTemporary(designDirectory, HEADER_FILE, encoded)
     replaceAtomically(temporary, designDirectory.resolve(HEADER_FILE))
     forceDirectory(designDirectory)
   }
@@ -1023,21 +1051,23 @@ internal class FileUiBuilderDesignStore(
     val journal = compactJournal(designDirectory, next, generation = 1)
     writeHeader(
       designDirectory,
-      StoredDesignHeaderV3(
-        designId = designId,
-        title = next.document.title,
-        revision = next.document.revision,
-        lastSequence = next.lastSequence,
-        access = next.access,
-        catalogPin = next.document.catalogPin,
-        createdAtEpochMillis = next.createdAtEpochMillis,
-        updatedAtEpochMillis = next.updatedAtEpochMillis,
-        documentFile = documentFile,
-        positionsFile = positionsFile,
-        revisionFiles = revisionFiles,
-        journalFile = journal.file,
-        journalBytes = journal.bytes,
-        journalCompactedBytes = journal.compactedBytes,
+      encodeHeader(
+        StoredDesignHeaderV3(
+          designId = designId,
+          title = next.document.title,
+          revision = next.document.revision,
+          lastSequence = next.lastSequence,
+          access = next.access,
+          catalogPin = next.document.catalogPin,
+          createdAtEpochMillis = next.createdAtEpochMillis,
+          updatedAtEpochMillis = next.updatedAtEpochMillis,
+          documentFile = documentFile,
+          positionsFile = positionsFile,
+          revisionFiles = revisionFiles,
+          journalFile = journal.file,
+          journalBytes = journal.bytes,
+          journalCompactedBytes = journal.compactedBytes,
+        )
       ),
     )
   }
@@ -1188,6 +1218,7 @@ internal class FileUiBuilderDesignStore(
     private const val CHECKSUM_FIELD = "checksumSha256"
     private const val DIGEST_NAME_LENGTH = 16
     private const val MAXIMUM_APPENDED_TAIL = 4
+    private const val MAXIMUM_MARKER_BYTES = 64L * 1_024
 
     private val json = Json { encodeDefaults = true }
     private val journalJson = Json { encodeDefaults = false }

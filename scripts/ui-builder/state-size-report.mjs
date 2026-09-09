@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -318,10 +326,17 @@ function replayJournal(designDirectory, header) {
   if (!header.journalFile) return { live };
   let committed;
   try {
-    committed = readFileSync(join(designDirectory, header.journalFile)).subarray(
-      0,
-      header.journalBytes ?? 0,
-    );
+    // Only the committed prefix, as the store itself reads: a journal with a large uncommitted tail
+    // — a runaway append, an interrupted write — would otherwise exhaust the heap here while the
+    // host it is reporting on carries on serving that design perfectly well.
+    const length = header.journalBytes ?? 0;
+    committed = Buffer.alloc(length);
+    const handle = openSync(join(designDirectory, header.journalFile), "r");
+    try {
+      readSync(handle, committed, 0, length, 0);
+    } finally {
+      closeSync(handle);
+    }
   } catch {
     return { live };
   }

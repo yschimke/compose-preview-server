@@ -135,6 +135,33 @@ class PersistentUiBuilderServiceFileStoreTest {
   }
 
   @Test
+  fun `a quarantined id cannot be created over until it is retired`() {
+    val root = createTempDirectory("ui-builder-service-store")
+    create(service(root), "checkout")
+    Files.writeString(
+      Files.list(designDirectory(root, "checkout"))
+        .use { paths -> paths.filter { it.fileName.toString().startsWith("document-") }.toList() }
+        .single(),
+      "not json",
+    )
+    val reopened = service(root)
+
+    // The quarantined design is absent from the design map but present on the disk, under the
+    // directory this id resolves to: creating over it would write into somebody else's design, and
+    // the id would then answer every request with the stale quarantine.
+    val refused =
+      execute(reopened, owner, UiBuilderServiceRequest.CreateDesign(document("checkout")))
+    val error = assertIs<UiBuilderServiceResponse.Error>(refused)
+    assertTrue(error.error.message.contains("quarantined"), error.error.message)
+
+    // Retiring it is the door, and it opens.
+    assertTrue(reopened.adminDeleteDesign("checkout"))
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(reopened, owner, UiBuilderServiceRequest.CreateDesign(document("checkout")))
+    )
+  }
+
+  @Test
   fun `retiring a design that is neither stored nor quarantined is still false`() {
     val service = service(createTempDirectory("ui-builder-service-store"))
     assertFalse(service.adminDeleteDesign("nothing-here"))

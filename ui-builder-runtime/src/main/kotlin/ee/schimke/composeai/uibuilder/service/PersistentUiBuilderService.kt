@@ -932,6 +932,19 @@ public class PersistentUiBuilderService(
     if (requested.id.isBlank() || requested.id in persisted.designs) {
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "design id is blank or already exists")
     }
+    // A design whose files could not be read is absent from the map above but present on the disk,
+    // under the directory this id resolves to. Creating over it would write into somebody else's
+    // design — and the id would then answer every request with the stale quarantine, while a delete
+    // aimed at the quarantine took the new design with it. Retiring the old one is the door.
+    unusableDesigns[requested.id]
+      ?.takeIf { it.storeQuarantine }
+      ?.let {
+        return serviceError(
+          ServiceErrorCodeV1.BAD_REQUEST,
+          "design ${requested.id} is quarantined and must be retired before the id is reused: " +
+            it.reason,
+        )
+      }
     if (requested.revision != 0L) {
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "new designs must start at revision 0")
     }

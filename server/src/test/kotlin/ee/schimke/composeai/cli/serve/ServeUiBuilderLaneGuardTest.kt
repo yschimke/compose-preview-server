@@ -127,5 +127,8 @@ class ServeUiBuilderLaneGuardTest {
     val warning = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("marker"))
 
     assertTrue(warning.contains(FileUiBuilderStateStorage.STATE_FILE + ".migrated"), warning)
+    // The store may hold designs created since the migration; rolling back without moving them
+    // aside would migrate the old file into the same tree and keep them.
+    assertTrue(warning.contains("designs.v3"), warning)
   }
 }

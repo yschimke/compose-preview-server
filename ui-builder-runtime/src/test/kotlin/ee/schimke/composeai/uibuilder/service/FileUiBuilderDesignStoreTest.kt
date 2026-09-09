@@ -480,6 +480,66 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `a store marker too large to be a marker is refused rather than read`() {
+    val root = createTempDirectory("ui-builder-store")
+    FileUiBuilderDesignStore(root)
+    Files.writeString(root.resolve("store.json"), "{".repeat(200_000))
+
+    val failure = assertFailsWith<UiBuilderPersistenceException> { FileUiBuilderDesignStore(root) }
+
+    assertContains(failure.message.orEmpty(), "store marker")
+  }
+
+  @Test
+  fun `the header counts against the design's own budget`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root, UiBuilderStoreLimits(maximumDesignBytes = 6_000))
+    val base = design("checkout")
+    // An access list has no bound of its own, so `design.json` can be the largest part of a design.
+    // Counted out of the budget, a commit could store a header the next open would refuse to read.
+    val wide =
+      base.copy(
+        access =
+          base.access.copy(
+            actorGrants =
+              (0 until 200).map {
+                DesignActorGrantV1(
+                  actorId = "actor-$it",
+                  role = DesignAccessRoleV1.VIEWER,
+                  allowedActions = listOf(DesignAccessActionV1.READ),
+                  grantedByActorId = "owner",
+                  grantedAtEpochMillis = 1_000,
+                )
+              }
+          )
+      )
+
+    assertFailsWith<UiBuilderPersistenceException> { store.commit("checkout", null, wide) }
+  }
+
+  @Test
+  fun `a tombstone whose cleanup did not finish keeps costing what it holds`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    store.commit("checkout", null, design("checkout"))
+    store.load()
+    // What a delete leaves when the unlink after its rename does not finish.
+    Files.move(
+      root.resolve("designs/${slugOf("checkout")}"),
+      root.resolve("designs/${slugOf("checkout")}${FileUiBuilderDesignStore.DELETED_SUFFIX}1"),
+    )
+
+    val reopened = FileUiBuilderDesignStore(root)
+    reopened.load()
+
+    assertEquals(
+      0,
+      reopened.usage().bytes,
+      "cleanup that succeeds on the next open gives the disk back",
+    )
+  }
+
+  @Test
   fun `removing a design removes its directory`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)
