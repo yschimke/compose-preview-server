@@ -4195,6 +4195,16 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
   .cp-preview-primary { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
     scrollbar-width: thin; padding-bottom: 4px; scroll-padding-inline: 8px; }
   .cp-preview-primary > * { flex: none; }
+  /* The comparisons menu opens as a BOTTOM SHEET here, because the row above cannot be asked not
+     to clip it. `overflow-x: auto` forces the other axis to compute to `auto` as well — `visible`
+     is not available on one axis alone — so an absolutely positioned panel inside this row is
+     clipped by it, and 83 of its 90 pixels were simply gone at 390px: the menu was unreachable on
+     a phone for every preview with two destinations or more.
+     `fixed` takes it out of the row's clip entirely, and the sheet is the shape a phone menu wants
+     anyway. Scoped to this row: Theme and History live in `.cp-head-toggles`, which does not
+     scroll, and their panels are already fine where they are. */
+  .cp-preview-primary .cp-detail-menu-panel { position: fixed; left: 8px; right: 8px; bottom: 8px;
+    top: auto; width: auto; max-width: none; }
   /* The hint is prose, not a chip: left to wrap inside a nowrap row it would size to its own
      max-content and push everything after it off the row's scrollable width for no gain. */
   .cp-preview-primary .cp-mode-hint { white-space: nowrap; }
