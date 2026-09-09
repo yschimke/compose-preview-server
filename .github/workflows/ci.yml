@@ -191,6 +191,13 @@ jobs:
             17
       - run: npm ci
         working-directory: preview-harness
+      # `--with-deps` runs `apt-get update`, which reads every source list on the runner image —
+      # including the two third-party repositories this job installs nothing from. Google's served a
+      # `Packages.gz` whose hash did not match its own `Release` file, `apt-get update` exited 100,
+      # and the browser install failed before a single test ran (#659). Dropping those lists makes
+      # that class of failure impossible rather than unlikely: every dependency Playwright asks for
+      # comes from the Ubuntu archives, and nothing here installs Chrome or the Microsoft packages.
+      - run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/microsoft-prod.list
       - run: npx playwright install --with-deps chromium
         working-directory: preview-harness
       - run: >-
