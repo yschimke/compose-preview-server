@@ -88,6 +88,7 @@ public final class ee/schimke/composeai/uibuilder/service/PersistentUiBuilderSer
 	public fun adminDesignDocument (Ljava/lang/String;)Ljava/lang/String;
 	public fun adminListDesigns ()Ljava/util/List;
 	public fun adminRepairDesign (Ljava/lang/String;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderAdminRepair;
+	public fun adminUnreadableDesigns ()Ljava/util/Set;
 	public fun adminUnusableDesigns ()Ljava/util/Map;
 	public fun diagnostics ()Lee/schimke/composeai/uibuilder/service/UiBuilderServiceDiagnostics;
 	public fun execute (Lee/schimke/composeai/uibuilder/service/UiBuilderServiceCall;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
@@ -202,12 +203,14 @@ public abstract interface class ee/schimke/composeai/uibuilder/service/UiBuilder
 	public fun adminDesignDocument (Ljava/lang/String;)Ljava/lang/String;
 	public abstract fun adminListDesigns ()Ljava/util/List;
 	public fun adminRepairDesign (Ljava/lang/String;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderAdminRepair;
+	public fun adminUnreadableDesigns ()Ljava/util/Set;
 	public fun adminUnusableDesigns ()Ljava/util/Map;
 }
 
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderAdminPort$DefaultImpls {
 	public static fun adminDesignDocument (Lee/schimke/composeai/uibuilder/service/UiBuilderAdminPort;Ljava/lang/String;)Ljava/lang/String;
 	public static fun adminRepairDesign (Lee/schimke/composeai/uibuilder/service/UiBuilderAdminPort;Ljava/lang/String;Ljava/lang/String;)Lee/schimke/composeai/uibuilder/service/UiBuilderAdminRepair;
+	public static fun adminUnreadableDesigns (Lee/schimke/composeai/uibuilder/service/UiBuilderAdminPort;)Ljava/util/Set;
 	public static fun adminUnusableDesigns (Lee/schimke/composeai/uibuilder/service/UiBuilderAdminPort;)Ljava/util/Map;
 }
 

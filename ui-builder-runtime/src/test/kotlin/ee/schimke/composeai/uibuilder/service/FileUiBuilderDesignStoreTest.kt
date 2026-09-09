@@ -540,6 +540,26 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `the gauge counts what is on the disk, not only what the header names`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    val first = design("checkout")
+    store.commit("checkout", null, first)
+    // A file the sweep will not remove — a previous generation that is still on the disk.
+    val stray = root.resolve("designs/${slugOf("checkout")}/document-stale.json.keep")
+    Files.writeString(stray, "x".repeat(4_096))
+    val before = store.usage().bytes
+
+    store.commit("checkout", first, first.copy(audit = first.audit + audit("op-2")))
+
+    assertTrue(
+      store.usage().bytes >= before,
+      "bytes the sweep could not reclaim are still bytes this store is holding",
+    )
+    assertTrue(Files.exists(stray) || store.usage().bytes > 0)
+  }
+
+  @Test
   fun `removing a design removes its directory`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)

@@ -162,6 +162,25 @@ class PersistentUiBuilderServiceFileStoreTest {
   }
 
   @Test
+  fun `a design whose files failed is told apart from one the catalog outgrew`() {
+    val root = createTempDirectory("ui-builder-service-store")
+    create(service(root), "checkout")
+    Files.writeString(
+      Files.list(designDirectory(root, "checkout"))
+        .use { paths -> paths.filter { it.fileName.toString().startsWith("document-") }.toList() }
+        .single(),
+      "not json",
+    )
+
+    val reopened = service(root)
+
+    // The startup warning offers a remedy per design, and download/repair is not one of them here:
+    // there is no document to hand anybody.
+    assertEquals(setOf("checkout"), reopened.adminUnreadableDesigns())
+    assertTrue("checkout" in reopened.adminUnusableDesigns())
+  }
+
+  @Test
   fun `retiring a design that is neither stored nor quarantined is still false`() {
     val service = service(createTempDirectory("ui-builder-service-store"))
     assertFalse(service.adminDeleteDesign("nothing-here"))

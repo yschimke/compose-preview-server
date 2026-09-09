@@ -2751,6 +2751,9 @@ public class PersistentUiBuilderService(
       }
   }
 
+  override fun adminUnreadableDesigns(): Set<String> =
+    unusableDesigns.filterValues { it.storeQuarantine }.keys.toSet()
+
   override fun adminUnusableDesigns(): Map<String, String> =
     unusableDesigns.mapValues { (_, unusable) ->
       unusable.reason

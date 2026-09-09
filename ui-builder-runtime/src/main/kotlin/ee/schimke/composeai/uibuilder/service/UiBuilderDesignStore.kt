@@ -429,8 +429,18 @@ internal class FileUiBuilderDesignStore(
         // that did not happen here.
         runCatching { Files.deleteIfExists(designDirectory.resolve(QUARANTINE_FILE)) }
         runCatching { sweep(designDirectory, header) }
-        storedBytes += bytes - (current?.bytes ?: 0)
-        files[designId] = DesignFiles(header, bytes)
+        // Measured after the sweep rather than taken from the budget: a generation the sweep could
+        // not remove is still on the disk, and a gauge that counted only what the header references
+        // would lose those bytes until a restart. The budget is the right question for what a
+        // design
+        // may *become*; the gauge is the question of what it currently costs.
+        val stored = runCatching {
+          directoryBytes(designDirectory)
+        }
+          .getOrDefault(bytes.toLong())
+          .toLong()
+        storedBytes += stored - (current?.bytes ?: 0)
+        files[designId] = DesignFiles(header, stored)
       } catch (failure: UiBuilderPersistenceException) {
         throw failure
       } catch (failure: IOException) {
@@ -1036,9 +1046,19 @@ internal class FileUiBuilderDesignStore(
     previous: PersistedDesignV1?,
     next: PersistedDesignV1,
   ) {
-    // The migration runs inside `load`'s lock, and `commit` takes the same non-reentrant file lock.
+    // The migration runs inside `load`'s lock, and `commit` takes the same non-reentrant file lock
+    // —
+    // which is why this path exists at all, and why the durability `commit` does has to be repeated
+    // here rather than assumed: the marker is written last and makes the legacy file irrelevant, so
+    // a slug directory whose name never reached the disk would be a design silently dropped by the
+    // one operation that was supposed to preserve every one of them.
     val designDirectory = designsDirectory.resolve(slug(designId))
+    val created = !Files.isDirectory(designDirectory)
     Files.createDirectories(designDirectory)
+    if (created) {
+      forceDirectory(designsDirectory)
+      forceDirectory(directory)
+    }
     val documentFile =
       writePart(designDirectory, DOCUMENT_PART, json.encodeToJsonElement(next.document))
     val positionsFile =
