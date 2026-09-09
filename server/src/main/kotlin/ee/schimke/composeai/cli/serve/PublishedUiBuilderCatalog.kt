@@ -291,9 +291,10 @@ internal object PublishedUiBuilderCatalog {
     component: ComponentRecord,
     policy: UiBuilderComponentPolicy?,
   ): ComponentCapabilityV1 {
-    // The catalog's slots, or failing that the composable's. See `UiBuilderComponentPolicy.slots`.
+    // The catalog's slots, or failing that the composable's. See
+    // `UiBuilderComponentPolicy.slotCapabilities`.
     val slots =
-      policy?.slots?.map { stated ->
+      policy?.slotCapabilities?.map { stated ->
         SlotCapabilityV1(
           name = stated.name,
           cardinality =
@@ -312,9 +313,10 @@ internal object PublishedUiBuilderCatalog {
         }
     val slotNames = slots.map { it.name }.toSet()
     // What the catalog says it offers, and only failing that what its call site happens to take.
-    // See `UiBuilderComponentPolicy.properties` for why the two are not the same question.
+    // See `UiBuilderComponentPolicy.propertyCapabilities` for why the two are not the same
+    // question.
     val properties =
-      policy?.properties?.map { it.toCapability() }
+      policy?.propertyCapabilities?.map { it.toCapability() }
         ?: component.parameters
           .filterNot { it.composableSlot || it.name in slotNames }
           .mapNotNull { parameter ->
@@ -333,7 +335,8 @@ internal object PublishedUiBuilderCatalog {
       traits = policy?.traits.orEmpty(),
       slots = slots,
       properties = properties,
-      modifierCapabilities = policy?.modifiers ?: structuralModifiers(slots.isNotEmpty()),
+      modifierCapabilities =
+        policy?.modifierCapabilities ?: structuralModifiers(slots.isNotEmpty()),
       wasm = wasm(policy?.canvas, policy?.nativeOnly == true, component.symbol.callable),
       code =
         CodeCapabilityV1(
@@ -385,8 +388,9 @@ internal object PublishedUiBuilderCatalog {
             ordered = true,
           )
         },
-      properties = builtin.properties.orEmpty().map { it.toCapability() },
-      modifierCapabilities = builtin.modifiers ?: structuralModifiers(builtin.slots.isNotEmpty()),
+      properties = builtin.propertyCapabilities.orEmpty().map { it.toCapability() },
+      modifierCapabilities =
+        builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()),
       wasm = wasm(builtin.canvas, nativeOnly = false, callable = null),
     )
 
@@ -492,12 +496,12 @@ internal object PublishedUiBuilderCatalog {
     val canvas: String? = null,
     val slots: Map<String, JsonElement> = emptyMap(),
     /**
-     * See [UiBuilderComponentPolicy.properties]. A builtin has no record, so this is its only
-     * source.
+     * See [UiBuilderComponentPolicy.propertyCapabilities]. A builtin has no record, so this is its
+     * only source.
      */
-    val properties: List<UiBuilderPropertyPolicy>? = null,
-    /** See [UiBuilderComponentPolicy.modifiers]. */
-    val modifiers: List<String>? = null,
+    val propertyCapabilities: List<UiBuilderPropertyPolicy>? = null,
+    /** See [UiBuilderComponentPolicy.modifierCapabilities]. */
+    val modifierCapabilities: List<String>? = null,
   )
 
   @Serializable
@@ -523,7 +527,7 @@ internal object PublishedUiBuilderCatalog {
      * So a catalog that means to replace a synthesised shelf states this. Null keeps the derived
      * behaviour, which is right for a catalog whose components ARE their call sites.
      */
-    val properties: List<UiBuilderPropertyPolicy>? = null,
+    val propertyCapabilities: List<UiBuilderPropertyPolicy>? = null,
     /**
      * The slots this component offers a design, or null to derive them from the record.
      *
@@ -538,7 +542,7 @@ internal object PublishedUiBuilderCatalog {
      * `acceptedRoles`, no `acceptedTraits` — so the rules that stop a design putting a scaffold
      * inside a chip's label simply vanish.
      */
-    val slots: List<UiBuilderSlotPolicy>? = null,
+    val slotCapabilities: List<UiBuilderSlotPolicy>? = null,
     /**
      * The modifiers this component accepts, or null for the structural default.
      *
@@ -547,7 +551,7 @@ internal object PublishedUiBuilderCatalog {
      * either: the frozen catalog gives `m3/icon` 17, `m3/text` 18 and `layout/box` 28, and the
      * difference is editorial — whether `fillMaxWidth` makes sense on an icon — not structural.
      */
-    val modifiers: List<String>? = null,
+    val modifierCapabilities: List<String>? = null,
   )
 
   /**
@@ -557,6 +561,17 @@ internal object PublishedUiBuilderCatalog {
    * catalog writes it into `ui-builder.json`, and the protocol type is what the builder is served.
    * They agree field for field today; if the protocol gains a field the catalog cannot state, only
    * this one stays still.
+   */
+  /**
+   * Why these three are `…Capabilities` and not `properties` / `slots` / `modifiers`.
+   *
+   * The generator's own `UiBuilderComponentPolicy` — compose-ai-tools, published in
+   * `preview-discovery`, and the thing that WRITES the file this reads — already spells two of
+   * those names for different types: a component's `slots` is a `Map<String, List<String>>` of
+   * `@BuilderComponent` content hints, and a builtin's `properties` is a `List<JsonElement>`. Both
+   * are empty in every catalog published today, so reusing the names would have decoded fine right
+   * up until the first catalog annotated a slot, and then failed the whole file rather than one
+   * field. Distinct names cost nothing and cannot collide.
    */
   /** One slot a catalog states, mirroring `SlotCapabilityV1`. See [UiBuilderPropertyPolicy]. */
   @Serializable

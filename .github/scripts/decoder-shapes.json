@@ -375,7 +375,7 @@
                 "optional": true,
                 "nullable": true
             },
-            "modifiers": {
+            "modifierCapabilities": {
                 "kind": "stringList",
                 "optional": true,
                 "nullable": true
@@ -384,7 +384,7 @@
                 "kind": "boolean",
                 "optional": true
             },
-            "properties": {
+            "propertyCapabilities": {
                 "kind": "objectList",
                 "members": {
                     "allowedValues": {
@@ -413,7 +413,7 @@
                 "kind": "string",
                 "optional": true
             },
-            "slots": {
+            "slotCapabilities": {
                 "kind": "objectList",
                 "members": {
                     "acceptedRoles": {

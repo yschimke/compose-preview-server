@@ -1,5 +1,5 @@
 {
-  "$comment": "Generated from m3-catalog's authored ui-builder.policy.json and its component record. This is the shape the delivery branch publishes and PublishedUiBuilderCatalog reads.",
+  "$comment": "Generated from m3-catalog's authored ui-builder.policy.json and its component record \u2014 the shape the delivery branch publishes and PublishedUiBuilderCatalog reads. Regenerate whenever the frozen capability document moves.",
   "schema": "compose-ui-builder-catalog/v1",
   "catalog": {
     "id": "m3-catalog",
@@ -56,7 +56,7 @@
           "Action",
           "ToolbarItem"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "style",
             "jsonType": "string",
@@ -98,7 +98,23 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [
+          {
+            "name": "content",
+            "cardinality": {
+              "min": 1
+            },
+            "ordered": true,
+            "acceptedRoles": [
+              "Leaf",
+              "Container"
+            ],
+            "acceptedTraits": [
+              "AnyContent"
+            ]
+          }
+        ],
+        "modifierCapabilities": [
           "size",
           "fillMaxWidth",
           "padding",
@@ -117,22 +133,6 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": [
-          {
-            "name": "content",
-            "cardinality": {
-              "min": 1
-            },
-            "ordered": true,
-            "acceptedRoles": [
-              "Leaf",
-              "Container"
-            ],
-            "acceptedTraits": [
-              "AnyContent"
-            ]
-          }
         ]
       },
       "m3/card": {
@@ -144,7 +144,7 @@
           "ListItem",
           "OverlayContent"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "variant",
             "jsonType": "string",
@@ -185,7 +185,23 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [
+          {
+            "name": "content",
+            "cardinality": {
+              "min": 1
+            },
+            "ordered": true,
+            "acceptedRoles": [
+              "Container",
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "AnyContent"
+            ]
+          }
+        ],
+        "modifierCapabilities": [
           "size",
           "fillMaxWidth",
           "padding",
@@ -209,22 +225,6 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": [
-          {
-            "name": "content",
-            "cardinality": {
-              "min": 1
-            },
-            "ordered": true,
-            "acceptedRoles": [
-              "Container",
-              "Leaf"
-            ],
-            "acceptedTraits": [
-              "AnyContent"
-            ]
-          }
         ]
       },
       "m3/center-aligned-top-app-bar": {
@@ -234,7 +234,7 @@
           "TopBar",
           "ScreenContent"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "containerColor",
             "jsonType": "string",
@@ -259,7 +259,23 @@
             "notes": "Reaches the generated Kotlin as the matching TopAppBarDefaults behavior. The canvas draws the bar pinned whatever this says: a scroll behavior is driven by a nested-scroll connection the document has no scaffold to carry."
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [
+          {
+            "name": "title",
+            "cardinality": {
+              "min": 0,
+              "max": 1
+            },
+            "ordered": false,
+            "acceptedRoles": [
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "TextContent"
+            ]
+          }
+        ],
+        "modifierCapabilities": [
           "fillMaxWidth",
           "padding",
           "alpha",
@@ -277,22 +293,6 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": [
-          {
-            "name": "title",
-            "cardinality": {
-              "min": 0,
-              "max": 1
-            },
-            "ordered": false,
-            "acceptedRoles": [
-              "Leaf"
-            ],
-            "acceptedTraits": [
-              "TextContent"
-            ]
-          }
         ]
       },
       "m3/checkbox": {
@@ -302,7 +302,7 @@
           "SelectionControl",
           "Action"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "checked",
             "jsonType": [
@@ -319,15 +319,15 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [],
+        "modifierCapabilities": [
           "size",
           "padding",
           "align",
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": []
+        ]
       },
       "m3/dialog": {
         "record": "catalog/androidx.compose.material3.AlertDialog_skikoKt.AlertDialog",
@@ -336,7 +336,7 @@
           "DialogContent",
           "OverlayContent"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "containerColor",
             "jsonType": "string",
@@ -354,31 +354,7 @@
             "required": false
           }
         ],
-        "modifiers": [
-          "size",
-          "fillMaxWidth",
-          "padding",
-          "alpha",
-          "offset",
-          "rotate",
-          "scale",
-          "zIndex",
-          "testTag",
-          "width",
-          "height",
-          "widthIn",
-          "heightIn",
-          "aspectRatio",
-          "background",
-          "border",
-          "shadow",
-          "wrapContentSize",
-          "align",
-          "alignHorizontal",
-          "alignVertical",
-          "weight"
-        ],
-        "slots": [
+        "slotCapabilities": [
           {
             "name": "icon",
             "cardinality": {
@@ -449,6 +425,30 @@
               "Action"
             ]
           }
+        ],
+        "modifierCapabilities": [
+          "size",
+          "fillMaxWidth",
+          "padding",
+          "alpha",
+          "offset",
+          "rotate",
+          "scale",
+          "zIndex",
+          "testTag",
+          "width",
+          "height",
+          "widthIn",
+          "heightIn",
+          "aspectRatio",
+          "background",
+          "border",
+          "shadow",
+          "wrapContentSize",
+          "align",
+          "alignHorizontal",
+          "alignVertical",
+          "weight"
         ]
       },
       "m3/filter-chip": {
@@ -458,7 +458,7 @@
           "SelectionControl",
           "ListItem"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "selected",
             "jsonType": [
@@ -488,26 +488,7 @@
             "required": false
           }
         ],
-        "modifiers": [
-          "size",
-          "padding",
-          "alpha",
-          "offset",
-          "rotate",
-          "scale",
-          "zIndex",
-          "testTag",
-          "width",
-          "height",
-          "widthIn",
-          "heightIn",
-          "aspectRatio",
-          "align",
-          "alignHorizontal",
-          "alignVertical",
-          "weight"
-        ],
-        "slots": [
+        "slotCapabilities": [
           {
             "name": "label",
             "cardinality": {
@@ -536,6 +517,25 @@
               "AnyContent"
             ]
           }
+        ],
+        "modifierCapabilities": [
+          "size",
+          "padding",
+          "alpha",
+          "offset",
+          "rotate",
+          "scale",
+          "zIndex",
+          "testTag",
+          "width",
+          "height",
+          "widthIn",
+          "heightIn",
+          "aspectRatio",
+          "align",
+          "alignHorizontal",
+          "alignVertical",
+          "weight"
         ]
       },
       "m3/horizontal-divider": {
@@ -544,7 +544,7 @@
         "traits": [
           "DividerContent"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "thicknessDp",
             "jsonType": "number",
@@ -557,7 +557,8 @@
             "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit."
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [],
+        "modifierCapabilities": [
           "size",
           "fillMaxWidth",
           "padding",
@@ -576,8 +577,7 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": []
+        ]
       },
       "m3/horizontal-floating-toolbar": {
         "record": "catalog/androidx.compose.material3.FloatingToolbarKt.HorizontalFloatingToolbar",
@@ -586,7 +586,7 @@
           "ToolbarContent",
           "OverlayContent"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "expanded",
             "jsonType": "boolean",
@@ -609,7 +609,23 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [
+          {
+            "name": "content",
+            "cardinality": {
+              "min": 1
+            },
+            "ordered": true,
+            "acceptedRoles": [
+              "Container",
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "ToolbarItem"
+            ]
+          }
+        ],
+        "modifierCapabilities": [
           "size",
           "padding",
           "alpha",
@@ -627,22 +643,6 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": [
-          {
-            "name": "content",
-            "cardinality": {
-              "min": 1
-            },
-            "ordered": true,
-            "acceptedRoles": [
-              "Container",
-              "Leaf"
-            ],
-            "acceptedTraits": [
-              "ToolbarItem"
-            ]
-          }
         ]
       },
       "m3/icon": {
@@ -651,7 +651,7 @@
         "traits": [
           "IconContent"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "iconKey",
             "jsonType": "string",
@@ -725,7 +725,8 @@
             "notes": "A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit."
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [],
+        "modifierCapabilities": [
           "size",
           "padding",
           "alpha",
@@ -743,8 +744,7 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": []
+        ]
       },
       "m3/icon-button": {
         "record": "catalog/androidx.compose.material3.IconButtonKt.IconButton",
@@ -754,7 +754,7 @@
           "OverlayControl",
           "ToolbarItem"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "variant",
             "jsonType": "string",
@@ -803,7 +803,23 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [
+          {
+            "name": "content",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            },
+            "ordered": false,
+            "acceptedRoles": [
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "IconContent"
+            ]
+          }
+        ],
+        "modifierCapabilities": [
           "size",
           "padding",
           "alpha",
@@ -821,22 +837,6 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": [
-          {
-            "name": "content",
-            "cardinality": {
-              "min": 1,
-              "max": 1
-            },
-            "ordered": false,
-            "acceptedRoles": [
-              "Leaf"
-            ],
-            "acceptedTraits": [
-              "IconContent"
-            ]
-          }
         ]
       },
       "m3/list-item": {
@@ -846,7 +846,7 @@
           "ListItem",
           "GridItem"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "startAccentColor",
             "jsonType": "string",
@@ -854,26 +854,7 @@
             "notes": "A 3dp bar down the leading edge, drawn behind the item. Empty draws none. A colour, written as {\"type\":\"color\",\"value\":\"#RRGGBB\"} or as {\"type\":\"colorToken\",\"value\":\"primary\"} naming one of statusSemantics.colorTokens. A string wrapper, or a role the canvas does not draw, is refused at commit."
           }
         ],
-        "modifiers": [
-          "fillMaxWidth",
-          "padding",
-          "alpha",
-          "offset",
-          "rotate",
-          "scale",
-          "zIndex",
-          "testTag",
-          "width",
-          "height",
-          "widthIn",
-          "heightIn",
-          "aspectRatio",
-          "align",
-          "alignHorizontal",
-          "alignVertical",
-          "weight"
-        ],
-        "slots": [
+        "slotCapabilities": [
           {
             "name": "headline",
             "cardinality": {
@@ -918,23 +899,8 @@
               "AnyContent"
             ]
           }
-        ]
-      },
-      "m3/primary-tab-row": {
-        "record": "catalog/androidx.compose.material3.TabRowKt.PrimaryTabRow",
-        "displayName": "Tab row",
-        "traits": [
-          "TabBar",
-          "OrderedContent"
         ],
-        "properties": [
-          {
-            "name": "selectedIndex",
-            "jsonType": "integer",
-            "required": true
-          }
-        ],
-        "modifiers": [
+        "modifierCapabilities": [
           "fillMaxWidth",
           "padding",
           "alpha",
@@ -952,8 +918,27 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
+        ]
+      },
+      "m3/primary-tab-row": {
+        "record": "catalog/androidx.compose.material3.TabRowKt.PrimaryTabRow",
+        "displayName": "Tab row",
+        "traits": [
+          "TabBar",
+          "OrderedContent"
         ],
-        "slots": [
+        "propertyCapabilities": [
+          {
+            "name": "selectedIndex",
+            "jsonType": [
+              "integer",
+              "object"
+            ],
+            "required": true,
+            "notes": "An index, or a `state` read of a declared `int` variable \u2014 which is an object, and why `object` is one of the accepted types. It is the variable the tabs write."
+          }
+        ],
+        "slotCapabilities": [
           {
             "name": "tabs",
             "cardinality": {
@@ -967,6 +952,25 @@
               "TabItem"
             ]
           }
+        ],
+        "modifierCapabilities": [
+          "fillMaxWidth",
+          "padding",
+          "alpha",
+          "offset",
+          "rotate",
+          "scale",
+          "zIndex",
+          "testTag",
+          "width",
+          "height",
+          "widthIn",
+          "heightIn",
+          "aspectRatio",
+          "align",
+          "alignHorizontal",
+          "alignVertical",
+          "weight"
         ]
       },
       "m3/progress-indicator": {
@@ -976,7 +980,7 @@
           "Feedback",
           "Decoration"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "variant",
             "jsonType": "string",
@@ -1003,7 +1007,8 @@
             "notes": "Draws the running animation rather than a value. Pinned to its first frame on the canvas, because a render that animates is a render that cannot be diffed."
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [],
+        "modifierCapabilities": [
           "size",
           "fillMaxWidth",
           "padding",
@@ -1011,8 +1016,7 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": []
+        ]
       },
       "m3/radio-button": {
         "record": "catalog/androidx.compose.material3.RadioButtonKt.RadioButton",
@@ -1021,7 +1025,7 @@
           "SelectionControl",
           "Action"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "selected",
             "jsonType": [
@@ -1038,15 +1042,15 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [],
+        "modifierCapabilities": [
           "size",
           "padding",
           "align",
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": []
+        ]
       },
       "m3/search-bar": {
         "record": "catalog/androidx.compose.material3.SearchBarKt.SearchBar",
@@ -1055,7 +1059,7 @@
           "TopBar",
           "SearchContent"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "expanded",
             "jsonType": "boolean",
@@ -1072,27 +1076,7 @@
             "required": false
           }
         ],
-        "modifiers": [
-          "size",
-          "fillMaxWidth",
-          "padding",
-          "alpha",
-          "offset",
-          "rotate",
-          "scale",
-          "zIndex",
-          "testTag",
-          "width",
-          "height",
-          "widthIn",
-          "heightIn",
-          "aspectRatio",
-          "align",
-          "alignHorizontal",
-          "alignVertical",
-          "weight"
-        ],
-        "slots": [
+        "slotCapabilities": [
           {
             "name": "inputField",
             "cardinality": {
@@ -1121,6 +1105,26 @@
               "AnyContent"
             ]
           }
+        ],
+        "modifierCapabilities": [
+          "size",
+          "fillMaxWidth",
+          "padding",
+          "alpha",
+          "offset",
+          "rotate",
+          "scale",
+          "zIndex",
+          "testTag",
+          "width",
+          "height",
+          "widthIn",
+          "heightIn",
+          "aspectRatio",
+          "align",
+          "alignHorizontal",
+          "alignVertical",
+          "weight"
         ]
       },
       "m3/search-input-field": {
@@ -1130,7 +1134,7 @@
           "SearchInput",
           "TextInput"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "value",
             "jsonType": "object",
@@ -1163,27 +1167,7 @@
             "required": false
           }
         ],
-        "modifiers": [
-          "size",
-          "fillMaxWidth",
-          "padding",
-          "alpha",
-          "offset",
-          "rotate",
-          "scale",
-          "zIndex",
-          "testTag",
-          "width",
-          "height",
-          "widthIn",
-          "heightIn",
-          "aspectRatio",
-          "align",
-          "alignHorizontal",
-          "alignVertical",
-          "weight"
-        ],
-        "slots": [
+        "slotCapabilities": [
           {
             "name": "placeholder",
             "cardinality": {
@@ -1230,6 +1214,26 @@
               "Action"
             ]
           }
+        ],
+        "modifierCapabilities": [
+          "size",
+          "fillMaxWidth",
+          "padding",
+          "alpha",
+          "offset",
+          "rotate",
+          "scale",
+          "zIndex",
+          "testTag",
+          "width",
+          "height",
+          "widthIn",
+          "heightIn",
+          "aspectRatio",
+          "align",
+          "alignHorizontal",
+          "alignVertical",
+          "weight"
         ]
       },
       "m3/slider": {
@@ -1239,7 +1243,7 @@
           "SelectionControl",
           "FormField"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "value",
             "jsonType": [
@@ -1271,7 +1275,8 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [],
+        "modifierCapabilities": [
           "size",
           "fillMaxWidth",
           "padding",
@@ -1279,8 +1284,7 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": []
+        ]
       },
       "m3/surface": {
         "record": "catalog/androidx.compose.material3.SurfaceKt.Surface",
@@ -1292,7 +1296,7 @@
           "ListItem",
           "RemoteAuthorable"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "containerColor",
             "jsonType": "string",
@@ -1350,7 +1354,24 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [
+          {
+            "name": "content",
+            "cardinality": {
+              "min": 0
+            },
+            "ordered": true,
+            "acceptedRoles": [
+              "Scaffold",
+              "Container",
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "AnyContent"
+            ]
+          }
+        ],
+        "modifierCapabilities": [
           "size",
           "fillMaxSize",
           "fillMaxWidth",
@@ -1377,23 +1398,6 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": [
-          {
-            "name": "content",
-            "cardinality": {
-              "min": 0
-            },
-            "ordered": true,
-            "acceptedRoles": [
-              "Scaffold",
-              "Container",
-              "Leaf"
-            ],
-            "acceptedTraits": [
-              "AnyContent"
-            ]
-          }
         ]
       },
       "m3/switch": {
@@ -1403,7 +1407,7 @@
           "SelectionControl",
           "Action"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "checked",
             "jsonType": [
@@ -1420,15 +1424,15 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [],
+        "modifierCapabilities": [
           "size",
           "padding",
           "align",
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": []
+        ]
       },
       "m3/tab": {
         "record": "catalog/androidx.compose.material3.TabKt.Tab",
@@ -1437,14 +1441,35 @@
           "TabItem",
           "SelectionControl"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "selected",
-            "jsonType": "boolean",
-            "required": true
+            "jsonType": [
+              "boolean",
+              "string",
+              "object"
+            ],
+            "required": true,
+            "notes": "A flag, or a `stateEquals` read of a declared state variable \u2014 the same shapes `m3/filter-chip` accepts, and for the same reason: a tab whose selection cannot be read from state is a tab that cannot be selected."
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [
+          {
+            "name": "text",
+            "cardinality": {
+              "min": 1,
+              "max": 1
+            },
+            "ordered": false,
+            "acceptedRoles": [
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "TextContent"
+            ]
+          }
+        ],
+        "modifierCapabilities": [
           "padding",
           "alpha",
           "offset",
@@ -1461,22 +1486,6 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": [
-          {
-            "name": "text",
-            "cardinality": {
-              "min": 1,
-              "max": 1
-            },
-            "ordered": false,
-            "acceptedRoles": [
-              "Leaf"
-            ],
-            "acceptedTraits": [
-              "TextContent"
-            ]
-          }
         ]
       },
       "m3/text": {
@@ -1486,7 +1495,7 @@
           "TextContent",
           "RemoteAuthorable"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "text",
             "jsonType": "string",
@@ -1623,7 +1632,8 @@
             "required": false
           }
         ],
-        "modifiers": [
+        "slotCapabilities": [],
+        "modifierCapabilities": [
           "size",
           "fillMaxWidth",
           "padding",
@@ -1642,8 +1652,7 @@
           "alignHorizontal",
           "alignVertical",
           "weight"
-        ],
-        "slots": []
+        ]
       },
       "m3/text-field": {
         "record": "catalog/androidx.compose.material3.TextFieldKt.TextField",
@@ -1652,7 +1661,7 @@
           "TextInput",
           "FormField"
         ],
-        "properties": [
+        "propertyCapabilities": [
           {
             "name": "variant",
             "jsonType": "string",
@@ -1693,16 +1702,7 @@
             "required": false
           }
         ],
-        "modifiers": [
-          "size",
-          "fillMaxWidth",
-          "padding",
-          "align",
-          "alignHorizontal",
-          "alignVertical",
-          "weight"
-        ],
-        "slots": [
+        "slotCapabilities": [
           {
             "name": "label",
             "cardinality": {
@@ -1777,6 +1777,15 @@
               "Action"
             ]
           }
+        ],
+        "modifierCapabilities": [
+          "size",
+          "fillMaxWidth",
+          "padding",
+          "align",
+          "alignHorizontal",
+          "alignVertical",
+          "weight"
         ]
       },
       "catalog/androidx.compose.material3.AppBarKt.BottomAppBar": {
