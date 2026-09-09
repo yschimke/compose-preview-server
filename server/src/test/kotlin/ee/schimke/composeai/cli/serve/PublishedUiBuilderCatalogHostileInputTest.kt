@@ -3,6 +3,8 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlinx.serialization.json.Json
@@ -126,15 +128,7 @@ class PublishedUiBuilderCatalogHostileInputTest {
            "builtins":{"h/widget":{"role":"screen-root"}}}}
         """
           .trimIndent(),
-      "two policies claiming one component id" to
-        """
-        {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
-         "record":{"file":"components.json","schemaVersion":1,"components":2},
-         "statusSemantics":{"componentIdPrefix":"h/",
-           "components":{"h/same":{"record":":hostile/com.example.AKt.Widget"},
-                         "h/same ":{"record":":hostile/com.example.AKt.Nameless"}}}}
-        """
-          .trimIndent(),
+      "a declared id colliding with another component's derived id" to COLLIDING,
       "a record count far larger than the record" to
         """
         {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
@@ -187,7 +181,45 @@ class PublishedUiBuilderCatalogHostileInputTest {
     }
   }
 
+  /**
+   * The record-to-record collision branch, exercised rather than merely named.
+   *
+   * `Widget` carries `componentIds: ["Widgets/Widget"]`, so with no policy it derives `h/widget`.
+   * The policy below hands that **same** id to `Nameless`, and the record is walked in order, so
+   * `Widget` takes `h/widget` first and `Nameless` hits `taken.containsKey(componentId)`.
+   *
+   * A first draft of this case used the keys `"h/same"` and `"h/same "` and proved nothing: the
+   * component ids are the map keys, `compose` does not trim them, so the two are distinct and both
+   * components were admitted. It read like a collision test and exercised no collision — the same
+   * failure mode this whole file exists to catch, one level up. The assertion below is what stops
+   * it recurring: a fixture that stopped colliding would take two components, not one.
+   */
+  @Test
+  fun `the collision fixture actually collides`() {
+    val result = PublishedUiBuilderCatalog.compose(COLLIDING, record, exports)
+    val composed =
+      assertIs<PublishedUiBuilderCatalog.Result.Composed>(
+        result,
+        "the colliding document should still compose — a collision is skipped, not fatal",
+      )
+    assertEquals(
+      listOf("h/widget"),
+      composed.catalog.components.map { it.componentId },
+      "only the first claimant of h/widget may be taken",
+    )
+  }
+
   private companion object {
+    /** See [the collision fixture actually collides]. */
+    val COLLIDING =
+      """
+      {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
+       "record":{"file":"components.json","schemaVersion":1,"components":2},
+       "statusSemantics":{"componentIdPrefix":"h/",
+         "components":{"h/widget":{"record":":hostile/com.example.AKt.Nameless"}}}}
+      """
+        .trimIndent()
+
     /** A `frame` object nested [depth] deep — the shape a recursive-descent parser dies on. */
     fun nest(depth: Int): String = buildString {
       repeat(depth) { append("""{"a":""") }
