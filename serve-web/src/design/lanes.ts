@@ -78,6 +78,18 @@ export function laneOf(value: string | null | undefined): Lane {
     return value === "design" || value === "parallel" ? value : "code";
 }
 
+/**
+ * The lane this sheet can actually SHOW, which is not every lane a URL may name.
+ *
+ * `allowsBaseline` already refuses a `parallel` baseline on a sheet that carries no sibling
+ * renders, on the reasoning that a comparison this server cannot make is not offered at all. The
+ * lane is the same claim from the other side and needs the same answer — otherwise the sheet is
+ * asked to SHOW a source it would refuse to score against.
+ */
+export function laneWithin(lane: Lane, hasParallel: boolean): Lane {
+    return lane === "parallel" && !hasParallel ? "code" : lane;
+}
+
 export function baselineOf(value: string | null | undefined): Baseline {
     return value === "design" || value === "parallel" || value === "code"
         ? value
@@ -234,7 +246,17 @@ export function pageStateFrom(
     },
     hasParallel: boolean,
 ): { lane: Lane; baseline: Baseline; outlines: boolean; unlinked: boolean } {
-    const lane = laneOf(params.lane);
+    // The lane is resolved against the pairing FIRST, because the baseline is then validated
+    // against it. `laneOf` only parses — a stale `?lane=parallel` on an unpaired sheet survives it,
+    // and `allowsBaseline("parallel", "code", false)` then reads `code` as a perfectly legal
+    // baseline opposite a lane that does not exist. Hydration cannot check a `parallel` radio the
+    // page never rendered, so the sheet settles on its checked `code` lane while still holding the
+    // `code` baseline this function just blessed: `applyLane` turns the diff on and scores every
+    // render against itself, a wall of `0.0%` from one stale link.
+    //
+    // `code` rather than `off`, because that is where the sheet lands anyway — the fallback names
+    // it instead of leaving it to whichever radio happened to be checked.
+    const lane = laneWithin(laneOf(params.lane), hasParallel);
     const asked = baselineOf(params.baseline);
     const baseline = allowsBaseline(lane, asked, hasParallel) ? asked : "off";
     const unlinked = params.unlinked === "1";
