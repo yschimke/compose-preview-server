@@ -119,6 +119,7 @@ golden=""
 differences=""
 catalog_id=""
 component_id_prefix=""
+record=""
 strict=0
 
 while [[ $# -gt 0 ]]; do
@@ -128,6 +129,7 @@ while [[ $# -gt 0 ]]; do
     --differences) differences="$2"; shift 2 ;;
     --catalog-id) catalog_id="$2"; shift 2 ;;
     --component-id-prefix) component_id_prefix="$2"; shift 2 ;;
+    --record) record="$2"; shift 2 ;;
     --strict) strict=1; shift ;;
     # The whole leading comment block, not a hardcoded line range: the range was `2,40p` and every
     # paragraph added above `Usage:` pushed the flags further out of it, so `--help` had quietly
@@ -138,7 +140,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${policy}" || -z "${golden}" ]]; then
-  echo "usage: $0 --policy <ui-builder.policy.json> --golden <…-capabilities-v1.json> [--differences <json>] [--catalog-id <id>] [--component-id-prefix <prefix>] [--strict]" >&2
+  echo "usage: $0 --policy <ui-builder.policy.json> --golden <…-capabilities-v1.json> [--differences <json>] [--catalog-id <id>] [--component-id-prefix <prefix>] [--record <components.json>] [--strict]" >&2
   exit 2
 fi
 
@@ -161,10 +163,24 @@ if [[ ! -f "${policy}" ]]; then
   exit 0
 fi
 
-node - "${policy}" "${golden}" "${differences}" "${strict}" "${catalog_id}" "${component_id_prefix}" <<'NODE'
+if [[ -n "${record}" && ! -f "${record}" ]]; then
+  echo "ui-builder-equivalence: no component record at ${record}." >&2
+  exit 2
+fi
+
+node - "${policy}" "${golden}" "${differences}" "${strict}" "${catalog_id}" "${component_id_prefix}" "${record}" <<'NODE'
 const { readFileSync } = require("node:fs");
-const [, , policyPath, goldenPath, differencesPath, strictFlag, expectedId, expectedPrefixArg] =
-  process.argv;
+const [
+  ,
+  ,
+  policyPath,
+  goldenPath,
+  differencesPath,
+  strictFlag,
+  expectedId,
+  expectedPrefixArg,
+  recordPath,
+] = process.argv;
 const expectedPrefix = expectedPrefixArg || "";
 const strict = strictFlag === "1";
 
@@ -950,8 +966,154 @@ if (goldenId === null) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Which COMPONENTS the catalog would put on the shelf (--record).
+//
+// The header above says this gate deliberately does not compare components, because composing a
+// policy with a record is the loader's job and a second implementation of it in bash would disagree
+// with the real one where it mattered. That still holds, and this is not that: it compares the
+// component **ids** only, which need no composition — an id is either declared by the policy or
+// derived from the record entry, and nothing else about the component is read.
+//
+// It exists because a catalog can agree with the frozen one about every catalog-level fact this
+// gate already checks and still put a completely different shelf in front of an author.
+// m3-catalog is that case, measured: it declares no `components`, so every id is derived; its
+// `componentIds` are `Group/Variant` (`Dialog/Basic`, `TopAppBar/Small`) and the derivation takes
+// the leaf, which is the variant. 63 of its 104 components collided, and the 41 that survived
+// shared exactly ONE id with the frozen catalog's 41. Note what passes with flying colours there:
+// any check comparing COUNTS. 41 against 41.
+//
+// `slug` below is the one piece of the loader duplicated here, and it is duplicated rather than
+// approximated: the four cases in `SLUG_PINS` are the same four `PublishedUiBuilderCatalogTest`
+// pins against the Kotlin, so the two implementations are nailed to one table and a drift in either
+// fails a test rather than silently changing what this gate reports.
+const SLUG_PINS = [
+  ["RTLText", "rtl-text"],
+  ["CheckboxButton", "checkbox-button"],
+  ["Button2", "button2"],
+  ["TopAppBar", "top-app-bar"],
+];
+
+const slug = (name) => {
+  let out = "";
+  for (let index = 0; index < name.length; index += 1) {
+    const ch = name[index];
+    if (/[\p{L}\p{N}]/u.test(ch)) {
+      const previous = index > 0 ? name[index - 1] : null;
+      const next = index + 1 < name.length ? name[index + 1] : null;
+      const startsWord =
+        previous !== null &&
+        ch === ch.toUpperCase() &&
+        ch !== ch.toLowerCase() &&
+        ((previous === previous.toLowerCase() && previous !== previous.toUpperCase()) ||
+          /[0-9]/.test(previous) ||
+          (previous === previous.toUpperCase() &&
+            previous !== previous.toLowerCase() &&
+            next !== null &&
+            next === next.toLowerCase() &&
+            next !== next.toUpperCase()));
+      if (startsWord && out.length > 0 && !out.endsWith("-")) out += "-";
+      out += ch.toLowerCase();
+    } else if (out.length > 0 && !out.endsWith("-")) {
+      out += "-";
+    }
+  }
+  return out.replace(/^-+|-+$/g, "");
+};
+
+for (const [name, expected] of SLUG_PINS) {
+  if (slug(name) !== expected) {
+    console.log("");
+    console.log(
+      `  x slug: this gate derives ${JSON.stringify(slug(name))} from ${JSON.stringify(name)}, ` +
+        `but the reader derives ${JSON.stringify(expected)} — the two have drifted and every ` +
+        `component comparison below would be measuring the wrong ids.`,
+    );
+    process.exit(2);
+  }
+}
+
+let componentIdDifferences = 0;
+if (recordPath) {
+  const recordFile = read(recordPath);
+  const semantics = source.statusSemantics ?? source;
+  const prefix = (semantics.componentIdPrefix ?? expectedPrefix ?? "").trim();
+  const declaredComponents = semantics.components ?? {};
+  const byRecordId = new Map(
+    Object.entries(declaredComponents).map(([componentId, entry]) => [entry.record, componentId]),
+  );
+
+  const taken = [];
+  const takenSet = new Set();
+  let collisions = 0;
+  for (const component of recordFile.components ?? []) {
+    let componentId = byRecordId.get(component.canonicalId);
+    if (componentId === undefined) {
+      const first = (component.componentIds ?? [])[0];
+      const leaf = first ? first.split("/").pop() : "";
+      componentId = prefix + slug(leaf && leaf.trim() ? leaf : (component.symbol?.name ?? ""));
+    }
+    if (takenSet.has(componentId)) {
+      collisions += 1;
+    } else {
+      takenSet.add(componentId);
+      taken.push(componentId);
+    }
+  }
+  for (const builtinId of Object.keys(semantics.builtins ?? {})) {
+    if (!takenSet.has(builtinId)) {
+      takenSet.add(builtinId);
+      taken.push(builtinId);
+    }
+  }
+
+  // Only the components this catalog is answerable for. The frozen catalog also carries the
+  // BUILDER's own — `layout/box`, `asset/image`, `remote-compose/*` — which no catalog states, so
+  // comparing against all of them would report a catalog missing what was never its to publish.
+  // Same scoping rule the menu comparison above uses, and for the same reason.
+  const goldenOwned = (golden.components ?? [])
+    .map((component) => component.componentId)
+    .filter((componentId) => (prefix ? componentId.startsWith(prefix) : true));
+  const composedOwned = taken.filter((componentId) =>
+    prefix ? componentId.startsWith(prefix) : true,
+  );
+  const goldenSet = new Set(goldenOwned);
+  const composedSet = new Set(composedOwned);
+  const missing = goldenOwned.filter((componentId) => !composedSet.has(componentId));
+  const extra = composedOwned.filter((componentId) => !goldenSet.has(componentId));
+  const shared = goldenOwned.filter((componentId) => composedSet.has(componentId));
+
+  console.log("");
+  console.log(
+    `  components: ${recordFile.components?.length ?? 0} record entries -> ` +
+      `${taken.length} id(s)${collisions > 0 ? `, ${collisions} collided` : ""}; ` +
+      `${shared.length} of the frozen catalog's ${goldenOwned.length} matched`,
+  );
+  if (collisions > 0) {
+    // Reported on its own line because it is the catalog's bug irrespective of the comparison: two
+    // components claimed one identity, and which survives is an accident of record order.
+    console.log(
+      `  x components: ${collisions} record component(s) collided on an already-taken id`,
+    );
+    componentIdDifferences += 1;
+  }
+  const show = (label, ids) => {
+    if (ids.length === 0) return;
+    componentIdDifferences += 1;
+    console.log(`  x components ${label} (${ids.length}):`);
+    for (const componentId of ids.slice(0, 20)) console.log(`      ${componentId}`);
+    if (ids.length > 20) console.log(`      … and ${ids.length - 20} more`);
+  };
+  show("the frozen catalog has and this one would not offer", missing);
+  show("this one would offer and the frozen catalog does not have", extra);
+  if (componentIdDifferences === 0) {
+    console.log(`  = components: the same ${shared.length} id(s) on both sides`);
+  }
+}
+
 const id = declaredId ?? expectedId ?? "(unidentified)";
-const blocking = differences + gaps + stale + misidentified + misprefixed + unstated;
+const blocking =
+  differences + gaps + stale + misidentified + misprefixed + unstated + componentIdDifferences;
 console.log("");
 console.log(
   `ui-builder-equivalence: ${id} — ${differences} difference(s), ${gaps} unstated fact(s) the ` +
