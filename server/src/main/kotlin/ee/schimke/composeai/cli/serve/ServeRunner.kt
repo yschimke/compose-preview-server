@@ -294,6 +294,17 @@ public class ServeRunner(
    */
   @Volatile private var uiBuilderLaneOpen: Boolean = false
 
+  /**
+   * Whether `/` has anything to show, set alongside [uiBuilderLaneOpen].
+   *
+   * `handleLanding` answers the front-door index when this server publishes catalogs, and otherwise
+   * leases the default session — which on a host with neither is a blank id and a 404. The
+   * only-surface guard deliberately keeps a `--accept-docs` / `--accept-images` /
+   * `--accept-bundles` / `--admin-token` host alive with no session and no catalog, so `/` is
+   * exactly the wrong place to send that host's operator.
+   */
+  @Volatile private var landingServesSomething: Boolean = false
+
   /** Whether [path] is the builder, in either of its two spellings. */
   private fun isUiBuilderPath(path: String): Boolean =
     path == "/ui-builder" || path.startsWith("/ui-builder/")
@@ -310,9 +321,14 @@ public class ServeRunner(
     get() =
       when {
         !isUiBuilderPath(openBrowserPath) -> openBrowserPath
-        !uiBuilderLaneOpen -> "/"
-        openBrowserPath == "/ui-builder" -> "/ui-builder/"
-        else -> openBrowserPath
+        uiBuilderLaneOpen ->
+          if (openBrowserPath == "/ui-builder") "/ui-builder/" else openBrowserPath
+        // The builder is not there. `/` when it has something to show, and `/status` when it does
+        // not: the status page leases no session, so it is the one route a
+        // surviving-but-sessionless
+        // host can always answer, and it names the lanes that survived.
+        landingServesSomething -> "/"
+        else -> "/status"
       }
 
   /**
@@ -3030,6 +3046,8 @@ public class ServeRunner(
     val uiBuilderAppDir = usableUiBuilderDir()
     val uiBuilderLane = openUiBuilderService(uiBuilderAppDir, catalogStore, catalogLoads)
     uiBuilderLaneOpen = uiBuilderLane != null
+    landingServesSomething =
+      defaultSessionId.isNotEmpty() || registry.anySessionId() != null || catalogRefs.isNotEmpty()
     // Fail-soft everywhere else — a host with previews to serve keeps serving them and simply has
     // no builder — but fatal when the builder was the whole server, which is `ui --no-project`.
     // Serving its assets over an absent design API is a builder that opens and cannot save.
