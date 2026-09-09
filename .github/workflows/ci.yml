@@ -130,7 +130,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.20.0
+          node-version: 24.21.0
           cache: npm
           cache-dependency-path: serve-web/package-lock.json
       - run: npm ci
@@ -148,7 +148,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.20.0
+          node-version: 24.21.0
       - run: npm test
         working-directory: scripts/ui-builder
       # The readiness gate's own tests. They existed for several rounds and nothing ran them, which
@@ -165,7 +165,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.20.0
+          node-version: 24.21.0
           cache: npm
           cache-dependency-path: preview-harness/package-lock.json
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
