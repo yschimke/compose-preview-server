@@ -1,5 +1,35 @@
 # Changelog
 
+## [3.22.0](https://github.com/yschimke/compose-preview-server/compare/v3.21.0...v3.22.0) (2026-09-09)
+
+
+### Features
+
+* fold identical sibling runs into one repeat in the Compose export ([#647](https://github.com/yschimke/compose-preview-server/issues/647)) ([bf8e725](https://github.com/yschimke/compose-preview-server/commit/bf8e725fa4b55b214fded13504aaca7b13b019da))
+* **ui-builder:** draw a component placed more than once ([#662](https://github.com/yschimke/compose-preview-server/issues/662)) ([f2bb2f9](https://github.com/yschimke/compose-preview-server/commit/f2bb2f9e504933b48d716608b38a9e98ec5615cb))
+* **ui-builder:** draw a loop over the design's own rows ([#667](https://github.com/yschimke/compose-preview-server/issues/667)) ([8486e02](https://github.com/yschimke/compose-preview-server/commit/8486e0244ee9bfd9bf6724140aff5f3d1039d6f4))
+* **ui-builder:** draw the history as revision thumbnails, and compare two of them ([#658](https://github.com/yschimke/compose-preview-server/issues/658)) ([4ae2423](https://github.com/yschimke/compose-preview-server/commit/4ae24231ebca2997bcdc47f35b7be911313494a2))
+* **ui-builder:** export a loop as its rows and one forEach ([#670](https://github.com/yschimke/compose-preview-server/issues/670)) ([2bb9d07](https://github.com/yschimke/compose-preview-server/commit/2bb9d07cc302684384fcf772b4796a8bc158feb8))
+* **ui-builder:** export a placed component as its own composable ([#665](https://github.com/yschimke/compose-preview-server/issues/665)) ([a45b19b](https://github.com/yschimke/compose-preview-server/commit/a45b19b6ad3bbafd4df3528c963d0f901a32d3f0))
+* **ui-builder:** let a catalog state its own vocabulary, not just its ids ([#664](https://github.com/yschimke/compose-preview-server/issues/664)) ([07a5c8a](https://github.com/yschimke/compose-preview-server/commit/07a5c8a41c6b7c24558c96fc750e2c65c6520616))
+* **ui-builder:** let a tab row be clicked, on the canvas and in the export ([#659](https://github.com/yschimke/compose-preview-server/issues/659)) ([11e3b55](https://github.com/yschimke/compose-preview-server/commit/11e3b55c63f23db6d823854548d9e4111a298678))
+* **ui-builder:** measure the canvas against instance paths, not node ids ([#661](https://github.com/yschimke/compose-preview-server/issues/661)) ([02bccf3](https://github.com/yschimke/compose-preview-server/commit/02bccf337bdd0a5ad3a67f1c83278a0b50a7177e))
+
+
+### Bug Fixes
+
+* **design:** refuse a sibling lane the sheet carries no renders for ([#651](https://github.com/yschimke/compose-preview-server/issues/651)) ([32fe89b](https://github.com/yschimke/compose-preview-server/commit/32fe89b34b6f562f0ddd1beaa0e5b15c4c135164))
+* **serve:** carry the token through the builder redirect, and stop opening a builder that failed ([#645](https://github.com/yschimke/compose-preview-server/issues/645)) ([d629fb6](https://github.com/yschimke/compose-preview-server/commit/d629fb605b6783bd93e05afece51906641e73055))
+* **serve:** compare against the source the chip names, and say which one it is ([#648](https://github.com/yschimke/compose-preview-server/issues/648)) ([6ad6eb1](https://github.com/yschimke/compose-preview-server/commit/6ad6eb1edcf48ac54d177ba7fb2a831963e6166a))
+* **serve:** finish a Back that only reframes, and carry the picked source across the strip ([#650](https://github.com/yschimke/compose-preview-server/issues/650)) ([d8ac29e](https://github.com/yschimke/compose-preview-server/commit/d8ac29eaaed0e84eee2ad0ea0f94a756b7b1aa98))
+* **serve:** keep the moved stage toggles reachable, and withhold them where they do nothing ([#649](https://github.com/yschimke/compose-preview-server/issues/649)) ([e66771e](https://github.com/yschimke/compose-preview-server/commit/e66771e216f31e901823fcd284645deb5da2e3b2))
+* **serve:** open the comparisons menu as a sheet on a phone, where the row clips it ([#646](https://github.com/yschimke/compose-preview-server/issues/646)) ([76188d9](https://github.com/yschimke/compose-preview-server/commit/76188d91b79cee575055a52acc7b0a0e5b72a588))
+* **serve:** rehydrate the inspect layers on Back/Forward ([#652](https://github.com/yschimke/compose-preview-server/issues/652)) ([a854968](https://github.com/yschimke/compose-preview-server/commit/a854968e6bcee1ee19e8a39d73699e108128bc2d))
+* **ui-builder:** decode before comparing, rather than patching one bad shape at a time ([#656](https://github.com/yschimke/compose-preview-server/issues/656)) ([5195a0e](https://github.com/yschimke/compose-preview-server/commit/5195a0edd93fae34edb7802de9181397596e2d93))
+* **ui-builder:** refuse a published catalog whose ids collide in bulk, and compare ids in the gate ([#655](https://github.com/yschimke/compose-preview-server/issues/655)) ([4ca275b](https://github.com/yschimke/compose-preview-server/commit/4ca275b6127c24694cae4a9b92f77efbdb64469d))
+* **ui-builder:** refuse the component exports that would not compile ([#666](https://github.com/yschimke/compose-preview-server/issues/666)) ([4cd7ef0](https://github.com/yschimke/compose-preview-server/commit/4cd7ef0debfdfd043d5848e648f5f742b67eb6ae))
+* **ui-builder:** refuse what the editor cannot author, and give a shelf its place ([#668](https://github.com/yschimke/compose-preview-server/issues/668)) ([0a4093f](https://github.com/yschimke/compose-preview-server/commit/0a4093f98aa6f180b5aa506db764da4c6b9d707f))
+
 ## [3.21.0](https://github.com/yschimke/compose-preview-server/compare/v3.20.0...v3.21.0) (2026-09-09)
 
 
