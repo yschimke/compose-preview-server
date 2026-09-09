@@ -153,16 +153,21 @@
       // Offered on every row, and the only action that works on an unusable one: a design the
       // host cannot serve can still be copied out, repaired against the current rules and
       // created again. Without it, Delete is the operator's only move and the document is lost.
-      var save = document.createElement("button");
-      save.type = "button";
-      save.className = "cp-doc-btn cp-admin-download";
-      save.textContent = "Download JSON";
-      save.addEventListener("click", function () { download(d, save); });
-      actions.appendChild(save);
+      // Except where there is no document to copy out: a design whose own stored files would
+      // not read has none, and a button that cannot work is worse than no button, because
+      // retiring it is then the only move and nothing on the row would say so.
+      if (d.documentAvailable !== false) {
+        var save = document.createElement("button");
+        save.type = "button";
+        save.className = "cp-doc-btn cp-admin-download";
+        save.textContent = "Download JSON";
+        save.addEventListener("click", function () { download(d, save); });
+        actions.appendChild(save);
+      }
       // Only offered where it applies. A design the host serves is edited in the editor, with
       // an actor and a sequence; this is the door that exists because that one is closed to a
       // design the host will not load.
-      if (d.unusableReason) {
+      if (d.unusableReason && d.documentAvailable !== false) {
         var fix = document.createElement("button");
         fix.type = "button";
         fix.className = "cp-doc-btn cp-admin-repair";

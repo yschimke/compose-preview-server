@@ -10,6 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -45,7 +46,13 @@ class ServeUiBuilderAdminRoutingTest {
       }
 
       override fun adminUnusableDesigns(): Map<String, String> =
-        mapOf("shady-goose" to "catalog unavailable for stored design shady-goose")
+        mapOf(
+          "shady-goose" to "catalog unavailable for stored design shady-goose",
+          // A store quarantine: never a design in memory, so never in `adminListDesigns`.
+          "sunken-otter" to "stored design cannot be read: document-a1b2.json is missing",
+        )
+
+      override fun adminUnreadableDesigns(): Set<String> = setOf("sunken-otter")
 
       override fun adminDesignDocument(designId: String): String? =
         designs[designId]?.let { """{"id":"${it.designId}"}""" }
@@ -146,11 +153,13 @@ class ServeUiBuilderAdminRoutingTest {
     )
     val listed = json.getValue("designs").jsonArray.map { it.jsonObject }
     assertEquals(
-      listOf("cheeky-raccoon", "shady-goose"),
+      // The designs the host serves, then the one it holds but cannot read — which has no owner,
+      // no catalog and no revision to report, because it never became a design in memory.
+      listOf("cheeky-raccoon", "shady-goose", "sunken-otter"),
       listed.map { it.getValue("designId").jsonPrimitive.content },
     )
     assertEquals(
-      listOf("operator", "github:someone"),
+      listOf("operator", "github:someone", ""),
       listed.map { it.getValue("ownerActorId").jsonPrimitive.content },
     )
     assertEquals("m3-catalog", listed.first().getValue("catalogSystemId").jsonPrimitive.content)
@@ -163,6 +172,33 @@ class ServeUiBuilderAdminRoutingTest {
     assertTrue(page.contains("X-Compose-Preview-Admin-Token"), "the page sends the admin header")
     assertTrue(page.contains("\"$adminToken\""), "the page re-sends the token it was opened with")
     assertFalse(page.contains("cheeky-raccoon"), "rows are fetched, not baked into the page")
+  }
+
+  @Test
+  fun `a design the host cannot read has a row, and only the action that works on it`() {
+    server = server(ServeUiBuilderAdmin(port, onLog = {}))
+
+    val (code, body) = send("/admin/ui-builder/designs")
+
+    assertEquals(200, code)
+    val listed =
+      Json.parseToJsonElement(body).jsonObject.getValue("designs").jsonArray.map { it.jsonObject }
+    // It is not a design in memory, so nothing would have put it here — and this is the page the
+    // startup warning sends an operator to, offering the one recovery it has.
+    val quarantined = listed.single {
+      it.getValue("designId").jsonPrimitive.content == "sunken-otter"
+    }
+    assertTrue(
+      quarantined.getValue("unusableReason").jsonPrimitive.content.contains("cannot be read"),
+      body,
+    )
+    assertFalse(quarantined.getValue("documentAvailable").jsonPrimitive.boolean, body)
+    // And the quarantine whose document is fine keeps both actions that need one.
+    val outgrown = listed.single { it.getValue("designId").jsonPrimitive.content == "shady-goose" }
+    assertTrue(outgrown.getValue("documentAvailable").jsonPrimitive.boolean, body)
+
+    val (_, page) = send("/admin/ui-builder?token=$adminToken", token = null)
+    assertTrue(page.contains("documentAvailable"), "the page decides the buttons on it")
   }
 
   @Test
@@ -193,7 +229,11 @@ class ServeUiBuilderAdminRoutingTest {
         .map { it.jsonObject }
     assertEquals(
       "catalog unavailable for stored design shady-goose",
-      listed.last().getValue("unusableReason").jsonPrimitive.content,
+      listed
+        .single { it.getValue("designId").jsonPrimitive.content == "shady-goose" }
+        .getValue("unusableReason")
+        .jsonPrimitive
+        .content,
     )
 
     val (code, body) = send("/admin/ui-builder/designs/shady-goose/document")

@@ -36,8 +36,9 @@ class ServeUiBuilderStorageHeadroomTest {
     assertTrue(warning.startsWith("serve: WARNING"), warning)
     assertTrue(warning.contains("26.0 MB of 32.0 MB"), warning)
     assertTrue(warning.contains("81.2%"), warning)
-    assertTrue(warning.contains("saves are refused at the ceiling"), warning)
+    assertTrue(warning.contains("refused when one design outgrows its own budget"), warning)
     assertTrue(warning.contains("retainedRevisionSnapshots"), warning)
+    assertTrue(warning.contains("retainedUndoBytes"), warning)
     assertTrue(warning.contains("state-size-report.mjs"), warning)
   }
 

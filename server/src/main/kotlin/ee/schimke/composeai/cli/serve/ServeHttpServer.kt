@@ -5200,27 +5200,46 @@ class ServeHttpServer(
   private suspend fun RoutingContext.respondAdminUiBuilderDesigns(admin: ServeUiBuilderAdmin) {
     val designs = withContext(Dispatchers.IO) { admin.list() }
     val unusable = withContext(Dispatchers.IO) { admin.unusable() }
+    val unreadable = withContext(Dispatchers.IO) { admin.unreadable() }
+    val listed = designs.map {
+      AdminUiBuilderDesignDto(
+        designId = it.designId,
+        title = it.title,
+        revision = it.revision,
+        catalogSystemId = it.catalogPin.systemId,
+        ownerActorId = it.ownerActorId,
+        collaborators = it.collaborators,
+        createdAtEpochMillis = it.createdAtEpochMillis,
+        updatedAtEpochMillis = it.updatedAtEpochMillis,
+        activeSubscribers = it.activeSubscribers,
+        unusableReason = unusable[it.designId],
+      )
+    }
+    // A design whose own stored files would not read is not in the map above — it never became a
+    // design in memory — so it would have no row here, on the page the startup warning sends an
+    // operator to, offering the one recovery it actually has. It gets a row of its own, with what
+    // is knowable about it: the id it is reported under, and why the host will not serve it.
+    val quarantined =
+      (unusable.keys - designs.map { it.designId }.toSet()).sorted().map { designId ->
+        AdminUiBuilderDesignDto(
+          designId = designId,
+          title = designId,
+          revision = 0,
+          catalogSystemId = "",
+          ownerActorId = "",
+          collaborators = 0,
+          createdAtEpochMillis = 0,
+          updatedAtEpochMillis = 0,
+          activeSubscribers = 0,
+          unusableReason = unusable.getValue(designId),
+          documentAvailable = designId !in unreadable,
+        )
+      }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
       JSON.encodeToString(
         AdminUiBuilderDesignsResponse.serializer(),
-        AdminUiBuilderDesignsResponse(
-          designs =
-            designs.map {
-              AdminUiBuilderDesignDto(
-                designId = it.designId,
-                title = it.title,
-                revision = it.revision,
-                catalogSystemId = it.catalogPin.systemId,
-                ownerActorId = it.ownerActorId,
-                collaborators = it.collaborators,
-                createdAtEpochMillis = it.createdAtEpochMillis,
-                updatedAtEpochMillis = it.updatedAtEpochMillis,
-                activeSubscribers = it.activeSubscribers,
-                unusableReason = unusable[it.designId],
-              )
-            }
-        ),
+        AdminUiBuilderDesignsResponse(designs = listed + quarantined),
       ),
       ContentType.Application.Json,
     )
@@ -15310,6 +15329,13 @@ private data class AdminUiBuilderDesignDto(
    * schema: a client that does not know the field sees exactly what it saw before.
    */
   val unusableReason: String? = null,
+  /**
+   * Whether this design's document can still be produced, and so whether download and repair are
+   * offered. False only for a quarantine where the stored files themselves would not read, which is
+   * the case where retiring it is the only move an operator has. Additive, and true by default: a
+   * client that does not know the field behaves exactly as it did.
+   */
+  val documentAvailable: Boolean = true,
 )
 
 @Serializable

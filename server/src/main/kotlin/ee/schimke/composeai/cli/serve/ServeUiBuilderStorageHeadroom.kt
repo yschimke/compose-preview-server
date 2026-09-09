@@ -20,9 +20,14 @@ internal fun storageUsedPercent(bytes: Long, maximumBytes: Long): Double {
 /**
  * The line to print at startup, or null while there is headroom to spare.
  *
- * Deliberately a warning and never a refusal: a host that would not start because its state file is
+ * Deliberately a warning and never a refusal: a host that would not start because its state is
  * large is the failure mode #568 is about. It names the remedy rather than only the number, because
  * "73% full" tells an operator nothing about what to do with it.
+ *
+ * What the ceiling means changed with the per-design store (#578): the number is a gauge over the
+ * whole store, and what actually refuses a save is a design outgrowing `maximumDesignBytes` — so
+ * the line says so rather than promising a cliff that is no longer there. One design can no longer
+ * stop another from saving, which was the point.
  */
 internal fun uiBuilderStorageWarning(bytes: Long, maximumBytes: Long): String? {
   if (maximumBytes <= 0) return null
@@ -30,7 +35,8 @@ internal fun uiBuilderStorageWarning(bytes: Long, maximumBytes: Long): String? {
   if (used < UI_BUILDER_STORAGE_WARNING_PERCENT) return null
   val megabytes = { value: Long -> String.format("%.1f MB", value / (1024.0 * 1024.0)) }
   return "serve: WARNING UI-builder state is ${megabytes(bytes)} of ${megabytes(maximumBytes)} " +
-    "($used% of the ceiling); saves are refused at the ceiling. Retained revisions are almost all " +
-    "of it — lower UiBuilderServiceLimits.retainedRevisionSnapshots, or run " +
-    "scripts/ui-builder/state-size-report.mjs against the state file to see where the bytes go."
+    "($used% of the ceiling); a save is refused when one design outgrows its own budget, not when " +
+    "the store reaches this. Run scripts/ui-builder/state-size-report.mjs against the state " +
+    "directory to see where the bytes go, or lower UiBuilderServiceLimits." +
+    "retainedRevisionSnapshots and retainedUndoBytes."
 }
