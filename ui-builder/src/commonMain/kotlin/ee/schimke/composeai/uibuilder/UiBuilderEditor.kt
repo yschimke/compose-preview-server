@@ -1999,6 +1999,30 @@ private fun MobileEditorToolbar(
           Text("More")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+          // The host container shapes, on a widget design. Rows rather than the wide toolbar's
+          // menu-inside-a-menu, because this is already the overflow: a second dropdown off one
+          // row is a worse thing to hit on a narrow screen than two rows that read as a pair. The
+          // wide toolbar's control is the same choice, and without these the whole rectangular
+          // frame — canvas and native render — would be unreachable under 840dp.
+          state.document.wearWidgetScaffoldSize()?.let { size ->
+            WearWidgetHostShape.entries.forEach { option ->
+              val spec = size.hostSpec(option)
+              DropdownMenuItem(
+                text = {
+                  Text("${option.label} container · ${spec.frameWidthDp}×${spec.frameHeightDp}dp")
+                },
+                onClick = {
+                  expanded = false
+                  dispatch(UiBuilderEditorEvent.ShowWearWidgetHostShape(option))
+                },
+                leadingIcon = {
+                  if (option == state.wearWidgetHostShape) {
+                    Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(18.dp))
+                  }
+                },
+              )
+            }
+          }
           if (onNewDesign != null) {
             DropdownMenuItem(
               text = { Text("New design") },

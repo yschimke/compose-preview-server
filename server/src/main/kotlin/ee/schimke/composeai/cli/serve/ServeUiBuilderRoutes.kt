@@ -330,9 +330,15 @@ internal fun Route.installUiBuilderRoutes(
       }
       val document = snapshot.snapshot.state.document
       // Which host container to frame a widget in, from the body. Absent means the squircle, which
-      // is what every caller sent before this existed and what the editor's canvas opens on. An
-      // unknown spelling falls back to it rather than 400ing: the shape is a *view*, and refusing
-      // a render over one leaves a pane empty where the honest answer is the default frame.
+      // is what every caller sent before this existed and what the editor's canvas opens on.
+      //
+      // Two different failures, deliberately answered differently. A body that does not *decode* —
+      // malformed JSON, or `hostShape` sent as something other than a string — is a client or
+      // protocol bug, and answering it with a valid-looking render in the default frame hides the
+      // bug behind a picture that looks right; that is a 400. A body that decodes and names a shape
+      // this host does not know is forward compatibility, not a bug — a newer editor naming a
+      // container this build predates — and falls back to the default, because the shape is a
+      // *view* and refusing over one leaves a pane empty where the honest answer is a frame.
       val requestBytes =
         withContext(Dispatchers.IO) {
           call.receiveStream().use { input -> input.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
@@ -341,14 +347,18 @@ internal fun Route.installUiBuilderRoutes(
         call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
         return@post
       }
-      val hostShape =
-        WearWidgetHostShape.fromId(
-          runCatching {
-            val body = requestBytes.toString(StandardCharsets.UTF_8).ifBlank { "{}" }
-            UI_BUILDER_JSON.decodeFromString(NativePreviewRequestV1.serializer(), body).hostShape
-          }
-            .getOrNull()
-        )
+      val decoded =
+        try {
+          val body = requestBytes.toString(StandardCharsets.UTF_8).ifBlank { "{}" }
+          UI_BUILDER_JSON.decodeFromString(NativePreviewRequestV1.serializer(), body)
+        } catch (_: SerializationException) {
+          call.respondText(
+            "native render request body is not valid JSON for this route",
+            status = HttpStatusCode.BadRequest,
+          )
+          return@post
+        }
+      val hostShape = WearWidgetHostShape.fromId(decoded.hostShape)
       val result = withContext(Dispatchers.IO) { nativePreview.render(document, hostShape) }
       when (result) {
         is UiBuilderNativePreviewOutcome.Refused ->
