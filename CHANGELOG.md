@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.21.0](https://github.com/yschimke/compose-preview-server/compare/v3.20.0...v3.21.0) (2026-09-09)
+
+
+### Bug Fixes
+
+* **deploy:** stage the Skiko native the cmp-jvm player links against ([#640](https://github.com/yschimke/compose-preview-server/issues/640)) ([d8ff81c](https://github.com/yschimke/compose-preview-server/commit/d8ff81ceef08a0eec3aa74092ef3e85d404a255c))
+* **serve:** keep a builder failure from killing a serving host, and refuse --catalog-source-root ([#642](https://github.com/yschimke/compose-preview-server/issues/642)) ([443f65a](https://github.com/yschimke/compose-preview-server/commit/443f65a00748c0bbb2a501f63ab8bd230b4cd9b5))
+* **serve:** make ui --no-project self-contained, and let it export ([#639](https://github.com/yschimke/compose-preview-server/issues/639)) ([39dc4de](https://github.com/yschimke/compose-preview-server/commit/39dc4de14372fd09544de6bd824f18236d59c4ce))
+* **ui-builder:** cover the accepted window with conflict history, and keep undo targets ([#637](https://github.com/yschimke/compose-preview-server/issues/637)) ([0697fc9](https://github.com/yschimke/compose-preview-server/commit/0697fc91845e1b23e1d1c989394b9b7e9e37abe0))
+
 ## [3.20.0](https://github.com/yschimke/compose-preview-server/compare/v3.19.0...v3.20.0) (2026-09-09)
 
 
