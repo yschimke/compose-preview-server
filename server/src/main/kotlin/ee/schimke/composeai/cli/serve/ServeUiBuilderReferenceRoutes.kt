@@ -1,10 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
-import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
-import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
-import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -29,10 +26,10 @@ import kotlinx.serialization.SerializationException
  * part of the design document (see [ServeUiBuilderReferenceStore]).
  *
  * **Authorised twice, on purpose.** The route capability decides whether this caller may use the
- * UI-builder at all, and then every request reads the design *through the service, as that actor*,
- * so the design's own access control decides whether there is a design here to attach anything to.
- * Without the second check, an actor with a write capability could park megabytes against a design
- * they cannot open, and enumerate which design ids exist by watching which writes succeeded.
+ * UI-builder at all, and then the design's own access control decides what this actor may do to
+ * *this* design — READ to see what it reproduces, its own WRITE action to change that. Without the
+ * second check, an actor with a write capability could park megabytes against a design they cannot
+ * open, and enumerate which design ids exist by watching which writes succeeded.
  */
 internal fun Route.installUiBuilderReferenceRoutes(
   service: UiBuilderServicePort,
@@ -136,14 +133,21 @@ private suspend fun ApplicationCall.authorizedDesign(
     respondReferenceError(HttpStatusCode.BadRequest, "a design id is required")
     return null
   }
-  val mapping =
-    UiBuilderProtocolMapper.toServiceCall(
-      actor,
-      GetSnapshotRequestV1(designId = designId, revision = null),
-    )
-  val snapshot = (mapping as? ProtocolRequestMapping.Mapped)?.let { service.execute(it.call) }
-  if (snapshot !is UiBuilderServiceResponse.Snapshot) {
+  // READ decides whether there is a design here to answer about; WRITE decides whether this actor
+  // may change what it reproduces. A host write capability is permission to use the door, never
+  // permission to re-aim somebody else's design.
+  val actions = service.designActions(actor, designId)
+  if (actions == null) {
     respondReferenceError(HttpStatusCode.NotFound, "no such design")
+    return null
+  }
+  if (
+    capability == UiBuilderRouteCapability.WRITE && !actions.contains(DesignAccessActionV1.WRITE)
+  ) {
+    respondReferenceError(
+      HttpStatusCode.Forbidden,
+      "the design's own access control does not permit writing it",
+    )
     return null
   }
   return designId
