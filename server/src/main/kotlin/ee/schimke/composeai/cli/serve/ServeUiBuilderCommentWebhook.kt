@@ -599,8 +599,12 @@ private fun StoredCommentAnchor?.summarize(): String? {
     ?.let {
       return "a mark"
     }
-  if (x != null && y != null) {
-    return "a point at ${(x * 100).roundToInt()}%, ${(y * 100).roundToInt()}%"
+  // Read into locals: the shape is published from another module now, so the compiler will not
+  // smart-cast its properties across the null check.
+  val pinX = x
+  val pinY = y
+  if (pinX != null && pinY != null) {
+    return "a point at ${(pinX * 100).roundToInt()}%, ${(pinY * 100).roundToInt()}%"
   }
   return null
 }

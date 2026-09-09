@@ -5,6 +5,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -145,6 +146,40 @@ class ServeUiBuilderLinksStoreTest {
     assertEquals(LinksDeleteResult.FAILED, store.delete("design-1"))
     // And the caller is told, rather than handed a 200 over a record that is still on disk.
     assertIs<LinksWriteResult.Failed>(store.replace("design-1", StoredLinks()))
+  }
+
+  @Test
+  fun `a record written before the shapes moved to contracts still reads`() {
+    // The exact bytes a shipped host wrote into links/<digest>.json before StoredLinks became an
+    // alias for the published DesignLinksV1. The type's name changed and its JSON must not have,
+    // so this is the guard on that: a host upgrading reads what it wrote yesterday.
+    store.replace("design-1", StoredLinks(issue = "https://example.com/placeholder"))
+    val record = Files.list(root).use { it.toList() }.single()
+    Files.writeString(
+      record,
+      """
+      {
+        "schemaVersion": 1,
+        "designId": "design-1",
+        "issue": "https://github.com/yschimke/compose-preview-server/issues/12",
+        "reference": "https://www.figma.com/design/abc123/Checkout?node-id=41-207",
+        "pr": "https://github.com/yschimke/compose-preview-server/pull/598",
+        "thread": "https://example.slack.com/archives/C123/p1700000000",
+        "previous": "checkout-v1",
+        "updatedAtEpochMillis": 1788900000000
+      }
+      """
+        .trimIndent(),
+    )
+
+    val read = assertNotNull(store.read("design-1"))
+    assertEquals("https://github.com/yschimke/compose-preview-server/issues/12", read.issue)
+    assertEquals("https://www.figma.com/design/abc123/Checkout?node-id=41-207", read.reference)
+    assertEquals("https://github.com/yschimke/compose-preview-server/pull/598", read.pr)
+    assertEquals("https://example.slack.com/archives/C123/p1700000000", read.thread)
+    assertEquals("checkout-v1", read.previous)
+    assertEquals(1788900000000L, read.updatedAtEpochMillis)
+    assertEquals(1, read.schemaVersion)
   }
 
   @Test

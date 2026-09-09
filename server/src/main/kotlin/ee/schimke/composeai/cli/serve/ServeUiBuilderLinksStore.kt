@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.protocol.DesignLinksV1
 import java.io.IOException
 import java.net.URI
 import java.net.URISyntaxException
@@ -8,8 +9,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
@@ -284,37 +283,26 @@ class ServeUiBuilderLinksStore(private val root: Path) {
 }
 
 /**
- * The links payload, on the wire and on disk.
+ * The links payload, on the wire and on disk — [DesignLinksV1], published.
  *
- * One shape for both, for the reason [StoredReference] gives: the file *is* the response body, plus
- * the design id and a timestamp somebody looking at the directory will want. [designId] and
- * [updatedAtEpochMillis] are assigned by the host, so a client may send them and they are
- * overwritten rather than trusted.
+ * The shape moved to `compose-preview-contracts` because that is where a wire shape lives, and this
+ * record is one three times over: the response body of the links routes, the payload of
+ * `ui_builder_get_links`, and the file under `links/`. The alias is kept because the name says what
+ * this server does with it — it *stores* the thing — and because every reader here is about storage
+ * rather than about the wire.
+ *
+ * Nothing about the JSON changed. The published type carries the same field names and the same
+ * `@SerialName`, so a host reads the records it wrote before this bump.
+ *
+ * What did not move is everything that is not shape: [ServeUiBuilderLinksStore.refusal] and its URL
+ * rules, the digest that names the file, and [isEmpty] below. The contracts module is shape and
+ * never behaviour, so a question *about* a record is answered here.
  */
-@Serializable
-data class StoredLinks(
-  @SerialName("schemaVersion") val schemaVersion: Int = SCHEMA_VERSION,
-  val designId: String = "",
-  /** The tracker issue this design is for. */
-  val issue: String? = null,
-  /** The frame in the design tool it reproduces — any tool; this host resolves none of them. */
-  val reference: String? = null,
-  /** The pull request that implemented it. */
-  val pr: String? = null,
-  /** The chat thread it is being discussed in, as a permalink. */
-  val thread: String? = null,
-  /** The design on this host that this one continues. */
-  val previous: String? = null,
-  val updatedAtEpochMillis: Long = 0,
-) {
-  /** Whether this record says nothing, which is stored as no record at all. */
-  val isEmpty: Boolean
-    get() = issue == null && reference == null && pr == null && thread == null && previous == null
+typealias StoredLinks = DesignLinksV1
 
-  companion object {
-    const val SCHEMA_VERSION: Int = 1
-  }
-}
+/** Whether this record says nothing, which is stored as no record at all. */
+val StoredLinks.isEmpty: Boolean
+  get() = issue == null && reference == null && pr == null && thread == null && previous == null
 
 /** What [ServeUiBuilderLinksStore.delete] did: removed a record, found none, or could not. */
 enum class LinksDeleteResult {
