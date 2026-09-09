@@ -32,6 +32,14 @@
 #   that differs reports what differs. `--strict` turns that into exit 1, which is what the cutover
 #   PR turns on once a catalog is meant to be equivalent.
 #
+#   VALIDATE a policy. Every catalog-level fact phase 4 consumes is COMPARED here — `code`,
+#   `templates` and `frame.seedDevice` alongside the platform, the surfaces and the frame — but
+#   whether `code.strategy` names a strategy that exists, or a `templates` path resolves to a
+#   document, is the authoring pipeline's question. compose-ai-tools answers it in
+#   `validate-ui-builder-policy.mjs`, and a second implementation of it here would disagree with
+#   the real one exactly where that matters. What this gate says is that the two documents agree,
+#   or that a fact only one of them states has been read.
+#
 # Usage:
 #   .github/scripts/ui-builder-equivalence.sh --policy <path> --golden <path> [--differences <path>]
 #                                             [--catalog-id <id>] [--strict]
@@ -60,8 +68,11 @@
 # check (accepted with `"frozen": null` once somebody has read it — the mirror of the silence rule,
 # because one catches a catalog describing too little and the other a catalog describing something
 # WRONG), a stale or unexplained exemption, a MISSING policy file, a policy that is not this
-# catalog's, and a SCHEMA this gate cannot vouch for on EITHER document — a future major, an
-# unrecognised family, an unreadable string, or none at all where only a capability document may
+# catalog's — a different catalog from the golden's or from `--catalog-id`, or a document naming TWO
+# catalogs because a field that identifies one shape rides as ordinary payload in another — and a
+# SCHEMA this gate cannot vouch for on EITHER document — a future major, an unrecognised family, a
+# family that does not match the shape the document actually has, an unreadable string, or none at
+# all where only a capability document may
 # omit one. Refused
 # outright rather than compared, because the fields this gate happens to recognise in a `…/v2` say
 # nothing about the semantics it does not. The last three matter most: `--strict` is the cutover
@@ -92,7 +103,10 @@ while [[ $# -gt 0 ]]; do
     --differences) differences="$2"; shift 2 ;;
     --catalog-id) catalog_id="$2"; shift 2 ;;
     --strict) strict=1; shift ;;
-    -h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # The whole leading comment block, not a hardcoded line range: the range was `2,40p` and every
+    # paragraph added above `Usage:` pushed the flags further out of it, so `--help` had quietly
+    # stopped printing the flags it exists to document.
+    -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -163,11 +177,29 @@ const SCHEMA_FAMILIES = {
   "compose-ui-builder-catalog": 1,
   "compose-ui-builder-capabilities": 1,
 };
+// And which family each SHAPE must declare. Knowing the family is not the same as the family being
+// the right one: this gate detects the shape STRUCTURALLY — does the document carry
+// `statusSemantics`, does it carry `benchmark` — so an authored policy labelled
+// `compose-ui-builder-catalog/v1` was read as a policy, compared field by field, and passed. The
+// argument is the one already made for an unrecognised family, one step in: the fields this gate
+// happens to recognise say nothing about what the document MEANS, and a document whose label and
+// whose contents disagree has one of the two wrong. Which one is not for this gate to guess.
+const SHAPE_FAMILIES = {
+  "authored ui-builder.policy.json": "compose-ui-builder-policy",
+  "generated ui-builder.json": "compose-ui-builder-catalog",
+  "capability document": "compose-ui-builder-capabilities",
+};
 // BOTH documents, not just the policy. The frozen catalog is regenerated from this repository's own
 // types, so `CatalogCapabilityV1` moving to a v2 is the likelier of the two — and a v1 policy
 // against a v2 golden is exactly as unreadable as the reverse, for the same reason: the fields that
 // still line up say nothing about the ones whose meaning changed.
-const refuseFutureMajor = (label, doc, mustDeclare) => {
+// Which shape each of the two documents is. The golden is a capability document by construction;
+// the source is whichever shape was detected above. Defined before the function that reads it,
+// because a `const` used ahead of its own initialiser is a temporal-dead-zone crash waiting for the
+// first caller who reorders anything.
+const shapeOf = (label) => (label === "catalog" ? shape : "capability document");
+
+const refuseFutureMajor = (label, doc, mustDeclare, expectedFamily) => {
   const schema = doc?.schema;
   // A schema that is PRESENT and unreadable is refused, and a shape that must declare one and does
   // not is refused too. Only `family/version` says anything; `compose-ui-builder-policy-v999`, a
@@ -206,6 +238,14 @@ const refuseFutureMajor = (label, doc, mustDeclare) => {
     console.log(`ui-builder-equivalence: refused — unrecognised schema ${schema}.`);
     return true;
   }
+  if (family !== expectedFamily) {
+    console.log(`  x schema: the ${label} is ${JSON.stringify(schema)}, but its shape is`);
+    console.log(`      ${shapeOf(label)}, which declares '${expectedFamily}'. A document whose`);
+    console.log(`      label and whose contents disagree is not one this gate can vouch for.`);
+    console.log("");
+    console.log(`ui-builder-equivalence: refused — ${schema} on ${shapeOf(label)}.`);
+    return true;
+  }
   if (!Number.isFinite(major)) {
     console.log(`  x schema: the ${label} is ${JSON.stringify(schema)}, whose version is not a`);
     console.log(`      number, so this gate cannot tell whether it understands it.`);
@@ -225,8 +265,8 @@ const refuseFutureMajor = (label, doc, mustDeclare) => {
 // it is. `capabilities` is computed above from the source's own `benchmark`; the golden is a
 // capability document by construction.
 if (
-  refuseFutureMajor("catalog", source, !capabilities) ||
-  refuseFutureMajor("frozen catalog", golden, false)
+  refuseFutureMajor("catalog", source, !capabilities, SHAPE_FAMILIES[shape]) ||
+  refuseFutureMajor("frozen catalog", golden, false, "compose-ui-builder-capabilities")
 ) {
   process.exit(strict ? 1 : 2);
 }
@@ -243,8 +283,24 @@ const fields = [
   ["previewSurfaces", facts.previewSurfaces, semantics.previewSurfaces],
   ["componentMenu.groupOrder", menu?.groupOrder, semantics.componentMenu?.groupOrder],
   ["frame.adapter", facts.frame?.adapter, semantics.frame?.adapter],
+  // The rest of what phase 4 CONSUMES, for the reason `previewSurfaces` is here: a field this list
+  // leaves out cannot differ, and a field that cannot differ is checked by nothing. `seedDevice`
+  // decides which device a new design opens on, `code` is what the emitter is routed through
+  // (`code.strategy`, plus the imports and structural templates a generated screen is built from),
+  // and `templates` names the documents the New-design chooser offers. Each of them would have
+  // reached the cutover unread while `platform` and the shelf order agreed.
+  //
+  // Compared, not validated. Whether `code.strategy` is a strategy that exists, or a `templates`
+  // path resolves to a document, is the authoring pipeline's question and is answered by
+  // compose-ai-tools' `validate-ui-builder-policy.mjs` — a second implementation of it here, in a
+  // gate that only holds the frozen catalog, would disagree with the real one where it matters.
+  // What this gate can say is that the catalog and the frozen catalog do or do not agree, and that
+  // a fact only the catalog states has been read by somebody.
+  ["frame.seedDevice", facts.frame?.seedDevice, semantics.frame?.seedDevice],
   ["frame.geometry", facts.frame?.geometry, semantics.frame?.geometry],
   ["colorTokens.roles", facts.colorTokens?.roles, semantics.colorTokens?.roles],
+  ["code", facts.code, semantics.code],
+  ["templates", facts.templates, semantics.templates],
 ];
 
 // `$comment` keys are prose for a reader and are never part of a comparison — and object keys are
@@ -453,12 +509,46 @@ if (capabilities) {
 // fetched. Silence with no fallback is not resolvable, and under --strict that is a refusal rather
 // than a shrug — an unidentified catalog cannot be asserted ready.
 // Wherever the file names itself: the authored policy's `catalogId`, the generated
-// ui-builder.json's `catalog.id`, or a capability document's `benchmark.catalogSystemId`. The last
-// costs one `??` and stops a file that plainly names its catalog reading as unidentified.
-const declaredId =
-  source.catalogId ?? source.catalog?.id ?? source.benchmark?.catalogSystemId ?? null;
+// ui-builder.json's `catalog.id`, or a capability document's `benchmark.catalogSystemId`.
+//
+// WHICH of them, though, is decided by the shape — not by whichever happens to come first.
+// A chain of `??` reads the fields in the author's order rather than the document's, and a
+// capability document carries `catalog.id` as ordinary payload while being identified by
+// `benchmark.catalogSystemId`. So a document whose benchmark says `remote-m3` and whose
+// `catalog.id` says `wear-m3` was read as `wear-m3`, matched the Wear golden and the Wear
+// `--catalog-id`, and passed `--strict` — the gate approving the wrong catalog through the one
+// check that exists to stop exactly that. The fallback is kept for a shape that leaves its own
+// field empty while plainly naming itself elsewhere, but it is a fallback now and not a race.
+const IDENTIFIERS = {
+  "authored ui-builder.policy.json": ["catalogId", source.catalogId],
+  "generated ui-builder.json": ["catalog.id", source.catalog?.id],
+  "capability document": ["benchmark.catalogSystemId", source.benchmark?.catalogSystemId],
+};
+const namedIds = Object.values(IDENTIFIERS).filter(([, value]) => value !== undefined);
+const [shapeField, shapeId] = IDENTIFIERS[shape];
+// Which field ACTUALLY supplied the id, not which one should have: a shape that leaves its own
+// field empty falls back, and a message naming the empty field would be describing a value it did
+// not carry — the sort of nearly-right report that costs somebody an hour.
+const [identifyingField, declaredId] =
+  shapeId !== undefined ? [shapeField, shapeId] : (namedIds[0] ?? [shapeField, null]);
 const goldenId = golden.benchmark?.catalogSystemId ?? null;
 let misidentified = 0;
+
+// A document that names itself TWICE must agree with itself, whichever name won above. Two
+// identifiers disagreeing is not a difference to waive and not a question of precedence: one of
+// them is wrong, this gate cannot know which, and picking a winner silently is how the wrong
+// catalog gets approved. Reported before the golden is consulted, because it is true regardless of
+// what the golden says.
+const conflicting = namedIds.filter(([, value]) => value !== declaredId);
+for (const [field, value] of conflicting) {
+  misidentified += 1;
+  console.log("");
+  console.log(
+    `  x catalog id: this ${shape} is identified by \`${identifyingField}\` as ` +
+      `${JSON.stringify(declaredId)}, but it also declares \`${field}\`: ${JSON.stringify(value)}`,
+  );
+  console.log(`      A document that names two different catalogs has one of them wrong.`);
+}
 
 // `--catalog-id` is an INDEPENDENT assertion, not a fallback for a silent policy.
 //

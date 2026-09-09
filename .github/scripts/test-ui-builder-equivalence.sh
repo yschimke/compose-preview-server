@@ -383,6 +383,80 @@ grep -q "is obsolete and should be deleted" "${work}/out" ||
 check "a preview surface claiming the wrong backend fails --strict" 1 $?
 grep -q "previewSurfaces" "${work}/out" ||
   { echo "FAIL previewSurfaces not compared"; failures=$((failures + 1)); }
+# The rest of what phase 4 consumes. Each was absent from the comparison, so each could be anything
+# at all while `platform` and the shelf order agreed — the same "a field that cannot differ is not
+# being checked" as previewSurfaces above, three more times.
+cat >"${work}/consumed.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] },
+  "code": { "strategy": "templates" },
+  "templates": ["ui-builder/designs/blank.json"],
+  "frame": { "seedDevice": "id:wearos_small_round" } }
+JSON
+"${gate}" --policy "${work}/consumed.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "the code, templates and seed device a catalog states are reviewed" 1 $?
+for field in "code" "templates" "frame.seedDevice"; do
+  grep -q "x ${field}: stated as" "${work}/out" ||
+    { echo "FAIL ${field} not compared"; failures=$((failures + 1)); }
+done
+
+# And once read, they pass — a fact the frozen catalog has no opinion about is reviewable like any
+# other, not permanently blocking.
+cat >"${work}/consumed-reviewed.json" <<'JSON'
+[ { "field": "code", "why": "the emitter strategy this catalog owns", "frozen": null,
+    "policy": { "strategy": "templates" } },
+  { "field": "templates", "why": "its own seed design", "frozen": null,
+    "policy": ["ui-builder/designs/blank.json"] },
+  { "field": "frame.seedDevice", "why": "the device a new design opens on", "frozen": null,
+    "policy": "id:wearos_small_round" } ]
+JSON
+"${gate}" --policy "${work}/consumed.json" --golden "${work}/golden.json" \
+  --differences "${work}/consumed-reviewed.json" --strict >/dev/null 2>&1
+check "the same three pass once reviewed with \"frozen\": null" 0 $?
+
+# The shape is detected structurally, so a KNOWN family is not the same as the RIGHT one: this is an
+# authored policy wearing the generated catalog's label, and it was compared field by field and
+# passed.
+cat >"${work}/mislabelled.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+"${gate}" --policy "${work}/mislabelled.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a schema family that does not match the shape is refused" 1 $?
+grep -q "but its shape is" "${work}/out" ||
+  { echo "FAIL mislabelled family not reported"; failures=$((failures + 1)); }
+
+# A capability document is identified by `benchmark.catalogSystemId`; `catalog.id` is ordinary
+# payload in that shape. Reading the identifiers in the author's order rather than the document's
+# let the payload shadow the identity, and the gate approved the wrong catalog through the one check
+# that exists to stop exactly that.
+cat >"${work}/two-names.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "remote-m3" }, "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A", "B"] } } }
+JSON
+"${gate}" --policy "${work}/two-names.json" --golden "${work}/golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a document naming two catalogs fails --strict" 1 $?
+grep -q "names two different catalogs" "${work}/out" ||
+  { echo "FAIL conflicting identifiers not reported"; failures=$((failures + 1)); }
+grep -q 'identified by `benchmark.catalogSystemId` as "remote-m3"' "${work}/out" ||
+  { echo "FAIL identity not taken from the shape's own field"; failures=$((failures + 1)); }
+
+# The fallback survives the shape rule: a document whose own shape-field is empty is still
+# identified by whatever it does name. Selecting by shape must not turn "names itself elsewhere"
+# into "unidentified", which is a refusal under --strict.
+cat >"${work}/fallback-name.json" <<'JSON'
+{ "benchmark": { "renderedAt": "never" }, "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A", "B"] } } }
+JSON
+"${gate}" --policy "${work}/fallback-name.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a shape whose own id field is empty is still identified" 0 $?
+grep -q 'catalog id (declared: "wear-m3")' "${work}/out" ||
+  { echo "FAIL fallback identifier not used"; failures=$((failures + 1)); }
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then

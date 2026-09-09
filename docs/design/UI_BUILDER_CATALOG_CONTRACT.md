@@ -462,12 +462,32 @@ Each phase is releasable on its own and leaves every catalog working.
    this catalog's**, and a schema this gate cannot vouch for.
 
    The third is the mirror of the second and was informational for too long: `platformLabel`,
-   `frame.adapter` and `frame.geometry` are absent from every frozen catalog — the server holds them
-   as `when (catalogSystemId)` branches and transcribed constants rather than as data — and phase 4
-   *consumes* all three. An arbitrary label or a wrong padding table would have reached the cutover
-   with the gate reporting ready. They are accepted per catalog with `"frozen": null`, which is
-   somebody recording that they read a value nothing here can check; wear-m3's geometry is reviewed
-   against its own Robolectric probe, which is a stronger check than the golden could have been. `--catalog-id` states which catalog
+   `frame.adapter`, `frame.seedDevice`, `frame.geometry`, `code` and `templates` are absent from
+   every frozen catalog — the server holds them as `when (catalogSystemId)` branches and transcribed
+   constants rather than as data — and phase 4 *consumes* all of them. An arbitrary label or a wrong
+   padding table would have reached the cutover with the gate reporting ready. They are accepted per
+   catalog with `"frozen": null`, which is somebody recording that they read a value nothing here
+   can check; wear-m3's geometry is reviewed against its own Robolectric probe, which is a stronger
+   check than the golden could have been, and both seed devices against the frame this build already
+   opens a new design on.
+
+   The last three of the six were added late, and the reason is worth keeping: a field left out of
+   the comparison **cannot differ**, so `code`, `templates` and `frame.seedDevice` were carried past
+   the gate unread while the platform word and the shelf order agreed. That is the same omission
+   `previewSurfaces` was fixed for. What the gate does *not* do is validate them — whether
+   `code.strategy` names a strategy that exists, or a `templates` path resolves to a document, is
+   compose-ai-tools' `validate-ui-builder-policy.mjs` and a second implementation here would
+   disagree with the real one exactly where it matters.
+
+   Two of the seven read wider than their names suggest. "A policy that is not this catalog's" also
+   covers a document that names **two** catalogs: a capability document is identified by
+   `benchmark.catalogSystemId` while carrying `catalog.id` as ordinary payload, so reading the
+   identifiers in a fixed order rather than by shape let the payload shadow the identity and the
+   gate approve the wrong catalog. "A schema this gate cannot vouch for" also covers a **known
+   family on the wrong shape**: the shape is detected structurally, so an authored policy labelled
+   `compose-ui-builder-catalog/v1` was read as a policy and compared field by field. A document
+   whose label and whose contents disagree has one of the two wrong, and which one is not for this
+   gate to guess. `--catalog-id` states which catalog
    the caller MEANT, and is checked against the golden's id and the policy's alike — so asking for
    one catalog while holding another's policy *and* its matching golden fails, which no comparison
    of those two files against each other can catch. Required for a catalog whose policy defaults its

@@ -148,6 +148,11 @@ jobs:
           node-version: 24.20.0
       - run: npm test
         working-directory: scripts/ui-builder
+      # The readiness gate's own tests. They existed for several rounds and nothing ran them, which
+      # is the failure the gate itself is about: a check nobody invokes is indistinguishable from a
+      # check that passes. The gate is what the cutover PR turns `--strict` on against, so a
+      # regression in it would be discovered by the cutover.
+      - run: .github/scripts/test-ui-builder-equivalence.sh
 
   visual-harness:
     runs-on: ubuntu-latest
