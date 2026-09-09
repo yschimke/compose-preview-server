@@ -1080,6 +1080,28 @@ check "a declared id needs no derivation and passes" 0 $?
 grep -q "= components: the same 2 id(s) on both sides" "${work}/out" ||
   { echo "FAIL declared non-ASCII component not compared"; failures=$((failures + 1)); }
 
+# `statusSemantics.components` must be a MAP. The reader decodes it as
+# `Map<String, UiBuilderComponentPolicy>`, so `null` or an array fails its decode and it refuses the
+# file — while `?? {}` read null as "no policy" and `Object.entries([])` read an array as an empty
+# one, letting the gate compare ids for an artifact the server will not load. Reported by Codex on
+# #655; third instance of "where the reader refuses, so must this".
+for shape in 'null' '[]'; do
+  cat >"${work}/rec-badmap.json" <<JSON
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "components": ${shape},
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+  "${gate}" --policy "${work}/rec-badmap.json" --golden "${work}/rec-golden.json" \
+    --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-ok.json" --strict \
+    >"${work}/out" 2>&1
+  check "a components map that is ${shape} is refused under --record" 1 $?
+  grep -q "not a map of component id to policy" "${work}/out" ||
+    { echo "FAIL malformed components map (${shape}) not reported"; failures=$((failures + 1)); }
+done
+
 # A record path that does not exist is a usage error, not a pass. The same argument as the missing
 # golden: a caller asserting readiness against a file nobody could read has asserted nothing.
 "${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \

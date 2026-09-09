@@ -629,7 +629,26 @@ if (recordPath) {
   // up and nothing else here reads the field for an authored document. `facts` is the policy's
   // block, `semantics` the golden's; I reached for the wrong one.
   const prefix = (facts.componentIdPrefix ?? expectedPrefix ?? "").trim();
-  const declaredComponents = facts.components ?? {};
+  // A plain object, or the artifact is refused. The reader decodes this field as
+  // `Map<String, UiBuilderComponentPolicy>`, so `null` or an array fails its decode and returns
+  // `Unusable` — while `?? {}` read `null` as "no policy" and `Object.entries([])` read an array as
+  // an empty one, both of which let the gate compare ids for an artifact the server will not load.
+  // The same rule as the collision and empty-shelf cases: where the reader refuses, so does this.
+  const rawComponents = facts.components;
+  const componentsIsMap =
+    rawComponents === undefined ||
+    (typeof rawComponents === "object" && rawComponents !== null && !Array.isArray(rawComponents));
+  if (!componentsIsMap) {
+    unservable += 1;
+    console.log("");
+    console.log(
+      `  x components: statusSemantics.components is ${
+        Array.isArray(rawComponents) ? "an array" : JSON.stringify(rawComponents)
+      }, which is not a map of component id to policy — the reader fails to decode this file and ` +
+        `refuses it, so the ids below cannot be compared and this cannot be waived.`,
+    );
+  }
+  const declaredComponents = componentsIsMap ? (rawComponents ?? {}) : {};
   const policyByRecordId = new Map(
     Object.entries(declaredComponents).map(([componentId, entry]) => [
       entry?.record,
