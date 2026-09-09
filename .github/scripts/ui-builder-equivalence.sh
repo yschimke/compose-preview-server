@@ -534,6 +534,8 @@ const SLUG_PINS = [
   ["Widget\u00B2X", "widget-x"],
   // A decimal digit outside ASCII: `isDigit()` is true, so the letter after it starts a word.
   ["A\u0662B", "a\u0662-b"],
+  // A letter that is lowercase by PROPERTY and has no distinct case conversion.
+  ["\u02B0A", "\u02B0-a"],
 ];
 
 // Single-character lowercase, matching Kotlin's `Char.lowercaseChar()`. JavaScript's
@@ -561,8 +563,14 @@ const slug = (name) => {
     if (/[\p{L}\p{Nd}]/u.test(ch)) {
       const previous = index > 0 ? name[index - 1] : null;
       const next = index + 1 < name.length ? name[index + 1] : null;
-      const isUpper = (c) => c !== null && c === c.toUpperCase() && c !== c.toLowerCase();
-      const isLower = (c) => c !== null && c === c.toLowerCase() && c !== c.toUpperCase();
+      // The Unicode case PROPERTIES, not a round-trip heuristic. Kotlin asks `isUpperCase()` and
+      // `isLowerCase()`, which are the `Uppercase`/`Lowercase` properties — and those include
+      // characters with no distinct case conversion at all. U+02B0 MODIFIER LETTER SMALL H is
+      // lowercase to the JVM while both JavaScript conversions return it unchanged, so
+      // `c === c.toLowerCase() && c !== c.toUpperCase()` called it neither: `ʰA` slugged `ʰa` here
+      // and `ʰ-a` in the reader.
+      const isUpper = (c) => c !== null && /\p{Uppercase}/u.test(c);
+      const isLower = (c) => c !== null && /\p{Lowercase}/u.test(c);
       const startsWord =
         previous !== null &&
         isUpper(ch) &&
@@ -643,8 +651,14 @@ if (recordPath) {
   // Declared builtins outside the frozen catalog are already reported per id by `builtins.<id>`
   // above; excluded here so one mistake is not two findings.
   const declaredBuiltinIds = new Set(Object.keys(facts.builtins ?? {}));
+  // Measured against the ids this catalog is ANSWERABLE FOR, not against every id the frozen
+  // catalog happens to carry. A policy mapping a record entry to `layout/box` produces an id the
+  // reader puts on the shelf and the catalog has no business publishing — and `frozenIds.has()`
+  // waved it through, because the golden does contain it as a BUILDER component. Neither missing
+  // nor surplus, so the "same ids on both sides" line printed over it.
+  const ownedSet = new Set(goldenOwned);
   const surplus = [...takenSet].filter(
-    (componentId) => !frozenIds.has(componentId) && !declaredBuiltinIds.has(componentId),
+    (componentId) => !ownedSet.has(componentId) && !declaredBuiltinIds.has(componentId),
   );
 
   // A composition yielding nothing is refused by the reader outright — `taken.isEmpty()` returns

@@ -993,6 +993,27 @@ grep -q "components.other/extra" "${work}/out" ||
 grep -q "the same 2 id(s) on both sides" "${work}/out" &&
   { echo "FAIL claimed agreement while offering an extra component"; failures=$((failures + 1)); }
 
+# An id outside the prefix that the FROZEN catalog does happen to carry — `layout/box` is the
+# builder's own — is still not this catalog's to publish. Checking surplus against every frozen id
+# rather than the owned ones waved it through and printed agreement. Reported by Codex on #655, the
+# same prefix-scoping mistake one predicate along.
+cat >"${work}/rec-builderid.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "components": { "layout/box": { "record": ":w/A.Extra" } },
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+"${gate}" --policy "${work}/rec-builderid.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-outside-record.json" \
+  --strict >"${work}/out" 2>&1
+check "a builder-owned id the catalog publishes is still surplus" 1 $?
+grep -q "components.layout/box" "${work}/out" ||
+  { echo "FAIL builder-owned surplus id not reported"; failures=$((failures + 1)); }
+grep -q "the same 2 id(s) on both sides" "${work}/out" &&
+  { echo "FAIL claimed agreement while publishing a builder id"; failures=$((failures + 1)); }
+
 # A policy excluding every record component composes to nothing, which the reader refuses outright.
 # Waiving each missing frozen id must not make an EMPTY catalog pass readiness.
 cat >"${work}/rec-empty.json" <<'JSON'

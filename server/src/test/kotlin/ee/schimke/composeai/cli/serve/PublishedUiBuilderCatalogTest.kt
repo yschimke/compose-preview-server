@@ -169,6 +169,10 @@ class PublishedUiBuilderCatalogTest {
     // And the word-boundary test asks `isDigit()` too, so a decimal digit outside ASCII starts a
     // word after it — the same predicate as the admission test, which a port can easily split.
     assertEquals("a\u0662-b", PublishedUiBuilderCatalog.slug("A\u0662B"))
+    // `isLowerCase()` is a case PROPERTY, not "differs from its uppercase form": U+02B0 is
+    // lowercase to the JVM and has no distinct case conversion, so a round-trip heuristic — which
+    // is what a port reaches for — calls it neither upper nor lower and misses the boundary.
+    assertEquals("\u02B0-a", PublishedUiBuilderCatalog.slug("\u02B0A"))
   }
 
   @Test
