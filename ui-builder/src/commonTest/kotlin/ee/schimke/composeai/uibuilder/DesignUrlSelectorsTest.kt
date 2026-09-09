@@ -2,6 +2,8 @@ package ee.schimke.composeai.uibuilder
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -171,11 +173,15 @@ class DesignUrlSelectorsTest {
   }
 
   @Test
-  fun `a design id that needs encoding is encoded in the path`() {
-    assertEquals(
-      "/ui-builder/m3-catalog/a%20design",
-      designUrlPath("m3-catalog", "a design"),
-    )
+  fun `a design the path form cannot name is refused rather than mis-linked`() {
+    // The service stores any id that is not blank, but the editor will not start on a design named
+    // in the path unless the id is path-safe. A link builder that encoded such an id would produce
+    // an address its recipient could not open.
+    assertTrue(isDesignUrlPathSafe("m3-catalog", "jetcaster-discover"))
+    assertFalse(isDesignUrlPathSafe("m3-catalog", "hero design"))
+    assertFalse(isDesignUrlPathSafe("m3-catalog", "-leading-dash"))
+    assertFalse(isDesignUrlPathSafe("m3 catalog", "jetcaster-discover"))
+    assertFailsWith<IllegalArgumentException> { designUrlPath("m3-catalog", "hero design") }
   }
 
   @Test

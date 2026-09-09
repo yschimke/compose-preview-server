@@ -1025,9 +1025,16 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
           )
           .takeIf { it.isNotEmpty() }
           ?.joinToString(" "),
-      onCopyDesignLink = { selectors ->
-        copyDesignLink(designUrlPath(config.catalogSystemId, config.designId, selectors))
-      },
+      // Withheld for a design the path form cannot name. The service stores any id that is not
+      // blank, while this editor refuses to start on a design named in the path unless the id is
+      // path-safe, so such a design is reachable only through the legacy query form — and a link
+      // to it would hand its recipient a page that will not open. See [isDesignUrlPathSafe].
+      onCopyDesignLink =
+        if (!isDesignUrlPathSafe(config.catalogSystemId, config.designId)) null
+        else
+          { selectors ->
+            copyDesignLink(designUrlPath(config.catalogSystemId, config.designId, selectors))
+          },
       initialCatalogQuery = catalogQuery,
       initialEnabledPacks = enabledPacks,
       collaborators = collaborators,

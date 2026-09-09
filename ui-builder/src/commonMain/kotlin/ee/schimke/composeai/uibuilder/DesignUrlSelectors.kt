@@ -119,6 +119,25 @@ fun parseDesignUrlSelectors(query: String?, fragment: String?): DesignUrlSelecto
 }
 
 /**
+ * Whether the path form can name this design and catalog at all.
+ *
+ * The two ends of a design URL do not agree on what an id may contain, and this is the seam. The
+ * service stores any id that is not blank; the editor's own entry point refuses to start on a
+ * design *named in the path* unless it matches this, and the app shell routes on the same shape. So
+ * a design created through the protocol, MCP or the Design API with a space in its id is reachable
+ * only through the legacy `?designId=` query — and a path-form link to it would hand its recipient
+ * a 404 or a page that refuses to initialise.
+ *
+ * Asked before the link is offered rather than repaired afterwards: a builder that quietly emitted
+ * a different *kind* of URL for some designs would be a second address form to keep working, and
+ * the one thing worse than no Copy link is a Copy link that produces a broken address.
+ */
+fun isDesignUrlPathSafe(catalogSystemId: String, designId: String): Boolean =
+  PATH_SAFE_ID.matches(catalogSystemId) && PATH_SAFE_ID.matches(designId)
+
+private val PATH_SAFE_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+
+/**
  * The canonical URL for one design, carrying only what a reader needs to see the same thing.
  *
  * Path form rather than the legacy `?designId=` query, absolute-from-root rather than fully
@@ -126,6 +145,9 @@ fun parseDesignUrlSelectors(query: String?, fragment: String?): DesignUrlSelecto
  * against it. The order is fixed (`revision` then `node`, then the fragment) so the same selection
  * always produces the same string: a link copied twice is the same link, which is what makes it
  * safe to paste into a pull request and compare.
+ *
+ * The catalog and design must be [isDesignUrlPathSafe]; a caller asks first and withholds the
+ * affordance rather than handing over an address the editor would refuse to open.
  */
 fun designUrlPath(
   catalogSystemId: String,
@@ -134,6 +156,9 @@ fun designUrlPath(
 ): String {
   require(catalogSystemId.isNotBlank()) { "a design link needs a catalog" }
   require(designId.isNotBlank()) { "a design link needs a design id" }
+  require(isDesignUrlPathSafe(catalogSystemId, designId)) {
+    "the path form cannot name this design; see isDesignUrlPathSafe"
+  }
   val path = "/ui-builder/${encodeUrlComponent(catalogSystemId)}/${encodeUrlComponent(designId)}"
   val query = buildList {
     selectors.revision?.let { add("$DESIGN_URL_REVISION_KEY=$it") }

@@ -162,7 +162,17 @@ exists thanks to a queued insert, duplicate or paste was not in it, and pairing 
 that opens on the missing-layer notice every time. So the host answers per node: the last revision
 it confirmed *that layer was in*.
 
-Where it has no answer, **Copy link is withheld** rather than degraded. Dropping the revision does
+Copy link is also withheld entirely for a design the path form cannot name. The two ends of a design
+URL disagree about what an id may contain: the service stores any id that is not blank, while the
+editor refuses to start on a design *named in the path* unless the id matches
+`[A-Za-z0-9][A-Za-z0-9._-]*`, and the app shell routes on the same shape. A design created through
+the protocol, MCP or the Design API with a space in its id is therefore reachable only through the
+legacy `?designId=` query, and a path-form link to it would hand its recipient a 404 or a page that
+refuses to initialise. Emitting a different *kind* of URL for those designs would be a second
+address form to keep working; the one thing worse than no Copy link is one that copies a broken
+address.
+
+Where it has no revision to name, **Copy link is withheld** rather than degraded. Dropping the revision does
 not rescue such a link — an unpinned link to a layer that is not committed yet opens the living
 design, whose first snapshot on the recipient's side has no such node either, so the editor falls
 back to the root and never reselects it when the edit lands. There is no address that is right, so
