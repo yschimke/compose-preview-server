@@ -60,9 +60,22 @@ internal object LocalUiBuilder {
    * with no build host exits on a render-build failure, and with one builds a project the caller
    * asked not to have — and dropping them silently would make a typed flag vanish. The help text
    * said these "stop applying"; a usage error is the only reading of that which does not lie.
+   *
+   * The first five are exactly what `ServeRunner.needsGradle` keys on — `explicitModule`,
+   * `discover`, `exportPath`, `catalogSourceRoot`, `revisions` — so this list has to move with it
+   * or a projectless invocation reaches discovery through the option nobody thought to name here.
+   * `--variant` is the sixth because it selects an Android build variant to render a module under,
+   * which is meaningless with no module, even though it does not itself request the Gradle path.
    */
   private val PROJECT_FLAGS: List<String> =
-    listOf("--module", "--discover", "--export", "--revisions", "--variant")
+    listOf(
+      "--module",
+      "--discover",
+      "--export",
+      "--catalog-source-root",
+      "--revisions",
+      "--variant",
+    )
 
   /** Where the Gradle plugin's discovery task writes a module's preview outputs. */
   private const val MODULE_PREVIEW_OUTPUT = "build/compose-previews"

@@ -202,6 +202,15 @@ class LocalUiBuilderTest {
       "reported in the order the help lists them, not the order they were typed",
     )
     assertEquals(
+      // `ServeRunner.needsGradle` keys on `catalogSourceRoot`, so a projectless invocation carrying
+      // it reached discovery and exited on a render-build failure — the exact outcome this refusal
+      // exists to prevent, through the one option that was missing from the list.
+      listOf("--catalog-source-root"),
+      LocalUiBuilder.conflictingProjectFlags(
+        listOf(LocalUiBuilder.NO_PROJECT, "--catalog-source-root", "/src/app")
+      ),
+    )
+    assertEquals(
       emptyList(),
       LocalUiBuilder.conflictingProjectFlags(listOf(LocalUiBuilder.NO_PROJECT, "--port", "9000")),
       "flags that mean the same thing with or without a project are not a conflict",
