@@ -104,6 +104,15 @@ jobs:
       - name: Check vendored preview-selector fixtures
         run: ./scripts/sync-preview-selector-fixtures.sh --check
 
+      # The evidence pruner deletes directories, so its keep-rules are what stand between a
+      # scheduled job and somebody's baseline. The age floor especially: it is the only thing keeping
+      # an open PR's evidence, and it cannot be checked by reading the tree.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.21.0
+      - name: Evidence pruner tests
+        run: node --test scripts/prune-evidence.test.mjs
+
   deployment:
     runs-on: ubuntu-latest
     steps:
