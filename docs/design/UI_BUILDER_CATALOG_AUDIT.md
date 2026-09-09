@@ -21,6 +21,13 @@ Four inventories, taken at `d629fb6`:
 | `remote-m3` authoring catalog | [`fixtures/ui-builder/remote-m3-capabilities-v1.json`](fixtures/ui-builder/remote-m3-capabilities-v1.json) | **12** components (3 `remote-m3/*` + 9 borrowed) |
 | What the catalogs publish | `@CatalogComponent` ids in `yschimke/m3-catalog`, `yschimke/wear-m3-catalog` | **58** mobile, **79** Wear, **53** Remote |
 
+**A declared property is not a capability.** Twice in review this audit called something authorable
+because the capability JSON declared a property or a variant value, when no emitter reads it — see
+`scrollIndicator` and the `app` card variant in §6, and `contentWindowInsets` in §4. The check that
+settles it is the emitter (`CapabilityComposeCodeExporter`, `WearScreenCodeExporter`) and the Wasm
+renderer, not the catalog. Every "already authorable" claim below has been through that check;
+treat any that has not as unverified.
+
 The authoring catalogs are the smaller number in every row, which is expected — the builder is not
 obliged to author everything a catalog can render. The question this audit asks is narrower: *for
 each thing an application screen normally contains, can the builder express it at all?* A component
@@ -95,9 +102,24 @@ undo granularity, and drag-reordering. Transforms and clips nest as containers, 
 canvas, the way pack shelves are hidden until a pack is switched on, so the palette does not grow a
 dozen entries for every author.
 
+**Blend mode is a paint property, and it is portable.** It needs no drawing opcode of its own: it
+rides on `PAINT_VALUES` (40, `implemented`) — the checked-in player in
+`server/src/main/resources/rc-player/bundle.js` reads `_PaintBundle.BLEND_MODE` and applies it while
+drawing — and every `DrawScope` call takes a `blendMode` argument. So it belongs in the per-op paint
+block below alongside colour, style, stroke width and alpha.
+
 **Paint is per-op properties, not a stateful `draw/paint` op.** Remote Compose has a stateful paint
 (`PAINT_VALUES`, 40); `DrawScope` takes paint arguments per call. Per-op is the portable subset, and
 it is the only one of the two that a property inspector can show without simulating the document.
+
+**`draw/path` needs structured commands, not an SVG string.** The sketch above shows
+`data: "M0,0 L1,1 …"`, and an opaque string cannot say which of its numbers are dp and which are
+fractions of the canvas — so it cannot honour the coordinate rule in the next paragraph, and a path
+mixing a 12dp inset with a half-width midpoint is unrepresentable. A path should be an ordered list
+of typed commands (`moveTo`, `lineTo`, `cubicTo`, `close`) whose coordinates are the same dp ∪
+fraction union as every other op. `DATA_PATH` (123) / `PATH_CREATE` (159) / `PATH_ADD` (160) already
+model a path as commands rather than text on the Remote side, so this matches the wire rather than
+fighting it.
 
 **Coordinates are a union of dp and fraction.** A `.rc` document is resolution-independent, and the
 `MaterialShapes` precedent above scales a *normalised* polygon by the drawing area rather than
@@ -126,8 +148,8 @@ marks `implemented`. Everything in this table can be authored once and exported 
 
 Deliberately outside the first cut, and why:
 
-- **`drawPoints`, `drawOutline`, blend modes** — Compose-side only; no `implemented` opcode answers
-  them, so authoring one would produce a design that exports on one lane and refuses on the other.
+- **`drawPoints`, `drawOutline`** — Compose-side only; no `implemented` opcode answers them, so
+  authoring one would produce a design that exports on one lane and refuses on the other.
 - **Text on a path** — `DRAW_TEXT_ON_PATH` (53) is `implemented` on the Remote side, but Compose
   publishes no `DrawScope.drawTextOnPath`: reaching it means `nativeCanvas`, which is
   `android.graphics.Canvas` on Android and Skia elsewhere. The editor's canvas is Wasm, so a node
@@ -182,7 +204,7 @@ themselves are not the gap. These are:
 
 | Missing | Why it matters | Notes |
 | --- | --- | --- |
-| **`Spacer`** | The single most common composable in real screens after `Text`. Today the only way to make a gap is a padding modifier on a neighbour, which is not what the code would say. | Trivial: a `Leaf` with `width`/`height`/`weight`. Should be in the first batch of anything. |
+| **`Spacer`** | The single most common composable in real screens after `Text`. A *uniform* gap is already covered — `layout/row.horizontalSpacingDp` and `layout/column.verticalSpacingDp` emit `Arrangement.spacedBy` — so the gap is the rest of what a `Spacer` does: one uneven gap between two of five children, a weighted `Spacer(Modifier.weight(1f))` pushing a trailing item to the end, and matching the structure a hand-written screen would have. | Trivial: a `Leaf` with `width`/`height`/`weight`. |
 | **`HorizontalPager` / `VerticalPager`** | Onboarding, tabs-with-swipe, media carousels, every Wear pager screen. `wear-m3-catalog` publishes `Pager` and three `PageIndicator` components; the builder has none. | Needs a page-count property and a repeated `pages` slot; the `RepeatedContent` trait already exists. |
 | **`FlowRow` / `FlowColumn`** | Chip groups and tag clouds. A chip row that does not wrap is the classic builder-vs-real-screen divergence. | `maxItemsInEachRow`, cross-axis spacing. |
 | **`LazyVerticalStaggeredGrid`** | Photo/feed grids. `lazy-grid` covers the uniform case only. | |
@@ -261,8 +283,8 @@ Twenty-eight types are writable. What is missing splits into two kinds.
 | --- | --- | --- |
 | **`graphicsLayer`** | The one the question named. It is how a real screen does rotation, scale, alpha, translation, `clip`, shadow elevation, `TransformOrigin`, `RenderEffect` and `CompositingStrategy` in one place — and the only way to express several of them at all. The builder has `rotate`, `scale`, `alpha` and `zIndex` as separate modifiers, which cover the easy third. The editor itself uses `graphicsLayer` for its own zoom. | Maps to Remote `MATRIX_*` for the transform subset; the effect subset is Compose-only and would want `wasm`/`code` notes saying so. |
 | **`clickable`** | There is no way to make an arbitrary node interactive. `m3/button` has `onClickAction` and the value-semantics model exists, but a clickable `Card` or `Row` — the most common list pattern there is — is unauthorable. | Should reuse `onClickAction`'s shape, not invent a second one. |
-| **Window-inset padding** | `statusBarsPadding`, `navigationBarsPadding`, `imePadding`, `safeDrawingPadding`, `windowInsetsPadding`. `layout/scaffold` has a `contentWindowInsets` property, so insets are half-modelled; outside a scaffold they are unreachable. | Edge-to-edge is mandatory on Android 15+, so this is not optional for generated code that runs. |
-| **`drawBehind` / `drawWithContent`** | Falls out of §1 for free once draw ops are nodes: a modifier whose argument is a list of `DrawOp` nodes. The exporter already writes `drawBehind` by hand twice. | |
+| **Window-inset padding** | `statusBarsPadding`, `navigationBarsPadding`, `imePadding`, `safeDrawingPadding`, `windowInsetsPadding`. Insets are not half-modelled — they are unreachable everywhere: `layout/scaffold` declares `contentWindowInsets`, but `emitScaffold` never reads it, it is absent from `HANDLED_FIELDS`, and the Wasm renderer hardcodes `WindowInsets(0, 0, 0, 0)` (`UiBuilderRenderer.kt:854`). So the work is the five modifiers **and** making the scaffold property mean something. | Edge-to-edge is mandatory on Android 15+, so this is not optional for generated code that runs. |
+| **`drawBehind` / `drawWithContent`** | Does **not** fall out of §1 for free. A modifier element has no identity and no slots, and `SetModifiersMutationV1` replaces the whole list at once — so a modifier holding child draw nodes cannot carry the node identity, MCP addressing and per-op undo that §1's node model is chosen for. Either give a canvas an ordinary component slot and place it behind its sibling, or change the modifier wire shape — which is `compose-preview-contracts` work, not this repository's. The exporter already writes `drawBehind` by hand twice, so the want is real; the cheap route is not. | |
 | **`wrapContentWidth` / `wrapContentHeight`** | Only `wrapContentSize` exists. | Trivial. |
 | **`defaultMinSize`, `requiredSize`, `sizeIn`** | Constraint-shaping that `size`/`widthIn`/`heightIn` do not cover. | |
 | **`paddingFromBaseline`** | Text alignment in dense lists. | |
@@ -319,12 +341,22 @@ controls (7 ids), `Auth` (5 ids), `Placeholder` (3 ids), `AnimatedText` / `Fadin
 `IconToggleButton` / `TextToggleButton`, `LevelIndicator`,
 `FastScrollingTransformingLazyColumn`, and the one-handed-gesture set.
 
-Four things that *look* absent are already authorable as variant values or scaffold properties, and
-are listed here so a follow-up does not go looking for them: `TimeText` and `ScrollIndicator` are
-`wear-m3/screen-scaffold` properties (`timeText` is emitted as the `AppScaffold(timeText = …)`
-wrapper by `WearScreenCodeExporter`); `ArcProgressIndicator` and `SegmentedCircularProgressIndicator`
-are `wear-m3/progress-indicator.variant` values (`circular\|segmented-circular\|linear\|arc`); and
-`AppCard` / `TitleCard` are `wear-m3/card.variant` values (`title\|app\|outlined\|plain`).
+Three things that *look* absent are genuinely authorable, verified at the emitter and listed here so
+a follow-up does not go looking for them: `TimeText` (`wear-m3/screen-scaffold.timeText`, emitted as
+the `AppScaffold(timeText = …)` wrapper, `WearScreenCodeExporter.kt:150`); `ArcProgressIndicator` and
+`SegmentedCircularProgressIndicator` (`wear-m3/progress-indicator.variant`, `…:1207-1209`); and
+`TitleCard` / `OutlinedCard` (`wear-m3/card.variant`, `…:520,547`).
+
+And two that the capability JSON *declares* but nothing emits — the failure mode this audit's method
+note warns about, caught in review:
+
+- **`ScrollIndicator`** is a `wear-m3/screen-scaffold` property, and the exporter appends
+  `scrollIndicator = { … ScrollIndicator(listState) }` unconditionally (`…:171`) without ever
+  reading it. Every Wear screen gets one and no design can say otherwise, so it is a gap: either
+  honour the boolean or drop the property.
+- **`AppCard`** is a declared `wear-m3/card.variant` value (`app`), but that branch falls through to
+  the `TitleCard` emit. A design asking for an `AppCard` silently gets a `TitleCard`, which is worse
+  than the component being absent.
 
 ---
 
@@ -336,13 +368,15 @@ a release of this repository:
 **This repository, builder-side, no catalog change:**
 - §1 the whole `draw/*` family and its two emitters
 - §2 `Spacer`, pager, flow layouts, staggered grid, drawer, pull-to-refresh, scaffold slots
-- §4 every modifier type and argument
+- §4 every modifier type and argument **except** `drawBehind`/`drawWithContent`, whose child-node
+  form needs a modifier wire shape that only `compose-preview-contracts` can grant — see §4's row
 
 **The catalog contract, once catalogs publish `ui-builder.json`:**
 - §3's variant axes and nine new Material 3 components
-- §5 and §6 in bulk — these are the plan's whole justification, and this audit is the size of the
-  prize: roughly 23 Remote and 49 Wear components that exist, render and are measured today, and
-  that the builder cannot place.
+- §5 and §6 in bulk — these are the plan's whole justification. §5 enumerates at least 32 published
+  Remote ids the builder cannot place and §6 the Wear families; a single subtracted total is not
+  worth quoting, because nine of `remote-m3`'s twelve entries are borrowed foundation ids that map
+  to no published component of that catalog, so `35 − 12` measures nothing.
 
 **Upstream of everything:**
 - §3b — compose-ai-tools#3916 (popup capture), then `@CatalogComponent` annotations in
@@ -358,8 +392,9 @@ builder, and none of them needs a catalog release:
    pattern in existence.
 3. `background`/`border` taking a brush, and `clip` taking `CircleShape` — three argument
    extensions that retire two component-shaped workarounds.
-4. Window-inset padding modifiers — generated code that does not run edge-to-edge correctly is
-   generated code a developer has to fix by hand.
+4. Window-inset padding modifiers, and making `layout/scaffold.contentWindowInsets` reach the
+   emitter and the renderer — generated code that does not run edge-to-edge correctly is generated
+   code a developer has to fix by hand.
 5. The `draw/*` family from §1, portable subset only.
 6. Scaffold `bottomBar` + `floatingActionButton` slots, and the navigation bar and FAB components
    that go in them.
