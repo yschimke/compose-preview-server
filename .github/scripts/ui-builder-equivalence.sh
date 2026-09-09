@@ -34,11 +34,16 @@
 #
 # Usage:
 #   .github/scripts/ui-builder-equivalence.sh --policy <path> --golden <path> [--differences <path>]
-#                                             [--strict]
+#                                             [--catalog-id <id>] [--strict]
 #
 #   --policy       a catalog's authored ui-builder.policy.json, or its generated ui-builder.json
 #                  (a local checkout, or fetched from the delivery branch)
 #   --golden       docs/design/fixtures/ui-builder/<id>-capabilities-v1.json
+#   --catalog-id   the id the caller believes it fetched, checked against the golden's own. Only
+#                  needed when the policy defaults its id from the cover sheet rather than declaring
+#                  one (:remote-catalog does). Semantics never identify a catalog — a second `wear`
+#                  catalog can agree on every compared field — so without an id `--strict` has no
+#                  way to tell "ready" from "you read the wrong file".
 #   --differences  a JSON array of {"field": …, "why": …, "policy": …} — differences somebody has
 #                  read and accepted. `why` is printed, because an unexplained exemption is how a
 #                  gate stops meaning anything; `policy` is the exact value that was reviewed,
@@ -47,11 +52,13 @@
 #                  accidentally emptied menu passing under the entry that reviewed a deliberate
 #                  reordering — so a changed value re-surfaces as a stale exemption.
 #
-# Four things fail under `--strict`: a difference nobody has accepted, a fact the frozen catalog
-# states that the catalog is silent about, a stale or unexplained exemption, and a MISSING policy
-# file. The last two matter most: `--strict` is the cutover asserting readiness, so "there is no
-# catalog here" and "somebody fetched the wrong path" must not both read as success — and the
-# silence check is what stops the gate answering "ready" for a file that describes nothing at all.
+# Five things fail under `--strict`: a difference nobody has accepted, a fact the frozen catalog
+# states that the catalog is silent about, a stale or unexplained exemption, a MISSING policy file,
+# and a policy that is not this catalog's. The last three matter most: `--strict` is the cutover
+# asserting readiness, so "there is no catalog here", "this describes nothing at all" and "somebody
+# fetched a real file belonging to a different catalog" must none of them read as success. An
+# exemption counts as stale once the field it waives AGREES again — it has outlived its
+# disagreement, and leaving it would silently re-authorise a return to the waived value.
 #
 # What `builtins` can and cannot tell you. A declared builtin the frozen catalog carries no
 # component for is a real difference and is reported. The reverse — a builtin the catalog OUGHT to
@@ -64,6 +71,7 @@ set -euo pipefail
 policy=""
 golden=""
 differences=""
+catalog_id=""
 strict=0
 
 while [[ $# -gt 0 ]]; do
@@ -71,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --policy) policy="$2"; shift 2 ;;
     --golden) golden="$2"; shift 2 ;;
     --differences) differences="$2"; shift 2 ;;
+    --catalog-id) catalog_id="$2"; shift 2 ;;
     --strict) strict=1; shift ;;
     -h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -78,7 +87,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${policy}" || -z "${golden}" ]]; then
-  echo "usage: $0 --policy <ui-builder.policy.json> --golden <…-capabilities-v1.json> [--differences <json>] [--strict]" >&2
+  echo "usage: $0 --policy <ui-builder.policy.json> --golden <…-capabilities-v1.json> [--differences <json>] [--catalog-id <id>] [--strict]" >&2
   exit 2
 fi
 
@@ -101,9 +110,9 @@ if [[ ! -f "${policy}" ]]; then
   exit 0
 fi
 
-node - "${policy}" "${golden}" "${differences}" "${strict}" <<'NODE'
+node - "${policy}" "${golden}" "${differences}" "${strict}" "${catalog_id}" <<'NODE'
 const { readFileSync } = require("node:fs");
-const [, , policyPath, goldenPath, differencesPath, strictFlag] = process.argv;
+const [, , policyPath, goldenPath, differencesPath, strictFlag, expectedId] = process.argv;
 const strict = strictFlag === "1";
 
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -128,6 +137,13 @@ const declaredBuiltins = Object.keys(facts.builtins ?? {}).sort();
 const fields = [
   ["platform", facts.platform, semantics.platform],
   ["platformLabel", facts.platformLabel, semantics.platformLabel],
+  // Compared, not merely carried. A surface entry says which backend renders a catalog
+  // authoritatively and how honest the other one is, and phase 4 reads it to CHOOSE the native
+  // backend — so a policy claiming `native.backend: "desktop"` for a catalog the frozen one renders
+  // under Robolectric would change what gets drawn while every other field still matched. Left out
+  // of this list it could not differ, and a field that cannot differ is the omission this gate
+  // already had to be fixed for once.
+  ["previewSurfaces", facts.previewSurfaces, semantics.previewSurfaces],
   ["componentMenu.groupOrder", menu?.groupOrder, semantics.componentMenu?.groupOrder],
   ["frame.adapter", facts.frame?.adapter, semantics.frame?.adapter],
   ["frame.geometry", facts.frame?.geometry, semantics.frame?.geometry],
@@ -194,6 +210,18 @@ for (const [field, stated, frozen] of fields) {
     continue;
   }
   if (canonical(stated) === canonical(frozen)) {
+    // A waiver on a field that now AGREES has outlived the discrepancy it was written for. Skipping
+    // the check here left it valid indefinitely, so if the catalog ever returned to the exact value
+    // that was waived, the old entry would authorise the regression with nobody re-reading it —
+    // which is the failure the reviewed-value pinning exists to prevent, reintroduced by the happy
+    // path. An exemption is only ever as good as the disagreement it describes.
+    if (accepted.has(field)) {
+      stale += 1;
+      console.log(`  ! ${field}: agrees with the frozen catalog, so the accepted difference for it`);
+      console.log(`      is obsolete and should be deleted — it would silently re-authorise a`);
+      console.log(`      return to ${show(accepted.get(field).policy)}`);
+      continue;
+    }
     console.log(`  = ${field}`);
     continue;
   }
@@ -227,14 +255,58 @@ if (declaredBuiltins.length > 0) {
   }
 }
 
-const id = source.catalogId ?? source.catalog?.id ?? "(defaulted from the cover sheet)";
-const blocking = differences + gaps + stale;
+// WHICH CATALOG IS THIS? Asked before anything above is believed.
+//
+// Every comparison so far has been of catalog-level SEMANTICS, and semantics do not identify a
+// catalog: a second `wear` catalog with the same shelves, roles and frame agrees with this golden
+// on every enumerated field while being a different catalog entirely. The id was printed and never
+// checked, so `--strict` — whose whole job is to assert "this catalog is ready to replace that
+// frozen one" — could answer yes about the wrong file. That is the same failure as the missing
+// policy the header already argues about, arriving through a path that exists rather than one that
+// does not.
+//
+// The authored shape may legitimately be silent: :remote-catalog defaults its id from its cover
+// sheet's `system` on purpose. So `--catalog-id` lets the caller supply the id it believes it
+// fetched. Silence with no fallback is not resolvable, and under --strict that is a refusal rather
+// than a shrug — an unidentified catalog cannot be asserted ready.
+const declaredId = source.catalogId ?? source.catalog?.id ?? null;
+const statedId = declaredId ?? (expectedId ? expectedId : null);
+const goldenId = golden.benchmark?.catalogSystemId ?? null;
+let misidentified = 0;
+if (goldenId === null) {
+  // The golden names no catalog, so there is nothing to be wrong about. Silent on purpose: this is
+  // the shape of a hand-written fixture, not of a real frozen catalog.
+} else if (statedId === null) {
+  misidentified += 1;
+  console.log("");
+  console.log(
+    `  ? catalog id: the policy declares none and no --catalog-id was given, so there is nothing ` +
+      `to check against the frozen catalog's ${JSON.stringify(goldenId)}`,
+  );
+} else if (statedId !== goldenId) {
+  misidentified += 1;
+  console.log("");
+  console.log(`  x catalog id: this is ${JSON.stringify(statedId)}, the golden is ${JSON.stringify(goldenId)}`);
+  console.log(`      Not a difference to waive — a policy for another catalog was read.`);
+} else {
+  const how = declaredId !== null ? "declared" : "supplied with --catalog-id";
+  console.log(`  = catalog id (${how}: ${JSON.stringify(statedId)})`);
+}
+
+const id = statedId ?? "(unidentified)";
+const blocking = differences + gaps + stale + misidentified;
 console.log("");
 console.log(
   `ui-builder-equivalence: ${id} — ${differences} difference(s), ${gaps} unstated fact(s) the ` +
     `frozen catalog has, ${stale} unusable exemption(s), ${unstated} field(s) the frozen catalog ` +
     `has no opinion about.`,
 );
+if (misidentified > 0 && strict) {
+  console.log("`--strict` asserts THIS catalog is ready to replace THAT frozen one, which cannot be");
+  console.log("asserted about a catalog nobody has identified. Pass --catalog-id when the policy");
+  console.log("defaults its id from the cover sheet.");
+  process.exit(1);
+}
 if (blocking > 0 && strict) {
   console.log("A difference is either wrong, or deliberate and belongs in the list passed with");
   console.log("--differences — with a `why`, the `policy` value reviewed AND the `frozen` value it");

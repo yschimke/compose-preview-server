@@ -4,6 +4,8 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -106,7 +108,7 @@ class SynthesisedCatalogGoldenTest {
   private fun catalog(systemId: String): JsonObject {
     val catalog = executor.listCatalogs().single { it.benchmark.catalogSystemId == systemId }
     val encoded = pretty.encodeToString(catalog)
-    return sortKeys(pretty.parseToJsonElement(encoded) as JsonObject)
+    return sortKeys(pretty.parseToJsonElement(encoded) as JsonObject) as JsonObject
   }
 
   private fun JsonObject.catalogSystemId(): String? =
@@ -118,17 +120,23 @@ class SynthesisedCatalogGoldenTest {
   /**
    * Key order is not information here, and an unsorted golden would diff on it.
    *
-   * Only objects are sorted; array order is meaningful everywhere it appears in a catalog (shelf
-   * order, allowed values, modifier capabilities) and reordering one would hide a real change.
+   * Object keys are sorted at every depth, **including inside arrays** — a catalog's components,
+   * properties and slots all live in arrays of objects, so stopping at the array boundary left
+   * hundreds of objects per golden ordered by whatever their serializer emitted. Reordering a field
+   * in a data class would then rewrite the goldens without changing a single fact, which is the
+   * churn this sorting exists to prevent.
+   *
+   * ELEMENT order is untouched, and that is a different thing from key order. Shelf order, allowed
+   * values and modifier capabilities are all information carried by an array's sequence, and
+   * sorting one would hide a real change.
    */
-  private fun sortKeys(value: JsonObject): JsonObject = buildJsonObject {
-    value.keys.sorted().forEach { key ->
-      when (val child = value.getValue(key)) {
-        is JsonObject -> put(key, sortKeys(child))
-        else -> put(key, child)
-      }
+  private fun sortKeys(value: JsonElement): JsonElement =
+    when (value) {
+      is JsonObject ->
+        buildJsonObject { value.keys.sorted().forEach { put(it, sortKeys(value.getValue(it))) } }
+      is JsonArray -> JsonArray(value.map { sortKeys(it) })
+      else -> value
     }
-  }
 
   private fun goldenFor(systemId: String): File {
     // A unit test runs with the module directory as its working directory; `..` reaches the

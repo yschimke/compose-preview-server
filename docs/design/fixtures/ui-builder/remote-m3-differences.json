@@ -1,7 +1,7 @@
 [
   {
     "field": "componentMenu.groupOrder",
-    "why": "Deliberate, and here the frozen side is not even a Remote Compose taxonomy: `remoteM3Catalog` never declares a componentMenu of its own, so it inherits the packaged Material 3 one wholesale \u2014 Scaffolds, Layout, Navigation, Text inputs \u2014 shelf names for a catalog of widget containers, shaders and typefaces. The policy states :remote-catalog's own @CatalogComponent(group = ...) vocabulary, led by Widget Container and Scaffold templates because a Remote design starts from a container and everything else goes inside one.",
+    "why": "Deliberate, and here the frozen side is not even a Remote Compose taxonomy: `remoteM3Catalog` never declares a componentMenu of its own, so it inherits the packaged Material 3 one wholesale — Scaffolds, Layout, Navigation, Text inputs — shelf names for a catalog of widget containers, shaders and typefaces. The policy states :remote-catalog's own @CatalogComponent(group = ...) vocabulary, led by Widget Container and Scaffold templates because a Remote design starts from a container and everything else goes inside one.",
     "policy": [
       "Widget Container",
       "Scaffold templates",
@@ -31,5 +31,26 @@
       "Styles",
       "Embedded"
     ]
+  },
+  {
+    "field": "previewSurfaces",
+    "why": "The catalog states a `wasm` surface the frozen catalog omits entirely, and native agrees on fidelity/backend with only the `reason` rewritten. The addition is the point rather than a discrepancy to tolerate: the builder's Wasm canvas has no Remote Compose player, so a design drawn there is a widget-host frame with placeholders inside it and NOT a picture of what the player will produce. The frozen catalog says nothing about that, which leaves a person reading an approximate canvas with no statement that it is approximate — precisely the silence this contract moves into the repository that can answer it. Both values are pinned, so a later change to either side re-surfaces this for review.",
+    "policy": {
+      "wasm": {
+        "fidelity": "approximate",
+        "reason": "A Remote Compose document is played, not composed. The builder's Wasm canvas has no player, so it draws the widget host frame and placeholders inside it; what the player would draw is a different picture, produced by a different program from the same document."
+      },
+      "native": {
+        "fidelity": "authoritative",
+        "backend": "android",
+        "reason": "The generated creation-DSL Kotlin compiled against this module's own alpha Remote Compose trio and rasterised by the real player — the same lane that produces every sticker in this catalog."
+      }
+    },
+    "frozen": {
+      "native": {
+        "backend": "android",
+        "fidelity": "authoritative"
+      }
+    }
   }
 ]

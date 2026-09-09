@@ -24,7 +24,39 @@ check() {
 }
 
 cat >"${work}/golden.json" <<'JSON'
-{ "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A", "B"] } } }
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A", "B"] } } }
+JSON
+
+# Same semantics, different catalog. Every compared field agrees; only the id says otherwise.
+cat >"${work}/impostor.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3-tv", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+
+# Declares no id — legitimate for a module defaulting it from its cover sheet.
+cat >"${work}/unnamed.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "platform": "wear",
+  "menu": { "groupOrder": ["A", "B"] } }
+JSON
+
+# A waiver for a field that now AGREES with the frozen catalog.
+cat >"${work}/converged.json" <<'JSON'
+[ { "field": "componentMenu.groupOrder", "why": "reviewed back when these disagreed",
+    "policy": ["B", "A"], "frozen": ["A", "B"] } ]
+JSON
+
+# previewSurfaces: the golden claims an android backend, this policy claims desktop.
+cat >"${work}/surfaces-golden.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A"] },
+    "previewSurfaces": { "native": { "fidelity": "authoritative", "backend": "android" } } } }
+JSON
+
+cat >"${work}/surfaces-policy.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A"] },
+  "previewSurfaces": { "native": { "fidelity": "authoritative", "backend": "desktop" } } }
 JSON
 
 cat >"${work}/agrees.json" <<'JSON'
@@ -161,6 +193,42 @@ grep -q "as a generated ui-builder.json" "${work}/out" ||
 # --strict is the cutover asserting readiness; "there is no catalog" must not read as success.
 "${gate}" --policy "${work}/absent.json" --golden "${work}/golden.json" --strict >/dev/null 2>&1
 check "a missing policy fails --strict" 1 $?
+
+# Semantics do not identify a catalog. A second `wear` catalog agreeing on every compared field is
+# still the wrong file, and "you fetched a real path belonging to somebody else" has to be as loud
+# as "you fetched nothing".
+"${gate}" --policy "${work}/impostor.json" --golden "${work}/golden.json" --strict >"${work}/out" 2>&1
+check "a policy for another catalog fails --strict despite agreeing on everything" 1 $?
+grep -q "a policy for another catalog was read" "${work}/out" ||
+  { echo "FAIL wrong catalog not reported"; failures=$((failures + 1)); }
+
+# Defaulting the id from the cover sheet is legitimate, so the caller can supply it — but only the
+# caller can, and without it the gate must decline to assert readiness rather than assume.
+"${gate}" --policy "${work}/unnamed.json" --golden "${work}/golden.json" --strict >"${work}/out" 2>&1
+check "an unidentifiable catalog fails --strict" 1 $?
+grep -q "there is nothing to check against" "${work}/out" ||
+  { echo "FAIL unidentified catalog not reported"; failures=$((failures + 1)); }
+
+"${gate}" --policy "${work}/unnamed.json" --golden "${work}/golden.json"   --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "--catalog-id supplies the id a policy defaults" 0 $?
+
+"${gate}" --policy "${work}/unnamed.json" --golden "${work}/golden.json"   --catalog-id wear-m3-tv --strict >/dev/null 2>&1
+check "--catalog-id naming the wrong catalog still fails --strict" 1 $?
+
+# A waiver outlives its disagreement. Left valid, it would silently re-authorise a return to the
+# exact value it once waived, with nobody re-reading it.
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json"   --differences "${work}/converged.json" --strict >"${work}/out" 2>&1
+check "a waiver for a field that now agrees fails --strict" 1 $?
+grep -q "is obsolete and should be deleted" "${work}/out" ||
+  { echo "FAIL converged waiver not reported"; failures=$((failures + 1)); }
+
+# previewSurfaces chooses the native backend at phase 4. A field left out of the comparison cannot
+# differ, and a field that cannot differ is not being checked.
+"${gate}" --policy "${work}/surfaces-policy.json" --golden "${work}/surfaces-golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a preview surface claiming the wrong backend fails --strict" 1 $?
+grep -q "previewSurfaces" "${work}/out" ||
+  { echo "FAIL previewSurfaces not compared"; failures=$((failures + 1)); }
 set -e
 
 if [[ ${failures} -gt 0 ]]; then
