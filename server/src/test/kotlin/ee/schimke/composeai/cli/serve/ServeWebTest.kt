@@ -437,6 +437,35 @@ class ServeWebTest {
     assertFalse(flat.contains("spatial-view.js"), flat)
   }
 
+  /**
+   * The stage-presentation group is for controls that answer a press, and on a spatial preview
+   * neither of these does.
+   *
+   * The scene is an opaque WebGL canvas (`alpha: false`), so the checkerboard `Transparent` paints
+   * is never seen through it; and the zoom handler sizes `#cp-img` and the ordinary render
+   * canvases, never `cp-spatial-view`, so `Fit width` moves nothing. Offering them anyway spends
+   * the reader's first press on a control that does nothing and makes them doubt the panel.
+   */
+  @Test
+  fun `the stage view group is withheld from a spatial preview`() {
+    val spatial =
+      ServeWeb.viewerPage(
+        ServePreview(id = "com.example.Xr", label = "XR preview", spatial = true),
+        token = "t",
+        basePath = "/bundle",
+        spatialSceneUrl = "/bundle/spatial/com.example.Xr/scene.json?token=t",
+      )
+
+    assertFalse(spatial.contains("data-cp-group=\"stage-view\""), spatial)
+    assertFalse(spatial.contains("cp-stage-view-row"), spatial)
+    assertFalse(spatial.contains("Fit width"), spatial)
+
+    // …and every ordinary preview still has it, open, as the first thing in the panel.
+    val flat = ServeWeb.viewerPage(ServePreview("flat", "Flat"), token = "t")
+    assertTrue(flat.contains("data-cp-group=\"stage-view\""), flat)
+    assertTrue(flat.contains("Fit width"), flat)
+  }
+
   // Button/Filled with its default render plus two props-axis variants (an RTL render and an ar-XB
   // pseudo-locale), each in light + dark — the shape the compose-m3 catalog folds via `variants`.
   private val buttonVariants =

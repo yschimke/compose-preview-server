@@ -21,7 +21,11 @@ describe("power-user keyboard navigation", () => {
             <button id="cp-live-toggle" type="button" aria-pressed="false">Snapshot</button>
             <button class="cp-theme-btn" type="button" aria-pressed="false">Day</button>
           </div>
-          <div class="cp-viewer"><div id="cp-controls"><details><label>Locale
+          <div class="cp-viewer"><div id="cp-controls"><details class="cp-group" data-cp-group="stage-view" open>
+            <summary>View</summary><div class="cp-group-body"><div class="cp-stage-view-row">
+            <button type="button" class="cp-bg-btn" aria-pressed="false">Transparent</button>
+            <button type="button" class="cp-bg-btn cp-zoom-toggle" aria-pressed="false">Fit width</button>
+          </div></div></details><details><label>Locale
             <input id="cp-localeTag"></label><label>Size mode
             <select id="cp-sizeMode"><option value="">Default</option><option value="fixed">Fixed size</option></select>
           </label><span aria-hidden="true"><select id="cp-theme"><option>Hidden theme state</option></select></span></details></div></div>
@@ -129,6 +133,19 @@ describe("power-user keyboard navigation", () => {
         assert.equal(
             modeItems[0].textContent,
             "Live previewSwitch to interactive mode",
+        );
+        // `Transparent` and `Fit width` moved off the viewer bar into the Overrides panel's own
+        // View group. Neither collector followed them — `modeCommands` reads the bar and the theme
+        // row, `overrideCommands` reads `#cp-controls` inputs and selects but never its buttons —
+        // so a keyboard-only reader lost both entirely.
+        const modeLabels = modeItems.map((item) => item.textContent ?? "");
+        assert.ok(
+            modeLabels.some((label) => label.startsWith("Transparent")),
+            `Transparent is reachable from M: ${modeLabels.join(" | ")}`,
+        );
+        assert.ok(
+            modeLabels.some((label) => label.startsWith("Fit width")),
+            `Fit width is reachable from M: ${modeLabels.join(" | ")}`,
         );
         const dayCommand = modeItems.find((item) =>
             item.textContent?.startsWith("Day"),

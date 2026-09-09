@@ -133,6 +133,14 @@ internal object PublishedUiBuilderCatalog {
       semantics.components.entries.associateBy({ it.value.record }, { it.key to it.value })
     val taken = linkedMapOf<String, ComponentCapabilityV1>()
     val skipped = mutableListOf<String>()
+    // Counted apart from the rest of `skipped`, because a collision means something the other skip
+    // reasons do not: two components claimed one identity. See [COLLISION_REFUSAL_RATE].
+    var collisions = 0
+    // Entries that actually competed for an identity. An excluded component never enters the shelf,
+    // so counting it in the denominator lets a policy excluding most of its record hide a shelf
+    // where everything left collides: 100 entries, 90 excluded, the remaining 10 all deriving one
+    // id is 9 collisions against an allowance of 10 — composed, with a one-component shelf.
+    var eligible = 0
 
     record?.components.orEmpty().forEach { component ->
       val declared = policyByRecordId[component.canonicalId]
@@ -141,11 +149,18 @@ internal object PublishedUiBuilderCatalog {
       val excluded = policy?.excluded
       when {
         excluded != null -> skipped += "$componentId — $excluded"
+        // Everything below this arm competed for `componentId`, so everything below counts.
         // A duplicate id is the catalog's to fix and is reported rather than resolved: picking a
         // winner silently would bind saved designs to whichever entry happened to sort first.
-        taken.containsKey(componentId) ->
+        taken.containsKey(componentId) -> {
+          eligible++
+          collisions++
           skipped += "$componentId — a component of the same id was already taken from this record"
-        else -> taken[componentId] = capability(componentId, component, policy)
+        }
+        else -> {
+          eligible++
+          taken[componentId] = capability(componentId, component, policy)
+        }
       }
     }
 
@@ -160,6 +175,33 @@ internal object PublishedUiBuilderCatalog {
     if (taken.isEmpty()) {
       return Result.Unusable(
         "composing ui-builder.json with the component record yielded no components"
+      )
+    }
+    // Collisions in bulk mean the ids are not identities.
+    //
+    // A single collision is one catalog bug and the shelf around it is still the right shelf, so it
+    // is skipped and reported. A large fraction is a different claim: the file is not naming
+    // components, and what survives is whichever entry happened to be walked first. The case this
+    // was written from published a policy declaring no `components`, so every id fell to
+    // `derivedId`, and its `componentIds` were a `Group/Variant` taxonomy whose LEAF is the
+    // variant. One variant word was claimed by 15 components. 63 of 104 collided, and the 41
+    // survivors shared exactly ONE id with the catalog this server synthesises.
+    //
+    // That is the shape this refusal is for, and note what did NOT catch it: the composition
+    // produced 41 components against a frozen shelf of 41, so any check comparing counts reports a
+    // match. Only the ids say otherwise.
+    // `maxOf(1, …)` rather than the bare rate, so ONE collision never refuses whatever the record's
+    // size. On a two-component record a single collision is 50% and would have tripped a plain
+    // rate — which contradicts the paragraph above, and did: it broke
+    // `PublishedUiBuilderCatalogHostileInputTest`'s two-component collision fixture, which expects
+    // a skip. The rate is for the bulk case; the floor keeps the stated "one is a catalog bug"
+    // true at every scale.
+    val allowed = maxOf(1, (eligible * COLLISION_REFUSAL_RATE).toInt())
+    if (eligible > 0 && collisions > allowed) {
+      return Result.Unusable(
+        "$collisions of $eligible eligible record components collided on an already-taken " +
+          "component id, leaving ${taken.size} — the published file is not naming components " +
+          "distinctly, so which one survives is an accident of record order"
       )
     }
     // The file says how many record components it was generated against. If it expected an
@@ -351,6 +393,23 @@ internal object PublishedUiBuilderCatalog {
     val digest = MessageDigest.getInstance("SHA-256").digest(published.toByteArray())
     return "sha256:" + digest.joinToString("") { "%02x".format(it) }.take(32)
   }
+
+  /**
+   * The share of a record's components that may collide on an already-taken id before the whole
+   * published file is refused.
+   *
+   * A tenth, which is deliberately loose. The number that matters is not this threshold but the gap
+   * either side of it: a catalog naming its components correctly collides on **zero**, and a
+   * catalog whose ids are not identities collides on most of them — the two measured cases sit at
+   * 61% and 36%. Nothing real sits near 10%, so the threshold does not have to be argued about; it
+   * only has to separate a stray duplicate, which is one catalog bug worth skipping past, from a
+   * file that is not describing components at all. The measurements, with the catalogs named, are
+   * in `docs/design/UI_BUILDER_CATALOG_CONTRACT.md` § Phase 4 — this file may not name one.
+   *
+   * Raising it is not the fix if a real catalog ever trips this. The collisions are its own to
+   * resolve, by declaring `statusSemantics.components` rather than leaving every id to be derived.
+   */
+  private const val COLLISION_REFUSAL_RATE = 0.10
 
   private const val UI_BUILDER_CATALOG_SCHEMA = "compose-ui-builder-catalog/v1"
   private const val CAPABILITY_SCHEMA = "compose-catalog-capabilities/v1"

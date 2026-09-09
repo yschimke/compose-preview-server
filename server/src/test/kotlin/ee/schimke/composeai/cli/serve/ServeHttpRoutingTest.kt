@@ -1949,6 +1949,15 @@ class ServeHttpRoutingTest {
           assertEquals("/ui-builder/", response.header("Location"))
         }
       }
+      // …carrying the query with it. On a token-gated host the credential rides as `?token=…` and
+      // the Wasm client reads it from `location.search`, so a redirect that dropped it landed the
+      // editor on a page whose identity, design and WebSocket requests were unauthenticated.
+      fetch("/ui-builder?token=private-token", noRedirects).let { (code, response) ->
+        response.use {
+          assertEquals(302, code)
+          assertEquals("/ui-builder/?token=private-token", response.header("Location"))
+        }
+      }
       // The document stays where it is — the app reads its catalog and design id back out of
       // `location.pathname` — and the shell's own asset references carry the version instead.
       val versionedPrefix =
