@@ -263,16 +263,30 @@ export function analyzeUiBuilderStore(directory) {
     };
     sections.access = { bytes: byteLength(header.access), count: 1 };
 
-    for (const file of Object.values(header.revisionFiles ?? {})) {
+    sections.revisionSnapshots.entryBytes = [];
+    sections.positionSnapshots.entryBytes = [];
+    // Sorted by revision, the way `readDesign` sorts them. Object key order is not the store's
+    // ordering, and `projectRetention` drops a PREFIX — so an unordered list would sum an
+    // arbitrary five files rather than the five oldest.
+    const revisionFiles = Object.entries(header.revisionFiles ?? {}).sort(
+      ([left], [right]) => (Number(left) || 0) - (Number(right) || 0),
+    );
+    for (const [, file] of revisionFiles) {
       const retained = payloadOf(join(designDirectory, file));
       if (!retained) continue;
       if (retained.document) {
-        sections.revisionSnapshots.bytes += byteLength(retained.document);
+        const bytes = byteLength(retained.document);
+        sections.revisionSnapshots.bytes += bytes;
         sections.revisionSnapshots.count += 1;
+        // Per entry as well as in total: retention drops the oldest, and on a design that grew
+        // those are the small ones, so the average this used to scale by overstated the saving.
+        sections.revisionSnapshots.entryBytes.push(bytes);
       }
       if (retained.positions) {
-        sections.positionSnapshots.bytes += byteLength(retained.positions);
+        const bytes = byteLength(retained.positions);
+        sections.positionSnapshots.bytes += bytes;
         sections.positionSnapshots.count += 1;
+        sections.positionSnapshots.entryBytes.push(bytes);
       }
     }
 

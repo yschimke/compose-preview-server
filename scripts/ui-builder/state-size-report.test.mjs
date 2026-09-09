@@ -315,6 +315,54 @@ test("the per-design store reports the same sections the one file did", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test("the store's own revisions are measured per entry, oldest first", () => {
+  // The per-design store is the production format, so a projection that falls back to the average
+  // here is one that is wrong everywhere it is actually run.
+  const root = storeDirectory({
+    growing: {
+      document: document("growing", 6, 24),
+      // Five revisions, growing: the oldest are the small ones retention would drop.
+      revisions: [
+        document("growing", 1, 2),
+        document("growing", 2, 6),
+        document("growing", 3, 12),
+        document("growing", 4, 18),
+        document("growing", 5, 24),
+      ],
+      outcome: { operationId: "op-1", revision: 6 },
+    },
+  });
+
+  const report = analyzeUiBuilderStore(root);
+  const section = report.designs[0].sections.revisionSnapshots;
+
+  assert.equal(section.entryBytes.length, 5, "one measurement per retained revision");
+  assert.deepEqual(
+    [...section.entryBytes].sort((left, right) => left - right),
+    section.entryBytes,
+    "recorded oldest-first, so the prefix a cut drops is the front of this list",
+  );
+  assert.equal(
+    section.entryBytes.reduce((sum, it) => sum + it, 0),
+    section.bytes,
+    "and the per-entry sizes still add up to the section",
+  );
+
+  // Keeping three drops the two smallest, which is well under two fifths of the section.
+  const projection = projectRetention(report, { keep: 3 });
+  const dropped = section.entryBytes[0] + section.entryBytes[1];
+  const positions = report.designs[0].sections.positionSnapshots;
+  assert.equal(
+    projection.savedBytes,
+    dropped + positions.entryBytes[0] + positions.entryBytes[1],
+  );
+  assert.ok(
+    projection.savedBytes < Math.round((section.bytes + positions.bytes) * (2 / 5)),
+    "the averaged reading would have claimed two fifths of both sections",
+  );
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("a state directory with no marker is not mistaken for the store", () => {
   const root = mkdtempSync(join(tmpdir(), "ui-builder-store-"));
   assert.equal(isDesignStore(root), false);
