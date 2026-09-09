@@ -33,6 +33,15 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
  * [`UI_BUILDER_COMMENTS.md`](../../../../../../../../docs/design/UI_BUILDER_COMMENTS.md). Requiring
  * WRITE to comment would lock reviewers out of the review surface, which is the opposite of what
  * the board is for. Reading a design remains the right bar for discussing it.
+ *
+ * ## One implementation, including for the board
+ *
+ * The board asks the *same question* through the same function rather than its own copy of it. It
+ * previously answered "may this actor read it" by requesting a whole design snapshot and looking at
+ * whether one came back — correct, but a second implementation of an access check, and one that
+ * loaded and decoded an entire design document to produce a boolean. Two spellings of one security
+ * question are two things to keep in agreement, and the board's copy also folded in a protocol
+ * mapping that could refuse for reasons that were never about access.
  */
 internal suspend fun UiBuilderServicePort.designActions(
   actor: AuthenticatedUiBuilderActor,
