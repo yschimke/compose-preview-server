@@ -49,6 +49,14 @@ sidecars=(
   # consequence is louder than a degraded lane — `openPlaygroundService` returns null and the
   # server serves no playground — but it is just as invisible to a build: preview.coo.ee logged
   # "playground admitted" and then "playground compiler unavailable" on the next line, for months.
+  # The Skiko NATIVE, which is not code the CLI stages at all: `cli/build.gradle.kts` filters
+  # every `skiko-awt-runtime-*` out of the sidecars ("SkikoNativeProvision downloads only the
+  # current host's jar") and that provisioner is a CLI class this image never installs. So the
+  # directory has to be built here, and `-Dcomposeai.cli.skikoDir` is what makes
+  # `locateBundleSidecarJars("lib-daemon-desktop")` prepend it (`configuredSkikoJars`). Same
+  # pairing rule as the rows above, and a fourth distinct symptom: not a missing jar but a
+  # missing `.so`, reported as `ExceptionInInitializerError: null` with the cause stripped.
+  "skiko|lib-skiko|composeai.cli.skikoDir|every Skiko-backed lane dies in a static initialiser and ?rcPlayer=cmp-jvm answers 500 for every document"
   "playground|lib-bta|composeai.cli.libBtaDir|/playground is admitted and then disabled, so the box serves no playground at all"
 )
 

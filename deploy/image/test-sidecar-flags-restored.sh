@@ -30,18 +30,21 @@ stanza="$(sed -n '/^# >>> sidecar-restore$/,/^# <<< sidecar-restore$/p' "${entry
 fixtures="$(mktemp -d)"
 trap 'rm -rf "${fixtures}"' EXIT
 mkdir -p "${fixtures}/lib-daemon-android" "${fixtures}/lib-daemon-desktop" \
-  "${fixtures}/lib-renderer" "${fixtures}/lib-bta" "${fixtures}/lib-rcjvm"
+  "${fixtures}/lib-renderer" "${fixtures}/lib-bta" "${fixtures}/lib-rcjvm" \
+  "${fixtures}/lib-skiko"
 
 # `present` lets a case declare a sidecar dir that does NOT exist, by pointing at a missing path.
 run_stanza() {
   local incoming="$1" android="${2:-${fixtures}/lib-daemon-android}" \
-    bta="${3:-${fixtures}/lib-bta}" rcjvm="${4:-${fixtures}/lib-rcjvm}"
+    bta="${3:-${fixtures}/lib-bta}" rcjvm="${4:-${fixtures}/lib-rcjvm}" \
+    skiko="${5:-${fixtures}/lib-skiko}"
   JAVA_TOOL_OPTIONS="${incoming}" \
   LIB_DAEMON_ANDROID_DIR="${android}" \
   LIB_DAEMON_DESKTOP_DIR="${fixtures}/lib-daemon-desktop" \
   LIB_RENDERER_DIR="${fixtures}/lib-renderer" \
   LIB_BTA_DIR="${bta}" \
   LIB_RCJVM_DIR="${rcjvm}" \
+  LIB_SKIKO_DIR="${skiko}" \
     bash -c "
       set -euo pipefail
       ${stanza}
@@ -52,7 +55,7 @@ run_stanza() {
 # 1. The reported failure: an inherited string carrying the Android flag and nothing else. The two
 #    desktop flags come back, and the operator's own content is untouched.
 result="$(run_stanza '-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android')"
-for want in libDaemonDesktopDir libRendererDir libBtaDir libRcjvmDir; do
+for want in libDaemonDesktopDir libRendererDir libBtaDir libRcjvmDir skikoDir; do
   [[ "${result}" == *"${want}="* ]] || {
     echo "FAIL: ${want} was not restored: ${result}" >&2
     exit 1
@@ -93,7 +96,7 @@ echo "PASS: no flag is invented for a sidecar the image does not carry"
 
 # 4. The ordinary case — nothing replaced anything, every flag already present — must be a no-op,
 #    not a string that lists each flag twice.
-baked='-Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm'
+baked='-Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.skikoDir=/opt/lib-skiko'
 result="$(run_stanza "${baked}")"
 [[ "${result}" == "${baked}" ]] || {
   echo "FAIL: an intact JAVA_TOOL_OPTIONS was modified: ${result}" >&2
@@ -131,6 +134,24 @@ result="$(run_stanza '' "${fixtures}/lib-daemon-android" "${fixtures}/lib-bta" "
   exit 1
 }
 echo "PASS: the cmp-jvm player flag is restored, and only when the image carries it"
+
+# 6b. The Skiko native directory, same two rules, and the one whose absence is hardest to read from
+#     the outside: every jar is present, the lane starts, and `Library`'s static initialiser dies
+#     with `Cannot find libskiko-<platform>.so.sha256` — reported to the caller as
+#     `ExceptionInInitializerError: null`, cause stripped. That is how `?rcPlayer=cmp-jvm` came to
+#     answer 500 for every document in every catalog on preview.coo.ee.
+result="$(run_stanza '-XX:MaxRAMPercentage=70')"
+[[ "${result}" == *"skikoDir=${fixtures}/lib-skiko"* ]] || {
+  echo "FAIL: skikoDir was not restored: ${result}" >&2
+  exit 1
+}
+result="$(run_stanza '' "${fixtures}/lib-daemon-android" "${fixtures}/lib-bta" \
+  "${fixtures}/lib-rcjvm" "${fixtures}/absent-skiko")"
+[[ "${result}" != *"skikoDir="* ]] || {
+  echo "FAIL: skikoDir was invented for a directory the image does not carry: ${result}" >&2
+  exit 1
+}
+echo "PASS: the Skiko native flag is restored, and only when the image carries it"
 
 # 7. Self-test: the checks above must be able to fail. A stanza that only ever echoes its input
 #    would pass cases 2-4 on content it never touched, so prove case 1 catches it.

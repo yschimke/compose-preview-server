@@ -186,11 +186,34 @@ RUN set -eu; \
 # It is the largest of the sidecars, and it buys the lane that compiles a stranger's Kotlin;
 # a box that does not run `--playground` pays for it in image size and nothing else.
 #
-# `lib-renderer/` carries every platform's `skiko-awt-runtime-*` beside `skiko-awt`, so the
-# daemon links its bindings against a matching native and does not fall into the split-Skiko
-# `UnsatisfiedLinkError` `SkikoNativePairing` exists to warn about. A bundle built against a
-# NEWER Skiko than this sidecar still resolves its own pair through `CoordinateResolver`
-# (the repair coordinate), which needs the box's Maven Central egress — unchanged by this.
+# NONE of these sidecars carries a Skiko NATIVE. `skiko-awt` is bindings only; the
+# `libskiko-<os>-<arch>.so` lives in `skiko-awt-runtime-<os>-<arch>`, and compose-ai-tools'
+# `:cli` staging excludes all six of those on purpose ("excluded from CLI staging:
+# SkikoNativeProvision downloads only the current host's jar", `cli/build.gradle.kts`). That
+# provisioner is a CLI class this image never installs — the entrypoint here is the SERVER — so
+# nothing downloads it and `-Dcomposeai.cli.skikoProvisionerClass` is unset. Every lane that
+# boots Skiko then dies in `Library`'s static initialiser with
+#
+#     LibraryLoadException: Cannot find libskiko-linux-x64.so.sha256, proper native dependency
+#     missing
+#
+# which reaches the caller as a bare `ExceptionInInitializerError: null` — no cause, no stack —
+# so `?rcPlayer=cmp-jvm` answered `500 cmp-jvm render failed: ExceptionInInitializerError: null`
+# for every document in every catalog, and the compare wall's cmp-jvm column was a broken image.
+# Stage the ONE native this image's host arch needs into `lib-skiko/`, which
+# `locateBundleSidecarJars("lib-daemon-desktop")` prepends to the desktop classpath when
+# `-Dcomposeai.cli.skikoDir` names it (`configuredSkikoJars`) — the same directory the cmp-jvm
+# subprocess joins, so both the desktop daemon and that render lane get it.
+#
+# The version is READ OFF the staged `skiko-awt-<version>.jar` rather than pinned here: a
+# mismatched pair is the split-Skiko `UnsatisfiedLinkError` `SkikoNativePairing` exists to warn
+# about, and a pin would drift the next time compose-ai-tools bumps Compose. A bundle built
+# against a NEWER Skiko still resolves its own pair through `CoordinateResolver` (the repair
+# coordinate), which needs the box's Maven Central egress — unchanged by this.
+#
+# Fetching it is a hard failure, unlike the `android-all` prefetch above: that one has a runtime
+# fetch to fall back on, this one has none, and an image built without it is exactly the silently
+# broken box this stanza documents.
 FROM base AS desktop-daemon
 ARG TOOLS_VERSION
 COPY release-assets/ /tmp/release-assets/
@@ -225,6 +248,23 @@ RUN set -eu; \
     ls /opt/lib-bta/*.jar >/dev/null; \
     ls /opt/lib-bta/kotlin-compose-compiler-plugin-embeddable*.jar >/dev/null; \
     test "$(ls /opt/lib-bta/*.jar | grep -cv kotlin-compose-compiler-plugin-embeddable)" -gt 0
+
+# The host's Skiko native, paired by version with the `skiko-awt` the sidecars carry. See the
+# stage header for why nothing else in this image supplies it.
+RUN set -eu; \
+    awt="$(ls /opt/lib-daemon-desktop/skiko-awt-*.jar | head -n 1)"; \
+    version="$(basename "$awt" .jar | sed 's/^skiko-awt-//')"; \
+    test -n "$version"; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) platform=linux-x64 ;; \
+      arm64) platform=linux-arm64 ;; \
+      *) echo "no Skiko native for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    nativeJar="skiko-awt-runtime-${platform}-${version}.jar"; \
+    mkdir -p /opt/lib-skiko; \
+    curl -fsSL --retry 20 --retry-delay 15 --retry-all-errors -o "/opt/lib-skiko/${nativeJar}" \
+      "https://repo1.maven.org/maven2/org/jetbrains/skiko/skiko-awt-runtime-${platform}/${version}/${nativeJar}"; \
+    jar tf "/opt/lib-skiko/${nativeJar}" | grep -qx "libskiko-${platform}.so"
 
 # ---------------------------------------------------------------------------
 # Stage 1b: prewarm the downloadable-font cache.
@@ -280,6 +320,10 @@ COPY --from=desktop-daemon /opt/lib-renderer /opt/lib-renderer
 # with "needs lib-rcjvm and lib-daemon-desktop on the CLI install" — measured against
 # preview.coo.ee/remote-m3 — and the compare wall could never show that player.
 COPY --from=desktop-daemon /opt/lib-rcjvm /opt/lib-rcjvm
+# …and the Skiko native both of those link against. Neither sidecar ships one — see the
+# desktop-daemon stage — so without this directory every Skiko-backed lane on this box dies in a
+# static initialiser and `?rcPlayer=cmp-jvm` answers 500 for every document.
+COPY --from=desktop-daemon /opt/lib-skiko /opt/lib-skiko
 # …and the Kotlin Build Tools API jars the PLAYGROUND compiles snippets with. Unlike the
 # sidecars above it backs no render lane: without it `--playground` is admitted and then
 # disabled at the last step, which is how preview.coo.ee ran with a playground nobody could
@@ -324,7 +368,7 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     COMPOSE_PREVIEW_INIT_USE_MAVEN_LOCAL=1 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
-    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
+    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
 
 WORKDIR /project
 # Carry the release Maven tree so live bundles can resolve the plugin/runtime
