@@ -188,6 +188,17 @@ test("a fragment-only navigation moves the panel to the thread it names", async 
     )
     .toBe(secondOfTwoThreadId);
   expect(new URL(page.url()).hash).toBe(`#thread=${secondOfTwoThreadId}`);
+  // And back out of the fragment entirely, which is the same navigation in the other direction: the
+  // address bar stops naming a conversation, so the panel has to stop having one selected.
+  await page.goBack();
+  await expect
+    .poll(
+      async () =>
+        (await page.evaluate(() => globalThis.__uiBuilderDesignSelectors))
+          .threadId,
+      { timeout: 30_000 },
+    )
+    .toBe(firstOfTwoThreadId);
 });
 
 test("#thread= combines with ?node= where the thread is pinned to a layer", async ({

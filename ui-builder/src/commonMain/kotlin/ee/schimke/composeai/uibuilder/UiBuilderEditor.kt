@@ -759,18 +759,24 @@ fun UiBuilderEditor(
     editorFocusRequester.requestFocus()
   }
   // Following the address bar after the first paint, for the navigation the browser answers without
-  // reloading: a fragment-only move between two thread links, or Back over one. The panel is
-  // brought to the front as well as the thread selected, because such a link is a request to read a
-  // conversation and arriving with Talk shut would answer half of it. Only a non-null value acts —
-  // the fragment being *dropped* is this editor's own doing, and re-selecting nothing on the way
-  // back through would fight the reader who just closed a thread.
+  // reloading: a fragment-only move between two thread links, or Back over one.
+  //
+  // Null is a case and not a no-op. Back out of a `#thread=` URL to the fragment-free design is a
+  // same-document navigation like any other, and leaving the previous conversation selected while
+  // the address bar has stopped naming it is the same disagreement this effect exists to prevent.
+  // Deselecting cannot fight the reader who closed a thread by hand: that path has already set the
+  // selection to null, so this finds nothing to do. The panel is opened for a thread and not shut
+  // again for a null — where the reader ended up is the board, and closing it under them would be
+  // answering a navigation with more than it asked for.
   LaunchedEffect(linkedThreadId) {
-    val threadId = linkedThreadId ?: return@LaunchedEffect
+    val threadId = linkedThreadId
     if (threadId == selectedThreadId) return@LaunchedEffect
     selectThread(threadId)
-    dispatch(UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Comments))
-    inspectorOpen = true
-    mobilePanel = MobileEditorPanel.Properties
+    if (threadId != null) {
+      dispatch(UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Comments))
+      inspectorOpen = true
+      mobilePanel = MobileEditorPanel.Properties
+    }
   }
   /**
    * Bake the reference stack into one picture and make it the base.
