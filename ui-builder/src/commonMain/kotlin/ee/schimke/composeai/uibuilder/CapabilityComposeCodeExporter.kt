@@ -459,19 +459,23 @@ private class ComposeEmitter(
   }
 
   /**
-   * Whether a `repeat` written into this screen would still mean `kotlin.repeat`, and whether the
-   * `it` it binds would shadow anything a folded child reads.
+   * Whether the `kotlin` a folded run qualifies through still means the package.
    *
-   * Both are names like any other. `exportedStateIdentifier` leaves `it` and `repeat` exactly as
-   * they are, so a design declaring either gets a local of that name in the generated function —
-   * and inside a folded run the lambda's implicit `Int` would shadow the first while the second
-   * would capture the call itself. Decided once per document, and spent on the fold rather than on
-   * a refusal: such a design has its siblings written out one by one, exactly as before the fold
-   * existed. Only state can do this here — every other name this exporter writes is a fixed Compose
-   * symbol.
+   * A folded run is written `kotlin.repeat(n) { _ -> … }`, and both halves of that are the point:
+   * `repeat` is a name like any other and so is the `it` it would otherwise bind.
+   * `exportedStateIdentifier` leaves both alone, so a design declaring state called either gets a
+   * local of that name — and an unqualified call would resolve to it, while the lambda's implicit
+   * parameter would shadow a read of it. Qualifying and binding nothing settles both without asking
+   * what else is in scope, which is the honest position for an exporter whose imports include one
+   * the caller supplies (`ComposeAssetAdapter.renderer`).
+   *
+   * That leaves one name to protect rather than two, and it is protected the same way: a design
+   * whose state is called `kotlin` has its cells printed the long way, since the local would
+   * capture the qualifier. Spent on the fold rather than on a refusal — the design is legal and the
+   * canvas draws it.
    */
   private val foldsRepeatedSiblings: Boolean by lazy {
-    document.stateVariables.keys.map { it.identifier() }.none { it == "it" || it == "repeat" }
+    document.stateVariables.keys.none { it.identifier() == "kotlin" }
   }
 
   /**
@@ -511,7 +515,7 @@ private class ComposeEmitter(
       } else {
         val folded = children.subList(index, end)
         line(level, "// repeated:$run nodes:${folded.joinToString(",").escapeComment()}")
-        line(level, "repeat($run) {")
+        line(level, "kotlin.repeat($run) { _ ->")
         emitNode(folded.first(), level + 1)
         line(level, "}")
       }

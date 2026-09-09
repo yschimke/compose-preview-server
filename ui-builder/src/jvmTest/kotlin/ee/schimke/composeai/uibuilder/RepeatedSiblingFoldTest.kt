@@ -36,7 +36,7 @@ class RepeatedSiblingFoldTest {
   fun `twelve identical cells become one repeat`() {
     val source = exportSource(contributionRow(cells = 12))
 
-    assertEquals(1, Regex("repeat\\(12\\) \\{").findAll(source).count())
+    assertEquals(1, Regex("kotlin\\.repeat\\(12\\) \\{ _ ->").findAll(source).count())
     assertEquals(1, emittedCellBodies(source))
     assertTrue(source.contains("// repeated:12 nodes:cell-0,cell-1,"), source)
   }
@@ -45,7 +45,7 @@ class RepeatedSiblingFoldTest {
   fun `a run of two is still written out, because two calls read fine`() {
     val source = exportSource(contributionRow(cells = 2))
 
-    assertFalse(source.contains("repeat("), source)
+    assertFalse(source.contains("kotlin.repeat("), source)
     assertEquals(2, emittedCellBodies(source))
   }
 
@@ -54,8 +54,8 @@ class RepeatedSiblingFoldTest {
     val document = contributionRow(cells = 8, distinctAt = 3)
     val source = exportSource(document)
 
-    assertEquals(1, Regex("repeat\\(3\\) \\{").findAll(source).count())
-    assertEquals(1, Regex("repeat\\(4\\) \\{").findAll(source).count())
+    assertEquals(1, Regex("kotlin\\.repeat\\(3\\) \\{ _ ->").findAll(source).count())
+    assertEquals(1, Regex("kotlin\\.repeat\\(4\\) \\{ _ ->").findAll(source).count())
     // Three folded, the odd one out, then four folded: three emitted bodies for eight cells.
     assertEquals(3, emittedCellBodies(source))
     assertTrue(source.contains("// node:cell-3 "), source)
@@ -65,7 +65,7 @@ class RepeatedSiblingFoldTest {
   fun `a stableKey is an identity claim, so its cells are printed the long way`() {
     val source = exportSource(contributionRow(cells = 12, stableKeys = true))
 
-    assertFalse(source.contains("repeat("), source)
+    assertFalse(source.contains("kotlin.repeat("), source)
     assertEquals(12, emittedCellBodies(source))
     assertEquals(12, Regex("key\\(\"cell-").findAll(source).count())
   }
@@ -94,39 +94,53 @@ class RepeatedSiblingFoldTest {
   }
 
   /**
-   * `repeat` and the `it` it binds are names like any other.
+   * `repeat` and the `it` it binds are names like any other, and the emitted form owns that.
    *
    * `exportedStateIdentifier` leaves both alone, so a design declaring state called either gets a
-   * local of that name in the generated function — and inside a folded run the lambda's implicit
-   * `Int` would shadow the first while the second would capture the call. Neither is a refusal: the
-   * cells are printed the long way, exactly as before the fold existed.
+   * local of that name in the generated function — an unqualified call would resolve to it, and the
+   * lambda's implicit parameter would shadow a read of it. `kotlin.repeat(n) { _ -> … }` can be
+   * captured by neither, so the fold still happens and the cells still read what they read.
    */
   @Test
-  fun `state named it or repeat turns the fold off rather than changing what a cell reads`() {
+  fun `state named it or repeat does not capture the folded call or its parameter`() {
     listOf("it", "repeat").forEach { name ->
-      val document = contributionRow(cells = 12)
-      val source =
-        exportSource(
-          document.copy(
-            stateVariables =
+      val source = exportSource(contributionRow(cells = 12).withState(name))
+
+      assertEquals(1, Regex("kotlin\\.repeat\\(12\\) \\{ _ ->").findAll(source).count())
+      assertEquals(1, emittedCellBodies(source))
+    }
+  }
+
+  /**
+   * The one name left to protect, protected the same way as the others.
+   *
+   * A design whose state is called `kotlin` gets a local that captures the qualifier a folded run
+   * writes, so it is printed the long way rather than refused — the design is legal and the canvas
+   * draws it.
+   */
+  @Test
+  fun `state named kotlin turns the fold off, because the run qualifies through that root`() {
+    val source = exportSource(contributionRow(cells = 12).withState("kotlin"))
+
+    assertFalse(source.contains("kotlin.repeat("), source)
+    assertEquals(12, emittedCellBodies(source))
+  }
+
+  private fun UiBuilderDocument.withState(name: String) =
+    copy(
+      stateVariables =
+        JsonObject(
+          mapOf(
+            name to
               JsonObject(
                 mapOf(
-                  name to
-                    JsonObject(
-                      mapOf(
-                        "valueType" to JsonPrimitive("string"),
-                        "initialValue" to JsonPrimitive("x"),
-                      )
-                    )
+                  "valueType" to JsonPrimitive("string"),
+                  "initialValue" to JsonPrimitive("x"),
                 )
               )
           )
         )
-
-      assertFalse(source.contains("repeat(12)"), source)
-      assertEquals(12, emittedCellBodies(source))
-    }
-  }
+    )
 
   /**
    * How many cell bodies the source actually holds.
