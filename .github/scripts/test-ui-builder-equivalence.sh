@@ -267,6 +267,35 @@ grep -q "future major" "${work}/out" ||
 "${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json" --strict >/dev/null 2>&1
 check "the current schema major still passes" 0 $?
 
+# The THIRD way a waiver outlives its disagreement: the frozen catalog stops stating the field while
+# the policy keeps it. Regenerating the goldens can do exactly that.
+cat >"${work}/policy-only-golden.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear" } }
+JSON
+cat >"${work}/waiver-for-policy-only.json" <<'JSON'
+[ { "field": "componentMenu.groupOrder", "why": "reviewed back when the frozen catalog had one",
+    "policy": ["B", "A"], "frozen": ["A", "B"] } ]
+JSON
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/policy-only-golden.json" \
+  --differences "${work}/waiver-for-policy-only.json" --strict >"${work}/out" 2>&1
+check "a waiver the frozen catalog no longer disagrees with fails --strict" 1 $?
+grep -q "is obsolete and should be deleted" "${work}/out" ||
+  { echo "FAIL policy-only waiver not reported"; failures=$((failures + 1)); }
+
+# A future major on the FROZEN side is as unreadable as one on the policy side, and the golden is
+# the likelier of the two to move — it is regenerated from this repository's own types.
+cat >"${work}/future-golden.json" <<'JSON'
+{ "schema": "compose-ui-builder-capabilities/v2",
+  "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A", "B"] } } }
+JSON
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/future-golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a future schema major on the frozen catalog is refused" 1 $?
+grep -q "frozen catalog is" "${work}/out" ||
+  { echo "FAIL future golden major not reported"; failures=$((failures + 1)); }
+
 # A waiver outlives its disagreement. Left valid, it would silently re-authorise a return to the
 # exact value it once waived, with nobody re-reading it.
 "${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json"   --differences "${work}/converged.json" --strict >"${work}/out" 2>&1

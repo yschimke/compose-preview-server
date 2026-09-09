@@ -156,21 +156,26 @@ const SCHEMA_FAMILIES = {
   "compose-ui-builder-catalog": 1,
   "compose-ui-builder-capabilities": 1,
 };
-if (typeof source.schema === "string" && source.schema.includes("/")) {
-  const [family, version] = [
-    source.schema.slice(0, source.schema.lastIndexOf("/")),
-    source.schema.slice(source.schema.lastIndexOf("/") + 1),
-  ];
-  const major = Number.parseInt(String(version).replace(/^v/, ""), 10);
+// BOTH documents, not just the policy. The frozen catalog is regenerated from this repository's own
+// types, so `CatalogCapabilityV1` moving to a v2 is the likelier of the two — and a v1 policy
+// against a v2 golden is exactly as unreadable as the reverse, for the same reason: the fields that
+// still line up say nothing about the ones whose meaning changed.
+const refuseFutureMajor = (label, doc) => {
+  const schema = doc?.schema;
+  if (typeof schema !== "string" || !schema.includes("/")) return false;
+  const family = schema.slice(0, schema.lastIndexOf("/"));
+  const major = Number.parseInt(String(schema.slice(schema.lastIndexOf("/") + 1)).replace(/^v/, ""), 10);
   const known = SCHEMA_FAMILIES[family];
-  if (known !== undefined && Number.isFinite(major) && major > known) {
-    console.log(`  x schema: ${JSON.stringify(source.schema)} is a future major of '${family}'.`);
-    console.log(`      This gate understands v${known}. Comparing the fields it happens to`);
-    console.log(`      recognise would report readiness for semantics it does not know.`);
-    console.log("");
-    console.log(`ui-builder-equivalence: refused — unsupported schema ${source.schema}.`);
-    process.exit(strict ? 1 : 2);
-  }
+  if (known === undefined || !Number.isFinite(major) || major <= known) return false;
+  console.log(`  x schema: the ${label} is ${JSON.stringify(schema)}, a future major of '${family}'.`);
+  console.log(`      This gate understands v${known}. Comparing the fields it happens to`);
+  console.log(`      recognise would report readiness for semantics it does not know.`);
+  console.log("");
+  console.log(`ui-builder-equivalence: refused — unsupported schema ${schema}.`);
+  return true;
+};
+if (refuseFutureMajor("catalog", source) || refuseFutureMajor("frozen catalog", golden)) {
+  process.exit(strict ? 1 : 2);
 }
 
 const fields = [
@@ -233,6 +238,7 @@ const waiverVerdict = (waiver, stated, frozen) => {
 };
 
 console.log(`  read ${policyPath} as a ${shape}`);
+
 // An exemption is only ever as good as the disagreement it describes — the third and last way that
 // can stop being true. Convergence was one; both sides going SILENT is the other, and this branch
 // returned before the waiver was consulted, so the entry survived to re-authorise the exact old
@@ -246,10 +252,33 @@ const waiverIsObsolete = (field, why) => {
   return true;
 };
 
+// EVERY waiver is judged here, once, before any branch decides what to print.
+//
+// I added this check to the branches one at a time — the field agreeing, then both sides silent —
+// and each time a branch I had not thought about still slipped past it. There is one question worth
+// asking and it does not depend on which branch a field lands in: DOES THE DISAGREEMENT THIS WAIVER
+// DESCRIBES STILL EXIST? It does only when both sides state the field and the two values differ.
+// Asked here, a field shape nobody has thought of yet cannot acquire a fourth exemption from the
+// rule, because the branches no longer carry it.
+for (const [field, stated, frozen] of fields) {
+  const disagrees =
+    stated !== undefined && frozen !== undefined && canonical(stated) !== canonical(frozen);
+  if (disagrees) continue;
+  waiverIsObsolete(
+    field,
+    stated === undefined && frozen === undefined
+      ? "neither the catalog nor the frozen catalog states this"
+      : stated === undefined
+        ? "the catalog does not state this at all"
+        : frozen === undefined
+          ? "the frozen catalog does not state this at all"
+          : "this agrees with the frozen catalog",
+  );
+}
+
 for (const [field, stated, frozen] of fields) {
   if (stated === undefined) {
     if (frozen === undefined) {
-      waiverIsObsolete(field, "neither the catalog nor the frozen catalog states this");
       continue;
     }
     // The golden states this and the catalog does not. Silently skipping it is how a gate goes
@@ -270,7 +299,8 @@ for (const [field, stated, frozen] of fields) {
     // that was waived, the old entry would authorise the regression with nobody re-reading it —
     // which is the failure the reviewed-value pinning exists to prevent, reintroduced by the happy
     // path. An exemption is only ever as good as the disagreement it describes.
-    if (waiverIsObsolete(field, "this agrees with the frozen catalog")) continue;
+    // Its waiver, if any, was already judged obsolete by the sweep above.
+    if (accepted.has(field)) continue;
     console.log(`  = ${field}`);
     continue;
   }
