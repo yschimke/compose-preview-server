@@ -188,6 +188,7 @@ private const val RECTANGULAR_RADIUS_DP: Float = 0f
  * `WidgetPreviewConstants.CORNER_RADIUS_ROUND_DP` is 999: a radius no frame can reach, left to the
  * renderer to clamp to a stadium. Copying the literal keeps this table a transcription — a widget
  * that reads its `cornerRadiusDp` off the params sees the number the host actually sends — and it
- * is why the inspector's radius editor bounds reach 999 rather than stopping at something tidier.
+ * is the value the inspector's radius editor already had to admit, which is why its range runs well
+ * past any radius a frame could use (`CapabilityCatalog`).
  */
 private const val ROUND_RADIUS_DP: Float = 999f
