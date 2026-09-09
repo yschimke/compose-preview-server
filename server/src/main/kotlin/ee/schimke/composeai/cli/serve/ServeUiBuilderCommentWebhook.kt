@@ -109,6 +109,10 @@ internal class ServeUiBuilderCommentWebhook(
   /** Posts one body and answers whether the far end accepted it. Replaced in tests. */
   private val send: suspend (String) -> Boolean = HttpCommentWebhookSender(config)::post,
   private val onLog: (String) -> Unit = { System.err.println(it) },
+  /** How long a cached title and catalog are reused. Shortened in tests. */
+  private val designCacheMillis: Long = DESIGN_CACHE_MILLIS,
+  /** The clock the cache window is measured against. Replaced in tests. */
+  private val now: () -> Long = System::currentTimeMillis,
   private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : Closeable {
 
@@ -155,7 +159,18 @@ internal class ServeUiBuilderCommentWebhook(
       // On the writer's thread, so nothing here waits: a diff of two small in-memory boards, a map
       // lookup, and an offer to a queue that never blocks.
       for (change in diffCommentBoards(previous, next)) {
-        enqueue(QueuedCommentChange(change, knownDesigns[change.designId]?.design))
+        // The snapshot is taken whatever its age — it is the design the comment was written
+        // against, which is the point — but a snapshot past the window also tells the worker to
+        // look again, so a rename reaches later notifications instead of the cache pinning the
+        // first title it ever saw for the life of the process.
+        val cached = knownDesigns[change.designId]
+        enqueue(
+          QueuedCommentChange(
+            change = change,
+            design = cached?.design,
+            refresh = cached == null || now() - cached.atEpochMillis >= designCacheMillis,
+          )
+        )
       }
     }
 
@@ -194,7 +209,10 @@ internal class ServeUiBuilderCommentWebhook(
   /** The change, plus everything the store does not know: the design's name and where to click. */
   private fun describe(queued: QueuedCommentChange): CommentWebhookEventV1 {
     val change = queued.change
-    val design = queued.design ?: resolveDesign(change.designId)
+    val refreshed = if (queued.refresh) resolveDesign(change.designId) else null
+    // The snapshot wins where there is one: it is what the design was called when somebody wrote
+    // the comment, and [refreshed] exists to leave the cache current for the next one.
+    val design = queued.design ?: refreshed
     return CommentWebhookEventV1(
       event = change.kind.wire,
       design =
@@ -223,12 +241,8 @@ internal class ServeUiBuilderCommentWebhook(
    * took, which is both cheaper and the metadata the comment was actually written against.
    */
   private fun resolveDesign(designId: String): CommentWebhookDesign? {
-    val cached = knownDesigns[designId]
-    if (cached != null && System.currentTimeMillis() - cached.atEpochMillis < DESIGN_CACHE_MILLIS) {
-      return cached.design
-    }
     val resolved = designs(designId)
-    knownDesigns[designId] = TimedDesign(resolved, System.currentTimeMillis())
+    knownDesigns[designId] = TimedDesign(resolved, now())
     return resolved
   }
 
@@ -311,6 +325,8 @@ internal class ServeUiBuilderCommentWebhook(
 internal data class QueuedCommentChange(
   val change: CommentBoardChange,
   val design: CommentWebhookDesign?,
+  /** The writer's cache had nothing for this design, or had something too old to keep serving. */
+  val refresh: Boolean = design == null,
 )
 
 /** A cached design lookup and when it was made. */
@@ -448,6 +464,13 @@ internal data class CommentWebhookThreadV1(
 internal data class CommentWebhookCommentV1(
   /** The author's display name, else their actor id. Absent where the act has no named actor. */
   val author: String? = null,
+  /**
+   * The actor the authorization layer established, which [author] is not.
+   *
+   * A display name is whatever the writer typed, so it is a label and never evidence. This is the
+   * field a relay checks when it cares who really spoke.
+   */
+  @SerialName("authorId") val authorId: String? = null,
   /** `human` or `agent`, as declared. Cosmetic here exactly as it is on the board. */
   @SerialName("authorKind") val authorKind: String? = null,
   /** What was said, trimmed by [commentExcerpt] — the same rule the `comments` notice uses. */
@@ -540,9 +563,19 @@ internal fun diffCommentBoards(
   return changes
 }
 
+/**
+ * The comment, with the name it chose to show *and* the identity it actually wrote under.
+ *
+ * `displayName` arrives in the request body; `authorId` is established by the authorization layer
+ * and is never read from the request (see [ServeUiBuilderCommentStore.post]). Carrying only the
+ * former would let anyone who may comment put a colleague's name on a message that a chat channel
+ * then repeats as fact — and leave a relay with nothing to check it against. So the label stays
+ * cosmetic and the authenticated actor rides alongside it.
+ */
 private fun StoredComment.asWebhookComment(): CommentWebhookCommentV1 =
   CommentWebhookCommentV1(
     author = displayName.ifBlank { authorId },
+    authorId = authorId,
     authorKind = authorKind,
     excerpt = body.commentExcerpt(),
   )
@@ -560,6 +593,8 @@ private fun StoredCommentThread.resolutionComment(): CommentWebhookCommentV1 {
   val byActor = comments.lastOrNull { it.authorId == actor }
   return CommentWebhookCommentV1(
     author = byActor?.displayName?.ifBlank { null } ?: actor,
+    // The resolver, as the store recorded it — null on a reopen, where nothing is known.
+    authorId = actor,
     authorKind = byActor?.authorKind,
     excerpt = comments.firstOrNull()?.body.orEmpty().commentExcerpt(),
   )

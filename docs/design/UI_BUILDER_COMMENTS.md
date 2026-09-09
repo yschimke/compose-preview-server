@@ -248,6 +248,20 @@ same list and may not have landed: a host that does not understand the fragment 
 ignores it, which is the correct degraded behaviour and is why a fragment rather than a query
 carries it.
 
+**The name shown is not the identity carried.** A comment's `displayName` arrives in the request
+body while its `authorId` is established by the authorization layer, so anyone who may comment can
+put a colleague's name on one. The event carries both: `author` is the cosmetic label a channel
+shows, and `authorId` is the authenticated actor a relay can check it against. Only the label would
+have let a chat window state as fact that somebody said a thing they did not.
+
+**A permalink is only worth sending to somebody who can open it.** The browse token travels as a
+header or `?token=`, never a cookie, so on a host gated by `--token` with no GitHub sign-in a
+recipient lands on the shell and the design behind it stays refused. Starting with a webhook in that
+configuration prints a note saying so. The token is deliberately *not* put in the link: it is a far
+stronger credential than the hook URL this feature refuses to log, and a chat channel is long-lived
+and widely readable. It is a note rather than a refusal because a local `serve` posting to a
+loopback receiver is legitimate, and so is a proxy that authenticates in front of the box.
+
 **The URL is a credential.** A Slack or Teams hook URL carries its secret in its path: anybody
 holding the string can post into that channel. So it is never logged — not on success, not on
 failure, not in the banner — and everything that has to name it names a short digest of it instead,

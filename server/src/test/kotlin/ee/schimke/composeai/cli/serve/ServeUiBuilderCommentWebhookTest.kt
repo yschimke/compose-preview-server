@@ -458,6 +458,108 @@ class ServeUiBuilderCommentWebhookTest {
   }
 
   @Test
+  fun `a cached design is re-read once its window has passed, so a rename lands`() {
+    // The snapshot the writer takes must not pin the first title the process ever saw. A stale
+    // entry still describes the event it was taken for — that is the point of taking it — but it
+    // also tells the worker to look again, so the next notification carries the new name.
+    val root = Files.createTempDirectory("comment-webhook-refresh")
+    try {
+      val store = ServeUiBuilderCommentStore(root)
+      val current =
+        java.util.concurrent.atomic.AtomicReference(CommentWebhookDesign("Checkout", "m3-catalog"))
+      val lookups = java.util.concurrent.atomic.AtomicInteger(0)
+      val clock = java.util.concurrent.atomic.AtomicLong(1_000L)
+      val delivered = CopyOnWriteArrayList<String>()
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig("https://hooks.example/hook"),
+          designs = {
+            lookups.incrementAndGet()
+            current.get()
+          },
+          baseUrl = { "https://preview.example" },
+          send = {
+            delivered += it
+            true
+          },
+          onLog = {},
+          designCacheMillis = 30_000L,
+          now = { clock.get() },
+        )
+      webhook.use {
+        it.attach(store).use {
+          store.post("design-1", "Yuri", CommentPostRequest(body = "First."))
+          awaitDeliveries(delivered, 1)
+          assertEquals(1, lookups.get(), "the first comment should resolve the design once")
+
+          // Inside the window: served from the snapshot, no second lookup.
+          store.post("design-1", "Yuri", CommentPostRequest(body = "Second."))
+          awaitDeliveries(delivered, 2)
+          assertEquals(1, lookups.get(), "a fresh cache entry must not be re-read")
+
+          // Past the window, and renamed in the meantime.
+          clock.addAndGet(30_001L)
+          current.set(CommentWebhookDesign("Checkout v2", "m3-catalog"))
+
+          store.post("design-1", "Yuri", CommentPostRequest(body = "Third."))
+          awaitDeliveries(delivered, 3)
+          assertEquals(2, lookups.get(), "a stale cache entry must be re-read")
+          // This one still reads as the design the comment was written against.
+          assertEquals("Checkout", titleOf(delivered[2]))
+
+          // And the refresh left the cache current, so the next one carries the new name.
+          store.post("design-1", "Yuri", CommentPostRequest(body = "Fourth."))
+          awaitDeliveries(delivered, 4)
+          assertEquals("Checkout v2", titleOf(delivered[3]))
+        }
+      }
+    } finally {
+      root.toFile().deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `the event carries the authenticated actor, not only the name they typed`() {
+    // `displayName` arrives in the request body and `authorId` comes from the authorization layer,
+    // so a writer can put a colleague's name on a comment. The channel may show the label, but the
+    // payload has to carry the identity somebody can check it against.
+    val before = board()
+    val after =
+      board(
+        thread(
+          "t-1",
+          comment("c-1", "Yuri Schimke", "Ship it.", authorId = "github:someone-else"),
+        )
+      )
+
+    val change = diffCommentBoards(before, after).single()
+
+    assertEquals("Yuri Schimke", change.comment.author)
+    assertEquals("github:someone-else", change.comment.authorId)
+
+    // And it survives into the wire body a bespoke receiver reads.
+    val body = CommentWebhookFormat.PLAIN.body(event(authorId = "github:someone-else"))
+    val comment = Json.parseToJsonElement(body).jsonObject.getValue("comment").jsonObject
+    assertEquals("github:someone-else", comment.getValue("authorId").jsonPrimitive.content)
+  }
+
+  /** The design title inside a delivered plain body. */
+  private fun titleOf(body: String): String =
+    Json.parseToJsonElement(body)
+      .jsonObject
+      .getValue("design")
+      .jsonObject
+      .getValue("title")
+      .jsonPrimitive
+      .content
+
+  private fun awaitDeliveries(bodies: CopyOnWriteArrayList<String>, count: Int) {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    while (bodies.size < count && System.nanoTime() < deadline) Thread.sleep(10)
+    assertEquals(count, bodies.size, "expected $count deliveries, saw ${bodies.size}")
+  }
+
+  @Test
   fun `a fingerprint identifies a hook without carrying it`() {
     val url = "https://hooks.slack.com/services/T000/B000/SUPERSECRET"
     val fingerprint = ServeUiBuilderCommentWebhook.fingerprintOf(url)
@@ -475,12 +577,19 @@ class ServeUiBuilderCommentWebhookTest {
     author: String? = "Yuri",
     kind: String? = StoredComment.AUTHOR_KIND_HUMAN,
     excerpt: String = "This row should be a card.",
+    authorId: String? = null,
   ) =
     CommentWebhookEventV1(
       event = "thread",
       design = CommentWebhookDesignV1(id = "checkout", title = "Checkout", catalog = "m3-catalog"),
       thread = CommentWebhookThreadV1(id = "t-1", anchor = "node play-button", comments = 1),
-      comment = CommentWebhookCommentV1(author = author, authorKind = kind, excerpt = excerpt),
+      comment =
+        CommentWebhookCommentV1(
+          author = author,
+          authorId = authorId,
+          authorKind = kind,
+          excerpt = excerpt,
+        ),
       url = "https://preview.example/ui-builder/m3-catalog/checkout#thread=t-1",
     )
 
@@ -503,10 +612,11 @@ class ServeUiBuilderCommentWebhookTest {
     displayName: String,
     body: String,
     kind: String = StoredComment.AUTHOR_KIND_HUMAN,
+    authorId: String? = null,
   ) =
     StoredComment(
       id = id,
-      authorId = if (kind == StoredComment.AUTHOR_KIND_AGENT) "agent-1" else "yuri",
+      authorId = authorId ?: if (kind == StoredComment.AUTHOR_KIND_AGENT) "agent-1" else "yuri",
       displayName = displayName,
       authorKind = kind,
       body = body,
