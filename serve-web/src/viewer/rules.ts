@@ -7,6 +7,7 @@
 // decisions the viewer does NOT make inline. Every one of these has a test file beside it.
 
 export * from "./fit.js";
+export * from "./historyRestore.js";
 export * from "./keyInput.js";
 export * from "./laneState.js";
 export * from "./motionPlayback.js";
