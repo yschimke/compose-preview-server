@@ -53,6 +53,15 @@
 #   --policy       a catalog's authored ui-builder.policy.json, or its generated ui-builder.json
 #                  (a local checkout, or fetched from the delivery branch)
 #   --golden       docs/design/fixtures/ui-builder/<id>-capabilities-v1.json
+#   --component-id-prefix
+#                  the prefix the caller believes this catalog's components carry (`wear-m3/`,
+#                  `m3/`). An assertion in its own right, exactly like --catalog-id and for the same
+#                  reason: it decides which of the frozen catalog's components this one is
+#                  answerable for, and taking it from the document under test lets that document
+#                  choose its own scope. The remote-m3 golden holds both `m3/…` and `remote-m3/…`,
+#                  so a generated Remote catalog declaring `m3/` — a real prefix, present in the
+#                  golden — could drop its own component and pass. Required by --strict for a
+#                  document that publishes a per-component menu.
 #   --catalog-id   the catalog the caller MEANT to check. An assertion in its own right, not a
 #                  fallback for a silent policy: it is checked against the golden's id AND against
 #                  the policy's, so asking for one catalog while holding another's policy and its
@@ -76,8 +85,9 @@
 # check (accepted with `"frozen": null` once somebody has read it — the mirror of the silence rule,
 # because one catches a catalog describing too little and the other a catalog describing something
 # WRONG), a stale or unexplained exemption, a MISSING policy file, a policy that is not this
-# catalog's — a different catalog from the golden's or from `--catalog-id`, or a document naming TWO
-# catalogs because a field that identifies one shape rides as ordinary payload in another — and a
+# catalog's — a different catalog from the golden's or from `--catalog-id`, a document naming TWO
+# catalogs because a field that identifies one shape rides as ordinary payload in another, or one
+# whose components are not the ones `--component-id-prefix` says they are — and a
 # SCHEMA this gate cannot vouch for on EITHER document — a future major, an unrecognised family, a
 # family that does not match the shape the document actually has, an unreadable string, or none at
 # all where only a capability document may
@@ -104,6 +114,7 @@ policy=""
 golden=""
 differences=""
 catalog_id=""
+component_id_prefix=""
 strict=0
 
 while [[ $# -gt 0 ]]; do
@@ -112,6 +123,7 @@ while [[ $# -gt 0 ]]; do
     --golden) golden="$2"; shift 2 ;;
     --differences) differences="$2"; shift 2 ;;
     --catalog-id) catalog_id="$2"; shift 2 ;;
+    --component-id-prefix) component_id_prefix="$2"; shift 2 ;;
     --strict) strict=1; shift ;;
     # The whole leading comment block, not a hardcoded line range: the range was `2,40p` and every
     # paragraph added above `Usage:` pushed the flags further out of it, so `--help` had quietly
@@ -122,7 +134,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${policy}" || -z "${golden}" ]]; then
-  echo "usage: $0 --policy <ui-builder.policy.json> --golden <…-capabilities-v1.json> [--differences <json>] [--catalog-id <id>] [--strict]" >&2
+  echo "usage: $0 --policy <ui-builder.policy.json> --golden <…-capabilities-v1.json> [--differences <json>] [--catalog-id <id>] [--component-id-prefix <prefix>] [--strict]" >&2
   exit 2
 fi
 
@@ -145,9 +157,11 @@ if [[ ! -f "${policy}" ]]; then
   exit 0
 fi
 
-node - "${policy}" "${golden}" "${differences}" "${strict}" "${catalog_id}" <<'NODE'
+node - "${policy}" "${golden}" "${differences}" "${strict}" "${catalog_id}" "${component_id_prefix}" <<'NODE'
 const { readFileSync } = require("node:fs");
-const [, , policyPath, goldenPath, differencesPath, strictFlag, expectedId] = process.argv;
+const [, , policyPath, goldenPath, differencesPath, strictFlag, expectedId, expectedPrefixArg] =
+  process.argv;
+const expectedPrefix = expectedPrefixArg || "";
 const strict = strictFlag === "1";
 
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -355,6 +369,11 @@ const fields = [
   ["colorTokens.roles", facts.colorTokens?.roles, semantics.colorTokens?.roles],
   ["code", facts.code, semantics.code],
   ["templates", facts.templates, semantics.templates],
+  // Documented in the contract's own table of what a catalog declares and two surfaces read — the
+  // palette and the export — and nothing compared it. No catalog states one today and no frozen
+  // catalog carries one, so this is silent until somebody does, which is exactly when a field that
+  // cannot differ stops being harmless. The fifth time on this file.
+  ["componentPacks", facts.componentPacks, semantics.componentPacks],
 ];
 
 // EVERY component's shelf, not just the order of the shelves.
@@ -412,7 +431,8 @@ for (const id of unknownBuiltins) {
 // I did. The published shapes carry a `componentMenu`; an authored policy carries `menu` with no
 // components at all, and asking it for per-component shelves is what this must not start doing.
 let unrecognisedPrefix = null;
-let unresolvedPrefix = false;
+let disagreeingPrefix = null;
+let unassertedPrefix = false;
 const statedEntries = published && menu !== undefined ? (menu.components ?? {}) : undefined;
 const frozenEntries = semantics.componentMenu?.components;
 let agreeingEntries = 0;
@@ -450,7 +470,32 @@ if (statedEntries && typeof statedEntries === "object" && !Array.isArray(statedE
   // silently matches nothing disables the sweep exactly as a wrong published prefix would.
   // `componentIdPrefix` is published on the generated shape precisely so a consumer can name a
   // component this file says nothing about, which is the same question asked here.
-  const catalogPrefix = facts.componentIdPrefix || null;
+  // The CALLER's assertion first, the document's second.
+  //
+  // Corroborating the document's prefix against the golden proved it matched something, not that it
+  // was this catalog's — and the remote-m3 golden holds both `m3/…` (25, the packaged Material 3
+  // catalog's) and `remote-m3/…` (1, its own). A generated Remote catalog declaring `m3/` therefore
+  // named a real, corroborated prefix, reproduced those 25 entries, dropped its own
+  // `remote-m3/lottie`, and passed `--strict` — the document under test choosing the scope it would
+  // be judged on. Reproduced before this was changed, and it exits 0.
+  //
+  // So which components a catalog answers for is an assertion from outside it, exactly as its
+  // identity is. `--catalog-id` was made an independent assertion for this same reason one round
+  // earlier; this is that argument applied to the other thing a document can misdescribe about
+  // itself.
+  const declaredPrefix = facts.componentIdPrefix || null;
+  const catalogPrefix = expectedPrefix || declaredPrefix;
+  if (expectedPrefix && declaredPrefix && expectedPrefix !== declaredPrefix) {
+    disagreeingPrefix = [expectedPrefix, declaredPrefix];
+  }
+  // And a document that publishes a per-component menu while nobody said which components are its.
+  // Informational on its own; under `--strict` it is a refusal, because `--strict` asserts this
+  // catalog is ready to replace that frozen one and the comparison behind that assertion was
+  // scoped by the catalog itself.
+  // Only where the scope actually decides something: a golden with no per-component menu has
+  // nothing for a prefix to include or exclude, so demanding the assertion there would be a flag
+  // for its own sake rather than for the hole it closes.
+  if (!expectedPrefix && frozenEntries) unassertedPrefix = true;
   // CORROBORATED, not trusted. The prefix decides which frozen entries this catalog is answerable
   // for, and it is supplied by the document being checked — so a wrong one silently suppresses the
   // whole sweep, which is the thing under test deciding what gets tested. It is not hypothetical:
@@ -462,18 +507,16 @@ if (statedEntries && typeof statedEntries === "object" && !Array.isArray(statedE
   // wrong or these two files are not about the same catalog — both of which `--strict` exists to
   // refuse, and neither of which may read as "nothing to compare".
   //
-  // Two different answers for two different situations. A prefix the frozen catalog has never heard
-  // of is a disagreement about which components belong to this catalog, and blocks. NO prefix is
-  // not a disagreement — a capability document publishes none, because its builtins have been
-  // materialised in and it does not distinguish them — so the sweep says it could not run rather
-  // than passing quietly or failing a document that is not the shape this checks.
+  // A prefix the frozen catalog has never heard of is a disagreement about which components belong
+  // to this catalog, and blocks. NO prefix at all is covered by the assertion rule above rather
+  // than by a second message about the same situation: a capability document publishes none — its
+  // builtins are materialised in and it does not distinguish them — and `--component-id-prefix` is
+  // how a caller supplies it.
   const prefixCorroborated =
     catalogPrefix !== null &&
     Object.keys(frozenEntries ?? {}).some((id) => id.startsWith(catalogPrefix));
   if (frozenEntries && catalogPrefix !== null && !prefixCorroborated) {
     unrecognisedPrefix = catalogPrefix;
-  } else if (frozenEntries && catalogPrefix === null) {
-    unresolvedPrefix = true;
   } else if (frozenEntries && catalogPrefix) {
     for (const id of Object.keys(frozenEntries).sort()) {
       if (!id.startsWith(catalogPrefix)) continue;
@@ -673,12 +716,21 @@ if (unrecognisedPrefix !== null) {
   console.log(`      this golden are not about the same catalog. Not a difference to waive.`);
 }
 
-if (unresolvedPrefix) {
-  console.log(`  ~ componentMenu.components: this shape publishes no componentIdPrefix, so which`);
-  console.log(`      frozen entries are this catalog's cannot be told from the builder's own. The`);
-  console.log(`      entries it DOES state were compared; a dropped one could not be.`);
+if (disagreeingPrefix !== null) {
+  console.log("");
+  console.log(
+    `  x componentIdPrefix: --component-id-prefix asked for ${JSON.stringify(disagreeingPrefix[0])}, ` +
+      `but this catalog declares ${JSON.stringify(disagreeingPrefix[1])}`,
+  );
+  console.log(`      Not a difference to waive — the caller and the document disagree about which`);
+  console.log(`      components belong to this catalog.`);
 }
-
+if (unassertedPrefix) {
+  console.log(
+    `  ? componentMenu.components: no --component-id-prefix was given, so which frozen components` +
+      ` this catalog answers for came from the catalog itself`,
+  );
+}
 // WHICH CATALOG IS THIS? Asked before anything above is believed.
 //
 // Every comparison so far has been of catalog-level SEMANTICS, and semantics do not identify a
@@ -717,7 +769,10 @@ const [shapeField, shapeId] = IDENTIFIERS[shape];
 const [identifyingField, declaredId] =
   shapeId !== undefined ? [shapeField, shapeId] : (namedIds[0] ?? [shapeField, null]);
 const goldenId = golden.benchmark?.catalogSystemId ?? null;
-let misidentified = unrecognisedPrefix === null ? 0 : 1;
+let misidentified =
+  (unrecognisedPrefix === null ? 0 : 1) +
+  (disagreeingPrefix === null ? 0 : 1) +
+  (unassertedPrefix ? 1 : 0);
 
 // A document that names itself TWICE must agree with itself, whichever name won above. Two
 // identifiers disagreeing is not a difference to waive and not a question of precedence: one of

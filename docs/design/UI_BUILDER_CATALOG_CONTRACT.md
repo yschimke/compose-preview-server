@@ -483,12 +483,22 @@ Each phase is releasable on its own and leaves every catalog working.
    `componentIdPrefix` — each stated entry against the frozen one, *and* each frozen one against the
    catalog's. Sweeping only the catalog's keys caught a shelf that moved and not one that vanished,
    so a generated menu omitting a component — an empty map included — reached no comparison at all
-   and passed while that component lost its shelf and its variant control. Which ids are the catalog's is read from the
+   and passed while that component lost its shelf and its variant control. Which ids are the catalog's is asserted by the caller with
+   `--component-id-prefix`, exactly as its identity is asserted with `--catalog-id` and for the same
+   reason: corroborating the document's own prefix against the golden proves it matches *something*,
+   not that it is this catalog's. The remote-m3 golden carries both `m3/…` (the packaged Material 3
+   catalog's) and a single `remote-m3/…` of its own, so a generated Remote catalog declaring `m3/`
+   named a real, corroborated prefix, reproduced those entries, dropped its own component and
+   passed. `--strict` requires the assertion wherever the frozen catalog has a per-component menu
+   for it to scope. The document's own prefix is read from the
    **published** `componentIdPrefix` and never derived from the catalog id — m3-catalog's components
    are `m3/…` while its id is `m3-catalog`, so a derived prefix would match none of its 25 frozen
    entries and disable the sweep as surely as a wrong one. A prefix the frozen catalog has never
-   heard of blocks; a shape that publishes none (a capability document does not) reports that the
-   sweep could not run rather than passing quietly. A missing entry is a
+   heard of blocks, as does one that disagrees with the caller's. A capability document publishes
+   none at all — its builtins are materialised in — which is what `--component-id-prefix` supplies.
+   `componentPacks` joined the compared fields at the same time, for the fifth time on this file:
+   the contract's own table lists it as a fact the palette and the export read, and nothing compared
+   it. A missing entry is a
    difference rather than a gap, and reviewable: the catalog publishes a menu and that menu does not
    list the id, which is an assertion that the component is gone, not the silence of a catalog that
    has not been written yet. An authored policy states none of them — a component's shelf comes from

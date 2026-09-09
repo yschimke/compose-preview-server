@@ -494,7 +494,7 @@ cat >"${work}/menu-agreeing.json" <<'JSON'
                       "wear-m3/card": { "group": "B" } } } } }
 JSON
 "${gate}" --policy "${work}/menu-agreeing.json" --golden "${work}/menu-golden.json" \
-  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --strict >"${work}/out" 2>&1
 check "a generated menu agreeing with the frozen one passes" 0 $?
 grep -q "2 shelf assignment(s) agree" "${work}/out" ||
   { echo "FAIL agreeing shelves not summarised"; failures=$((failures + 1)); }
@@ -508,7 +508,7 @@ cat >"${work}/menu-moved.json" <<'JSON'
                       "wear-m3/card": { "group": "A" } } } } }
 JSON
 "${gate}" --policy "${work}/menu-moved.json" --golden "${work}/menu-golden.json" \
-  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --strict >"${work}/out" 2>&1
 check "a component moved to another shelf fails --strict" 1 $?
 grep -q "componentMenu.components.wear-m3/card" "${work}/out" ||
   { echo "FAIL moved shelf not reported"; failures=$((failures + 1)); }
@@ -523,7 +523,8 @@ cat >"${work}/menu-reviewed.json" <<'JSON'
     "policy": { "group": "A" }, "frozen": { "group": "A", "variantProperty": "variant" } } ]
 JSON
 "${gate}" --policy "${work}/menu-moved.json" --golden "${work}/menu-golden.json" \
-  --differences "${work}/menu-reviewed.json" --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+  --differences "${work}/menu-reviewed.json" --catalog-id wear-m3 --component-id-prefix wear-m3/ \
+  --strict >"${work}/out" 2>&1
 check "a reviewed shelf move passes --strict" 0 $?
 
 # An authored policy states no per-component shelves at all — they come from the record's
@@ -593,7 +594,7 @@ cat >"${work}/drop-policy.json" <<'JSON'
       "components": { "wear-m3/button": { "group": "A" } } } } }
 JSON
 "${gate}" --policy "${work}/drop-policy.json" --golden "${work}/drop-golden.json" \
-  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --strict >"${work}/out" 2>&1
 check "a component missing from a generated menu fails --strict" 1 $?
 grep -q "x componentMenu.components.wear-m3/card" "${work}/out" ||
   { echo "FAIL dropped component not reported"; failures=$((failures + 1)); }
@@ -607,7 +608,7 @@ cat >"${work}/drop-empty.json" <<'JSON'
     "componentMenu": { "groupOrder": ["A"], "components": {} } } }
 JSON
 "${gate}" --policy "${work}/drop-empty.json" --golden "${work}/drop-golden.json" \
-  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --strict >"${work}/out" 2>&1
 check "an empty generated menu fails --strict" 1 $?
 
 # A retirement is a decision somebody can record: the catalog publishes a menu and that menu does
@@ -617,7 +618,8 @@ cat >"${work}/drop-reviewed.json" <<'JSON'
     "policy": null, "frozen": { "group": "A" } } ]
 JSON
 "${gate}" --policy "${work}/drop-policy.json" --golden "${work}/drop-golden.json" \
-  --differences "${work}/drop-reviewed.json" --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+  --differences "${work}/drop-reviewed.json" --catalog-id wear-m3 --component-id-prefix wear-m3/ \
+  --strict >"${work}/out" 2>&1
 check "a reviewed retirement passes --strict" 0 $?
 
 # A menu with no `components` member says exactly what an empty one says. The guard handled `{}`
@@ -629,7 +631,7 @@ cat >"${work}/drop-nomap.json" <<'JSON'
     "componentMenu": { "groupOrder": ["A"] } } }
 JSON
 "${gate}" --policy "${work}/drop-nomap.json" --golden "${work}/drop-golden.json" \
-  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --strict >"${work}/out" 2>&1
 check "a generated menu with no components member fails --strict" 1 $?
 grep -q "x componentMenu.components.wear-m3/card" "${work}/out" ||
   { echo "FAIL absent map not swept"; failures=$((failures + 1)); }
@@ -643,15 +645,14 @@ cat >"${work}/drop-badprefix.json" <<'JSON'
     "componentMenu": { "groupOrder": ["A"], "components": {} } } }
 JSON
 "${gate}" --policy "${work}/drop-badprefix.json" --golden "${work}/drop-golden.json" \
-  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+  --catalog-id wear-m3 --component-id-prefix nope/ --strict >"${work}/out" 2>&1
 check "a prefix the frozen catalog does not recognise fails --strict" 1 $?
 grep -q "x componentIdPrefix" "${work}/out" ||
   { echo "FAIL unrecognised prefix not reported"; failures=$((failures + 1)); }
 
-# NO prefix is a different answer from a WRONG one. A capability document publishes none — its
-# builtins are materialised in and it does not distinguish them — so the sweep says it could not
-# run rather than failing a document that is simply not the shape it checks. The frozen catalogs
-# are that shape, and one checked against itself has to pass.
+# A capability document publishes no prefix — its builtins are materialised in and it does not
+# distinguish them — so `--component-id-prefix` is how a caller supplies one, and with it a frozen
+# catalog checked against itself passes.
 cat >"${work}/drop-noprefix.json" <<'JSON'
 { "benchmark": { "catalogSystemId": "wear-m3" },
   "statusSemantics": { "platform": "wear",
@@ -661,10 +662,16 @@ cat >"${work}/drop-noprefix.json" <<'JSON'
                       "layout/box": { "group": "A" } } } } }
 JSON
 "${gate}" --policy "${work}/drop-noprefix.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --strict >"${work}/out" 2>&1
+check "a caller's prefix supplies what a capability document does not publish" 0 $?
+
+# And with neither: nobody has said which components are this catalog's, so the comparison behind
+# `--strict`'s assertion was scoped by the document itself.
+"${gate}" --policy "${work}/drop-noprefix.json" --golden "${work}/drop-golden.json" \
   --catalog-id wear-m3 --strict >"${work}/out" 2>&1
-check "a shape publishing no prefix says so rather than failing or passing quietly" 0 $?
-grep -q "publishes no componentIdPrefix" "${work}/out" ||
-  { echo "FAIL unresolvable prefix not reported"; failures=$((failures + 1)); }
+check "an unasserted ownership prefix fails --strict" 1 $?
+grep -q "no --component-id-prefix was given" "${work}/out" ||
+  { echo "FAIL unasserted prefix not reported"; failures=$((failures + 1)); }
 
 # A version token has to be a version all the way through: `parseInt` reads a numeric prefix and
 # discards the rest, so `v1junk` arrived as a supported major and every field compared cleanly.
