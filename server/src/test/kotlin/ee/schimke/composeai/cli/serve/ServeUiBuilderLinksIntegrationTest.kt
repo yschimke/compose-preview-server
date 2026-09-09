@@ -3,13 +3,17 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
+import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.HttpRequestEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
+import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
@@ -226,6 +230,111 @@ class ServeUiBuilderLinksIntegrationTest {
     assertEquals(true, refused["isError"]?.jsonPrimitive?.content?.toBoolean(), text)
     val survived = links(server, OPERATOR_TOKEN, "GET", designPath(DESIGN_ID), null)
     assertTrue(survived.second.contains(ISSUE), survived.second)
+  }
+
+  @Test
+  fun `a viewer shared into a design may read its links and may not write them`() {
+    val server = start()
+    createDesign(server, OPERATOR_TOKEN, DESIGN_ID)
+    links(server, OPERATOR_TOKEN, "PUT", designPath(DESIGN_ID), """{"issue":"$ISSUE"}""")
+
+    // The stranger holds every capability this host hands out, and is shared in as a VIEWER. That
+    // is exactly the actor the route capability alone could not tell apart from an editor: a
+    // repository-authorised session or an approved agent grant passes the WRITE gate on the door.
+    envelope(
+      server,
+      ServeUiBuilderMcp.SHARE_DESIGN,
+      """{"designId":"$DESIGN_ID","actorId":"github:stranger","role":"viewer"}""",
+    )
+
+    val read = links(server, STRANGER_TOKEN, "GET", designPath(DESIGN_ID), null)
+    assertEquals(200, read.first, read.second)
+    assertTrue(read.second.contains(ISSUE), read.second)
+
+    // 403 rather than 404: this actor may open the design, so pretending it is not here would be a
+    // worse answer than saying the design does not grant them writing it.
+    assertEquals(
+      403,
+      links(server, STRANGER_TOKEN, "PUT", designPath(DESIGN_ID), """{"issue":"$OTHER_ISSUE"}""")
+        .first,
+    )
+    assertEquals(403, links(server, STRANGER_TOKEN, "DELETE", designPath(DESIGN_ID), null).first)
+
+    // Nothing the viewer did changed the record, and the owner still writes it.
+    val kept = links(server, OPERATOR_TOKEN, "GET", designPath(DESIGN_ID), null)
+    assertTrue(kept.second.contains(ISSUE), kept.second)
+    assertTrue(!kept.second.contains(OTHER_ISSUE), kept.second)
+    assertEquals(
+      200,
+      links(server, OPERATOR_TOKEN, "PUT", designPath(DESIGN_ID), """{"issue":"$OTHER_ISSUE"}""")
+        .first,
+    )
+  }
+
+  @Test
+  fun `the links tool repeats the design's write check rather than trusting the grant`() {
+    val server = start()
+    // Roles reversed here, because only the operator's credential reaches the MCP door: the
+    // stranger owns this design and shares the operator in as a VIEWER.
+    createDesign(server, STRANGER_TOKEN, OTHER_DESIGN_ID)
+    links(server, STRANGER_TOKEN, "PUT", designPath(OTHER_DESIGN_ID), """{"issue":"$ISSUE"}""")
+    shareAsViewer(server, STRANGER_TOKEN, OTHER_DESIGN_ID, "operator")
+
+    // Reading is fine — the design granted it.
+    val read = envelope(server, ServeUiBuilderMcp.GET_LINKS, """{"designId":"$OTHER_DESIGN_ID"}""")
+    assertTrue(read.contains(ISSUE), read)
+
+    val refused =
+      call(
+        server,
+        ServeUiBuilderMcp.SET_LINKS,
+        """{"designId":"$OTHER_DESIGN_ID","issue":"$OTHER_ISSUE"}""",
+      )
+    val text = refused["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertEquals(true, refused["isError"]?.jsonPrimitive?.content?.toBoolean(), text)
+    assertTrue(text.contains("write access"), text)
+
+    val kept = links(server, STRANGER_TOKEN, "GET", designPath(OTHER_DESIGN_ID), null)
+    assertTrue(kept.second.contains(ISSUE), kept.second)
+    assertTrue(!kept.second.contains(OTHER_ISSUE), kept.second)
+  }
+
+  /** Share [designId] with [actorId] as a viewer, as its owner, over the protocol endpoint. */
+  private fun shareAsViewer(
+    server: RunningServer,
+    token: String,
+    designId: String,
+    actorId: String,
+  ) {
+    val envelope =
+      HttpRequestEnvelopeV1(
+        requestId = "share-$designId",
+        actorId = if (token == STRANGER_TOKEN) "github:stranger" else "operator",
+        request =
+          UpdateDesignAccessRequestV1(
+            designId = designId,
+            baseAccessRevision = 0,
+            mutations =
+              listOf(
+                GrantActorAccessMutationV1(
+                  actorId,
+                  DesignAccessRoleV1.VIEWER,
+                  listOf(DesignAccessActionV1.READ, DesignAccessActionV1.EXPORT),
+                )
+              ),
+          ),
+      )
+    val response =
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.server.port}/api/ui-builder/v1/requests")
+            .header(ServeHttpServer.TOKEN_HEADER, token)
+            .post(json.encodeToString(envelope).toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        )
+        .execute()
+    response.use { assertEquals(200, it.code, it.body.string()) }
   }
 
   @Test
@@ -515,6 +624,7 @@ class ServeUiBuilderLinksIntegrationTest {
     const val DESIGN_ID = "linked-screen"
     const val OTHER_DESIGN_ID = "someone-elses-screen"
     const val ISSUE = "https://github.com/yschimke/compose-preview-server/issues/12"
+    const val OTHER_ISSUE = "https://github.com/yschimke/compose-preview-server/issues/77"
     val JSON_MEDIA_TYPE = "application/json".toMediaType()
   }
 }

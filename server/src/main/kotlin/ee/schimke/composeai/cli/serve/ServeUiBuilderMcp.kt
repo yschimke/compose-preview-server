@@ -692,7 +692,8 @@ class ServeUiBuilderMcp(
    *
    * Authorised twice, exactly as the links routes are: the tool's capability decides whether this
    * caller may use the builder, and then the design is read *through the service, as this actor*,
-   * so a design they cannot open is "no such design" rather than a record they may write against.
+   * so a design they cannot open is "no such design" rather than a record they may write against,
+   * and [SET_LINKS] additionally takes the design's own WRITE action.
    *
    * [SET_LINKS] replaces the whole record rather than merging into it, for the reason the route
    * gives: a partial write is how a design ends up citing the issue it used to be for, and clearing
@@ -705,8 +706,14 @@ class ServeUiBuilderMcp(
   ): String {
     val store = links ?: throw McpRequestException("this host does not record what designs are for")
     val designId = args.requiredText("designId")
-    if (!service.canRead(actor, designId)) {
-      throw McpRequestException("no design `$designId` this actor can read")
+    val actions =
+      service.designActions(actor, designId)
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    // The tool capability got this call through the door; the design decides the rest. Setting a
+    // design's links is authoring it, so it takes that design's own WRITE action and not merely an
+    // agent grant wide enough to reach the tool.
+    if (tool == SET_LINKS && !actions.contains(DesignAccessActionV1.WRITE)) {
+      throw McpRequestException("design `$designId` does not grant this actor write access")
     }
     val stored =
       when (tool) {

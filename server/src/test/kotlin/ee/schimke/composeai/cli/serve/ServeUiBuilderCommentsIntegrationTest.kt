@@ -3,13 +3,17 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
+import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
 import ee.schimke.composeai.uibuilder.protocol.HttpRequestEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
+import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
@@ -180,6 +184,72 @@ class ServeUiBuilderCommentsIntegrationTest {
     // is what stops a caller enumerating which design ids exist by watching which posts succeed.
     val read = comments(server, "GET", "/api/ui-builder/v1/designs/not-a-design/comments", null)
     assertEquals(404, read.first, read.second)
+  }
+
+  @Test
+  fun `a viewer shared into a design may still comment on it`() {
+    val server = start()
+    createDesign(server)
+    shareAsViewer(server, "github:reviewer")
+
+    // The board deliberately stays on READ where the reference overlay and the links record take
+    // the design's own WRITE action. Its whole reason to exist is a reviewer who may see a screen
+    // saying so on it; requiring WRITE to comment would lock the reviewer out of the review
+    // surface. This test is here so that a later tightening of the sidecars has to say no to it on
+    // purpose rather than by sweeping all three together.
+    val posted =
+      comments(
+        server,
+        "POST",
+        "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
+        """{"body":"The play icon looks like a cross"}""",
+        token = REVIEWER_TOKEN,
+      )
+    assertEquals(201, posted.first, posted.second)
+
+    val read =
+      comments(
+        server,
+        "GET",
+        "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
+        null,
+        token = REVIEWER_TOKEN,
+      )
+    assertEquals(200, read.first, read.second)
+    assertTrue(read.second.contains("looks like a cross"), read.second)
+  }
+
+  /** Share the design with [actorId] as a viewer, as its owner. */
+  private fun shareAsViewer(server: RunningServer, actorId: String) {
+    val envelope =
+      HttpRequestEnvelopeV1(
+        requestId = "share-1",
+        actorId = "operator",
+        request =
+          UpdateDesignAccessRequestV1(
+            designId = DESIGN_ID,
+            baseAccessRevision = 0,
+            mutations =
+              listOf(
+                GrantActorAccessMutationV1(
+                  actorId,
+                  DesignAccessRoleV1.VIEWER,
+                  listOf(DesignAccessActionV1.READ, DesignAccessActionV1.EXPORT),
+                )
+              ),
+          ),
+      )
+    val response =
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.server.port}/api/ui-builder/v1/requests")
+            .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
+            .post(json.encodeToString(envelope).toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        )
+        .execute()
+    response.use { assertEquals(200, it.code, it.body.string()) }
   }
 
   @Test
@@ -367,15 +437,33 @@ class ServeUiBuilderCommentsIntegrationTest {
     method: String,
     path: String,
     body: String?,
+    token: String = OPERATOR_TOKEN,
   ): Pair<Int, String> {
     val request =
       Request.Builder()
         .url("http://127.0.0.1:${server.server.port}$path")
-        .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
+        .header(ServeHttpServer.TOKEN_HEADER, token)
         .method(method, body?.toRequestBody(JSON_MEDIA_TYPE))
         .build()
     return client.newCall(request).execute().use { it.code to it.body.string() }
   }
+
+  /**
+   * The operator and a second collaborator, both holding every UI-builder capability this host
+   * hands out.
+   *
+   * Two are needed to say anything about a *design's* access control rather than the host's: with
+   * one credential every design is owned by the caller, and "a viewer may comment" is not a
+   * sentence the fixture can express.
+   */
+  private fun twoCredentials(): ServeUiBuilderAuthorization =
+    ServeUiBuilderAuthorization { call, _, presented ->
+      when (presented ?: call.request.headers[ServeHttpServer.TOKEN_HEADER]) {
+        OPERATOR_TOKEN -> UiBuilderAuthorizationDecision.Authorized("operator")
+        REVIEWER_TOKEN -> UiBuilderAuthorizationDecision.Authorized("github:reviewer")
+        else -> UiBuilderAuthorizationDecision.Missing
+      }
+    }
 
   private fun createDesign(server: RunningServer) {
     val envelope =
@@ -432,8 +520,7 @@ class ServeUiBuilderCommentsIntegrationTest {
           catalogMcpEnabled = true,
           machineAuthorization = ServeMachineAuthorization(OPERATOR_TOKEN, null, null),
           uiBuilderService = service,
-          uiBuilderAuthorization =
-            ServeUiBuilderAuthorization.fromServeIdentity(OPERATOR_TOKEN, null, null),
+          uiBuilderAuthorization = twoCredentials(),
           uiBuilderCommentStore = store,
         )
         .also(ServeHttpServer::start)
@@ -535,6 +622,7 @@ class ServeUiBuilderCommentsIntegrationTest {
 
   private companion object {
     const val OPERATOR_TOKEN = "ui-builder-comments-operator-token"
+    const val REVIEWER_TOKEN = "ui-builder-comments-reviewer-token"
     const val CATALOG_SYSTEM_ID = "m3-catalog"
     const val DESIGN_ID = "discussed-screen"
     val JSON_MEDIA_TYPE = "application/json".toMediaType()

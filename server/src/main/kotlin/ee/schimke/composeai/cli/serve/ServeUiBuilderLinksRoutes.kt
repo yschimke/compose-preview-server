@@ -1,11 +1,8 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
-import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
-import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
-import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -31,8 +28,9 @@ import kotlinx.serialization.SerializationException
  * design document (see [ServeUiBuilderLinksStore]).
  *
  * **Authorised twice, on purpose.** The route capability decides whether this caller may use the
- * UI-builder at all, and then every request reads the design *through the service, as that actor*,
- * so the design's own access control decides whether there is a design here to link anything to.
+ * UI-builder at all, and then the design's own access control decides what this actor may do to
+ * *this* design — READ to be told what it is for, its own WRITE action to change that. A host
+ * capability is permission to use the door, never permission to edit somebody else's design.
  * Without the second check, an actor with a write capability could park a record against a design
  * they cannot open, and enumerate which design ids exist by watching which writes succeeded. The
  * reverse lookup is the same rule read backwards: a directory scan finds the records, and each
@@ -136,8 +134,21 @@ private suspend fun ApplicationCall.authorizedLinkedDesign(
     respondLinksError(HttpStatusCode.BadRequest, "a design id is required")
     return null
   }
-  if (!service.canRead(actor, designId)) {
+  // READ decides whether there is a design here to answer about; WRITE decides whether this actor
+  // may change it. Both refuse as 404, so a design the caller cannot open and one they may only
+  // read are told apart by what they may do, never by whether an id exists.
+  val actions = service.designActions(actor, designId)
+  if (actions == null) {
     respondLinksError(HttpStatusCode.NotFound, "no such design")
+    return null
+  }
+  if (
+    capability == UiBuilderRouteCapability.WRITE && !actions.contains(DesignAccessActionV1.WRITE)
+  ) {
+    respondLinksError(
+      HttpStatusCode.Forbidden,
+      "the design's own access control does not permit writing it",
+    )
     return null
   }
   return designId
@@ -160,24 +171,6 @@ private suspend fun ApplicationCall.authorizedActor(
       null
     }
   }
-
-/**
- * Whether [actor] can open [designId] at all — the design's own access control, asked the only way
- * this host asks it: by reading the design as them.
- */
-internal suspend fun UiBuilderServicePort.canRead(
-  actor: AuthenticatedUiBuilderActor,
-  designId: String,
-): Boolean {
-  if (designId.isBlank()) return false
-  val mapping =
-    UiBuilderProtocolMapper.toServiceCall(
-      actor,
-      GetSnapshotRequestV1(designId = designId, revision = null),
-    )
-  val snapshot = (mapping as? ProtocolRequestMapping.Mapped)?.let { execute(it.call) }
-  return snapshot is UiBuilderServiceResponse.Snapshot
-}
 
 /** The request body, or null once the refusal has been written. */
 private suspend fun ApplicationCall.receiveLinksBody(): StoredLinks? {
