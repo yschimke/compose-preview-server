@@ -9,34 +9,46 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
 /**
- * The refusal that would have caught m3-catalog, written from the real thing.
+ * The refusal that would have caught a real published catalog, written from the real thing.
  *
- * m3-catalog publishes a `ui-builder.json` whose policy declares **no** `components`, so every id
- * falls to `derivedId`. Its `componentIds` are a `Group/Variant` taxonomy — `Dialog/Basic`,
- * `TopAppBar/Small`, `Buttons/Filled` — and `derivedId` takes the LEAF, which is the variant. The
- * measured result against its 104-component record: `Filled` claimed by 15 components, 63
- * collisions, 41 survivors named `m3/filled`, `m3/small`, `m3/standard`, sharing exactly **one**
- * component id with the 41-component catalog this server synthesises.
+ * The case: a policy declaring **no** `components`, so every id falls to `derivedId`, whose leaf
+ * comes from the record entry's first `componentIds` value — and that taxonomy is `Group/Variant`
+ * (`Dialog/Basic`, `TopAppBar/Small`), so the leaf is the VARIANT. One variant word was claimed by
+ * 15 components. 63 of 104 collided, and the 41 survivors shared exactly **one** component id with
+ * the 41-component catalog this server synthesises.
  *
  * The reason this is a refusal and not a warning is in that last sentence. 41 composed against a
- * frozen 41 — every check that compares counts reports a match, and only the ids disagree. A shelf
- * can be completely wrong and exactly the right size.
+ * frozen 41 — every check comparing counts reports a match, and only the ids disagree. A shelf can
+ * be completely wrong and exactly the right size. The catalog is named in
+ * `docs/design/UI_BUILDER_CATALOG_CONTRACT.md` § Phase 4; this file may not name one.
  *
  * The fixtures are that shape reduced to what causes it; the real files are not committed because
- * the record is 3.5 MB. `.github/scripts/ui-builder-equivalence.sh --record` is what checks the
- * published files themselves.
+ * the record is 3.5 MB. `.github/scripts/ui-builder-equivalence.sh --record` is what checks those.
  */
 class PublishedUiBuilderCatalogCollisionTest {
 
   private val exports = ExportCapabilitiesV1(composeCode = true, svg = false, png = false)
 
   /**
-   * A record of `Group/Variant` component ids, the way m3-catalog's is shaped.
+   * The canonical id [record] gives the entry at [index].
+   *
+   * Shared so a fixture cannot mis-spell it. A first draft of the exclusion case below wrote these
+   * out by hand, they matched no record entry, every exclusion was silently ignored and the case
+   * composed where it should have refused — passing for the wrong reason is the failure mode this
+   * whole file is about.
+   */
+  private fun canonicalIdAt(componentId: String, index: Int): String {
+    val group = componentId.substringBefore('/')
+    val variant = componentId.substringAfter('/')
+    return ":m3/androidx.compose.material3.${group}Kt.$variant$group$index"
+  }
+
+  /**
+   * A record of `Group/Variant` component ids, the way the real one is shaped.
    *
    * Ids written out one by one rather than as a group × variant cross product, because the cross
-   * product hides the very thing under test: the derived id is the LEAF, so "four groups, one
-   * variant each" is four components sharing one id, not the clean case it reads as. Spelled out,
-   * each case says what it actually is.
+   * product hides the thing under test: the derived id is the LEAF, so "four groups, one variant
+   * each" is four components sharing one id, not the clean case it reads as.
    */
   private fun record(vararg componentIds: String): ComponentRecordFile {
     val components = componentIds.mapIndexed { index, id ->
@@ -44,7 +56,7 @@ class PublishedUiBuilderCatalogCollisionTest {
       val variant = id.substringAfter('/')
       """
         {
-          "canonicalId": ":m3/androidx.compose.material3.${group}Kt.$variant$group$index",
+          "canonicalId": "${canonicalIdAt(id, index)}",
           "componentIds": ["$id"],
           "symbol": {
             "name": "$variant$group",
@@ -69,7 +81,7 @@ class PublishedUiBuilderCatalogCollisionTest {
       )
   }
 
-  /** A policy declaring no `components` — m3-catalog's shape, and why every id is derived. */
+  /** A policy declaring no `components` — the shape that leaves every id to be derived. */
   private fun published(expected: Int) =
     """
     {
@@ -84,7 +96,7 @@ class PublishedUiBuilderCatalogCollisionTest {
   @Test
   fun `a file whose ids are variants rather than components is refused`() {
     // Four groups sharing three variant words. The leaf is the variant, so twelve components derive
-    // three ids and nine collide — 75%, the same register as m3-catalog's measured 61%.
+    // three ids and nine collide — 75%, the same register as the measured 61%.
     val result =
       PublishedUiBuilderCatalog.compose(
         published(expected = 12),
@@ -107,15 +119,15 @@ class PublishedUiBuilderCatalogCollisionTest {
     val unusable = assertIs<PublishedUiBuilderCatalog.Result.Unusable>(result)
     // The reason has to carry the numbers: an operator reading one startup line is deciding whether
     // this is their catalog's bug or their server's, and "refused" alone does not say.
-    assertTrue("9 of 12" in unusable.reason, unusable.reason)
+    assertTrue("9 of 12 eligible" in unusable.reason, unusable.reason)
     assertTrue("accident of record order" in unusable.reason, unusable.reason)
   }
 
   @Test
   fun `a catalog that names its components distinctly is unaffected`() {
     // Four DISTINCT leaves, so four distinct derived ids and no collisions. This arm keeps the
-    // refusal from being a blanket ban on derived ids — deriving is legitimate, and `test-catalog`
-    // and wear-m3-catalog both rely on it.
+    // refusal from being a blanket ban on derived ids — deriving is legitimate, and both
+    // `test-catalog` and the Wear catalog rely on it.
     val result =
       PublishedUiBuilderCatalog.compose(
         published(expected = 4),
@@ -130,7 +142,7 @@ class PublishedUiBuilderCatalogCollisionTest {
   fun `one stray duplicate is skipped rather than fatal`() {
     // A single collision is one catalog bug, and the shelf around it is still the right shelf.
     // Refusing here would withdraw a whole catalog over one mis-named component — the failure mode
-    // the threshold exists to avoid, and the reason it is a rate with a floor of one rather than
+    // the threshold exists to avoid, and why it is a rate with a floor of one rather than
     // `collisions > 0`.
     val ids = (1..20).map { "Group$it/Variant$it" } + "Extra/Variant1"
     val result =
@@ -146,11 +158,43 @@ class PublishedUiBuilderCatalogCollisionTest {
   }
 
   @Test
+  fun `an excluded component is out of the denominator, not hiding a colliding shelf`() {
+    // Reported by Codex on #655, and real. Ten entries all deriving `m3/filled`, ninety the policy
+    // excludes. Over the whole record that is 9 collisions against an allowance of 10, which
+    // composes to a ONE-component shelf; over the entries that actually competed it is 9 of 10 and
+    // is refused. An excluded entry never claims an identity, so it cannot be evidence that
+    // identities are being claimed distinctly.
+    val ids = (1..10).map { "Button/Filled" } + (1..90).map { "Skip$it/Skip$it" }
+    val excluded =
+      ids
+        .withIndex()
+        .filter { (_, id) -> id.startsWith("Skip") }
+        .joinToString(",") { (index, id) ->
+          """"m3/skip$index": {"record": "${canonicalIdAt(id, index)}", "excluded": "not on the shelf"}"""
+        }
+    val policy =
+      """
+      {
+        "schema": "compose-ui-builder-catalog/v1",
+        "catalog": { "id": "m3-shaped" },
+        "record": { "file": "components.json", "schemaVersion": 1, "components": 100 },
+        "statusSemantics": { "platform": "mobile", "componentIdPrefix": "m3/",
+          "components": { $excluded } }
+      }
+      """
+        .trimIndent()
+    val result = PublishedUiBuilderCatalog.compose(policy, record(*ids.toTypedArray()), exports)
+    val unusable = assertIs<PublishedUiBuilderCatalog.Result.Unusable>(result)
+    assertTrue("9 of 10 eligible" in unusable.reason, unusable.reason)
+  }
+
+  @Test
   fun `the floor holds on a record too small for the rate to mean anything`() {
-    // Two components, one collision — 50%, which a bare rate would refuse, contradicting the test
-    // above at a different scale. This is the case that caught the first version of the threshold:
-    // it broke `PublishedUiBuilderCatalogHostileInputTest`'s two-component collision fixture, which
-    // expects a skip and gets one only because the floor is `maxOf(1, rate * n)`.
+    // Two components, one collision — 50%, which a bare rate would refuse, contradicting
+    // `one stray duplicate is skipped rather than fatal` at a different scale. This is the case
+    // that caught the first version of the threshold: it broke
+    // `PublishedUiBuilderCatalogHostileInputTest`'s two-component collision fixture, which expects
+    // a skip and gets one only because the allowance is `maxOf(1, rate * eligible)`.
     val result =
       PublishedUiBuilderCatalog.compose(
         published(expected = 2),

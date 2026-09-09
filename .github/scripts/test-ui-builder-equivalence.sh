@@ -864,7 +864,7 @@ JSON
   --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-collide.json" --strict \
   >"${work}/out" 2>&1
 check "a record whose derived ids collide fails --strict" 1 $?
-grep -q "1 record component(s) collided" "${work}/out" ||
+grep -q "1 of 2 eligible record component(s) collided" "${work}/out" ||
   { echo "FAIL collision not reported"; failures=$((failures + 1)); }
 grep -q "wear-m3/button" "${work}/out" ||
   { echo "FAIL missing frozen component not named"; failures=$((failures + 1)); }

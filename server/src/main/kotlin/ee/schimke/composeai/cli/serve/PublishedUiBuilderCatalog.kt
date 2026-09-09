@@ -136,6 +136,11 @@ internal object PublishedUiBuilderCatalog {
     // Counted apart from the rest of `skipped`, because a collision means something the other skip
     // reasons do not: two components claimed one identity. See [COLLISION_REFUSAL_RATE].
     var collisions = 0
+    // Entries that actually competed for an identity. An excluded component never enters the shelf,
+    // so counting it in the denominator lets a policy excluding most of its record hide a shelf
+    // where everything left collides: 100 entries, 90 excluded, the remaining 10 all deriving one
+    // id is 9 collisions against an allowance of 10 — composed, with a one-component shelf.
+    var eligible = 0
 
     record?.components.orEmpty().forEach { component ->
       val declared = policyByRecordId[component.canonicalId]
@@ -144,13 +149,18 @@ internal object PublishedUiBuilderCatalog {
       val excluded = policy?.excluded
       when {
         excluded != null -> skipped += "$componentId — $excluded"
+        // Everything below this arm competed for `componentId`, so everything below counts.
         // A duplicate id is the catalog's to fix and is reported rather than resolved: picking a
         // winner silently would bind saved designs to whichever entry happened to sort first.
         taken.containsKey(componentId) -> {
+          eligible++
           collisions++
           skipped += "$componentId — a component of the same id was already taken from this record"
         }
-        else -> taken[componentId] = capability(componentId, component, policy)
+        else -> {
+          eligible++
+          taken[componentId] = capability(componentId, component, policy)
+        }
       }
     }
 
@@ -186,11 +196,10 @@ internal object PublishedUiBuilderCatalog {
     // `PublishedUiBuilderCatalogHostileInputTest`'s two-component collision fixture, which expects
     // a skip. The rate is for the bulk case; the floor keeps the stated "one is a catalog bug"
     // true at every scale.
-    val recordComponents = record?.components?.size ?: 0
-    val allowed = maxOf(1, (recordComponents * COLLISION_REFUSAL_RATE).toInt())
-    if (recordComponents > 0 && collisions > allowed) {
+    val allowed = maxOf(1, (eligible * COLLISION_REFUSAL_RATE).toInt())
+    if (eligible > 0 && collisions > allowed) {
       return Result.Unusable(
-        "$collisions of $recordComponents record components collided on an already-taken " +
+        "$collisions of $eligible eligible record components collided on an already-taken " +
           "component id, leaving ${taken.size} — the published file is not naming components " +
           "distinctly, so which one survives is an accident of record order"
       )
