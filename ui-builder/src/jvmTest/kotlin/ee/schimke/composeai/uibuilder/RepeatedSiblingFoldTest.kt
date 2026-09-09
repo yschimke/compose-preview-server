@@ -82,6 +82,41 @@ class RepeatedSiblingFoldTest {
   }
 
   /**
+   * `repeat` and the `it` it binds are names like any other.
+   *
+   * `exportedStateIdentifier` leaves both alone, so a design declaring state called either gets a
+   * local of that name in the generated function — and inside a folded run the lambda's implicit
+   * `Int` would shadow the first while the second would capture the call. Neither is a refusal: the
+   * cells are printed the long way, exactly as before the fold existed.
+   */
+  @Test
+  fun `state named it or repeat turns the fold off rather than changing what a cell reads`() {
+    listOf("it", "repeat").forEach { name ->
+      val document = contributionRow(cells = 12)
+      val source =
+        exportSource(
+          document.copy(
+            stateVariables =
+              JsonObject(
+                mapOf(
+                  name to
+                    JsonObject(
+                      mapOf(
+                        "valueType" to JsonPrimitive("string"),
+                        "initialValue" to JsonPrimitive("x"),
+                      )
+                    )
+                )
+              )
+          )
+        )
+
+      assertFalse(source.contains("repeat(12)"), source)
+      assertEquals(12, emittedCellBodies(source))
+    }
+  }
+
+  /**
    * How many cell bodies the source actually holds.
    *
    * Counted from the located node comment each emitted node carries rather than from the call — the

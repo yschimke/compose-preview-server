@@ -476,10 +476,26 @@ private class ComposeEmitter(
    * item identity has consequences, so the readability trade is not obviously worth it there and is
    * not taken.
    */
+  /**
+   * Whether a `repeat` written into this screen would still mean `kotlin.repeat`, and whether the
+   * `it` it binds would shadow anything a folded child reads.
+   *
+   * Both are names like any other. `exportedStateIdentifier` leaves `it` and `repeat` exactly as
+   * they are, so a design declaring either gets a local of that name in the generated function —
+   * and inside a folded run the lambda's implicit `Int` would shadow the first while the second
+   * would capture the call itself. Decided once per document, and spent on the fold rather than on
+   * a refusal: such a design has its siblings written out one by one, exactly as before the fold
+   * existed. Only state can do this here — every other name this exporter writes is a fixed Compose
+   * symbol.
+   */
+  private val foldsRepeatedSiblings: Boolean by lazy {
+    document.stateVariables.keys.map { it.identifier() }.none { it == "it" || it == "repeat" }
+  }
+
   private fun emitChildren(children: List<String>, level: Int) {
     var index = 0
     while (index < children.size) {
-      val signature = foldSignature(children[index])
+      val signature = if (foldsRepeatedSiblings) foldSignature(children[index]) else null
       var end = index + 1
       if (signature != null) {
         while (end < children.size && foldSignature(children[end]) == signature) end++
