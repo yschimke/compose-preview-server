@@ -284,6 +284,54 @@ public class ServeRunner(
     get() = usableUiBuilderDir() != null && uiBuilderStateDirFlag != "none"
 
   /**
+   * Whether [openUiBuilderService] actually returned a lane, set once [bringUpServer] knows.
+   *
+   * The static shell is still served when it did not — `--ui-builder-state-dir none` deliberately
+   * offers an editor that cannot save — but a shell whose design API is absent is not somewhere to
+   * SEND anyone. Without this, a `ui` invocation whose builder failed while its project session
+   * survived still carried `--open-browser` and a `/ui-builder/…` open path, so the fail-soft host
+   * came up by opening the one surface that did not work instead of the previews that did.
+   */
+  @Volatile private var uiBuilderLaneOpen: Boolean = false
+
+  /**
+   * Whether `/` has anything to show, set alongside [uiBuilderLaneOpen].
+   *
+   * `handleLanding` answers the front-door index when this server publishes catalogs, and otherwise
+   * leases the default session — which on a host with neither is a blank id and a 404. The
+   * only-surface guard deliberately keeps a `--accept-docs` / `--accept-images` /
+   * `--accept-bundles` / `--admin-token` host alive with no session and no catalog, so `/` is
+   * exactly the wrong place to send that host's operator.
+   */
+  @Volatile private var landingServesSomething: Boolean = false
+
+  /** Whether [path] is the builder, in either of its two spellings. */
+  private fun isUiBuilderPath(path: String): Boolean =
+    path == "/ui-builder" || path.startsWith("/ui-builder/")
+
+  /**
+   * The page to open and to print, which is [openBrowserPath] unless it names a builder that is not
+   * there — then the landing page, which lists whatever this host does serve.
+   *
+   * Normalised to the trailing slash as well. `/ui-builder` redirects to `/ui-builder/`, and until
+   * that redirect carried the query with it a printed token-bearing link arrived signed out; the
+   * redirect is fixed, and printing the canonical form means the URL does not depend on it.
+   */
+  private val effectiveOpenPath: String
+    get() =
+      when {
+        !isUiBuilderPath(openBrowserPath) -> openBrowserPath
+        uiBuilderLaneOpen ->
+          if (openBrowserPath == "/ui-builder") "/ui-builder/" else openBrowserPath
+        // The builder is not there. `/` when it has something to show, and `/status` when it does
+        // not: the status page leases no session, so it is the one route a
+        // surviving-but-sessionless
+        // host can always answer, and it names the lanes that survived.
+        landingServesSomething -> "/"
+        else -> "/status"
+      }
+
+  /**
    * Whether nothing but the builder could keep this server alive — the CONFIGURED half.
    *
    * [uiBuilderLaneConfigured] answers a question about configuration, and the empty-server check
@@ -2997,6 +3045,9 @@ public class ServeRunner(
       }
     val uiBuilderAppDir = usableUiBuilderDir()
     val uiBuilderLane = openUiBuilderService(uiBuilderAppDir, catalogStore, catalogLoads)
+    uiBuilderLaneOpen = uiBuilderLane != null
+    landingServesSomething =
+      defaultSessionId.isNotEmpty() || registry.anySessionId() != null || catalogRefs.isNotEmpty()
     // Fail-soft everywhere else — a host with previews to serve keeps serving them and simply has
     // no builder — but fatal when the builder was the whole server, which is `ui --no-project`.
     // Serving its assets over an absent design API is a builder that opens and cannot save.
@@ -3397,7 +3448,7 @@ public class ServeRunner(
   private fun openBrowser(port: Int, token: String) {
     val localHost =
       if (ServeUrls.isExposed(host) || host == ServeUrls.LOOPBACK) ServeUrls.LOOPBACK else host
-    val url = localUrlFor(localHost, port, token, openBrowserPath)
+    val url = localUrlFor(localHost, port, token, effectiveOpenPath)
     val opened = runCatching {
       if (!Desktop.isDesktopSupported()) return@runCatching false
       val desktop = Desktop.getDesktop()
@@ -4816,11 +4867,8 @@ public class ServeRunner(
     // `/ui-builder` exactly, as well as anything under it: that spelling is a registered route
     // which redirects to `/ui-builder/`, so a caller who passes it explicitly must not be sent back
     // to the root landing page — the very case this line exists to fix.
-    if (
-      uiBuilderLaneConfigured &&
-        (openBrowserPath == "/ui-builder" || openBrowserPath.startsWith("/ui-builder/"))
-    ) {
-      System.err.println("  Builder: ${localUrlFor(localHost, port, token, openBrowserPath)}")
+    if (uiBuilderLaneOpen && isUiBuilderPath(openBrowserPath)) {
+      System.err.println("  Builder: ${localUrlFor(localHost, port, token, effectiveOpenPath)}")
     }
     if (acceptDocs) {
       val docsUrl =
