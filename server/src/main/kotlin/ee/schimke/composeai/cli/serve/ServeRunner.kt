@@ -284,6 +284,25 @@ public class ServeRunner(
     get() = usableUiBuilderDir() != null && uiBuilderStateDirFlag != "none"
 
   /**
+   * Whether the builder is the ONLY thing keeping this server alive.
+   *
+   * [uiBuilderLaneConfigured] answers a question about configuration, and the empty-server check
+   * runs long before [openUiBuilderService] has tried anything — so a builder that is configured
+   * but cannot open (an unwritable state directory, corrupt saved state, a `--ui-builder-catalogs`
+   * naming a catalog with no packaged adapter) got past the check and left `ui --no-project`
+   * serving static assets whose design API was absent, instead of failing the command. This is what
+   * [bringUpServer] re-asks once the answer is known, so the failure is fatal exactly when there is
+   * nothing else to be.
+   */
+  private val uiBuilderIsOnlySurface: Boolean
+    get() =
+      catalogRefs.isEmpty() &&
+        !acceptBundles &&
+        !acceptDocs &&
+        !imageLaneConfigured &&
+        adminToken == null
+
+  /**
    * The parsed `--catalogs-file`, or the empty config when none is set / it can't be read. A
    * malformed config is reported and treated as empty rather than fatal: a box whose config file
    * got truncated should still come up on its flag-supplied catalogs.
@@ -2972,6 +2991,16 @@ public class ServeRunner(
       }
     val uiBuilderAppDir = usableUiBuilderDir()
     val uiBuilderLane = openUiBuilderService(uiBuilderAppDir, catalogStore, catalogLoads)
+    // Fail-soft everywhere else — a host with previews to serve keeps serving them and simply has
+    // no builder — but fatal when the builder was the whole server, which is `ui --no-project`.
+    // Serving its assets over an absent design API is a builder that opens and cannot save.
+    if (uiBuilderLane == null && uiBuilderLaneConfigured && uiBuilderIsOnlySurface) {
+      System.err.println(
+        "serve: the UI builder is the only surface on this server and its service could not be " +
+          "opened, so there is nothing left to serve."
+      )
+      exitProcess(1)
+    }
     // Runtime UI-builder administration. Needs the admin token and a builder lane, nothing else:
     // it reads and removes designs through the service the routes already hold, so a host with
     // no builder has no such page, and one without --admin-token has no admin surface at all.
@@ -3356,9 +3385,7 @@ public class ServeRunner(
   private fun openBrowser(port: Int, token: String) {
     val localHost =
       if (ServeUrls.isExposed(host) || host == ServeUrls.LOOPBACK) ServeUrls.LOOPBACK else host
-    val origin = ServeUrls.origin(localHost, port)
-    val url =
-      if (public) "$origin$openBrowserPath" else ServeUrls.pathUrl(origin, openBrowserPath, token)
+    val url = localUrlFor(localHost, port, token, openBrowserPath)
     val opened = runCatching {
       if (!Desktop.isDesktopSupported()) return@runCatching false
       val desktop = Desktop.getDesktop()
@@ -3368,8 +3395,16 @@ public class ServeRunner(
     }
       .getOrDefault(false)
     if (!opened) {
-      System.err.println("browse: could not open a desktop browser; open the Local URL above.")
+      // The URL itself rather than "the Local URL above": that one is the root landing page, which
+      // is not where this server was asked to open, and on a projectless builder is a 404.
+      System.err.println("browse: could not open a desktop browser; open $url")
     }
+  }
+
+  /** [path] on this server, carrying the token unless the host is public. */
+  private fun localUrlFor(localHost: String, port: Int, token: String, path: String): String {
+    val origin = ServeUrls.origin(localHost, port)
+    return if (public) "$origin$path" else ServeUrls.pathUrl(origin, path, token)
   }
 
   /**
@@ -4763,6 +4798,12 @@ public class ServeRunner(
       )
     }
     System.err.println("  Previews: $previewCount")
+    // The page this server is actually about, when the builder is a lane. `--no-open` prints no
+    // URL of its own and the root landing page has no session behind a projectless server, so
+    // without this line a headless caller was handed a 404 as the way in.
+    if (uiBuilderLaneConfigured && openBrowserPath.startsWith("/ui-builder/")) {
+      System.err.println("  Builder: ${localUrlFor(localHost, port, token, openBrowserPath)}")
+    }
     if (acceptDocs) {
       val docsUrl =
         if (public) "${ServeUrls.origin(localHost, port)}/docs"

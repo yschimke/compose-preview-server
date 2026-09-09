@@ -42,6 +42,28 @@ internal object LocalUiBuilder {
   /** The packaged builder distribution's directory name, beside the binary's `lib/`. */
   private const val BUILDER_ASSETS = "ui-builder"
 
+  /**
+   * The packaged component record's directory, a sibling of [BUILDER_ASSETS] in the distribution.
+   *
+   * Written by `server/build.gradle.kts`, whose own comment says what it is for: without the record
+   * "a packaged host advertises no Compose export at all".
+   */
+  private const val BUILDER_COMPONENTS = "ui-builder-components"
+
+  /** The packaged record's file name, as the distribution ships it. */
+  private const val PACKAGED_RECORD = "m3-catalog-components-v1.json"
+
+  /**
+   * The options that only mean something with a Gradle project, and so contradict [NO_PROJECT].
+   *
+   * Refused rather than dropped. Forwarding them sent `ServeRunner` down its Gradle path — which
+   * with no build host exits on a render-build failure, and with one builds a project the caller
+   * asked not to have — and dropping them silently would make a typed flag vanish. The help text
+   * said these "stop applying"; a usage error is the only reading of that which does not lie.
+   */
+  private val PROJECT_FLAGS: List<String> =
+    listOf("--module", "--discover", "--export", "--revisions", "--variant")
+
   /** Where the Gradle plugin's discovery task writes a module's preview outputs. */
   private const val MODULE_PREVIEW_OUTPUT = "build/compose-previews"
 
@@ -108,12 +130,25 @@ internal object LocalUiBuilder {
       add("--ui-builder-dir")
       add(builderDir.path)
     }
-    // No project, no record: the Compose export falls back to what the packaged catalog can write
-    // on its own, and naming a file that discovery is never going to produce would make the export
-    // refuse against a path that cannot appear.
+    // With a project, the record is the one discovery is about to write — named up front and
+    // filled in by [publishRecord], because the module is not known until Gradle has run.
     if (!projectless && !args.hasFlag("--ui-builder-components")) {
       add("--ui-builder-components")
       add("$catalog=${componentRecord.path}")
+    }
+    // Without one, the DISTRIBUTION's record. `--no-project` is the documented stock-distribution
+    // command and the distribution ships `ui-builder-components/m3-catalog-components-v1.json`, so
+    // omitting it left `uiBuilderComponents` empty, `composeExportFor` false for the default
+    // `m3-catalog`, and its Compose export action withdrawn — the packaged record sitting unread
+    // beside the binary. Only `remote-m3` worked, and only because its exporter needs no record.
+    //
+    // Pinned to [DEFAULT_CATALOG] rather than to `catalog`: it is M3's record, and naming it for a
+    // catalog it does not describe would make the export generate call sites for the wrong system.
+    if (projectless && !args.hasFlag("--ui-builder-components")) {
+      packagedComponentRecord()?.let {
+        add("--ui-builder-components")
+        add("$DEFAULT_CATALOG=${it.path}")
+      }
     }
     // Offer every packaged design system rather than only the one being opened: the reason to run
     // this mode is to draw against them, and picking one at launch would mean relaunching to try
@@ -122,13 +157,39 @@ internal object LocalUiBuilder {
       add("--ui-builder-catalogs")
       add(DEFAULT_CATALOGS.joinToString(","))
     }
-    if (NO_OPEN !in args) {
-      if (!args.hasFlag("--open-browser")) add("--open-browser")
-      if (!args.hasFlag("--open-path")) {
-        add("--open-path")
-        add("/ui-builder/$catalog/")
-      }
+    // `--open-path` is set even under `--no-open`, because it is the page this command is ABOUT,
+    // not only the page a browser is pointed at: `ServeRunner` prints it in the banner and names it
+    // when a desktop browse fails. Without it the only URL a headless caller saw was the generic
+    // root landing page, which on a projectless server has no session and no served catalog behind
+    // it — a 404 offered as the way in.
+    if (!args.hasFlag("--open-path")) {
+      add("--open-path")
+      add("/ui-builder/$catalog/")
     }
+    if (NO_OPEN !in args && !args.hasFlag("--open-browser")) add("--open-browser")
+  }
+
+  /**
+   * The project options [NO_PROJECT] contradicts, in the order given, or empty when there are none.
+   */
+  fun conflictingProjectFlags(args: List<String>): List<String> =
+    if (!isProjectless(args)) emptyList() else PROJECT_FLAGS.filter { args.hasFlag(it) }
+
+  /**
+   * The packaged component record shipped beside this binary, or null when it is not there.
+   *
+   * Resolved exactly as [packagedBuilderDir] resolves the assets — explicit app home first, then
+   * the install inferred from this class's own jar — because the two are siblings written by the
+   * same distribution block, and a build that moves one moves the other.
+   */
+  fun packagedComponentRecord(): File? {
+    val appHome = System.getProperty("composeai.cli.appHome") ?: System.getenv("APP_HOME")
+    return listOfNotNull(
+        appHome?.let { File(it, BUILDER_COMPONENTS) },
+        inferredInstallDir(BUILDER_COMPONENTS),
+      )
+      .map { File(it, PACKAGED_RECORD) }
+      .firstOrNull { it.isFile }
   }
 
   /**
@@ -146,13 +207,16 @@ internal object LocalUiBuilder {
       .firstOrNull { File(it, "index.html").isFile }
   }
 
-  private fun inferredInstallAssets(): File? = runCatching {
+  private fun inferredInstallAssets(): File? = inferredInstallDir(BUILDER_ASSETS)
+
+  /** `<APP_HOME>/[name]`, inferred from `<APP_HOME>/lib/compose-preview-serve.jar`. */
+  private fun inferredInstallDir(name: String): File? = runCatching {
     val jar =
       File(
         LocalUiBuilder::class.java.protectionDomain?.codeSource?.location?.toURI()
           ?: return@runCatching null
       )
-    jar.parentFile?.parentFile?.resolve(BUILDER_ASSETS)
+    jar.parentFile?.parentFile?.resolve(name)
   }
     .getOrNull()
 
@@ -216,7 +280,8 @@ internal object LocalUiBuilder {
 
     Options:
       --no-project      Open the builder against the packaged design systems, with no Gradle project
-                        and no build host. Everything below about modules stops applying.
+                        and no build host. The options below that need a project — ${PROJECT_FLAGS.joinToString(", ")} —
+                        are refused alongside it rather than ignored.
       --module <path>   Build and serve one Gradle module. Omit it to discover every module in the
                         build (a build with more than one module of previews then asks you to pick).
       --variant <name>  Android build variant used for previews.

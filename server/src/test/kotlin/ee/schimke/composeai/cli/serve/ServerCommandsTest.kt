@@ -116,9 +116,11 @@ class LocalUiBuilderTest {
         "/opt/compose-preview-server/ui-builder",
         "--ui-builder-components",
         "m3-catalog=/tmp/record/components.json",
-        "--open-browser",
+        // `--open-path` first, and set whether or not a browser is opened: it names the page this
+        // command is about, which the banner prints and a failed desktop browse quotes.
         "--open-path",
         "/ui-builder/m3-catalog/",
+        "--open-browser",
       ),
       serve,
     )
@@ -148,11 +150,79 @@ class LocalUiBuilderTest {
   }
 
   @Test
+  fun `no-project points the export at the record the distribution ships`(@TempDir temp: File) {
+    // The documented stock-distribution command, on a distribution laid out as one. Without this
+    // the packaged record sat unread beside the binary: `uiBuilderComponents` came up empty,
+    // `composeExportFor` answered false for the default catalog, and the builder withdrew its
+    // Compose export action on exactly the mode that has nothing else to offer.
+    val home = File(temp, "app-home").also { it.mkdirs() }
+    val record = File(home, "ui-builder-components/m3-catalog-components-v1.json")
+    record.parentFile.mkdirs()
+    record.writeText("{}")
+    val previous = System.getProperty("composeai.cli.appHome")
+    System.setProperty("composeai.cli.appHome", home.path)
+    try {
+      val serve = serveArgs(listOf(LocalUiBuilder.NO_PROJECT))
+
+      val index = serve.indexOf("--ui-builder-components")
+      assertTrue(index >= 0, serve.toString())
+      assertEquals("${LocalUiBuilder.DEFAULT_CATALOG}=${record.path}", serve[index + 1])
+    } finally {
+      if (previous == null) System.clearProperty("composeai.cli.appHome")
+      else System.setProperty("composeai.cli.appHome", previous)
+    }
+  }
+
+  @Test
+  fun `no-project without a packaged record names no components file`(@TempDir temp: File) {
+    // A source checkout or an unpacked jar has no distribution beside it. Naming a path that is not
+    // there would make every export refuse against a file that cannot appear, which is the reason
+    // the projectless branch declined to name one at all.
+    val previous = System.getProperty("composeai.cli.appHome")
+    System.setProperty("composeai.cli.appHome", File(temp, "empty").path)
+    try {
+      assertTrue("--ui-builder-components" !in serveArgs(listOf(LocalUiBuilder.NO_PROJECT)))
+    } finally {
+      if (previous == null) System.clearProperty("composeai.cli.appHome")
+      else System.setProperty("composeai.cli.appHome", previous)
+    }
+  }
+
+  @Test
+  fun `no-project refuses the options that need a project`() {
+    assertEquals(
+      listOf("--module"),
+      LocalUiBuilder.conflictingProjectFlags(listOf(LocalUiBuilder.NO_PROJECT, "--module", "app")),
+    )
+    assertEquals(
+      listOf("--discover", "--export"),
+      LocalUiBuilder.conflictingProjectFlags(
+        listOf("--export", "out", LocalUiBuilder.NO_PROJECT, "--discover")
+      ),
+      "reported in the order the help lists them, not the order they were typed",
+    )
+    assertEquals(
+      emptyList(),
+      LocalUiBuilder.conflictingProjectFlags(listOf(LocalUiBuilder.NO_PROJECT, "--port", "9000")),
+      "flags that mean the same thing with or without a project are not a conflict",
+    )
+    assertEquals(
+      emptyList(),
+      LocalUiBuilder.conflictingProjectFlags(listOf("--module", "app")),
+      "and there is no conflict at all without --no-project",
+    )
+  }
+
+  @Test
   fun `no-open is this lane's flag and never reaches the server`() {
     val serve = serveArgs(listOf("--module", "app", LocalUiBuilder.NO_OPEN))
     assertTrue(LocalUiBuilder.NO_OPEN !in serve, serve.toString())
     assertTrue("--open-browser" !in serve, serve.toString())
-    assertTrue("--open-path" !in serve, serve.toString())
+    // `--open-path` DOES survive, which it did not before. It is what the banner prints, so
+    // withholding it left `--no-open` — the headless case — with only the root landing URL, and on
+    // a projectless server that page has no session behind it.
+    assertTrue("--open-path" in serve, serve.toString())
+    assertTrue("/ui-builder/${LocalUiBuilder.DEFAULT_CATALOG}/" in serve, serve.toString())
   }
 
   @Test
@@ -255,9 +325,9 @@ class LocalUiBuilderTest {
         "/opt/compose-preview-server/ui-builder",
         "--ui-builder-catalogs",
         "m3-catalog,remote-m3",
-        "--open-browser",
         "--open-path",
         "/ui-builder/m3-catalog/",
+        "--open-browser",
       ),
       serve,
     )
