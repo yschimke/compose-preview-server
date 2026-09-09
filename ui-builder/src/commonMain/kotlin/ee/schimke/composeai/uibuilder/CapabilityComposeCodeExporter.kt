@@ -458,6 +458,87 @@ private class ComposeEmitter(
     if (stableIdentity.isNotEmpty()) line(level, "}")
   }
 
+  /**
+   * A slot's children, with runs of identical siblings written as one `repeat`.
+   *
+   * A design says a twelve-cell contribution row by holding twelve nodes, because that is the only
+   * thing the document can say: there is no loop in the format, and the canvas draws what is there.
+   * Printing it back as twelve identical `Surface` calls is faithful and unreadable, and the person
+   * reading the generated screen is the one this export exists for.
+   *
+   * The fold is purely how the same composition is *spelled*. The run emits the calls it replaced,
+   * in the same order, in the same parent scope; nothing about what is drawn moves. So the rule for
+   * what may fold is the rule for what is genuinely interchangeable — see [foldSignature], which
+   * refuses a subtree asserting an identity the fold would erase.
+   *
+   * Only in the non-lazy containers. `LazyColumn` and the grid wrap each child in `item(key = …)`,
+   * and a folded run would have to invent one key for what were separate keys — laziness is where
+   * item identity has consequences, so the readability trade is not obviously worth it there and is
+   * not taken.
+   */
+  private fun emitChildren(children: List<String>, level: Int) {
+    var index = 0
+    while (index < children.size) {
+      val signature = foldSignature(children[index])
+      var end = index + 1
+      if (signature != null) {
+        while (end < children.size && foldSignature(children[end]) == signature) end++
+      }
+      val run = end - index
+      if (run < MINIMUM_FOLDED_RUN) {
+        children.subList(index, end).forEach { emitNode(it, level) }
+      } else {
+        val folded = children.subList(index, end)
+        line(level, "// repeated:$run nodes:${folded.joinToString(",").escapeComment()}")
+        line(level, "repeat($run) {")
+        emitNode(folded.first(), level + 1)
+        line(level, "}")
+      }
+      index = end
+    }
+  }
+
+  /**
+   * What makes two sibling subtrees the same drawing, or `null` for one that may not be folded.
+   *
+   * Everything the emitters read is in it — the component, its properties, its modifiers, its event
+   * bindings, and the same question asked of every child, per slot — so two subtrees with equal
+   * signatures generate byte-identical Kotlin. Node ids are the one thing left out, since being
+   * different nodes is exactly what a run of identical siblings is.
+   *
+   * `null` for a subtree carrying `stableKey` or `scrollStateKey`, at any depth. Those are the
+   * design's own claim that this node is a particular one — [emitNode] spends them on a `key(…)`
+   * wrapper — and a `repeat` would emit that claim n times over. A design that wants its cells
+   * distinguishable says so, and is then printed the long way.
+   */
+  private fun foldSignature(nodeId: String, ancestors: Set<String> = emptySet()): String? {
+    // The export gate refuses `GRAPH_CYCLE` before any of this runs; the guard is here so that a
+    // future caller cannot turn a malformed document into a stack overflow inside the emitter.
+    if (nodeId in ancestors) return null
+    val node = document.nodes[nodeId] ?: return null
+    if (node.string("stableKey").isNotEmpty() || node.string("scrollStateKey").isNotEmpty()) {
+      return null
+    }
+    val slots = StringBuilder()
+    node.slots.entries
+      .sortedBy { it.key }
+      .forEach { (slot, children) ->
+        slots.append(slot).append("=[")
+        children.forEach { child ->
+          slots.append(foldSignature(child, ancestors + nodeId) ?: return null).append(",")
+        }
+        slots.append("],")
+      }
+    return listOf(
+        node.componentId,
+        canonicalJson(node.properties),
+        canonicalJson(node.modifiers),
+        canonicalJson(node.eventBindings),
+        slots.toString(),
+      )
+      .joinToString("|")
+  }
+
   private fun emitSupportingPane(node: UiBuilderNode, level: Int) {
     line(level, "BuilderSupportingPaneScaffold(")
     line(level + 1, "modifier = ${node.modifierExpression()},")
@@ -471,10 +552,10 @@ private class ComposeEmitter(
     line(level + 1, "mainPaneVisible = ${node.boolValue("mainPaneVisible", true)},")
     line(level + 1, "supportingPaneVisible = ${node.boolValue("supportingPaneVisible", true)},")
     line(level + 1, "mainPane = {")
-    node.slot("mainPane").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("mainPane"), level + 2)
     line(level + 1, "},")
     line(level + 1, "supportingPane = {")
-    node.slot("supportingPane").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("supportingPane"), level + 2)
     line(level + 1, "},")
     line(level, ")")
   }
@@ -485,12 +566,12 @@ private class ComposeEmitter(
     line(level + 1, "containerColor = ${node.colorExpression("containerColor")},")
     listOf("topBar", "snackbarHost").forEach { slot ->
       line(level + 1, "$slot = {")
-      node.slot(slot).forEach { emitNode(it, level + 2) }
+      emitChildren(node.slot(slot), level + 2)
       line(level + 1, "},")
     }
     line(level, ") { contentPadding ->")
     line(level + 1, "Box(Modifier.padding(contentPadding)) {")
-    node.slot("content").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("content"), level + 2)
     if ("loading" in node.properties) {
       line(
         level + 2,
@@ -510,7 +591,7 @@ private class ComposeEmitter(
   ) {
     val prefix = arguments?.let { "$it, " }.orEmpty()
     line(level, "$symbol(${prefix}${node.modifierArgument()}) {")
-    node.slot(slot).forEach { emitNode(it, level + 1) }
+    emitChildren(node.slot(slot), level + 1)
     line(level, "}")
   }
 
@@ -528,7 +609,7 @@ private class ComposeEmitter(
       level,
       "Column(${node.modifierArgument()}, verticalArrangement = ${node.verticalArrangementExpression()}$horizontalAlignment) {",
     )
-    node.slot("children").forEach { emitNode(it, level + 1) }
+    emitChildren(node.slot("children"), level + 1)
     line(level, "}")
   }
 
@@ -543,7 +624,7 @@ private class ComposeEmitter(
       level,
       "Row(${node.modifierArgument()}, horizontalArrangement = ${node.horizontalArrangementExpression()}, verticalAlignment = $verticalAlignment) {",
     )
-    node.slot("children").forEach { emitNode(it, level + 1) }
+    emitChildren(node.slot("children"), level + 1)
     line(level, "}")
   }
 
@@ -603,7 +684,7 @@ private class ComposeEmitter(
       level,
       "BuilderSearchBar(expanded = ${node.boolValue("expanded")}, tonalElevation = ${node.number("tonalElevationDp").dpLiteral()}, ${node.modifierArgument()}) {",
     )
-    node.slot("inputField").forEach { emitNode(it, level + 1) }
+    emitChildren(node.slot("inputField"), level + 1)
     line(level, "}")
   }
 
@@ -615,7 +696,7 @@ private class ComposeEmitter(
     line(level + 1, "enabled = ${node.boolValue("enabled", true)},")
     listOf("leadingIcon", "placeholder", "trailingIcon").forEach { slot ->
       line(level + 1, "$slot = {")
-      node.slot(slot).forEach { emitNode(it, level + 2) }
+      emitChildren(node.slot(slot), level + 2)
       line(level + 1, "},")
     }
     line(level, ")")
@@ -634,11 +715,11 @@ private class ComposeEmitter(
       "shape = RoundedCornerShape(${shapeDp(node.string("shape").ifEmpty { "large" }).dpLiteral()}),",
     )
     line(level + 1, "label = {")
-    node.slot("label").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("label"), level + 2)
     line(level + 1, "},")
     if (node.slot("leadingIcon").isNotEmpty()) {
       line(level + 1, "leadingIcon = {")
-      node.slot("leadingIcon").forEach { emitNode(it, level + 2) }
+      emitChildren(node.slot("leadingIcon"), level + 2)
       line(level + 1, "},")
     }
     line(level, ")")
@@ -700,7 +781,7 @@ private class ComposeEmitter(
       level,
       "IconButton(onClick = {}, modifier = ${node.modifierExpression()}$selectedBackground) {",
     )
-    node.slot("content").forEach { emitNode(it, level + 1) }
+    emitChildren(node.slot("content"), level + 1)
     line(level, "}")
   }
 
@@ -738,7 +819,7 @@ private class ComposeEmitter(
   private fun emitTopAppBar(node: UiBuilderNode, level: Int) {
     line(level, "CenterAlignedTopAppBar(")
     line(level + 1, "title = {")
-    node.slot("title").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("title"), level + 2)
     line(level + 1, "},")
     line(
       level + 1,
@@ -753,7 +834,7 @@ private class ComposeEmitter(
     line(level, "ListItem(")
     listOf("headline", "supporting", "trailing").forEach { slot ->
       line(level + 1, "${slot}Content = {")
-      node.slot(slot).forEach { emitNode(it, level + 2) }
+      emitChildren(node.slot(slot), level + 2)
       line(level + 1, "},")
     }
     // The leading accent bar the canvas draws. It is a `drawBehind` rather than a parameter because
@@ -773,7 +854,7 @@ private class ComposeEmitter(
       level,
       "Surface(${node.modifierArgument()}, shape = ${node.shapeExpression()}, color = ${node.colorExpression("containerColor")}, tonalElevation = ${node.number("tonalElevationDp").dpLiteral()}) {",
     )
-    node.slot("content").forEach { emitNode(it, level + 1) }
+    emitChildren(node.slot("content"), level + 1)
     line(level, "}")
   }
 
@@ -793,7 +874,7 @@ private class ComposeEmitter(
         else -> "Box {"
       }
     line(level + 1, box)
-    node.slot("content").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("content"), level + 2)
     line(level + 1, "}")
     line(level, "}")
   }
@@ -812,10 +893,10 @@ private class ComposeEmitter(
     )
     if (node.string("style") == "fab") {
       line(level + 1, "Box(Modifier.padding(horizontal = 16.dp)) {")
-      node.slot("content").forEach { emitNode(it, level + 2) }
+      emitChildren(node.slot("content"), level + 2)
       line(level + 1, "}")
     } else {
-      node.slot("content").forEach { emitNode(it, level + 1) }
+      emitChildren(node.slot("content"), level + 1)
     }
     line(level, "}")
   }
@@ -825,7 +906,7 @@ private class ComposeEmitter(
       level,
       "BuilderHorizontalFloatingToolbar(expanded = ${node.boolValue("expanded", true)}, containerColor = ${node.colorExpression("containerColor")}, contentPadding = ${node.toolbarContentPaddingExpression()}, ${node.modifierArgument()}) {",
     )
-    node.slot("content").forEach { emitNode(it, level + 1) }
+    emitChildren(node.slot("content"), level + 1)
     line(level, "}")
   }
 
@@ -901,7 +982,7 @@ private class ComposeEmitter(
       .forEach { (slot, parameter) ->
         if (node.slot(slot).isNotEmpty()) {
           line(level + 1, "$parameter = {")
-          node.slot(slot).forEach { emitNode(it, level + 2) }
+          emitChildren(node.slot(slot), level + 2)
           line(level + 1, "},")
         }
       }
@@ -948,20 +1029,20 @@ private class ComposeEmitter(
     line(level + 1, "hasText = ${node.slot("text").isNotEmpty()},")
     line(level + 1, "${node.modifierArgument()},")
     line(level + 1, "icon = {")
-    node.slot("icon").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("icon"), level + 2)
     line(level + 1, "},")
     line(level + 1, "title = {")
-    node.slot("title").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("title"), level + 2)
     line(level + 1, "},")
     line(level + 1, "text = {")
-    node.slot("text").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("text"), level + 2)
     line(level + 1, "},")
     line(level + 1, ") {")
     // The dismissing action first, then the confirming one: Material's order, and the order the
     // canvas draws, so a screenshot and its generated source cannot disagree about which button is
     // on the end.
-    node.slot("dismissButton").forEach { emitNode(it, level + 2) }
-    node.slot("confirmButton").forEach { emitNode(it, level + 2) }
+    emitChildren(node.slot("dismissButton"), level + 2)
+    emitChildren(node.slot("confirmButton"), level + 2)
     line(level, "}")
   }
 
@@ -1771,6 +1852,14 @@ private fun String.escape(): String =
   replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
 
 private fun String.escapeComment(): String = replace("\n", " ").replace("\r", " ")
+
+/**
+ * How many identical siblings it takes before a `repeat` reads better than the calls themselves.
+ *
+ * Two of anything is still a list a reader takes in at a glance, and folding a pair costs two lines
+ * to save one. Three is where the pattern starts being the point.
+ */
+private const val MINIMUM_FOLDED_RUN = 3
 
 private val EMITTER_IDS =
   setOf(
