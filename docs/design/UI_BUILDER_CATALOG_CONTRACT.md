@@ -667,7 +667,10 @@ proven equivalent:
     `ProductionUiBuilderRuntime` takes a `List<CatalogCapabilityV1>` and constructs none. The
     cutover is **per catalog and reversible**: a published file is preferred, the synthesised
     catalog is the fallback, and a startup line says which one each catalog came from. The frozen
-    goldens of phase 0 become the offline fallback for a builder with no reachable branch.
+    goldens of phase 0 serve the same catalog with no reachable branch **for the duration of the
+    cutover only** — they go with the synthesisers in phase 5, and from there the packaged
+    `m3-catalog` is the one offline catalog (§ *A builder catalog is a served catalog*, item 7) and
+    an unreachable branch refuses that catalog by name rather than serving a stale copy of it.
 19. **`compose-preview-server ui` publishes the local file.** The lane that copies
     `build/compose-previews/components.json` also copies `ui-builder.json` when discovery wrote one,
     and the local project becomes a builder catalog rather than a record hanging off a packaged

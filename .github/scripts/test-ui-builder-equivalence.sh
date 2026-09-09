@@ -100,7 +100,8 @@ JSON
 # The published shape: the same facts under statusSemantics, with `menu` called `componentMenu`.
 cat >"${work}/published.json" <<'JSON'
 { "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
-  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A", "B"] } } }
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "componentMenu": { "groupOrder": ["A", "B"] } } }
 JSON
 
 # The same facts as the golden, with object members in the other order.
@@ -488,7 +489,7 @@ JSON
 # not this catalog's to state and its absence is not a difference.
 cat >"${work}/menu-agreeing.json" <<'JSON'
 { "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
-  "statusSemantics": { "platform": "wear",
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
     "componentMenu": { "groupOrder": ["A", "B"],
       "components": { "wear-m3/button": { "group": "A", "variantProperty": "variant" },
                       "wear-m3/card": { "group": "B" } } } } }
@@ -502,7 +503,7 @@ grep -q "2 shelf assignment(s) agree" "${work}/out" ||
 # One component moved to another shelf, one variantProperty dropped.
 cat >"${work}/menu-moved.json" <<'JSON'
 { "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
-  "statusSemantics": { "platform": "wear",
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
     "componentMenu": { "groupOrder": ["A", "B"],
       "components": { "wear-m3/button": { "group": "A" },
                       "wear-m3/card": { "group": "A" } } } } }
@@ -761,6 +762,50 @@ JSON
 check "a known builtin whose slots changed fails --strict" 1 $?
 grep -q "builtins.wear-m3/screen-scaffold.slots" "${work}/out" ||
   { echo "FAIL builtin slots not compared"; failures=$((failures + 1)); }
+
+# `[]` says the same thing about a catalog's shelves as `{}` does, and the type guard read it as "no
+# map to compare" and skipped both sweeps — so the empty-map fix from one round ago passed through
+# the third shape of the same question.
+cat >"${work}/drop-arraymap.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "componentMenu": { "groupOrder": ["A"], "components": [] } } }
+JSON
+"${gate}" --policy "${work}/drop-arraymap.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --strict >"${work}/out" 2>&1
+check "a components map that is not a map fails --strict" 1 $?
+grep -q "which is not a map of component id to" "${work}/out" ||
+  { echo "FAIL malformed components map not reported"; failures=$((failures + 1)); }
+grep -q "componentMenu.components.wear-m3/card" "${work}/out" ||
+  { echo "FAIL malformed map not swept as empty"; failures=$((failures + 1)); }
+
+# A generated artifact publishes its own prefix; the caller's flag scopes the comparison and does
+# not stand in for the field phase 4 reads.
+cat >"${work}/drop-noprefixgen.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear",
+    "componentMenu": { "groupOrder": ["A"], "components": { "wear-m3/button": { "group": "A" } } } } }
+JSON
+"${gate}" --policy "${work}/drop-noprefixgen.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --strict >"${work}/out" 2>&1
+check "a generated catalog publishing no prefix fails --strict" 1 $?
+grep -q "x componentIdPrefix: this generated catalog publishes none" "${work}/out" ||
+  { echo "FAIL undeclared prefix not reported"; failures=$((failures + 1)); }
+
+# A prefix problem and an id problem are both blocking and are fixed by different things. Summing
+# them into one counter made the epilogue print the catalog-id remedy for a prefix failure — telling
+# a caller who HAD passed --catalog-id to pass --catalog-id — and suppressed the `= catalog id`
+# confirmation for an id that was in fact checked and correct. Found by comparing a real golden
+# against itself, which no fixture in this file was shaped to ask.
+"${gate}" --policy "${work}/drop-noprefixgen.json" --golden "${work}/drop-golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "an unasserted prefix does not print the catalog-id remedy" 1 $?
+grep -q "which components this catalog owns" "${work}/out" ||
+  { echo "FAIL prefix failure did not print the prefix remedy"; failures=$((failures + 1)); }
+grep -q "Pass --catalog-id when the policy" "${work}/out" &&
+  { echo "FAIL prefix failure printed the catalog-id remedy"; failures=$((failures + 1)); }
+grep -q '= catalog id (declared: "wear-m3")' "${work}/out" ||
+  { echo "FAIL a correct id was not confirmed under a prefix failure"; failures=$((failures + 1)); }
 
 set -e
 

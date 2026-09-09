@@ -492,13 +492,29 @@ if (!capabilities) {
 // the finding from one round ago arriving through the shape I did not think of rather than the one
 // I did. The published shapes carry a `componentMenu`; an authored policy carries `menu` with no
 // components at all, and asking it for per-component shelves is what this must not start doing.
+let malformedEntries;
 let unrecognisedPrefix = null;
 let disagreeingPrefix = null;
+let undeclaredPrefix = false;
 let unassertedPrefix = false;
-const statedEntries = published && menu !== undefined ? (menu.components ?? {}) : undefined;
+// A `components` that is not an object — an array, a string, a number — says the same thing about
+// the catalog's shelves as an empty one does: nothing this gate can read. The type guard treated it
+// as "no map to compare" and skipped BOTH sweeps, so `[]` passed where `{}` blocked. That is the
+// finding from one round ago arriving through the third shape of the same question, which is the
+// argument for answering it once here rather than at the guard.
+const declaredEntries = published && menu !== undefined ? (menu.components ?? {}) : undefined;
+const entriesAreReadable =
+  declaredEntries !== undefined &&
+  declaredEntries !== null &&
+  typeof declaredEntries === "object" &&
+  !Array.isArray(declaredEntries);
+const statedEntries = declaredEntries === undefined ? undefined : entriesAreReadable ? declaredEntries : {};
 const frozenEntries = semantics.componentMenu?.components;
 let agreeingEntries = 0;
-if (statedEntries && typeof statedEntries === "object" && !Array.isArray(statedEntries)) {
+if (declaredEntries !== undefined && !entriesAreReadable) {
+  malformedEntries = declaredEntries;
+}
+if (statedEntries) {
   for (const id of Object.keys(statedEntries).sort()) {
     const field = `componentMenu.components.${id}`;
     const frozenEntry = frozenEntries?.[id];
@@ -549,6 +565,14 @@ if (statedEntries && typeof statedEntries === "object" && !Array.isArray(statedE
   const catalogPrefix = expectedPrefix || declaredPrefix;
   if (expectedPrefix && declaredPrefix && expectedPrefix !== declaredPrefix) {
     disagreeingPrefix = [expectedPrefix, declaredPrefix];
+  }
+  // A generated artifact has to publish its OWN prefix, and the caller's flag does not stand in for
+  // it. `componentIdPrefix` is non-null on the generated shape and phase 4 reads it to name a
+  // component the file says nothing about — so one omitted or empty is a malformed artifact, and the
+  // truthy-only check above let a correct `--component-id-prefix` paper over it. The exemption is
+  // the capability document, which publishes none by construction.
+  if (!capabilities && published && !declaredPrefix) {
+    undeclaredPrefix = true;
   }
   // And a document that publishes a per-component menu while nobody said which components are its.
   // Informational on its own; under `--strict` it is a refusal, because `--strict` asserts this
@@ -783,6 +807,15 @@ if (unrecognisedPrefix !== null) {
   console.log(`      this golden are not about the same catalog. Not a difference to waive.`);
 }
 
+if (malformedEntries !== undefined) {
+  differences += 1;
+  console.log("");
+  console.log(
+    `  x componentMenu.components: ${show(malformedEntries)}, which is not a map of component id to` +
+      ` shelf`,
+  );
+  console.log(`      Compared as if it named none, so every frozen entry below is reported.`);
+}
 if (disagreeingPrefix !== null) {
   console.log("");
   console.log(
@@ -791,6 +824,12 @@ if (disagreeingPrefix !== null) {
   );
   console.log(`      Not a difference to waive — the caller and the document disagree about which`);
   console.log(`      components belong to this catalog.`);
+}
+if (undeclaredPrefix) {
+  console.log("");
+  console.log(`  x componentIdPrefix: this generated catalog publishes none, and phase 4 reads it to`);
+  console.log(`      name a component the file says nothing about. A caller's --component-id-prefix`);
+  console.log(`      scopes this comparison; it does not stand in for the artifact's own field.`);
 }
 if (unassertedPrefix) {
   console.log(
@@ -836,9 +875,16 @@ const [shapeField, shapeId] = IDENTIFIERS[shape];
 const [identifyingField, declaredId] =
   shapeId !== undefined ? [shapeField, shapeId] : (namedIds[0] ?? [shapeField, null]);
 const goldenId = golden.benchmark?.catalogSystemId ?? null;
-let misidentified =
+let misidentified = 0;
+// Counted apart from the identity checks below, and NOT folded into them. Both block, but they
+// fail for different reasons and are fixed by different things: an id problem means the wrong pair
+// of files was fetched, a prefix problem means the two files disagree about — or say nothing about
+// — which components this catalog answers for. Summing them made an unasserted prefix print the
+// catalog-id remedy, so the gate told a caller who HAD passed --catalog-id to pass --catalog-id.
+const misprefixed =
   (unrecognisedPrefix === null ? 0 : 1) +
   (disagreeingPrefix === null ? 0 : 1) +
+  (undeclaredPrefix ? 1 : 0) +
   (unassertedPrefix ? 1 : 0);
 
 // A document that names itself TWICE must agree with itself, whichever name won above. Two
@@ -905,7 +951,7 @@ if (goldenId === null) {
 }
 
 const id = declaredId ?? expectedId ?? "(unidentified)";
-const blocking = differences + gaps + stale + misidentified + unstated;
+const blocking = differences + gaps + stale + misidentified + misprefixed + unstated;
 console.log("");
 console.log(
   `ui-builder-equivalence: ${id} — ${differences} difference(s), ${gaps} unstated fact(s) the ` +
@@ -916,6 +962,13 @@ if (misidentified > 0 && strict) {
   console.log("`--strict` asserts THIS catalog is ready to replace THAT frozen one, which cannot be");
   console.log("asserted about a catalog nobody has identified. Pass --catalog-id when the policy");
   console.log("defaults its id from the cover sheet.");
+  process.exit(1);
+}
+if (misprefixed > 0 && strict) {
+  console.log("`--strict` asserts THIS catalog is ready to replace THAT frozen one, which cannot be");
+  console.log("asserted while the two files disagree about which components this catalog owns.");
+  console.log("Pass --component-id-prefix to state it, and publish `componentIdPrefix` so a reader");
+  console.log("with no caller to ask can find it too.");
   process.exit(1);
 }
 if (blocking > 0 && strict) {
