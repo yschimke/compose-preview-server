@@ -1386,6 +1386,65 @@ check "a collision failure still states the collision remedy" 1 $?
 grep -q "collisions are the catalog's to resolve" "${work}/out" ||
   { echo "FAIL the collision remedy was lost"; failures=$((failures + 1)); }
 
+# Round twelve. The table stopped being hand-written, because a hand-written one drifted exactly
+# as predicted: it was transcribed from a sibling checkout OLDER than the artifact :server
+# resolves, so it missed six fields the published TargetParameter and BuilderPolicy carry.
+# `DecoderShapeFixtureTest` now generates it from the live descriptors and fails on drift; these
+# cases check that the gate reads it and uses it.
+
+# 17. A field that exists only in the PUBLISHED artifact — absent from the checkout the old table
+#     was typed from, and present in the real m3-catalog record.
+cat >"${work}/rec-scopedsl.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.Button", "componentIds": ["Controls/Button"],
+    "symbol": { "name": "Button", "callable": "a.Button", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [ { "name": "x", "type": "String", "scopeDslReceiver": 7 } ],
+    "slots": [], "code": { "imports": [] } },
+  { "canonicalId": ":w/A.Card", "componentIds": ["Containers/Card"],
+    "symbol": { "name": "Card", "callable": "a.Card", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-scopedsl.json" \
+  --strict >"${work}/out" 2>&1
+check "a field only the published artifact carries is validated" 1 $?
+grep -q "parameters\[0\].scopeDslReceiver is not a string" "${work}/out" ||
+  { echo "FAIL generated-table field not validated"; failures=$((failures + 1)); }
+
+# 18. Kotlin's Int is 32-bit and kotlinx refuses a JSON number outside it, so integrality alone is
+#     not the test.
+cat >"${work}/rec-bigint.json" <<'JSON'
+{ "schemaVersion": 2147483648, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.Button", "componentIds": ["Controls/Button"],
+    "symbol": { "name": "Button", "callable": "a.Button", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } },
+  { "canonicalId": ":w/A.Card", "componentIds": ["Containers/Card"],
+    "symbol": { "name": "Card", "callable": "a.Card", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-bigint.json" \
+  --strict >"${work}/out" 2>&1
+check "an integer outside Kotlin's Int range is refused" 1 $?
+grep -q "schemaVersion is outside the range of a Kotlin Int" "${work}/out" ||
+  { echo "FAIL Int overflow not named"; failures=$((failures + 1)); }
+# 2147483647 is the largest that decodes, and must still pass.
+sed 's/2147483648/2147483647/' "${work}/rec-bigint.json" >"${work}/rec-maxint.json"
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-maxint.json" \
+  --strict >"${work}/out" 2>&1
+check "the largest Kotlin Int still decodes" 0 $?
+
+# 19. The table is an input now, so its absence is a usage error — never a quiet pass. A gate that
+#     certified records with no shape table would be the "check that does not check" this file
+#     keeps being about.
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-ok.json" --strict \
+  --shapes "${work}/no-such-table.json" >"${work}/out" 2>&1
+check "a missing shape table is a usage error, not a pass" 2 $?
+grep -q "cannot read the decoder shape table" "${work}/out" ||
+  { echo "FAIL missing shape table not reported"; failures=$((failures + 1)); }
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then
