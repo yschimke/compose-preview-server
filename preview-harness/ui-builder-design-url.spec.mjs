@@ -113,6 +113,21 @@ test("#thread= opens the Talk panel on the conversation it names", async ({ page
     expect(new URL(page.url()).hash).toBe(`#thread=${threadId}`);
 });
 
+test("a #thread= this design does not have opens it with a notice, not an error", async ({
+    page,
+}) => {
+    await openDesign(page, { thread: "t-no-such-thread" });
+    await expect(page.getByLabel("Design link notice")).toContainText("t-no-such-thread");
+    // The fragment stops naming a conversation that is not there, and so does the state this page
+    // publishes: an address bar that keeps the id is the same lie an unavailable revision is not
+    // allowed to tell. The wait is the comment board's, which arrives over its own socket.
+    await expect
+        .poll(async () => new URL(page.url()).hash, { timeout: 30_000 })
+        .toBe("");
+    const selectors = await page.evaluate(() => globalThis.__uiBuilderDesignSelectors);
+    expect(selectors.threadId).toBe("");
+});
+
 test("#thread= combines with ?node= where the thread is pinned to a layer", async ({ page }) => {
     const selectors = await openDesign(page, { node: "discover-grid", thread: threadId });
     expect(selectors).toMatchObject({

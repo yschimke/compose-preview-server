@@ -593,6 +593,10 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   // when the design changes, because a discussion is addressed to one design.
   val commentHost = remember(config.designId) { BrowserCommentHost(config.designId) }
   var commentBoard by remember(config.designId) { mutableStateOf(DesignCommentBoard()) }
+  // Whether the discussion has been delivered at all, which is not the same question as whether it
+  // has anything in it. A design nobody has commented on answers with an empty board, so an empty
+  // board cannot be read as "the thread this link names is gone" until something has arrived.
+  var commentBoardLoaded by remember(config.designId) { mutableStateOf(false) }
   var commentStatus by remember(config.designId) { mutableStateOf<String?>(null) }
 
   // One socket for the life of the design. It sends the current board on connect, so there is no
@@ -603,6 +607,7 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       commentHost.watch(
         onBoard = { board ->
           commentBoard = board
+          commentBoardLoaded = true
           commentStatus = null
         },
         onDropped = {
@@ -616,6 +621,7 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       // Only if the socket has not already delivered something newer: the two race by design and
       // the sequence is what settles it, rather than whichever answer happened to arrive last.
       if (board.sequence > commentBoard.sequence) commentBoard = board
+      commentBoardLoaded = true
     }
   }
 
@@ -907,6 +913,23 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
     return
   }
   if (loadedDocument != null && loadedCatalog != null) {
+    // A `#thread=` naming no conversation on this board, once the board is in a position to say so.
+    // Answered the way `?node=` answers an unknown layer — a sentence rather than a failure — but
+    // it needs the wait: the discussion arrives over its own socket well after the design does, so
+    // asking earlier would call every thread link stale for the first moments of every page.
+    val staleThreadId =
+      config.selectors.threadId?.takeIf {
+        commentBoardLoaded && commentBoard.threads.none { thread -> thread.id == it }
+      }
+    // The address bar stops naming it, and so does the state this page publishes for the harness
+    // and the extension. A fragment pointing at a conversation that is not there is the same lie
+    // an unavailable `?revision=` is not allowed to tell.
+    LaunchedEffect(staleThreadId) {
+      if (staleThreadId != null) {
+        dropDesignUrlFragment()
+        openThreadId = null
+      }
+    }
     val collaborators = presenceState.collaborators(config.actorId)
     LaunchedEffect(collaborators) {
       publishPresenceManifest(
@@ -943,7 +966,9 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
         }
       },
       authoritativeGeneration = authoritativeGeneration,
-      authoritativeRevision = authoritativeDocument?.revision,
+      authoritativeRevisionFor = { nodeId ->
+        authoritativeDocument?.takeIf { it.nodes.containsKey(nodeId) }?.revision
+      },
       initialSelectedNodeId = selectedNodeId,
       // `#thread=` wins the panel where a link names both: one dock is open at a time, and a link
       // that names a conversation is a link to read it. `?node=` still selects the layer, which is
@@ -964,9 +989,14 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       // that teaches the banner cannot be trusted.
       onGoToLatest = revisionPin?.takeIf { it.pinned }?.let { { goToLatestRevision() } },
       openingNotice =
-        config.selectors.nodeId
-          ?.takeIf { !loadedDocument.nodes.containsKey(it) }
-          ?.let { "This link names a layer this design does not have: $it" },
+        listOfNotNull(
+            config.selectors.nodeId
+              ?.takeIf { !loadedDocument.nodes.containsKey(it) }
+              ?.let { "This link names a layer this design does not have: $it" },
+            staleThreadId?.let { "This link names a conversation this design does not have: $it" },
+          )
+          .takeIf { it.isNotEmpty() }
+          ?.joinToString(" "),
       onCopyDesignLink = { selectors ->
         copyDesignLink(designUrlPath(config.catalogSystemId, config.designId, selectors))
       },
@@ -982,7 +1012,12 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       exportHost = exportHost,
       restoredReference = restoredReference,
       onPickReference = { references.pickFile() },
-      onSnapshotDesign = { references.snapshotDesign() },
+      // The third lane that renders on request, and the one easiest to miss: this one *keeps* what
+      // it renders, as the reference the canvas is traced against. Snapshotting a pinned page
+      // without the revision would lay the head over history and then persist it.
+      onSnapshotDesign = {
+        references.snapshotDesign(revisionPin?.takeIf { it.pinned }?.requested)
+      },
       referenceStatus = referenceStatus,
       pastedReference = pastedReference,
       comments = commentBoard,

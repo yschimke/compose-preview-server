@@ -101,12 +101,19 @@ canvas is not showing. And the lanes that render on request are pinned or withhe
 routes take the same `revision`, so the Export menu answers about history; the native-preview route
 takes none, so it is not offered at all, and a catalog whose Wasm canvas is only a stand-in (Wear)
 shows a pinned revision on that stand-in rather than a faithful picture of the wrong revision.
+**Screen → Snapshot design** is pinned too, and is the lane worth naming separately because it does
+not merely display what it renders, it *keeps* it: an unpinned snapshot would lay the head over the
+historical canvas and then persist it as that design's reference.
 **Reconnect** is withheld for the same reason: there is no session to resume, and its handler would
 fetch the head under a banner still naming the revision.
 
 **`?node=<nodeId>`** selects that node as the design opens — the canvas outline and the Layers row —
 and opens the Properties panel on it. An id this design does not have opens the design with a small
-notice rather than an error, for the same reason: the link is stale and the design is not. On a
+notice rather than an error, for the same reason: the link is stale and the design is not. A
+`#thread=` naming no conversation on the board is answered the same way, once the board has arrived
+— it comes over its own socket well after the design, so asking earlier would call every thread link
+stale for the first moments of every page — and the fragment is then taken out of the address bar
+rather than left claiming a thread that is not there. On a
 viewport too narrow for the docked inspector the same selector opens the compact Properties sheet,
 which is the one dock that hosts every inspector mode, Talk included — a selector that set the state
 and left the phone showing nothing would be the panel half of the feature missing.
@@ -136,12 +143,23 @@ moment the selection moves off it, and `#thread=` the moment the reader closes t
 another, so a URL copied later cannot point at something nobody has been looking at.
 
 **Copy link** produces these URLs from the two places a person is standing when they want one: a
-selected layer's menu, which copies the node at the last revision the host has confirmed — not the
-one on screen, which the reducer has already raised for an edit still in the queue and which a
-collaborator may yet claim first — and a comment thread's card,
+selected layer's menu, which copies the node at a revision the host has confirmed *that layer was
+in*, and a comment thread's card,
 which copies the thread and the layer it is pinned to. Both copy the canonical path form with no
 identity or token value on it — a shared link is an address and never a credential, which is the
-rule the export lane's Copy link already follows. The grammar is one function,
+rule the export lane's Copy link already follows.
+
+The revision on a layer link is two questions, and taking either alone produces a link that is
+reliably wrong. It is not the revision on screen: the reducer raises that the moment an edit is
+applied so the canvas can draw it, so the number describes a submission still in the queue, which
+resolves to nothing or — once a collaborator claims the number first — to a document the person
+copying never saw. But it is not simply the last accepted revision either, because a layer that only
+exists thanks to a queued insert, duplicate or paste was not in it, and pairing the two makes a link
+that opens on the missing-layer notice every time. So the host answers per node, and where it has no
+answer the link names no revision at all and opens the living design on that layer — right in both
+cases, and correct the moment the edit lands.
+
+The grammar is one function,
 [`parseDesignUrlSelectors`](../../ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/DesignUrlSelectors.kt)
 and its `designUrlPath` twin, in common code with a test rather than in a `@JsFun` in the browser
 entry point: a link this editor writes has to be a link this editor reads back.

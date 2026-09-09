@@ -311,16 +311,23 @@ fun UiBuilderEditor(
   onSubmission: ((EditorSubmission) -> Unit)? = null,
   authoritativeGeneration: Int = 0,
   /**
-   * The revision the *server* has accepted, or null where no host says.
+   * The revision a link to one node may name: the last the server accepted, and only if that
+   * revision is one the node was in. Null everywhere else, and null by default.
    *
-   * Not `state.document.revision`, which the reducer raises the moment an edit is applied so the
-   * canvas can draw it — a number that is a claim about a submission still in the queue. A link
-   * copied at that number would either resolve to nothing, or, once a collaborator's edit claimed
-   * the same number first, to a document the person who copied it never saw. So a link names the
-   * last revision that certainly exists, and where nothing is authoritative it names no revision at
-   * all and opens the living design.
+   * Two questions rather than one, because a layer link gets them both wrong in opposite
+   * directions. `state.document.revision` is not the answer to the first: the reducer raises it the
+   * moment an edit is applied so the canvas can draw it, which is a claim about a submission still
+   * in the queue — a link at that number resolves to nothing, or, once a collaborator's edit
+   * claimed the number first, to a document the person who copied it never saw. But the last
+   * accepted revision is not the answer either for a node that only exists because of a queued
+   * insert, duplicate or paste: pairing it with the new node's id makes a link that is *reliably*
+   * stale, opening on the missing-layer notice.
+   *
+   * So a host answers per node, and a null means the link names no revision and opens the living
+   * design at that layer — which is right in both cases, and arrives at the layer as soon as the
+   * edit that made it lands.
    */
-  authoritativeRevision: Long? = null,
+  authoritativeRevisionFor: (String) -> Long? = { null },
   initialSelectedNodeId: String? = null,
   initialCatalogQuery: String = "",
   initialLayerQuery: String = "",
@@ -837,9 +844,10 @@ fun UiBuilderEditor(
       },
       // The link names the *anchor* rather than the whole selection: a URL selects one node, and
       // the anchor is the node every other single-selection question in this editor is asked of.
-      // Pinned to the last revision the host confirmed, because a link to a layer is a link to a
-      // layer as it was — the thing somebody is about to be asked to look at. See
-      // [authoritativeRevision] for why that is not the revision on screen.
+      // Pinned to a revision the host confirmed this layer was in, because a link to a layer is a
+      // link to a layer as it was — the thing somebody is about to be asked to look at. See
+      // [authoritativeRevisionFor] for why that is neither the revision on screen nor, for a layer
+      // just inserted, the last one accepted.
       onCopyLink =
         onCopyDesignLink?.let { copy ->
           state.selectedNodeId?.let { nodeId ->
@@ -848,7 +856,10 @@ fun UiBuilderEditor(
                 say(
                   copyLinkSentence(
                     copy,
-                    DesignUrlSelectors(revision = authoritativeRevision, nodeId = nodeId),
+                    DesignUrlSelectors(
+                      revision = authoritativeRevisionFor(nodeId),
+                      nodeId = nodeId,
+                    ),
                   )
                 )
               }
