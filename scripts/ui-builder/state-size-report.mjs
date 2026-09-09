@@ -60,8 +60,8 @@ const DEFAULT_MAXIMUM_BYTES = 128 * 1024 * 1024;
  */
 const DEFAULT_STORE_MAXIMUM_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_WARN_PERCENT = 80;
-/** `FileUiBuilderDesignStore.DELETED_SUFFIX`: a design directory renamed out of the way by a delete. */
-const DELETED_SUFFIX = ".deleted-";
+/** `FileUiBuilderDesignStore.DELETED_DIRECTORY`: where a deleted design waits to be unlinked. */
+const DELETED_DIRECTORY = ".deleted";
 /** `UiBuilderStoreLimits.maximumDesignBytes`: what the store refuses to read a single file above. */
 const MAXIMUM_DESIGN_BYTES = 64 * 1024 * 1024;
 
@@ -202,16 +202,16 @@ export function analyzeUiBuilderStore(directory) {
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
     : [];
-  // A `.deleted-` directory is a design whose deletion committed by rename and whose unlink did not
-  // finish. The store treats it as garbage and retries the unlink on the next open, so tabulating
-  // it would count a deleted design as a live one — and show its id twice, once as a tombstone and
-  // once as the design that has since been recreated under it. Its bytes are still on the disk and
-  // still charged against the ceiling, so they are counted here too, as overhead with no sections.
-  const slugs = entries.filter((name) => !name.includes(DELETED_SUFFIX));
+  // The store's own `.deleted` directory holds designs whose deletion committed by rename and whose
+  // unlink did not finish. It retries them on the next open, so tabulating what is in there would
+  // count deleted designs as live ones — and show an id twice, once as a tombstone and once as the
+  // design since recreated under it. Those bytes are still on the disk and still charged against
+  // the ceiling, so they are counted here too, as overhead with no sections.
+  const slugs = entries.filter((name) => name !== DELETED_DIRECTORY);
 
   let totalBytes = fileBytes(join(directory, "store.json"));
-  for (const name of entries) {
-    if (name.includes(DELETED_SUFFIX)) totalBytes += directoryBytes(join(designsDirectory, name));
+  if (entries.includes(DELETED_DIRECTORY)) {
+    totalBytes += directoryBytes(join(designsDirectory, DELETED_DIRECTORY));
   }
   const designs = [];
   for (const slug of slugs) {

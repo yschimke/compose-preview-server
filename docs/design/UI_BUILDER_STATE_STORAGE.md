@@ -280,7 +280,10 @@ absent from the stored tree and defaulted after.
   and `adminDeleteDesign` still retires it: reading a design and retiring it are different
   permissions on different failures, and a quarantine that could not be cleared would be the
   one-way door this mechanism exists to avoid. Downloading or repairing it cannot work, and says so
-  — both need the document that would not decode.
+  — both need the document that would not decode, so `/admin/ui-builder` gives it a row of its own
+  (it is not a design in memory and nothing else would list it) and offers only the action that
+  works on it. The startup warning sends an operator to that page; a row that was not there, or
+  buttons that could not work, would send them nowhere.
 - **A design directory is only that design where its name says so.** The slug is the address, not a
   label: a commit and a delete both derive `designs/<slug(designId)>` from the id rather than from
   the directory the design was read out of. So a design restored or copied under some other basename
@@ -297,6 +300,13 @@ absent from the stored tree and defaulted after.
   refuses the commit for the same reason and not as free space: a commit reuses the name of every
   part it did not rewrite, so counting a missing one as zero bytes would land a header naming a file
   that has gone — an edit acknowledged here and a design quarantined at the next open.
+- **A deleted design is moved into the store's own `designs/.deleted/`, not renamed beside the
+  live ones.** The unlink after the rename is cleanup and can be interrupted, so the next open has
+  to be able to tell what it is finishing — and no *name* is proof of who wrote it. A tombstone
+  named `<directory>.deleted-<millis>` beside the designs made `checkout.deleted-1700000000000`, a
+  plausible operator backup, indistinguishable from garbage, in a store that otherwise treats an
+  unfamiliar directory as the operator's content. Everything under the reserved directory is the
+  store's own, by where it is rather than by what it is called.
 - **A quarantine key never names a design that loaded.** A quarantine is reported under the id in
   its header and, where there is no id to read, under the directory holding it — a name an operator
   chose, which can be anything, including the id of a design that loads perfectly well from its own

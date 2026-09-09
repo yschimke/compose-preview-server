@@ -43,6 +43,16 @@ class ServeUiBuilderAdmin(
   fun unusable(): Map<String, String> = service.adminUnusableDesigns()
 
   /**
+   * Of those, the ones whose document cannot be produced at all.
+   *
+   * The two kinds of quarantine look alike in [unusable] and are not: a design the catalog outgrew
+   * still has a document to download and repair, and a design whose stored files would not read
+   * does not. Offering those two actions on a row where they cannot work is worse than not offering
+   * them, because retiring it is then the operator's only move and they have no way to know that.
+   */
+  fun unreadable(): Set<String> = service.adminUnreadableDesigns()
+
+  /**
    * The stored document for one design as JSON, or null when there is no such design.
    *
    * Deliberately reachable for a design the host cannot serve: it is the only way to get a

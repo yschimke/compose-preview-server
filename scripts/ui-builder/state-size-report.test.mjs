@@ -345,7 +345,7 @@ test("a tombstone is charged for its bytes and not tabulated as a design", () =>
   // can be interrupted. What is left is not a design — the store retries the unlink on the next
   // open — so counting it as one would double a recreated id and report deleted designs as live.
   const live = join(root, "designs", readdirSync(join(root, "designs"))[0]);
-  const tombstone = `${live}.deleted-1700000000000`;
+  const tombstone = join(root, "designs", ".deleted", "checkout-1700000000000");
   cpSync(live, tombstone, { recursive: true });
   writeFileSync(join(tombstone, "leftover.json"), "x".repeat(4096));
 

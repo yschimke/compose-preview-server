@@ -528,6 +528,28 @@ internal class FileUiBuilderDesignStore(
     else written.forEach { runCatching { Files.deleteIfExists(it) } }
   }
 
+  /**
+   * Where a deleted design goes: a directory of the store's own, never a name beside the designs.
+   *
+   * A tombstone used to be `<directory>.deleted-<millis>` next to the live designs, and the next
+   * open unlinked whatever matched that shape. But this store takes an unfamiliar directory name as
+   * the operator's content — it quarantines a design restored under one rather than assuming it is
+   * garbage — and no name is proof of who wrote it: `checkout.deleted-1700000000000` is a plausible
+   * backup, and deleting somebody's only copy is the one outcome this store must never produce. So
+   * a deletion moves the design into a directory nothing else writes to, and everything under it is
+   * garbage by where it is rather than by a guess about what it is called.
+   */
+  private fun tombstoneFor(designDirectory: Path): Path {
+    val deleted = designsDirectory.resolve(DELETED_DIRECTORY)
+    val stamp = System.currentTimeMillis()
+    var candidate = deleted.resolve("${designDirectory.fileName}-$stamp")
+    var attempt = 1
+    while (Files.exists(candidate)) {
+      candidate = deleted.resolve("${designDirectory.fileName}-$stamp-${attempt++}")
+    }
+    return candidate
+  }
+
   override fun remove(designId: String) {
     locked {
       // A quarantined design's id came out of a header this build could not otherwise read, so its
@@ -543,10 +565,8 @@ internal class FileUiBuilderDesignStore(
         // out of the way is atomic, so after it the design is gone whatever happens next; the
         // unlink of the tombstone is cleanup, and a failure there costs disk rather than truth.
         if (Files.exists(designDirectory)) {
-          val tombstone =
-            designDirectory.resolveSibling(
-              "${designDirectory.fileName}$DELETED_SUFFIX${System.currentTimeMillis()}"
-            )
+          val tombstone = tombstoneFor(designDirectory)
+          Files.createDirectories(tombstone.parent)
           Files.move(designDirectory, tombstone, StandardCopyOption.ATOMIC_MOVE)
           forceDirectory(designsDirectory)
           // The design is gone either way; the disk is only given back when the unlink finishes, so
@@ -587,15 +607,11 @@ internal class FileUiBuilderDesignStore(
     Files.newDirectoryStream(designsDirectory).use { entries ->
       entries.forEach {
         val name = it.fileName.toString()
-        // A tombstone is a design that was deleted and whose cleanup did not finish. It is not a
-        // design, and the next open is where the disk it holds is given back.
-        //
-        // Matched on the exact name `remove` generates rather than on the suffix appearing
-        // anywhere: this store now takes any directory name as operator content — a restored
-        // design, a backup left in place — and quarantines it rather than assuming it is garbage.
-        // `checkout.deleted-backup` is somebody's copy, and a substring test would recursively
-        // delete the only one they have.
-        if (Files.isDirectory(it) && TOMBSTONE_NAME.matches(name)) {
+        // Everything under the store's own deleted directory is a design whose deletion committed
+        // and whose unlink did not finish — garbage because of where it is rather than because of
+        // what it is called, which is the only test that cannot mistake an operator's backup for
+        // one. See [tombstoneFor].
+        if (Files.isDirectory(it) && name == DELETED_DIRECTORY) {
           // Cleanup that did not finish. Retried here, and while it keeps failing its bytes are
           // still charged: a gauge that called a tombstone free would report disk nothing can use
           // as available, and it is the deletes that fail which leave the most of it.
@@ -1377,10 +1393,8 @@ internal class FileUiBuilderDesignStore(
     const val QUARANTINE_FILE: String = "quarantine.json"
     const val REVISIONS_DIRECTORY: String = "revisions"
     const val MIGRATED_SUFFIX: String = ".migrated"
-    /** A design directory renamed out of the way by `remove`, then unlinked as cleanup. */
-    const val DELETED_SUFFIX: String = ".deleted-"
-    /** Exactly what `remove` names a tombstone: the directory it renamed, and when. */
-    private val TOMBSTONE_NAME = Regex(".+" + Regex.escape(DELETED_SUFFIX) + """\d+""" + "$")
+    /** Where `remove` puts a design it has deleted, until the unlink finishes. */
+    const val DELETED_DIRECTORY: String = ".deleted"
     private const val LOCK_FILE = ".ui-builder-service.lock"
     private const val DOCUMENT_PART = "document"
     private const val POSITIONS_PART = "positions"

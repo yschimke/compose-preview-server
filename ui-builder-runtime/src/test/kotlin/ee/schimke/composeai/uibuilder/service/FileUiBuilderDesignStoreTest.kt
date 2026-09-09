@@ -391,10 +391,9 @@ class FileUiBuilderDesignStoreTest {
     store.commit("checkout", null, design("checkout"))
     store.commit("settings", null, design("settings"))
     // What `remove` leaves behind when the cleanup after its rename does not finish.
-    Files.move(
-      root.resolve("designs/${slugOf("checkout")}"),
-      root.resolve("designs/${slugOf("checkout")}${FileUiBuilderDesignStore.DELETED_SUFFIX}1"),
-    )
+    val tombstone = root.resolve("designs/.deleted/${slugOf("checkout")}-1")
+    Files.createDirectories(tombstone.parent)
+    Files.move(root.resolve("designs/${slugOf("checkout")}"), tombstone)
 
     val reopened = FileUiBuilderDesignStore(root).load()
 
@@ -404,12 +403,7 @@ class FileUiBuilderDesignStoreTest {
       reopened.quarantined,
       "a tombstone is not a design that failed to read",
     )
-    assertFalse(
-      Files.exists(
-        root.resolve("designs/${slugOf("checkout")}${FileUiBuilderDesignStore.DELETED_SUFFIX}1")
-      ),
-      "and the disk it holds is given back",
-    )
+    assertFalse(Files.exists(tombstone), "and the disk it holds is given back")
   }
 
   @Test
@@ -536,14 +530,14 @@ class FileUiBuilderDesignStoreTest {
     val store = FileUiBuilderDesignStore(root)
     store.commit("checkout", null, design("checkout"))
     val canonical = root.resolve("designs").resolve(FileUiBuilderDesignStore.slug("checkout"))
-    // Somebody's copy, kept under a name that happens to contain the suffix. A tombstone is what
-    // `remove` writes — the directory it renamed, and when — and nothing else may be unlinked
-    // without being read: this store takes an unfamiliar directory name as operator content, and
-    // recursively deleting the only backup someone has is the one outcome it must never produce.
-    val backup = canonical.resolveSibling("checkout.deleted-backup")
+    // Somebody's copy, kept under a name that reads like something the store wrote. No name is
+    // proof of who wrote it — `checkout.deleted-1700000000000` is a plausible backup — and this
+    // store takes an unfamiliar directory name as operator content, so recursively deleting the
+    // only copy someone has is the one outcome it must never produce.
+    val backup = canonical.resolveSibling("checkout.deleted-1700000000000")
     copyRecursively(canonical, backup)
-    // What `remove` actually writes, beside it.
-    val tombstone = canonical.resolveSibling("checkout.deleted-1700000000000")
+    // What a delete actually leaves: the design moved into the store's own directory.
+    val tombstone = canonical.resolveSibling(".deleted").resolve("checkout-1700000000000")
     copyRecursively(canonical, tombstone)
 
     val loaded = FileUiBuilderDesignStore(root).load()
@@ -789,10 +783,9 @@ class FileUiBuilderDesignStoreTest {
     store.commit("checkout", null, design("checkout"))
     store.load()
     // What a delete leaves when the unlink after its rename does not finish.
-    Files.move(
-      root.resolve("designs/${slugOf("checkout")}"),
-      root.resolve("designs/${slugOf("checkout")}${FileUiBuilderDesignStore.DELETED_SUFFIX}1"),
-    )
+    val tombstone = root.resolve("designs/.deleted/${slugOf("checkout")}-1")
+    Files.createDirectories(tombstone.parent)
+    Files.move(root.resolve("designs/${slugOf("checkout")}"), tombstone)
 
     val reopened = FileUiBuilderDesignStore(root)
     reopened.load()
