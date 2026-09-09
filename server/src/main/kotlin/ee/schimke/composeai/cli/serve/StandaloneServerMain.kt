@@ -38,24 +38,49 @@ private fun run(command: String, args: List<String>) {
     return
   }
 
+  // Refused before anything is spawned or parsed: `--no-project` with an option that only means
+  // something for a project is a contradiction, and the two readings of it — build the project
+  // anyway, or drop the flag the caller typed — are both worse than saying so.
+  val conflicting = LocalUiBuilder.conflictingProjectFlags(args)
+  if (command == ServerCommands.UI && conflicting.isNotEmpty()) {
+    System.err.println(
+      "ui: ${LocalUiBuilder.NO_PROJECT} cannot be combined with " +
+        "${conflicting.joinToString(", ")} — ${if (conflicting.size == 1) "that option needs"
+        else "those options need"} a Gradle project."
+    )
+    System.err.println(
+      "  Drop ${LocalUiBuilder.NO_PROJECT} to build the project, or drop " +
+        "${conflicting.joinToString(", ")} to open the packaged design systems."
+    )
+    exitProcess(1)
+  }
+
   // The capability this binary did not have until now: with a build host, `--module app --discover`
   // finds the Gradle project, builds its previews and serves them, which previously required the
   // compose-ai-tools CLI to BE the server (#9). Without one, `StandaloneBuildHost` — which is no
   // longer a set of stubs standing in for a real implementation, but the honest answer for a server
   // that has no Gradle build behind it.
+  //
+  // Not looked for at all when the invocation is projectless. `ui --no-project` promises to need
+  // nothing else, and searching anyway left a `compose-preview` child process running for the
+  // server's lifetime on any machine with the CLI on PATH — and a stale or unresponsive one could
+  // block the unbounded handshake, so the self-contained command failed to open at all.
+  val projectlessUi = command == ServerCommands.UI && LocalUiBuilder.isProjectless(args)
   val buildHost =
-    BuildHostDiscovery.choose(args)?.let { choice ->
-      ProcessBuildHost.spawn(choice.binary, workingDirectory = null)?.also {
-        System.err.println("compose-preview build host: ${choice.binary} (from ${choice.source})")
+    if (projectlessUi) null
+    else
+      BuildHostDiscovery.choose(args)?.let { choice ->
+        ProcessBuildHost.spawn(choice.binary, workingDirectory = null)?.also {
+          System.err.println("compose-preview build host: ${choice.binary} (from ${choice.source})")
+        }
       }
-    }
 
   try {
     // `ui` is the one command a missing build host makes impossible rather than merely narrower:
     // there is no project to point the builder at, and serving the packaged palette with no record
     // would look like it worked. Say so, the way `serve` says what a bundle-backed server cannot
     // select.
-    if (command == ServerCommands.UI && buildHost == null && !LocalUiBuilder.isProjectless(args)) {
+    if (command == ServerCommands.UI && buildHost == null && !projectlessUi) {
       System.err.println(
         "ui: no `compose-preview` build host found, so this project cannot be discovered or built."
       )
