@@ -158,7 +158,7 @@
       "modifierCapabilities": ["size", "fillMaxWidth", "padding", "alpha", "offset", "rotate", "scale", "zIndex", "testTag", "width", "height", "widthIn", "heightIn", "aspectRatio", "align", "alignHorizontal", "alignVertical", "weight"],
       "wasm": { "platformSupported": true, "adapterStatus": "supported" },
       "code": { "symbol": "", "imports": [] },
-      "svg": { "status": "verified", "fallback": "none", "blocksExport": false }
+      "svg": { "status": "unverified", "fallback": "none", "blocksExport": false, "notes": "Repeated rows draw the template more than once, and the structured recorder correlates a text element by authored node id \u2014 so only the last row's measurements survive and the typography annotation cannot be matched. Unverified until the recorder reads instance paths, which makes an SVG export of a design holding a loop refuse by name rather than emit an unannotated one." }
     },
     {
       "componentId": "layout/horizontal-carousel",

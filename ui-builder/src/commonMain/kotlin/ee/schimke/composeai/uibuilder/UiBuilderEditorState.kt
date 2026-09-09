@@ -4425,7 +4425,7 @@ private fun ComponentCapability.defaultNode(
     properties =
       JsonObject(
         properties.filter(PropertyCapability::required).associate { property ->
-          property.name to property.defaultEncodedValue(nodeId, document)
+          property.name to property.defaultEncodedValue(componentId, nodeId, document)
         }
       ),
     modifiers = JsonArray(emptyList()),
@@ -4453,6 +4453,9 @@ private fun PropertyCapability.literalDefault(): JsonObject {
   }
 }
 
+/** The catalog's own id for a loop over the design's rows. */
+private const val FOR_EACH_COMPONENT_ID = "layout/for-each"
+
 /** The rows a freshly inserted `layout/for-each` carries: three, each naming one `label`. */
 private fun starterRows(): JsonObject =
   JsonObject(
@@ -4473,6 +4476,7 @@ private fun starterRows(): JsonObject =
   )
 
 private fun PropertyCapability.defaultEncodedValue(
+  componentId: String,
   nodeId: String,
   document: UiBuilderDocument,
 ): JsonObject {
@@ -4498,7 +4502,13 @@ private fun PropertyCapability.defaultEncodedValue(
     // that draws nothing — and a designer's first question of one is what a row looks like. The
     // key is what the starter template binds, so the insert draws three cells rather than three
     // copies of a default.
-    "data" -> starterRows()
+    //
+    // Matched on the component as well as the name: this defaulting serves every catalog and every
+    // enabled pack, and a pack declaring a required scalar `data` would otherwise be inserted with
+    // a list of dictionaries in it — a node `CapabilityValidator` rejects, from a palette action
+    // that simply fails.
+    "data" ->
+      if (componentId == FOR_EACH_COMPONENT_ID) starterRows() else JsonPrimitive("").asLiteral(this)
     "itemWidthDp" -> literal("float", JsonPrimitive(128.0))
     "expanded",
     "selected",

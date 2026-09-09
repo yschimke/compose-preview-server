@@ -94,6 +94,33 @@ class ForEachRowsTest {
     )
   }
 
+  /**
+   * A loop's SVG capability is unverified, and an export of a design holding one says so.
+   *
+   * The structured recorder correlates a text element by authored node id, and a loop draws its
+   * template more than once — so only the last row's measurements survive and the typography
+   * annotation cannot be matched to the earlier elements. Refusing by name is the honest state
+   * until the recorder reads instance paths; claiming `verified` would have produced an SVG whose
+   * text is silently unannotated.
+   */
+  @Test
+  fun `an svg export of a design holding a loop refuses by name`() {
+    val catalog =
+      CapabilityCatalogParser.parse(
+        checkNotNull(javaClass.getResource("/m3-catalog-capabilities-v1.json")).readText()
+      )
+
+    val readiness =
+      inspectDocumentSvgExport(
+        document(),
+        catalog,
+        DocumentSvgExecutionBridge.JVM_SKIA_SCENE_RECORDING,
+      )
+
+    assertTrue(!readiness.ready, "readiness=$readiness")
+    assertTrue("loop" in readiness.unverifiedNodeIds, "${readiness.unverifiedNodeIds}")
+  }
+
   private fun rowCentreY(index: Int) = index * CELL_PX + CELL_PX / 2
 
   /** A loop over three rows, whose template is one surface reading `shade`. */
