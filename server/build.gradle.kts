@@ -398,14 +398,16 @@ dependencies {
   implementation(libs.classgraph)
   implementation(libs.jmdns)
 
-  val composeAiToolsVersion = libs.versions.composeai.tools.get()
+  // The renderer and the daemon publish from compose-preview-daemon on their own line since
+  // compose-ai-tools#5336; the `composeai-preview-daemon` pin names it.
+  val previewDaemonVersion = libs.versions.composeai.preview.daemon.get()
   add(
     "composePreviewRenderer",
-    "ee.schimke.composeai:renderer-desktop:$composeAiToolsVersion",
+    "ee.schimke.composeai:renderer-desktop:$previewDaemonVersion",
   )
   add(
     "composePreviewDaemonDesktop",
-    "ee.schimke.composeai:daemon-desktop:$composeAiToolsVersion",
+    "ee.schimke.composeai:daemon-desktop:$previewDaemonVersion",
   )
 
   // BTA *interfaces only* — the playground compiler references `BtaCompileSession`'s

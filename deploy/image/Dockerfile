@@ -17,6 +17,11 @@ ARG SERVER_VERSION=3.21.0
 # Required build input. The release workflow reads it from gradle/libs.versions.toml so the
 # server's runtime dependencies and its separately packaged daemon sidecars cannot drift.
 ARG TOOLS_VERSION
+# The compose-preview-daemon release supplying the daemon sidecars — the Android daemon zip and the
+# desktop daemon + renderer tarball. Those left compose-ai-tools in compose-ai-tools#5336, so
+# TOOLS_VERSION names only what still ships from there (`lib-rcjvm/`, `lib-bta/`). No default:
+# automatic releases read `composeai-preview-daemon` from gradle/libs.versions.toml.
+ARG DAEMON_VERSION
 
 # ---------------------------------------------------------------------------
 # Stage 0: base — JDK + Skiko's native deps (same rationale as the cloudrun image:
@@ -74,7 +79,7 @@ COPY m2/ /root/.m2/repository/
 # Stage 1b (optional): Android/Wear live daemon — "do the slow work upfront".
 #
 # An Android/Wear catalog (wear-m3) renders live through a Robolectric daemon, NOT
-# the desktop Skiko one. That runtime ships SEPARATELY from compose-ai-tools (it's ~150-200 MB)
+# the desktop Skiko one. That runtime ships from compose-preview-daemon (it's ~150-200 MB)
 # as `compose-preview-android-daemon-<ver>.zip`, and needs
 # `android.jar` from an Android SDK plus, on its FIRST render, Robolectric's
 # `android-all-instrumented` jar (~150 MB). All three are baked here so the runtime
@@ -85,7 +90,7 @@ COPY m2/ /root/.m2/repository/
 # stay inert unless a served catalog actually resolves an android `liveBundle`, in
 # which case ServeBundleDaemon.materialize picks up the sidecar + android.jar here.
 FROM base AS android-daemon
-ARG TOOLS_VERSION
+ARG DAEMON_VERSION
 ARG ANDROID_SDK_PLATFORM=android-35
 COPY release-assets/ /tmp/release-assets/
 # Minimal Android SDK: just the cmdline-tools + one platform's android.jar (no
@@ -105,12 +110,12 @@ RUN set -eu; \
 # Unpack the released Android daemon sidecar → /opt/lib-daemon-android. Automatic
 # releases use the locally staged archive; manual builds retain the public fallback.
 RUN set -eu; \
-    local="/tmp/release-assets/compose-preview-android-daemon-${TOOLS_VERSION}.zip"; \
+    local="/tmp/release-assets/compose-preview-android-daemon-${DAEMON_VERSION}.zip"; \
     if [ -f "$local" ]; then \
       cp "$local" /tmp/android-daemon.zip; \
     else \
       curl -fsSL --retry 20 --retry-delay 30 --retry-all-errors -o /tmp/android-daemon.zip \
-        "https://github.com/yschimke/compose-ai-tools/releases/download/v${TOOLS_VERSION}/compose-preview-android-daemon-${TOOLS_VERSION}.zip"; \
+        "https://github.com/yschimke/compose-preview-daemon/releases/download/v${DAEMON_VERSION}/compose-preview-android-daemon-${DAEMON_VERSION}.zip"; \
     fi; \
     unzip -q /tmp/android-daemon.zip -d /opt; \
     rm /tmp/android-daemon.zip; \
@@ -160,20 +165,21 @@ RUN set -eu; \
 #
 # `$APP_HOME` here is `/opt/compose-preview-server`, and the released SERVER tarball
 # carries only `bin/`, `lib/`, `wasm-ui/`, `ui-builder/` and `ui-builder-components/` — those two
-# sidecars are staged into
-# compose-ai-tools' `:cli` distribution (`cli/build.gradle.kts`, `into("lib-daemon-desktop")`
-# / `into("lib-renderer")`), which this image never installed. So the lookup came back
+# sidecars used to be staged into compose-ai-tools' `:cli` distribution, which this image never
+# installed, and since compose-ai-tools#5336 they are compose-preview-daemon's
+# `compose-preview-desktop-daemon-<ver>.tar.gz`. So the lookup came back
 # empty, `desktopBundleDaemonLaunch` returned null, and every desktop catalog fell back
 # with `livebundle-unavailable: the live bundle daemon could not be started` — the Android
 # catalogs stayed live because stage 1b baked THEIR sidecar and pointed a sysprop at it.
 # Before the repo split (#3824) the server ran out of the CLI install dir and inherited
 # both for free; nothing replaced that when it moved.
 #
-# Only the sidecar directories are lifted out of the CLI tarball. The rest of it (the
+# Two archives feed this stage: the desktop daemon tarball from compose-preview-daemon
+# (`lib-daemon-desktop/` + `lib-renderer/`, packed flat) and the compose-ai-tools CLI tarball,
+# from which only `lib-rcjvm/` and `lib-bta/` are lifted. The rest of the CLI tarball (the
 # `compose-preview` launcher, its own `lib/`, `lib-usage-psi/`, the Wasm players) is not
-# this image's job — the server is the entrypoint, not the CLI — and the ~310 MB download
-# stays in this stage, so the runtime grows by the sidecars rather than by the whole
-# tarball.
+# this image's job — the server is the entrypoint, not the CLI — and the downloads stay in
+# this stage, so the runtime grows by the sidecars rather than by whole archives.
 #
 # `lib-bta/` IS one of them, and was the exception that disabled a whole lane. It carries
 # `kotlin-build-tools-impl` + `kotlin-compiler-embeddable` + the Compose compiler plugin,
@@ -216,6 +222,7 @@ RUN set -eu; \
 # broken box this stanza documents.
 FROM base AS desktop-daemon
 ARG TOOLS_VERSION
+ARG DAEMON_VERSION
 COPY release-assets/ /tmp/release-assets/
 # Same local-first / public-fallback shape as the server and Android stages: an automatic
 # release stages the tag's tarball into the build context and can build before the draft
@@ -228,6 +235,15 @@ COPY release-assets/ /tmp/release-assets/
 # return null — the exact silent-disable this stage now exists to prevent — so each half is
 # asserted on its own.
 RUN set -eu; \
+    local="/tmp/release-assets/compose-preview-desktop-daemon-${DAEMON_VERSION}.tar.gz"; \
+    if [ -f "$local" ]; then \
+      cp "$local" /tmp/desktop-daemon.tgz; \
+    else \
+      curl -fsSL --retry 20 --retry-delay 30 --retry-all-errors -o /tmp/desktop-daemon.tgz \
+        "https://github.com/yschimke/compose-preview-daemon/releases/download/v${DAEMON_VERSION}/compose-preview-desktop-daemon-${DAEMON_VERSION}.tar.gz"; \
+    fi; \
+    tar -xzf /tmp/desktop-daemon.tgz -C /opt; \
+    rm /tmp/desktop-daemon.tgz; \
     local="/tmp/release-assets/compose-preview-${TOOLS_VERSION}.tar.gz"; \
     if [ -f "$local" ]; then \
       cp "$local" /tmp/cli.tgz; \
@@ -236,7 +252,7 @@ RUN set -eu; \
         "https://github.com/yschimke/compose-ai-tools/releases/download/v${TOOLS_VERSION}/compose-preview-${TOOLS_VERSION}.tar.gz"; \
     fi; \
     tar -xzf /tmp/cli.tgz -C /opt --strip-components=1 --wildcards \
-      "*/lib-daemon-desktop" "*/lib-renderer" "*/lib-rcjvm" "*/lib-bta"; \
+      "*/lib-rcjvm" "*/lib-bta"; \
     rm /tmp/cli.tgz; \
     test -d /opt/lib-daemon-desktop; \
     test -d /opt/lib-renderer; \

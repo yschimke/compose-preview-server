@@ -1,1 +1,5 @@
-
+Placeholder so the Dockerfile `COPY release-assets/` always has a directory.
+Automatic releases stage the exact tag's CLI tarball and the pinned
+compose-preview-daemon desktop/android assets here before `docker build`;
+manual/local builds leave it empty and each stage downloads the public
+release asset instead.
