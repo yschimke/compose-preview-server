@@ -123,10 +123,45 @@ public class CurrentM3UiBuilderCatalogExecutor(
       REMOTE_M3_CATALOG_SYSTEM_ID to remoteM3Catalog(baseCatalog),
       WEAR_M3_CATALOG_SYSTEM_ID to wearM3Catalog(baseCatalog),
     )
+  /**
+   * The builder's own vocabulary, taken from the packaged catalog.
+   *
+   * A column is not a Material 3 component and this server does not render one on a catalog's
+   * behalf: the `layout/`, `shape/`, `asset/` and `remote-compose/` namespaces are the BUILDER's,
+   * offered on every shelf whatever design system it describes. m3-catalog's published policy says
+   * the same thing from the other side — it declares no builtins, on the stated grounds that
+   * declaring them "would be this catalog claiming to own the builder's own vocabulary".
+   *
+   * Which makes this the server's to supply. A published catalog replaces the synthesised one
+   * wholesale, so without this a catalog that correctly declines to claim `layout/box` ships a
+   * shelf with no box on it. Naming the namespaces here rather than deriving them from the base
+   * catalog's prefix is deliberate: the packaged catalog declares no `componentIdPrefix`, and
+   * "everything the published catalog does not own" would hand a future `m4/` catalog the whole
+   * `m3/` shelf.
+   */
+  private val builderVocabulary: List<ComponentCapabilityV1> =
+    baseCatalog.components.filter { component ->
+      BUILDER_NAMESPACES.any { component.componentId.startsWith(it) }
+    }
+
+  /**
+   * A published catalog, plus the builder components it does not offer itself.
+   *
+   * Additive only, and the catalog wins every collision: a catalog that DOES declare `layout/box`
+   * as a builtin keeps its own, so this cannot overwrite a deliberate statement.
+   */
+  private fun withBuilderVocabulary(catalog: CatalogCapabilityV1): CatalogCapabilityV1 {
+    val offered = catalog.components.mapTo(mutableSetOf()) { it.componentId }
+    val missing = builderVocabulary.filterNot { it.componentId in offered }
+    return if (missing.isEmpty()) catalog
+    else catalog.copy(components = catalog.components + missing)
+  }
+
   // A published catalog wins over the synthesised one of the same id. The map is the union rather
   // than an overlay of the synthesised keys, so an id nothing here synthesises is servable — that
   // is the whole point, and an overlay would have quietly kept the set of possible catalogs closed.
-  private val availableCatalogs = synthesisedCatalogs + published
+  private val availableCatalogs =
+    synthesisedCatalogs + published.mapValues { (_, catalog) -> withBuilderVocabulary(catalog) }
   private val catalogs =
     catalogSystemIds
       .also { require(it.isNotEmpty()) { "at least one UI-builder catalog must be enabled" } }
@@ -611,6 +646,16 @@ private const val REMOTE_COMPOSE_INLINE_COMPONENT_ID = "remote-compose/inline"
 
 /** The node that switches back out of it — see [REMOTE_COMPOSE_INLINE_COMPONENT_ID]. */
 private const val REMOTE_COMPOSE_CUSTOM_COMPONENT_ID = "remote-compose/custom"
+
+/**
+ * The id namespaces the BUILDER owns, on every shelf.
+ *
+ * Not a design system's: a box, a gradient, an image and the Remote Compose seams are the builder's
+ * own vocabulary, which is why a catalog is right to publish components only under its own prefix
+ * and why this server supplies the rest. Adding a namespace here widens what every published
+ * catalog is handed, so it is a deliberate list rather than a pattern.
+ */
+private val BUILDER_NAMESPACES = listOf("layout/", "shape/", "asset/", "remote-compose/")
 
 private val REMOTE_COMPOSE_BORROWED_AS_THEMSELVES =
   setOf(
