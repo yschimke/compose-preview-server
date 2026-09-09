@@ -423,6 +423,17 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   // authoritative state this host reads back.
   var inspectorMode by remember(config.designId) { mutableStateOf(EditorInspectorMode.Properties) }
   var openThreadId by remember(config.designId) { mutableStateOf(config.selectors.threadId) }
+  // The thread the *address bar* names right now, which is not the same as the one parsed at
+  // startup: a fragment-only navigation never re-enters this app. Held as state so the editor can
+  // follow it, and re-read from `location` on every change rather than from the event, so Back and
+  // Forward are answered by the same path as a link press.
+  var linkedThreadId by remember(config.designId) { mutableStateOf(config.selectors.threadId) }
+  LaunchedEffect(config.designId) {
+    while (true) {
+      val hash = awaitHashChange()
+      linkedThreadId = parseDesignUrlSelectors(null, hash).threadId
+    }
+  }
   var catalogQuery by remember { mutableStateOf("") }
   // Which component packs are on, remembered per catalog in this browser. A setting rather than
   // document state: the same design opened by a collaborator shows their palette, not yours.
@@ -917,10 +928,9 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
     // Answered the way `?node=` answers an unknown layer — a sentence rather than a failure — but
     // it needs the wait: the discussion arrives over its own socket well after the design does, so
     // asking earlier would call every thread link stale for the first moments of every page.
-    val staleThreadId =
-      config.selectors.threadId?.takeIf {
-        commentBoardLoaded && commentBoard.threads.none { thread -> thread.id == it }
-      }
+    val staleThreadId = linkedThreadId?.takeIf {
+      commentBoardLoaded && commentBoard.threads.none { thread -> thread.id == it }
+    }
     // The address bar stops naming it, and so does the state this page publishes for the harness
     // and the extension. A fragment pointing at a conversation that is not there is the same lie
     // an unavailable `?revision=` is not allowed to tell.
@@ -977,11 +987,11 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
         if (config.selectors.threadId != null) EditorInspectorMode.Comments
         else EditorInspectorMode.Properties,
       initialInspectorOpen = config.selectors.nodeId != null || config.selectors.threadId != null,
-      initialSelectedThreadId = config.selectors.threadId,
+      linkedThreadId = linkedThreadId,
       onSelectedThreadChanged = {
         openThreadId = it
         // The fragment stops naming a thread as soon as the reader closes it or opens another.
-        if (it != config.selectors.threadId) dropDesignUrlFragment()
+        if (it != linkedThreadId) dropDesignUrlFragment()
       },
       revisionPin = revisionPin,
       // Only where there is somewhere to go. A revision that could not be shown left the page on
@@ -1880,6 +1890,43 @@ private fun canonicalizeUiBuilderUrl(
 @JsFun("() => globalThis.location.search") private external fun locationSearch(): String
 
 @JsFun("() => globalThis.location.hash") private external fun locationHash(): String
+
+/**
+ * The next time the address bar's fragment changes, whatever changed it.
+ *
+ * A fragment-only navigation — a second `#thread=` link followed from inside the open design, or
+ * Back over one — is a *same-document* navigation: the browser does not reload, the Wasm app is
+ * never re-entered, and the config parsed at startup keeps naming the thread that was open. Without
+ * this the address bar and the panel disagree, which is the one failure a permalink cannot have.
+ *
+ * One promise per change rather than a persistent callback, because that is what a Kotlin/Wasm
+ * caller can await, and it is the shape the paste listener already uses: re-armed by the loop that
+ * consumed the last one.
+ */
+@JsFun(
+  """() => new Promise((resolve) => {
+    globalThis.addEventListener(
+      'hashchange',
+      () => resolve(globalThis.location.hash),
+      { once: true },
+    );
+  })"""
+)
+private external fun awaitHashChangePromise(): Promise<JsString>
+
+private suspend fun awaitHashChange(): String = suspendCancellableCoroutine { continuation ->
+  awaitHashChangePromise()
+    .then { value ->
+      if (continuation.isActive) continuation.resume(value.toString())
+      null
+    }
+    .catch { error ->
+      if (continuation.isActive) {
+        continuation.resumeWithException(IllegalStateException(error.toString()))
+      }
+      null
+    }
+}
 
 /**
  * Takes one selector back out of the address bar, without a round trip and without a history entry.

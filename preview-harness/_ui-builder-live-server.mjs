@@ -21,39 +21,42 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const harnessRoot = resolve(here, "..");
 
 const launcher = resolve(
-    harnessRoot,
-    "server/build/install/compose-preview-server/bin/compose-preview-server",
+  harnessRoot,
+  "server/build/install/compose-preview-server/bin/compose-preview-server",
 );
-const app = resolve(harnessRoot, "server/build/install/compose-preview-server/ui-builder");
+const app = resolve(
+  harnessRoot,
+  "server/build/install/compose-preview-server/ui-builder",
+);
 
 export const catalogSystemId = "m3-catalog";
 
 async function freePort() {
-    const socket = createServer();
-    await new Promise((accept, reject) => {
-        socket.once("error", reject);
-        socket.listen(0, "127.0.0.1", accept);
-    });
-    const { port } = socket.address();
-    await new Promise((accept) => socket.close(accept));
-    return port;
+  const socket = createServer();
+  await new Promise((accept, reject) => {
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", accept);
+  });
+  const { port } = socket.address();
+  await new Promise((accept) => socket.close(accept));
+  return port;
 }
 
 async function waitUntilReady(origin, child) {
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline) {
-        if (child.exitCode !== null) {
-            throw new Error(`server exited before readiness (${child.exitCode})`);
-        }
-        try {
-            const response = await fetch(`${origin}/ui-builder/index.html`);
-            if (response.ok) return;
-        } catch {
-            // The listener is not bound yet.
-        }
-        await new Promise((accept) => setTimeout(accept, 100));
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`server exited before readiness (${child.exitCode})`);
     }
-    throw new Error("server did not become ready");
+    try {
+      const response = await fetch(`${origin}/ui-builder/index.html`);
+      if (response.ok) return;
+    } catch {
+      // The listener is not bound yet.
+    }
+    await new Promise((accept) => setTimeout(accept, 100));
+  }
+  throw new Error("server did not become ready");
 }
 
 /**
@@ -64,67 +67,75 @@ async function waitUntilReady(origin, child) {
  * operator, which is the identity a token already authenticates.
  */
 export async function startUiBuilderServer(token) {
-    const port = await freePort();
-    const stateDirectory = await mkdtemp(`${tmpdir()}/ui-builder-live-`);
-    const environment = { ...process.env };
-    delete environment.JAVA_OPTS;
-    delete environment.UI_BUILDER_REAL_RENDER_APP_HOME;
-    const child = spawn(
-        launcher,
-        [
-            "--host",
-            "127.0.0.1",
-            "--port",
-            String(port),
-            "--token",
-            token,
-            "--ui-builder-dir",
-            app,
-            "--ui-builder-state-dir",
-            stateDirectory,
-            "--accept-docs",
-        ],
-        { cwd: tmpdir(), env: environment, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    child.stdout.resume();
-    child.stderr.resume();
-    const origin = `http://127.0.0.1:${port}`;
+  const port = await freePort();
+  const stateDirectory = await mkdtemp(`${tmpdir()}/ui-builder-live-`);
+  const environment = { ...process.env };
+  delete environment.JAVA_OPTS;
+  delete environment.UI_BUILDER_REAL_RENDER_APP_HOME;
+  const child = spawn(
+    launcher,
+    [
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--token",
+      token,
+      "--ui-builder-dir",
+      app,
+      "--ui-builder-state-dir",
+      stateDirectory,
+      "--accept-docs",
+    ],
+    { cwd: tmpdir(), env: environment, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  child.stdout.resume();
+  child.stderr.resume();
+  const origin = `http://127.0.0.1:${port}`;
+  async function stop() {
+    if (child.exitCode === null) child.kill("SIGINT");
+    await Promise.race([
+      new Promise((accept) => child.once("exit", accept)),
+      new Promise((accept) => setTimeout(accept, 15_000)),
+    ]);
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
+  // A server that starts but never becomes ready has to be killed here, because there is nobody
+  // else left who can: the throw happens before this function returns, so the spec's `beforeAll`
+  // never assigns the handle and its `afterAll` has nothing to stop. The JVM would then outlive
+  // the run, holding its port and its pipes open through every later harness command.
+  try {
     await waitUntilReady(origin, child);
-    return {
-        origin,
-        token,
-        async stop() {
-            if (child.exitCode === null) child.kill("SIGINT");
-            await Promise.race([
-                new Promise((accept) => child.once("exit", accept)),
-                new Promise((accept) => setTimeout(accept, 15_000)),
-            ]);
-            if (child.exitCode === null) child.kill("SIGKILL");
-        },
-    };
+  } catch (failure) {
+    await stop();
+    throw failure;
+  }
+  return { origin, token, stop };
 }
 
 let requestSequence = 0;
 
 async function apiCall(server, request) {
-    const response = await fetch(
-        `${server.origin}/api/ui-builder/v1/requests?token=${encodeURIComponent(server.token)}`,
-        {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                schemaVersion: 1,
-                requestId: `live-harness-${++requestSequence}`,
-                actorId: "operator",
-                request,
-            }),
-        },
+  const response = await fetch(
+    `${server.origin}/api/ui-builder/v1/requests?token=${encodeURIComponent(server.token)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        requestId: `live-harness-${++requestSequence}`,
+        actorId: "operator",
+        request,
+      }),
+    },
+  );
+  const body = JSON.parse(await response.text());
+  if (response.status !== 200) {
+    throw new Error(
+      `envelope call failed (${response.status}): ${JSON.stringify(body)}`,
     );
-    const body = JSON.parse(await response.text());
-    if (response.status !== 200) {
-        throw new Error(`envelope call failed (${response.status}): ${JSON.stringify(body)}`);
-    }
-    return body.response;
+  }
+  return body.response;
 }
 
 /**
@@ -136,78 +147,85 @@ async function apiCall(server, request) {
  * publishing each parent alone would be a deliberately invalid intermediate document.
  */
 export async function seedJetcasterDesign(server, designId) {
-    const fixture = JSON.parse(
-        await readFile(
-            resolve(
-                harnessRoot,
-                "docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json",
-            ),
-            "utf8",
-        ),
-    );
-    const [create, ...inserts] = fixture.operations;
-    if (create.type !== "createDesign") throw new Error("fixture does not open with createDesign");
-    await apiCall(server, {
-        type: "createDesign",
-        document: {
-            schema: fixture.documentSchema,
-            id: designId,
-            title: create.title,
-            revision: 0,
-            catalogPin: create.catalogPin,
-            environment: create.environment,
-            stateVariables: create.stateVariables,
-            roots: [],
-            nodes: {},
-            assets: {},
-            tokenBindings: {},
+  const fixture = JSON.parse(
+    await readFile(
+      resolve(
+        harnessRoot,
+        "docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json",
+      ),
+      "utf8",
+    ),
+  );
+  const [create, ...inserts] = fixture.operations;
+  if (create.type !== "createDesign")
+    throw new Error("fixture does not open with createDesign");
+  await apiCall(server, {
+    type: "createDesign",
+    document: {
+      schema: fixture.documentSchema,
+      id: designId,
+      title: create.title,
+      revision: 0,
+      catalogPin: create.catalogPin,
+      environment: create.environment,
+      stateVariables: create.stateVariables,
+      roots: [],
+      nodes: {},
+      assets: {},
+      tokenBindings: {},
+    },
+  });
+  const response = await apiCall(server, {
+    type: "applyOperation",
+    submission: {
+      type: "batch",
+      designId,
+      operationId: `seed-${designId}`,
+      actorId: "operator",
+      clientId: "live-harness-seed",
+      baseRevision: 0,
+      operations: inserts.map((operation) => ({
+        type: "insertNode",
+        node: operation.node,
+        location: {
+          parent: operation.parent ?? null,
+          afterNodeId: operation.afterNodeId ?? null,
         },
-    });
-    const response = await apiCall(server, {
-        type: "applyOperation",
-        submission: {
-            type: "batch",
-            designId,
-            operationId: `seed-${designId}`,
-            actorId: "operator",
-            clientId: "live-harness-seed",
-            baseRevision: 0,
-            operations: inserts.map((operation) => ({
-                type: "insertNode",
-                node: operation.node,
-                location: {
-                    parent: operation.parent ?? null,
-                    afterNodeId: operation.afterNodeId ?? null,
-                },
-            })),
-        },
-    });
-    if (response.outcome?.type !== "accepted") {
-        throw new Error(`seed was refused: ${JSON.stringify(response.outcome)}`);
-    }
-    return response.outcome.committedRevision;
+      })),
+    },
+  });
+  if (response.outcome?.type !== "accepted") {
+    throw new Error(`seed was refused: ${JSON.stringify(response.outcome)}`);
+  }
+  return response.outcome.committedRevision;
 }
 
 /** One thread on the design's comment board. Returns the id the store minted for it. */
-export async function seedCommentThread(server, designId, { nodeId, body, displayName }) {
-    const response = await fetch(
-        `${server.origin}/api/ui-builder/v1/designs/${designId}/comments` +
-            `?token=${encodeURIComponent(server.token)}`,
-        {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                anchor: nodeId ? { nodeId } : null,
-                body,
-                displayName: displayName ?? "Operator",
-            }),
-        },
+export async function seedCommentThread(
+  server,
+  designId,
+  { nodeId, body, displayName },
+) {
+  const response = await fetch(
+    `${server.origin}/api/ui-builder/v1/designs/${designId}/comments` +
+      `?token=${encodeURIComponent(server.token)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        anchor: nodeId ? { nodeId } : null,
+        body,
+        displayName: displayName ?? "Operator",
+      }),
+    },
+  );
+  const board = JSON.parse(await response.text());
+  if (response.status !== 201) {
+    throw new Error(
+      `comment was refused (${response.status}): ${JSON.stringify(board)}`,
     );
-    const board = JSON.parse(await response.text());
-    if (response.status !== 201) {
-        throw new Error(`comment was refused (${response.status}): ${JSON.stringify(board)}`);
-    }
-    return board.threads[board.threads.length - 1].id;
+  }
+  return board.threads[board.threads.length - 1].id;
 }
 
 /**
@@ -217,14 +235,19 @@ export async function seedCommentThread(server, designId, { nodeId, body, displa
  * Built here with `URLSearchParams` rather than by the code under test on purpose: a spec that
  * asked `designUrlPath` for the URL would agree with itself whatever either of them did.
  */
-export function designPermalink(server, designId, { revision, node, thread } = {}) {
-    const query = new URLSearchParams({
-        actor: "operator",
-        clientId: "live-harness",
-        token: server.token,
-    });
-    if (revision !== undefined) query.set("revision", String(revision));
-    if (node !== undefined) query.set("node", node);
-    const fragment = thread === undefined ? "" : `#thread=${encodeURIComponent(thread)}`;
-    return `${server.origin}/ui-builder/${catalogSystemId}/${designId}?${query}${fragment}`;
+export function designPermalink(
+  server,
+  designId,
+  { revision, node, thread } = {},
+) {
+  const query = new URLSearchParams({
+    actor: "operator",
+    clientId: "live-harness",
+    token: server.token,
+  });
+  if (revision !== undefined) query.set("revision", String(revision));
+  if (node !== undefined) query.set("node", node);
+  const fragment =
+    thread === undefined ? "" : `#thread=${encodeURIComponent(thread)}`;
+  return `${server.origin}/ui-builder/${catalogSystemId}/${designId}?${query}${fragment}`;
 }

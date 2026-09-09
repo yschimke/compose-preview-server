@@ -448,12 +448,17 @@ fun UiBuilderEditor(
   /** A sentence from the host — a refused comment, a feed that dropped. */
   commentStatus: String? = null,
   /**
-   * The thread `#thread=` named, opened and scrolled to as the editor mounts.
+   * The thread the address bar names — now, not only when the editor mounted.
    *
-   * Separate from the selection the panel keeps for itself, and read once: a link names where to
-   * start reading, not a thread that has to stay open for the life of the session.
+   * Separate from the selection the panel keeps for itself: a link says where to start reading, and
+   * the reader is free to move off it, which is why this is not simply the panel's state. But it is
+   * *not* read once. A fragment-only navigation — a second `#thread=` link followed from inside the
+   * open design, or Back over one — never reloads the page, so a host that reported only the
+   * startup value would leave the panel on the previous conversation while the address bar named
+   * the new one. Each new non-null value is opened and scrolled to exactly once, the way the first
+   * one is.
    */
-  initialSelectedThreadId: String? = null,
+  linkedThreadId: String? = null,
   /**
    * Which thread the panel has open now, told to the host on every change.
    *
@@ -707,7 +712,7 @@ fun UiBuilderEditor(
   var captureFailure by remember(document.id) { mutableStateOf<String?>(null) }
   // Which conversation is open, in the panel and under the pin. Editor state rather than document
   // state, and per design: which thread somebody has expanded is a fact about a moment.
-  var selectedThreadId by remember(document.id) { mutableStateOf(initialSelectedThreadId) }
+  var selectedThreadId by remember(document.id) { mutableStateOf(linkedThreadId) }
   // A sentence the editor itself put up — a refused edit under a pinned revision, the answer to a
   // Copy link — kept apart from [openingNotice], which is the host's and does not expire.
   var transientNotice by remember(document.id) { mutableStateOf<String?>(null) }
@@ -752,6 +757,20 @@ fun UiBuilderEditor(
   fun focusEditor() {
     textInputFocused = false
     editorFocusRequester.requestFocus()
+  }
+  // Following the address bar after the first paint, for the navigation the browser answers without
+  // reloading: a fragment-only move between two thread links, or Back over one. The panel is
+  // brought to the front as well as the thread selected, because such a link is a request to read a
+  // conversation and arriving with Talk shut would answer half of it. Only a non-null value acts —
+  // the fragment being *dropped* is this editor's own doing, and re-selecting nothing on the way
+  // back through would fight the reader who just closed a thread.
+  LaunchedEffect(linkedThreadId) {
+    val threadId = linkedThreadId ?: return@LaunchedEffect
+    if (threadId == selectedThreadId) return@LaunchedEffect
+    selectThread(threadId)
+    dispatch(UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Comments))
+    inspectorOpen = true
+    mobilePanel = MobileEditorPanel.Properties
   }
   /**
    * Bake the reference stack into one picture and make it the base.
@@ -1250,7 +1269,7 @@ fun UiBuilderEditor(
       onSelectThread = ::selectThread,
       // Read once. The panel scrolls to the thread the URL named as it opens, and never again —
       // a later scroll would be the page fighting somebody who has started reading elsewhere.
-      revealThreadId = initialSelectedThreadId,
+      revealThreadId = linkedThreadId,
       onPostComment = onPostComment,
       onResolveCommentThread = onResolveCommentThread,
       // A thread's link carries the thread in the fragment and, where the thread is pinned to a

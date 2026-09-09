@@ -120,7 +120,11 @@ and left the phone showing nothing would be the panel half of the feature missin
 
 **`#thread=<threadId>`** opens the Talk panel scrolled to one conversation, and combines with
 `?node=` where the thread is pinned to a layer, so "the thread about this button, beside the button"
-is one URL. A thread the URL names is shown even when it is resolved, without switching **Show
+is one URL. The panel follows the fragment rather than only reading it once at startup: moving
+between two thread links inside an open design is a *same-document* navigation, so the browser never
+reloads and the Wasm app is never re-entered — an editor that read the fragment only on mount would
+sit on the previous conversation while the address bar named the new one, and Back would do the
+same. A thread the URL names is shown even when it is resolved, without switching **Show
 resolved** on for everything else: a permalink to a settled conversation is exactly the link somebody
 sends to explain a decision. The panel scrolls to it **once**: a link says where to start reading,
 and a page that kept pulling itself back would fight whoever read on.
