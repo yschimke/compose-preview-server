@@ -36,6 +36,9 @@ The product spec and its RFC come first; everything after them is one surface or
   repository authors so the builder can serve it without being written into the server.
 - [design/UI_BUILDER_COMPONENT_PACKS.md](design/UI_BUILDER_COMPONENT_PACKS.md) — other catalogs'
   components in one design.
+- [design/UI_BUILDER_CATALOG_AUDIT.md](design/UI_BUILDER_CATALOG_AUDIT.md) — **audit**: what an
+  application screen needs that the three authoring catalogs do not offer — drawing, layout, the
+  Material 3 remainder, modifiers — and which repository owns each gap.
 - [design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md](design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md) —
   the builder over a derived component record.
 - [design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md](design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md) — the
