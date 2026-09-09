@@ -471,6 +471,13 @@ Each phase is releasable on its own and leaves every catalog working.
    check than the golden could have been, and both seed devices against the frame this build already
    opens a new design on.
 
+   **Read that table as a checklist.** Six fields have now been added to this comparison one review
+   round at a time — `previewSurfaces`, `code`, `templates`, `frame.seedDevice`,
+   `componentMenu.components` and `componentPacks` — every one of them a row of the "declared by the
+   catalog, read by a surface" table above that nothing was comparing. No frozen catalog carries a
+   `componentPacks` and the generator emits none, so that last one is silent today; a field that
+   cannot differ is cheapest to fix while nothing states it and dearest once something does.
+
    The last three of the six were added late, and the reason is worth keeping: a field left out of
    the comparison **cannot differ**, so `code`, `templates` and `frame.seedDevice` were carried past
    the gate unread while the platform word and the shelf order agreed. `componentMenu.components`
@@ -496,9 +503,7 @@ Each phase is releasable on its own and leaves every catalog working.
    entries and disable the sweep as surely as a wrong one. A prefix the frozen catalog has never
    heard of blocks, as does one that disagrees with the caller's. A capability document publishes
    none at all — its builtins are materialised in — which is what `--component-id-prefix` supplies.
-   `componentPacks` joined the compared fields at the same time, for the fifth time on this file:
-   the contract's own table lists it as a fact the palette and the export read, and nothing compared
-   it. A missing entry is a
+   A missing entry is a
    difference rather than a gap, and reviewable: the catalog publishes a menu and that menu does not
    list the id, which is an assertion that the component is gone, not the silence of a catalog that
    has not been written yet. An authored policy states none of them — a component's shelf comes from
