@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -383,6 +391,59 @@ test("a quarantined design is counted but not tabulated, header or no header", (
     "the quarantined design is not a row",
   );
   assert.ok(report.overheadBytes > 0, "but its bytes are still charged");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a design under a name that is not its address is not a second row", () => {
+  const root = storeDirectory({
+    checkout: {
+      document: document("checkout", 2, 4),
+      revisions: [],
+      outcome: { operationId: "op-1", revision: 2 },
+    },
+  });
+  // The slug is the address: the store quarantines a design restored or copied under another
+  // basename, and decides that from the name rather than by writing a record. Trusting the header
+  // here would report the same designId twice, once from a directory the host does not serve.
+  const canonical = join(root, "designs", slugOf("checkout"));
+  cpSync(canonical, join(root, "designs", "restored-checkout"), { recursive: true });
+
+  const report = analyzeUiBuilderStore(root);
+
+  assert.deepEqual(
+    report.designs.map((design) => design.id),
+    ["checkout"],
+    "one design, from the directory that addresses it",
+  );
+  assert.ok(report.overheadBytes > 0, "and the copy's bytes are still charged");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a header claiming a journal larger than a design may be is not allocated", () => {
+  const root = storeDirectory({
+    checkout: {
+      document: document("checkout", 2, 4),
+      revisions: [],
+      outcome: { operationId: "op-1", revision: 2 },
+    },
+  });
+  // The length comes out of a header, so a corrupt or hand-edited one can ask for more memory than
+  // there is. The store bounds it against the per-design limit before reading; a diagnostic that
+  // died on a store the host quarantines calmly would be no diagnostic.
+  const designDirectory = join(root, "designs", slugOf("checkout"));
+  const headerPath = join(designDirectory, "design.json");
+  const stored = JSON.parse(readFileSync(headerPath, "utf8"));
+  stored.payload.journalBytes = 64 * 1024 * 1024 + 1;
+  writeFileSync(headerPath, JSON.stringify(stored));
+
+  const report = analyzeUiBuilderStore(root);
+
+  assert.equal(report.designCount, 1, "the design is still reported");
+  assert.equal(
+    report.designs[0].sections.history.count,
+    0,
+    "with nothing replayed out of a journal it will not read",
+  );
   rmSync(root, { recursive: true, force: true });
 });
 

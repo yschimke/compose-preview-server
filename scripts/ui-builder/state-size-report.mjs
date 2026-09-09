@@ -9,6 +9,7 @@ import {
   readdirSync,
   statSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -61,6 +62,13 @@ const DEFAULT_STORE_MAXIMUM_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_WARN_PERCENT = 80;
 /** `FileUiBuilderDesignStore.DELETED_SUFFIX`: a design directory renamed out of the way by a delete. */
 const DELETED_SUFFIX = ".deleted-";
+/** `UiBuilderStoreLimits.maximumDesignBytes`: what the store refuses to read a single file above. */
+const MAXIMUM_DESIGN_BYTES = 64 * 1024 * 1024;
+
+/** `FileUiBuilderDesignStore.slug`: the directory a design id addresses, and its only address. */
+function slugOf(designId) {
+  return createHash("sha256").update(designId ?? "", "utf8").digest("hex").slice(0, 32);
+}
 
 function byteLength(value) {
   if (value === undefined) return 0;
@@ -213,7 +221,12 @@ export function analyzeUiBuilderStore(directory) {
     // under a header that reads perfectly well. Tabulating one would report a design the host does
     // not serve, with sections measured from whatever survived.
     const quarantined = existsSync(join(designDirectory, "quarantine.json"));
-    const header = quarantined ? null : payloadOf(join(designDirectory, "design.json"));
+    const parsed = quarantined ? null : payloadOf(join(designDirectory, "design.json"));
+    // The slug is the address, not a label. A design restored or copied under another basename is
+    // one the store quarantines at load — without writing a record, because it decides that from
+    // the name — so a report that trusted the header would tabulate it as another live design and
+    // show the same `designId` twice.
+    const header = parsed && slugOf(parsed.designId) === slug ? parsed : null;
     if (!header) {
       // Still on the disk, and the store counts it: a report that dropped it would understate a
       // store precisely when corrupt state is what is filling it. It has no sections to attribute,
@@ -345,7 +358,12 @@ function replayJournal(designDirectory, header) {
     // Only the committed prefix, as the store itself reads: a journal with a large uncommitted tail
     // — a runaway append, an interrupted write — would otherwise exhaust the heap here while the
     // host it is reporting on carries on serving that design perfectly well.
+    //
+    // And the length is bounded before it is allocated, also as the store reads it: the number
+    // comes out of a header, so a corrupt or hand-edited one can ask for more memory than there is,
+    // and a diagnostic that dies on a store the host quarantines calmly is no diagnostic.
     const length = header.journalBytes ?? 0;
+    if (length > MAXIMUM_DESIGN_BYTES) return { live };
     committed = Buffer.alloc(length);
     const handle = openSync(join(designDirectory, header.journalFile), "r");
     try {

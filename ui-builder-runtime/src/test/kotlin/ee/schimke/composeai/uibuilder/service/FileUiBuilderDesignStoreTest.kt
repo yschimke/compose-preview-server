@@ -531,6 +531,34 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `a directory that merely looks like a tombstone is not deleted`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    store.commit("checkout", null, design("checkout"))
+    val canonical = root.resolve("designs").resolve(FileUiBuilderDesignStore.slug("checkout"))
+    // Somebody's copy, kept under a name that happens to contain the suffix. A tombstone is what
+    // `remove` writes — the directory it renamed, and when — and nothing else may be unlinked
+    // without being read: this store takes an unfamiliar directory name as operator content, and
+    // recursively deleting the only backup someone has is the one outcome it must never produce.
+    val backup = canonical.resolveSibling("checkout.deleted-backup")
+    copyRecursively(canonical, backup)
+    // What `remove` actually writes, beside it.
+    val tombstone = canonical.resolveSibling("checkout.deleted-1700000000000")
+    copyRecursively(canonical, tombstone)
+
+    val loaded = FileUiBuilderDesignStore(root).load()
+
+    assertTrue(Files.exists(backup), "the backup is left where it was put")
+    assertFalse(Files.exists(tombstone), "and the deletion that did not finish is finished")
+    assertEquals(setOf("checkout"), loaded.designs.keys)
+    assertContains(
+      loaded.quarantined.keys,
+      backup.fileName.toString(),
+      "the backup is reported as what it is: a design under a name that is not its address",
+    )
+  }
+
+  @Test
   fun `a quarantine never answers for a design that loaded`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)

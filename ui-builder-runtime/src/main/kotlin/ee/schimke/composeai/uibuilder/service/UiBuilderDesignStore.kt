@@ -589,7 +589,13 @@ internal class FileUiBuilderDesignStore(
         val name = it.fileName.toString()
         // A tombstone is a design that was deleted and whose cleanup did not finish. It is not a
         // design, and the next open is where the disk it holds is given back.
-        if (Files.isDirectory(it) && DELETED_SUFFIX in name) {
+        //
+        // Matched on the exact name `remove` generates rather than on the suffix appearing
+        // anywhere: this store now takes any directory name as operator content — a restored
+        // design, a backup left in place — and quarantines it rather than assuming it is garbage.
+        // `checkout.deleted-backup` is somebody's copy, and a substring test would recursively
+        // delete the only one they have.
+        if (Files.isDirectory(it) && TOMBSTONE_NAME.matches(name)) {
           // Cleanup that did not finish. Retried here, and while it keeps failing its bytes are
           // still charged: a gauge that called a tombstone free would report disk nothing can use
           // as available, and it is the deletes that fail which leave the most of it.
@@ -1373,6 +1379,8 @@ internal class FileUiBuilderDesignStore(
     const val MIGRATED_SUFFIX: String = ".migrated"
     /** A design directory renamed out of the way by `remove`, then unlinked as cleanup. */
     const val DELETED_SUFFIX: String = ".deleted-"
+    /** Exactly what `remove` names a tombstone: the directory it renamed, and when. */
+    private val TOMBSTONE_NAME = Regex(".+" + Regex.escape(DELETED_SUFFIX) + """\d+""" + "$")
     private const val LOCK_FILE = ".ui-builder-service.lock"
     private const val DOCUMENT_PART = "document"
     private const val POSITIONS_PART = "positions"
