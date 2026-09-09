@@ -206,6 +206,8 @@ jobs:
         working-directory: preview-harness
       - run: npm run harness:ui-builder-performance
         working-directory: preview-harness
+      - run: npm run harness:ui-builder-design-url
+        working-directory: preview-harness
       - run: npm run harness:pages
         working-directory: preview-harness
       - run: npm run harness:compare
