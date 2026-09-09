@@ -2120,16 +2120,26 @@ function syncSpecStrip() {
     // were reading a moment ago, having asked for nothing but "the next variant".
     //
     // Written here rather than server-side because the pick is not a fact the server has: the strip
-    // follows every press (`pickSpecSource` calls this), and the destinations follow with it. The
-    // default source writes no parameter — `sourceParam`'s rule, and what clears a stale one on the
-    // way back to the kit.
-    var param = sourceParam(specSourceList(), active.id);
+    // follows every press (`pickSpecSource` calls this), and the destinations follow with it.
+    //
+    // `active.id` and not `sourceParam()`. That helper answers what THIS page's address bar should
+    // say, and its rule — the first source is the default, so say nothing — is a fact about this
+    // page. A row leads to a different variant, which resolves `?specSource=` against its own
+    // picker: a variant offering only the sibling makes `parallel` its default, so the shorthand
+    // would write nothing, and a destination offering both would then open on the kit. The strip
+    // would be showing one reference and sending the reader to another, which is the bug this
+    // block exists to fix, one page along.
+    //
+    // Naming the source outright is safe in the other direction too. `sourceForParam` falls back to
+    // the destination's default for a source it does not offer, and a value that turns out to be
+    // that page's default is dropped by its first `syncUrl` — so a redundant parameter costs a
+    // moment in the address bar and never a wrong pairing.
+    const activeId = active.id;
     specStrip
         .querySelectorAll<HTMLAnchorElement>("a.cp-strip-name")
         .forEach(function (link) {
             var url = new URL(link.href, location.href);
-            if (param) url.searchParams.set("specSource", param);
-            else url.searchParams.delete("specSource");
+            url.searchParams.set("specSource", activeId);
             link.href = url.pathname + url.search + url.hash;
         });
 }

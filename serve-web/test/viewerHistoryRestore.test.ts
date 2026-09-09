@@ -78,6 +78,22 @@ describe("restoredInPlace", () => {
         assert.equal(restoredInPlace("", ""), true);
     });
 
+    it("tells a repeated parameter apart from one value that contains the delimiter", () => {
+        // Any join needs a delimiter, and a delimiter that can appear inside a decoded value is not
+        // injective. `?knob.tag=a%26%3Db` is ONE value, `a&=b`; `?knob.tag=a&knob.tag=b` is two.
+        // Serialising both to the same string made two different entries compare equal, so the
+        // restore between them was skipped and the render kept the knob the URL no longer named —
+        // the exact failure this function exists to prevent, arriving through its own comparison.
+        assert.equal(
+            restoredInPlace("?knob.tag=a%26%3Db", "?knob.tag=a&knob.tag=b"),
+            false,
+        );
+        assert.equal(
+            restoredInPlace("?knob.tag=a&knob.tag=b", "?knob.tag=a%26%3Db"),
+            false,
+        );
+    });
+
     it("compares every value of a repeated parameter", () => {
         // `get` would read the first and call a real change no change.
         assert.equal(

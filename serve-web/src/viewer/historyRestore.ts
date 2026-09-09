@@ -37,17 +37,25 @@ function movedParams(before: string, after: string): string[] {
     // `getAll`, not `get`: an author knob is named by the preview and nothing stops a page from
     // carrying two of them, and comparing only the first would call a real change no change.
     //
-    // Each value is prefixed rather than plainly joined, because several of these parameters are
-    // written WITHOUT one — `?focus` and `?gestures` are read back as presence (`q.get(f) !== null`)
-    // — and a bare join makes "absent" and "present and empty" the same string. Turning `?focus`
-    // off is then a change this function cannot see, and the detected-feature overlay never leaves
-    // the render on the way Back.
-    const values = (p: URLSearchParams, name: string) =>
-        p
-            .getAll(name)
-            .map((value) => "=" + value)
-            .join("&");
-    return [...names].filter((name) => values(a, name) !== values(b, name));
+    // Compared element by element rather than joined into one string. Any join has a delimiter, and
+    // a delimiter that can appear INSIDE a decoded value is not injective: `?knob.tag=a%26%3Db`
+    // decodes to the single value `a&=b`, which serialises identically to the two values `a` and
+    // `b`. Two entries that differ would then compare equal, and the restore between them would be
+    // skipped — the failure this whole function exists to avoid, arriving through its own
+    // comparison.
+    //
+    // Length first, which is also what separates "absent" from "present and empty": `?focus` and
+    // `?gestures` are read back as presence (`q.get(f) !== null`), so turning one off has to count
+    // as a change even though neither entry carries a value.
+    const same = (name: string) => {
+        const left = a.getAll(name);
+        const right = b.getAll(name);
+        return (
+            left.length === right.length &&
+            left.every((value, at) => value === right[at])
+        );
+    };
+    return [...names].filter((name) => !same(name));
 }
 
 /**
