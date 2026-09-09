@@ -167,6 +167,37 @@ class RepeatedSiblingFoldTest {
     assertEquals(1, emittedCellBodies(source))
   }
 
+  /**
+   * Depth changes nothing about the answer, only what it costs to reach.
+   *
+   * Signatures are memoised and a list too short to hold a run is emitted without computing one, so
+   * this pins that neither shortcut loses the fold at the bottom of a deep chain of single-child
+   * containers — the shape both were introduced for.
+   */
+  @Test
+  fun `a run nested under a chain of single-child containers still folds`() {
+    val source = exportSource(nested(depth = 24, cells = 12))
+
+    assertEquals(1, Regex("kotlin\\.repeat\\(12\\) \\{ _ ->").findAll(source).count())
+    assertEquals(1, emittedCellBodies(source))
+  }
+
+  /** The contribution row, buried [depth] single-child columns down. */
+  private fun nested(depth: Int, cells: Int): UiBuilderDocument {
+    val base = contributionRow(cells = cells)
+    val wrappers =
+      (0 until depth).associate { level ->
+        "wrap-$level" to
+          UiBuilderNode(
+            id = "wrap-$level",
+            componentId = "layout/column",
+            slots =
+              mapOf("children" to listOf(if (level == depth - 1) "root" else "wrap-${level + 1}")),
+          )
+      }
+    return base.copy(nodes = base.nodes + wrappers, roots = listOf("wrap-0"))
+  }
+
   /** Identical cards in a carousel, which is the only container whose items it accepts. */
   private fun carousel(items: Int): UiBuilderDocument {
     val itemIds = (0 until items).map { "cell-$it" }

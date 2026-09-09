@@ -512,6 +512,14 @@ private class ComposeEmitter(
     level: Int,
     emitOne: (String, Int) -> Unit = ::emitNode,
   ) {
+    // A list too short to hold a run is emitted without asking any of the questions below. Not an
+    // optimisation of the common case but of the *deep* one: a signature walks a whole subtree, so
+    // a chain of single-child containers would have serialised its tail once per level on the way
+    // down, for an answer — "one child cannot be three" — that the length already gives.
+    if (children.size < MINIMUM_FOLDED_RUN) {
+      children.forEach { emitOne(it, level) }
+      return
+    }
     var index = 0
     while (index < children.size) {
       val signature = if (foldsRepeatedSiblings) foldSignature(children[index]) else null
@@ -546,7 +554,29 @@ private class ComposeEmitter(
    * wrapper — and a `repeat` would emit that claim n times over. A design that wants its cells
    * distinguishable says so, and is then printed the long way.
    */
+  /**
+   * One answer per node for the life of an export.
+   *
+   * A signature contains its children's signatures, so an unmemoised walk costs the subtree once
+   * per level of nesting above it — and the emitter descends every level. Nothing in a document
+   * changes while it is being emitted, so the second answer is always the first.
+   *
+   * Holds nulls too: "this subtree may not fold" is as reusable as any other answer, and the
+   * refusals ([stableKey], a missing node) are what a deep design hits most.
+   */
+  private val foldSignatures = mutableMapOf<String, String?>()
+
   private fun foldSignature(nodeId: String, ancestors: Set<String> = emptySet()): String? {
+    if (nodeId in foldSignatures) return foldSignatures.getValue(nodeId)
+    val signature = computeFoldSignature(nodeId, ancestors)
+    // Not cached under a cycle: the answer there is "this node is its own ancestor *on this path*",
+    // which is a fact about the path rather than about the node. The export gate refuses
+    // `GRAPH_CYCLE` long before emission, so this is a guard rather than a case.
+    if (ancestors.isEmpty() || signature != null) foldSignatures[nodeId] = signature
+    return signature
+  }
+
+  private fun computeFoldSignature(nodeId: String, ancestors: Set<String>): String? {
     // The export gate refuses `GRAPH_CYCLE` before any of this runs; the guard is here so that a
     // future caller cannot turn a malformed document into a stack overflow inside the emitter.
     if (nodeId in ancestors) return null
