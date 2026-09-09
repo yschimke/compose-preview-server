@@ -133,9 +133,40 @@ fun parseDesignUrlSelectors(query: String?, fragment: String?): DesignUrlSelecto
  * the one thing worse than no Copy link is a Copy link that produces a broken address.
  */
 fun isDesignUrlPathSafe(catalogSystemId: String, designId: String): Boolean =
-  PATH_SAFE_ID.matches(catalogSystemId) && PATH_SAFE_ID.matches(designId)
+  PATH_SAFE_ID.matches(catalogSystemId) &&
+    PATH_SAFE_ID.matches(designId) &&
+    designId.substringAfterLast('.', "").lowercase() !in DESIGN_PATH_ASSET_EXTENSIONS
 
 private val PATH_SAFE_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+
+/**
+ * Suffixes the app shell reads as a file rather than as a design, mirroring the server's own list.
+ *
+ * A design legitimately called `screen.png` matches the id pattern and is still unreachable by
+ * path: the route treats a single segment ending in one of these as an asset request, so the link
+ * 404s instead of opening the editor. Duplicated here rather than shared because the two live in
+ * different modules and this is the smaller half of the seam; the cost of them drifting is a link
+ * that does not open, which is what the test beside this pins.
+ */
+private val DESIGN_PATH_ASSET_EXTENSIONS =
+  setOf(
+    "css",
+    "html",
+    "ico",
+    "js",
+    "json",
+    "map",
+    "mjs",
+    "otf",
+    "png",
+    "svg",
+    "ttf",
+    "txt",
+    "wasm",
+    "webp",
+    "woff",
+    "woff2",
+  )
 
 /**
  * The canonical URL for one design, carrying only what a reader needs to see the same thing.

@@ -298,13 +298,27 @@ internal fun Route.installUiBuilderRoutes(
         call.respondText("a design id is required", status = HttpStatusCode.BadRequest)
         return@post
       }
+      // Which revision to render, from the query rather than the body so it reads like the export
+      // routes beside it. Absent means the current committed revision, which is what every caller
+      // sent before this existed. A pinned editor names one: without it this lane answers a
+      // historical page with a render of the head, and on a catalog whose Wasm canvas is only a
+      // stand-in that render is the *only* faithful picture the page has.
+      val revisionParameter = call.request.queryParameters["revision"]
+      val revision = revisionParameter?.toLongOrNull()
+      if (revisionParameter != null && (revision == null || revision < 0)) {
+        call.respondText(
+          "revision must be a non-negative integer",
+          status = HttpStatusCode.BadRequest,
+        )
+        return@post
+      }
       // Read through the service, as this actor, so the design's own access control decides
       // whether there is anything to render. A lane that took the document from anywhere else
       // would be a way to render a design you cannot open.
       val mapping =
         UiBuilderProtocolMapper.toServiceCall(
           actor,
-          GetSnapshotRequestV1(designId = designId, revision = null),
+          GetSnapshotRequestV1(designId = designId, revision = revision),
         )
       val snapshot =
         (mapping as? ProtocolRequestMapping.Mapped)?.let { service.execute(it.call) }

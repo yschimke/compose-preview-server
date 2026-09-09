@@ -92,20 +92,23 @@ above; answer the question the reader actually has. `?revision=0` is a revision 
 design is created at 0 and that snapshot is retained, so the link names the state a template started
 in. Only a negative or non-numeric value is no revision at all.
 
-A pinned page is historical all the way down, not merely un-editable, and three things follow that
+A pinned page is historical all the way down, not merely un-editable, and several things follow that
 are easy to leave out. The catalog installed is the one the **pinned** snapshot resolved against, not
 the one the catalog list offers today, so a design whose catalog pin moved between revisions is drawn
 with the capabilities it actually had. Presence is dropped: the page holds no socket, and collaborator
 avatars and selection outlines from the live design would be pointing at nodes of a revision this
-canvas is not showing. And the lanes that render on request are pinned or withheld — the export
-routes take the same `revision`, so the Export menu answers about history; the native-preview route
-takes none, so it is not offered at all, and a catalog whose Wasm canvas is only a stand-in (Wear)
-shows a pinned revision on that stand-in rather than a faithful picture of the wrong revision.
+canvas is not showing. And every lane that renders on request is pinned to the same revision — the
+export routes already took one, and the native-preview route now does too. That last one is the
+only server change this needed, and it is load-bearing rather than tidy: on a catalog whose Wasm
+canvas is only a stand-in (`wear-m3` draws Material 3 lookalikes, because a Wasm build cannot link
+`androidx.wear.compose:compose-material3` at all) the native render is the *only* faithful picture
+the page has. Withholding it there did not leave the reader with a rough drawing of the right
+document, it left them with an accurate drawing of the wrong component library, under a banner
+naming a revision.
 **Screen → Snapshot design** is pinned too, and is the lane worth naming separately because it does
 not merely display what it renders, it *keeps* it: an unpinned snapshot would lay the head over the
-historical canvas and then persist it as that design's reference.
-**Reconnect** is withheld for the same reason: there is no session to resume, and its handler would
-fetch the head under a banner still naming the revision.
+historical canvas and then persist it as that design's reference. **Reconnect** is the one thing
+genuinely withheld, and for a different reason: there is no session to resume.
 
 **`?node=<nodeId>`** selects that node as the design opens — the canvas outline and the Layers row —
 and opens the Properties panel on it. An id this design does not have opens the design with a small
@@ -165,7 +168,8 @@ it confirmed *that layer was in*.
 Copy link is also withheld entirely for a design the path form cannot name. The two ends of a design
 URL disagree about what an id may contain: the service stores any id that is not blank, while the
 editor refuses to start on a design *named in the path* unless the id matches
-`[A-Za-z0-9][A-Za-z0-9._-]*`, and the app shell routes on the same shape. A design created through
+`[A-Za-z0-9][A-Za-z0-9._-]*` and does not end in a suffix the shell reads as a file — a design
+legitimately called `screen.png` is routed as an asset request and 404s. A design created through
 the protocol, MCP or the Design API with a space in its id is therefore reachable only through the
 legacy `?designId=` query, and a path-form link to it would hand its recipient a 404 or a page that
 refuses to initialise. Emitting a different *kind* of URL for those designs would be a second

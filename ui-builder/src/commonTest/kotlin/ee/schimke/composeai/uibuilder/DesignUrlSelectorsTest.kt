@@ -181,6 +181,10 @@ class DesignUrlSelectorsTest {
     assertFalse(isDesignUrlPathSafe("m3-catalog", "hero design"))
     assertFalse(isDesignUrlPathSafe("m3-catalog", "-leading-dash"))
     assertFalse(isDesignUrlPathSafe("m3 catalog", "jetcaster-discover"))
+    // A design may legitimately be called this, and the app shell would route it as a file.
+    assertFalse(isDesignUrlPathSafe("m3-catalog", "screen.png"))
+    assertFalse(isDesignUrlPathSafe("m3-catalog", "prototype.mjs"))
+    assertTrue(isDesignUrlPathSafe("m3-catalog", "screen.v2"))
     assertFailsWith<IllegalArgumentException> { designUrlPath("m3-catalog", "hero design") }
   }
 

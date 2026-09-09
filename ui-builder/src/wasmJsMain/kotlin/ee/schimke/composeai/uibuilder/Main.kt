@@ -1088,16 +1088,14 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       onInspectionInvalidated = { collector ->
         inspectionPublisher.offer(collector, loadedDocument.revision)
       },
-      // Withheld while pinned, unlike the export lane above: the native-preview route renders the
-      // design's current committed revision and takes no revision of its own, so the only honest
-      // answer for a historical page is not to offer it. A catalog whose Wasm canvas is a stand-in
-      // (Wear) therefore opens a pinned revision on that stand-in rather than on a faithful
-      // picture of the wrong revision.
-      onRequestNativeRender =
-        if (revisionPin?.pinned == true) null
-        else {
-          { requestNativeRender(config.designId) }
-        },
+      // Pinned like the export lane rather than withheld, which is what it has to be on a catalog
+      // whose Wasm canvas is only a stand-in. Withholding it left `wear-m3` drawing Material 3
+      // lookalikes under a banner naming a revision — not a rough picture of the right document but
+      // a faithful picture of the wrong component library, which is the one thing a historical view
+      // must not be. The route now takes a revision for exactly this.
+      onRequestNativeRender = {
+        requestNativeRender(config.designId, revisionPin?.takeIf { it.pinned }?.requested)
+      },
       remoteComposeSources = remoteComposeSources,
       resolveRemoteComposeDocument = { source ->
         fetchBase64(catalogAssetPath(config.catalogSystemId, "/render/${source.id}.rc"))
@@ -1169,12 +1167,19 @@ private external fun publishDesignSelectors(
  * and a 200 with no frame means the compile lane answered without one, which the editor says
  * plainly rather than showing an empty box.
  */
-private suspend fun requestNativeRender(designId: String): UiBuilderNativeRender {
+private suspend fun requestNativeRender(
+  designId: String,
+  revision: Long? = null,
+): UiBuilderNativeRender {
   val response =
     BrowserUiBuilderHttpTransport()
       .post(
         UiBuilderHttpRequest(
-          endpoint = "/api/ui-builder/v1/designs/$designId/native-preview",
+          // The revision rides in the query, as it does on the export routes: absent means the
+          // current committed revision, which is what an unpinned editor asks for.
+          endpoint =
+            "/api/ui-builder/v1/designs/$designId/native-preview" +
+              (revision?.let { "?revision=$it" } ?: ""),
           contentType = "application/json",
           body = "{}",
         )
