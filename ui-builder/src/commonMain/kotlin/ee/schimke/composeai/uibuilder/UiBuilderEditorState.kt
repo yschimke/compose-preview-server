@@ -4453,6 +4453,25 @@ private fun PropertyCapability.literalDefault(): JsonObject {
   }
 }
 
+/** The rows a freshly inserted `layout/for-each` carries: three, each naming one `label`. */
+private fun starterRows(): JsonObject =
+  JsonObject(
+    mapOf(
+      "type" to JsonPrimitive("list"),
+      "values" to
+        JsonArray(
+          listOf("Row one", "Row two", "Row three").map { label ->
+            JsonObject(
+              mapOf(
+                "type" to JsonPrimitive("object"),
+                "fields" to JsonObject(mapOf("label" to literal("string", JsonPrimitive(label)))),
+              )
+            )
+          }
+        ),
+    )
+  )
+
 private fun PropertyCapability.defaultEncodedValue(
   nodeId: String,
   document: UiBuilderDocument,
@@ -4475,6 +4494,11 @@ private fun PropertyCapability.defaultEncodedValue(
         )
       )
     "scrollStateKey" -> literal("string", JsonPrimitive("$nodeId-scroll"))
+    // Three rows, each a dictionary with one key, because a loop inserted with no data is a loop
+    // that draws nothing — and a designer's first question of one is what a row looks like. The
+    // key is what the starter template binds, so the insert draws three cells rather than three
+    // copies of a default.
+    "data" -> starterRows()
     "itemWidthDp" -> literal("float", JsonPrimitive(128.0))
     "expanded",
     "selected",

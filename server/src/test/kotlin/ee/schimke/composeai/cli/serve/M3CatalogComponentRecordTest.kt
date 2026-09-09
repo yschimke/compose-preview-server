@@ -126,6 +126,11 @@ class M3CatalogComponentRecordTest {
       "layout/horizontal-carousel" to
         "takes a CarouselState from rememberCarouselState { n }, whose argument is a lambda, and its content slot is called per item index rather than per child (compose-ai-tools#5218)",
       "layout/supporting-pane-scaffold" to "adaptive API; panes are not plain composable slots",
+      // Not a component at all in the generated source: a loop over the design's own rows becomes
+      // a `forEach` around the template's call, which is the Compose exporter's to write and not
+      // a symbol discovery could find. The record covers components the generator calls by name.
+      "layout/for-each" to
+        "a loop over the design's rows, generated as a forEach around its template rather than as a call to any component",
       // Not the factory. `rememberDatePickerState` carries a `$default` bridge, so every parameter
       // defaults and the no-arg call compiles — the same shape a dozen covered components use. What
       // blocks it is one property: `selectedDate` is an ISO-8601 `YYYY-MM-DD` string and the
