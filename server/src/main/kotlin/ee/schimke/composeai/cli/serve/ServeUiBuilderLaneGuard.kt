@@ -47,9 +47,21 @@ internal fun uiBuilderDisabledWarning(stateDirectory: File, failure: Throwable):
       ", or pass --ui-builder-state-dir none to run without the builder deliberately."
   } else {
     val backupFile = File(stateDirectory, FileUiBuilderStateStorage.BACKUP_FILE)
+    // A migration that failed partway leaves design directories with no marker to commit them, and
+    // this is the branch that failure lands in: telling an operator to move only the legacy file
+    // aside would start them not on an empty store but on whichever designs the migration had got
+    // to. So the partial output is named too, and only when it is actually there.
+    val partial = File(stateDirectory, "designs")
     preamble +
       "either restore the one-generation backup (cp ${backupFile.path} ${stateFile.path}), or " +
       "move ${stateFile.path} aside to start empty (the designs in it are then lost, so copy it " +
-      "first), or pass --ui-builder-state-dir none to run without the builder deliberately."
+      "first" +
+      (if (partial.exists()) {
+        "; move ${partial.path} aside as well — a migration that did not finish left it, and it is " +
+          "part of the old state rather than a store"
+      } else {
+        ""
+      }) +
+      "), or pass --ui-builder-state-dir none to run without the builder deliberately."
   }
 }

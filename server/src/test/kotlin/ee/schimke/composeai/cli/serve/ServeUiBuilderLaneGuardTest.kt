@@ -61,6 +61,19 @@ class ServeUiBuilderLaneGuardTest {
   }
 
   @Test
+  fun `a migration that did not finish is named on the recovery path it fails on`() {
+    val directory = stateDirectory()
+    writeState(directory, "{ this is not json")
+    // What a migration that wrote designs and never reached its marker leaves behind.
+    File(directory, "designs").mkdirs()
+
+    val warning = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("checksum"))
+
+    assertTrue(warning.contains("${directory.path}/designs"), warning)
+    assertTrue(warning.contains("did not finish"), warning)
+  }
+
+  @Test
   fun `a failure with no message still names something an operator can search for`() {
     val warning = uiBuilderDisabledWarning(stateDirectory(), UiBuilderPersistenceException(""))
 

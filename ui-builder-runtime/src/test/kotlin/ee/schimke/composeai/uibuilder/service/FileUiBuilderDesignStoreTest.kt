@@ -409,6 +409,77 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `a journal larger than a design may be is refused rather than read`() {
+    val root = createTempDirectory("ui-builder-store")
+    FileUiBuilderDesignStore(root, UiBuilderStoreLimits(maximumDesignBytes = 64_000))
+      .commit("checkout", null, design("checkout"))
+    // A journal that grew past what a design may hold — corrupt, hand-copied, or a runaway append.
+    // Read whole to find that out, it is an OutOfMemoryError rather than an exception, which is
+    // neither quarantined here nor caught by the lane guard above.
+    val journal = journalFile(root, "checkout")
+    Files.writeString(journal, "x".repeat(200_000))
+
+    val reopened =
+      FileUiBuilderDesignStore(root, UiBuilderStoreLimits(maximumDesignBytes = 64_000)).load()
+
+    assertEquals(emptyMap(), reopened.designs)
+    assertContains(reopened.quarantined.keys, "checkout")
+  }
+
+  @Test
+  fun `only the committed prefix of a journal is read`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    val first = design("checkout")
+    store.commit("checkout", null, first)
+    val journal = journalFile(root, "checkout")
+    // Junk past the committed length is not a record and is never parsed, so it cannot quarantine a
+    // design whose committed bytes are intact.
+    Files.writeString(journal, Files.readString(journal) + "x".repeat(50_000))
+
+    assertEquals(first, FileUiBuilderDesignStore(root).load().designs.getValue("checkout"))
+  }
+
+  @Test
+  fun `a first commit that is refused leaves no directory to be mistaken for a design`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root, UiBuilderStoreLimits(maximumDesignBytes = 8_192))
+    val large =
+      design("checkout").let { base ->
+        base.copy(
+          document =
+            base.document.copy(nodes = (0 until 400).associate { "node-$it" to node("node-$it") })
+        )
+      }
+
+    assertFailsWith<UiBuilderPersistenceException> { store.commit("checkout", null, large) }
+
+    val reopened = FileUiBuilderDesignStore(root).load()
+    assertEquals(emptyMap(), reopened.designs)
+    assertEquals(
+      emptyMap(),
+      reopened.quarantined,
+      "a headerless directory left behind would be read as a corrupt design, and its phantom " +
+        "quarantine would share a directory with the design that later takes the id",
+    )
+    assertFalse(Files.exists(root.resolve("designs/${slugOf("checkout")}")))
+  }
+
+  @Test
+  fun `a design directory that cannot be walked costs that design and not the load`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    store.commit("checkout", null, design("checkout"))
+    store.commit("settings", null, design("settings"))
+    Files.writeString(documentFiles(root, "checkout").single(), "not json")
+
+    val reopened = FileUiBuilderDesignStore(root).load()
+
+    assertEquals(setOf("settings"), reopened.designs.keys)
+    assertContains(reopened.quarantined.keys, "checkout")
+  }
+
+  @Test
   fun `removing a design removes its directory`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)

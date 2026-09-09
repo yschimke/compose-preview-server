@@ -283,8 +283,10 @@ internal class FileUiBuilderDesignStore(
         quarantinedSlugs[existingQuarantine.first] = slug
         // Counted even though it cannot be decoded: a large corrupt design is still on the disk,
         // and a gauge that called those bytes free would be wrong exactly when an operator needs to
-        // notice that broken data is being retained.
-        storedBytes += directoryBytes(designDirectory)
+        // notice that broken data is being retained. Best-effort, because a directory that cannot
+        // even be walked must cost this design and not the load: a gauge that took the lane down
+        // would be the failure this store exists to prevent, one scope larger.
+        storedBytes += runCatching { directoryBytes(designDirectory) }.getOrDefault(0L)
         continue
       }
       try {
@@ -301,7 +303,7 @@ internal class FileUiBuilderDesignStore(
         writeQuarantine(designDirectory, designId, reason)
         quarantined[designId] = reason
         quarantinedSlugs[designId] = slug
-        storedBytes += directoryBytes(designDirectory)
+        storedBytes += runCatching { directoryBytes(designDirectory) }.getOrDefault(0L)
       }
     }
     StoredDesigns(designs, quarantined)
@@ -310,7 +312,15 @@ internal class FileUiBuilderDesignStore(
   override fun commit(designId: String, previous: PersistedDesignV1?, next: PersistedDesignV1) {
     locked {
       val designDirectory = designsDirectory.resolve(slug(designId))
+      val created = !Files.isDirectory(designDirectory)
       Files.createDirectories(designDirectory)
+      if (created) {
+        // Forcing a directory does not make its own name durable in its parent, so a design's first
+        // commit forces the chain above it: without this a power loss can acknowledge a create and
+        // then lose the `designs/<slug>` entry, and the design a caller was told exists is gone.
+        forceDirectory(designsDirectory)
+        forceDirectory(directory)
+      }
       if (!Files.exists(markerFile)) writeMarker(StoreMarkerV3(STORE_FORMAT))
       val current = files[designId]
       val known = if (current == null) null else previous
@@ -405,7 +415,7 @@ internal class FileUiBuilderDesignStore(
           bytes = referencedBytes(designDirectory, header)
         }
         if (bytes > limits.maximumDesignBytes) {
-          written.forEach { runCatching { Files.deleteIfExists(it) } }
+          discardUncommitted(designDirectory, current, written)
           throw UiBuilderPersistenceException(
             "UI-builder design $designId is $bytes bytes; limit is ${limits.maximumDesignBytes}"
           )
@@ -418,7 +428,7 @@ internal class FileUiBuilderDesignStore(
       } catch (failure: UiBuilderPersistenceException) {
         throw failure
       } catch (failure: IOException) {
-        written.forEach { runCatching { Files.deleteIfExists(it) } }
+        discardUncommitted(designDirectory, current, written)
         throw UiBuilderPersistenceException(
           "cannot store UI-builder design $designId under $designDirectory",
           failure,
@@ -427,15 +437,32 @@ internal class FileUiBuilderDesignStore(
     }
   }
 
+  /**
+   * Undoes a commit that never became the design.
+   *
+   * For a design that existed before, the parts this commit wrote are unreferenced and go; the
+   * previous header still names a complete generation. For a design's **first** commit there is no
+   * previous generation, and leaving a headerless directory behind would be worse than the failure:
+   * the next open reads it as a corrupt design and quarantines it under the directory's hash, and
+   * that phantom shares its directory with the real design if the id is ever created successfully —
+   * so retiring the phantom would delete the design that replaced it.
+   */
+  private fun discardUncommitted(
+    designDirectory: Path,
+    current: DesignFiles?,
+    written: List<Path>,
+  ) {
+    if (current == null) runCatching { deleteRecursively(designDirectory) }
+    else written.forEach { runCatching { Files.deleteIfExists(it) } }
+  }
+
   override fun remove(designId: String) {
     locked {
       // A quarantined design's id came out of a header this build could not otherwise read, so its
       // directory is the one recorded at load rather than one derived from the id.
-      val designDirectory =
-        designsDirectory.resolve(quarantinedSlugs.remove(designId) ?: slug(designId))
-      val bytes = files.remove(designId)?.bytes ?: directoryBytes(designDirectory)
-      storedBytes -= bytes
-      if (storedBytes < 0) storedBytes = 0
+      val designDirectory = designsDirectory.resolve(quarantinedSlugs[designId] ?: slug(designId))
+      val bytes =
+        files[designId]?.bytes ?: runCatching { directoryBytes(designDirectory) }.getOrDefault(0L)
       try {
         // The rename is the deletion. A recursive unlink that fails halfway would leave the design
         // half gone while the caller was told the delete failed and the service kept it in memory —
@@ -451,6 +478,13 @@ internal class FileUiBuilderDesignStore(
           forceDirectory(designsDirectory)
           runCatching { deleteRecursively(tombstone) }
         }
+        // Only now: the rename is what made the design gone, and bookkeeping that ran ahead of it
+        // would leave the store believing a design it still holds was deleted — after which a retry
+        // finds nothing, reports success, and the directory comes back on the next open.
+        files.remove(designId)
+        quarantinedSlugs.remove(designId)
+        storedBytes -= bytes
+        if (storedBytes < 0) storedBytes = 0
       } catch (failure: IOException) {
         throw UiBuilderPersistenceException(
           "cannot remove UI-builder design $designId at $designDirectory",
@@ -538,13 +572,23 @@ internal class FileUiBuilderDesignStore(
     if (!Files.exists(path)) {
       throw UiBuilderPersistenceException("UI-builder journal $file is missing")
     }
-    val stored = Files.readAllBytes(path)
-    if (stored.size < header.journalBytes) {
+    // Only the committed prefix is read, and only if the header's own claim is inside the design's
+    // budget. Reading the file whole would make a runaway or hand-copied journal an
+    // `OutOfMemoryError`, which is not an `Exception`: it would escape the per-design quarantine
+    // below *and* the lane guard above, and take the host down over one design's bytes.
+    if (header.journalBytes > limits.maximumDesignBytes) {
       throw UiBuilderPersistenceException(
-        "UI-builder journal $file is ${stored.size} bytes; the header commits to ${header.journalBytes}"
+        "UI-builder journal $file commits to ${header.journalBytes} bytes; the per-design limit " +
+          "is ${limits.maximumDesignBytes}"
       )
     }
-    val committed = stored.copyOf(header.journalBytes.toInt()).decodeToString()
+    val size = Files.size(path)
+    if (size < header.journalBytes) {
+      throw UiBuilderPersistenceException(
+        "UI-builder journal $file is $size bytes; the header commits to ${header.journalBytes}"
+      )
+    }
+    val committed = readPrefix(path, header.journalBytes).decodeToString()
     var history = emptyList<CommittedOperationV1>()
     var audit = emptyList<AuditRecordV1>()
     var outcomes = emptyMap<String, OperationOutcomeRecordV1>()
@@ -601,7 +645,7 @@ internal class FileUiBuilderDesignStore(
     }
     val encoded =
       try {
-        Files.readAllBytes(path).decodeToString()
+        readBounded(path, description).decodeToString()
       } catch (failure: IOException) {
         throw UiBuilderPersistenceException("cannot read UI-builder $description at $path", failure)
       }
@@ -999,6 +1043,38 @@ internal class FileUiBuilderDesignStore(
   }
 
   // ---------------------------------------------------------------- files
+
+  /**
+   * The whole of one part, refused before it is allocated when it is larger than a design may be.
+   *
+   * A part that has grown past the per-design budget cannot be a part this store wrote, and reading
+   * it whole to find that out is how one corrupt file becomes a dead host rather than one
+   * quarantined design.
+   */
+  private fun readBounded(path: Path, description: String): ByteArray {
+    val size = Files.size(path)
+    if (size > limits.maximumDesignBytes) {
+      throw UiBuilderPersistenceException(
+        "UI-builder $description at $path is $size bytes; the per-design limit is " +
+          "${limits.maximumDesignBytes}"
+      )
+    }
+    return Files.readAllBytes(path)
+  }
+
+  /** The first [length] bytes of [path], which is as much of a journal as a header commits to. */
+  private fun readPrefix(path: Path, length: Long): ByteArray {
+    val buffer = ByteBuffer.allocate(length.toInt())
+    FileChannel.open(path, StandardOpenOption.READ).use { channel ->
+      while (buffer.hasRemaining()) {
+        if (channel.read(buffer) < 0) break
+      }
+    }
+    if (buffer.hasRemaining()) {
+      throw UiBuilderPersistenceException("UI-builder journal at $path ended before $length bytes")
+    }
+    return buffer.array()
+  }
 
   private fun writeTemporary(directory: Path, name: String, value: ByteArray): Path {
     Files.createDirectories(directory)
