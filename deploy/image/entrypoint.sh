@@ -246,23 +246,30 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # adapter is a claim that what an author sees is what they get, and that claim now has a render
   # behind it.
   #
-  # `wear-m3` is OFF by default as of the catalog contract's phase 4. It is a Wear/Android catalog —
-  # its previews need Robolectric and its native lane an Android SDK — and wear-m3-catalog's
-  # components carry no `@BuilderComponent` policy, so the `ui-builder.json` it now publishes
-  # derives every id from the prefix and collides 28 of them (`wear-m3/alert-dialog` alone is
-  # claimed by ConfirmButton, DismissButton, EdgeButton and AlertDialogContent). The equivalence
-  # gate scores that published file 23 differences against the frozen catalog. Serving it was
-  # costing an Android dependency for a catalog whose shelf would not have matched; a deployment
-  # that wants it back says so, and should run the gate first.
+  # `wear-m3` is OFF by default. It is a Wear/Android catalog — its previews need Robolectric and
+  # its native lane an Android SDK — and nobody is authoring against it, so the deployment stopped
+  # paying for it. A box that wants it back sets SERVE_UI_BUILDER_CATALOGS; every adapter, render
+  # and template it had still works, and the `wear-m3=wear-m3-catalog` native mapping below is kept
+  # inert precisely so that putting it back is one variable.
   args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}")
-  # Which of those may be served from their own published `ui-builder.json` rather than from the
-  # catalog this build writes in Kotlin. Unset means all of them, which is what the loader shipped
-  # with; `none` keeps every catalog on its built-in definition, and a list opts in one at a time.
-  # The lever exists because a published catalog and a synthesised one can differ, and reversing it
-  # used to mean asking another repository to withdraw a file.
-  if [ -n "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}" ]; then
-    args+=(--ui-builder-published-catalogs "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS}")
-  fi
+  # Which of those may take their definition from the catalog repository's own published
+  # `ui-builder.json` rather than from the catalog this build writes in Kotlin: `all`, `none`, or a
+  # subset of the list above.
+  #
+  # DEFAULT `none`, deliberately, and it is not a vote against the contract — it is the contract's
+  # own readiness gate applied to the catalogs this image actually serves. Measured against the
+  # frozen goldens with .github/scripts/ui-builder-equivalence.sh:
+  #
+  #   remote-m3   declares no `uiBuilderFile` at all, so nothing is fetched and nothing changes.
+  #   m3-catalog  publishes a 48 KB file that the gate scores 25 differences against the frozen
+  #               catalog. It declares ZERO components and ZERO builtins — 104 record components
+  #               would each be derived from the `m3/` prefix against a curated shelf of 41, and a
+  #               catalog with no builtins has no screen root to put any of them in.
+  #
+  # So the published path is off until a catalog is proven equivalent, and turning it on is one
+  # variable naming one catalog. Reversing it used to mean asking another repository to withdraw a
+  # file; that is what this lever exists to avoid.
+  args+=(--ui-builder-published-catalogs "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-none}")
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")
