@@ -318,6 +318,13 @@ services:
       # Served catalogs offered as component packs (`<catalog>=<platform>[,…]`); the record
       # comes from each catalog's own delivery branch. Unset means no packs.
       SERVE_UI_BUILDER_PACKS: "${SERVE_UI_BUILDER_PACKS:-}"
+      # Where a design's comment activity is announced: one incoming-webhook URL, told about new
+      # threads, replies and resolutions. A SECRET — a Slack/Teams/Chat hook URL is a credential —
+      # so keep it in the env file, not here. Unset means the discussion stays inside the product.
+      SERVE_UI_BUILDER_COMMENT_WEBHOOK: "${SERVE_UI_BUILDER_COMMENT_WEBHOOK:-}"
+      # Which body that hook receives: plain, slack, teams or google-chat. Unset is plain, this
+      # server's own event JSON.
+      SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT: "${SERVE_UI_BUILDER_COMMENT_WEBHOOK_FORMAT:-}"
       # Naming this turns the image lane on (see SERVE_ACCEPT_IMAGES above): the repository an
       # uploader's GitHub token must have access to. Write access on a public repo, any grant on a
       # private one.

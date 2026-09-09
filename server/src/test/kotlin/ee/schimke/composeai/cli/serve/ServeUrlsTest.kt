@@ -202,4 +202,20 @@ class ServeUrlsTest {
     assertEquals(null, ServeUrls.historicalRenderUrl("o/r", "abc1234", "renders/../secrets"))
     assertEquals(null, ServeUrls.historicalRenderUrl("o/r", "abc1234", null))
   }
+
+  @Test
+  fun `an IPv6 host is bracketed, because a bare one is not a URL`() {
+    // `--host ::1` is a supported bind, and the origin feeds every link this server hands out —
+    // the startup banner and the UI-builder comment webhook's thread permalinks among them.
+    // Unbracketed it reads as `http://::1:8080`, which no client will parse.
+    assertEquals("http://[::1]:8080", ServeUrls.origin("::1", 8080))
+    assertEquals("http://[fe80::1]:80", ServeUrls.origin("fe80::1", 80))
+
+    // Idempotent: a host that already carries its brackets keeps exactly one pair.
+    assertEquals("http://[::1]:8080", ServeUrls.origin("[::1]", 8080))
+
+    // IPv4 and names are untouched.
+    assertEquals("http://127.0.0.1:8080", ServeUrls.origin("127.0.0.1", 8080))
+    assertEquals("http://localhost:8080", ServeUrls.origin("localhost", 8080))
+  }
 }

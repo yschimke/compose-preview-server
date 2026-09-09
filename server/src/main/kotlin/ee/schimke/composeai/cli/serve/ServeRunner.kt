@@ -2916,6 +2916,71 @@ public class ServeRunner(
       } else {
         null
       }
+    // Telling the room: comment activity, posted out to one URL. Off unless an operator named one.
+    //
+    // Constructed here and attached in the same breath, so it subscribes before the routes that
+    // accept comments are serving: a hook that attached after the first request could miss the
+    // comment that arrived while it was starting.
+    var startedServer: ServeHttpServer? = null
+    val commentWebhook = uiBuilderCommentWebhook?.let { url ->
+      val comments = uiBuilderLane?.comments
+      if (comments == null) {
+        // Named, and nothing to watch. Said out loud rather than ignored: an operator who
+        // configured a hook and hears nothing for a week should learn why on the day they
+        // deployed it, and the reason is always one of these two.
+        System.err.println(
+          "serve: --ui-builder-comment-webhook is set and there is no comment store to watch " +
+            "(the UI builder is off, or its state directory could not be opened); nothing " +
+            "will be posted"
+        )
+        return@let null
+      }
+      val format =
+        uiBuilderCommentWebhookFormat?.let { CommentWebhookFormat.parse(it) }
+          ?: CommentWebhookFormat.PLAIN
+      // The origin a reader's browser reaches this box at. `--github-auth-callback-base-url` is
+      // the operator's own statement of it and is authoritative where it is set — a deployment
+      // behind a reverse proxy knows its public name and this process does not. Everything else
+      // falls back to the bind address, which is right for the local case the fallback serves.
+      val configuredOrigin =
+        githubAuthCallbackBaseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
+      val linkHost = if (ServeUrls.isExposed(host)) ServeUrls.LOOPBACK else host
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig(url, format),
+          designs = { designId ->
+            // Keyed, not a scan: this runs on the thread accepting a comment, and it runs there
+            // so the title and catalog belong to the design the comment was actually written on.
+            runCatching { uiBuilderLane.service.adminDesignSummary(designId) }
+              .getOrNull()
+              ?.let { CommentWebhookDesign(it.title, it.catalogPin.systemId) }
+          },
+          baseUrl = {
+            configuredOrigin ?: ServeUrls.origin(linkHost, startedServer?.port ?: requestedPort)
+          },
+        )
+      System.err.println(
+        "serve: UI-builder comment activity posts to a ${format.wire} webhook " +
+          "(${webhook.fingerprint}); threads, replies and resolutions only"
+      )
+      // A permalink is only useful to somebody who can open it, and on a token-gated host without
+      // sign-in nobody receiving one can: the browse token travels as a header or `?token=`, never
+      // a cookie, so the link opens the shell and the design behind it stays refused.
+      //
+      // Said, not fixed by putting the token in the link. The server token is a far stronger
+      // credential than the hook URL this file refuses to log, and a chat channel is long-lived and
+      // widely readable — pasting it into every notification would hand browse access to everyone
+      // who can scroll back. Said rather than refused, too: a local `serve` posting to a loopback
+      // receiver is a legitimate setup, and so is a proxy that authenticates in front of this box.
+      if (token.isNotBlank() && githubAuth == null) {
+        System.err.println(
+          "serve: note - this host is gated by a browse token and has no GitHub sign-in, so a " +
+            "recipient without that token cannot open the designs these notifications link to; " +
+            "configure --github-auth-client-id, or authenticate in front of this server"
+        )
+      }
+      webhook to webhook.attach(comments)
+    }
     val server =
       ServeHttpServer(
         host = host,
@@ -3174,12 +3239,15 @@ public class ServeRunner(
           runCatching { catalogFeed?.close() }
           runCatching { catalogRegistrySync?.close() }
           runCatching { registry.close() }
+          runCatching { commentWebhook?.second?.close() }
+          runCatching { commentWebhook?.first?.close() }
           runCatching { uiBuilderLane?.close() }
           closeables.forEach { c -> runCatching { c?.close() } }
           done.countDown()
         }
       )
 
+    startedServer = server
     server.start()
     // Cadence only — the boot fold-in already read every registry once, so the first pass is a
     // reconciliation, not the initial import.
