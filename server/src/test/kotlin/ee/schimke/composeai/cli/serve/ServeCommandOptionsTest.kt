@@ -158,6 +158,76 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `published-catalog lever distinguishes all, none and a named subset`() {
+    // Absent is `all`, which is what the loader shipped with — a bump that changed this silently
+    // would flip every catalog that publishes without anybody choosing to.
+    assertNull(
+      options(listOf("--ui-builder-catalogs", "m3-catalog,remote-m3")).uiBuilderPublishedCatalogs
+    )
+    assertNull(
+      options(
+          listOf("--ui-builder-catalogs", "m3-catalog", "--ui-builder-published-catalogs", "all")
+        )
+        .uiBuilderPublishedCatalogs
+    )
+
+    // `none` is an empty SET, not null: "no catalog may" and "every catalog may" are opposites and
+    // must not collapse into the same value.
+    assertEquals(
+      emptySet(),
+      options(
+          listOf("--ui-builder-catalogs", "m3-catalog", "--ui-builder-published-catalogs", "none")
+        )
+        .uiBuilderPublishedCatalogs,
+    )
+
+    assertEquals(
+      setOf("m3-catalog"),
+      options(
+          listOf(
+            "--ui-builder-catalogs",
+            "m3-catalog,remote-m3",
+            "--ui-builder-published-catalogs",
+            "m3-catalog",
+          )
+        )
+        .uiBuilderPublishedCatalogs,
+    )
+  }
+
+  @Test
+  fun `published-catalog lever refuses a catalog this host does not serve`() {
+    // The typo with a silent failure mode: the operator opts a catalog in and nothing happens,
+    // because the name is not one this host serves. Refused rather than ignored.
+    val unknown =
+      assertFailsWith<IllegalArgumentException> {
+        options(
+          listOf(
+            "--ui-builder-catalogs",
+            "m3-catalog",
+            "--ui-builder-published-catalogs",
+            "wear-m3",
+          )
+        )
+      }
+    assertTrue("wear-m3" in unknown.message.orEmpty(), unknown.message.orEmpty())
+
+    assertFailsWith<IllegalArgumentException> {
+      options(
+        listOf(
+          "--ui-builder-catalogs",
+          "m3-catalog",
+          "--ui-builder-published-catalogs",
+          "m3-catalog,m3-catalog",
+        )
+      )
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-published-catalogs", "not/a/catalog"))
+    }
+  }
+
+  @Test
   fun `open path defaults to the landing page and refuses a URL that would not open`() {
     assertEquals("/", options(emptyList()).openBrowserPath)
     assertEquals(
