@@ -220,6 +220,230 @@ class ForEachRowsTest {
     assertTrue("loop" in readiness.unverifiedNodeIds, "${readiness.unverifiedNodeIds}")
   }
 
+  /**
+   * A loop whose template is a component placement — the composition the design record calls the
+   * point of having both: one body, defined once, drawn per row with that row's values.
+   *
+   * A placement reads through its *arguments* rather than its properties, so a scan that looked
+   * only at properties lost every row-varying argument: a colour was refused as `INVALID_ARGUMENT`
+   * and a string became the key's own name.
+   */
+  @Test
+  fun `a loop over a placed component passes each row to the call`() {
+    val source = exportSource(loopOverComponent())
+
+    assertTrue(source.contains("private data class LoopRow(val shade: Color)"), source)
+    assertTrue(source.contains("Cell(containerColor = row.shade, modifier = Modifier)"), source)
+    assertTrue(
+      source.contains("private fun Cell(containerColor: Color, modifier: Modifier = Modifier)"),
+      source,
+    )
+  }
+
+  /**
+   * An empty row list still has to say what it is a list of.
+   *
+   * `listOf().forEach { row -> row.shade }` has nothing to infer the element from, and a design
+   * with no rows yet is the state every loop starts in.
+   */
+  @Test
+  fun `an empty row list carries its element type`() {
+    val empty = withRows(JsonArray(emptyList()))
+
+    val source = exportSource(empty)
+
+    assertTrue(source.contains("kotlin.collections.listOf<LoopRow>()"), source)
+  }
+
+  /**
+   * A loop inside a loop reads its own rows, so the outer signature stops at the inner template.
+   *
+   * Descending into it demanded the inner keys of the outer rows and refused a nesting the emitter
+   * draws correctly.
+   */
+  @Test
+  fun `a nested loop does not put its keys on the outer rows`() {
+    val nested =
+      document().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              mapOf(
+                "loop" to
+                  base.nodes.getValue("loop").copy(slots = mapOf("template" to listOf("inner"))),
+                "inner" to
+                  base.nodes
+                    .getValue("loop")
+                    .copy(id = "inner", slots = mapOf("template" to listOf("cell"))),
+              )
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(nested, catalog())
+
+    assertTrue(
+      result.diagnostics.none { it.code == "MISSING_ROW_VALUE" },
+      "${result.diagnostics.map { it.code to it.message }}",
+    )
+  }
+
+  /**
+   * An identity inside a repeated template is refused: every row reaches the same `key("…")`, so
+   * remembered and scroll state would follow whichever row composed last. The sibling fold refuses
+   * an identity-bearing subtree for the same reason.
+   */
+  @Test
+  fun `an identity inside a template is refused`() {
+    val identified =
+      document().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              ("cell" to
+                base.nodes.getValue("cell").let { cell ->
+                  cell.copy(
+                    properties =
+                      JsonObject(
+                        cell.properties +
+                          ("stableKey" to JsonObject(mapOf("value" to JsonPrimitive("cell"))))
+                      )
+                  )
+                })
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(identified, catalog())
+
+    assertTrue(
+      result.diagnostics.any { it.code == "IDENTITY_IN_LOOP_TEMPLATE" },
+      "${result.diagnostics.map { it.code }}",
+    )
+  }
+
+  /**
+   * Two keys that generate one Kotlin name would make a data class with duplicate properties and a
+   * constructor call with duplicate arguments — source that looks right and does not compile.
+   */
+  @Test
+  fun `row keys that generate one identifier are refused`() {
+    val colliding =
+      document().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              ("cell" to
+                base.nodes.getValue("cell").let { cell ->
+                  cell.copy(
+                    properties =
+                      JsonObject(
+                        mapOf(
+                          "containerColor" to binding("cell shade"),
+                          "shape" to binding("cell-shade"),
+                        )
+                      )
+                  )
+                })
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(colliding, catalog())
+
+    assertTrue(
+      result.diagnostics.any {
+        it.code == "COLLIDING_ROW_PROPERTY" || it.code == "UNSUPPORTED_BINDING"
+      },
+      "${result.diagnostics.map { it.code }}",
+    )
+  }
+
+  /**
+   * Which lane exports a loop, pinned rather than asserted.
+   *
+   * `CapabilityComposeCodeExporter` is the editor's own gate — the Issues panel reads its
+   * `diagnose`, and it writes the checked-in benchmark fixture. What the **code pane** shows and
+   * what the server's export and native preview write is the record-driven lane (`ScreenExportGate`
+   * → `ScreenGenerator`), which has no loop and refuses one by name. Until that lane grows a
+   * `forEach` of its own, a design holding a loop is refused everywhere a person can see the code,
+   * and saying otherwise is how a claim in a design record rots.
+   */
+  @Test
+  fun `the record-driven lane the code pane uses still refuses a loop`() {
+    val reducer = UiBuilderEditorReducer(catalog())
+
+    val generated = reducer.generatedCode(document())
+
+    assertTrue(
+      generated is EditorGeneratedCode.Refused,
+      "the code pane generated a loop it has no emitter for: $generated",
+    )
+  }
+
+  private fun binding(key: String) =
+    JsonObject(mapOf("type" to JsonPrimitive("binding"), "value" to JsonPrimitive(key)))
+
+  private fun withRows(values: JsonArray): UiBuilderDocument =
+    document().let { base ->
+      base.copy(
+        nodes =
+          base.nodes +
+            ("loop" to
+              base.nodes
+                .getValue("loop")
+                .copy(
+                  properties =
+                    JsonObject(
+                      mapOf(
+                        "data" to
+                          JsonObject(mapOf("type" to JsonPrimitive("list"), "values" to values))
+                      )
+                    )
+                ))
+      )
+    }
+
+  /** The same loop, but its template places a component that takes the row's shade. */
+  private fun loopOverComponent(): UiBuilderDocument =
+    document().let { base ->
+      base.copy(
+        nodes =
+          base.nodes +
+            mapOf(
+              "loop" to
+                base.nodes.getValue("loop").copy(slots = mapOf("template" to listOf("place"))),
+              "place" to
+                UiBuilderNode(
+                  id = "place",
+                  componentId = "design/component-instance",
+                  component =
+                    JsonObject(
+                      mapOf(
+                        "componentKey" to JsonPrimitive("cell"),
+                        "arguments" to JsonObject(mapOf("containerColor" to binding("shade"))),
+                      )
+                    ),
+                ),
+              "cell" to
+                base.nodes
+                  .getValue("cell")
+                  .copy(
+                    properties = JsonObject(mapOf("containerColor" to binding("containerColor")))
+                  ),
+            ),
+        components =
+          JsonObject(
+            mapOf(
+              "cell" to
+                JsonObject(
+                  mapOf(
+                    "name" to JsonPrimitive("Cell"),
+                    "root" to JsonPrimitive("cell"),
+                  )
+                )
+            )
+          ),
+      )
+    }
+
   private fun rowCentreY(index: Int) = index * CELL_PX + CELL_PX / 2
 
   /** A loop over three rows, whose template is one surface reading `shade`. */

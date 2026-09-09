@@ -159,10 +159,13 @@ object CapabilityComposeCodeExporter {
     // wrong thing.
     val (signatures, componentRefusals) = document.componentSignatures()
     val (loops, loopRefusals) =
-      document.loopSignatures(signatures.values.mapTo(mutableSetOf()) { it.functionName })
+      document.loopSignatures(
+        signatures.values.mapTo(mutableSetOf()) { it.functionName },
+        signatures,
+      )
     (componentRefusals +
         loopRefusals +
-        document.placementRefusals(signatures) +
+        document.placementRefusals(signatures, document.scopedNodeIds(signatures)) +
         document.loopPlacementRefusals() +
         document.strayBindingRefusals(signatures))
       .forEach { refusal ->
@@ -343,7 +346,10 @@ private class ComposeEmitter(
   /** Each loop's generated row type, derived once by the same code the gate ran. */
   private val loopSignatures: Map<String, LoopSignature> by lazy {
     document
-      .loopSignatures(componentSignatures.values.mapTo(mutableSetOf()) { it.functionName })
+      .loopSignatures(
+        componentSignatures.values.mapTo(mutableSetOf()) { it.functionName },
+        componentSignatures,
+      )
       .first
   }
 
@@ -481,7 +487,11 @@ private class ComposeEmitter(
           }
         "${loop.className}($arguments)"
       }
-    line(level + 1, "kotlin.collections.listOf($rows).forEach { $parameter ->")
+    // The element type is written when there is no element to infer it from: an empty list whose
+    // lambda reads `row.shade` has nothing to tell Kotlin what `row` is, and a design with no rows
+    // yet is the state every loop starts in.
+    val elementType = if (loop.rows.isEmpty()) "<${loop.className}>" else ""
+    line(level + 1, "kotlin.collections.listOf$elementType($rows).forEach { $parameter ->")
     val outer = emittingRow
     emittingRow = parameter to loop
     emitNode(loop.template, level + 2)
@@ -534,7 +544,11 @@ private class ComposeEmitter(
     val passed =
       signature.parameters.joinToString("") { (parameter, kind) ->
         val value = arguments[parameter] as? JsonObject ?: return@joinToString ""
-        "${parameter.identifier()} = ${kind.argument(value)}, "
+        // A placement inside a loop template may pass the row rather than a value of its own,
+        // which is the composition the design record calls the point of having both: one body,
+        // placed once, drawn per row.
+        val expression = node.boundArgument(parameter) ?: kind.argument(value)
+        "${parameter.identifier()} = $expression, "
       }
     line(level, "${signature.functionName}($passed${node.modifierArgument()})")
   }
@@ -553,6 +567,18 @@ private class ComposeEmitter(
   /** A text property, quoted as a literal or written as the parameter the body reads. */
   private fun UiBuilderNode.boundStringExpression(name: String): String =
     boundParameter(name) ?: "\"${string(name).escape()}\""
+
+  /** The row reference a placement's argument reads, or null when it passes a value. */
+  private fun UiBuilderNode.boundArgument(argument: String): String? {
+    val key = argumentBindingKey(argument) ?: return null
+    emittingRow?.let { (parameter, loop) ->
+      if (loop.properties.any { it.first == key }) return "$parameter.${key.identifier()}"
+    }
+    val signature = emittingComponent ?: return null
+    return key
+      .takeIf { candidate -> signature.parameters.any { it.first == candidate } }
+      ?.identifier()
+  }
 
   private fun UiBuilderNode.boundParameter(property: String): String? {
     val key = bindingKey(property) ?: return null
@@ -2052,7 +2078,7 @@ private fun UiBuilderDocument.componentSignatures():
         }
       }
       body.forEach { node ->
-        node.bindingKinds().forEach { (property, bindingKey, kind) ->
+        node.bindingKinds(signatures).forEach { (property, bindingKey, kind) ->
           if (kind == null) {
             refusals +=
               ExportRefusal(
@@ -2121,7 +2147,8 @@ private fun UiBuilderDocument.componentSignatures():
 
 /** Everything a placement is refused for: an unknown component, or an argument it does not pass. */
 private fun UiBuilderDocument.placementRefusals(
-  signatures: Map<String, ComponentSignature>
+  signatures: Map<String, ComponentSignature>,
+  scoped: Set<String>,
 ): List<ExportRefusal> =
   nodes.values
     .sortedBy(UiBuilderNode::id)
@@ -2153,6 +2180,23 @@ private fun UiBuilderDocument.placementRefusals(
         }
         signature.parameters.forEach { (parameter, kind) ->
           val argument = arguments?.get(parameter) as? JsonObject
+          // An argument that reads the dictionary around the placement is checked as a read rather
+          // than as a value: what fills it is a row or an enclosing component's parameter, and both
+          // are typed where they are declared. Checked here only for having somewhere to read
+          // from — outside a body or a template there is no dictionary, and the emitter would
+          // print the key's own name.
+          node.argumentBindingKey(parameter)?.let { key ->
+            if (node.id !in scoped) {
+              this +=
+                ExportRefusal(
+                  "BINDING_OUTSIDE_COMPONENT",
+                  "a placement of ${signature.functionName} reads '$key' for '$parameter', and " +
+                    "this node is in no component body or loop template",
+                  node.id,
+                )
+            }
+            return@forEach
+          }
           if (argument == null) {
             this +=
               ExportRefusal(
@@ -2188,17 +2232,7 @@ private fun UiBuilderDocument.placementRefusals(
 private fun UiBuilderDocument.strayBindingRefusals(
   signatures: Map<String, ComponentSignature>
 ): List<ExportRefusal> {
-  val inABody =
-    signatures.values.flatMapTo(mutableSetOf()) { signature ->
-      bodyNodes(signature.root).map(UiBuilderNode::id)
-    }
-  // A loop's template is the other scope: there the dictionary is the row rather than a placement's
-  // arguments, which is the whole point of one reader serving both. Left out, every bound template
-  // was refused as a stray.
-  nodes.values
-    .filter { it.componentId == FOR_EACH_COMPONENT_ID }
-    .flatMap { loop -> loop.slots["template"].orEmpty() }
-    .forEach { template -> inABody += bodyNodes(template).map(UiBuilderNode::id) }
+  val inABody = scopedNodeIds(signatures)
   return nodes.values
     .sortedBy(UiBuilderNode::id)
     .filter { it.id !in inABody }
@@ -2224,7 +2258,8 @@ private fun UiBuilderDocument.strayBindingRefusals(
  * loop's rows, so they are checked here rather than at each placement.
  */
 private fun UiBuilderDocument.loopSignatures(
-  taken: Set<String>
+  taken: Set<String>,
+  components: Map<String, ComponentSignature> = emptyMap(),
 ): Pair<Map<String, LoopSignature>, List<ExportRefusal>> {
   val signatures = linkedMapOf<String, LoopSignature>()
   val refusals = mutableListOf<ExportRefusal>()
@@ -2250,8 +2285,27 @@ private fun UiBuilderDocument.loopSignatures(
         return@forEach
       }
       val properties = linkedMapOf<String, BindingKind>()
-      bodyNodes(template).forEach { node ->
-        node.bindingKinds().forEach { (property, key, kind) ->
+      val identifiers = mutableSetOf<String>()
+      // The template's own nodes, stopping at a nested loop: an inner template reads the inner
+      // loop's rows, which `emitLoop` gives it by replacing the row in scope. Descending into one
+      // demanded the inner keys of the outer rows, and refused a nesting the emitter draws
+      // correctly.
+      templateNodes(template).forEach { node ->
+        // Every iteration reaches one `key("…")`, so an identity inside a repeated template would
+        // tie remembered or scroll state to whichever row composed last. The sibling fold refuses
+        // an identity-bearing subtree for exactly this reason; a loop is the same call site n
+        // times.
+        val identity = node.string("stableKey").ifEmpty { node.string("scrollStateKey") }
+        if (identity.isNotEmpty()) {
+          refusals +=
+            ExportRefusal(
+              "IDENTITY_IN_LOOP_TEMPLATE",
+              "loop ${loop.id} repeats a node claiming the identity '$identity', which every row " +
+                "would share",
+              node.id,
+            )
+        }
+        node.bindingKinds(components).forEach { (property, key, kind) ->
           if (kind == null) {
             refusals +=
               ExportRefusal(
@@ -2269,6 +2323,20 @@ private fun UiBuilderDocument.loopSignatures(
                 "CONFLICTING_BINDING",
                 "loop ${loop.id} reads '$key' as both ${existing.kotlinType} and " +
                   "${kind.kotlinType}",
+                node.id,
+              )
+            return@forEach
+          }
+          // Two keys that normalise to one Kotlin name would generate a data class with duplicate
+          // properties and a constructor call with duplicate arguments. Refused for the reason a
+          // component's parameters are.
+          val identifier = key.identifier()
+          if (properties[key] == null && !identifiers.add(identifier)) {
+            refusals +=
+              ExportRefusal(
+                "COLLIDING_ROW_PROPERTY",
+                "loop ${loop.id} reads '$key', which generates the property name '$identifier' " +
+                  "another key already has",
                 node.id,
               )
             return@forEach
@@ -2375,6 +2443,46 @@ private fun UiBuilderDocument.loopPlacementRefusals(): List<ExportRefusal> =
 /** The containers whose children are emitted as lazy items. */
 private val LAZY_CONTAINER_IDS = setOf("layout/lazy-column", "layout/lazy-row", "layout/lazy-grid")
 
+/**
+ * Every node with a dictionary around it: a component's body, or a loop's template.
+ *
+ * The two scopes a binding may read from, in one set, because the question every reader asks is the
+ * same one — is there a dictionary here — and two sets that must agree is how they come to
+ * disagree.
+ */
+private fun UiBuilderDocument.scopedNodeIds(
+  signatures: Map<String, ComponentSignature>
+): Set<String> {
+  val scoped =
+    signatures.values.flatMapTo(mutableSetOf()) { signature ->
+      bodyNodes(signature.root).map(UiBuilderNode::id)
+    }
+  nodes.values
+    .filter { it.componentId == FOR_EACH_COMPONENT_ID }
+    .flatMap { loop -> loop.slots["template"].orEmpty() }
+    .forEach { template -> scoped += bodyNodes(template).map(UiBuilderNode::id) }
+  return scoped
+}
+
+/**
+ * A loop template's nodes, root first, stopping where a nested loop begins.
+ *
+ * The nested loop itself is included — it is a node the template draws — but its template is not:
+ * those bindings read the inner loop's rows, which the emitter supplies by replacing the row in
+ * scope.
+ */
+private fun UiBuilderDocument.templateNodes(root: String): List<UiBuilderNode> {
+  val visited = linkedSetOf<String>()
+  fun walk(id: String) {
+    if (!visited.add(id)) return
+    val node = nodes[id] ?: return
+    if (node.componentId == FOR_EACH_COMPONENT_ID && id != root) return
+    node.slots.entries.sortedBy { it.key }.forEach { (_, children) -> children.forEach(::walk) }
+  }
+  walk(root)
+  return visited.mapNotNull(nodes::get)
+}
+
 /** A component body, root first, in the order the emitter walks it. */
 private fun UiBuilderDocument.bodyNodes(root: String): List<UiBuilderNode> {
   val visited = linkedSetOf<String>()
@@ -2458,12 +2566,48 @@ private fun UiBuilderNode.bindingKey(property: String): String? {
   return value.optionalString("value")?.takeIf { it.isNotEmpty() }
 }
 
-/** Every key this node reads, with what each read needs it to be. */
-private fun UiBuilderNode.bindingKinds(): List<Triple<String, String, BindingKind?>> =
-  properties.keys.sorted().mapNotNull { property ->
+/**
+ * Every key this node reads, with what each read needs it to be.
+ *
+ * A placement reads through its **arguments** rather than its properties — `component.arguments` is
+ * where a placement's dictionary lives — and the kind is the one the placed component's own
+ * parameter has, because that is the parameter the value is about to fill. Without this a loop
+ * whose template is a placement lost every row-varying argument: a colour was refused as
+ * `INVALID_ARGUMENT` and a string became the key's own name.
+ */
+private fun UiBuilderNode.bindingKinds(
+  components: Map<String, ComponentSignature> = emptyMap()
+): List<Triple<String, String, BindingKind?>> {
+  if (componentId == DESIGN_COMPONENT_INSTANCE_ID) {
+    val arguments = placementArguments()
+    val placed = components[placementKey()]
+    return arguments.keys.sorted().mapNotNull { argument ->
+      val value = arguments[argument] as? JsonObject ?: return@mapNotNull null
+      if (value.optionalString("type") != "binding") return@mapNotNull null
+      val key = value.optionalString("value")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+      Triple(argument, key, placed?.parameters?.firstOrNull { it.first == argument }?.second)
+    }
+  }
+  return properties.keys.sorted().mapNotNull { property ->
     val key = bindingKey(property) ?: return@mapNotNull null
     Triple(property, key, BINDABLE_PROPERTIES[componentId]?.get(property))
   }
+}
+
+/** Which component a placement places, from its own field rather than a property. */
+private fun UiBuilderNode.placementKey(): String =
+  component?.optionalString("componentKey").orEmpty()
+
+/** The dictionary a placement passes. */
+private fun UiBuilderNode.placementArguments(): JsonObject =
+  component?.get("arguments") as? JsonObject ?: JsonObject(emptyMap())
+
+/** The binding a placement's argument is, or null when it passes a value of its own. */
+private fun UiBuilderNode.argumentBindingKey(argument: String): String? {
+  val value = placementArguments()[argument] as? JsonObject ?: return null
+  if (value.optionalString("type") != "binding") return null
+  return value.optionalString("value")?.takeIf { it.isNotEmpty() }
+}
 
 private data class HandledFields(
   val properties: Set<String> = emptySet(),
