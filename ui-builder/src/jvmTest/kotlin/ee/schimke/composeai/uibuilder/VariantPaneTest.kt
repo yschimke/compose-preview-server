@@ -72,6 +72,20 @@ class VariantPaneTest {
     assertEquals(listOf("Pixel 6"), panes.map { it.label })
   }
 
+  /**
+   * `exportDevices` is stored verbatim — no uniqueness, no size bound — so a document written
+   * through the protocol or MCP can name one device many times. Each repeat would otherwise be
+   * another full surface sharing one pane id.
+   */
+  @Test
+  fun `a device named twice draws one pane`() {
+    val panes =
+      withDevices("id:pixel_6", "id:pixel_6", "id:pixel_tablet", "id:pixel_6")
+        .variantPanes(presets, emptySet())
+
+    assertEquals(listOf("Pixel 6", "Pixel Tablet"), panes.map { it.label })
+  }
+
   @Test
   fun `an axis writes only its own field over the design's environment`() {
     val panes = document.variantPanes(presets, setOf(EditorVariantAxis.Dark))

@@ -4122,6 +4122,14 @@ class UiBuilderEditorReducer(
     selectedNodeId: String?,
     inserted: ComponentCapability,
   ): ParentSlot? {
+    // A component whose emitter demands the root has no destination in a slot, on any path in.
+    // `besideRefusal` alone was not enough: turning Add beside off and pressing Add, or dragging
+    // the
+    // scaffold onto the board, reached the same placement through here — a column's `children` slot
+    // accepts the `Scaffold` role, so nothing else was going to refuse it. `RecordFreeExport`
+    // routes on the *root* component id, so a nested Wear scaffold silently stops being a Wear
+    // screen whichever way it got there.
+    if (inserted.componentId in RecordFreeExport.ROOT_ONLY_COMPONENT_IDS) return null
     val selected = selectedNodeId?.let(document.nodes::get)
     if (selected != null) {
       firstAcceptingSlotBelow(document, selected, inserted)?.let {

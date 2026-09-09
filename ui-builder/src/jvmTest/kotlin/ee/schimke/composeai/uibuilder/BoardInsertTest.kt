@@ -294,5 +294,28 @@ class BoardInsertTest {
     )
   }
 
+  /**
+   * The refusal has to hold on every path in, not just the Add beside one: turning the switch off
+   * and pressing Add, or dragging the scaffold onto the board, reached the same placement through
+   * `dropTarget` — a column's `children` slot accepts the `Scaffold` role, so nothing else was
+   * going to refuse it.
+   */
+  @Test
+  fun `a root-only component has no slot destination at all`() {
+    val onBoard =
+      reducer.reduce(
+        reducer.initial(document, selectedNodeId = null),
+        UiBuilderEditorEvent.InsertComponentBeside("m3/card"),
+      )
+    val boardId = assertNotNull(onBoard.document.boardRootId)
+    val selected = reducer.initial(onBoard.document, selectedNodeId = boardId)
+
+    RecordFreeExport.ROOT_ONLY_COMPONENT_IDS.forEach { rootOnly ->
+      assertNull(reducer.dropTarget(selected, rootOnly), rootOnly)
+    }
+    // The board still takes everything else, so this refuses the component rather than the board.
+    assertNotNull(reducer.dropTarget(selected, "m3/text"))
+  }
+
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
 }

@@ -64,7 +64,11 @@ fun UiBuilderDocument.variantPanes(
 ): List<UiBuilderVariantPane> {
   val settings = screenEnvironmentSettings()
   val devicePanes =
-    settings.exportDevices.mapNotNull { id ->
+    // Distinct, because `exportDevices` is stored verbatim: `SetExportDevicesEnvironmentChangeV1`
+    // imposes no uniqueness, so a document written through the protocol or MCP can name one device
+    // a thousand times — and each repeat would be another full `UiBuilderSurface`, all sharing one
+    // pane id. The picker only ever writes a set; this is about what a document can *hold*.
+    settings.exportDevices.distinct().mapNotNull { id ->
       val preset = presets.firstOrNull { it.id == id } ?: return@mapNotNull null
       UiBuilderVariantPane(
         id = "variant-device-${preset.id}",
