@@ -117,6 +117,12 @@ export class ViewerDrawers extends ControllerElement {
                 .getElementById(toggleIdFor(other))
                 ?.setAttribute("aria-expanded", "false");
         }
+        // The comparisons sheet goes with them. On a phone it is `position: fixed` above the FAB,
+        // so it paints over a drawer (z-index 40) and its scrim (35) — and the summary that would
+        // close it is BEHIND that scrim, so the sheet cannot be dismissed while the drawer it is
+        // covering stays open. `drawerToClose` only knows about the other drawer; this disclosure
+        // is the third thing that owns the bottom of a phone screen.
+        if (open) this.closeComparisonMenus();
         viewer.classList.toggle(drawer, open);
         // The nav's closed state has to be said out loud, not merely implied by the absence of
         // `cp-nav-open`: above 1100px the absence means OPEN, so without this class the toggle
@@ -128,6 +134,22 @@ export class ViewerDrawers extends ControllerElement {
             .getElementById(toggleIdFor(drawer))
             ?.setAttribute("aria-expanded", open ? "true" : "false");
         this.syncScrim();
+    }
+
+    /**
+     * Close any open comparisons disclosure in the viewer's control row.
+     *
+     * Only the ones inside `.cp-preview-primary`: that is the row whose panel becomes a fixed sheet
+     * at phone widths. A `<details>` elsewhere on the page is nobody's business here.
+     */
+    private closeComparisonMenus(): void {
+        document
+            .querySelectorAll<HTMLDetailsElement>(
+                ".cp-preview-primary .cp-detail-menu[open]",
+            )
+            .forEach((menu) => {
+                menu.open = false;
+            });
     }
 
     /**
@@ -223,6 +245,13 @@ export class ViewerDrawers extends ControllerElement {
                         ),
                     );
                 }
+                // Arriving at the phone layout is the other way the sheet ends up over a drawer,
+                // and `setOpen` never sees it: the call above passes `false` on a phone, and an
+                // already-open Overrides drawer is not re-opened at all. So a page held wide with
+                // both showing, then rotated, would land with the sheet (fixed, z-index 70) over
+                // the drawer (fixed, 40) and its scrim — the same trap, reached by turning the
+                // device rather than by tapping.
+                if (this.viewport().mobile) this.closeComparisonMenus();
                 this.reflowRows();
             };
             list.addEventListener("change", handler);

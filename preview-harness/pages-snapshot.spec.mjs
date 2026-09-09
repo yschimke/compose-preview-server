@@ -2730,6 +2730,35 @@ const FIXTURE_STATES = [
     },
   },
   {
+    // …and the SAME panel below the phone breakpoint, which is where it actually lives now.
+    //
+    // The state above is captured at the default desktop width, so it never crosses the 640px
+    // media query and never sees the sheet. That mattered: `.cp-preview-primary` is the viewer's
+    // horizontal scroller down there (`overflow-x: auto`, which forces the other axis to compute
+    // to `auto` as well), and an absolutely positioned panel was clipped by it — 83 of its 90
+    // pixels gone at 390px, every destination unreachable. The fix takes the panel out of that
+    // clip with `position: fixed`. Nothing in the harness was diffing it, so deleting that rule
+    // would have left every visual check green with the menu unusable again on a phone.
+    //
+    // The menu is opened AFTER the viewport change rather than inherited from the state above,
+    // and that is the fix's own doing: `ViewerDrawers` closes an open comparisons sheet when the
+    // phone layout arrives (so a page held wide with both showing cannot land in the phone layout
+    // with the sheet over a drawer). Narrowing therefore shuts it, and re-opening here is what
+    // puts the sheet on screen — which exercises that path as well as the sheet's geometry.
+    //
+    // Between the two desktop states deliberately: `compare-menu-closed` below closes the menu
+    // for everything after it, and the viewport is restored by the runner either way.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "compare-menu-phone",
+    viewport: PHONE_VIEWPORT,
+    apply: async (page) => {
+      if (!(await page.$(".cp-detail-menu[open]")))
+        await page.click(".cp-detail-menu > summary");
+      await page.waitForSelector(".cp-detail-menu[open] .cp-detail-menu-item");
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
     // …and closed again, so the states after this one diff a resting bar rather than one with a
     // menu surface floating over it.
     fixture: "serve-viewer-rc-parallel",
