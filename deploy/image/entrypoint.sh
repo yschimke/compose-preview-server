@@ -781,6 +781,12 @@ fi
 # install") rather than degrading quietly, so it reads as a broken player rather than as a lost
 # flag. The flag is baked and paired in the Dockerfile like every other, and was the one this
 # stanza never re-asserted.
+
+# `skikoDir` is not a sidecar of code but the one NATIVE the Skiko-backed lanes link against, and it
+# fails in a fourth shape again: the classpath is complete, the lane starts, and `Library`'s static
+# initialiser dies with `Cannot find libskiko-<platform>.so.sha256`. That surfaces as
+# `ExceptionInInitializerError: null` — cause stripped — so `?rcPlayer=cmp-jvm` answers 500 for
+# every document in every catalog and reads as a broken player rather than as a missing file.
 #
 # The directories are variables so the guard test can point them at fixtures; they default to the
 # paths the Dockerfile COPYs into.
@@ -790,6 +796,7 @@ fi
 : "${LIB_RENDERER_DIR:=/opt/lib-renderer}"
 : "${LIB_BTA_DIR:=/opt/lib-bta}"
 : "${LIB_RCJVM_DIR:=/opt/lib-rcjvm}"
+: "${LIB_SKIKO_DIR:=/opt/lib-skiko}"
 sidecar_restored=()
 restore_sidecar_flag() {
   local prop="$1" dir="$2"
@@ -806,12 +813,14 @@ restore_sidecar_flag composeai.cli.libDaemonDesktopDir "${LIB_DAEMON_DESKTOP_DIR
 restore_sidecar_flag composeai.cli.libRendererDir "${LIB_RENDERER_DIR}"
 restore_sidecar_flag composeai.cli.libBtaDir "${LIB_BTA_DIR}"
 restore_sidecar_flag composeai.cli.libRcjvmDir "${LIB_RCJVM_DIR}"
+restore_sidecar_flag composeai.cli.skikoDir "${LIB_SKIKO_DIR}"
 if ((${#sidecar_restored[@]})); then
   echo "entrypoint: JAVA_TOOL_OPTIONS was missing ${sidecar_restored[*]} — restored from the" \
     "image. Something replaced the baked JAVA_TOOL_OPTIONS (setting it in the compose file or" \
     ".env does that); use SERVE_JAVA_OPTS to ADD options instead. Without this the live render" \
-    "lanes serve baked PNG snapshots only, the cmp-jvm player answers 503, and the playground" \
-    "does not start at all." >&2
+    "lanes serve baked PNG snapshots only, the cmp-jvm player answers 503 (or 500 with" \
+    "ExceptionInInitializerError when the Skiko native is the one lost), and the playground does" \
+    "not start at all." >&2
 fi
 # <<< sidecar-restore
 

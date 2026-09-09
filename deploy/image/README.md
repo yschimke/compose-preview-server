@@ -12,7 +12,12 @@ bundles without a local Gradle project. Built once in CI and pushed to GHCR, so 
   `compose-ai-tools` release and located through `-Dcomposeai.cli.libDaemon*Dir` /
   `-Dcomposeai.cli.libRendererDir`; the server distribution itself carries neither, so a
   backend whose sidecar is absent publishes baked PNGs with `livebundle-unavailable`
-  instead of failing loudly (guarded by `test-desktop-daemon-sidecar.sh`). Lighting the Android live lane needs the catalog's stickers to
+  instead of failing loudly (guarded by `test-desktop-daemon-sidecar.sh`). None of those sidecars
+  carries a Skiko **native** — `:cli` staging filters every `skiko-awt-runtime-*` out and leaves a
+  CLI-only provisioner to fetch the host's, which this image never installs — so the host's jar is
+  fetched into `/opt/lib-skiko` and named by `-Dcomposeai.cli.skikoDir`. Without it every
+  Skiko-backed lane dies in `Library`'s static initialiser and `?rcPlayer=cmp-jvm` answers
+  `500 … ExceptionInInitializerError: null` for every document. Lighting the Android live lane needs the catalog's stickers to
   carry the `previewId` daemon mapping **and** the bundle to carry the app's resource table under
   `android/`; both shipped in **0.16.50** (previewId #2492, app-resource carriage #2498 + missing-
   resource placeholder fallback #2499), so `wear-m3` renders live once the box rolls that image and
