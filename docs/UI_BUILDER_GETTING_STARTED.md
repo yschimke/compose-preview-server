@@ -269,10 +269,22 @@ independent: what is *in* the design, and how many pictures of it you look at.
 ### A board holds several items
 
 **Add beside**, a switch in the insert panel under the line that says where the next Add lands,
-places what you add as a new top-level item rather than inside the selection. The first one wraps
-the design in a **board** and puts the two side by side; every one after joins it. The line above
-the switch says which is about to happen — "Adds beside the design, on a new board", then "Adds
-beside 3 item(s) on the board" — so the panel tells you where the next Add lands before you press it.
+places what you add as a top-level item rather than inside the selection. What that means depends on
+what the design already is, and the line above the switch says which of the three is about to
+happen before you press it:
+
+| The design | The line reads | What the Add does |
+| --- | --- | --- |
+| empty | "Adds as this design's first item" | the component becomes the root. No board yet. |
+| already rooted in a column | "Adds beside *n* item(s) on the board" | appends into that column |
+| any other root | "Adds beside the design, on a new board" | wraps the root in a board and puts the two side by side |
+
+The second row is worth reading twice if you imported a design or built one that starts with a
+column: **a root `layout/column` already is the board.** Adding beside appends into it rather than
+wrapping it, so your column is not preserved as a separate item inside a new one, and the spacing and
+alignment the items get are the ones already on it, not the 24 dp a fresh board is created with.
+That is the honest consequence of a board being an ordinary node — but it does mean the first Add
+beside on such a design changes nothing structurally, and the items simply join what was there.
 
 A board is an ordinary `layout/column`, not a mode. It is in the document, the layers panel lists
 it, and selecting it gives you the **Properties** panel's `verticalSpacingDp` and
@@ -280,16 +292,23 @@ it, and selecting it gives you the **Properties** panel's `verticalSpacingDp` an
 in Layers, exactly like any other children. Nothing downstream treats it specially: the Kotlin
 export writes the `Column` it is, and the screen projection sees the same.
 
-Two things it will not do:
+Two Adds it will not do:
 
 - **An Add with no compatible slot is still refused.** Add beside is a switch you reach for, not a
   fallback: a scaffold does not grow a neighbour every time a chip fails to fit inside it.
-- **A Wear screen scaffold or a widget container cannot become a board item.** Both record-free
-  emitters route on the root component, so an item that stopped being the root would lose its
-  emitter and its native preview lane. The panel refuses that Add and says so.
+- **A Wear screen scaffold or a widget container cannot become an item of a board.** Both
+  record-free emitters route on the root component, so an item that stopped being the root would
+  lose its emitter and its native preview lane.
 
-Unwrapping is deleting the board, which takes its children with it. Undo takes back a board the
-last Add created; one that has outlived that command has no one-press way back to a single screen.
+Those two refuse differently, which is worth knowing when a row will not add. Refusing to *wrap* the
+current root is explained on the destination line, in place of the text above. Refusing a
+**component** — the Wear and widget case, on a design that already has a board — only disables that
+row's **Add** button, with no message; the reason is in the component, not on the panel.
+
+A root board **cannot be unwrapped**: Unwrap needs the selected container to have a parent, and a
+board is the document root. **Delete** on it is a different action and takes the whole subtree, its
+items included. Undo takes back a board the last Add created; a board that has outlived that command
+has no one-press way back to a single screen.
 
 ### The frame is not the device
 
@@ -306,24 +325,33 @@ Below the frame, two lists put more pictures of the same document beside the one
 
 | Field | What it draws | Stored? |
 | --- | --- | --- |
-| **Also shown and exported as** | the devices the design claims — the same list `@Preview(device = …)` is written from | yes, shared with collaborators |
+| **Also shown and exported as** | the devices the design claims | yes, shared with collaborators |
 | **Also compare** | Dark, RTL and 1.5× font | no — a way of looking, off again when the design is reopened |
 
-The first is worth knowing about: that list was always stored and always written into the Compose
-export, and the editor used not to draw it. A design could claim three devices and show its author
-one. Now the set you look at is the set the export writes.
+The first is worth knowing about: that list was always stored, and the editor used not to draw it. A
+design could claim three devices and show its author one.
+
+**"Exported as" means the record-driven Compose export**, which writes the claimed devices into
+`@Preview(device = …)`. A `wear-m3` screen or a `remote-m3` widget is emitted by the record-free
+exporters instead, and those write their own fixed preview annotations — so on those designs the
+list still changes what you *see* here, and does not reach the generated Kotlin.
 
 The panes are for checking, and **exactly one of them takes edits** — the first, at the design's own
 frame. No variant pane carries a selection, a drop target or a comment pin. That is deliberate
 rather than unfinished: there is one document behind all of them, so an edit made on the tablet pane
 would be an edit to the tree the phone pane draws.
 
-Point a tablet pane at an adaptive design and it draws the supporting pane the phone does not, which
-is the whole point: the adaptive behaviour is checkable without leaving the design.
+A wider pane is worth having when the design actually responds to width. A supporting-pane scaffold
+does when its `layoutMode` is `expandedTwoPane` or `twoPane`: the tablet pane then draws the
+supporting pane the phone does not, which is the adaptive behaviour checkable without leaving the
+design. Note that the editor inserts `adaptive` by default, and that value does **not** expand —
+set the mode explicitly if the second pane is what you are trying to see.
 
-On a catalog the host's own renderer previews, the builder's canvas is not drawn at all, so the
-compare chips say why they are inert instead of accepting a choice that would draw nothing. The
-device list stays live there, because those still reach the export.
+In the wide editor layout, choosing a host-rendered preview surface replaces the builder's canvas
+with the host's pane, and the compare chips say why they are inert rather than accepting a choice
+that would draw nothing. The device list stays live, because those still reach the export. The
+compact layout below 840 dp is different: it draws the builder canvas whatever surface is selected,
+so the chips stay active there.
 
 ## Starting from a worked widget
 
