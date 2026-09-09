@@ -8,7 +8,33 @@
 import "./setup.js";
 import assert from "node:assert/strict";
 import { flush, resetDom } from "./setup.js";
+import type { UrlState } from "../src/urlState.js";
 import "../src/components/InspectLayers.js";
+
+/** Just enough of `window.cpUrlState` to fire a Back/Forward at the element. */
+interface FakeUrlState extends UrlState {
+    pop(): void;
+}
+
+function fakeUrlState(): FakeUrlState {
+    const popHandlers: Array<() => void> = [];
+    return {
+        get: () => "",
+        push() {},
+        replace() {},
+        sync() {},
+        onPop: (callback) => {
+            popHandlers.push(callback);
+            return () => {
+                const at = popHandlers.indexOf(callback);
+                if (at >= 0) popHandlers.splice(at, 1);
+            };
+        },
+        pop() {
+            for (const handler of popHandlers.slice()) handler();
+        },
+    };
+}
 
 const A11Y = {
     nodes: [
@@ -175,6 +201,9 @@ describe("<cp-inspect-layers>", () => {
     afterEach(() => {
         resetDom();
         window.history.replaceState(null, "", "/");
+        // Global, like the observer below: a later file's element must not find a pop handle wired
+        // to this file's fake.
+        window.cpUrlState = undefined;
         // The stub is global; leaving it in place would hand a later file's element an observer
         // wired to a document that no longer exists.
         if (priorResizeObserver === undefined)
@@ -344,6 +373,53 @@ describe("<cp-inspect-layers>", () => {
         assert.deepEqual(stub.urls, [
             "/m3/render/plain.Button.annotations?at=abc",
         ]);
+    });
+
+    it("follows Back onto an entry that names a layer", async () => {
+        // `inspect` is written with `replaceState`, so this element never mints an entry of its
+        // own — but a NEIGHBOUR that pushes captures whatever the URL holds at the time.
+        // `<cp-reference-compare>` pushing `annotate` on the focused comparison is the reported
+        // path: the entry it mints carries the `inspect` beside it, and stepping back onto it
+        // restored a URL saying the layer is on above a cleared checkbox and a bare frame.
+        stubFetch();
+        const state = fakeUrlState();
+        window.cpUrlState = state;
+        await mount();
+        assert.equal(toggle("theme").checked, false);
+
+        window.history.replaceState(
+            null,
+            "",
+            "/m3/p/plain.Button?inspect=theme",
+        );
+        state.pop();
+        for (let i = 0; i < 5; i++) await flush();
+
+        assert.equal(toggle("theme").checked, true);
+        assert.equal(boxes().length, 1);
+        assert.equal(viewer().getAttribute("data-inspect"), "on");
+    });
+
+    it("follows Back OFF a layer, which the install-time restore never could", async () => {
+        // The other direction, and the half a bare listener would still get wrong: install
+        // deliberately only ever ticks, because a page served with a layer already checked and no
+        // `?inspect=` must keep it. A restore is not that — the entry is the whole truth, and an
+        // absent parameter on it means none of them.
+        stubFetch();
+        const state = fakeUrlState();
+        window.cpUrlState = state;
+        await mount("?inspect=theme");
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(toggle("theme").checked, true);
+
+        window.history.replaceState(null, "", "/m3/p/plain.Button");
+        state.pop();
+        for (let i = 0; i < 5; i++) await flush();
+
+        assert.equal(toggle("theme").checked, false);
+        assert.equal(boxes().length, 0);
+        assert.equal(legend().hidden, true);
+        assert.equal(viewer().hasAttribute("data-inspect"), false);
     });
 
     it("clears the overlay when the last layer is un-ticked", async () => {

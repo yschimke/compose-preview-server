@@ -2111,7 +2111,37 @@ const specStrip = may<HTMLElement>("cp-compare-strip");
 function syncSpecStrip() {
     if (!specStrip || !specStrip.hasAttribute("data-cp-strip-source")) return;
     var active = activeSource(specSourceList(), specPressedId());
-    if (active) specStrip.setAttribute("data-cp-strip-source", active.id);
+    if (!active) return;
+    specStrip.setAttribute("data-cp-strip-source", active.id);
+    // …and the rows have to lead where the strip is pointing. Each one links to another variant of
+    // the same component, and `comparisonStripHtml` writes that destination with the credential
+    // query alone — so clicking the next variant off a strip showing the SIBLING's renders opened
+    // it on the kit. The reader is then comparing against a different reference from the one they
+    // were reading a moment ago, having asked for nothing but "the next variant".
+    //
+    // Written here rather than server-side because the pick is not a fact the server has: the strip
+    // follows every press (`pickSpecSource` calls this), and the destinations follow with it.
+    //
+    // `active.id` and not `sourceParam()`. That helper answers what THIS page's address bar should
+    // say, and its rule — the first source is the default, so say nothing — is a fact about this
+    // page. A row leads to a different variant, which resolves `?specSource=` against its own
+    // picker: a variant offering only the sibling makes `parallel` its default, so the shorthand
+    // would write nothing, and a destination offering both would then open on the kit. The strip
+    // would be showing one reference and sending the reader to another, which is the bug this
+    // block exists to fix, one page along.
+    //
+    // Naming the source outright is safe in the other direction too. `sourceForParam` falls back to
+    // the destination's default for a source it does not offer, and a value that turns out to be
+    // that page's default is dropped by its first `syncUrl` — so a redundant parameter costs a
+    // moment in the address bar and never a wrong pairing.
+    const activeId = active.id;
+    specStrip
+        .querySelectorAll<HTMLAnchorElement>("a.cp-strip-name")
+        .forEach(function (link) {
+            var url = new URL(link.href, location.href);
+            url.searchParams.set("specSource", activeId);
+            link.href = url.pathname + url.search + url.hash;
+        });
 }
 /** The picked source's raster, else the carrier's — the single-source lane's original behaviour. */
 function specSrcRaw(): string {
@@ -4773,6 +4803,17 @@ function currentMode() {
 // typed knob) leave it false and replace instead, so one drag can't bury the catalog page under
 // fifty entries. Consumed by the first sync that follows.
 var urlPush = false;
+// The query string as of the last moment the page and the address bar were reconciled — written by
+// the two functions that do the reconciling and by nothing else, so a Back/Forward restore can ask
+// what actually MOVED rather than assuming everything did (`rules.restoredInPlace`).
+//
+// Only these two, because only these two put the page and the URL in agreement: `syncUrl` writes
+// the controls out, `hydrateFromUrl` reads an entry in. A component that rewrites the URL on its
+// own — `InspectLayers` replacing `inspect`, `spec-compare.js` pushing `specView` — leaves this
+// STALE, and deliberately so: a stale value can only make the diff name more parameters than moved,
+// which spends a dispatch the page did not need. The opposite mistake, naming fewer, would skip one
+// it did.
+var reconciledSearch = location.search;
 function syncUrl() {
     var push = urlPush;
     urlPush = false;
@@ -4849,6 +4890,7 @@ function syncUrl() {
             values.motion = pickedMotion;
     }
     window.cpUrlState.sync(values, ownsUrlParam, !push);
+    reconciledSearch = location.search;
     // Revision destinations are server-rendered, but the visitor can choose a theme without a
     // navigation. Keep every revision/current link aligned with that live URL state so entering or
     // leaving a pin never drops the selection the Theme chip describes.
@@ -5137,6 +5179,8 @@ function hydrateFromUrl(popped: boolean) {
     if (motionSelect && !pickMotion(q.get("motion") || ""))
         motionSelect.selectedIndex = 0;
     syncLaneSelect();
+    // The page now says what the URL says, which is the only claim `reconciledSearch` makes.
+    reconciledSearch = location.search;
 }
 hydrateFromUrl(false);
 // The strip's baseline is server-rendered from the same default the picker is; this reconciles
@@ -5153,6 +5197,7 @@ if (window.cpUrlState) {
         // static published catalog does not re-render at all. Read across the restore and ask for
         // the frame directly when the entry named a different format.
         var wasSvg = svgOn();
+        var wasSearch = reconciledSearch;
         hydrateFromUrl(true);
         var svgMoved = svgOn() !== wasSvg;
         var mode = currentMode();
@@ -5166,6 +5211,14 @@ if (window.cpUrlState) {
         // restored entry can name a different capture. hydrateFromUrl() has already pressed that
         // button, so without this the picker would describe a recording that is not on screen.
         else if (wanted === "motion") playMotion();
+        // …and an entry that moved only the axes hydration finishes by itself is DONE. Sending it
+        // through the render controls anyway is not the harmless no-op it looks like: with no
+        // daemon and no re-renderable catalog, `onControlsChanged` falls back to `setMode("wasm")`,
+        // so undoing Fit width or stepping back to a previous spec source left the lane, mounted
+        // the Wasm app and pushed an entry of its own — Back moving the page FORWARD. The links are
+        // still refreshed, on the same terms as every other path through this handler.
+        else if (rules.restoredInPlace(wasSearch, location.search))
+            refreshLinks();
         else onControlsChanged();
     });
 }

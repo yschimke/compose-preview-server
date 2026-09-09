@@ -47,6 +47,7 @@ import {
     type LayerSpec,
 } from "../inspect/layers.js";
 import { resolveHost, type InspectHost } from "../inspect/host.js";
+import { urlState } from "../urlState.js";
 
 interface Box {
     id: string;
@@ -148,6 +149,18 @@ export class InspectLayers extends ControllerElement {
         }
 
         this.hydrate();
+        // …and keep following the parameter, because this element is not the only thing that puts
+        // it in an entry. `inspect` is written with `replaceState` on purpose — ticking a layer is
+        // a reading aid over the same frame, not a different render — but a NEIGHBOUR that pushes
+        // captures whatever the URL holds at the time: `<cp-reference-compare>` pushing `annotate`
+        // on the focused comparison mints an entry carrying the `inspect` beside it. Stepping back
+        // over that entry restored a URL saying the layer is on, above a cleared checkbox and a
+        // bare frame — the address bar describing an overlay that is not drawn.
+        const offPop = urlState()?.onPop(() => {
+            this.hydrate(true);
+            void this.refresh();
+        });
+        if (offPop) this.cleanups.push(offPop);
         if (this.activeKinds().length) void this.refresh();
         return true;
     }
@@ -192,15 +205,28 @@ export class InspectLayers extends ControllerElement {
             this.isSpec() && host.specFrame ? host.specFrame : host.frame;
     }
 
-    /** Restore from a deep link: `?inspect=a11y,typography`. */
-    private hydrate(): void {
+    /**
+     * Restore from a deep link: `?inspect=a11y,typography`.
+     *
+     * On INSTALL this only ever ticks boxes, because a parameter the URL does not carry is not the
+     * same as one it denies: the server can render a layer already checked, and a page opened
+     * without `?inspect=` must keep whatever it was served with.
+     *
+     * On a Back/Forward pass ([authoritative]) the entry is the whole truth and the absent
+     * parameter means "none of them" — otherwise stepping back over the press that turned a layer
+     * ON would leave it drawn, which is the half of the restore a listener alone would still get
+     * wrong.
+     */
+    private hydrate(authoritative = false): void {
         const wanted = kindsFromParam(
             new URLSearchParams(location.search).get("inspect"),
         );
-        if (!wanted.length) return;
+        if (!wanted.length && !authoritative) return;
         for (const toggle of this.host?.toggles ?? []) {
-            if (wanted.includes(toggle.getAttribute("data-cp-inspect") ?? ""))
-                toggle.checked = true;
+            const on = wanted.includes(
+                toggle.getAttribute("data-cp-inspect") ?? "",
+            );
+            if (on || authoritative) toggle.checked = on;
         }
     }
 

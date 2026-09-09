@@ -377,7 +377,15 @@ class KeyboardNavigation {
         const commands: Command[] = [];
         document
             .querySelectorAll<HTMLButtonElement>(
-                ".cp-preview-primary button:not([disabled]), .cp-theme-bar .cp-theme-btn:not([disabled])",
+                // `.cp-stage-view-row` is the third place a MODE control can live: `Transparent`
+                // and `Fit width` moved off the viewer bar into the Overrides panel's own View
+                // group, and neither collector followed them — this one looks at the bar and the
+                // theme row, `overrideCommands` at `#cp-controls` inputs and selects but never its
+                // buttons. They fell out of `M`, out of `O`, and out of the all-commands search,
+                // which for a keyboard-only reader is the whole of their existence.
+                ".cp-preview-primary button:not([disabled])," +
+                    " .cp-theme-bar .cp-theme-btn:not([disabled])," +
+                    " .cp-stage-view-row button:not([disabled])",
             )
             .forEach((button) => {
                 const liveToggle = button.id === "cp-live-toggle";
