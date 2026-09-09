@@ -532,6 +532,8 @@ const SLUG_PINS = [
   ["A\u{10400}B", "a-b"],
   // A numeric character outside the decimal category: `isDigit()` is false, so it separates.
   ["Widget\u00B2X", "widget-x"],
+  // A decimal digit outside ASCII: `isDigit()` is true, so the letter after it starts a word.
+  ["A\u0662B", "a\u0662-b"],
 ];
 
 // Single-character lowercase, matching Kotlin's `Char.lowercaseChar()`. JavaScript's
@@ -564,7 +566,10 @@ const slug = (name) => {
       const startsWord =
         previous !== null &&
         isUpper(ch) &&
-        (isLower(previous) || /[0-9]/.test(previous) || (isUpper(previous) && isLower(next)));
+        // `\p{Nd}` here too, and for the same reason as the admission test above: Kotlin's
+        // `previous.isDigit()` is the decimal category, not `[0-9]`. An Arabic-Indic two before an
+        // uppercase letter starts a word in the reader and did not here.
+        (isLower(previous) || /\p{Nd}/u.test(previous) || (isUpper(previous) && isLower(next)));
       if (startsWord && out.length > 0 && !out.endsWith("-")) out += "-";
       out += lowerChar(ch);
     } else if (out.length > 0 && !out.endsWith("-")) {
@@ -623,19 +628,42 @@ if (recordPath) {
   }
   for (const builtinId of Object.keys(facts.builtins ?? {})) takenSet.add(builtinId);
 
-  // Only the components this catalog is answerable for. The frozen catalog also carries the
-  // BUILDER's own — `layout/box`, `asset/image`, `remote-compose/*` — which no catalog states, so
-  // comparing against all of them would report a catalog missing what was never its to publish.
-  const owned = (componentId) => (prefix ? componentId.startsWith(prefix) : true);
-  const goldenOwned = [...frozenIds].filter(owned);
-  const composedOwned = [...takenSet].filter(owned);
-  const composedSet = new Set(composedOwned);
+  // The prefix scopes ONE side, the frozen catalog's. It says which of the frozen ids this catalog
+  // is answerable for — the golden also carries the BUILDER's own, `layout/box`, `asset/image`,
+  // `remote-compose/*`, which no catalog states — and it must not be used to filter what the
+  // COMPOSITION produced. A policy is free to map a record entry to an id outside its own prefix,
+  // and the reader puts that id on the shelf; filtering it out here reported "the same ids on both
+  // sides" for a shelf carrying a component the frozen catalog has never heard of. A gate that
+  // narrows the evidence to the shape it expects only ever confirms itself.
+  const goldenOwned = [...frozenIds].filter((componentId) =>
+    prefix ? componentId.startsWith(prefix) : true,
+  );
+  const composedSet = takenSet;
   const shared = goldenOwned.filter((componentId) => composedSet.has(componentId));
+  // Declared builtins outside the frozen catalog are already reported per id by `builtins.<id>`
+  // above; excluded here so one mistake is not two findings.
+  const declaredBuiltinIds = new Set(Object.keys(facts.builtins ?? {}));
+  const surplus = [...takenSet].filter(
+    (componentId) => !frozenIds.has(componentId) && !declaredBuiltinIds.has(componentId),
+  );
+
+  // A composition yielding nothing is refused by the reader outright — `taken.isEmpty()` returns
+  // `Unusable` — so it cannot be waived here either. Without this the missing frozen ids each go
+  // down the ordinary retirement path, and a differences file accepting them all made an EMPTY
+  // catalog pass readiness.
+  if (takenSet.size === 0) {
+    unservable += 1;
+    console.log("");
+    console.log(
+      `  x components: composing this policy with the record yields no components at all — the ` +
+        `server refuses that outright, so it cannot be waived.`,
+    );
+  }
 
   console.log("");
   console.log(
     `  components: ${recordFile.components?.length ?? 0} record entries, ${eligible} eligible -> ` +
-      `${composedOwned.length} owned id(s)${collisions > 0 ? `, ${collisions} collided` : ""}; ` +
+      `${takenSet.size} id(s)${collisions > 0 ? `, ${collisions} collided` : ""}; ` +
       `${shared.length} of the frozen catalog's ${goldenOwned.length} matched`,
   );
 
@@ -671,11 +699,10 @@ if (recordPath) {
   for (const componentId of goldenOwned.filter((id) => !composedSet.has(id))) {
     fields.push([`components.${componentId}`, "not offered", "offered by the frozen catalog"]);
   }
-  for (const componentId of composedOwned.filter((id) => !frozenIds.has(id))) {
+  for (const componentId of surplus) {
     fields.push([`components.${componentId}`, "offered by this catalog", "not offered"]);
   }
-  if (collisions === 0 && shared.length === goldenOwned.length &&
-      composedOwned.length === goldenOwned.length) {
+  if (collisions === 0 && surplus.length === 0 && shared.length === goldenOwned.length) {
     console.log(`  = components: the same ${shared.length} id(s) on both sides`);
   }
 }

@@ -166,6 +166,9 @@ class PublishedUiBuilderCatalogTest {
     // `isLetterOrDigit()` is `isLetter() || isDigit()`, and `isDigit()` is the DECIMAL category
     // alone — a superscript two is numeric but not a digit, so it separates.
     assertEquals("widget-x", PublishedUiBuilderCatalog.slug("Widget\u00B2X"))
+    // And the word-boundary test asks `isDigit()` too, so a decimal digit outside ASCII starts a
+    // word after it — the same predicate as the admission test, which a port can easily split.
+    assertEquals("a\u0662-b", PublishedUiBuilderCatalog.slug("A\u0662B"))
   }
 
   @Test

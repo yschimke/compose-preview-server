@@ -961,6 +961,63 @@ check "a policy declaring the wrong prefix cannot pass on the golden's" 1 $?
 grep -q "wrong/button" "${work}/out" ||
   { echo "FAIL derivation did not use the policy's prefix"; failures=$((failures + 1)); }
 
+# An id the policy maps OUTSIDE its own prefix is still on the shelf. The prefix scopes which
+# FROZEN ids this catalog answers for; using it to filter the composition too hid a component the
+# server would offer and let the gate report "the same ids on both sides". Reported by Codex on #655.
+cat >"${work}/rec-outside.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "components": { "other/extra": { "record": ":w/A.Extra" } },
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+cat >"${work}/rec-outside-record.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.Button", "componentIds": ["Controls/Button"],
+    "symbol": { "name": "Button", "callable": "a.Button", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } },
+  { "canonicalId": ":w/A.Card", "componentIds": ["Containers/Card"],
+    "symbol": { "name": "Card", "callable": "a.Card", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } },
+  { "canonicalId": ":w/A.Extra", "componentIds": ["Extras/Extra"],
+    "symbol": { "name": "Extra", "callable": "a.Extra", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-outside.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-outside-record.json" \
+  --strict >"${work}/out" 2>&1
+check "an id mapped outside the prefix is still compared" 1 $?
+grep -q "components.other/extra" "${work}/out" ||
+  { echo "FAIL out-of-prefix id not reported"; failures=$((failures + 1)); }
+grep -q "the same 2 id(s) on both sides" "${work}/out" &&
+  { echo "FAIL claimed agreement while offering an extra component"; failures=$((failures + 1)); }
+
+# A policy excluding every record component composes to nothing, which the reader refuses outright.
+# Waiving each missing frozen id must not make an EMPTY catalog pass readiness.
+cat >"${work}/rec-empty.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wear-m3/",
+    "components": { "wear-m3/button": { "record": ":w/A.Button", "excluded": "gone" },
+                    "wear-m3/card": { "record": ":w/A.Card", "excluded": "gone" } },
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+cat >"${work}/rec-emptywaiver.json" <<'JSON'
+[ { "field": "components.wear-m3/button", "why": "retired", "policy": "not offered",
+    "frozen": "offered by the frozen catalog" },
+  { "field": "components.wear-m3/card", "why": "retired", "policy": "not offered",
+    "frozen": "offered by the frozen catalog" } ]
+JSON
+"${gate}" --policy "${work}/rec-empty.json" --golden "${work}/rec-golden.json" \
+  --differences "${work}/rec-emptywaiver.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-ok.json" --strict \
+  >"${work}/out" 2>&1
+check "an empty composition cannot be waived through" 1 $?
+grep -q "no components at all" "${work}/out" ||
+  { echo "FAIL empty composition not reported"; failures=$((failures + 1)); }
+
 # A record path that does not exist is a usage error, not a pass. The same argument as the missing
 # golden: a caller asserting readiness against a file nobody could read has asserted nothing.
 "${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
