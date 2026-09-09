@@ -7,6 +7,7 @@ import java.util.Comparator
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -528,6 +529,94 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `a commit whose reused part has gone is refused rather than committed`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    val base = design("checkout")
+    store.commit("checkout", null, base)
+    val designDirectory = root.resolve("designs").resolve(FileUiBuilderDesignStore.slug("checkout"))
+    val header = designDirectory.resolve("design.json")
+    val before = Files.readAllBytes(header)
+    // The document is unchanged, so the next commit reuses its filename rather than rewriting it —
+    // and the file is not there. Measured as zero bytes the commit would fit the budget, land a
+    // header naming a part that has gone, and the design would quarantine at the next open having
+    // been told its edit was stored.
+    Files.delete(designDirectory.resolve(readHeaderDocumentFile(header)))
+
+    assertFailsWith<UiBuilderPersistenceException> {
+      store.commit(
+        "checkout",
+        base,
+        base.copy(access = base.access.copy(accessRevision = 1), updatedAtEpochMillis = 2_000),
+      )
+    }
+
+    assertContentEquals(before, Files.readAllBytes(header), "the header is still the old one")
+  }
+
+  @Test
+  fun `a legacy design with a part over the budget does not migrate and is named`() {
+    val root = createTempDirectory("ui-builder-store")
+    val wide =
+      design("checkout").let { base ->
+        base.copy(
+          access =
+            base.access.copy(
+              actorGrants =
+                (0 until 400).map {
+                  DesignActorGrantV1(
+                    actorId = "actor-$it",
+                    role = DesignAccessRoleV1.VIEWER,
+                    allowedActions = listOf(DesignAccessActionV1.READ),
+                    grantedByActorId = "owner",
+                    grantedAtEpochMillis = 1_000,
+                  )
+                }
+            )
+        )
+      }
+    Files.write(
+      root.resolve(FileUiBuilderStateStorage.STATE_FILE),
+      LegacyUiBuilderState.encode(
+        PersistedServiceV1(mapOf("checkout" to wide, "settings" to design("settings"))),
+        LegacyUiBuilderState.Format.V2,
+      ),
+    )
+
+    // The access list lives in the header and has no bound of its own, so this design's
+    // `design.json` is one file the reader would refuse. Written out anyway it would be committed
+    // under the marker and quarantined by the very next load, with the pre-migration file already
+    // renamed out of the way.
+    val store = FileUiBuilderDesignStore(root, UiBuilderStoreLimits(maximumDesignBytes = 8_192))
+    val loaded = store.load()
+
+    assertEquals(setOf("settings"), loaded.designs.keys, "every other design migrates")
+    assertContains(loaded.quarantined.keys, "checkout")
+    assertContains(loaded.quarantined.getValue("checkout"), "did not migrate")
+    assertContains(loaded.quarantined.getValue("checkout"), "per-design limit")
+    assertTrue(
+      Files.exists(root.resolve(FileUiBuilderStateStorage.STATE_FILE + ".migrated")),
+      "and the copy that still holds it is named in the reason",
+    )
+  }
+
+  @Test
+  fun `a quarantine reported under a directory still holds that design's place`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    store.commit("checkout", null, design("checkout"))
+    val slug = FileUiBuilderDesignStore.slug("checkout")
+    // A header that will not parse has no design id to be reported under, so the quarantine is
+    // keyed by the directory. The directory is still the one "checkout" would be created into.
+    Files.writeString(root.resolve("designs").resolve(slug).resolve("design.json"), "not json")
+    val reopened = FileUiBuilderDesignStore(root)
+    reopened.load()
+
+    assertEquals(slug, reopened.quarantineHolding("checkout"))
+    assertEquals(null, reopened.quarantineHolding("settings"))
+  }
+
+  @Test
   fun `a copy under another name can be retired by the name it has`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)
@@ -778,6 +867,10 @@ class FileUiBuilderDesignStoreTest {
     }
     return entries
   }
+
+  /** The `document-<digest>.json` name the stored header points at. */
+  private fun readHeaderDocumentFile(header: Path): String =
+    Regex("\"documentFile\":\"([^\"]+)\"").find(Files.readString(header))!!.groupValues[1]
 
   private fun copyRecursively(source: Path, target: Path) {
     Files.walk(source).forEach { path ->

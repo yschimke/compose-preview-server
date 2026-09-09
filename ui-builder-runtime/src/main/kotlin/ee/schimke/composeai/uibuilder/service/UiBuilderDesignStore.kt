@@ -55,6 +55,18 @@ internal interface UiBuilderDesignStore {
 
   fun remove(designId: String)
 
+  /**
+   * The key of the quarantine occupying the place [designId] would be written to, or null.
+   *
+   * Not the same question as "is this id quarantined". A design whose header cannot be parsed has
+   * no id to be quarantined under — it is reported under its directory instead — and a design
+   * restored under someone else's name is reported under that name. Both still hold a place on the
+   * disk, and creating a design into a place a quarantine holds is how one design becomes two: the
+   * new design serves while the stale quarantine still names its directory, and retiring the
+   * quarantine takes the new design with it.
+   */
+  fun quarantineHolding(designId: String): String? = null
+
   /** What is held against the ceiling that would refuse a write, or null when there is neither. */
   fun usage(): UiBuilderStorageUsage? = null
 }
@@ -526,6 +538,11 @@ internal class FileUiBuilderDesignStore(
         )
       }
     }
+  }
+
+  override fun quarantineHolding(designId: String): String? {
+    val slug = slug(designId)
+    return quarantinedSlugs.entries.firstOrNull { it.value == slug }?.key
   }
 
   override fun usage(): UiBuilderStorageUsage =
@@ -1132,27 +1149,55 @@ internal class FileUiBuilderDesignStore(
       )
     val revisionFiles = writeRevisions(designDirectory, previous, next, emptyMap()) {}
     val journal = compactJournal(designDirectory, next, generation = 1)
-    writeHeader(
-      designDirectory,
-      encodeHeader(
-        StoredDesignHeaderV3(
-          designId = designId,
-          title = next.document.title,
-          revision = next.document.revision,
-          lastSequence = next.lastSequence,
-          access = next.access,
-          catalogPin = next.document.catalogPin,
-          createdAtEpochMillis = next.createdAtEpochMillis,
-          updatedAtEpochMillis = next.updatedAtEpochMillis,
-          documentFile = documentFile,
-          positionsFile = positionsFile,
-          revisionFiles = revisionFiles,
-          journalFile = journal.file,
-          journalBytes = journal.bytes,
-          journalCompactedBytes = journal.compactedBytes,
-        )
-      ),
-    )
+    val header =
+      StoredDesignHeaderV3(
+        designId = designId,
+        title = next.document.title,
+        revision = next.document.revision,
+        lastSequence = next.lastSequence,
+        access = next.access,
+        catalogPin = next.document.catalogPin,
+        createdAtEpochMillis = next.createdAtEpochMillis,
+        updatedAtEpochMillis = next.updatedAtEpochMillis,
+        documentFile = documentFile,
+        positionsFile = positionsFile,
+        revisionFiles = revisionFiles,
+        journalFile = journal.file,
+        journalBytes = journal.bytes,
+        journalCompactedBytes = journal.compactedBytes,
+      )
+    // The migration must not write a file its own reader will refuse. Every read here is bounded by
+    // the per-design budget, so a legacy design with one file over that budget — a document, or the
+    // header itself, which carries an access list with no bound of its own — would be written out,
+    // committed under the marker, and then quarantined by the very next load, with the
+    // pre-migration file already renamed. Refused here it is one design named with its size and its
+    // limit, and the copy that still has it is the `.migrated` file this migration keeps.
+    //
+    // File by file, not the design's total: a design merely larger than the budget loads, serves
+    // and exports, and refuses to grow, which is what `commit` does with any design that reaches
+    // the budget. Quarantining that one would be a harsher rule invented at the migration boundary.
+    val encodedHeader = encodeHeader(header)
+    val oversize =
+      referencedParts(header)
+        .map { name ->
+          name to runCatching { Files.size(designDirectory.resolve(name)) }.getOrDefault(0L)
+        }
+        .plus(HEADER_FILE to encodedHeader.size.toLong())
+        .firstOrNull { (_, size) -> size > limits.maximumDesignBytes }
+    if (oversize != null) {
+      val (name, size) = oversize
+      runCatching { deleteRecursively(designDirectory) }
+      Files.createDirectories(designDirectory)
+      writeQuarantine(
+        designDirectory,
+        designId,
+        "did not migrate: $name is $size bytes and the per-design limit is " +
+          "${limits.maximumDesignBytes}; the state it was migrated from is kept as " +
+          "${FileUiBuilderStateStorage.STATE_FILE}$MIGRATED_SUFFIX",
+      )
+      return
+    }
+    writeHeader(designDirectory, encodedHeader)
   }
 
   // ---------------------------------------------------------------- files
@@ -1238,15 +1283,21 @@ internal class FileUiBuilderDesignStore(
    * would refuse a commit for bytes that are on their way out.
    */
   private fun referencedBytes(designDirectory: Path, header: StoredDesignHeaderV3): Long {
-    val parts = buildList {
-      add(header.documentFile)
-      add(header.positionsFile)
-      header.journalFile?.let { add(it) }
-      addAll(header.revisionFiles.values)
-    }
-    return parts.sumOf { name ->
-      runCatching { Files.size(designDirectory.resolve(name)) }.getOrDefault(0L)
-    }
+    val parts = referencedParts(header)
+    // Deliberately not best-effort, unlike the gauge above. A part this header names that cannot be
+    // measured is a part that is not there, and a commit reuses the name of every part it did not
+    // rewrite: counting the failure as zero bytes would let the header land naming a file that has
+    // gone, which is a design accepted here and quarantined at the next open. `Files.size` throws
+    // an `IOException`, which `commit` already answers by discarding what it wrote and refusing —
+    // leaving the previous generation whole, which is the generation that still has its parts.
+    return parts.sumOf { name -> Files.size(designDirectory.resolve(name)) }
+  }
+
+  private fun referencedParts(header: StoredDesignHeaderV3): List<String> = buildList {
+    add(header.documentFile)
+    add(header.positionsFile)
+    header.journalFile?.let { add(it) }
+    addAll(header.revisionFiles.values)
   }
 
   private fun deleteRecursively(directory: Path) {

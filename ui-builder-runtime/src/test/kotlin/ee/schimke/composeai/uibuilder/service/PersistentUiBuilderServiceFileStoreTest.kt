@@ -162,6 +162,33 @@ class PersistentUiBuilderServiceFileStoreTest {
   }
 
   @Test
+  fun `a design whose header will not parse still holds its id's place`() {
+    val root = createTempDirectory("ui-builder-service-store")
+    create(service(root), "checkout")
+    // The header is the thing that names the design, so a header that will not parse leaves no id
+    // to report the quarantine under and it is reported under the directory instead. The directory
+    // is still the one "checkout" resolves to: creating over it would put a live design and a stale
+    // quarantine in the same place, and retiring the quarantine would take the new design with it.
+    Files.writeString(designDirectory(root, "checkout").resolve("design.json"), "not json")
+    val reopened = service(root)
+    val reported = reopened.adminUnusableDesigns().keys.single()
+    assertTrue("checkout" !in reopened.adminUnusableDesigns(), "reported as $reported")
+
+    val refused =
+      execute(reopened, owner, UiBuilderServiceRequest.CreateDesign(document("checkout")))
+
+    val error = assertIs<UiBuilderServiceResponse.Error>(refused)
+    assertTrue(error.error.message.contains("quarantined"), error.error.message)
+    assertTrue(error.error.message.contains(reported), error.error.message)
+
+    // And retiring it by the name it was reported under is still the door.
+    assertTrue(reopened.adminDeleteDesign(reported))
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      execute(reopened, owner, UiBuilderServiceRequest.CreateDesign(document("checkout")))
+    )
+  }
+
+  @Test
   fun `a design whose files failed is told apart from one the catalog outgrew`() {
     val root = createTempDirectory("ui-builder-service-store")
     create(service(root), "checkout")

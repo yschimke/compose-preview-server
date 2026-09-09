@@ -57,16 +57,29 @@ internal fun uiBuilderDisabledWarning(stateDirectory: File, failure: Throwable):
     // aside would start them not on an empty store but on whichever designs the migration had got
     // to. So the partial output is named too, and only when it is actually there.
     val partial = File(stateDirectory, "designs")
-    preamble +
-      "either restore the one-generation backup (cp ${backupFile.path} ${stateFile.path}), or " +
-      "move ${stateFile.path} aside to start empty (the designs in it are then lost, so copy it " +
-      "first" +
-      (if (partial.exists()) {
+    val partialNote =
+      if (partial.exists()) {
         "; move ${partial.path} aside as well — a migration that did not finish left it, and it is " +
           "part of the old state rather than a store"
       } else {
         ""
-      }) +
+      }
+    // The rename of the legacy file deliberately precedes the marker, so the migration can be
+    // retried from it rather than half-committed. That leaves one window in this branch where the
+    // state file is already gone and `.migrated` is the state: recovery here is putting it back,
+    // not restoring a backup of a file that is no longer the newest thing on the disk.
+    if (migrated.exists() && !stateFile.exists()) {
+      return preamble +
+        "put the migrated state back and let the migration run again (mv ${migrated.path} " +
+        "${stateFile.path}$partialNote), or move it aside to start empty (the designs in it are " +
+        "then lost, so copy it first), or pass --ui-builder-state-dir none to run without the " +
+        "builder deliberately."
+    }
+    preamble +
+      "either restore the one-generation backup (cp ${backupFile.path} ${stateFile.path}), or " +
+      "move ${stateFile.path} aside to start empty (the designs in it are then lost, so copy it " +
+      "first" +
+      partialNote +
       "), or pass --ui-builder-state-dir none to run without the builder deliberately."
   }
 }

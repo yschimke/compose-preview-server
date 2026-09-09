@@ -74,6 +74,27 @@ class ServeUiBuilderLaneGuardTest {
   }
 
   @Test
+  fun `a migration that renamed the state and never reached its marker points at the rename`() {
+    val directory = stateDirectory()
+    // The window the migration's own ordering creates: the legacy file is renamed before the marker
+    // is written, so that a rename that failed can be retried rather than half-committed. If the
+    // marker write is what fails, there is no marker, no state file, and the state is the
+    // `.migrated` file — which the backup-and-move-aside advice would send an operator straight
+    // past.
+    File(directory, FileUiBuilderStateStorage.STATE_FILE + ".migrated").writeText("{}")
+    File(directory, "designs").mkdirs()
+
+    val warning = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("disk full"))
+
+    assertTrue(
+      warning.contains("mv ${directory.path}/ui-builder-service-v1.json.migrated"),
+      warning,
+    )
+    assertFalse(warning.contains("cp "), "there is no backup of a file that has been renamed away")
+    assertTrue(warning.contains("${directory.path}/designs"), warning)
+  }
+
+  @Test
   fun `a failure with no message still names something an operator can search for`() {
     val warning = uiBuilderDisabledWarning(stateDirectory(), UiBuilderPersistenceException(""))
 

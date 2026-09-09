@@ -293,7 +293,15 @@ absent from the stored tree and defaulted after.
 
 - **A commit that exceeds a design's own budget is refused before the header lands.** The header is
   what makes a generation the design, so a budget checked after it would tell the caller its edit
-  failed and hand a restart the edit that failed.
+  failed and hand a restart the edit that failed. A part the header names that cannot be *measured*
+  refuses the commit for the same reason and not as free space: a commit reuses the name of every
+  part it did not rewrite, so counting a missing one as zero bytes would land a header naming a file
+  that has gone — an edit acknowledged here and a design quarantined at the next open.
+- **Creating a design asks the store for the place, not the id.** A quarantine is not always
+  reported under the id it holds: a design whose header will not parse has no id to be read out of
+  it and is reported under its directory. Both still occupy the directory an id resolves to, and
+  creating into one is how a live design and a stale quarantine end up in the same place — the
+  design serves, and retiring the quarantine deletes it.
 
 ## Migration
 
@@ -309,7 +317,12 @@ One direction, one shot, never at the same time as anything else:
   marker, skipped the migration and served the very same designs — and the disabled-lane warning
   would offer a `.migrated` rollback whose absence was the failure. Ahead of the marker it is a step
   the migration retries from: the parts are named by the digests of their contents, so the retry
-  writes the same tree. The v2 envelope decodes as a whole — one checksum covers every design in it, so
+  writes the same tree. The migration also refuses to write a file its own reader would refuse: a
+  legacy design with a document — or a header, which carries an unbounded access list — over the
+  per-design budget is recorded as quarantined with its size and the limit, rather than written out,
+  committed under the marker, and quarantined by the very next load. File by file, not by the
+  design's total: a design merely past the budget loads, serves and exports and refuses to grow,
+  which is what any design that reaches the budget does. The v2 envelope decodes as a whole — one checksum covers every design in it, so
   there is no per-design failure to quarantine at this point; that granularity begins the moment the
   designs are written out separately, which is the next paragraph and every read after it.
 - Otherwise the store is empty and starts at v3.

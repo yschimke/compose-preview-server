@@ -936,15 +936,23 @@ public class PersistentUiBuilderService(
     // under the directory this id resolves to. Creating over it would write into somebody else's
     // design — and the id would then answer every request with the stale quarantine, while a delete
     // aimed at the quarantine took the new design with it. Retiring the old one is the door.
-    unusableDesigns[requested.id]
-      ?.takeIf { it.storeQuarantine }
-      ?.let {
-        return serviceError(
-          ServiceErrorCodeV1.BAD_REQUEST,
-          "design ${requested.id} is quarantined and must be retired before the id is reused: " +
-            it.reason,
-        )
-      }
+    //
+    // Asked of the store by place rather than by id, because a quarantine is not always reported
+    // under the id it holds: a design whose header will not parse has no id to be read out of it
+    // and is reported under its directory, and one restored under another name is reported under
+    // that name. Either still occupies the directory this id resolves to.
+    val holder =
+      store.quarantineHolding(requested.id)
+        ?: requested.id.takeIf { unusableDesigns[it]?.storeQuarantine == true }
+    if (holder != null) {
+      val reason = unusableDesigns[holder]?.reason ?: "the stored design could not be read"
+      val named = if (holder == requested.id) "" else " (reported as $holder)"
+      return serviceError(
+        ServiceErrorCodeV1.BAD_REQUEST,
+        "design ${requested.id} is quarantined$named and must be retired before the id is reused: " +
+          reason,
+      )
+    }
     if (requested.revision != 0L) {
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "new designs must start at revision 0")
     }
