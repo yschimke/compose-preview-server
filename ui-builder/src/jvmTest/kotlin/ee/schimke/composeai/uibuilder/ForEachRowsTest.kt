@@ -301,14 +301,26 @@ class ForEachRowsTest {
             base.nodes +
               ("cell" to
                 base.nodes.getValue("cell").let { cell ->
+                  // `m3/card` declares `stableKey`; `m3/surface` does not, and an undeclared
+                  // property is a different diagnostic than the one under test. Its content slot
+                  // takes a child, so the document stays valid for every other reason.
                   cell.copy(
+                    componentId = "m3/card",
                     properties =
                       JsonObject(
                         cell.properties +
                           ("stableKey" to JsonObject(mapOf("value" to JsonPrimitive("cell"))))
-                      )
+                      ),
+                    slots = mapOf("content" to listOf("cell-label")),
                   )
-                })
+                }) +
+              ("cell-label" to
+                UiBuilderNode(
+                  id = "cell-label",
+                  componentId = "m3/text",
+                  properties =
+                    JsonObject(mapOf("text" to JsonObject(mapOf("value" to JsonPrimitive(""))))),
+                ))
         )
       }
 
@@ -378,6 +390,163 @@ class ForEachRowsTest {
     )
   }
 
+  /**
+   * The canvas draws what the export writes, for a loop over a placed component.
+   *
+   * The export prints `row.shade` and the canvas substitutes the row into the placement's arguments
+   * — without that substitution the body received the binding wrapper and drew its fallback, so the
+   * preview and the generated screen disagreed about the one thing a loop is for.
+   */
+  @Test
+  fun `a loop over a placed component draws each row's value`() {
+    val image =
+      renderComposeScene(FRAME_PX, FRAME_PX, Density(1f)) { UiBuilderSurface(loopOverComponent()) }
+    val pixels = image.toComposeImageBitmap().toPixelMap()
+
+    assertEquals(shades, shades.indices.map { pixels[CELL_PX / 2, rowCentreY(it)] })
+  }
+
+  /**
+   * A malformed identity is a diagnostic, not a crash.
+   *
+   * `diagnose` runs the loop's checks before it returns what capability validation already found,
+   * so an accessor that threw here turned a malformed document into an editor that could not draw
+   * the panel naming its fault.
+   */
+  @Test
+  fun `a malformed identity value does not take the gate down`() {
+    val malformed =
+      document().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              ("cell" to
+                base.nodes.getValue("cell").let { cell ->
+                  cell.copy(
+                    properties =
+                      JsonObject(
+                        cell.properties +
+                          ("stableKey" to JsonObject(mapOf("value" to JsonObject(emptyMap()))))
+                      )
+                  )
+                })
+        )
+      }
+
+    // The claim is that this returns at all: `diagnose` reads the identity before it hands back
+    // what capability validation already found, and an accessor that threw took the editor with it.
+    val diagnostics = CapabilityComposeCodeExporter.diagnose(malformed, catalog())
+
+    assertTrue(diagnostics.any { it.nodeId == "cell" }, "$diagnostics")
+  }
+
+  /**
+   * A component placed by a body whose key sorts later is still derived first.
+   *
+   * A bound argument takes its type from the parameter it fills, so a signature derived in key
+   * order refused a perfectly acyclic composition purely because of the names involved.
+   */
+  @Test
+  fun `a component placing a later-named component still exports`() {
+    val source = exportSource(loopOverComponent(placedKey = "zzz-cell"))
+
+    assertTrue(source.contains("containerColor = row.shade"), source)
+  }
+
+  /**
+   * A loop inside a component body reads the loop's rows, not the component's arguments.
+   *
+   * Derived through the loop, the row key became a parameter of the enclosing function too, and a
+   * placement of it was refused for not passing a value the generated function never reads.
+   */
+  @Test
+  fun `a loop inside a component body does not add its keys to the component`() {
+    val nested = loopInsideComponent()
+
+    val result = CapabilityComposeCodeExporter.export(nested, catalog())
+
+    assertTrue(
+      result.diagnostics.none { it.code == "MISSING_ARGUMENT" },
+      "${result.diagnostics.map { it.code to it.message }}",
+    )
+  }
+
+  /**
+   * An identity inside a component the template places is shared by every row, so it is refused.
+   */
+  @Test
+  fun `an identity inside a placed component body is refused`() {
+    val identified =
+      loopOverComponent().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              ("cell" to
+                base.nodes.getValue("cell").let { cell ->
+                  // `m3/card` declares `stableKey`; `m3/surface` does not, and an undeclared
+                  // property is a different diagnostic than the one under test. Its content slot
+                  // takes a child, so the document stays valid for every other reason.
+                  cell.copy(
+                    componentId = "m3/card",
+                    properties =
+                      JsonObject(
+                        cell.properties +
+                          ("stableKey" to JsonObject(mapOf("value" to JsonPrimitive("cell"))))
+                      ),
+                    slots = mapOf("content" to listOf("cell-label")),
+                  )
+                }) +
+              ("cell-label" to
+                UiBuilderNode(
+                  id = "cell-label",
+                  componentId = "m3/text",
+                  properties =
+                    JsonObject(mapOf("text" to JsonObject(mapOf("value" to JsonPrimitive(""))))),
+                ))
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(identified, catalog())
+
+    assertTrue(
+      result.diagnostics.any { it.code == "IDENTITY_IN_LOOP_TEMPLATE" },
+      "${result.diagnostics.map { it.code }}",
+    )
+  }
+
+  /** A component whose body holds a loop over its own rows. */
+  private fun loopInsideComponent(): UiBuilderDocument =
+    document().let { base ->
+      base.copy(
+        roots = listOf("place"),
+        nodes =
+          base.nodes +
+            mapOf(
+              "place" to
+                UiBuilderNode(
+                  id = "place",
+                  componentId = "design/component-instance",
+                  component = JsonObject(mapOf("componentKey" to JsonPrimitive("panel"))),
+                ),
+              "panel" to
+                UiBuilderNode(
+                  id = "panel",
+                  componentId = "layout/column",
+                  slots = mapOf("children" to listOf("loop")),
+                ),
+            ),
+        components =
+          JsonObject(
+            mapOf(
+              "panel" to
+                JsonObject(
+                  mapOf("name" to JsonPrimitive("Panel"), "root" to JsonPrimitive("panel"))
+                )
+            )
+          ),
+      )
+    }
+
   private fun binding(key: String) =
     JsonObject(mapOf("type" to JsonPrimitive("binding"), "value" to JsonPrimitive(key)))
 
@@ -402,7 +571,7 @@ class ForEachRowsTest {
     }
 
   /** The same loop, but its template places a component that takes the row's shade. */
-  private fun loopOverComponent(): UiBuilderDocument =
+  private fun loopOverComponent(placedKey: String = "cell"): UiBuilderDocument =
     document().let { base ->
       base.copy(
         nodes =
@@ -417,7 +586,7 @@ class ForEachRowsTest {
                   component =
                     JsonObject(
                       mapOf(
-                        "componentKey" to JsonPrimitive("cell"),
+                        "componentKey" to JsonPrimitive(placedKey),
                         "arguments" to JsonObject(mapOf("containerColor" to binding("shade"))),
                       )
                     ),
@@ -432,7 +601,7 @@ class ForEachRowsTest {
         components =
           JsonObject(
             mapOf(
-              "cell" to
+              placedKey to
                 JsonObject(
                   mapOf(
                     "name" to JsonPrimitive("Cell"),

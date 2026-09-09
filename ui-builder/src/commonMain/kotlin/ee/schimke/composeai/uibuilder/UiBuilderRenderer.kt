@@ -1436,7 +1436,7 @@ private fun RenderNode(
             // nothing rather than taking the composition down, which is the rule every other
             // reference in this renderer follows.
             ancestors = here,
-            arguments = node.componentArguments(),
+            arguments = node.componentArguments(arguments),
           )
         }
       }
@@ -1470,8 +1470,26 @@ private fun UiBuilderNode.forEachRows(): List<JsonObject> {
 private fun UiBuilderNode.componentKey(): String =
   component?.optionalString("componentKey").orEmpty()
 
-private fun UiBuilderNode.componentArguments(): JsonObject =
-  component?.get("arguments")?.objectOrEmpty() ?: JsonObject(emptyMap())
+/**
+ * What a placement passes, with its own bound arguments resolved from the dictionary around it.
+ *
+ * A placement inside a loop template passes the row — `{"type":"binding","value":"shade"}` — and
+ * the body reads the *placement's* dictionary, so without this substitution the body received the
+ * wrapper and drew its fallback while the generated Kotlin varied correctly per row. One
+ * substitution, the same one a property takes, at the one place a scope is handed on.
+ */
+private fun UiBuilderNode.componentArguments(scope: JsonObject): JsonObject {
+  val declared = component?.get("arguments")?.objectOrEmpty() ?: JsonObject(emptyMap())
+  if (scope.isEmpty() || declared.isEmpty()) return declared
+  return JsonObject(
+    declared.mapValues { (_, value) ->
+      val binding = value as? JsonObject ?: return@mapValues value
+      if (binding.optionalString("type") != "binding") return@mapValues value
+      val key = binding.optionalString("value") ?: return@mapValues value
+      scope[key] ?: value
+    }
+  )
+}
 
 /** Where the placed component's body starts, or null when the design defines no such component. */
 private fun UiBuilderDocument.componentRoot(node: UiBuilderNode): String? {
