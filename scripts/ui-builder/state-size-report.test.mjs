@@ -182,12 +182,17 @@ test("a file that is not a state envelope is refused by name", () => {
   assert.throws(() => analyzeUiBuilderState(null), /not a JSON object/);
 });
 
+/** `FileUiBuilderDesignStore.slug`: the directory a design id addresses. */
+function slugOf(id) {
+  return createHash("sha256").update(id).digest("hex").slice(0, 32);
+}
+
 /** A per-design store on disk, written the way `FileUiBuilderDesignStore` writes one. */
 function storeDirectory(designs) {
   const root = mkdtempSync(join(tmpdir(), "ui-builder-store-"));
   writeFileSync(join(root, "store.json"), JSON.stringify({ format: "ui-builder-store-v3" }));
   for (const [id, spec] of Object.entries(designs)) {
-    const slug = createHash("sha256").update(id).digest("hex").slice(0, 32);
+    const slug = slugOf(id);
     const designDirectory = join(root, "designs", slug);
     mkdirSync(join(designDirectory, "revisions"), { recursive: true });
     const part = (name, payload) => {
@@ -348,6 +353,36 @@ test("a tombstone is charged for its bytes and not tabulated as a design", () =>
     report.totalBytes > report.designBytes + 4000,
     "but the disk it still holds is charged",
   );
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a quarantined design is counted but not tabulated, header or no header", () => {
+  const root = storeDirectory({
+    checkout: {
+      document: document("checkout", 2, 4),
+      revisions: [],
+      outcome: { operationId: "op-1", revision: 2 },
+    },
+    settings: {
+      document: document("settings", 1, 2),
+      revisions: [],
+      outcome: { operationId: "op-2", revision: 1 },
+    },
+  });
+  // The usual quarantine is a missing or corrupt part under a header that still reads: the store
+  // excludes any directory carrying the record, so a report that only checked the header would
+  // tabulate a design the host does not serve, with whatever sections survived.
+  const broken = join(root, "designs", slugOf("settings"));
+  writeFileSync(join(broken, "quarantine.json"), JSON.stringify({ reason: "document missing" }));
+
+  const report = analyzeUiBuilderStore(root);
+
+  assert.deepEqual(
+    report.designs.map((design) => design.id),
+    ["checkout"],
+    "the quarantined design is not a row",
+  );
+  assert.ok(report.overheadBytes > 0, "but its bytes are still charged");
   rmSync(root, { recursive: true, force: true });
 });
 

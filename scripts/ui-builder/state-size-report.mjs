@@ -208,11 +208,16 @@ export function analyzeUiBuilderStore(directory) {
   const designs = [];
   for (const slug of slugs) {
     const designDirectory = join(designsDirectory, slug);
-    const header = payloadOf(join(designDirectory, "design.json"));
+    // A `quarantine.json` is the store's own record that this design does not load, and it says so
+    // whether or not the header still parses — the usual quarantine is a missing or corrupt part
+    // under a header that reads perfectly well. Tabulating one would report a design the host does
+    // not serve, with sections measured from whatever survived.
+    const quarantined = existsSync(join(designDirectory, "quarantine.json"));
+    const header = quarantined ? null : payloadOf(join(designDirectory, "design.json"));
     if (!header) {
-      // A quarantined design whose header will not parse is still on the disk, and the store counts
-      // it: a report that dropped it would understate a store precisely when corrupt state is what
-      // is filling it. It has no sections to attribute, so it is counted and not tabulated.
+      // Still on the disk, and the store counts it: a report that dropped it would understate a
+      // store precisely when corrupt state is what is filling it. It has no sections to attribute,
+      // so it is counted and not tabulated.
       totalBytes += directoryBytes(designDirectory);
       continue;
     }

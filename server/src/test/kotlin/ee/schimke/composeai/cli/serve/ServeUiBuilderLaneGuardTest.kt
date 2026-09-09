@@ -124,6 +124,7 @@ class ServeUiBuilderLaneGuardTest {
   fun `on the per-design store the remedies are the store's, not the old file's`() {
     val directory = stateDirectory()
     UiBuilderDesignStateStore.open(directory.toPath())
+    File(directory, "designs").mkdirs()
 
     val warning = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("marker"))
 
@@ -149,6 +150,7 @@ class ServeUiBuilderLaneGuardTest {
   fun `a migrated store offers the file it was migrated from as the rollback`() {
     val directory = stateDirectory()
     UiBuilderDesignStateStore.open(directory.toPath())
+    File(directory, "designs").mkdirs()
     // What the migration leaves behind: the v2 file, renamed rather than deleted.
     File(directory, FileUiBuilderStateStorage.STATE_FILE + ".migrated").writeText("{}")
 
@@ -158,5 +160,34 @@ class ServeUiBuilderLaneGuardTest {
     // The store may hold designs created since the migration; rolling back without moving them
     // aside would migrate the old file into the same tree and keep them.
     assertTrue(warning.contains("designs.v3"), warning)
+    // And the marker is removed last here too: the other order can leave a start with neither a
+    // marker nor a state file, which is an empty store beside a rollback file nothing reads again.
+    assertTrue(
+      warning.indexOf(FileUiBuilderStateStorage.STATE_FILE + ".migrated ") <
+        warning.indexOf("rm ${File(directory, UiBuilderDesignStateStore.STORE_FILE).path}"),
+      warning,
+    )
+  }
+
+  @Test
+  fun `a store that has never held a design still says how to start empty`() {
+    val directory = stateDirectory()
+    // `designs/` is not created until the first commit, and `mv` on a path that is not there fails
+    // — which, chained with `&&`, would stop the marker being moved at all and send the operator
+    // round the same failure.
+    UiBuilderDesignStateStore.open(directory.toPath())
+    assertFalse(File(directory, "designs").exists(), "the store has never held a design")
+
+    val warning = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("marker"))
+
+    assertFalse(warning.contains("designs.broken"), warning)
+    assertTrue(warning.contains("mv ${File(directory, "store.json").path} "), warning)
+
+    // The same holds for the rollback, which would otherwise offer designs.v3 as the place designs
+    // created since the migration are — a directory this recovery would never create.
+    File(directory, FileUiBuilderStateStorage.STATE_FILE + ".migrated").writeText("{}")
+    val rollback = uiBuilderDisabledWarning(directory, UiBuilderPersistenceException("marker"))
+    assertTrue(rollback.contains(".migrated"), rollback)
+    assertFalse(rollback.contains("designs.v3"), rollback)
   }
 }

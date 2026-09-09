@@ -3,6 +3,7 @@ package ee.schimke.composeai.uibuilder.service
 import ee.schimke.composeai.uibuilder.protocol.*
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.Comparator
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -13,6 +14,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
 
 /**
  * What the per-design store promises, stated as tests rather than as a cost model.
@@ -581,6 +583,37 @@ class FileUiBuilderDesignStoreTest {
       store.usage().bytes,
       "the gauge is what is on the disk once the sweep has finished",
     )
+  }
+
+  @Test
+  fun `garbage that cannot be swept costs the tidying, not the design`() {
+    val root = createTempDirectory("ui-builder-store")
+    FileUiBuilderDesignStore(root).commit("checkout", null, design("checkout"))
+    val designDirectory = root.resolve("designs").resolve(FileUiBuilderDesignStore.slug("checkout"))
+    // A crash artifact the header does not name, and one this process cannot walk into. The design
+    // itself read perfectly well; sweeping and measuring are tidying and accounting, and neither is
+    // a reason to stop serving a design that loaded.
+    val unreadable = designDirectory.resolve("leftover")
+    Files.createDirectories(unreadable)
+    Files.writeString(unreadable.resolve("part.json"), "{}")
+    Files.setPosixFilePermissions(unreadable, emptySet())
+    // Root walks into a directory with no permissions on it, so there the failure this is about
+    // cannot be provoked and the test would pass without proving anything. CI's runner is not root;
+    // a root container is told why it is skipped rather than shown a green that means nothing.
+    assumeTrue(
+      !Files.isReadable(unreadable),
+      "this process can read a directory with no permissions; it must be root",
+    )
+
+    val loaded =
+      try {
+        FileUiBuilderDesignStore(root).load()
+      } finally {
+        Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("rwx------"))
+      }
+
+    assertEquals(setOf("checkout"), loaded.designs.keys)
+    assertEquals(emptyMap(), loaded.quarantined)
   }
 
   @Test

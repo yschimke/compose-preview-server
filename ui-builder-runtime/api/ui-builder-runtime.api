@@ -375,6 +375,7 @@ public final class ee/schimke/composeai/uibuilder/service/UiBuilderComponentPack
 
 public final class ee/schimke/composeai/uibuilder/service/UiBuilderDesignStateStore {
 	public static final field Companion Lee/schimke/composeai/uibuilder/service/UiBuilderDesignStateStore$Companion;
+	public static final field DESIGNS_DIRECTORY Ljava/lang/String;
 	public static final field STORE_FILE Ljava/lang/String;
 	public static final fun open (Ljava/nio/file/Path;Lee/schimke/composeai/uibuilder/service/UiBuilderStoreLimits;)Lee/schimke/composeai/uibuilder/service/UiBuilderDesignStateStore;
 	public final fun usage ()Lee/schimke/composeai/uibuilder/service/UiBuilderStorageUsage;

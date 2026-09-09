@@ -86,6 +86,9 @@ internal constructor(internal val store: UiBuilderDesignStore) {
     /** The marker whose presence means a state directory holds the per-design store. */
     public const val STORE_FILE: String = "store.json"
 
+    /** The directory the designs are under, named because an operator's recovery acts on it. */
+    public const val DESIGNS_DIRECTORY: String = "designs"
+
     /**
      * Opens the store under [root], migrating a v2 single-file state the first time it is found.
      *
@@ -322,8 +325,18 @@ internal class FileUiBuilderDesignStore(
         // name, and this is where they go; measured first, the gauge would charge them for the life
         // of the process — against a ceiling that refuses writes — and only a later commit of that
         // same design would put it right.
-        sweep(designDirectory, header)
-        val bytes = directoryBytes(designDirectory)
+        //
+        // Both best-effort, because past `readDesign` this design is servable and neither of these
+        // is reading it: unrelated garbage that cannot be walked — an unreadable crash artifact, a
+        // permission on a subdirectory — must cost the tidying and the gauge's precision, never the
+        // design. The gauge falls back to what the header references, which is a floor rather than
+        // a guess.
+        runCatching { sweep(designDirectory, header) }
+        val bytes = runCatching {
+          directoryBytes(designDirectory)
+        }
+          .recoverCatching { referencedBytes(designDirectory, header) }
+          .getOrDefault(0L)
         files[header.designId] = DesignFiles(header, bytes)
         storedBytes += bytes
       } catch (failure: Exception) {
