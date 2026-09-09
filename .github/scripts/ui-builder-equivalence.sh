@@ -623,6 +623,90 @@ for (const [name, expected] of SLUG_PINS) {
 
 if (recordPath) {
   const recordFile = read(recordPath);
+
+  // ------------------------------------------------------------------------------------------
+  // Decode before comparing.
+  //
+  // Three findings in one round — a policy VALUE that is not an object, an AUTHORED policy standing
+  // in for a generated one, and a record whose `componentIds` is a string that this code happily
+  // indexes — are all the same mistake: this traverses raw JSON where the reader decodes into
+  // types, so every shape Kotlin's decoder rejects is a shape the gate reads as ordinary data and
+  // certifies. Patching them one at a time is how the previous eight rounds went; the checks below
+  // close the family instead, by asserting the runtime's shape before any id is derived.
+  //
+  // The rule they all serve is the one already stated at the collision threshold, the empty shelf
+  // and the malformed policy map: where the reader refuses, so does this, unwaivably.
+  const isPlainObject = (value) =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+  // `--record` answers "which components would this catalog put on the shelf", and only the
+  // GENERATED artifact can answer it. An authored `ui-builder.policy.json` carries catalog-level
+  // facts; per-component ids live in `@BuilderComponent` annotations and reach the shelf through
+  // the generator, so deriving from an authored policy silently ignores every id an annotation
+  // overrides and can agree with the golden by luck.
+  if (!published) {
+    unservable += 1;
+    console.log("");
+    console.log(
+      `  x components: --record needs the GENERATED ui-builder.json. This is an authored policy, ` +
+        `whose per-component ids live in @BuilderComponent annotations that only the generator ` +
+        `resolves — deriving them here would ignore every id an annotation overrides.`,
+    );
+  }
+
+  // Every policy VALUE decodes as `UiBuilderComponentPolicy`, so a null or an array fails the
+  // reader's decode exactly as a malformed map does.
+  const badPolicyValues = isPlainObject(facts.components)
+    ? Object.entries(facts.components)
+        .filter(([, entry]) => !isPlainObject(entry))
+        .map(([componentId]) => componentId)
+    : [];
+  if (badPolicyValues.length > 0) {
+    unservable += 1;
+    console.log("");
+    console.log(
+      `  x components: ${badPolicyValues.length} entr(y|ies) in statusSemantics.components are not ` +
+        `policy objects, which fails the reader's decode: ${badPolicyValues.slice(0, 8).join(", ")}`,
+    );
+  }
+
+  // And the record itself. `ComponentRecordSource` decodes it as `ComponentRecordFile`; a document
+  // that is merely valid JSON can carry a `componentIds` STRING, which `[0]` reads as a character
+  // and `.split("/").pop()` turns into a plausible-looking id. The reader would have no record at
+  // all, and a catalog expecting one falls back.
+  const recordShapeErrors = [];
+  if (!isPlainObject(recordFile) || !Array.isArray(recordFile.components)) {
+    recordShapeErrors.push("components is not an array");
+  } else {
+    recordFile.components.forEach((component, index) => {
+      const at = `components[${index}]`;
+      if (!isPlainObject(component)) recordShapeErrors.push(`${at} is not an object`);
+      else {
+        if (typeof component.canonicalId !== "string")
+          recordShapeErrors.push(`${at}.canonicalId is not a string`);
+        if (
+          component.componentIds !== undefined &&
+          (!Array.isArray(component.componentIds) ||
+            component.componentIds.some((id) => typeof id !== "string"))
+        )
+          recordShapeErrors.push(`${at}.componentIds is not a list of strings`);
+        if (component.symbol !== undefined && !isPlainObject(component.symbol))
+          recordShapeErrors.push(`${at}.symbol is not an object`);
+      }
+    });
+  }
+  if (recordShapeErrors.length > 0) {
+    unservable += 1;
+    console.log("");
+    console.log(
+      `  x components: ${recordPath} is not a component record the reader can decode, so no id ` +
+        `derived from it means anything:`,
+    );
+    for (const problem of recordShapeErrors.slice(0, 8)) console.log(`      ${problem}`);
+    if (recordShapeErrors.length > 8)
+      console.log(`      … and ${recordShapeErrors.length - 8} more`);
+  }
+
   // The prefix the POLICY declares, falling back to the caller's assertion — never the frozen
   // catalog's. Deriving with the golden's prefix guarantees the derived ids carry the prefix they
   // are about to be compared against, so a policy declaring the WRONG prefix passes: the ids line
