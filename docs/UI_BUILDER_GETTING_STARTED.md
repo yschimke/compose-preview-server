@@ -313,11 +313,17 @@ items from the height available and **ignore `verticalSpacingDp` entirely**, whi
 says is usually carrying one of those three.
 
 The spacing is kept only while it is **positive**, and that catches out the one case you would reach
-for it: the Properties panel lets you type a negative `verticalSpacingDp` so children overlap, and
-every arrangement drops it. `center` and `bottom` fall back to plain `Arrangement.Center` and
-`Arrangement.Bottom`, and so does the default top arrangement — the renderer and the Kotlin export
-agree, both testing `spacing > 0f`, so the overlap is missing from the canvas and from the generated
-`Column` alike.
+for it: the Properties panel lets you type a negative `verticalSpacingDp` so children overlap. On
+the canvas no arrangement honours it — `center`, `bottom` and the default top all test
+`spacing > 0f` and otherwise fall back to plain `Arrangement.Center`, `Arrangement.Bottom` or
+`Arrangement.Top`.
+
+The generated Kotlin does not match the canvas here, and the mismatch is worth knowing before you
+trust either. `center` and `bottom` drop the negative value in the export too, but the **default**
+arrangement does not: its branch emits `Arrangement.spacedBy(<the signed value>)` unguarded. So a
+board left on the default arrangement with a negative gap draws no overlap in the builder and
+exports a `Column` that overlaps. Neither lane is following the other; treat a negative spacing as
+unsupported until they agree.
 
 Items are reordered by dragging them in Layers, exactly like any other children. Nothing downstream
 treats it specially: the Kotlin export writes the `Column` it is, and the screen projection sees the
@@ -383,21 +389,25 @@ not only when all of them hold:
 - `layoutMode` is `expandedTwoPane` or `twoPane`. The editor inserts **`adaptive`** by default and
   that value does *not* expand, whatever its name suggests;
 - both `mainPaneVisible` and `supportingPaneVisible` are on;
-- the pane is at least `mainPanePreferredWidthDp + supportingPanePreferredWidthDp + paneSpacingDp`
-  wide. On the defaults that is 744 + 512 + spacing, so **a tablet preset narrower than about
-  1256 dp stays single-pane** however the mode is set — and raising either preferred width raises
-  the threshold with it.
+- the **scaffold node itself** is at least
+  `mainPanePreferredWidthDp + supportingPanePreferredWidthDp + paneSpacingDp` wide. On the defaults
+  that is 744 + 512 + spacing, so a scaffold narrower than about **1256 dp** stays single-pane
+  however the mode is set — and raising either preferred width raises the threshold with it.
 
-The last one is the usual reason a correctly-moded design still shows one pane: the mode was set,
-the preset was not wide enough.
+Read the third one exactly as written: `DeterministicSupportingPaneScaffold` measures inside
+`BoxWithConstraints(modifier)`, so the width that decides is the one the scaffold is *given*, not
+the device preset. A wide preset is necessary and not sufficient — a `width` or `widthIn` on the
+scaffold, or any narrower ancestor, holds it single-pane on the widest tablet in the list. Check the
+node's own constraints before reaching for a bigger preset.
 
-In the wide editor layout, choosing a host-rendered preview surface replaces the builder's canvas
-with the host's pane, and the compare chips say why they are inert rather than accepting a choice
-that would draw nothing. The device list stays live, on the same terms as above: it reaches the
-record-driven Compose export. On the designs most likely to be host-rendered — a `wear-m3` screen,
-a `remote-m3` widget — the record-free exporters write their own fixed preview annotations, so
-there the list reaches neither the generated Kotlin nor a variant pane the host's own pane has
-replaced. It is live, and on those designs it is not doing anything.
+In the wide editor layout, **`Native`** replaces the builder's canvas with the host's pane, and the
+compare chips say why they are inert rather than accepting a choice that would draw nothing.
+**`Both`** does not replace it: the canvas is kept beside the host's pane — that surface exists to
+compare the two — so the device variants are still drawn there. The device list stays live either
+way, on the same terms as above: it reaches the record-driven Compose export. On the designs most
+likely to be host-rendered — a `wear-m3` screen, a `remote-m3` widget — the record-free exporters
+write their own fixed preview annotations, so there the list reaches the generated Kotlin no longer,
+and reaches a variant pane only while one is drawn: in `Both`, or in the compact layout below.
 
 The compact layout below 840 dp is different: it draws the builder canvas whatever surface is
 selected, so the chips stay active there.
