@@ -150,6 +150,54 @@ class RepeatedSiblingFoldTest {
     assertEquals(12, emittedCellBodies(source))
   }
 
+  /**
+   * The carousel folds too, wrapper and all.
+   *
+   * `BuilderHorizontalCarousel` is a `Row` and its items carry no key, so it is a non-lazy
+   * container like any other — but it puts a `Box(Modifier.width(itemWidth))` around each child,
+   * and that expression is the same for every one of them. So the run stands for the wrapper as
+   * well as the item.
+   */
+  @Test
+  fun `a run of identical carousel items folds, and the item wrapper folds with it`() {
+    val source = exportSource(carousel(items = 5))
+
+    assertEquals(1, Regex("kotlin\\.repeat\\(5\\) \\{ _ ->").findAll(source).count())
+    assertEquals(1, Regex("Box\\(Modifier\\.width\\(itemWidth\\)\\)").findAll(source).count())
+    assertEquals(1, emittedCellBodies(source))
+  }
+
+  /** Identical cards in a carousel, which is the only container whose items it accepts. */
+  private fun carousel(items: Int): UiBuilderDocument {
+    val itemIds = (0 until items).map { "cell-$it" }
+    val base = contributionRow(cells = items)
+    val cards = itemIds.associateWith { id ->
+      UiBuilderNode(
+        id = id,
+        componentId = "m3/card",
+        slots = mapOf("content" to listOf("$id-label")),
+      )
+    }
+    return base.copy(
+      nodes =
+        base.nodes +
+          cards +
+          ("row" to
+            UiBuilderNode(
+              id = "row",
+              componentId = "layout/horizontal-carousel",
+              properties =
+                JsonObject(
+                  mapOf(
+                    "itemWidthDp" to JsonObject(mapOf("value" to JsonPrimitive(128))),
+                    "scrollStateKey" to JsonObject(mapOf("value" to JsonPrimitive("carousel"))),
+                  )
+                ),
+              slots = mapOf("items" to itemIds),
+            ))
+    )
+  }
+
   private fun UiBuilderDocument.withState(name: String) =
     copy(
       stateVariables =

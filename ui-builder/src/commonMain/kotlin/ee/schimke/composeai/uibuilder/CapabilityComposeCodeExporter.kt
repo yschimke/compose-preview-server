@@ -498,12 +498,20 @@ private class ComposeEmitter(
    * stands for them. Naming every descendant of every copy would put back, as comments, the text
    * the fold just removed — and the copies are identical, which is the whole premise.
    *
-   * Only in the non-lazy containers. `LazyColumn` and the grid wrap each child in `item(key = …)`,
-   * and a folded run would have to invent one key for what were separate keys — laziness is where
-   * item identity has consequences, so the readability trade is not obviously worth it there and is
-   * not taken.
+   * Only in the non-lazy containers — the carousel included, whose helper is a `Row` and whose
+   * items carry no key. `LazyColumn` and the grid wrap each child in `item(key = …)`, and a folded
+   * run would have to invent one key for what were separate keys — laziness is where item identity
+   * has consequences, so the readability trade is not obviously worth it there and is not taken.
+   *
+   * [emitOne] is how a container that wraps each child — the carousel's `Box` — folds without the
+   * wrapper being written n times: the run emits the wrapper too, because it is the same expression
+   * for every child it stands for.
    */
-  private fun emitChildren(children: List<String>, level: Int) {
+  private fun emitChildren(
+    children: List<String>,
+    level: Int,
+    emitOne: (String, Int) -> Unit = ::emitNode,
+  ) {
     var index = 0
     while (index < children.size) {
       val signature = if (foldsRepeatedSiblings) foldSignature(children[index]) else null
@@ -513,12 +521,12 @@ private class ComposeEmitter(
       }
       val run = end - index
       if (run < MINIMUM_FOLDED_RUN) {
-        children.subList(index, end).forEach { emitNode(it, level) }
+        children.subList(index, end).forEach { emitOne(it, level) }
       } else {
         val folded = children.subList(index, end)
         line(level, "// repeated:$run nodes:${folded.joinToString(",").escapeComment()}")
         line(level, "kotlin.repeat($run) { _ ->")
-        emitNode(folded.first(), level + 1)
+        emitOne(folded.first(), level + 1)
         line(level, "}")
       }
       index = end
@@ -698,10 +706,14 @@ private class ComposeEmitter(
       level,
       "BuilderHorizontalCarousel(kind = \"${node.string("kind").escape()}\", itemWidth = ${node.number("itemWidthDp", 128f).dpLiteral()}, spacing = ${node.number("itemSpacingDp").dpLiteral()}, contentPaddingStart = ${node.number("contentPaddingStartDp").dpLiteral()}) { itemWidth ->",
     )
-    node.slot("items").forEach {
-      line(level + 1, "Box(Modifier.width(itemWidth)) {")
-      emitNode(it, level + 2)
-      line(level + 1, "}")
+    // Through the fold like any other non-lazy container, per-item wrapper and all: the carousel
+    // helper is a `Row`, its items carry no key, and the `Box` this puts around each one is the
+    // same expression every time — so a run of identical items is as interchangeable here as
+    // anywhere else.
+    emitChildren(node.slot("items"), level + 1) { id, itemLevel ->
+      line(itemLevel, "Box(Modifier.width(itemWidth)) {")
+      emitNode(id, itemLevel + 1)
+      line(itemLevel, "}")
     }
     line(level, "}")
   }
