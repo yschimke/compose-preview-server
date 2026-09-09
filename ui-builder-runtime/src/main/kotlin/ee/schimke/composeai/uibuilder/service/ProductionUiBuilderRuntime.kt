@@ -123,6 +123,7 @@ public class CurrentM3UiBuilderCatalogExecutor(
       REMOTE_M3_CATALOG_SYSTEM_ID to remoteM3Catalog(baseCatalog),
       WEAR_M3_CATALOG_SYSTEM_ID to wearM3Catalog(baseCatalog),
     )
+
   /**
    * The builder's own vocabulary, taken from the packaged catalog.
    *
@@ -139,22 +140,58 @@ public class CurrentM3UiBuilderCatalogExecutor(
    * "everything the published catalog does not own" would hand a future `m4/` catalog the whole
    * `m3/` shelf.
    */
-  private val builderVocabulary: List<ComponentCapabilityV1> =
-    baseCatalog.components.filter { component ->
-      BUILDER_NAMESPACES.any { component.componentId.startsWith(it) }
-    }
+  /**
+   * Where a published catalog's builder components come from.
+   *
+   * NOT one fixed set. The synthesised catalogs curate the builder vocabulary per platform, and
+   * they are right to: `wear-m3` borrows `layout/box`, `layout/column`, `layout/row` and
+   * `asset/image` and nothing else, because `WearScreenCodeExporter` refuses everything else with
+   * "no Wear Compose Material 3 counterpart this generator can write". Handing a published Wear
+   * catalog all sixteen would put `layout/lazy-grid`, `layout/scaffold` and the shapes on a watch
+   * palette, where a design that uses one is guaranteed to fail export — a palette entry that
+   * cannot be exported is worse than a missing one, because it is only discovered at the end.
+   *
+   * So the donor is the synthesised catalog of the same id, then any synthesised catalog for the
+   * same platform, then the packaged one. A catalog this binary has never heard of still gets the
+   * vocabulary of its platform's peer rather than a set chosen for someone else.
+   */
+  private fun donorFor(catalog: CatalogCapabilityV1): CatalogCapabilityV1 =
+    synthesisedCatalogs[catalog.benchmark.catalogSystemId]
+      ?: synthesisedCatalogs.values.firstOrNull { it.platform == catalog.platform }
+      ?: baseCatalog
 
   /**
    * A published catalog, plus the builder components it does not offer itself.
    *
    * Additive only, and the catalog wins every collision: a catalog that DOES declare `layout/box`
    * as a builtin keeps its own, so this cannot overwrite a deliberate statement.
+   *
+   * The donor's asset registry travels with `asset/image`. `declaredAssetKeys` reads
+   * `statusSemantics.assetRegistry` and returns null when there is none, and a null registry makes
+   * `INVALID_PROPERTY` checking return early rather than fail — so handing over the image component
+   * without it would accept any `assetKey` a design invented and surface it as a broken picture at
+   * render time. Only when the catalog states none of its own; a catalog with a registry keeps it.
    */
   private fun withBuilderVocabulary(catalog: CatalogCapabilityV1): CatalogCapabilityV1 {
+    val donor = donorFor(catalog)
     val offered = catalog.components.mapTo(mutableSetOf()) { it.componentId }
-    val missing = builderVocabulary.filterNot { it.componentId in offered }
-    return if (missing.isEmpty()) catalog
-    else catalog.copy(components = catalog.components + missing)
+    val missing =
+      donor.components.filter { component ->
+        component.componentId !in offered &&
+          BUILDER_NAMESPACES.any { component.componentId.startsWith(it) }
+      }
+    if (missing.isEmpty()) return catalog
+    val registryKey = CurrentM3UiBuilderCatalogExecutor.ASSET_REGISTRY_KEY
+    val donorRegistry = donor.statusSemantics[registryKey]
+    val semantics =
+      if (
+        missing.any { it.componentId.startsWith("asset/") } &&
+          catalog.statusSemantics[registryKey] == null &&
+          donorRegistry != null
+      )
+        JsonObject(catalog.statusSemantics + (registryKey to donorRegistry))
+      else catalog.statusSemantics
+    return catalog.copy(components = catalog.components + missing, statusSemantics = semantics)
   }
 
   // A published catalog wins over the synthesised one of the same id. The map is the union rather

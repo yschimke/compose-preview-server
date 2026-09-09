@@ -388,7 +388,7 @@
                 "kind": "objectList",
                 "members": {
                     "allowedValues": {
-                        "kind": "objectList",
+                        "kind": "anyList",
                         "optional": true
                     },
                     "jsonType": {

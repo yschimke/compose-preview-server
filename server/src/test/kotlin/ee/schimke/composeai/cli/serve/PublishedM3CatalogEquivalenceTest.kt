@@ -10,6 +10,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Does the shelf composed from m3-catalog's published files match the shelf this server
@@ -156,6 +158,90 @@ class PublishedM3CatalogEquivalenceTest {
         )
         .catalogSources["m3-catalog"],
       "the union must not quietly turn a published catalog back into a synthesised one",
+    )
+  }
+
+  /**
+   * The Wear palette is not the mobile one, and handing it the mobile vocabulary is not a kindness.
+   *
+   * `WearScreenCodeExporter` refuses everything outside `layout/box`, `layout/column`, `layout/row`
+   * and `asset/image` with "no Wear Compose Material 3 counterpart this generator can write". A
+   * palette entry that cannot be exported is worse than a missing one: the author finds out at the
+   * end, with the design already built.
+   */
+  @Test
+  fun `a published catalog is handed its own platform's builder vocabulary, not every catalog's`() {
+    val wearShaped =
+      composed.copy(
+        benchmark = composed.benchmark.copy(catalogSystemId = "wear-m3"),
+        statusSemantics =
+          JsonObject(composed.statusSemantics + ("platform" to JsonPrimitive("wear"))),
+      )
+    val served =
+      CurrentM3UiBuilderCatalogExecutor(
+          catalogSystemIds = linkedSetOf("wear-m3"),
+          published = mapOf("wear-m3" to wearShaped),
+        )
+        .listCatalogs()
+        .single()
+        .components
+        .map { it.componentId }
+        .toSet()
+    assertTrue(
+      "layout/box" in served,
+      "the Wear shelf borrows layout/box; it is one of the four the exporter writes",
+    )
+    for (mobileOnly in listOf("layout/lazy-grid", "layout/scaffold", "shape/radial-gradient")) {
+      assertTrue(
+        mobileOnly !in served,
+        "$mobileOnly reached a Wear palette, where the exporter refuses it",
+      )
+    }
+  }
+
+  /**
+   * `asset/image` without a registry is an image component whose keys nothing checks.
+   *
+   * `declaredAssetKeys` returns null when `statusSemantics.assetRegistry` is absent, and a null
+   * registry makes the check RETURN EARLY rather than fail — so an invented `assetKey` is accepted
+   * into a saved design and surfaces as a broken picture at render time.
+   */
+  @Test
+  fun `the donor's asset registry travels with the image component`() {
+    val served =
+      CurrentM3UiBuilderCatalogExecutor(
+          catalogSystemIds = linkedSetOf("m3-catalog"),
+          published = mapOf("m3-catalog" to composed),
+        )
+        .listCatalogs()
+        .single()
+    assertTrue(
+      "asset/image" in served.components.map { it.componentId },
+      "precondition: the image component is injected",
+    )
+    val keys = CurrentM3UiBuilderCatalogExecutor.declaredAssetKeys(served)
+    assertTrue(
+      keys != null && keys.isNotEmpty(),
+      "the composed catalog declares no asset registry, so no assetKey is validated",
+    )
+  }
+
+  @Test
+  fun `a jsonType the design validator cannot read is refused, not composed`() {
+    val record = json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-record-v1.json"))
+    val published = fixture("m3-catalog-published-v1.json")
+    // `accepts` reads a jsonType with `jsonPrimitive`, so an object throws while a design is being
+    // WRITTEN — an authoring path that crashes on save, not a shelf that fails to load.
+    val broken = published.replaceFirst("\"jsonType\": \"string\"", "\"jsonType\": {}")
+    assertTrue(broken != published, "precondition: the fixture has a string jsonType to break")
+    val result = PublishedUiBuilderCatalog.compose(broken, record, exports)
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Unusable,
+      "a jsonType of {} composed instead of being refused",
+    )
+    assertTrue(
+      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("jsonType"),
+      "the refusal does not name the field: ${result.reason}",
     )
   }
 

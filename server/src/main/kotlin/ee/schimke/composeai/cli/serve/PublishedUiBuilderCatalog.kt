@@ -16,6 +16,7 @@ import java.security.MessageDigest
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -128,6 +129,37 @@ internal object PublishedUiBuilderCatalog {
     }
     val id = file.catalog.id.trim()
     if (id.isEmpty()) return Result.Unusable("ui-builder.json declares no catalog id")
+
+    // A `jsonType` the design validator can read, or the file is refused.
+    //
+    // `PropertyCapabilityV1.jsonType` is a free-form `JsonElement`, and the runtime's
+    // `JsonElement.accepts` reads it as `jsonPrimitive.content` — or, for an array, each entry's.
+    // So `"jsonType": {}`, or `["string", 7]`, decodes here and THROWS there, while a design is
+    // being written. That is the worst shape a bad catalog can take: not a shelf that refuses to
+    // load, but an authoring path that crashes on save. The reader's own rule applies — where the
+    // runtime cannot read it, this refuses rather than composes.
+    val unreadableTypes =
+      semantics.components.entries
+        .flatMap { (componentId, policy) ->
+          policy.propertyCapabilities.orEmpty().mapNotNull { property ->
+            val readable =
+              when (val type = property.jsonType) {
+                is JsonArray -> type.all { it is JsonPrimitive && it.isString }
+                is JsonPrimitive -> type.isString
+                else -> false
+              }
+            if (readable) null else "$componentId.${property.name}"
+          }
+        }
+        .sorted()
+    if (unreadableTypes.isNotEmpty()) {
+      return Result.Unusable(
+        "${unreadableTypes.size} propert(y|ies) declare a jsonType that is neither a type name nor " +
+          "a list of them, which the design validator reads with `jsonPrimitive` and throws on: " +
+          unreadableTypes.take(8).joinToString(", ") +
+          (if (unreadableTypes.size > 8) ", …" else "")
+      )
+    }
 
     val policyByRecordId =
       semantics.components.entries.associateBy({ it.value.record }, { it.key to it.value })

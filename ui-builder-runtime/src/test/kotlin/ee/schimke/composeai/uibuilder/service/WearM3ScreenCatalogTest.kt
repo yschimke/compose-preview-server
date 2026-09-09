@@ -238,9 +238,19 @@ class WearM3ScreenCatalogTest {
     )
   }
 
-  /** The ids `CurrentM3UiBuilderCatalogExecutor` adds to any published catalog. */
+  /**
+   * The ids a published `wear-m3` is handed — the SYNTHESISED Wear catalog's builder vocabulary,
+   * not the mobile one.
+   *
+   * Computed from the Wear catalog rather than written down, because the point is that the two
+   * differ: Wear borrows `layout/box`, `layout/column`, `layout/row` and `asset/image` and none of
+   * the lazy layouts, scaffolds or shapes, since `WearScreenCodeExporter` refuses those. A literal
+   * list here would pass while the donor logic pointed anywhere.
+   */
   private val builderVocabulary =
-    CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
+    CurrentM3UiBuilderCatalogExecutor(
+        catalogSystemIds = setOf(CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID)
+      )
       .listCatalogs()
       .single()
       .components
