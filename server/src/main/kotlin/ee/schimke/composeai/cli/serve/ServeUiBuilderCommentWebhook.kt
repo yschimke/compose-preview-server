@@ -82,6 +82,28 @@ import kotlinx.serialization.json.putJsonObject
  * would make the channel lag further and further behind reality until somebody restarted the
  * server. Each drop says so on stderr, because a silently lossy notification is worse than none.
  *
+ * ## Why there is one destination, and not one per design
+ *
+ * [`MULTIPLAYER_WORKFLOW.md`](../../../../../../../../docs/design/MULTIPLAYER_WORKFLOW.md)'s build
+ * item 3 asks for "a per-design override in `links.thread`". This deliberately does not do that,
+ * and carries the value instead: [CommentWebhookDesignV1.thread] is on every event, so a relay that
+ * knows how to talk to the chat platform can put the message in the right conversation.
+ *
+ * Two reasons, and the second is the load-bearing one.
+ *
+ * A `links.thread` is **not the same kind of URL** as a webhook. It is the permalink you get from
+ * "copy link to message" — a thing a person opens. An incoming webhook is a secret endpoint that
+ * accepts a POST. Posting to a permalink does nothing, so the override could not work as worded
+ * even if it were safe.
+ *
+ * And it is not safe. `links` is written by **any actor with WRITE on the design**
+ * ([ServeUiBuilderLinksRoutes]), and [ServeUiBuilderLinksStore] states its own contract plainly:
+ * nothing there is ever fetched, and this host holds no credential for the systems those URLs name.
+ * Making this server POST to a URL a collaborator supplied would turn a design grant into the
+ * ability to point the host at any address that resolves — and to receive the design's discussion
+ * there. A per-design destination that a person may write has to be a credential the operator
+ * controls, and `links` is explicitly not that.
+ *
  * ## The URL is a credential
  *
  * A Slack or Teams incoming-webhook URL carries its secret in the path: anybody holding the string
@@ -192,6 +214,7 @@ internal class ServeUiBuilderCommentWebhook(
           id = change.designId,
           title = design?.title.orEmpty().ifBlank { change.designId },
           catalog = design?.catalogSystemId,
+          thread = design?.chatThread,
         ),
       thread =
         CommentWebhookThreadV1(
@@ -394,6 +417,13 @@ internal data class CommentWebhookDesignV1(
   val title: String,
   /** The catalog it is pinned to — the `<catalog>` segment of [CommentWebhookEventV1.url]. */
   val catalog: String? = null,
+  /**
+   * The chat thread this design is being discussed in, from `links.thread`.
+   *
+   * Carried, never posted to. See [ServeUiBuilderCommentWebhook]'s note on the per-design
+   * destination: this is a permalink a reader follows, not an endpoint this server may call.
+   */
+  val thread: String? = null,
 )
 
 @Serializable
@@ -429,7 +459,12 @@ internal data class CommentWebhookCommentV1(
 )
 
 /** Title and catalog for one design, as the service knows them and the comment store does not. */
-internal data class CommentWebhookDesign(val title: String, val catalogSystemId: String?)
+internal data class CommentWebhookDesign(
+  val title: String,
+  val catalogSystemId: String?,
+  /** The chat thread this design is discussed in, from its `links`. Null where none is set. */
+  val chatThread: String? = null,
+)
 
 /** Which of the four things happened. */
 internal enum class CommentBoardChangeKind(val wire: String) {
@@ -609,6 +644,15 @@ private fun teamsBody(event: CommentWebhookEventV1): JsonObject = buildJsonObjec
                 put("url", event.url)
               }
             )
+            event.design.thread?.let { thread ->
+              add(
+                buildJsonObject {
+                  put("type", "Action.OpenUrl")
+                  put("title", "Discussion for this design")
+                  put("url", thread)
+                }
+              )
+            }
           }
         }
       }
@@ -658,6 +702,10 @@ private fun CommentWebhookEventV1.chatText(
   append(headline(plain = false, escape = escape, link = link))
   append("\n> ").append(escape(comment.excerpt))
   contextLine()?.let { append("\n").append(escape(it)) }
+  // Where the design is already being talked about, when that is somewhere other than here. A
+  // notification often lands in a team channel while the design's own conversation is elsewhere,
+  // and this is the line that joins the two.
+  design.thread?.let { append("\n").append(link(it, "Discussion for this design")) }
 }
 
 private fun CommentWebhookEventV1.headline(
