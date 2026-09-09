@@ -159,9 +159,14 @@ applied so the canvas can draw it, so the number describes a submission still in
 resolves to nothing or — once a collaborator claims the number first — to a document the person
 copying never saw. But it is not simply the last accepted revision either, because a layer that only
 exists thanks to a queued insert, duplicate or paste was not in it, and pairing the two makes a link
-that opens on the missing-layer notice every time. So the host answers per node, and where it has no
-answer the link names no revision at all and opens the living design on that layer — right in both
-cases, and correct the moment the edit lands.
+that opens on the missing-layer notice every time. So the host answers per node: the last revision
+it confirmed *that layer was in*.
+
+Where it has no answer, **Copy link is withheld** rather than degraded. Dropping the revision does
+not rescue such a link — an unpinned link to a layer that is not committed yet opens the living
+design, whose first snapshot on the recipient's side has no such node either, so the editor falls
+back to the root and never reselects it when the edit lands. There is no address that is right, so
+the row is absent for the moment the queue takes.
 
 The grammar is one function,
 [`parseDesignUrlSelectors`](../../ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/DesignUrlSelectors.kt)

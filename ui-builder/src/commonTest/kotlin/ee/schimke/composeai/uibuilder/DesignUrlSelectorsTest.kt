@@ -105,6 +105,18 @@ class DesignUrlSelectorsTest {
   }
 
   @Test
+  fun `an id keeps the whitespace it was written with`() {
+    // The service rejects a node id only when it is blank, so " hero " is an id a design can have.
+    // A parser that trimmed it would disagree with the link builder, which encodes the id exactly.
+    val selectors = parseDesignUrlSelectors("?node=%20hero%20", null)
+    assertEquals(" hero ", selectors.nodeId)
+    assertEquals(
+      "/ui-builder/m3-catalog/d?node=%20hero%20",
+      designUrlPath("m3-catalog", "d", DesignUrlSelectors(nodeId = " hero ")),
+    )
+  }
+
+  @Test
   fun `the last value of a repeated key wins`() {
     assertEquals("second", parseDesignUrlSelectors("?node=first&node=second", null).nodeId)
   }

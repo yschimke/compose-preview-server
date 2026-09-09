@@ -863,26 +863,28 @@ fun UiBuilderEditor(
       },
       // The link names the *anchor* rather than the whole selection: a URL selects one node, and
       // the anchor is the node every other single-selection question in this editor is asked of.
-      // Pinned to a revision the host confirmed this layer was in, because a link to a layer is a
-      // link to a layer as it was — the thing somebody is about to be asked to look at. See
-      // [authoritativeRevisionFor] for why that is neither the revision on screen nor, for a layer
-      // just inserted, the last one accepted.
+      // Pinned to the revision the host confirmed this layer was in, and offered only where there
+      // is one. A layer that exists solely because of a queued insert, duplicate or paste is in no
+      // revision yet, and neither shape of link to it works: pinned, it names a revision the layer
+      // was not in; unpinned, it opens the living design, where the recipient's own first snapshot
+      // has no such node — so the editor falls back to the root and never reselects when the edit
+      // lands. Nothing here can make that link correct, so the row is withheld for the moment the
+      // queue takes rather than copying an address that is wrong on arrival.
       onCopyLink =
         onCopyDesignLink?.let { copy ->
           state.selectedNodeId?.let { nodeId ->
-            {
-              editorScope.launch {
-                say(
-                  copyLinkSentence(
-                    copy,
-                    DesignUrlSelectors(
-                      revision = authoritativeRevisionFor(nodeId),
-                      nodeId = nodeId,
-                    ),
+            authoritativeRevisionFor(nodeId)?.let { revision ->
+              {
+                editorScope.launch {
+                  say(
+                    copyLinkSentence(
+                      copy,
+                      DesignUrlSelectors(revision = revision, nodeId = nodeId),
+                    )
                   )
-                )
+                }
+                Unit
               }
-              Unit
             }
           }
         },

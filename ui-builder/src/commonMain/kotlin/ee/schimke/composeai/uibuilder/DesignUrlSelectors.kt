@@ -177,9 +177,18 @@ private fun parseUrlPairs(raw: String?): Map<String, String> {
  */
 private fun String.toRevisionOrNull(): Long? = trim().toLongOrNull()?.takeIf { it >= 0 }
 
-/** A node or thread id, or null where the URL named nothing usable. */
-private fun String.toSelectorIdOrNull(): String? =
-  trim().takeIf { it.isNotEmpty() && it.length <= SELECTOR_VALUE_MAX }
+/**
+ * A node or thread id, or null where the URL named nothing usable.
+ *
+ * The value is returned as it was written, not trimmed. Only *blankness* is tested by trimming,
+ * because that is the one thing the service tests too: a node id is rejected when it is blank and
+ * accepted otherwise, so `" hero "` is an id a stored design can genuinely have. Returning the
+ * trimmed form would make this parser disagree with [designUrlPath], which percent-encodes the id
+ * exactly — the feature's own copied link would then select a different node, or none.
+ */
+private fun String.toSelectorIdOrNull(): String? = takeIf {
+  it.isNotBlank() && it.length <= SELECTOR_VALUE_MAX
+}
 
 /**
  * Percent-encoding for one URL component, matching JavaScript's `encodeURIComponent`.

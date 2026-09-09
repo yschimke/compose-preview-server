@@ -934,6 +934,9 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
     // The address bar stops naming it, and so does the state this page publishes for the harness
     // and the extension. A fragment pointing at a conversation that is not there is the same lie
     // an unavailable `?revision=` is not allowed to tell.
+    // Deliberately not clearing [linkedThreadId] here, unlike the close path below: the notice is
+    // derived from it, and a link naming a thread that does not exist has no card to keep on screen
+    // anyway — the exemption that path is protecting against needs a card to exempt.
     LaunchedEffect(staleThreadId) {
       if (staleThreadId != null) {
         dropDesignUrlFragment()
@@ -990,8 +993,15 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
       linkedThreadId = linkedThreadId,
       onSelectedThreadChanged = {
         openThreadId = it
-        // The fragment stops naming a thread as soon as the reader closes it or opens another.
-        if (it != linkedThreadId) dropDesignUrlFragment()
+        // The fragment stops naming a thread as soon as the reader closes it or opens another, and
+        // the state that mirrors it has to go with it. `replaceState` fires no `hashchange`, so
+        // nothing else would clear this — and a stale value here keeps feeding the panel a
+        // `revealThreadId`, which is what exempts a resolved card from being hidden. The card would
+        // then stay on screen for the rest of the session, after the URL had stopped naming it.
+        if (it != linkedThreadId) {
+          dropDesignUrlFragment()
+          linkedThreadId = null
+        }
       },
       revisionPin = revisionPin,
       // Only where there is somewhere to go. A revision that could not be shown left the page on
