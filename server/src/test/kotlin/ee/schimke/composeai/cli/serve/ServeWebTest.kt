@@ -947,17 +947,24 @@ class ServeWebTest {
       )
 
     // The chip reads the SYSTEM id — short, bounded, and the handle the card already prints under
-    // its own title — while the whole sentence, with the catalog's real name, stays in the
-    // accessible name and the tooltip where its length costs nothing.
+    // its own title — and the catalog's real name joins it in the accessible name and the tooltip,
+    // where length costs nothing.
+    //
+    // BOTH, not just the title: the accessible name has to contain the visible text verbatim (WCAG
+    // 2.5.3 Label in Name), or someone driving the page by voice reads `wear-m3-catalog` off the
+    // chip and nothing happens.
     assertTrue(
       html.contains(
         "<a class=\"cp-action-chip cp-action-chip--compact\" " +
           "href=\"/remote-m3/compare?format=parallel\" " +
-          "aria-label=\"remote-m3: compare to M3 Wear OS Apps Design Kit\" " +
-          "title=\"remote-m3: compare to M3 Wear OS Apps Design Kit\">wear-m3-catalog</a>"
+          "aria-label=\"remote-m3: compare to wear-m3-catalog — M3 Wear OS Apps Design Kit\" " +
+          "title=\"remote-m3: compare to wear-m3-catalog — M3 Wear OS Apps Design Kit\">" +
+          "wear-m3-catalog</a>"
       ),
       html,
     )
+    // The design-tool chip shows its own label, so it stays one phrase rather than "Figma — Figma".
+    assertTrue(html.contains("aria-label=\"remote-m3: compare to Figma\""), html)
     // It stands BESIDE the design-tool chip under one "Compare to", rather than replacing it or
     // repeating the verb: they are two different comparisons, and a catalog with a sibling still
     // has a design file.

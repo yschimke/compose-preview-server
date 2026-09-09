@@ -6270,7 +6270,13 @@ ${captureControlsHtml().prependIndent("          ")}
         val query =
           listOf("format=$format", tokenParam).filter { it.isNotEmpty() }.joinToString("&")
         val href = WebEscaping.htmlEscape("/$sysSeg/compare?$query")
-        val described = WebEscaping.htmlEscape("${s.title}: compare to $spoken")
+        // The VISIBLE text, verbatim, inside the accessible name — WCAG 2.5.3 Label in Name. The
+        // sibling chip shows `wear-m3-catalog` and used to be announced only as "M3 Wear OS Apps
+        // Design Kit", so someone driving the page by voice could read the chip aloud and have
+        // nothing happen. Both, when they differ; the design-tool chip shows its own label and is
+        // left as one phrase rather than saying "Figma — Figma".
+        val named = if (text == spoken) spoken else "$text — $spoken"
+        val described = WebEscaping.htmlEscape("${s.title}: compare to $named")
         return "<a class=\"cp-action-chip cp-action-chip--compact\" href=\"$href\" " +
           "aria-label=\"$described\" title=\"$described\">${WebEscaping.htmlEscape(text)}</a>"
       }
