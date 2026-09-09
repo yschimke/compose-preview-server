@@ -400,13 +400,10 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
         config = CommentWebhookConfig(webhookUrl, CommentWebhookFormat.parse(format)!!),
         designs = { designId ->
           service.adminDesignSummary(designId)?.let {
-            CommentWebhookDesign(
-              it.title,
-              it.catalogPin.systemId,
-              links.read(designId)?.thread,
-            )
+            CommentWebhookDesign(it.title, it.catalogPin.systemId)
           }
         },
+        designThread = { designId -> links.read(designId)?.thread },
         baseUrl = { ServeUrls.origin("127.0.0.1", server.port) },
       )
     closeables += webhook.attach(comments)

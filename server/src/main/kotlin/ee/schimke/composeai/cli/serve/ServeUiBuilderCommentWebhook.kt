@@ -121,6 +121,20 @@ internal class ServeUiBuilderCommentWebhook(
   /** Title and catalog for a design id; null where the host cannot name it. */
   private val designs: (String) -> CommentWebhookDesign?,
   /**
+   * The design's chat thread, from its `links`. Called on the **worker**, never on the writer.
+   *
+   * Unlike the title and catalog, this reads a file, and the seam that resolves those runs inside
+   * the comment store's per-design lock ([ServeUiBuilderCommentStore]'s note on announcing host
+   * subscribers). Three syscalls there would serialize every other write to the design behind
+   * somebody's disk, which is the one thing that seam promises not to do.
+   *
+   * Resolving it later is affordable in a way that resolving the title later was not: `thread`
+   * names no part of the permalink and does not say which design this is. It is a pointer a relay
+   * follows, so the worst a late read costs is a pointer that moved, not a notification that
+   * describes the wrong design.
+   */
+  private val designThread: (String) -> String? = { null },
+  /**
    * The origin a person's browser reaches this server at, resolved per event rather than captured.
    *
    * Lazy because it is not knowable when this is constructed: on a `--port 0` host the port is
@@ -207,6 +221,8 @@ internal class ServeUiBuilderCommentWebhook(
   private fun describe(queued: QueuedCommentChange): CommentWebhookEventV1 {
     val change = queued.change
     val design = queued.design
+    // On the worker: see [designThread].
+    val chatThread = designThread(change.designId)
     return CommentWebhookEventV1(
       event = change.kind.wire,
       design =
@@ -214,7 +230,7 @@ internal class ServeUiBuilderCommentWebhook(
           id = change.designId,
           title = design?.title.orEmpty().ifBlank { change.designId },
           catalog = design?.catalogSystemId,
-          thread = design?.chatThread,
+          thread = chatThread,
         ),
       thread =
         CommentWebhookThreadV1(
@@ -459,12 +475,7 @@ internal data class CommentWebhookCommentV1(
 )
 
 /** Title and catalog for one design, as the service knows them and the comment store does not. */
-internal data class CommentWebhookDesign(
-  val title: String,
-  val catalogSystemId: String?,
-  /** The chat thread this design is discussed in, from its `links`. Null where none is set. */
-  val chatThread: String? = null,
-)
+internal data class CommentWebhookDesign(val title: String, val catalogSystemId: String?)
 
 /** Which of the four things happened. */
 internal enum class CommentBoardChangeKind(val wire: String) {

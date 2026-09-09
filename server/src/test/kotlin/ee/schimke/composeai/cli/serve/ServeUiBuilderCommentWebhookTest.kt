@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -556,6 +557,56 @@ class ServeUiBuilderCommentWebhookTest {
         .jsonPrimitive
         .content
     assertTrue(!plainSlack.contains("Discussion for this design"), plainSlack)
+  }
+
+  @Test
+  fun `reading the design's chat thread never holds up a comment write`() {
+    // That lookup reads a file. The seam resolving the title runs inside the comment store's
+    // per-design lock, and its own contract says a listener doing I/O there would serialize every
+    // other write to the design behind it — so this one runs on the worker instead. Pinned as the
+    // property that makes it observable: a wedged links read must not stall writes.
+    val root = Files.createTempDirectory("comment-webhook-thread-io")
+    try {
+      val store = ServeUiBuilderCommentStore(root)
+      val releaseThreadRead = CountDownLatch(1)
+      val threadReadEntered = CountDownLatch(1)
+      val webhook =
+        ServeUiBuilderCommentWebhook(
+          config = CommentWebhookConfig("https://hooks.example/hook"),
+          designs = { CommentWebhookDesign("Checkout", "m3-catalog") },
+          designThread = {
+            threadReadEntered.countDown()
+            releaseThreadRead.await(10, TimeUnit.SECONDS)
+            "https://chat.example/c/123/p456"
+          },
+          baseUrl = { "https://preview.example" },
+          send = { true },
+          onLog = {},
+        )
+      webhook.use {
+        it.attach(store).use {
+          store.post("design-1", "Yuri", CommentPostRequest(body = "First."))
+          assertTrue(
+            threadReadEntered.await(10, TimeUnit.SECONDS),
+            "the worker never read the design's thread",
+          )
+
+          // The read is wedged. A second write to the same design — the same lock stripe — must
+          // still go through, which it cannot if that read is happening under the lock.
+          val elapsed = measureTimeMillis {
+            store.post("design-1", "Yuri", CommentPostRequest(body = "Second."))
+          }
+
+          assertTrue(
+            elapsed < 5_000,
+            "a comment write waited $elapsed ms behind a links read it should never touch",
+          )
+          releaseThreadRead.countDown()
+        }
+      }
+    } finally {
+      root.toFile().deleteRecursively()
+    }
   }
 
   @Test
