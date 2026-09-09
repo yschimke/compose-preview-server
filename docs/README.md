@@ -61,6 +61,9 @@ The product spec and its RFC come first; everything after them is one surface or
 - [design/UI_BUILDER_ASSETS.md](design/UI_BUILDER_ASSETS.md) — images in a design.
 - [design/UI_BUILDER_LINKS.md](design/UI_BUILDER_LINKS.md) — links between designs.
 - [design/UI_BUILDER_COMMENTS.md](design/UI_BUILDER_COMMENTS.md) — comments on a design.
+- [design/UI_BUILDER_REVISION_HISTORY.md](design/UI_BUILDER_REVISION_HISTORY.md) — the history
+  bar of revision thumbnails, diffing two of them, and how that sits beside the viewer's
+  published-render versions.
 - [design/UI_BUILDER_LIVE_SESSION.md](design/UI_BUILDER_LIVE_SESSION.md) — the live browser session.
 - [design/UI_BUILDER_REFERENCE_OVERLAY.md](design/UI_BUILDER_REFERENCE_OVERLAY.md) — the reference
   overlay.
