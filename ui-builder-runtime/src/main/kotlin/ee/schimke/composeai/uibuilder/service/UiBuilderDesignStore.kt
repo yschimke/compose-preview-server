@@ -277,6 +277,19 @@ internal class FileUiBuilderDesignStore(
     storedBytes = 0
     for (slug in designSlugs()) {
       val designDirectory = designsDirectory.resolve(slug)
+      val misplaced = misplacedDesignId(designDirectory, slug)
+      if (misplaced != null) {
+        // Reported before the quarantine file is even read: a copy carries the original's
+        // `quarantine.json` too, and that record names the design id, which is exactly the id this
+        // directory must not be allowed to answer for.
+        quarantined[slug] =
+          "design $misplaced is stored at $DESIGNS_DIRECTORY/$slug rather than at " +
+            "$DESIGNS_DIRECTORY/${slug(misplaced)}; move it back under that name to serve it, or " +
+            "retire it by the name it has"
+        quarantinedSlugs[slug] = slug
+        storedBytes += runCatching { directoryBytes(designDirectory) }.getOrDefault(0L)
+        continue
+      }
       val existingQuarantine = readQuarantine(designDirectory)
       if (existingQuarantine != null) {
         quarantined[existingQuarantine.first] = existingQuarantine.second
@@ -923,6 +936,18 @@ internal class FileUiBuilderDesignStore(
   }
 
   private fun readMarker() {
+    // Bounded before it is allocated, like every other read here. The marker is two fields, so a
+    // large one is corruption — and reading it whole to discover that is an `OutOfMemoryError`,
+    // which is not an `Exception` and so escapes both this handler and `serve`'s lane guard: a bad
+    // `store.json` would cost the host rather than the UI-builder lane
+    // (yschimke/compose-preview-server#568).
+    val markerBytes = Files.size(markerFile)
+    if (markerBytes > MAXIMUM_MARKER_BYTES) {
+      throw UiBuilderPersistenceException(
+        "UI-builder store marker at $markerFile is $markerBytes bytes; the limit is " +
+          "$MAXIMUM_MARKER_BYTES"
+      )
+    }
     val marker =
       try {
         json.decodeFromString(
@@ -960,13 +985,35 @@ internal class FileUiBuilderDesignStore(
 
   // ---------------------------------------------------------------- quarantine
 
+  /**
+   * The design id a directory claims, when the directory is not the one that id addresses.
+   *
+   * The slug is the address, not a label: [commit] and [remove] both resolve
+   * `designs/<slug(designId)>` from the id rather than from the directory a design was read out of.
+   * So a design restored or copied under another basename — an in-place backup, a directory put
+   * back under a name someone could read — is not a second copy of that design to this store, it is
+   * a header claiming an id that already has a home. Loading it would hand the service that
+   * header's parts, and the next commit would then write a header into the canonical directory
+   * naming part files that only exist beside the copy: an edit accepted, and the design quarantined
+   * at the next start. A delete has the same shape from the other end — the canonical directory
+   * goes, the copy stays, and the design comes back on the next open.
+   *
+   * So it is reported instead, keyed by the directory rather than by the id. That keeps it distinct
+   * from whichever design legitimately holds that id, and still lets an operator retire it:
+   * [remove] resolves a quarantined key through the directory recorded here.
+   */
+  private fun misplacedDesignId(designDirectory: Path, slug: String): String? {
+    val designId = runCatching { readHeader(designDirectory).designId }.getOrNull() ?: return null
+    return designId.takeIf { slug(it) != slug }
+  }
+
   private fun readQuarantine(designDirectory: Path): Pair<String, String>? {
     val path = designDirectory.resolve(QUARANTINE_FILE)
     if (!Files.exists(path)) return null
     val record = runCatching {
       json.decodeFromString(
         StoredQuarantineV3.serializer(),
-        Files.readAllBytes(path).decodeToString(),
+        readBounded(path, "quarantine record").decodeToString(),
       )
     }
       .getOrNull()
@@ -982,7 +1029,7 @@ internal class FileUiBuilderDesignStore(
       ?: runCatching {
         json
           .parseToJsonElement(
-            Files.readAllBytes(designDirectory.resolve(HEADER_FILE)).decodeToString()
+            readBounded(designDirectory.resolve(HEADER_FILE), "header").decodeToString()
           )
           .jsonObject[PAYLOAD_FIELD]
           ?.jsonObject
@@ -1033,12 +1080,28 @@ internal class FileUiBuilderDesignStore(
     }
     val decoded = LegacyUiBuilderState.decode(Files.readAllBytes(legacyFile))
     decoded.designs.forEach { (designId, design) -> commitUnlocked(designId, null, design) }
+    // The rename goes BEFORE the marker, because the marker is the commit point: it is what makes
+    // the next start skip the migration. A rename that failed after it — a locked file, a read-only
+    // mount, a `.migrated` name already taken by something else — would leave this start reporting
+    // a failed migration and disabling the lane, while the next start reads the marker, skips the
+    // migration and serves the very same v3 designs. It would also make the disabled-lane warning
+    // untrue, offering a `.migrated` rollback that the failure is precisely the absence of. Ahead
+    // of the marker it is a step the migration can be retried from: the designs it rewrites are
+    // named by the digests of their contents, so the retry writes the same tree.
+    try {
+      Files.move(
+        legacyFile,
+        directory.resolve(FileUiBuilderStateStorage.STATE_FILE + MIGRATED_SUFFIX),
+        StandardCopyOption.REPLACE_EXISTING,
+      )
+    } catch (failure: IOException) {
+      throw UiBuilderPersistenceException(
+        "cannot set aside the migrated UI-builder state at $legacyFile",
+        failure,
+      )
+    }
+    // Forcing this directory is what makes both the rename and the marker durable, in that order.
     writeMarker(StoreMarkerV3(STORE_FORMAT, migratedFrom = decoded.format.wire))
-    Files.move(
-      legacyFile,
-      directory.resolve(FileUiBuilderStateStorage.STATE_FILE + MIGRATED_SUFFIX),
-      StandardCopyOption.REPLACE_EXISTING,
-    )
   }
 
   private fun commitUnlocked(

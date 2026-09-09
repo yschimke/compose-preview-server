@@ -281,6 +281,15 @@ absent from the stored tree and defaulted after.
   permissions on different failures, and a quarantine that could not be cleared would be the
   one-way door this mechanism exists to avoid. Downloading or repairing it cannot work, and says so
   — both need the document that would not decode.
+- **A design directory is only that design where its name says so.** The slug is the address, not a
+  label: a commit and a delete both derive `designs/<slug(designId)>` from the id rather than from
+  the directory the design was read out of. So a design restored or copied under some other basename
+  — an in-place backup, a directory put back under a name a person can read — is reported like a
+  quarantined design rather than served, keyed by the directory it is in so that it stays distinct
+  from whichever design legitimately holds that id, and so that it can still be retired by the name
+  it has. Served, it would be worse than useless: the next commit would reuse the part names in
+  *its* header while writing into the canonical directory, naming files that only exist beside the
+  copy, and a delete would take the canonical directory while the copy came back at the next open.
 
 - **A commit that exceeds a design's own budget is refused before the header lands.** The header is
   what makes a generation the design, so a budget checked after it would tell the caller its edit
@@ -292,9 +301,15 @@ One direction, one shot, never at the same time as anything else:
 
 - If `store.json` exists, the store is v3 and `ui-builder-service-v1.json` is ignored.
 - Otherwise, if `ui-builder-service-v1.json` exists, it is read with the existing v1/v2 decoder and
-  written out as the tree above, one design at a time; then `store.json` is written last, which is
-  what makes the migration atomic. The old file is renamed to `ui-builder-service-v1.json.migrated`
-  and never deleted. The v2 envelope decodes as a whole — one checksum covers every design in it, so
+  written out as the tree above, one design at a time; the old file is then renamed to
+  `ui-builder-service-v1.json.migrated` — never deleted — and `store.json` is written last, which is
+  what makes the migration atomic. The marker goes after the rename because the marker is the commit
+  point: it is what makes the next start skip the migration, so a rename that failed after it would
+  leave one start reporting a failed migration and disabling the lane while the next start read the
+  marker, skipped the migration and served the very same designs — and the disabled-lane warning
+  would offer a `.migrated` rollback whose absence was the failure. Ahead of the marker it is a step
+  the migration retries from: the parts are named by the digests of their contents, so the retry
+  writes the same tree. The v2 envelope decodes as a whole — one checksum covers every design in it, so
   there is no per-design failure to quarantine at this point; that granularity begins the moment the
   designs are written out separately, which is the next paragraph and every read after it.
 - Otherwise the store is empty and starts at v3.

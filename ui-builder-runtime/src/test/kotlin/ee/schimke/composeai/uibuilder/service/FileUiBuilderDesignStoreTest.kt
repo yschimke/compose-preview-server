@@ -3,6 +3,7 @@ package ee.schimke.composeai.uibuilder.service
 import ee.schimke.composeai.uibuilder.protocol.*
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Comparator
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -483,11 +484,70 @@ class FileUiBuilderDesignStoreTest {
   fun `a store marker too large to be a marker is refused rather than read`() {
     val root = createTempDirectory("ui-builder-store")
     FileUiBuilderDesignStore(root)
-    Files.writeString(root.resolve("store.json"), "{".repeat(200_000))
+    // Deliberately a marker that still decodes: the refusal has to be the size, taken before the
+    // bytes are allocated, rather than the parse failing afterwards. A marker large enough to
+    // matter is one there is no room to allocate, and the `OutOfMemoryError` that read would throw
+    // is not an `Exception` — it would escape `serve`'s lane guard and cost the host rather than
+    // the UI-builder lane.
+    Files.writeString(
+      root.resolve("store.json"),
+      "{\"format\":\"ui-builder-store-v3\"}" + " ".repeat(200_000),
+    )
 
     val failure = assertFailsWith<UiBuilderPersistenceException> { FileUiBuilderDesignStore(root) }
 
     assertContains(failure.message.orEmpty(), "store marker")
+    assertContains(failure.message.orEmpty(), "the limit is")
+  }
+
+  @Test
+  fun `a design stored under another directory's name is reported rather than served`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    store.commit("checkout", null, design("checkout"))
+    store.commit("settings", null, design("settings"))
+    // An operator restoring a design in place, or leaving a copy of one beside it. The slug is the
+    // address rather than a label — a commit and a delete both derive `designs/<slug(designId)>`
+    // from the id — so a header claiming "checkout" from anywhere else must not be allowed to
+    // answer for it: served, its parts would be reused by a commit that writes into the canonical
+    // directory, naming files that only exist beside the copy.
+    val canonical = root.resolve("designs").resolve(FileUiBuilderDesignStore.slug("checkout"))
+    val copy = canonical.resolveSibling(canonical.fileName.toString() + "-backup")
+    copyRecursively(canonical, copy)
+
+    val reopened = FileUiBuilderDesignStore(root).load()
+
+    assertEquals(
+      setOf("checkout", "settings"),
+      reopened.designs.keys,
+      "the design at its own address still serves",
+    )
+    val misplaced = copy.fileName.toString()
+    assertContains(reopened.quarantined.keys, misplaced, "and the copy is named by its directory")
+    assertContains(reopened.quarantined.getValue(misplaced), "checkout")
+  }
+
+  @Test
+  fun `a copy under another name can be retired by the name it has`() {
+    val root = createTempDirectory("ui-builder-store")
+    val store = FileUiBuilderDesignStore(root)
+    store.commit("checkout", null, design("checkout"))
+    val copy = root.resolve("designs/restored-checkout")
+    copyRecursively(
+      root.resolve("designs").resolve(FileUiBuilderDesignStore.slug("checkout")),
+      copy,
+    )
+    val reopened = FileUiBuilderDesignStore(root)
+    reopened.load()
+
+    reopened.remove("restored-checkout")
+
+    assertFalse(Files.exists(copy))
+    assertEquals(
+      setOf("checkout"),
+      FileUiBuilderDesignStore(root).load().designs.keys,
+      "and retiring the copy is not retiring the design it claimed to be",
+    )
   }
 
   @Test
@@ -617,6 +677,40 @@ class FileUiBuilderDesignStoreTest {
   }
 
   @Test
+  fun `a migration that cannot set the legacy file aside commits nothing`() {
+    val root = createTempDirectory("ui-builder-store")
+    Files.write(
+      root.resolve(FileUiBuilderStateStorage.STATE_FILE),
+      LegacyUiBuilderState.encode(
+        PersistedServiceV1(mapOf("checkout" to design("checkout"))),
+        LegacyUiBuilderState.Format.V2,
+      ),
+    )
+    // The rename is made to fail: a non-empty directory already holds the name it moves to. What
+    // matters is what the failure leaves behind — the marker is the commit point, so it must not
+    // have been written. Written first, this start would report a failed migration and disable the
+    // lane while the next start read the marker, skipped the migration and served the same designs.
+    val blocked = root.resolve(FileUiBuilderStateStorage.STATE_FILE + ".migrated")
+    Files.createDirectories(blocked)
+    Files.writeString(blocked.resolve("occupied"), "in the way")
+
+    val failure = assertFailsWith<UiBuilderPersistenceException> { FileUiBuilderDesignStore(root) }
+
+    assertContains(failure.message.orEmpty(), "set aside")
+    assertFalse(Files.exists(root.resolve("store.json")), "the marker is not the first thing done")
+    assertTrue(
+      Files.exists(root.resolve(FileUiBuilderStateStorage.STATE_FILE)),
+      "and the state being migrated is still the state",
+    )
+
+    // Which makes it a step the migration retries from, rather than one it has to be recovered
+    // from: the parts are named by the digests of their contents, so the retry writes the same
+    // tree.
+    Files.walk(blocked).sorted(Comparator.reverseOrder()).forEach { Files.delete(it) }
+    assertEquals(setOf("checkout"), FileUiBuilderDesignStore(root).load().designs.keys)
+  }
+
+  @Test
   fun `a v2 file beside an existing store is ignored`() {
     val root = createTempDirectory("ui-builder-store")
     val store = FileUiBuilderDesignStore(root)
@@ -683,6 +777,17 @@ class FileUiBuilderDesignStoreTest {
       }
     }
     return entries
+  }
+
+  private fun copyRecursively(source: Path, target: Path) {
+    Files.walk(source).forEach { path ->
+      val destination = target.resolve(source.relativize(path).toString())
+      if (Files.isDirectory(path)) Files.createDirectories(destination)
+      else {
+        Files.createDirectories(destination.parent)
+        Files.copy(path, destination)
+      }
+    }
   }
 
   private fun design(designId: String): PersistedDesignV1 {

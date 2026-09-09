@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -318,6 +318,37 @@ test("each store is measured against its own ceiling", () => {
     defaultMaximumBytes({ format: "compose-preview-ui-builder-service/v2" }),
     128 * 1024 * 1024,
   );
+});
+
+test("a tombstone is charged for its bytes and not tabulated as a design", () => {
+  const root = storeDirectory({
+    checkout: {
+      document: document("checkout", 2, 4),
+      revisions: [],
+      outcome: { operationId: "op-1", revision: 2 },
+    },
+  });
+  // A delete commits by renaming the design out of the way; the unlink that follows is cleanup and
+  // can be interrupted. What is left is not a design — the store retries the unlink on the next
+  // open — so counting it as one would double a recreated id and report deleted designs as live.
+  const live = join(root, "designs", readdirSync(join(root, "designs"))[0]);
+  const tombstone = `${live}.deleted-1700000000000`;
+  cpSync(live, tombstone, { recursive: true });
+  writeFileSync(join(tombstone, "leftover.json"), "x".repeat(4096));
+
+  const report = analyzeUiBuilderStore(root);
+
+  assert.equal(report.designCount, 1, "the tombstone is not a design");
+  assert.deepEqual(
+    report.designs.map((design) => design.id),
+    ["checkout"],
+    "and the id it holds is not reported twice",
+  );
+  assert.ok(
+    report.totalBytes > report.designBytes + 4000,
+    "but the disk it still holds is charged",
+  );
+  rmSync(root, { recursive: true, force: true });
 });
 
 test("a design whose header will not parse is still counted", () => {

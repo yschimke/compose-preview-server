@@ -59,6 +59,8 @@ const DEFAULT_MAXIMUM_BYTES = 128 * 1024 * 1024;
  */
 const DEFAULT_STORE_MAXIMUM_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_WARN_PERCENT = 80;
+/** `FileUiBuilderDesignStore.DELETED_SUFFIX`: a design directory renamed out of the way by a delete. */
+const DELETED_SUFFIX = ".deleted-";
 
 function byteLength(value) {
   if (value === undefined) return 0;
@@ -187,13 +189,22 @@ export function analyzeUiBuilderStore(directory) {
   // A store that has been opened but never written to has a marker and no `designs/` at all, which
   // is an empty deployment rather than a broken one — and the report exists to be runnable against
   // a host before anyone has edited anything.
-  const slugs = existsSync(designsDirectory)
+  const entries = existsSync(designsDirectory)
     ? readdirSync(designsDirectory, { withFileTypes: true })
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
     : [];
+  // A `.deleted-` directory is a design whose deletion committed by rename and whose unlink did not
+  // finish. The store treats it as garbage and retries the unlink on the next open, so tabulating
+  // it would count a deleted design as a live one — and show its id twice, once as a tombstone and
+  // once as the design that has since been recreated under it. Its bytes are still on the disk and
+  // still charged against the ceiling, so they are counted here too, as overhead with no sections.
+  const slugs = entries.filter((name) => !name.includes(DELETED_SUFFIX));
 
   let totalBytes = fileBytes(join(directory, "store.json"));
+  for (const name of entries) {
+    if (name.includes(DELETED_SUFFIX)) totalBytes += directoryBytes(join(designsDirectory, name));
+  }
   const designs = [];
   for (const slug of slugs) {
     const designDirectory = join(designsDirectory, slug);
