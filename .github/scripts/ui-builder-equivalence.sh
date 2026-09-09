@@ -55,7 +55,9 @@
 #                  the cover sheet (:remote-catalog and m3-catalog both do). Semantics never
 #                  identify a catalog — a second `wear` catalog can agree on every compared field —
 #                  so without an id `--strict` cannot tell "ready" from "you read the wrong file".
-#   --differences  a JSON array of {"field": …, "why": …, "policy": …} — differences somebody has
+#   --differences  a JSON array of {"field": …, "why": …, "policy": …} — differences somebody has,
+#                  each field named at most ONCE: a second entry for a field would silently replace
+#                  the first, leaving a review decision nothing ever judged.
 #                  read and accepted. `why` is printed, because an unexplained exemption is how a
 #                  gate stops meaning anything; `policy` is the exact value that was reviewed,
 #                  because an exemption that outlives the thing it exempted is the other way. A
@@ -143,9 +145,21 @@ const strict = strictFlag === "1";
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
 const source = read(policyPath);
 const golden = read(goldenPath);
-const accepted = new Map(
-  (differencesPath ? read(differencesPath) : []).map((entry) => [entry.field, entry]),
-);
+const acceptedEntries = differencesPath ? read(differencesPath) : [];
+const accepted = new Map(acceptedEntries.map((entry) => [entry.field, entry]));
+// A `Map` keeps the LAST of two entries naming one field and drops the first without a word — so
+// "every waiver is judged", the rule this whole file is built around, quietly stopped being true
+// the moment somebody pasted an entry twice. The dropped one could be the unexplained or stale
+// half, and `--strict` would report zero unusable exemptions and pass. Counted here rather than
+// deduplicated, because two review decisions about one field are two people disagreeing, or one
+// person editing the wrong copy, and neither is for this gate to resolve by picking one.
+const duplicated = [
+  ...new Set(
+    acceptedEntries
+      .map((entry) => entry.field)
+      .filter((field, index, all) => all.indexOf(field) !== index),
+  ),
+].sort();
 
 const semantics = golden.statusSemantics ?? {};
 
@@ -406,6 +420,11 @@ for (const field of accepted.keys()) {
   stale += 1;
   console.log(`  ! ${field}: no such compared field, so this exemption waives nothing.`);
   console.log(`      Compared fields are: ${[...comparedFields].join(", ")}.`);
+}
+for (const field of duplicated) {
+  stale += 1;
+  console.log(`  ! ${field}: named by more than one accepted difference, so only the last was read`);
+  console.log(`      and the others were judged by nothing. Keep the one somebody means.`);
 }
 
 for (const [field, stated, frozen] of fields) {

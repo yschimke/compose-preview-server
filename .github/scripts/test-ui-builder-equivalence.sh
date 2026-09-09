@@ -457,6 +457,21 @@ check "a shape whose own id field is empty is still identified" 0 $?
 grep -q 'catalog id (declared: "wear-m3")' "${work}/out" ||
   { echo "FAIL fallback identifier not used"; failures=$((failures + 1)); }
 
+# Two entries for one field: a `Map` keeps the last and drops the first silently, so the rule this
+# gate is built around — every waiver is judged — stopped holding the moment somebody pasted one
+# twice. The dropped half is the one that would have failed.
+cat >"${work}/duplicate-waiver.json" <<'JSON'
+[ { "field": "componentMenu.groupOrder", "why": "an older decision nobody removed",
+    "policy": ["Z"], "frozen": ["A", "B"] },
+  { "field": "componentMenu.groupOrder", "why": "the catalog's own sections, deliberately",
+    "policy": ["B", "A"], "frozen": ["A", "B"] } ]
+JSON
+"${gate}" --policy "${work}/differs.json" --golden "${work}/golden.json" \
+  --differences "${work}/duplicate-waiver.json" --strict >"${work}/out" 2>&1
+check "two accepted differences for one field fail --strict" 1 $?
+grep -q "named by more than one accepted difference" "${work}/out" ||
+  { echo "FAIL duplicate waiver not reported"; failures=$((failures + 1)); }
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then
