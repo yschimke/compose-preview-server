@@ -471,10 +471,18 @@ Each phase is releasable on its own and leaves every catalog working.
    check than the golden could have been, and both seed devices against the frame this build already
    opens a new design on.
 
-   **Read that table as a checklist.** Six fields have now been added to this comparison one review
+   **Read that table as a checklist.** Seven fields have now been added to this comparison one review
    round at a time — `previewSurfaces`, `code`, `templates`, `frame.seedDevice`,
-   `componentMenu.components` and `componentPacks` — every one of them a row of the "declared by the
-   catalog, read by a surface" table above that nothing was comparing. No frozen catalog carries a
+   `componentMenu.components`, `componentPacks` and `assetRegistry.keys` — every one of them a fact
+   a surface reads that nothing was comparing.
+
+   Two of them are compared as **sets** rather than as arrays: `colorTokens.roles` and
+   `assetRegistry.keys` are read by one `declaredStrings` helper in both the runtime and the export,
+   and it returns a `Set<String>`, so a reordering no consumer can observe must not block a cutover.
+   And `assetRegistry.keys` is compared only when the *catalog* states one: the frozen registry
+   holds the packaged catalog's artwork and the editor's own insert placeholder, so treating a
+   catalog's silence as a gap would demand it declare the builder's assets — and a gap cannot be
+   waived, which would have left all three catalogs permanently not-ready with no route through. No frozen catalog carries a
    `componentPacks` and the generator emits none, so that last one is silent today; a field that
    cannot differ is cheapest to fix while nothing states it and dearest once something does.
 

@@ -695,6 +695,73 @@ JSON
   check "a ${ok_version} schema is still read" 0 $?
 done
 
+# Order is not information for these two. Both the runtime and the export read them through one
+# `declaredStrings` helper that returns a `Set<String>`, so a catalog listing exactly the frozen
+# roles in a different order accepts exactly the same values — and blocking a cutover on a
+# byte-order change no consumer can observe is as useless as missing a difference that is real.
+cat >"${work}/sets-golden.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A"] },
+    "colorTokens": { "roles": ["background", "surface", "primary"] },
+    "assetRegistry": { "keys": ["editor.placeholder", "cover.one"] } } }
+JSON
+cat >"${work}/sets-reordered.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A"] },
+  "colorTokens": { "roles": ["primary", "background", "surface"] },
+  "assetRegistry": { "keys": ["cover.one", "editor.placeholder"] } }
+JSON
+"${gate}" --policy "${work}/sets-reordered.json" --golden "${work}/sets-golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a reordered role and key list is not a difference" 0 $?
+
+# The asset registry is consumed by two readers and was compared by nothing, so a catalog declaring
+# an EMPTY one passed its real golden.
+cat >"${work}/sets-emptied.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A"] },
+  "colorTokens": { "roles": ["background", "surface", "primary"] },
+  "assetRegistry": { "keys": [] } }
+JSON
+"${gate}" --policy "${work}/sets-emptied.json" --golden "${work}/sets-golden.json" \
+  --strict >"${work}/out" 2>&1
+check "an emptied asset registry fails --strict" 1 $?
+grep -q "x assetRegistry.keys" "${work}/out" ||
+  { echo "FAIL emptied registry not reported"; failures=$((failures + 1)); }
+
+# And a catalog that states no registry is not silent about a fact it owes. The frozen one lists the
+# packaged catalog's artwork and the editor's own insert placeholder — none of it a catalog's to
+# ship — so treating the silence as a gap would demand every catalog declare the builder's assets,
+# and a gap cannot be waived.
+cat >"${work}/sets-silent.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A"] },
+  "colorTokens": { "roles": ["background", "surface", "primary"] } }
+JSON
+"${gate}" --policy "${work}/sets-silent.json" --golden "${work}/sets-golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a catalog stating no asset registry is not a gap" 0 $?
+
+# A builtin the frozen catalog carries: its id being present was reported as agreement and checked
+# nothing about the definition, so changing its slots passed.
+cat >"${work}/builtin-slots-golden.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "components": [ { "componentId": "wear-m3/screen-scaffold", "role": "Scaffold",
+      "slots": [ { "name": "content" }, { "name": "edgeButton" } ] } ],
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A"] } } }
+JSON
+cat >"${work}/builtin-slots-policy.json" <<'JSON'
+{ "schema": "compose-ui-builder-policy/v1", "catalogId": "wear-m3", "platform": "wear",
+  "menu": { "groupOrder": ["A"] },
+  "builtins": { "wear-m3/screen-scaffold": { "role": "list",
+    "slots": { "content": {}, "somethingElse": {} } } } }
+JSON
+"${gate}" --policy "${work}/builtin-slots-policy.json" --golden "${work}/builtin-slots-golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a known builtin whose slots changed fails --strict" 1 $?
+grep -q "builtins.wear-m3/screen-scaffold.slots" "${work}/out" ||
+  { echo "FAIL builtin slots not compared"; failures=$((failures + 1)); }
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then

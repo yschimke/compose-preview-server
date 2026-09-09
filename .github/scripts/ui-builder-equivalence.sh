@@ -100,7 +100,11 @@
 # sides AGREE again, both go SILENT, or either one stops stating the field. Any of those and it sits
 # there re-authorising a return to the waived value with nobody re-reading it.
 #
-# What `builtins` can and cannot tell you. A declared builtin the frozen catalog carries no
+# What `builtins` can and cannot tell you. A builtin the frozen catalog DOES carry has its SLOT
+# NAMES compared — like for like, and what slot validation and the structural templates route on —
+# but not its role: a policy says `screen-root` where the frozen component says `Scaffold`, and
+# composing one vocabulary into the other is the phase-4 loader rather than something to reimplement
+# here. A declared builtin the frozen catalog carries no
 # component for is a real difference and is reported — one field per id, `builtins.<id>`, so a
 # deliberate addition can be reviewed and pinned like any other fact the frozen catalog cannot
 # check, and so a waiver approves the builtin somebody read rather than the whole set. The reverse — a builtin the catalog OUGHT to
@@ -337,6 +341,19 @@ const strip = (value) => {
 };
 
 const canonical = (value) => JSON.stringify(strip(value));
+// Two fields whose ORDER is not information, unlike the shelf order beside them.
+//
+// `colorTokens.roles` and `assetRegistry.keys` are read by `declaredStrings` in BOTH the runtime
+// and the export, and both return a `Set<String>` — so a catalog listing exactly the frozen roles in
+// a different order accepts exactly the same values and no consumer can tell. Comparing them by
+// array order would block a cutover on a byte-order change, which is the mirror of the mistake this
+// gate is otherwise built to avoid: reporting a difference that is not one is as useless as missing
+// one that is.
+//
+// Both, not one. They are read by the same helper, and teaching this about a single one of them is
+// the shape of half-fix this file has been corrected for repeatedly.
+const asSet = (value) =>
+  Array.isArray(value) ? JSON.stringify([...new Set(value.map(strip))].sort()) : canonical(value);
 const show = (value) => (value === undefined ? "(absent)" : canonical(value));
 
 const fields = [
@@ -366,7 +383,27 @@ const fields = [
   // a fact only the catalog states has been read by somebody.
   ["frame.seedDevice", facts.frame?.seedDevice, semantics.frame?.seedDevice],
   ["frame.geometry", facts.frame?.geometry, semantics.frame?.geometry],
-  ["colorTokens.roles", facts.colorTokens?.roles, semantics.colorTokens?.roles],
+  [
+    "colorTokens.roles",
+    facts.colorTokens?.roles,
+    semantics.colorTokens?.roles,
+    asSet,
+  ],
+  // Consumed by `PropertyValueKinds.declaredAssetKeys` and the runtime's own reader, and compared
+  // by nothing — so a generated catalog declaring an EMPTY registry passed its real golden. A set
+  // for the same reason as the roles above: one helper reads both.
+  //
+  // Compared only when the CATALOG states one, which is the difference between this field and
+  // `componentPacks`. The contract's table of what a catalog declares does not list an asset
+  // registry, and the frozen one holds `jetcaster.cover.*`, `ui-builder.gate0.cover` and
+  // `editor.placeholder` — the packaged catalog's artwork and the editor's own insert placeholder,
+  // none of it wear-m3-catalog's to ship. Treating its silence as a gap would demand that every
+  // catalog declare the builder's assets, and a gap cannot be waived, so all three catalogs would
+  // have been permanently not-ready with no route through. A catalog that states one is answerable
+  // for it; a catalog that states none has nothing to say rather than too little.
+  ...(facts.assetRegistry?.keys === undefined
+    ? []
+    : [["assetRegistry.keys", facts.assetRegistry.keys, semantics.assetRegistry?.keys, asSet]]),
   ["code", facts.code, semantics.code],
   ["templates", facts.templates, semantics.templates],
   // Documented in the contract's own table of what a catalog declares and two surfaces read — the
@@ -420,6 +457,31 @@ const unknownBuiltins = capabilities
   : declaredBuiltins.filter((id) => !frozenIds.has(id));
 for (const id of unknownBuiltins) {
   fields.push([`builtins.${id}`, facts.builtins?.[id] ?? null, undefined]);
+}
+// A builtin the frozen catalog DOES carry: its id being present was reported as `= builtins (N, all
+// present)`, which reads as agreement and checked nothing about the definition. Reassigning
+// `wear-m3/screen-scaffold` a different structural role, or giving it different slots, passed.
+//
+// The SLOT NAMES, and deliberately not the role. Slot names are like for like — the policy keys its
+// `slots` by name and the frozen component carries `slots[].name` — and they are what slot
+// validation and the structural templates route on. The two `role` fields are NOT the same
+// vocabulary: a policy says `screen-root` where the frozen component says `Scaffold`, and composing
+// one into the other is the phase-4 loader this gate declines to reimplement in bash. Comparing
+// them would report a permanent difference nobody could fix, which is the failure mode this file
+// has now been corrected for twice.
+const frozenComponents = new Map(
+  (golden.components ?? []).map((component) => [component.componentId, component]),
+);
+if (!capabilities) {
+  for (const id of declaredBuiltins.filter((builtin) => frozenIds.has(builtin))) {
+    const frozenSlots = (frozenComponents.get(id)?.slots ?? []).map((slot) => slot?.name);
+    fields.push([
+      `builtins.${id}.slots`,
+      Object.keys(facts.builtins?.[id]?.slots ?? {}),
+      frozenSlots,
+      asSet,
+    ]);
+  }
 }
 
 // A menu with NO `components` member is a menu that lists no components.
@@ -578,7 +640,7 @@ const waiverIsObsolete = (field, why) => {
 // Asked here, a field shape nobody has thought of yet cannot acquire a fourth exemption from the
 // rule, because the branches no longer carry it.
 const comparedFields = new Set(fields.map(([field]) => field));
-for (const [field, stated, frozen] of fields) {
+for (const [field, stated, frozen, compare = canonical] of fields) {
   // What a waiver can legitimately be reviewing, now that a policy-only fact needs one too:
   //
   //   both sides state it and the values differ  — a difference somebody accepted
@@ -588,7 +650,7 @@ for (const [field, stated, frozen] of fields) {
   // both went silent, or the catalog dropped the field while the frozen one kept it (which is a
   // gap, and blocking on its own — a waiver cannot make a missing fact present).
   const reviewable =
-    stated !== undefined && (frozen === undefined || canonical(stated) !== canonical(frozen));
+    stated !== undefined && (frozen === undefined || compare(stated) !== compare(frozen));
   if (reviewable) continue;
   waiverIsObsolete(
     field,
@@ -616,7 +678,7 @@ for (const field of duplicated) {
   console.log(`      and the others were judged by nothing. Keep the one somebody means.`);
 }
 
-for (const [field, stated, frozen] of fields) {
+for (const [field, stated, frozen, compare = canonical] of fields) {
   if (stated === undefined) {
     if (frozen === undefined) {
       continue;
@@ -656,7 +718,7 @@ for (const [field, stated, frozen] of fields) {
     console.log(`  ! ${field}: unchecked by the frozen catalog, accepted — ${waiver.why}`);
     continue;
   }
-  if (canonical(stated) === canonical(frozen)) {
+  if (compare(stated) === compare(frozen)) {
     // A waiver on a field that now AGREES has outlived the discrepancy it was written for. Skipping
     // the check here left it valid indefinitely, so if the catalog ever returned to the exact value
     // that was waived, the old entry would authorise the regression with nobody re-reading it —
@@ -697,7 +759,12 @@ if (capabilities) {
   console.log(`      components, so there is nothing here to check.`);
 } else if (declaredBuiltins.length > 0) {
   if (unknownBuiltins.length === 0) {
-    console.log(`  = builtins (${declaredBuiltins.length}, all present in the frozen catalog)`);
+    // Says what it checked. "All present" read as agreement about the definitions, and the only
+    // thing this shape can compare like for like is the id and the slot names.
+    console.log(
+      `  = builtins (${declaredBuiltins.length}: ids and slot names present in the frozen catalog;` +
+        ` a builtin's role is a different vocabulary on each side and is not compared)`,
+    );
   }
   // The unknown ones were reported above, by the field loop, one per id.
 }
