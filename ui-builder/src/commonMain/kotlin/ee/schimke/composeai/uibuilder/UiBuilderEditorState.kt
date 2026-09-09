@@ -2593,16 +2593,20 @@ class UiBuilderEditorReducer(
    */
   fun besideRefusal(state: UiBuilderEditorState, componentId: String? = null): String? {
     val document = state.document
-    // Asked of the component before the document, because it holds wherever the item would land.
-    // The document-level refusal below is about *wrapping* an existing root; this one is about the
-    // thing being added, and a board that already exists has no wrap left to refuse — which is
-    // exactly how a Wear scaffold could have become one item of a board on a design whose first Add
-    // was an ordinary layout.
+    // An empty design first, because nothing below applies to it: `besideDestination` puts the
+    // component at the root, which is exactly where a root-only component's emitter wants it. The
+    // component guard ahead of this refused every Wear scaffold on a design that had nothing to be
+    // beside — a refusal of the one placement that was already correct.
+    if (document.roots.isEmpty()) return null
+    // Then the component, because it holds wherever the item would land. The document-level refusal
+    // below is about *wrapping* an existing root; this one is about the thing being added, and a
+    // board that already exists has no wrap left to refuse — which is exactly how a Wear scaffold
+    // could have become one item of a board on a design whose first Add was an ordinary layout.
     if (componentId != null && componentId in RecordFreeExport.ROOT_ONLY_COMPONENT_IDS) {
       return "A ${catalog.componentsById[componentId]?.displayName ?: componentId} is exported as " +
         "the whole design, so it cannot be one item of a board"
     }
-    if (document.boardRootId != null || document.roots.isEmpty()) return null
+    if (document.boardRootId != null) return null
     // Wrapping changes which emitter writes the design: both record-free emitters route on the root
     // component id, so a wrapped Wear screen would quietly stop being one and be handed to the
     // record-driven generator instead. Refusing is the honest half of §1 of the design doc — a

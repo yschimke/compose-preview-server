@@ -6558,6 +6558,7 @@ private fun ScreenEnvironmentInspector(
     ExportDevicePicker(
       presets = devicePresets,
       selected = current.exportDevices,
+      drawn = variantsDrawn,
       onToggle = { id ->
         // The whole set per edit, matching the protocol change and for its reason: a toggle that
         // sent an add or a remove would let two people's ideas of the set drift apart between them.
@@ -6799,16 +6800,23 @@ private fun VariantAxisPicker(
 private fun ExportDevicePicker(
   presets: List<UiBuilderDevicePreset>,
   selected: List<String>,
+  /** Whether the strip that draws these devices is on screen — see the heading below. */
+  drawn: Boolean,
   onToggle: (String) -> Unit,
 ) {
   var expanded by remember { mutableStateOf(false) }
-  // The list now says what it does in both directions: it is still the set the export writes as
+  // The list says what it does in both directions: it is still the set the export writes as
   // `@Preview(device = …)`, and it is also the set the workspace draws beside the design. Before
   // the
   // variant strip existed a design could claim three devices and show its author one, and the two
   // decisions were made in different places with neither showing the other.
+  //
+  // Which is exactly why the heading drops "shown" where the strip is not drawn. The picker stays
+  // live — these devices still reach the export, and that is worth choosing on any surface — but a
+  // heading promising a picture the host's renderer never draws is the same disagreement in the
+  // other direction.
   Text(
-    "Also shown and exported as",
+    if (drawn) "Also shown and exported as" else "Also exported as",
     style = MaterialTheme.typography.labelMedium,
     fontWeight = FontWeight.Bold,
   )

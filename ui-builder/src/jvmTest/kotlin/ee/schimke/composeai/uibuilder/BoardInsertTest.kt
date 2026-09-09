@@ -244,6 +244,13 @@ class BoardInsertTest {
     RecordFreeExport.ROOT_ONLY_COMPONENT_IDS.forEach { rootOnly ->
       assertNotNull(reducer.besideRefusal(onBoard, rootOnly), rootOnly)
     }
+    // But not on an empty design, which has no board to become an item of: the component lands at
+    // the root, which is where its emitter wants it. Refusing there refused the one placement that
+    // was already correct.
+    val empty = reducer.initial(document.copy(roots = emptyList(), nodes = emptyMap()))
+    RecordFreeExport.ROOT_ONLY_COMPONENT_IDS.forEach { rootOnly ->
+      assertNull(reducer.besideRefusal(empty, rootOnly), rootOnly)
+    }
     // The document-level refusal has nothing to say here, which is exactly why the component-level
     // one had to exist.
     assertNull(reducer.besideRefusal(onBoard))
