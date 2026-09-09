@@ -57,6 +57,10 @@ const VIEWER = (controlsOpen = false) => `
   </div>
   <div class="cp-preview-primary">
     <button type="button" id="cp-nav-toggle" aria-expanded="false">☰ Components</button>
+    <details class="cp-detail-menu" id="cp-compare-menu">
+      <summary>Full comparisons</summary>
+      <div class="cp-detail-menu-panel"><a class="cp-detail-menu-item" href="#">Layers</a></div>
+    </details>
   </div>
   <div class="cp-viewer${controlsOpen ? " cp-controls-open" : ""}" data-fold-scope="compose-m3">
     <nav class="cp-nav">
@@ -107,6 +111,53 @@ describe("<cp-viewer-drawers>", () => {
             ),
             false,
         );
+    });
+
+    it("closes the comparisons sheet when a drawer opens", async () => {
+        // On a phone all three own the bottom of the screen. The sheet is `position: fixed` above
+        // the FAB, so it paints over a drawer and its scrim — and the summary that would close it
+        // is behind that scrim, so leaving it open strands the reader with a panel they cannot
+        // dismiss covering the drawer they just asked for.
+        stubStorage();
+        await mount("phone", false);
+        const menu = document.getElementById(
+            "cp-compare-menu",
+        ) as HTMLDetailsElement;
+        menu.open = true;
+
+        toggle("cp-controls-toggle").click();
+        await flush();
+
+        assert.equal(menu.open, false, "opening Overrides closes the sheet");
+
+        menu.open = true;
+        toggle("cp-nav-toggle").click();
+        await flush();
+
+        assert.equal(menu.open, false, "and so does opening Components");
+    });
+
+    it("leaves the comparisons sheet alone when a drawer CLOSES", async () => {
+        // Only opening competes for the space. Closing a drawer gives it back, and a reader who
+        // had the menu open has no reason to lose it.
+        stubStorage();
+        await mount("phone", false);
+        // Open the drawer FIRST — on a phone both start closed, so a single click is an open, not
+        // the close this is about.
+        toggle("cp-controls-toggle").click();
+        await flush();
+        const viewer = document.querySelector(".cp-viewer") as HTMLElement;
+        assert.equal(viewer.classList.contains("cp-controls-open"), true);
+
+        const menu = document.getElementById(
+            "cp-compare-menu",
+        ) as HTMLDetailsElement;
+        menu.open = true;
+        toggle("cp-controls-toggle").click();
+        await flush();
+
+        assert.equal(viewer.classList.contains("cp-controls-open"), false);
+        assert.equal(menu.open, true, "closing a drawer gives the space back");
     });
 
     it("says the nav's closed state out loud rather than leaving it to CSS", async () => {

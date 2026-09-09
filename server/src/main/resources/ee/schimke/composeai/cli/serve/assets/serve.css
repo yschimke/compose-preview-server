@@ -4204,7 +4204,11 @@ html:not(.cp-bg-transparent) #cp-reference-compare[data-cp-stage-clip] .cp-refer
      anyway. Scoped to this row: Theme and History live in `.cp-head-toggles`, which does not
      scroll, and their panels are already fine where they are. */
   .cp-preview-primary .cp-detail-menu-panel { position: fixed; left: 8px; right: 8px; bottom: 8px;
-    top: auto; width: auto; max-width: none; }
+    top: auto; width: auto; max-width: none;
+    /* Above `.cp-fab` (60), which is pinned bottom-right and would otherwise take the taps on the
+       last row's right edge — measured at 3 of 21 sample points across it. The panel's desktop
+       `z-index: 50` sits under the launcher because there it opens nowhere near it. */
+    z-index: 70; }
   /* The hint is prose, not a chip: left to wrap inside a nowrap row it would size to its own
      max-content and push everything after it off the row's scrollable width for no gain. */
   .cp-preview-primary .cp-mode-hint { white-space: nowrap; }
