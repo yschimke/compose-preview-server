@@ -460,6 +460,17 @@ fun UiBuilderEditor(
    */
   linkedThreadId: String? = null,
   /**
+   * How many times the browser has changed the fragment, and the only thing that moves this
+   * selection after the first paint.
+   *
+   * [linkedThreadId] answers *what* the address bar names; this answers *whether the address bar
+   * just changed*, and the two come apart. A host keeps that id in step with the URL, which means
+   * clearing it when the reader opens a different thread — the fragment stops naming the old one at
+   * that moment. Keyed on the id alone, this editor would read its own host's bookkeeping as a
+   * navigation and immediately close the thread that caused it.
+   */
+  threadNavigations: Int = 0,
+  /**
    * Which thread the panel has open now, told to the host on every change.
    *
    * The host uses it to keep the address bar honest: a `#thread=` naming a conversation the reader
@@ -768,7 +779,9 @@ fun UiBuilderEditor(
   // selection to null, so this finds nothing to do. The panel is opened for a thread and not shut
   // again for a null — where the reader ended up is the board, and closing it under them would be
   // answering a navigation with more than it asked for.
-  LaunchedEffect(linkedThreadId) {
+  LaunchedEffect(threadNavigations) {
+    // The value the editor mounted with is already the selection; only a later navigation acts.
+    if (threadNavigations == 0) return@LaunchedEffect
     val threadId = linkedThreadId
     if (threadId == selectedThreadId) return@LaunchedEffect
     selectThread(threadId)

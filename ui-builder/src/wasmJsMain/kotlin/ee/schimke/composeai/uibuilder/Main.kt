@@ -428,10 +428,17 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
   // follow it, and re-read from `location` on every change rather than from the event, so Back and
   // Forward are answered by the same path as a link press.
   var linkedThreadId by remember(config.designId) { mutableStateOf(config.selectors.threadId) }
+  // How many times the *browser* has changed the fragment, which is a different question from what
+  // the fragment now says. This host clears [linkedThreadId] itself when the reader opens another
+  // thread — the address bar has to stop naming the old one — and the editor must not read that
+  // housekeeping as a navigation and undo the selection that caused it. Only the loop below counts,
+  // and `replaceState` fires no `hashchange`, so nothing this host does can reach it.
+  var threadNavigations by remember(config.designId) { mutableStateOf(0) }
   LaunchedEffect(config.designId) {
     while (true) {
       val hash = awaitHashChange()
       linkedThreadId = parseDesignUrlSelectors(null, hash).threadId
+      threadNavigations += 1
     }
   }
   var catalogQuery by remember { mutableStateOf("") }
@@ -991,6 +998,7 @@ private fun LiveSessionApp(config: LiveSessionConfig) {
         else EditorInspectorMode.Properties,
       initialInspectorOpen = config.selectors.nodeId != null || config.selectors.threadId != null,
       linkedThreadId = linkedThreadId,
+      threadNavigations = threadNavigations,
       onSelectedThreadChanged = {
         openThreadId = it
         // The fragment stops naming a thread as soon as the reader closes it or opens another, and

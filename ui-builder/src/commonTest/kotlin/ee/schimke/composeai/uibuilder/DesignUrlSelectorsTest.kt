@@ -98,10 +98,18 @@ class DesignUrlSelectorsTest {
   }
 
   @Test
-  fun `a blank or absurd id is treated as absent`() {
+  fun `a blank id is treated as absent`() {
     assertNull(parseDesignUrlSelectors("?node=", null).nodeId)
     assertNull(parseDesignUrlSelectors("?node=%20%20", null).nodeId)
-    assertNull(parseDesignUrlSelectors("?node=${"n".repeat(513)}", null).nodeId)
+  }
+
+  @Test
+  fun `a long id is read, because the service stores one`() {
+    // Blankness is the only thing the service refuses a node id for, so a cap here would make the
+    // link builder emit an address this parser could not read back.
+    val long = "n".repeat(4096)
+    assertEquals(long, parseDesignUrlSelectors("?node=$long", null).nodeId)
+    assertEquals(long, parseDesignUrlSelectors(null, "#thread=$long").threadId)
   }
 
   @Test

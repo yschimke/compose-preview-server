@@ -91,9 +91,6 @@ const val DESIGN_URL_THREAD_KEY: String = "thread"
 val DESIGN_URL_IDENTITY_KEYS: List<String> =
   listOf("token", "actor", "clientId", "displayName", "color", "endpoint", "updatesEndpoint")
 
-/** The longest node or thread id a URL is allowed to name; ids here are short and generated. */
-private const val SELECTOR_VALUE_MAX = 512
-
 /**
  * Reads the three selectors out of one URL's query and fragment.
  *
@@ -185,10 +182,14 @@ private fun String.toRevisionOrNull(): Long? = trim().toLongOrNull()?.takeIf { i
  * accepted otherwise, so `" hero "` is an id a stored design can genuinely have. Returning the
  * trimmed form would make this parser disagree with [designUrlPath], which percent-encodes the id
  * exactly — the feature's own copied link would then select a different node, or none.
+ *
+ * Blankness is also the *only* thing an id is refused for. A length cap here looked like prudence
+ * and was the same bug in another spelling: the service stores a node id of any length, and
+ * [designUrlPath] writes out whatever the document holds, so a parser that dropped a long one would
+ * make this feature emit links it cannot read back. How long a URL may be is the browser's rule to
+ * enforce, on a URL it has already parsed and handed over.
  */
-private fun String.toSelectorIdOrNull(): String? = takeIf {
-  it.isNotBlank() && it.length <= SELECTOR_VALUE_MAX
-}
+private fun String.toSelectorIdOrNull(): String? = takeIf { it.isNotBlank() }
 
 /**
  * Percent-encoding for one URL component, matching JavaScript's `encodeURIComponent`.

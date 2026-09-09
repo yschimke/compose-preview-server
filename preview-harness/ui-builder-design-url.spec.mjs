@@ -92,8 +92,9 @@ test.beforeAll(async () => {
     nodeId: "discover-grid",
     body: "Should this grid be two columns on a phone?",
   });
+  // Unanchored, so its card is titled "This design" whatever the fixture's component ids are — a
+  // thread pinned to a node is titled with the node's *component* id, which is a fixture detail.
   secondOfTwoThreadId = await seedCommentThread(server, twoThreadDesignId, {
-    nodeId: "main-scrim",
     body: "Is the scrim too dark over the artwork?",
   });
 });
@@ -199,6 +200,27 @@ test("a fragment-only navigation moves the panel to the thread it names", async 
       { timeout: 30_000 },
     )
     .toBe(firstOfTwoThreadId);
+});
+
+test("opening another thread by hand keeps it open", async ({ page }) => {
+  // The regression this guards: the host clears the fragment when the reader opens a different
+  // conversation, and an editor that read that housekeeping as a navigation would immediately
+  // close the thread the reader had just opened.
+  await openDesign(page, { thread: firstOfTwoThreadId }, twoThreadDesignId);
+  const other = page.getByRole("button", {
+    name: "Comment thread on This design",
+  });
+  await expect(other).toBeVisible();
+  await clickCompose(page, other);
+  await settle(page);
+  await expect
+    .poll(
+      async () =>
+        (await page.evaluate(() => globalThis.__uiBuilderDesignSelectors))
+          .threadId,
+      { timeout: 30_000 },
+    )
+    .toBe(secondOfTwoThreadId);
 });
 
 test("#thread= combines with ?node= where the thread is pinned to a layer", async ({
