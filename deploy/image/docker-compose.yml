@@ -307,9 +307,11 @@ services:
       # Explicit authoring allowlist; publishing another preview catalog does not expose a builder.
       SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}"
       # Which of the served builder catalogs may take their definition from the catalog repository's
-      # own published `ui-builder.json` instead of this server's built-in one. `all` (the default),
-      # `none`, or a comma-separated subset of SERVE_UI_BUILDER_CATALOGS. Set it to `none` to pin a
-      # box to the built-in definitions while a catalog's published policy is being reviewed — the
+      # own published `ui-builder.json` instead of this server's built-in one: `all`, `none`, or a
+      # comma-separated subset of SERVE_UI_BUILDER_CATALOGS. Empty keeps the entrypoint's default,
+      # which is `none` — no catalog this image serves has yet passed the equivalence gate, and
+      # m3-catalog's published file would replace a curated 41-component shelf with 104 derived
+      # components and no screen root. Name a catalog here once its gate is green. This is the
       # per-catalog reversible lever docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
       SERVE_UI_BUILDER_PUBLISHED_CATALOGS: "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}"
       # The component record the Compose export generates from. The image ships one for
