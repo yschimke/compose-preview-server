@@ -1304,6 +1304,88 @@ JSON
   >"${work}/out" 2>&1
 check "a record carrying keys the gate does not know still passes" 0 $?
 
+# Round eleven. Three more of the same family — the container was checked, what it CONTAINED was
+# not; and one report that pointed at the wrong remedy.
+
+# 12. A null ELEMENT inside a real array. `Array.isArray` passes, so the loop reached
+#     `component.canonicalId` and died with a Node stack trace — which without --strict turned a
+#     report-only run into exit 1. Report-only must stay exit 0 and diagnostic.
+cat >"${work}/rec-nullelem.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [ null,
+  { "canonicalId": ":w/A.Card", "componentIds": ["Containers/Card"],
+    "symbol": { "name": "Card", "callable": "a.Card", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-nullelem.json" \
+  >"${work}/out" 2>&1
+check "a null record entry is reported, not crashed on" 0 $?
+grep -q "record.components\[0\] is not an object" "${work}/out" ||
+  { echo "FAIL null record entry not named"; failures=$((failures + 1)); }
+grep -qi "at evalTypeScript\|TypeError" "${work}/out" &&
+  { echo "FAIL a stack trace reached the report"; failures=$((failures + 1)); }
+
+# 13. And the refusal is the WHOLE answer. A record the reader rejects used to go on producing an
+#     empty-shelf refusal, a `0 record entries` summary, and a `not offered` difference per frozen
+#     component — differences a reviewer could waive, filing a considered decision against an
+#     artefact of the first failure.
+grep -q "not offered" "${work}/out" &&
+  { echo "FAIL an undecodable record still produced waivable differences"; failures=$((failures + 1)); }
+grep -q "yields no components at all" "${work}/out" &&
+  { echo "FAIL an undecodable record still reported an empty shelf"; failures=$((failures + 1)); }
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-nullelem.json" \
+  --strict >"${work}/out" 2>&1
+check "an undecodable record still fails --strict" 1 $?
+
+# 14. A member of a NESTED serialized type. `parameters` was validated as a list of arbitrary
+#     objects, so `TargetParameter.name` being a number decoded here and not in Kotlin.
+cat >"${work}/rec-badparam.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.Button", "componentIds": ["Controls/Button"],
+    "symbol": { "name": "Button", "callable": "a.Button", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [ { "name": 7, "type": "String" } ], "slots": [], "code": { "imports": [] } },
+  { "canonicalId": ":w/A.Card", "componentIds": ["Containers/Card"],
+    "symbol": { "name": "Card", "callable": "a.Card", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-badparam.json" \
+  --strict >"${work}/out" 2>&1
+check "a nested subobject member of the wrong type is refused" 1 $?
+grep -q "record.components\[0\].parameters\[0\].name is not a string" "${work}/out" ||
+  { echo "FAIL nested member not named"; failures=$((failures + 1)); }
+
+# 15. `ComponentSlot.required` has no default, one level in — absent is a MissingFieldException.
+cat >"${work}/rec-badslot.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.Button", "componentIds": ["Controls/Button"],
+    "symbol": { "name": "Button", "callable": "a.Button", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [ { "name": "content" } ], "code": { "imports": [] } } ] }
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-badslot.json" \
+  --strict >"${work}/out" 2>&1
+check "a nested property with no default cannot be absent" 1 $?
+grep -q "slots\[0\].required is missing" "${work}/out" ||
+  { echo "FAIL missing nested required property not named"; failures=$((failures + 1)); }
+
+# 16. The epilogue states the remedy for what actually failed. Every refusal shared one closing
+#     paragraph about declaring `statusSemantics.components` to stop ids colliding, so a run that
+#     failed on a malformed record closed by advising a fix for a problem it never reported.
+grep -q "Correct the record fields named above" "${work}/out" ||
+  { echo "FAIL the record remedy was not stated"; failures=$((failures + 1)); }
+grep -q "collisions are the catalog's to resolve" "${work}/out" &&
+  { echo "FAIL a decode failure closed with the collision remedy"; failures=$((failures + 1)); }
+
+# And the converse: a genuine collision failure must still state the collision remedy.
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-overcollide.json" \
+  --strict >"${work}/out" 2>&1
+check "a collision failure still states the collision remedy" 1 $?
+grep -q "collisions are the catalog's to resolve" "${work}/out" ||
+  { echo "FAIL the collision remedy was lost"; failures=$((failures + 1)); }
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then

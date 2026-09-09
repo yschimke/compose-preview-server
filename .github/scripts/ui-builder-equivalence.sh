@@ -491,6 +491,16 @@ for (const id of unknownBuiltins) {
 // them would report a permanent difference nobody could fix, which is the failure mode this file
 // has now been corrected for twice.
 let unservable = 0;
+// WHY it is unservable, alongside the count. The epilogue used to state one remedy — declare
+// `statusSemantics.components` so the ids stop colliding — because collisions were the only thing
+// that set this counter. Six other refusals set it now, and a strict run that fails on a
+// `parameters: null` should not close by advising a fix for a problem it did not report. Each
+// refusal states its own remedy; the epilogue prints the ones that fired.
+const unservableRemedies = [];
+const refuse = (remedy) => {
+  unservable += 1;
+  unservableRemedies.push(remedy);
+};
 
 const frozenComponents = new Map(
   (golden.components ?? []).map((component) => [component.componentId, component]),
@@ -663,21 +673,81 @@ if (recordPath) {
     docs: { kind: "string", optional: true },
     receiver: { kind: "string", optional: true, nullable: true },
   };
+  const builderPairShape = {
+    // BuilderPair
+    key: { kind: "string" },
+    value: { kind: "string" },
+  };
+  const targetParameterShape = {
+    // TargetParameter
+    name: { kind: "string" },
+    type: { kind: "string" },
+    typeFqn: { kind: "string", optional: true, nullable: true },
+    hasDefault: { kind: "boolean", optional: true },
+    composableSlot: { kind: "boolean", optional: true },
+    composableSlotReceiver: { kind: "string", optional: true, nullable: true },
+    nullable: { kind: "boolean", optional: true },
+    noArgConstructible: { kind: "boolean", optional: true },
+  };
+  const componentSlotShape = {
+    // ComponentSlot — `required` has no default, so an absent one is a MissingFieldException
+    name: { kind: "string" },
+    required: { kind: "boolean" },
+    receiverScope: { kind: "string", optional: true, nullable: true },
+  };
+  const componentBindingShape = {
+    // ComponentBinding
+    previewId: { kind: "string" },
+    componentId: { kind: "string", optional: true, nullable: true },
+    group: { kind: "string", optional: true, nullable: true },
+  };
+  const componentCodeShape = {
+    // ComponentCode
+    call: { kind: "string", optional: true, nullable: true },
+    imports: { kind: "stringList", optional: true },
+    refusedReason: { kind: "string", optional: true, nullable: true },
+    requiredOptIns: { kind: "stringList", optional: true },
+    androidxOptIns: { kind: "stringList", optional: true },
+  };
+  const builderPolicyShape = {
+    // BuilderPolicy
+    id: { kind: "string", optional: true, nullable: true },
+    component: { kind: "string", optional: true, nullable: true },
+    declaredForCatalogId: { kind: "string", optional: true, nullable: true },
+    group: { kind: "string", optional: true, nullable: true },
+    displayName: { kind: "string", optional: true, nullable: true },
+    canvas: { kind: "string", optional: true, nullable: true },
+    stateCallbacks: { kind: "objectList", optional: true, members: builderPairShape },
+    starter: { kind: "objectList", optional: true, members: builderPairShape },
+    slots: { kind: "objectList", optional: true, members: builderPairShape },
+    traits: { kind: "stringList", optional: true },
+    variantProperty: { kind: "string", optional: true, nullable: true },
+    variants: { kind: "objectList", optional: true, members: builderPairShape },
+    nativeOnly: { kind: "boolean", optional: true },
+    exclude: { kind: "string", optional: true, nullable: true },
+    declaredBy: { kind: "stringList", optional: true },
+  };
+  const builderOrphanShape = {
+    // BuilderOrphan
+    previewId: { kind: "string" },
+    component: { kind: "string" },
+    candidates: { kind: "stringList", optional: true },
+  };
   const recordComponentShape = {
     // ComponentRecord
     canonicalId: { kind: "string" },
     componentIds: { kind: "stringList", optional: true },
     symbol: { kind: "object", members: symbolShape },
-    parameters: { kind: "objectList", optional: true },
-    slots: { kind: "objectList", optional: true },
-    bindings: { kind: "objectList", optional: true },
-    code: { kind: "object", optional: true, nullable: true },
+    parameters: { kind: "objectList", optional: true, members: targetParameterShape },
+    slots: { kind: "objectList", optional: true, members: componentSlotShape },
+    bindings: { kind: "objectList", optional: true, members: componentBindingShape },
+    code: { kind: "object", optional: true, nullable: true, members: componentCodeShape },
     signatureKnown: { kind: "boolean", optional: true },
     callableFromAnotherFile: { kind: "boolean", optional: true },
     hasTypeParameters: { kind: "boolean", optional: true },
     hasContextReceivers: { kind: "boolean", optional: true },
     overloadsCollided: { kind: "boolean", optional: true },
-    builder: { kind: "object", optional: true, nullable: true },
+    builder: { kind: "object", optional: true, nullable: true, members: builderPolicyShape },
     requiredOptIns: { kind: "stringList", optional: true },
     androidxOptIns: { kind: "stringList", optional: true },
   };
@@ -687,7 +757,7 @@ if (recordPath) {
     module: { kind: "string" },
     variant: { kind: "string" },
     components: { kind: "objectList", members: recordComponentShape },
-    builderOrphans: { kind: "objectList", optional: true },
+    builderOrphans: { kind: "objectList", optional: true, members: builderOrphanShape },
   };
   const componentPolicyShape = {
     // PublishedUiBuilderCatalog.UiBuilderComponentPolicy
@@ -772,7 +842,10 @@ if (recordPath) {
   // one of them does not.
   if (shape !== "generated ui-builder.json") {
     const article = /^[aeiou]/i.test(shape) ? "an " : "a ";
-    unservable += 1;
+    refuse(
+      "Fetch the generated ui-builder.json from the catalog's delivery branch, or drop --record " +
+        "to run the catalog-level checks alone.",
+    );
     console.log("");
     console.log(
       `  x components: --record needs the GENERATED ui-builder.json, and this is ${article}${shape}. ` +
@@ -798,7 +871,10 @@ if (recordPath) {
     }
   }
   if (badPolicyValues.length > 0) {
-    unservable += 1;
+    refuse(
+      "Correct the policy entries named above so each decodes as UiBuilderComponentPolicy; the " +
+        "server refuses the whole file, not the entry.",
+    );
     console.log("");
     console.log(
       `  x components: ${badPolicyValues.length} problem(s) in statusSemantics.components that ` +
@@ -818,7 +894,10 @@ if (recordPath) {
   const recordShapeErrors = [];
   checkShape(recordFile, recordFileShape, "record", recordShapeErrors);
   if (recordShapeErrors.length > 0) {
-    unservable += 1;
+    refuse(
+      "Correct the record fields named above. The reader decodes components.json as a whole, so a " +
+        "single bad field leaves the catalog with NO record, not one component short.",
+    );
     console.log("");
     console.log(
       `  x components: ${recordPath} is not a component record the reader can decode, so no id ` +
@@ -845,7 +924,9 @@ if (recordPath) {
     rawComponents === undefined ||
     (typeof rawComponents === "object" && rawComponents !== null && !Array.isArray(rawComponents));
   if (!componentsIsMap) {
-    unservable += 1;
+    refuse(
+      "Publish statusSemantics.components as a map of component id to policy, or omit it.",
+    );
     console.log("");
     console.log(
       `  x components: statusSemantics.components is ${
@@ -866,129 +947,154 @@ if (recordPath) {
   const underivable = [];
   let collisions = 0;
   let eligible = 0;
-  // Only ever iterate a real list. A `components` that is a string is iterable and would
-  // yield CHARACTERS as components; one that is a number throws. Either way the shape check
-  // above has already refused the file, so there is nothing to derive from it.
-  const recordComponents = Array.isArray(recordFile.components) ? recordFile.components : [];
-  for (const component of recordComponents) {
-    const declared = policyByRecordId.get(component.canonicalId);
-    // An excluded component never enters the shelf, so it can neither claim an id nor collide with
-    // one — the loader skips it before its collision check and so must this. Counting it would
-    // report a surplus id for a component the server will never offer.
-    if (declared?.[1]?.excluded != null) continue;
-    eligible += 1;
-    let componentId = declared?.[0];
-    if (componentId === undefined) {
-      const first = (component.componentIds ?? [])[0];
-      const candidate = first ? first.split("/").pop() : "";
-      const leaf = candidate && candidate.trim() ? candidate : (component.symbol?.name ?? "");
-      // See the note above `SLUG_PINS`: outside ASCII this port and the reader are not provably the
-      // same function, so the id is refused rather than derived.
-      if (/[^\x20-\x7E]/.test(leaf)) {
-        underivable.push(`${component.canonicalId} (leaf ${JSON.stringify(leaf)})`);
-        continue;
+  // Everything below derives ids from the record, and it runs only if the reader would have a
+  // record to derive them from. When the shape check refused the file, one bad field used to
+  // produce four more reports: an "empty shelf" refusal, a `0 record entries` summary, and a
+  // `not offered` DIFFERENCE for every component the frozen catalog has — differences a reviewer
+  // could waive, which would file a considered decision against a finding that was an artefact of
+  // the first one. The refusal above is the whole answer; the rest is silent until it is fixed.
+  if (recordShapeErrors.length === 0) {
+    // Derive only from a record the reader would actually decode.
+    //
+    // Guarding the ARRAY was half the guard: `components: [null, …]` is a real list, so the loop
+    // still reached `component.canonicalId` and died with a Node stack trace — which in a
+    // report-only run (no `--strict`) turned a diagnostic exit 0 into a crash exit 1, the gate
+    // failing a caller who asked it only to describe.
+    //
+    // Skipping the whole derivation, rather than the bad entries, is the point. `ComponentRecordFile`
+    // decodes as a WHOLE: one bad field means the catalog has no record at all, so a shelf derived
+    // from the well-formed remainder would be a shelf the server never builds. The refusal above
+    // already says so; deriving anyway would put a number next to it that contradicts it.
+    const recordComponents = recordFile.components;
+    for (const component of recordComponents) {
+      const declared = policyByRecordId.get(component.canonicalId);
+      // An excluded component never enters the shelf, so it can neither claim an id nor collide with
+      // one — the loader skips it before its collision check and so must this. Counting it would
+      // report a surplus id for a component the server will never offer.
+      if (declared?.[1]?.excluded != null) continue;
+      eligible += 1;
+      let componentId = declared?.[0];
+      if (componentId === undefined) {
+        const first = (component.componentIds ?? [])[0];
+        const candidate = first ? first.split("/").pop() : "";
+        const leaf = candidate && candidate.trim() ? candidate : (component.symbol?.name ?? "");
+        // See the note above `SLUG_PINS`: outside ASCII this port and the reader are not provably the
+        // same function, so the id is refused rather than derived.
+        if (/[^\x20-\x7E]/.test(leaf)) {
+          underivable.push(`${component.canonicalId} (leaf ${JSON.stringify(leaf)})`);
+          continue;
+        }
+        componentId = prefix + slug(leaf);
       }
-      componentId = prefix + slug(leaf);
+      if (takenSet.has(componentId)) collisions += 1;
+      else takenSet.add(componentId);
     }
-    if (takenSet.has(componentId)) collisions += 1;
-    else takenSet.add(componentId);
-  }
-  for (const builtinId of Object.keys(facts.builtins ?? {})) takenSet.add(builtinId);
+    for (const builtinId of Object.keys(facts.builtins ?? {})) takenSet.add(builtinId);
 
-  // The prefix scopes ONE side, the frozen catalog's. It says which of the frozen ids this catalog
-  // is answerable for — the golden also carries the BUILDER's own, `layout/box`, `asset/image`,
-  // `remote-compose/*`, which no catalog states — and it must not be used to filter what the
-  // COMPOSITION produced. A policy is free to map a record entry to an id outside its own prefix,
-  // and the reader puts that id on the shelf; filtering it out here reported "the same ids on both
-  // sides" for a shelf carrying a component the frozen catalog has never heard of. A gate that
-  // narrows the evidence to the shape it expects only ever confirms itself.
-  const goldenOwned = [...frozenIds].filter((componentId) =>
-    prefix ? componentId.startsWith(prefix) : true,
-  );
-  const composedSet = takenSet;
-  const shared = goldenOwned.filter((componentId) => composedSet.has(componentId));
-  // Declared builtins outside the frozen catalog are already reported per id by `builtins.<id>`
-  // above; excluded here so one mistake is not two findings.
-  const declaredBuiltinIds = new Set(Object.keys(facts.builtins ?? {}));
-  // Measured against the ids this catalog is ANSWERABLE FOR, not against every id the frozen
-  // catalog happens to carry. A policy mapping a record entry to `layout/box` produces an id the
-  // reader puts on the shelf and the catalog has no business publishing — and `frozenIds.has()`
-  // waved it through, because the golden does contain it as a BUILDER component. Neither missing
-  // nor surplus, so the "same ids on both sides" line printed over it.
-  const ownedSet = new Set(goldenOwned);
-  const surplus = [...takenSet].filter(
-    (componentId) => !ownedSet.has(componentId) && !declaredBuiltinIds.has(componentId),
-  );
+    // The prefix scopes ONE side, the frozen catalog's. It says which of the frozen ids this catalog
+    // is answerable for — the golden also carries the BUILDER's own, `layout/box`, `asset/image`,
+    // `remote-compose/*`, which no catalog states — and it must not be used to filter what the
+    // COMPOSITION produced. A policy is free to map a record entry to an id outside its own prefix,
+    // and the reader puts that id on the shelf; filtering it out here reported "the same ids on both
+    // sides" for a shelf carrying a component the frozen catalog has never heard of. A gate that
+    // narrows the evidence to the shape it expects only ever confirms itself.
+    const goldenOwned = [...frozenIds].filter((componentId) =>
+      prefix ? componentId.startsWith(prefix) : true,
+    );
+    const composedSet = takenSet;
+    const shared = goldenOwned.filter((componentId) => composedSet.has(componentId));
+    // Declared builtins outside the frozen catalog are already reported per id by `builtins.<id>`
+    // above; excluded here so one mistake is not two findings.
+    const declaredBuiltinIds = new Set(Object.keys(facts.builtins ?? {}));
+    // Measured against the ids this catalog is ANSWERABLE FOR, not against every id the frozen
+    // catalog happens to carry. A policy mapping a record entry to `layout/box` produces an id the
+    // reader puts on the shelf and the catalog has no business publishing — and `frozenIds.has()`
+    // waved it through, because the golden does contain it as a BUILDER component. Neither missing
+    // nor surplus, so the "same ids on both sides" line printed over it.
+    const ownedSet = new Set(goldenOwned);
+    const surplus = [...takenSet].filter(
+      (componentId) => !ownedSet.has(componentId) && !declaredBuiltinIds.has(componentId),
+    );
 
-  // A composition yielding nothing is refused by the reader outright — `taken.isEmpty()` returns
-  // `Unusable` — so it cannot be waived here either. Without this the missing frozen ids each go
-  // down the ordinary retirement path, and a differences file accepting them all made an EMPTY
-  // catalog pass readiness.
-  if (underivable.length > 0) {
-    unservable += 1;
+    // A composition yielding nothing is refused by the reader outright — `taken.isEmpty()` returns
+    // `Unusable` — so it cannot be waived here either. Without this the missing frozen ids each go
+    // down the ordinary retirement path, and a differences file accepting them all made an EMPTY
+    // catalog pass readiness.
+    if (underivable.length > 0) {
+      refuse(
+        "Declare an explicit id in statusSemantics.components for each component named above; the " +
+          "reader will not derive one from a non-ASCII leaf.",
+      );
+      console.log("");
+      console.log(
+        `  x components: ${underivable.length} record component(s) have a non-ASCII name, and this ` +
+          `gate cannot reproduce the reader's id for them — Node and the JVM disagree about some ` +
+          `characters, so a derived id here would be a guess. Declare these in ` +
+          `\`statusSemantics.components\` and the gate reads the id instead of deriving it.`,
+      );
+      for (const entry of underivable.slice(0, 10)) console.log(`      ${entry}`);
+      if (underivable.length > 10) console.log(`      … and ${underivable.length - 10} more`);
+    }
+    if (takenSet.size === 0 && underivable.length === 0) {
+      refuse(
+        "An empty shelf cannot be certified ready. Check that the record and the policy describe the " +
+          "same catalog.",
+      );
+      console.log("");
+      console.log(
+        `  x components: composing this policy with the record yields no components at all — the ` +
+          `server refuses that outright, so it cannot be waived.`,
+      );
+    }
+
     console.log("");
     console.log(
-      `  x components: ${underivable.length} record component(s) have a non-ASCII name, and this ` +
-        `gate cannot reproduce the reader's id for them — Node and the JVM disagree about some ` +
-        `characters, so a derived id here would be a guess. Declare these in ` +
-        `\`statusSemantics.components\` and the gate reads the id instead of deriving it.`,
+      `  components: ${recordComponents.length} record entries, ${eligible} eligible -> ` +
+        `${takenSet.size} id(s)${collisions > 0 ? `, ${collisions} collided` : ""}; ` +
+        `${shared.length} of the frozen catalog's ${goldenOwned.length} matched`,
     );
-    for (const entry of underivable.slice(0, 10)) console.log(`      ${entry}`);
-    if (underivable.length > 10) console.log(`      … and ${underivable.length - 10} more`);
-  }
-  if (takenSet.size === 0 && underivable.length === 0) {
-    unservable += 1;
-    console.log("");
-    console.log(
-      `  x components: composing this policy with the record yields no components at all — the ` +
-        `server refuses that outright, so it cannot be waived.`,
-    );
-  }
 
-  console.log("");
-  console.log(
-    `  components: ${recordComponents.length} record entries, ${eligible} eligible -> ` +
-      `${takenSet.size} id(s)${collisions > 0 ? `, ${collisions} collided` : ""}; ` +
-      `${shared.length} of the frozen catalog's ${goldenOwned.length} matched`,
-  );
-
-  // The collision rate is over ELIGIBLE entries, not the whole record: an excluded entry never
-  // competes for an id, so counting it inflates the denominator and lets a policy that excludes
-  // most of its record hide a shelf where everything left collides.
-  //
-  // Above the reader's own threshold this is NOT waivable, and that is the difference between a
-  // readiness gate and a rubber stamp: `PublishedUiBuilderCatalog` refuses such a file outright, so
-  // there is no decision for anybody to record — a waiver would have this gate certify a catalog
-  // the server categorically will not serve. Mirrors the reader's `maxOf(1, eligible * 0.10)`
-  // exactly; below it the server composes, so it is reported and left alone.
-  const collisionAllowance = Math.max(1, Math.trunc(eligible * 0.1));
-  if (collisions > collisionAllowance) {
-    unservable += 1;
-    console.log(
-      `  x components: ${collisions} of ${eligible} eligible record component(s) collided on an ` +
-        `already-taken id, over the reader's allowance of ${collisionAllowance} — the server ` +
-        `refuses a file this far from naming its components, so this cannot be waived.`,
-    );
-  } else if (collisions > 0) {
-    console.log(
-      `  ! components: ${collisions} of ${eligible} eligible record component(s) collided on an ` +
-        `already-taken id. Under the reader's allowance of ${collisionAllowance}, so the server ` +
-        `composes and skips them — but each one is a component this catalog does not offer.`,
-    );
-  }
-  // BOTH sides asserted, never `undefined`. An absence spelled `undefined` lands on the
-  // policy-silent path, which counts a gap and returns before any waiver is read — so a catalog
-  // deliberately retiring one component could not record that decision anywhere, and an exact
-  // `--differences` entry for it was reported obsolete on top. Stating "not offered" makes it an
-  // ordinary difference between two known values, which is what it is.
-  for (const componentId of goldenOwned.filter((id) => !composedSet.has(id))) {
-    fields.push([`components.${componentId}`, "not offered", "offered by the frozen catalog"]);
-  }
-  for (const componentId of surplus) {
-    fields.push([`components.${componentId}`, "offered by this catalog", "not offered"]);
-  }
-  if (collisions === 0 && surplus.length === 0 && shared.length === goldenOwned.length) {
-    console.log(`  = components: the same ${shared.length} id(s) on both sides`);
+    // The collision rate is over ELIGIBLE entries, not the whole record: an excluded entry never
+    // competes for an id, so counting it inflates the denominator and lets a policy that excludes
+    // most of its record hide a shelf where everything left collides.
+    //
+    // Above the reader's own threshold this is NOT waivable, and that is the difference between a
+    // readiness gate and a rubber stamp: `PublishedUiBuilderCatalog` refuses such a file outright, so
+    // there is no decision for anybody to record — a waiver would have this gate certify a catalog
+    // the server categorically will not serve. Mirrors the reader's `maxOf(1, eligible * 0.10)`
+    // exactly; below it the server composes, so it is reported and left alone.
+    const collisionAllowance = Math.max(1, Math.trunc(eligible * 0.1));
+    if (collisions > collisionAllowance) {
+      refuse(
+        "The collisions are the catalog's to resolve, by declaring statusSemantics.components rather " +
+          "than leaving every id to be derived.",
+      );
+      console.log(
+        `  x components: ${collisions} of ${eligible} eligible record component(s) collided on an ` +
+          `already-taken id, over the reader's allowance of ${collisionAllowance} — the server ` +
+          `refuses a file this far from naming its components, so this cannot be waived.`,
+      );
+    } else if (collisions > 0) {
+      console.log(
+        `  ! components: ${collisions} of ${eligible} eligible record component(s) collided on an ` +
+          `already-taken id. Under the reader's allowance of ${collisionAllowance}, so the server ` +
+          `composes and skips them — but each one is a component this catalog does not offer.`,
+      );
+    }
+    // BOTH sides asserted, never `undefined`. An absence spelled `undefined` lands on the
+    // policy-silent path, which counts a gap and returns before any waiver is read — so a catalog
+    // deliberately retiring one component could not record that decision anywhere, and an exact
+    // `--differences` entry for it was reported obsolete on top. Stating "not offered" makes it an
+    // ordinary difference between two known values, which is what it is.
+    for (const componentId of goldenOwned.filter((id) => !composedSet.has(id))) {
+      fields.push([`components.${componentId}`, "not offered", "offered by the frozen catalog"]);
+    }
+    for (const componentId of surplus) {
+      fields.push([`components.${componentId}`, "offered by this catalog", "not offered"]);
+    }
+    if (collisions === 0 && surplus.length === 0 && shared.length === goldenOwned.length) {
+      console.log(`  = components: the same ${shared.length} id(s) on both sides`);
+    }
   }
 }
 if (!capabilities) {
@@ -1491,10 +1597,9 @@ if (misprefixed > 0 && strict) {
   process.exit(1);
 }
 if (unservable > 0 && strict) {
-  console.log("A file whose ids collide past the reader's allowance is refused by the server, so");
-  console.log("this is not a difference anybody can accept — `--differences` cannot make a catalog");
-  console.log("servable. The collisions are the catalog's to resolve, by declaring");
-  console.log("`statusSemantics.components` rather than leaving every id to be derived.");
+  console.log("A file the reader refuses is not a difference anybody can accept — `--differences`");
+  console.log("cannot make a catalog servable. What each refusal above needs:");
+  for (const remedy of [...new Set(unservableRemedies)]) console.log(`  - ${remedy}`);
   process.exit(1);
 }
 if (blocking > 0 && strict) {
