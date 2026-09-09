@@ -215,6 +215,25 @@ check "--catalog-id supplies the id a policy defaults" 0 $?
 "${gate}" --policy "${work}/unnamed.json" --golden "${work}/golden.json"   --catalog-id wear-m3-tv --strict >/dev/null 2>&1
 check "--catalog-id naming the wrong catalog still fails --strict" 1 $?
 
+# `--catalog-id` is an assertion, not a fallback. Treating it as a fallback meant the caller's
+# explicit target vanished the moment the file declared anything — so asking for one catalog while
+# holding another's policy AND its matching golden passed, because those two agree with each other.
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json" \
+  --catalog-id remote-m3 --strict >"${work}/out" 2>&1
+check "--catalog-id disagreeing with a self-consistent pair fails --strict" 1 $?
+grep -q "the wrong pair of files was fetched" "${work}/out" ||
+  { echo "FAIL mis-fetched pair not reported"; failures=$((failures + 1)); }
+
+# A capability document names its catalog at `benchmark.catalogSystemId`. It plainly identifies
+# itself, so it must not read as unidentified.
+cat >"${work}/capability-shaped.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentMenu": { "groupOrder": ["A", "B"] } } }
+JSON
+"${gate}" --policy "${work}/capability-shaped.json" --golden "${work}/golden.json" \
+  --strict >"${work}/out" 2>&1
+check "a document naming its catalog at benchmark.catalogSystemId is identified" 0 $?
+
 # A waiver outlives its disagreement. Left valid, it would silently re-authorise a return to the
 # exact value it once waived, with nobody re-reading it.
 "${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json"   --differences "${work}/converged.json" --strict >"${work}/out" 2>&1

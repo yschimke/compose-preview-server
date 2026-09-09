@@ -462,11 +462,14 @@ Each phase is releasable on its own and leaves every catalog working.
 
    Under `--strict` — what the cutover PR turns on — five things fail: an unaccepted difference, a
    fact the frozen catalog states that the catalog is silent about, a stale exemption, a missing
-   policy file, and **a policy that is not this catalog's**. That last one needs `--catalog-id` for
-   any catalog whose policy defaults its id from the cover sheet (`:remote-catalog` and m3-catalog
-   both do; wear-m3-catalog declares `catalogId` because its builder id and its delivery system
-   differ). Semantics never identify a catalog: a second `wear` catalog can agree on every compared
-   field, so without an id the gate cannot tell "ready" from "you fetched the wrong file". The three
+   policy file, and **a policy that is not this catalog's**. `--catalog-id` states which catalog
+   the caller MEANT, and is checked against the golden's id and the policy's alike — so asking for
+   one catalog while holding another's policy *and* its matching golden fails, which no comparison
+   of those two files against each other can catch. Required for a catalog whose policy defaults its
+   id from the cover sheet (`:remote-catalog` and m3-catalog both do; wear-m3-catalog declares
+   `catalogId` because its builder id and its delivery system differ), and worth passing always.
+   Semantics never identify a catalog: a second `wear` catalog can agree on every compared field, so
+   without an id the gate cannot tell "ready" from "you fetched the wrong file". The three
    invocations that pass today:
 
    ```

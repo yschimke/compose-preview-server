@@ -39,11 +39,14 @@
 #   --policy       a catalog's authored ui-builder.policy.json, or its generated ui-builder.json
 #                  (a local checkout, or fetched from the delivery branch)
 #   --golden       docs/design/fixtures/ui-builder/<id>-capabilities-v1.json
-#   --catalog-id   the id the caller believes it fetched, checked against the golden's own. Only
-#                  needed when the policy defaults its id from the cover sheet rather than declaring
-#                  one (:remote-catalog does). Semantics never identify a catalog — a second `wear`
-#                  catalog can agree on every compared field — so without an id `--strict` has no
-#                  way to tell "ready" from "you read the wrong file".
+#   --catalog-id   the catalog the caller MEANT to check. An assertion in its own right, not a
+#                  fallback for a silent policy: it is checked against the golden's id AND against
+#                  the policy's, so asking for one catalog while holding another's policy and its
+#                  matching golden fails — those two agree with each other, and only the caller
+#                  knows which catalog was intended. Required for a policy that defaults its id from
+#                  the cover sheet (:remote-catalog and m3-catalog both do). Semantics never
+#                  identify a catalog — a second `wear` catalog can agree on every compared field —
+#                  so without an id `--strict` cannot tell "ready" from "you read the wrong file".
 #   --differences  a JSON array of {"field": …, "why": …, "policy": …} — differences somebody has
 #                  read and accepted. `why` is printed, because an unexplained exemption is how a
 #                  gate stops meaning anything; `policy` is the exact value that was reviewed,
@@ -269,31 +272,62 @@ if (declaredBuiltins.length > 0) {
 // sheet's `system` on purpose. So `--catalog-id` lets the caller supply the id it believes it
 // fetched. Silence with no fallback is not resolvable, and under --strict that is a refusal rather
 // than a shrug — an unidentified catalog cannot be asserted ready.
-const declaredId = source.catalogId ?? source.catalog?.id ?? null;
-const statedId = declaredId ?? (expectedId ? expectedId : null);
+// Wherever the file names itself: the authored policy's `catalogId`, the generated
+// ui-builder.json's `catalog.id`, or a capability document's `benchmark.catalogSystemId`. The last
+// costs one `??` and stops a file that plainly names its catalog reading as unidentified.
+const declaredId =
+  source.catalogId ?? source.catalog?.id ?? source.benchmark?.catalogSystemId ?? null;
 const goldenId = golden.benchmark?.catalogSystemId ?? null;
 let misidentified = 0;
+
+// `--catalog-id` is an INDEPENDENT assertion, not a fallback for a silent policy.
+//
+// Treating it as a fallback meant the caller's explicit target vanished the moment the file
+// declared anything — so automation asking for `remote-m3` and handed the Wear policy against the
+// Wear golden passed, because those two agree with each other and nobody ever compared them to what
+// was asked for. The whole point of the flag is that the caller knows which catalog it MEANT, which
+// is exactly the knowledge a mis-fetch destroys.
 if (goldenId === null) {
   // The golden names no catalog, so there is nothing to be wrong about. Silent on purpose: this is
   // the shape of a hand-written fixture, not of a real frozen catalog.
-} else if (statedId === null) {
-  misidentified += 1;
-  console.log("");
-  console.log(
-    `  ? catalog id: the policy declares none and no --catalog-id was given, so there is nothing ` +
-      `to check against the frozen catalog's ${JSON.stringify(goldenId)}`,
-  );
-} else if (statedId !== goldenId) {
-  misidentified += 1;
-  console.log("");
-  console.log(`  x catalog id: this is ${JSON.stringify(statedId)}, the golden is ${JSON.stringify(goldenId)}`);
-  console.log(`      Not a difference to waive — a policy for another catalog was read.`);
+  if (expectedId) console.log(`  ~ catalog id: --catalog-id ${JSON.stringify(expectedId)}; the frozen catalog names none`);
 } else {
-  const how = declaredId !== null ? "declared" : "supplied with --catalog-id";
-  console.log(`  = catalog id (${how}: ${JSON.stringify(statedId)})`);
+  if (expectedId && expectedId !== goldenId) {
+    misidentified += 1;
+    console.log("");
+    console.log(
+      `  x catalog id: --catalog-id asked for ${JSON.stringify(expectedId)}, but this golden is ` +
+        `${JSON.stringify(goldenId)} — the wrong pair of files was fetched.`,
+    );
+  }
+  if (declaredId !== null && declaredId !== goldenId) {
+    misidentified += 1;
+    console.log("");
+    console.log(`  x catalog id: this is ${JSON.stringify(declaredId)}, the golden is ${JSON.stringify(goldenId)}`);
+    console.log(`      Not a difference to waive — a policy for another catalog was read.`);
+  }
+  if (declaredId !== null && expectedId && declaredId !== expectedId) {
+    misidentified += 1;
+    console.log(
+      `  x catalog id: --catalog-id asked for ${JSON.stringify(expectedId)}, the policy declares ` +
+        `${JSON.stringify(declaredId)}`,
+    );
+  }
+  if (declaredId === null && !expectedId) {
+    misidentified += 1;
+    console.log("");
+    console.log(
+      `  ? catalog id: the policy declares none and no --catalog-id was given, so there is nothing ` +
+        `to check against the frozen catalog's ${JSON.stringify(goldenId)}`,
+    );
+  }
+  if (misidentified === 0) {
+    const how = declaredId !== null ? "declared" : "supplied with --catalog-id";
+    console.log(`  = catalog id (${how}: ${JSON.stringify(declaredId ?? expectedId)})`);
+  }
 }
 
-const id = statedId ?? "(unidentified)";
+const id = declaredId ?? expectedId ?? "(unidentified)";
 const blocking = differences + gaps + stale + misidentified;
 console.log("");
 console.log(
