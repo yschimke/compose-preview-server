@@ -143,6 +143,21 @@ class PublishedUiBuilderCatalogHostileInputTest {
          "statusSemantics":{"componentIdPrefix":"h/"}}
         """
           .trimIndent(),
+      // The reader decodes `components` as a Map; anything else fails its decode. Pinned because
+      // `.github/scripts/ui-builder-equivalence.sh` now refuses these for the same reason, and the
+      // two refusals have to agree about which documents are refusable.
+      "components is an array" to
+        """
+        {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
+         "statusSemantics":{"componentIdPrefix":"h/","components":[]}}
+        """
+          .trimIndent(),
+      "components is null" to
+        """
+        {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
+         "statusSemantics":{"componentIdPrefix":"h/","components":null}}
+        """
+          .trimIndent(),
       "a builtin whose role is unknown" to
         """
         {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
@@ -207,6 +222,22 @@ class PublishedUiBuilderCatalogHostileInputTest {
       composed.catalog.components.map { it.componentId },
       "only the first claimant of h/widget may be taken",
     )
+  }
+
+  @Test
+  fun `a components field that is not a map is refused, not read as empty`() {
+    // The sweep above only proves these RETURN. The claim the equivalence gate now makes about them
+    // is stronger — that the reader REFUSES them — and `.github/scripts/ui-builder-equivalence.sh`
+    // refuses the same two shapes on the strength of it. Asserting "does not throw" and calling
+    // that agreement would be a check that does not check, so the stronger claim is pinned here.
+    listOf("components is an array", "components is null").forEach { label ->
+      val document = hostile.first { it.first == label }.second
+      val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+      assertTrue(
+        result is PublishedUiBuilderCatalog.Result.Unusable,
+        "$label should be refused, not read as a policy with no components",
+      )
+    }
   }
 
   private companion object {
