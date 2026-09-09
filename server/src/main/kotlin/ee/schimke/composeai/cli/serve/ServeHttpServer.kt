@@ -1160,7 +1160,14 @@ class ServeHttpServer(
         // mutations remain separately authenticated API concerns.
         get("/ui-builder") {
           if (uiBuilderDir == null) call.respondText("not found", status = HttpStatusCode.NotFound)
-          else call.respondRedirect("/ui-builder/")
+          else {
+            // WITH the query. On a token-gated host the credential rides as `?token=…`, and the
+            // Wasm client reads it from `location.search` — so dropping it here landed the editor
+            // on a page whose identity, design and WebSocket requests were all unauthenticated,
+            // for anyone who typed, bookmarked or was handed the slashless spelling.
+            val query = call.request.queryString()
+            call.respondRedirect(if (query.isEmpty()) "/ui-builder/" else "/ui-builder/?$query")
+          }
         }
         // Creating a design is a POST, and its answer is a redirect to the design's permalink.
         // The form the New design dialog submits is an ordinary HTML form, so the browser follows

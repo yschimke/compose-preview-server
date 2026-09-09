@@ -16461,16 +16461,23 @@ ${scriptTag("known-differences.js")}
     // visitor folds, so this is only the state they arrive on: two toggles are a short group, and
     // one collapsed to a summary reading "View" would have moved these controls twice — out of the
     // bar and behind a second click.
+    // Not on a spatial preview, where neither control does anything. The scene is an opaque WebGL
+    // canvas (`alpha: false`), so a checkerboard behind it is never seen; and the zoom handler
+    // sizes `#cp-img` and the ordinary render canvases, never `cp-spatial-view`, so `Fit width`
+    // moves nothing. Two controls that answer no press are worse than an absent group — the reader
+    // presses them, sees nothing, and doubts the rest of the panel.
     val stageViewGroupHtml =
-      "<details class=\"cp-group\" data-cp-group=\"stage-view\" open>" +
-        "<summary>View</summary>" +
-        "<div class=\"cp-group-body\">" +
-        "<div class=\"cp-stage-view-row\">" +
-        bgPickerHtml("Show the transparent checkerboard behind the preview") +
-        "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
-        "title=\"Show the preview at full width instead of fitting it to the screen\">" +
-        "Fit width</button>" +
-        "</div></div></details>"
+      if (spatialSceneUrl != null) ""
+      else
+        "<details class=\"cp-group\" data-cp-group=\"stage-view\" open>" +
+          "<summary>View</summary>" +
+          "<div class=\"cp-group-body\">" +
+          "<div class=\"cp-stage-view-row\">" +
+          bgPickerHtml("Show the transparent checkerboard behind the preview") +
+          "<button type=\"button\" class=\"cp-bg-btn cp-zoom-toggle\" aria-pressed=\"false\" " +
+          "title=\"Show the preview at full width instead of fitting it to the screen\">" +
+          "Fit width</button>" +
+          "</div></div></details>"
     val pinnedControlsNote =
       if (pinned == null) ""
       else

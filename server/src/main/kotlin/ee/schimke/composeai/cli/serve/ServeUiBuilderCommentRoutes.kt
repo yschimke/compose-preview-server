@@ -1,11 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
-import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
-import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
-import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
-import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -228,7 +223,7 @@ internal fun Route.installUiBuilderCommentRoutes(
       close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "UI-builder read access required"))
       return@webSocket
     }
-    if (!service.canRead(designId, actor)) {
+    if (!service.canRead(actor, designId)) {
       close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "no such design"))
       return@webSocket
     }
@@ -290,26 +285,6 @@ private suspend fun ApplicationCall.respondAcknowledgement(
   }
 }
 
-/**
- * Whether this actor can read this design, asked of the service rather than assumed.
- *
- * The socket cannot use [authorizedCommentDesign] — that one writes an HTTP refusal — so the check
- * is here in the shape both can use.
- */
-private suspend fun UiBuilderServicePort.canRead(
-  designId: String,
-  actor: AuthenticatedUiBuilderActor,
-): Boolean {
-  if (designId.isBlank()) return false
-  val mapping =
-    UiBuilderProtocolMapper.toServiceCall(
-      actor,
-      GetSnapshotRequestV1(designId = designId, revision = null),
-    )
-  val response = (mapping as? ProtocolRequestMapping.Mapped)?.let { execute(it.call) }
-  return response is UiBuilderServiceResponse.Snapshot
-}
-
 private suspend fun ApplicationCall.authorizedCommentDesign(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
@@ -341,7 +316,7 @@ private suspend fun ApplicationCall.authorizedCommentActor(
     respondCommentError(HttpStatusCode.BadRequest, "a design id is required")
     return null
   }
-  if (!service.canRead(designId, actor)) {
+  if (!service.canRead(actor, designId)) {
     respondCommentError(HttpStatusCode.NotFound, "no such design")
     return null
   }

@@ -153,6 +153,26 @@ class PublishedUiBuilderCatalogTest {
     assertEquals("checkbox-button", PublishedUiBuilderCatalog.slug("CheckboxButton"))
     assertEquals("button2", PublishedUiBuilderCatalog.slug("Button2"))
     assertEquals("top-app-bar", PublishedUiBuilderCatalog.slug("TopAppBar"))
+    // The two cases that separate this from a naive port, both reported by Codex against the
+    // JavaScript one in `.github/scripts/ui-builder-equivalence.sh`, which pins the same table.
+    //
+    // `lowercaseChar()` is a SINGLE-character mapping: U+0130 lowercases to `i`, where a
+    // JavaScript `toLowerCase()` yields `i` plus a combining dot.
+    assertEquals("i-button", PublishedUiBuilderCatalog.slug("\u0130Button"))
+    // And this loop walks `Char`s, so a supplementary code point is two surrogates, neither of
+    // which is a letter — both separate. A port iterating code points keeps it and produces an id
+    // with half a surrogate pair in it.
+    assertEquals("a-b", PublishedUiBuilderCatalog.slug("A\uD801\uDC00B"))
+    // `isLetterOrDigit()` is `isLetter() || isDigit()`, and `isDigit()` is the DECIMAL category
+    // alone — a superscript two is numeric but not a digit, so it separates.
+    assertEquals("widget-x", PublishedUiBuilderCatalog.slug("Widget\u00B2X"))
+    // And the word-boundary test asks `isDigit()` too, so a decimal digit outside ASCII starts a
+    // word after it — the same predicate as the admission test, which a port can easily split.
+    assertEquals("a\u0662-b", PublishedUiBuilderCatalog.slug("A\u0662B"))
+    // `isLowerCase()` is a case PROPERTY, not "differs from its uppercase form": U+02B0 is
+    // lowercase to the JVM and has no distinct case conversion, so a round-trip heuristic — which
+    // is what a port reaches for — calls it neither upper nor lower and misses the boundary.
+    assertEquals("\u02B0-a", PublishedUiBuilderCatalog.slug("\u02B0A"))
   }
 
   @Test

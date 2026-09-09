@@ -187,6 +187,32 @@ class ServeUiBuilderCommentsIntegrationTest {
   }
 
   @Test
+  fun `a design that exists but was never shared is refused the same way as one that does not`() {
+    val server = start()
+    createDesign(server)
+
+    // The reviewer holds a credential this host authenticates, and the design is real — what they
+    // do not hold is any access to THIS design. The board must answer exactly as it does for an id
+    // that names nothing, or the pair of replies tells a caller which private design ids exist.
+    //
+    // Pinned separately from the missing-design case because the two used to be answered by
+    // different code: the board asked by requesting a whole snapshot and seeing whether one came
+    // back, where the other sidecars ask the design's access control directly. One question with
+    // two implementations is one that can drift, and this is the reading that would drift.
+    for (path in
+      listOf(
+        "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
+        "/api/ui-builder/v1/designs/no-such-design/comments",
+      )) {
+      val read = comments(server, "GET", path, null, token = REVIEWER_TOKEN)
+      assertEquals(404, read.first, "$path -> ${read.second}")
+      val posted =
+        comments(server, "POST", path, """{"body":"can I see this?"}""", token = REVIEWER_TOKEN)
+      assertEquals(404, posted.first, "$path -> ${posted.second}")
+    }
+  }
+
+  @Test
   fun `a viewer shared into a design may still comment on it`() {
     val server = start()
     createDesign(server)
