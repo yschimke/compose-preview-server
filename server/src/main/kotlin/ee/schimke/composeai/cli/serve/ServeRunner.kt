@@ -2921,9 +2921,9 @@ public class ServeRunner(
         ServeUiBuilderCommentWebhook(
           config = CommentWebhookConfig(url, format),
           designs = { designId ->
-            runCatching {
-              uiBuilderLane.service.adminListDesigns().firstOrNull { it.designId == designId }
-            }
+            // Keyed, not a scan: this runs on the thread accepting a comment, and it runs there
+            // so the title and catalog belong to the design the comment was actually written on.
+            runCatching { uiBuilderLane.service.adminDesignSummary(designId) }
               .getOrNull()
               ?.let { CommentWebhookDesign(it.title, it.catalogPin.systemId) }
           },

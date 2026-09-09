@@ -8,7 +8,6 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.security.MessageDigest
 import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -109,40 +108,26 @@ internal class ServeUiBuilderCommentWebhook(
   /** Posts one body and answers whether the far end accepted it. Replaced in tests. */
   private val send: suspend (String) -> Boolean = HttpCommentWebhookSender(config)::post,
   private val onLog: (String) -> Unit = { System.err.println(it) },
-  /** How long a cached title and catalog are reused. Shortened in tests. */
-  private val designCacheMillis: Long = DESIGN_CACHE_MILLIS,
-  /** The clock the cache window is measured against. Replaced in tests. */
-  private val now: () -> Long = System::currentTimeMillis,
   private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : Closeable {
 
   /** What the log calls this hook. A digest of the URL, never the URL. */
   val fingerprint: String = fingerprintOf(config.url)
 
-  // What the queue carries is the raw change plus the design as it was *when the comment was
-  // written*, not the finished body.
+  // What the queue carries is the change and the design as it was when the comment was written.
   //
-  // Both halves of that matter. Turning a change into a body needs the design's title and catalog,
-  // and reading those from the service takes the service-wide lock and scans every persisted
-  // design — far too much to do on the thread accepting a comment, which is the one thing
-  // fire-and-forget delivery exists to protect. But resolving it later, on the worker, would
-  // describe the design as it is at *delivery* time, and behind a slow endpoint those are not the
-  // same design: ids are supplied by the client and are free again once a design is deleted, so a
-  // delete and re-create while the queue drains would point the permalink at an unrelated design
-  // that happens to hold the id now.
+  // Resolved here, on the writer's thread, and not from a cache. "The design with this id" is not
+  // a stable thing: ids come from the client and are free again once a design is deleted, so
+  // between a comment being written and its notification going out the id can come to mean a
+  // different design entirely. Metadata resolved later, or remembered from earlier, can therefore
+  // put one design's title and permalink on another design's comment — and a permalink that opens
+  // the wrong design is worse than no notification.
   //
-  // So the writer thread reads a cache ([knownDesigns]) and nothing else — one concurrent-map get,
-  // no lock, no scan — and the worker keeps that cache current.
+  // The cost is one lookup on the thread accepting a comment, which is why
+  // [UiBuilderAdminPort.adminDesignSummary] exists: a keyed read under the service's lock rather
+  // than the scan of every design that listing them would pay. That is small beside the disk write
+  // the comment itself already does, and it is what makes the pairing correct rather than likely.
   private val queue = Channel<QueuedCommentChange>(QUEUE_CAPACITY)
-
-  /**
-   * The last thing the worker learned about each design, and how long ago.
-   *
-   * Read on the comment writer's thread and written only by the worker. Refreshed lazily rather
-   * than on every event: within [DESIGN_CACHE_MILLIS] an entry is reused, which bounds how stale a
-   * title can be while costing one lookup per design per window rather than one per comment.
-   */
-  private val knownDesigns = ConcurrentHashMap<String, TimedDesign>()
 
   private val worker = scope.launch {
     for (queued in queue) {
@@ -156,21 +141,11 @@ internal class ServeUiBuilderCommentWebhook(
   /** Watch every board on [store] until the returned handle is closed. */
   fun attach(store: ServeUiBuilderCommentStore): Closeable =
     store.subscribeToHost { previous, next ->
-      // On the writer's thread, so nothing here waits: a diff of two small in-memory boards, a map
-      // lookup, and an offer to a queue that never blocks.
+      // A diff of two small in-memory boards, one design lookup each, and an offer to a queue
+      // that never blocks. Nothing here waits on the network.
       for (change in diffCommentBoards(previous, next)) {
-        // The snapshot is taken whatever its age — it is the design the comment was written
-        // against, which is the point — but a snapshot past the window also tells the worker to
-        // look again, so a rename reaches later notifications instead of the cache pinning the
-        // first title it ever saw for the life of the process.
-        val cached = knownDesigns[change.designId]
-        enqueue(
-          QueuedCommentChange(
-            change = change,
-            design = cached?.design,
-            refresh = cached == null || now() - cached.atEpochMillis >= designCacheMillis,
-          )
-        )
+        val design = runCatching { designs(change.designId) }.getOrNull()
+        enqueue(QueuedCommentChange(change, design))
       }
     }
 
@@ -209,10 +184,7 @@ internal class ServeUiBuilderCommentWebhook(
   /** The change, plus everything the store does not know: the design's name and where to click. */
   private fun describe(queued: QueuedCommentChange): CommentWebhookEventV1 {
     val change = queued.change
-    val refreshed = if (queued.refresh) resolveDesign(change.designId) else null
-    // The snapshot wins where there is one: it is what the design was called when somebody wrote
-    // the comment, and [refreshed] exists to leave the cache current for the next one.
-    val design = queued.design ?: refreshed
+    val design = queued.design
     return CommentWebhookEventV1(
       event = change.kind.wire,
       design =
@@ -231,19 +203,6 @@ internal class ServeUiBuilderCommentWebhook(
       comment = change.comment,
       url = threadUrl(baseUrl(), design?.catalogSystemId, change.designId, change.thread.id),
     )
-  }
-
-  /**
-   * What the design is called now, remembered for the next comment on it.
-   *
-   * Only reached for a design the cache has never seen or has not seen recently — the first comment
-   * on a design, or the first in a while. Everything else is described from the snapshot the writer
-   * took, which is both cheaper and the metadata the comment was actually written against.
-   */
-  private fun resolveDesign(designId: String): CommentWebhookDesign? {
-    val resolved = designs(designId)
-    knownDesigns[designId] = TimedDesign(resolved, now())
-    return resolved
   }
 
   /**
@@ -278,9 +237,6 @@ internal class ServeUiBuilderCommentWebhook(
     const val QUEUE_CAPACITY: Int = 64
 
     const val RETRY_DELAY_MILLIS: Long = 500
-
-    /** How long a cached design title and catalog are reused before the worker looks again. */
-    const val DESIGN_CACHE_MILLIS: Long = 30_000
 
     /** How long [close] waits for the queue to drain before saying what it is abandoning. */
     const val DRAIN_TIMEOUT_MILLIS: Long = 2_000
@@ -325,12 +281,7 @@ internal class ServeUiBuilderCommentWebhook(
 internal data class QueuedCommentChange(
   val change: CommentBoardChange,
   val design: CommentWebhookDesign?,
-  /** The writer's cache had nothing for this design, or had something too old to keep serving. */
-  val refresh: Boolean = design == null,
 )
-
-/** A cached design lookup and when it was made. */
-internal data class TimedDesign(val design: CommentWebhookDesign?, val atEpochMillis: Long)
 
 /** Where the notification goes, and in whose dialect. */
 internal data class CommentWebhookConfig(
@@ -665,13 +616,32 @@ private fun teamsBody(event: CommentWebhookEventV1): JsonObject = buildJsonObjec
   }
 }
 
+/**
+ * One line of the card, as text and nothing else.
+ *
+ * A `TextBlock` renders its content as Adaptive Card Markdown, and everything on this card is
+ * written by whoever left the comment: a body of `[Open the design](https://attacker.example)`
+ * would arrive in the channel as a clickable link to somewhere nobody chose, sitting under a
+ * headline that says a colleague wrote it. The builder shows that comment as the characters they
+ * typed, and so must this.
+ *
+ * A `RichTextBlock` of `TextRun`s rather than escaping, because `TextRun` does not interpret markup
+ * at all. Escaping would mean predicting one renderer's dialect and re-predicting it whenever that
+ * renderer changes; this cannot be got wrong.
+ */
 private fun textBlock(text: String, bold: Boolean, subtle: Boolean = false): JsonObject =
   buildJsonObject {
-    put("type", "TextBlock")
-    put("text", text)
-    put("wrap", true)
-    if (bold) put("weight", "Bolder")
-    if (subtle) put("isSubtle", true)
+    put("type", "RichTextBlock")
+    putJsonArray("inlines") {
+      add(
+        buildJsonObject {
+          put("type", "TextRun")
+          put("text", text)
+          if (bold) put("weight", "Bolder")
+          if (subtle) put("isSubtle", true)
+        }
+      )
+    }
   }
 
 /**

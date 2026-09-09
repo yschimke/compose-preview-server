@@ -105,8 +105,14 @@ internal fun StoredCommentBoard.noticeFor(actorId: String): CommentNoticeV1? {
  */
 internal fun String.commentExcerpt(): String {
   val flattened = trim().replace(Regex("\\s+"), " ")
-  return if (flattened.length <= MAX_COMMENT_EXCERPT) flattened
-  else flattened.take(MAX_COMMENT_EXCERPT - 1).trimEnd() + "…"
+  if (flattened.length <= MAX_COMMENT_EXCERPT) return flattened
+  // Back off a unit when the cut lands between the halves of a surrogate pair. Keeping the high
+  // half alone would emit malformed UTF-16 — an emoji arriving at a chat platform as a replacement
+  // character, or a receiver rejecting the body outright — and an emoji is exactly the kind of
+  // character a 160th position is likely to hold.
+  var cut = MAX_COMMENT_EXCERPT - 1
+  if (flattened[cut - 1].isHighSurrogate()) cut -= 1
+  return flattened.take(cut).trimEnd() + "…"
 }
 
 /**

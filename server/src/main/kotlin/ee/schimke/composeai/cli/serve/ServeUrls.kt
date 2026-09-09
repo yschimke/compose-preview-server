@@ -41,7 +41,17 @@ object ServeUrls {
    * [siteLocalIpv4Addresses] entry for the Network line) — the wildcard itself is not a usable URL
    * host.
    */
-  fun origin(host: String, port: Int): String = "http://$host:$port"
+  fun origin(host: String, port: Int): String = "http://${urlHost(host)}:$port"
+
+  /**
+   * [host] as a URL authority: an IPv6 literal in brackets, anything else unchanged.
+   *
+   * `--host ::1` is a supported bind, and without this it produces `http://::1:8080`, which is not
+   * a URL any client will parse. Idempotent, so a host that already carries its brackets keeps
+   * exactly one pair.
+   */
+  fun urlHost(host: String): String =
+    if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
 
   /** Landing-page URL (preview list) carrying the token. */
   fun landingUrl(origin: String, token: String): String = pathUrl(origin, "/", token)

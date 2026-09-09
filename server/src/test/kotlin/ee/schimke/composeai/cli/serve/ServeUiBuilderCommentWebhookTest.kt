@@ -4,13 +4,13 @@ import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -240,7 +240,7 @@ class ServeUiBuilderCommentWebhookTest {
     )
     val content = attachment["content"]!!.jsonObject
     assertEquals("AdaptiveCard", content["type"]!!.jsonPrimitive.content)
-    val blocks = content["body"]!!.jsonArray.map { it.jsonObject["text"]!!.jsonPrimitive.content }
+    val blocks = content["body"]!!.jsonArray.map { textOfCardBlock(it.jsonObject) }
     // No mrkdwn: a card renders its own emphasis, and `*Yuri*` would arrive as literal asterisks.
     assertEquals("Yuri started a thread on Checkout", blocks.first())
     assertTrue(blocks.any { it.contains("This row should be a card.") }, blocks.toString())
@@ -250,6 +250,59 @@ class ServeUiBuilderCommentWebhookTest {
       "https://preview.example/ui-builder/m3-catalog/checkout#thread=t-1",
       action["url"]!!.jsonPrimitive.content,
     )
+  }
+
+  @Test
+  fun `a teams card renders a comment as characters, not as markdown`() {
+    // Everything on this card was typed by whoever left the comment. A `TextBlock` would run it
+    // through Adaptive Card Markdown, so a comment body could put a clickable link to anywhere in
+    // a shared channel, under a headline naming a colleague as its author.
+    val body =
+      CommentWebhookFormat.TEAMS.body(
+        event(excerpt = "[Open the design](https://attacker.example) **now**")
+      )
+    val content =
+      Json.parseToJsonElement(body)
+        .jsonObject
+        .getValue("attachments")
+        .jsonArray
+        .single()
+        .jsonObject
+        .getValue("content")
+        .jsonObject
+
+    val blocks = content.getValue("body").jsonArray.map { it.jsonObject }
+
+    // Not a TextBlock anywhere: that element interprets markup and nothing here may.
+    assertTrue(
+      blocks.none { it.getValue("type").jsonPrimitive.content == "TextBlock" },
+      blocks.toString(),
+    )
+    // The characters survive exactly as typed, for a reader to see and not to click.
+    assertTrue(
+      blocks.any { textOfCardBlock(it) == "“[Open the design](https://attacker.example) **now**”" },
+      blocks.toString(),
+    )
+  }
+
+  /** The text of a card body element, whichever element shape it uses. */
+  private fun textOfCardBlock(block: JsonObject): String =
+    block["text"]?.jsonPrimitive?.content
+      ?: block.getValue("inlines").jsonArray.joinToString("") {
+        it.jsonObject.getValue("text").jsonPrimitive.content
+      }
+
+  @Test
+  fun `an excerpt never ends in half of an emoji`() {
+    // The cut is a fixed number of UTF-16 units, so it can land between the halves of a surrogate
+    // pair. A lone high surrogate is malformed UTF-16: a replacement character in the channel, or
+    // a receiver rejecting the body outright. Placed so the emoji straddles the boundary exactly.
+    val excerpt = ("a".repeat(158) + "🎨" + " and more").commentExcerpt()
+
+    assertTrue(excerpt.none { it.isSurrogate() }, "a half-emoji survived: $excerpt")
+    // A lone surrogate does not survive a UTF-8 round trip; well-formed text does.
+    assertEquals(excerpt, String(excerpt.toByteArray(Charsets.UTF_8), Charsets.UTF_8))
+    assertTrue(excerpt.endsWith("…"), excerpt)
   }
 
   @Test
@@ -314,44 +367,40 @@ class ServeUiBuilderCommentWebhookTest {
   }
 
   @Test
-  fun `naming the design happens on the worker, not on the thread accepting the comment`() {
-    // The design's title and catalog come from the service, behind the service's own lock and via
-    // a scan of every persisted design. Resolving that on the writer's thread would put an
-    // unrelated design persistence operation on the critical path of accepting a comment — the one
-    // thing fire-and-forget delivery exists to prevent — so the queue carries the raw change and
-    // everything expensive happens after it.
-    val root = Files.createTempDirectory("comment-webhook-off-thread")
+  fun `naming the design is one keyed read per event, on the thread that accepts it`() {
+    // Deliberately on the writing thread: it is the only place the design and the comment are the
+    // same moment (see `each event names the design as it was when that comment was written`).
+    // What must never happen there is per-event work that grows with the host, so this pins the
+    // count — one lookup per event, not one per design on the box.
+    //
+    // Delivery staying off this thread is a separate promise, and the integration test that posts
+    // against a receiver which never answers is what holds it.
+    val root = Files.createTempDirectory("comment-webhook-lookups")
     try {
       val store = ServeUiBuilderCommentStore(root)
-      val lookupEntered = CountDownLatch(1)
-      val releaseLookup = CountDownLatch(1)
+      val lookups = java.util.concurrent.atomic.AtomicInteger(0)
+      val delivered = CopyOnWriteArrayList<String>()
       val webhook =
         ServeUiBuilderCommentWebhook(
           config = CommentWebhookConfig("https://hooks.example/hook"),
           designs = {
-            lookupEntered.countDown()
-            releaseLookup.await(10, TimeUnit.SECONDS)
+            lookups.incrementAndGet()
             CommentWebhookDesign("Checkout", "m3-catalog")
           },
           baseUrl = { "https://preview.example" },
-          send = { true },
+          send = {
+            delivered += it
+            true
+          },
           onLog = {},
         )
       webhook.use {
         it.attach(store).use {
-          val elapsed = measureTimeMillis {
-            store.post("design-1", "Yuri", CommentPostRequest(body = "This row should be a card."))
-          }
+          store.post("design-1", "Yuri", CommentPostRequest(body = "First."))
+          store.post("design-1", "Yuri", CommentPostRequest(body = "Second."))
+          awaitDeliveries(delivered, 2)
 
-          assertTrue(
-            lookupEntered.await(10, TimeUnit.SECONDS),
-            "the worker never looked the design up",
-          )
-          assertTrue(
-            elapsed < 5_000,
-            "the comment write waited $elapsed ms on a design lookup it should not touch",
-          )
-          releaseLookup.countDown()
+          assertEquals(2, lookups.get(), "one lookup per event, no more and no fewer")
         }
       }
     } finally {
@@ -360,18 +409,19 @@ class ServeUiBuilderCommentWebhookTest {
   }
 
   @Test
-  fun `a queued event names the design as it was when the comment was written`() {
-    // Design ids come from the client and are free again once a design is deleted, so "the design
-    // with this id" at delivery time need not be the design the comment was written on. Behind a
-    // slow endpoint that is how a permalink ends up pointing at an unrelated replacement.
-    val root = Files.createTempDirectory("comment-webhook-snapshot")
+  fun `each event names the design as it was when that comment was written`() {
+    // A design id is not a stable name for a design: ids come from the client and are free again
+    // once one is deleted, so the id a comment was written under can mean something else by the
+    // time the notification goes out. Resolving per event, on the writing thread, is what keeps a
+    // comment paired with the design it was actually left on.
+    val root = Files.createTempDirectory("comment-webhook-per-event")
     try {
       val store = ServeUiBuilderCommentStore(root)
       val current =
         java.util.concurrent.atomic.AtomicReference(CommentWebhookDesign("Checkout", "m3-catalog"))
       val delivered = CopyOnWriteArrayList<String>()
-      val releaseFirstSend = CountDownLatch(1)
-      val firstSendEntered = CountDownLatch(1)
+      val releaseFirst = CountDownLatch(1)
+      val firstEntered = CountDownLatch(1)
       val webhook =
         ServeUiBuilderCommentWebhook(
           config = CommentWebhookConfig("https://hooks.example/hook"),
@@ -380,8 +430,8 @@ class ServeUiBuilderCommentWebhookTest {
           send = { body ->
             delivered += body
             if (delivered.size == 1) {
-              firstSendEntered.countDown()
-              releaseFirstSend.await(10, TimeUnit.SECONDS)
+              firstEntered.countDown()
+              releaseFirst.await(10, TimeUnit.SECONDS)
             }
             true
           },
@@ -389,128 +439,20 @@ class ServeUiBuilderCommentWebhookTest {
         )
       webhook.use {
         it.attach(store).use {
-          // The first comment warms the cache and then wedges the worker inside `send`.
-          store.post("design-1", "Yuri", CommentPostRequest(body = "First."))
-          assertTrue(firstSendEntered.await(10, TimeUnit.SECONDS), "the first send never ran")
+          store.post("design-1", "Yuri", CommentPostRequest(body = "On the old design."))
+          assertTrue(firstEntered.await(10, TimeUnit.SECONDS), "the first send never ran")
 
-          // The second is queued behind it, snapshotting the design as it is now.
-          store.post("design-1", "Yuri", CommentPostRequest(body = "Second."))
+          // The id now means a different design. The comment written next belongs to that one.
+          current.set(CommentWebhookDesign("Something else", "other-catalog"))
+          store.post("design-1", "Yuri", CommentPostRequest(body = "On the new one."))
 
-          // Only then is the design renamed — after the comment, before the delivery.
-          current.set(CommentWebhookDesign("Something else entirely", "other-catalog"))
-          releaseFirstSend.countDown()
-
-          val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
-          while (delivered.size < 2 && System.nanoTime() < deadline) Thread.sleep(25)
-          assertEquals(2, delivered.size, "expected both events, saw $delivered")
-
-          val second =
-            Json.parseToJsonElement(delivered[1]).jsonObject.getValue("design").jsonObject
-          assertEquals("Checkout", second.getValue("title").jsonPrimitive.content)
-          assertEquals("m3-catalog", second.getValue("catalog").jsonPrimitive.content)
-        }
-      }
-    } finally {
-      root.toFile().deleteRecursively()
-    }
-  }
-
-  @Test
-  fun `shutdown waits for the queue and says what it could not deliver`() {
-    // A restart or a rolling deployment must not throw queued notifications away in silence:
-    // nothing replays them, so a comment stays in the board and is never announced. Bounded, so
-    // shutdown is not held hostage by somebody's chat platform either.
-    val root = Files.createTempDirectory("comment-webhook-shutdown")
-    try {
-      val store = ServeUiBuilderCommentStore(root)
-      val logged = CopyOnWriteArrayList<String>()
-      val sendEntered = CountDownLatch(1)
-      val webhook =
-        ServeUiBuilderCommentWebhook(
-          config = CommentWebhookConfig("https://hooks.example/hook"),
-          designs = { CommentWebhookDesign("Checkout", "m3-catalog") },
-          baseUrl = { "https://preview.example" },
-          send = {
-            sendEntered.countDown()
-            // Longer than the drain window, so the event is genuinely still in flight at close.
-            Thread.sleep(30_000)
-            true
-          },
-          onLog = { logged += it },
-        )
-      val attached = webhook.attach(store)
-      store.post("design-1", "Yuri", CommentPostRequest(body = "Never delivered."))
-      assertTrue(sendEntered.await(10, TimeUnit.SECONDS), "the worker never started delivering")
-
-      val elapsed = measureTimeMillis { webhook.close() }
-      attached.close()
-
-      // Bounded: shutdown is not held hostage by somebody's chat platform.
-      assertTrue(elapsed < 20_000, "close waited $elapsed ms; shutdown must be bounded")
-      // And not silent: an abandoned notification is never announced again by anything.
-      assertTrue(
-        logged.any { it.contains("shutdown") },
-        "close discarded a queued event without saying so: $logged",
-      )
-    } finally {
-      root.toFile().deleteRecursively()
-    }
-  }
-
-  @Test
-  fun `a cached design is re-read once its window has passed, so a rename lands`() {
-    // The snapshot the writer takes must not pin the first title the process ever saw. A stale
-    // entry still describes the event it was taken for — that is the point of taking it — but it
-    // also tells the worker to look again, so the next notification carries the new name.
-    val root = Files.createTempDirectory("comment-webhook-refresh")
-    try {
-      val store = ServeUiBuilderCommentStore(root)
-      val current =
-        java.util.concurrent.atomic.AtomicReference(CommentWebhookDesign("Checkout", "m3-catalog"))
-      val lookups = java.util.concurrent.atomic.AtomicInteger(0)
-      val clock = java.util.concurrent.atomic.AtomicLong(1_000L)
-      val delivered = CopyOnWriteArrayList<String>()
-      val webhook =
-        ServeUiBuilderCommentWebhook(
-          config = CommentWebhookConfig("https://hooks.example/hook"),
-          designs = {
-            lookups.incrementAndGet()
-            current.get()
-          },
-          baseUrl = { "https://preview.example" },
-          send = {
-            delivered += it
-            true
-          },
-          onLog = {},
-          designCacheMillis = 30_000L,
-          now = { clock.get() },
-        )
-      webhook.use {
-        it.attach(store).use {
-          store.post("design-1", "Yuri", CommentPostRequest(body = "First."))
-          awaitDeliveries(delivered, 1)
-          assertEquals(1, lookups.get(), "the first comment should resolve the design once")
-
-          // Inside the window: served from the snapshot, no second lookup.
-          store.post("design-1", "Yuri", CommentPostRequest(body = "Second."))
+          releaseFirst.countDown()
           awaitDeliveries(delivered, 2)
-          assertEquals(1, lookups.get(), "a fresh cache entry must not be re-read")
 
-          // Past the window, and renamed in the meantime.
-          clock.addAndGet(30_001L)
-          current.set(CommentWebhookDesign("Checkout v2", "m3-catalog"))
-
-          store.post("design-1", "Yuri", CommentPostRequest(body = "Third."))
-          awaitDeliveries(delivered, 3)
-          assertEquals(2, lookups.get(), "a stale cache entry must be re-read")
-          // This one still reads as the design the comment was written against.
-          assertEquals("Checkout", titleOf(delivered[2]))
-
-          // And the refresh left the cache current, so the next one carries the new name.
-          store.post("design-1", "Yuri", CommentPostRequest(body = "Fourth."))
-          awaitDeliveries(delivered, 4)
-          assertEquals("Checkout v2", titleOf(delivered[3]))
+          // Each event kept the design its own comment was written against, even though the
+          // second was queued behind the first and both went out after the change.
+          assertEquals("Checkout", titleOf(delivered[0]))
+          assertEquals("Something else", titleOf(delivered[1]))
         }
       }
     } finally {

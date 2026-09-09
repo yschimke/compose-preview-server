@@ -228,25 +228,25 @@ Timeouts are seconds, and there is exactly one retry — a chat platform's hook 
 and a longer ladder turns one wedged host into a queue that never drains.
 
 **What a notification says is fixed when the comment is written, not when it is delivered.** The
-queue carries the change plus the design as it looked at that moment, because design ids come from
-the client and are free again once a design is deleted: resolving the title and catalog at delivery
-time would let a delete and re-create while the queue drains point a permalink at whatever holds the
-id now. Reading them from the service is far too expensive for the thread accepting a comment — it
-takes the service-wide lock and scans every design — so the writer reads a small cache the worker
-keeps current, which is one map lookup and no lock. Shutdown gives the queue a couple of seconds to
-drain and says out loud what it abandons: nothing replays a notification, so an event dropped at
-SIGTERM is a comment that stays in the board and is never announced.
+design's title and catalog are resolved on the thread accepting the comment and travel with it on
+the queue. A design id is not a stable name for a design — ids come from the client and are free
+again once one is deleted — so metadata resolved at delivery time, or remembered from an earlier
+event, can put one design's title and permalink on another design's comment. That is why
+`adminDesignSummary` exists: a keyed read under the service's lock rather than the scan of every
+design that listing them would pay, small beside the disk write the comment already does. Delivery
+staying off that thread is a separate promise, and the one that matters for latency: a slow or dead
+webhook host never touches the write.
 
-**The permalink needs a public origin.** The link is the whole of the notification's value, so the
-host has to know the name a reader's browser reaches it at. That is
-`--github-auth-callback-base-url`, which is the operator's own statement of the public origin and is
-authoritative wherever it is set; the deployed image derives it from `DOMAIN`, independently of
-whether GitHub sign-in is configured, precisely so a box with no OAuth does not post `127.0.0.1`
-links that nobody receiving them can open. Falling back to the bind address is right only for the
-local case, where the reader is on the same machine. The `#thread=` selector is build item 1 of the
-same list and may not have landed: a host that does not understand the fragment opens the design and
-ignores it, which is the correct degraded behaviour and is why a fragment rather than a query
-carries it.
+Shutdown gives the queue a couple of seconds to drain and says out loud what it abandons: nothing
+replays a notification, so an event dropped at SIGTERM is a comment that stays in the board and is
+never announced.
+
+**Nothing on the wire is markup.** Every string in a notification was typed by whoever left the
+comment, so each adapter renders it as characters: Slack and Google Chat escape the three
+characters they read as markup, and the Teams card carries its text in `TextRun` inlines, which do
+not interpret Adaptive Card Markdown at all. Without that, a comment body of
+`[Open the design](https://attacker.example)` arrives in a shared channel as a clickable link to
+somewhere nobody chose, under a headline naming a colleague as its author.
 
 **The name shown is not the identity carried.** A comment's `displayName` arrives in the request
 body while its `authorId` is established by the authorization layer, so anyone who may comment can
