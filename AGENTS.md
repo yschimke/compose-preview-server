@@ -1,8 +1,9 @@
 # AGENTS.md
 
 This repository owns the Compose Preview server implementation, its `serve-web` frontend, Wasm UI,
-and visual harness. Read `README.md` and `docs/design/PREVIEW_SERVER_SPLIT.md` before changing the
-repository boundary.
+and visual harness. Read `README.md` first. Before changing a module boundary, read
+`docs/design/UI_BUILDER_PROJECT_BOUNDARY.md`, which is the one that states and enforces the current
+boundaries.
 
 ## Enforced rules
 
