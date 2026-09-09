@@ -7475,6 +7475,12 @@ class ServeHttpServer(
       it.renderStats?.let { stats -> stats.breaker?.open != true && stats.lastRenderFailed } == true
     }
     val catalogLoadFailureCount: Int = catalogs.count { it.loadError != null }
+    /**
+     * This container's subprocesses ([ServeProcessCensusSnapshot]) — the page and the JSON read the
+     * same census, so `/status` and `/status.json` cannot disagree about a leak that is running
+     * while they are both being read.
+     */
+    val processCensus: ServeProcessCensusSnapshot? = ServeProcessCensusSnapshot.read()
     val overallOk: Boolean =
       failures.isEmpty() &&
         catalogLoadFailureCount == 0 &&
@@ -7860,6 +7866,7 @@ class ServeHttpServer(
                 },
             )
           },
+        processes = processCensus,
       )
     }
 
@@ -7992,6 +7999,45 @@ class ServeHttpServer(
           )
         )
         add(ServeWeb.Stat("Known sessions", knownSessions.toString()))
+        // Subprocesses, which every other counter on this page is blind to: `Known sessions` and
+        // `Live daemons` count SESSIONS, so a box whose real problem is unreaped children reads as
+        // healthy here. Zombies are called out separately from the live JVMs rather than summed —
+        // they hold a PID and no address space, so one number for both would be a memory estimate
+        // that is wrong in whichever direction the leak is running. See
+        // [ServeProcessCensusSnapshot].
+        processCensus?.let { census ->
+          add(
+            ServeWeb.Stat(
+              "Processes",
+              buildString {
+                append("${census.liveJava} live JVMs · ${census.total} total")
+                if (census.zombies > 0) {
+                  append(" · ${census.zombies} defunct")
+                  census.zombieCommands.entries.firstOrNull()?.let { append(" (${it.key})") }
+                }
+                census.pidsMax?.let { max -> append(" · ${census.pidsCurrent ?: 0}/$max pids") }
+              },
+              // The meter is the PID budget, because that is the ceiling a reaping leak actually
+              // runs into — and an unbounded budget (null `pidsMax`) draws none, since a bar with
+              // no ceiling would imply a headroom nobody set.
+              census.pidsMax?.let { max ->
+                val used = census.pidsCurrent ?: (census.total.toLong())
+                ServeWeb.Meter(
+                  max,
+                  listOf(
+                    ServeWeb.MeterSegment("defunct", census.zombies.toLong(), "warning"),
+                    ServeWeb.MeterSegment(
+                      "live",
+                      (used - census.zombies).coerceAtLeast(0),
+                      "secondary",
+                    ),
+                    ServeWeb.MeterSegment("free", (max - used).coerceAtLeast(0), "primary"),
+                  ),
+                )
+              },
+            )
+          )
+        }
         add(ServeWeb.Stat("Uptime", formatDuration(uptimeSeconds)))
         if (renderAgg != null) {
           add(
@@ -14592,6 +14638,16 @@ private data class StatusResponse(
   val agentAccess: AgentAccessDto? = null,
   /** Aggregate UI-builder pressure counters. Owner and document identifiers are never included. */
   val uiBuilder: UiBuilderDto? = null,
+  /**
+   * This container's process census ([ServeProcessCensusSnapshot]), or null off Linux.
+   *
+   * The one field here that is an alert rather than a gauge is `zombies`: the server spawns render
+   * daemons, compile jails and UI-builder renderers as subprocesses, and every other count on this
+   * response is session-level, so an unreaped-child leak was previously invisible without `docker
+   * exec … ps`. See the snapshot's own doc for the measured incident. Additive on
+   * `compose-preview-serve/status/v1`.
+   */
+  val processes: ServeProcessCensusSnapshot? = null,
 )
 
 @Serializable
