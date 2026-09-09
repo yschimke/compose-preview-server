@@ -28,6 +28,12 @@
 #   not written yet (phase 4). Pretending to compare them here would mean a second implementation of
 #   that composition, in bash, whose disagreements with the real one nobody would ever see.
 #
+#   The catalog's own MENU is a different thing and is compared per component: which shelf each one
+#   lands on and which parameter its variant control writes to are catalog-level policy, stated in
+#   the published file, and phase 4 reads them to build the insert panel. Only the entries the
+#   catalog states, though — the frozen catalog's menu also carries the BUILDER's components
+#   (`asset/image`, `layout/box`, `remote-compose/*`), which are not the catalog's to state.
+#
 #   Fail a build. Through phases 2 and 3 a catalog that publishes nothing reports "not yet", and one
 #   that differs reports what differs. `--strict` turns that into exit 1, which is what the cutover
 #   PR turns on once a catalog is meant to be equivalent.
@@ -285,6 +291,26 @@ if (
   process.exit(strict ? 1 : 2);
 }
 
+// `$comment` keys are prose for a reader and are never part of a comparison — and object keys are
+// sorted, because two generators emitting the same object in different insertion orders is not a
+// difference and a gate that said it was would block the cutover on nothing. Arrays are left alone:
+// shelf order and allowed values are information.
+const strip = (value) => {
+  if (Array.isArray(value)) return value.map(strip);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !key.startsWith("$comment"))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, child]) => [key, strip(child)]),
+    );
+  }
+  return value;
+};
+
+const canonical = (value) => JSON.stringify(strip(value));
+const show = (value) => (value === undefined ? "(absent)" : canonical(value));
+
 const fields = [
   ["platform", facts.platform, semantics.platform],
   ["platformLabel", facts.platformLabel, semantics.platformLabel],
@@ -317,25 +343,41 @@ const fields = [
   ["templates", facts.templates, semantics.templates],
 ];
 
-// `$comment` keys are prose for a reader and are never part of a comparison — and object keys are
-// sorted, because two generators emitting the same object in different insertion orders is not a
-// difference and a gate that said it was would block the cutover on nothing. Arrays are left alone:
-// shelf order and allowed values are information.
-const strip = (value) => {
-  if (Array.isArray(value)) return value.map(strip);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([key]) => !key.startsWith("$comment"))
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([key, child]) => [key, strip(child)]),
-    );
+// EVERY component's shelf, not just the order of the shelves.
+//
+// `componentMenu.groupOrder` names the sections; `componentMenu.components` says which section each
+// component lands in and which of its parameters the variant control writes to. Only the first was
+// compared, so a generated catalog could move every component to a different shelf, or drop every
+// `variantProperty`, and `--strict` would still report readiness — the insert panel at cutover
+// bearing no resemblance to the frozen one while the section headings matched.
+//
+// A SUBSET, deliberately. The frozen catalog is a capability document: its menu carries the
+// builder's own components (`asset/image`, `layout/box`, `remote-compose/*`) alongside the
+// catalog's, and a generated `ui-builder.json` carries only the catalog's. Comparing the two maps
+// whole would report a permanent difference nobody can fix, and waiving a thirty-entry map is a
+// rubber stamp rather than a review. So each entry the CATALOG states is checked against the frozen
+// entry for the same id; ids only the frozen one has are the builder's, not this catalog's to
+// state, and the `builtins` check below is what covers that direction.
+//
+// Fed into the same `fields` list rather than compared separately, so waiver pinning, obsolescence
+// and the unreviewed-field rule all apply to a shelf assignment exactly as they do to the frame —
+// a second implementation of those rules here is how they would start to disagree. Only entries
+// that DIFFER or already carry a waiver are added: adding the agreeing ones would print thirty `=`
+// lines, and a waiver for an entry that has come back into agreement still has to be judged stale.
+const statedEntries = menu?.components;
+const frozenEntries = semantics.componentMenu?.components;
+let agreeingEntries = 0;
+if (statedEntries && typeof statedEntries === "object" && !Array.isArray(statedEntries)) {
+  for (const id of Object.keys(statedEntries).sort()) {
+    const field = `componentMenu.components.${id}`;
+    const frozenEntry = frozenEntries?.[id];
+    if (frozenEntry !== undefined && canonical(statedEntries[id]) === canonical(frozenEntry)) {
+      agreeingEntries += 1;
+      if (!accepted.has(field)) continue;
+    }
+    fields.push([field, statedEntries[id], frozenEntry]);
   }
-  return value;
-};
-
-const canonical = (value) => JSON.stringify(strip(value));
-const show = (value) => (value === undefined ? "(absent)" : canonical(value));
+}
 
 let differences = 0;
 let gaps = 0;
@@ -493,6 +535,12 @@ for (const [field, stated, frozen] of fields) {
     continue;
   }
   console.log(`  ! ${field}: accepted difference — ${waiver.why}`);
+}
+
+// Said once rather than thirty times: the entries that agree are the reason this comparison is worth
+// having, and printing each of them would bury the ones that do not.
+if (agreeingEntries > 0) {
+  console.log(`  = componentMenu.components (${agreeingEntries} shelf assignment(s) agree)`);
 }
 
 // The one thing `builtins` can be checked against: the frozen catalog's own component ids. A

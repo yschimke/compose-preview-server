@@ -472,6 +472,68 @@ check "two accepted differences for one field fail --strict" 1 $?
 grep -q "named by more than one accepted difference" "${work}/out" ||
   { echo "FAIL duplicate waiver not reported"; failures=$((failures + 1)); }
 
+# A generated catalog's per-component shelves, which only `groupOrder` used to stand in for. Moving
+# every component to a different shelf, or dropping a `variantProperty`, left the section headings
+# matching and the insert panel unrecognisable.
+cat >"${work}/menu-golden.json" <<'JSON'
+{ "benchmark": { "catalogSystemId": "wear-m3" },
+  "statusSemantics": { "platform": "wear",
+    "componentMenu": { "groupOrder": ["A", "B"],
+      "components": { "wear-m3/button": { "group": "A", "variantProperty": "variant" },
+                      "wear-m3/card": { "group": "B" },
+                      "layout/box": { "group": "A" } } } } }
+JSON
+
+# Same shelves as the golden for the two components it publishes; the builder's own `layout/box` is
+# not this catalog's to state and its absence is not a difference.
+cat >"${work}/menu-agreeing.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear",
+    "componentMenu": { "groupOrder": ["A", "B"],
+      "components": { "wear-m3/button": { "group": "A", "variantProperty": "variant" },
+                      "wear-m3/card": { "group": "B" } } } } }
+JSON
+"${gate}" --policy "${work}/menu-agreeing.json" --golden "${work}/menu-golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a generated menu agreeing with the frozen one passes" 0 $?
+grep -q "2 shelf assignment(s) agree" "${work}/out" ||
+  { echo "FAIL agreeing shelves not summarised"; failures=$((failures + 1)); }
+
+# One component moved to another shelf, one variantProperty dropped.
+cat >"${work}/menu-moved.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear",
+    "componentMenu": { "groupOrder": ["A", "B"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+"${gate}" --policy "${work}/menu-moved.json" --golden "${work}/menu-golden.json" \
+  --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a component moved to another shelf fails --strict" 1 $?
+grep -q "componentMenu.components.wear-m3/card" "${work}/out" ||
+  { echo "FAIL moved shelf not reported"; failures=$((failures + 1)); }
+grep -q "componentMenu.components.wear-m3/button" "${work}/out" ||
+  { echo "FAIL dropped variantProperty not reported"; failures=$((failures + 1)); }
+
+# And a shelf move is reviewable like any other difference, with both sides pinned.
+cat >"${work}/menu-reviewed.json" <<'JSON'
+[ { "field": "componentMenu.components.wear-m3/card", "why": "moved on purpose at cutover",
+    "policy": { "group": "A" }, "frozen": { "group": "B" } },
+  { "field": "componentMenu.components.wear-m3/button", "why": "variants land in phase 5",
+    "policy": { "group": "A" }, "frozen": { "group": "A", "variantProperty": "variant" } } ]
+JSON
+"${gate}" --policy "${work}/menu-moved.json" --golden "${work}/menu-golden.json" \
+  --differences "${work}/menu-reviewed.json" --catalog-id wear-m3 --strict >"${work}/out" 2>&1
+check "a reviewed shelf move passes --strict" 0 $?
+
+# An authored policy states no per-component shelves at all — they come from the record's
+# @CatalogGroup, not from the policy — so this comparison must not turn every authored catalog into
+# a wall of unstated facts.
+"${gate}" --policy "${work}/agrees.json" --golden "${work}/golden.json" --strict >"${work}/out" 2>&1
+check "an authored policy is not asked for per-component shelves" 0 $?
+grep -q "componentMenu.components" "${work}/out" &&
+  { echo "FAIL authored policy asked for shelves"; failures=$((failures + 1)); }
+
 set -e
 
 if [[ ${failures} -gt 0 ]]; then

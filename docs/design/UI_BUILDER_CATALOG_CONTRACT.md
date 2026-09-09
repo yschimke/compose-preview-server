@@ -473,7 +473,16 @@ Each phase is releasable on its own and leaves every catalog working.
 
    The last three of the six were added late, and the reason is worth keeping: a field left out of
    the comparison **cannot differ**, so `code`, `templates` and `frame.seedDevice` were carried past
-   the gate unread while the platform word and the shelf order agreed. That is the same omission
+   the gate unread while the platform word and the shelf order agreed. `componentMenu.components`
+   arrived the same way and for the same reason: `groupOrder` names the sections, and only the
+   sections were compared, so a generated catalog could move every component to a different shelf or
+   drop every `variantProperty` and still report ready — the insert panel at cutover bearing no
+   resemblance to the frozen one while the headings matched. It is compared as a **subset**: the
+   frozen catalog's menu also carries the builder's own components (`asset/image`, `layout/box`,
+   `remote-compose/*`), so only the entries the catalog states are checked, each against the frozen
+   entry for the same id. An authored policy states none of them — a component's shelf comes from
+   its `@CatalogGroup`, not from the policy — so this asks nothing of the three catalogs today and
+   everything of the generated files they will publish. That is the same omission
    `previewSurfaces` was fixed for. What the gate does *not* do is validate them — whether
    `code.strategy` names a strategy that exists, or a `templates` path resolves to a document, is
    compose-ai-tools' `validate-ui-builder-policy.mjs` and a second implementation here would
