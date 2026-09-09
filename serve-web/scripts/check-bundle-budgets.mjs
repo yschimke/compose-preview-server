@@ -45,7 +45,13 @@ const limits = {
     // `viewer-components.js`, which this page carries for its report affordance: measured at
     // +192 gzip bytes, against 57 bytes of headroom. Raised by 2_000 rather than to the new
     // measurement, so the next small change to a shared report control is not another budget edit.
-    "spatial viewer": 182_000,
+    //
+    // 182_000 until `three` v0.186.0 (#615), which is upstream weight rather than anything this
+    // repository authored: measured at 183_832 gzip bytes, 1_832 over. Raised by the same 2_000
+    // step over the measurement, for the same reason. This page is the only one carrying the
+    // WebGL/WebXR runtime, so it absorbs a renderer bump the other six never feel — splitting the
+    // spatial surface into its own artifact is the way that stops being true.
+    "spatial viewer": 186_000,
 };
 
 const gzipBytes = new Map();

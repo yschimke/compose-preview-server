@@ -165,6 +165,44 @@ kotlin {
   }
 }
 
+/**
+ * Order preview discovery after this module's wasmJs and Compose-resources tasks.
+ *
+ * `composePreviewDiscover` reads this module's processed resource and class directories. The plugin
+ * declares dependencies for the *desktop* tasks that write them (`DESKTOP_RESOURCE_TASK_CANDIDATES`
+ * / `DESKTOP_COMPILE_TASK_CANDIDATES`) — which is the whole story in a JVM-only module. This one
+ * also has a wasmJs target and Compose multiplatform resources, and those tasks write into the same
+ * directories without being in either list, so Gradle sees an undeclared producer to consumer edge
+ * and fails the build during configuration:
+ *
+ *     Task ':ui-builder:composePreviewDiscover' uses this output of task
+ *     ':ui-builder:compileKotlinWasmJs' without declaring an explicit or implicit dependency
+ *
+ * `mustRunAfter` rather than `dependsOn` on purpose: the ordering is all Gradle needs to validate,
+ * and `dependsOn` would make every `compose-preview list` on the desktop lane build the wasm target
+ * first — a cost this module pays for nothing. When the task is asked for alone, none of these are
+ * in the graph and this adds no ordering at all.
+ *
+ * Matched by shape rather than by a fixed list of names, because the set that trips the validation
+ * depends on which tasks share the graph: `check` surfaced five, a narrower invocation five
+ * different ones. The real fix belongs in the plugin, which should declare what it reads for every
+ * target rather than for the desktop one — this keeps the build green until it does.
+ */
+tasks
+  .matching { it.name == "composePreviewDiscover" }
+  .configureEach {
+    mustRunAfter(
+      tasks.matching { producer ->
+        producer.name.contains("WasmJs") ||
+          producer.name.contains("WasmRuntime") ||
+          producer.name.contains("ForKWasm") ||
+          producer.name.startsWith("prepareComposeResourcesTaskFor") ||
+          producer.name.startsWith("copyNonXmlValueResourcesFor") ||
+          producer.name.startsWith("convertXmlValueResourcesFor")
+      }
+    )
+  }
+
 val collaborationSoakMinutes = providers.gradleProperty("uiBuilderCollaborationSoakMinutes")
 
 tasks.named<Test>("jvmTest") {
