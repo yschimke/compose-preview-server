@@ -163,6 +163,9 @@ class PublishedUiBuilderCatalogTest {
     // which is a letter — both separate. A port iterating code points keeps it and produces an id
     // with half a surrogate pair in it.
     assertEquals("a-b", PublishedUiBuilderCatalog.slug("A\uD801\uDC00B"))
+    // `isLetterOrDigit()` is `isLetter() || isDigit()`, and `isDigit()` is the DECIMAL category
+    // alone — a superscript two is numeric but not a digit, so it separates.
+    assertEquals("widget-x", PublishedUiBuilderCatalog.slug("Widget\u00B2X"))
   }
 
   @Test

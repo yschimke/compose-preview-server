@@ -909,6 +909,58 @@ check "a reviewed retirement passes --strict" 0 $?
 grep -q "no such compared field" "${work}/out" &&
   { echo "FAIL the waiver was reported as naming nothing"; failures=$((failures + 1)); }
 
+# Collisions past the READER's allowance cannot be waived. The gate certifying a catalog the
+# server categorically refuses is worse than not checking at all — a readiness gate whose pass does
+# not mean the thing can be served. Reported by Codex on #655, with the exact reproduction below.
+cat >"${work}/rec-overcollide.json" <<'JSON'
+{ "schemaVersion": 1, "module": ":w", "variant": "debug", "components": [
+  { "canonicalId": ":w/A.B1", "componentIds": ["Button/Filled"],
+    "symbol": { "name": "B1", "callable": "a.B1", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } },
+  { "canonicalId": ":w/A.B2", "componentIds": ["Card/Filled"],
+    "symbol": { "name": "B2", "callable": "a.B2", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } },
+  { "canonicalId": ":w/A.B3", "componentIds": ["Dialog/Filled"],
+    "symbol": { "name": "B3", "callable": "a.B3", "jvmOwner": "A", "origin": "PROJECT" },
+    "parameters": [], "slots": [], "code": { "imports": [] } } ] }
+JSON
+cat >"${work}/rec-anywaiver.json" <<'JSON'
+[ { "field": "components.collisions", "why": "trying to wave this through",
+    "policy": "anything", "frozen": "anything" },
+  { "field": "components.wear-m3/button", "why": "trying to wave this through",
+    "policy": "not offered", "frozen": "offered by the frozen catalog" },
+  { "field": "components.wear-m3/card", "why": "trying to wave this through",
+    "policy": "not offered", "frozen": "offered by the frozen catalog" },
+  { "field": "components.wear-m3/filled", "why": "trying to wave this through",
+    "policy": "offered by this catalog", "frozen": "not offered" } ]
+JSON
+"${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \
+  --differences "${work}/rec-anywaiver.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-overcollide.json" \
+  --strict >"${work}/out" 2>&1
+check "collisions past the reader's allowance cannot be waived" 1 $?
+grep -q "this cannot be waived" "${work}/out" ||
+  { echo "FAIL unwaivable collision not reported as such"; failures=$((failures + 1)); }
+grep -q "declaring" "${work}/out" ||
+  { echo "FAIL the remedy does not say what to do instead"; failures=$((failures + 1)); }
+
+# The prefix used for derivation is the POLICY's, never the frozen catalog's. Taking it from the
+# golden makes the derived ids carry the prefix they are about to be compared against, so a policy
+# declaring a WRONG prefix lines up and passes.
+cat >"${work}/rec-wrongprefix.json" <<'JSON'
+{ "schema": "compose-ui-builder-catalog/v1", "catalog": { "id": "wear-m3" },
+  "statusSemantics": { "platform": "wear", "componentIdPrefix": "wrong/",
+    "componentMenu": { "groupOrder": ["A"],
+      "components": { "wear-m3/button": { "group": "A" },
+                      "wear-m3/card": { "group": "A" } } } } }
+JSON
+"${gate}" --policy "${work}/rec-wrongprefix.json" --golden "${work}/rec-golden.json" \
+  --catalog-id wear-m3 --component-id-prefix wear-m3/ --record "${work}/rec-ok.json" --strict \
+  >"${work}/out" 2>&1
+check "a policy declaring the wrong prefix cannot pass on the golden's" 1 $?
+grep -q "wrong/button" "${work}/out" ||
+  { echo "FAIL derivation did not use the policy's prefix"; failures=$((failures + 1)); }
+
 # A record path that does not exist is a usage error, not a pass. The same argument as the missing
 # golden: a caller asserting readiness against a file nobody could read has asserted nothing.
 "${gate}" --policy "${work}/rec-policy.json" --golden "${work}/rec-golden.json" \

@@ -490,6 +490,8 @@ for (const id of unknownBuiltins) {
 // one into the other is the phase-4 loader this gate declines to reimplement in bash. Comparing
 // them would report a permanent difference nobody could fix, which is the failure mode this file
 // has now been corrected for twice.
+let unservable = 0;
+
 const frozenComponents = new Map(
   (golden.components ?? []).map((component) => [component.componentId, component]),
 );
@@ -528,6 +530,8 @@ const SLUG_PINS = [
   ["\u0130Button", "i-button"],
   // Above the BMP: Kotlin's `Char` loop sees two surrogates, neither a letter, so both separate.
   ["A\u{10400}B", "a-b"],
+  // A numeric character outside the decimal category: `isDigit()` is false, so it separates.
+  ["Widget\u00B2X", "widget-x"],
 ];
 
 // Single-character lowercase, matching Kotlin's `Char.lowercaseChar()`. JavaScript's
@@ -549,7 +553,10 @@ const slug = (name) => {
   let out = "";
   for (let index = 0; index < name.length; index += 1) {
     const ch = name[index];
-    if (/[\p{L}\p{N}]/u.test(ch)) {
+    // `\p{Nd}`, not `\p{N}`. Kotlin's `isLetterOrDigit()` is `isLetter() || isDigit()`, and
+    // `isDigit()` is the DECIMAL digit category alone — so `Widget²` loses the superscript there
+    // and would keep it under the broader `\p{N}`.
+    if (/[\p{L}\p{Nd}]/u.test(ch)) {
       const previous = index > 0 ? name[index - 1] : null;
       const next = index + 1 < name.length ? name[index + 1] : null;
       const isUpper = (c) => c !== null && c === c.toUpperCase() && c !== c.toLowerCase();
@@ -581,7 +588,12 @@ for (const [name, expected] of SLUG_PINS) {
 
 if (recordPath) {
   const recordFile = read(recordPath);
-  const prefix = (semantics.componentIdPrefix ?? expectedPrefix ?? "").trim();
+  // The prefix the POLICY declares, falling back to the caller's assertion — never the frozen
+  // catalog's. Deriving with the golden's prefix guarantees the derived ids carry the prefix they
+  // are about to be compared against, so a policy declaring the WRONG prefix passes: the ids line
+  // up and nothing else here reads the field for an authored document. `facts` is the policy's
+  // block, `semantics` the golden's; I reached for the wrong one.
+  const prefix = (facts.componentIdPrefix ?? expectedPrefix ?? "").trim();
   const declaredComponents = facts.components ?? {};
   const policyByRecordId = new Map(
     Object.entries(declaredComponents).map(([componentId, entry]) => [
@@ -630,12 +642,26 @@ if (recordPath) {
   // The collision rate is over ELIGIBLE entries, not the whole record: an excluded entry never
   // competes for an id, so counting it inflates the denominator and lets a policy that excludes
   // most of its record hide a shelf where everything left collides.
-  if (collisions > 0) {
-    fields.push([
-      "components.collisions",
-      `${collisions} of ${eligible} eligible record component(s) collided on an already-taken id`,
-      "none",
-    ]);
+  //
+  // Above the reader's own threshold this is NOT waivable, and that is the difference between a
+  // readiness gate and a rubber stamp: `PublishedUiBuilderCatalog` refuses such a file outright, so
+  // there is no decision for anybody to record — a waiver would have this gate certify a catalog
+  // the server categorically will not serve. Mirrors the reader's `maxOf(1, eligible * 0.10)`
+  // exactly; below it the server composes, so it is reported and left alone.
+  const collisionAllowance = Math.max(1, Math.trunc(eligible * 0.1));
+  if (collisions > collisionAllowance) {
+    unservable += 1;
+    console.log(
+      `  x components: ${collisions} of ${eligible} eligible record component(s) collided on an ` +
+        `already-taken id, over the reader's allowance of ${collisionAllowance} — the server ` +
+        `refuses a file this far from naming its components, so this cannot be waived.`,
+    );
+  } else if (collisions > 0) {
+    console.log(
+      `  ! components: ${collisions} of ${eligible} eligible record component(s) collided on an ` +
+        `already-taken id. Under the reader's allowance of ${collisionAllowance}, so the server ` +
+        `composes and skips them — but each one is a component this catalog does not offer.`,
+    );
   }
   // BOTH sides asserted, never `undefined`. An absence spelled `undefined` lands on the
   // policy-silent path, which counts a gap and returns before any waiver is read — so a catalog
@@ -1132,7 +1158,7 @@ if (goldenId === null) {
 }
 
 const id = declaredId ?? expectedId ?? "(unidentified)";
-const blocking = differences + gaps + stale + misidentified + misprefixed + unstated;
+const blocking = differences + gaps + stale + misidentified + misprefixed + unstated + unservable;
 console.log("");
 console.log(
   `ui-builder-equivalence: ${id} — ${differences} difference(s), ${gaps} unstated fact(s) the ` +
@@ -1150,6 +1176,13 @@ if (misprefixed > 0 && strict) {
   console.log("asserted while the two files disagree about which components this catalog owns.");
   console.log("Pass --component-id-prefix to state it, and publish `componentIdPrefix` so a reader");
   console.log("with no caller to ask can find it too.");
+  process.exit(1);
+}
+if (unservable > 0 && strict) {
+  console.log("A file whose ids collide past the reader's allowance is refused by the server, so");
+  console.log("this is not a difference anybody can accept — `--differences` cannot make a catalog");
+  console.log("servable. The collisions are the catalog's to resolve, by declaring");
+  console.log("`statusSemantics.components` rather than leaving every id to be derived.");
   process.exit(1);
 }
 if (blocking > 0 && strict) {
