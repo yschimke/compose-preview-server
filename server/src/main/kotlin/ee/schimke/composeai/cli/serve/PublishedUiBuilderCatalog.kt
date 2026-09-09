@@ -16,6 +16,7 @@ import java.security.MessageDigest
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -128,6 +129,61 @@ internal object PublishedUiBuilderCatalog {
     }
     val id = file.catalog.id.trim()
     if (id.isEmpty()) return Result.Unusable("ui-builder.json declares no catalog id")
+
+    // A `jsonType` the design validator can read, and a slot cardinality that can be satisfied,
+    // or the file is refused.
+    //
+    // `PropertyCapabilityV1.jsonType` is a free-form `JsonElement`, and the runtime's
+    // `JsonElement.accepts` reads it as `jsonPrimitive.content` — or, for an array, each entry's.
+    // So `"jsonType": {}`, or `["string", 7]`, decodes here and THROWS there, while a design is
+    // being written. That is the worst shape a bad catalog can take: not a shelf that refuses to
+    // load, but an authoring path that crashes on save.
+    //
+    // BUILTINS are checked alongside components, and were not on the first cut of this — the same
+    // "some of the places" this file keeps being corrected for. A builtin's properties reach
+    // `builtinCapability` by the identical route and are read by the identical validator.
+    //
+    // Cardinality is here rather than in the runtime's `validateCatalog` because that function
+    // requires `catalogSystemId == "m3-catalog"` and so can only ever see the packaged catalog. A
+    // published one reaches the shelf unvalidated, and `max < min` makes every child count invalid
+    // — a component nobody can author, on a shelf that loaded cleanly.
+    val unreadable = mutableListOf<String>()
+    fun checkProperties(owner: String, properties: List<UiBuilderPropertyPolicy>) {
+      for (property in properties) {
+        val readable =
+          when (val type = property.jsonType) {
+            is JsonArray -> type.all { it is JsonPrimitive && it.isString }
+            is JsonPrimitive -> type.isString
+            else -> false
+          }
+        if (!readable) unreadable += "$owner.${property.name} (jsonType)"
+      }
+    }
+    fun checkSlots(owner: String, slots: List<UiBuilderSlotPolicy>) {
+      for (slot in slots) {
+        val min = slot.cardinality.min
+        val max = slot.cardinality.max
+        if (min < 0) unreadable += "$owner.${slot.name} (cardinality min $min is negative)"
+        else if (max != null && max < min)
+          unreadable += "$owner.${slot.name} (cardinality max $max is below min $min)"
+      }
+    }
+    semantics.components.forEach { (componentId, policy) ->
+      checkProperties(componentId, policy.propertyCapabilities.orEmpty())
+      checkSlots(componentId, policy.slotCapabilities.orEmpty())
+    }
+    semantics.builtins.forEach { (builtinId, builtin) ->
+      checkProperties(builtinId, builtin.propertyCapabilities.orEmpty())
+    }
+    if (unreadable.isNotEmpty()) {
+      return Result.Unusable(
+        "${unreadable.size} declaration(s) the builder cannot serve — a jsonType the design " +
+          "validator reads with `jsonPrimitive` and throws on, or a slot cardinality no child " +
+          "count satisfies: " +
+          unreadable.sorted().take(8).joinToString(", ") +
+          (if (unreadable.size > 8) ", …" else "")
+      )
+    }
 
     val policyByRecordId =
       semantics.components.entries.associateBy({ it.value.record }, { it.key to it.value })
@@ -291,27 +347,43 @@ internal object PublishedUiBuilderCatalog {
     component: ComponentRecord,
     policy: UiBuilderComponentPolicy?,
   ): ComponentCapabilityV1 {
+    // The catalog's slots, or failing that the composable's. See
+    // `UiBuilderComponentPolicy.slotCapabilities`.
     val slots =
-      component.slots.map { slot ->
+      policy?.slotCapabilities?.map { stated ->
         SlotCapabilityV1(
-          name = slot.name,
-          cardinality = SlotCardinalityV1(min = 0, max = null),
-          ordered = true,
+          name = stated.name,
+          cardinality =
+            SlotCardinalityV1(min = stated.cardinality.min, max = stated.cardinality.max),
+          ordered = stated.ordered,
+          acceptedRoles = stated.acceptedRoles,
+          acceptedTraits = stated.acceptedTraits,
         )
       }
-    val slotNames = slots.map { it.name }.toSet()
-    val properties =
-      component.parameters
-        .filterNot { it.composableSlot || it.name in slotNames }
-        .mapNotNull { parameter ->
-          val jsonType = ComponentRecordPacks.jsonTypeOf(parameter) ?: return@mapNotNull null
-          PropertyCapabilityV1(
-            name = parameter.name,
-            jsonType = JsonPrimitive(jsonType),
-            required = !parameter.hasDefault && !parameter.nullable,
-            notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`.",
+        ?: component.slots.map { slot ->
+          SlotCapabilityV1(
+            name = slot.name,
+            cardinality = SlotCardinalityV1(min = 0, max = null),
+            ordered = true,
           )
         }
+    val slotNames = slots.map { it.name }.toSet()
+    // What the catalog says it offers, and only failing that what its call site happens to take.
+    // See `UiBuilderComponentPolicy.propertyCapabilities` for why the two are not the same
+    // question.
+    val properties =
+      policy?.propertyCapabilities?.map { it.toCapability() }
+        ?: component.parameters
+          .filterNot { it.composableSlot || it.name in slotNames }
+          .mapNotNull { parameter ->
+            val jsonType = ComponentRecordPacks.jsonTypeOf(parameter) ?: return@mapNotNull null
+            PropertyCapabilityV1(
+              name = parameter.name,
+              jsonType = JsonPrimitive(jsonType),
+              required = !parameter.hasDefault && !parameter.nullable,
+              notes = "`${parameter.name}: ${parameter.type}` on `${component.symbol.callable}`.",
+            )
+          }
     return ComponentCapabilityV1(
       componentId = componentId,
       displayName = policy?.displayName ?: component.symbol.name,
@@ -319,7 +391,8 @@ internal object PublishedUiBuilderCatalog {
       traits = policy?.traits.orEmpty(),
       slots = slots,
       properties = properties,
-      modifierCapabilities = emptyList(),
+      modifierCapabilities =
+        policy?.modifierCapabilities ?: structuralModifiers(slots.isNotEmpty()),
       wasm = wasm(policy?.canvas, policy?.nativeOnly == true, component.symbol.callable),
       code =
         CodeCapabilityV1(
@@ -328,6 +401,27 @@ internal object PublishedUiBuilderCatalog {
         ),
     )
   }
+
+  private fun UiBuilderPropertyPolicy.toCapability(): PropertyCapabilityV1 =
+    PropertyCapabilityV1(
+      name = name,
+      jsonType = jsonType,
+      required = required,
+      allowedValues = allowedValues,
+      notes = notes,
+    )
+
+  /**
+   * What a component accepts when the catalog does not say.
+   *
+   * Deliberately NOT an attempt to reproduce a frozen catalog's editorial list — those differ by
+   * component in ways nothing structural predicts. This is the honest fallback: the same
+   * container/leaf split a pack component already gets, so a catalog that states nothing is usable
+   * rather than inert. A catalog replacing a synthesised shelf states `modifiers` and does not
+   * reach this.
+   */
+  private fun structuralModifiers(container: Boolean): List<String> =
+    ComponentRecordPacks.structuralModifiers(container)
 
   /**
    * A builtin, as a component.
@@ -350,8 +444,9 @@ internal object PublishedUiBuilderCatalog {
             ordered = true,
           )
         },
-      properties = emptyList(),
-      modifierCapabilities = emptyList(),
+      properties = builtin.propertyCapabilities.orEmpty().map { it.toCapability() },
+      modifierCapabilities =
+        builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()),
       wasm = wasm(builtin.canvas, nativeOnly = false, callable = null),
     )
 
@@ -456,6 +551,13 @@ internal object PublishedUiBuilderCatalog {
     val displayName: String? = null,
     val canvas: String? = null,
     val slots: Map<String, JsonElement> = emptyMap(),
+    /**
+     * See [UiBuilderComponentPolicy.propertyCapabilities]. A builtin has no record, so this is its
+     * only source.
+     */
+    val propertyCapabilities: List<UiBuilderPropertyPolicy>? = null,
+    /** See [UiBuilderComponentPolicy.modifierCapabilities]. */
+    val modifierCapabilities: List<String>? = null,
   )
 
   @Serializable
@@ -468,5 +570,84 @@ internal object PublishedUiBuilderCatalog {
     val nativeOnly: Boolean = false,
     val traits: List<String> = emptyList(),
     val excluded: String? = null,
+    /**
+     * The properties this component offers a design, or null to derive them from the record.
+     *
+     * A catalog's vocabulary is not its component's parameter list. `m3/button` offers `style`,
+     * `selected` and `containerColor`; `androidx.compose.material3.Button` takes `onClick`,
+     * `shape`, `colors`, `elevation`, `border`, `contentPadding` and `interactionSource`. Deriving
+     * from the record produced the second, which is a different vocabulary rather than a different
+     * spelling of the first — and made `onClick` REQUIRED, since it carries no default, so every
+     * design that had ever placed a button failed validation.
+     *
+     * So a catalog that means to replace a synthesised shelf states this. Null keeps the derived
+     * behaviour, which is right for a catalog whose components ARE their call sites.
+     */
+    val propertyCapabilities: List<UiBuilderPropertyPolicy>? = null,
+    /**
+     * The slots this component offers a design, or null to derive them from the record.
+     *
+     * Curated for the same reason properties are, and one level further: a catalog's slot is not
+     * always its composable's parameter. `m3/list-item` offers `headline`, `supporting` and
+     * `trailing`; `ListItem` takes `headlineContent`, `leadingContent`, `overlineContent`,
+     * `supportingContent` and `trailingContent`. Deriving renamed three slots and invented two, and
+     * because a component's role follows from whether it has any, it also turned `m3/switch` from a
+     * Leaf into a Container by finding its `thumbContent`.
+     *
+     * The acceptance model is the other half. A derived slot accepts anything — no cardinality, no
+     * `acceptedRoles`, no `acceptedTraits` — so the rules that stop a design putting a scaffold
+     * inside a chip's label simply vanish.
+     */
+    val slotCapabilities: List<UiBuilderSlotPolicy>? = null,
+    /**
+     * The modifiers this component accepts, or null for the structural default.
+     *
+     * `ProductionUiBuilderRuntime` rejects any modifier a component does not declare, so the empty
+     * list this used to pass meant no design could set `padding` on anything. It cannot be inferred
+     * either: the frozen catalog gives `m3/icon` 17, `m3/text` 18 and `layout/box` 28, and the
+     * difference is editorial — whether `fillMaxWidth` makes sense on an icon — not structural.
+     */
+    val modifierCapabilities: List<String>? = null,
+  )
+
+  /**
+   * One property a catalog states, mirroring `PropertyCapabilityV1`.
+   *
+   * Declared here rather than reusing the protocol type because this is the AUTHORED shape: a
+   * catalog writes it into `ui-builder.json`, and the protocol type is what the builder is served.
+   * They agree field for field today; if the protocol gains a field the catalog cannot state, only
+   * this one stays still.
+   */
+  /**
+   * Why these three are `…Capabilities` and not `properties` / `slots` / `modifiers`.
+   *
+   * The generator's own `UiBuilderComponentPolicy` — compose-ai-tools, published in
+   * `preview-discovery`, and the thing that WRITES the file this reads — already spells two of
+   * those names for different types: a component's `slots` is a `Map<String, List<String>>` of
+   * `@BuilderComponent` content hints, and a builtin's `properties` is a `List<JsonElement>`. Both
+   * are empty in every catalog published today, so reusing the names would have decoded fine right
+   * up until the first catalog annotated a slot, and then failed the whole file rather than one
+   * field. Distinct names cost nothing and cannot collide.
+   */
+  /** One slot a catalog states, mirroring `SlotCapabilityV1`. See [UiBuilderPropertyPolicy]. */
+  @Serializable
+  internal data class UiBuilderSlotPolicy(
+    val name: String,
+    val cardinality: UiBuilderSlotCardinality = UiBuilderSlotCardinality(),
+    val ordered: Boolean = false,
+    val acceptedRoles: List<String> = emptyList(),
+    val acceptedTraits: List<String> = emptyList(),
+  )
+
+  /** How many children a stated slot takes; `max` null is unbounded. */
+  @Serializable internal data class UiBuilderSlotCardinality(val min: Int = 0, val max: Int? = null)
+
+  @Serializable
+  internal data class UiBuilderPropertyPolicy(
+    val name: String,
+    val jsonType: JsonElement,
+    val required: Boolean = false,
+    val allowedValues: List<JsonElement> = emptyList(),
+    val notes: String = "",
   )
 }

@@ -114,12 +114,20 @@ class DecoderShapeFixtureTest {
         )
       StructureKind.LIST -> {
         val item = descriptor.getElementDescriptor(0)
-        if (item.kind == PrimitiveKind.STRING) mapOf("kind" to JsonPrimitive("stringList"))
-        else
-          mapOf("kind" to JsonPrimitive("objectList")) +
-            if (item.kind == StructureKind.CLASS)
-              mapOf("members" to describe(item, seen)["members"]!!)
-            else emptyMap()
+        when (item.kind) {
+          PrimitiveKind.STRING -> mapOf("kind" to JsonPrimitive("stringList"))
+          StructureKind.CLASS ->
+            mapOf(
+              "kind" to JsonPrimitive("objectList"),
+              "members" to describe(item, seen).getValue("members"),
+            )
+          // A `List<JsonElement>` — `allowedValues` is one. Its elements are whatever the property
+          // is: strings for an enum, numbers for a range. Calling it `objectList` because it is
+          // neither a string list nor a list of a known class made the gate demand an object per
+          // entry and refuse every catalog that declares enum values — 104 findings against the
+          // very first policy written to this contract, none of them real.
+          else -> mapOf("kind" to JsonPrimitive("anyList"))
+        }
       }
       StructureKind.CLASS -> {
         val described = describe(descriptor, seen)

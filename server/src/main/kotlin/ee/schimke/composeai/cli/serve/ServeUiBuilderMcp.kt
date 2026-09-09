@@ -50,6 +50,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.encodeToJsonElement
@@ -342,7 +343,13 @@ class ServeUiBuilderMcp(
         is JsonArray -> jsonType.joinToString("|") { it.jsonPrimitive.content }
         else -> jsonType.jsonPrimitive.content
       }
-    val allowed = property.allowedValues.joinToString("|") { it.jsonPrimitive.content }
+    // `allowedValues` is a `List<JsonElement>` and a catalog may legitimately put a non-primitive
+    // in one. This is a human-readable summary, so an object renders as its JSON rather than
+    // taking the whole `ui_builder_list_catalogs` response down with an exception.
+    val allowed =
+      property.allowedValues.joinToString("|") { value ->
+        (value as? JsonPrimitive)?.content ?: value.toString()
+      }
     return "${property.name}:$type" +
       (if (property.required) "!" else "") +
       (if (allowed.isEmpty()) "" else "=$allowed")

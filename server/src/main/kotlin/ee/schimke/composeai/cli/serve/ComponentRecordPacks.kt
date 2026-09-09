@@ -188,7 +188,7 @@ internal object ComponentRecordPacks {
       traits = listOf(PACK_TRAIT),
       slots = slots,
       properties = properties,
-      modifierCapabilities = if (container) CONTAINER_MODIFIERS else LEAF_MODIFIERS,
+      modifierCapabilities = structuralModifiers(container),
       wasm =
         WasmCapabilityV1(
           platformSupported = JsonPrimitive(false),
@@ -259,6 +259,16 @@ internal object ComponentRecordPacks {
     )
 
   /** What `layout/column` may carry: the leaf set plus what a container that fills does. */
+  /**
+   * The container/leaf split, shared with `PublishedUiBuilderCatalog`.
+   *
+   * Exposed rather than duplicated so a published catalog that states no `modifiers` gets the same
+   * answer a pack component does — two fallbacks that disagreed would be two different ideas of
+   * what "the default" means.
+   */
+  internal fun structuralModifiers(container: Boolean): List<String> =
+    if (container) CONTAINER_MODIFIERS else LEAF_MODIFIERS
+
   private val CONTAINER_MODIFIERS =
     LEAF_MODIFIERS +
       listOf(
