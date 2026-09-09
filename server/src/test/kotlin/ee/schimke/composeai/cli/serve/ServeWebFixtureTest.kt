@@ -3742,6 +3742,27 @@ class ServeWebFixtureTest {
                   ),
                 ),
                 ServeWeb.Stat("Known sessions", "4"),
+                // The subprocess census, in the state it exists to make visible: a reaping leak
+                // running against a bounded PID budget. Captured because the row is the page's
+                // longest single value — four clauses, one of them naming the leaking executable —
+                // and because its meter is the only one here whose warning segment dwarfs the rest,
+                // which is exactly the layout a golden has to hold still. Figures are the measured
+                // `preview.coo.ee` incident ([ServeProcessCensusSnapshot]) against a 4096 ceiling,
+                // rather than the unbounded budget that box actually had: an unbounded one draws no
+                // meter at all, so it would capture strictly less.
+                ServeWeb.Stat(
+                  "Processes",
+                  "18 live JVMs · 2140 total · 2099 defunct (java) · 2140/4096 pids",
+                  ServeWeb.Meter(
+                    total = 4096,
+                    segments =
+                      listOf(
+                        ServeWeb.MeterSegment("defunct", 2099, "warning"),
+                        ServeWeb.MeterSegment("live", 41, "secondary"),
+                        ServeWeb.MeterSegment("free", 1956, "primary"),
+                      ),
+                  ),
+                ),
                 ServeWeb.Stat("Uptime", "3d 4h"),
                 ServeWeb.Stat(
                   "Live renders",

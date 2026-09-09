@@ -83,4 +83,107 @@ class ServeProcessCensusTest {
     assertEquals(1, census.liveJava)
     assertEquals(0, census.zombies)
   }
+
+  /** A cgroup PID controller in the unified (v2) layout: counters at the hierarchy root. */
+  private fun cgroupV2(root: File, current: String, max: String): File {
+    val dir = File(root, "cgroup2").also { it.mkdirs() }
+    File(dir, "pids.current").writeText("$current\n")
+    File(dir, "pids.max").writeText("$max\n")
+    return dir
+  }
+
+  /** A cgroup PID controller in the v1 layout: its own `pids/` mount beneath the hierarchy. */
+  private fun cgroupV1(root: File, current: String, max: String): File {
+    val dir = File(root, "cgroup1")
+    val pids = File(dir, "pids").also { it.mkdirs() }
+    File(pids, "pids.current").writeText("$current\n")
+    File(pids, "pids.max").writeText("$max\n")
+    return dir
+  }
+
+  @Test
+  fun `reads the pid budget from a unified cgroup`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+
+    val census = ServeProcessCensusSnapshot.read(tmp, cgroupV2(tmp, "2140", "4096"))!!
+
+    assertEquals(2140L, census.pidsCurrent)
+    assertEquals(4096L, census.pidsMax)
+  }
+
+  @Test
+  fun `reads the pid budget from a cgroup v1 controller`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+    // The regression: reading only the v2 path answered null here, so the PID meter vanished on a
+    // v1 host with a perfectly finite budget. The deployment entrypoint already falls back this way
+    // for the CPU and memory limits, so a host it supports must not be blind to its PID ceiling.
+    val census = ServeProcessCensusSnapshot.read(tmp, cgroupV1(tmp, "2140", "4096"))!!
+
+    assertEquals(2140L, census.pidsCurrent)
+    assertEquals(4096L, census.pidsMax)
+  }
+
+  @Test
+  fun `reports an unbounded budget as no ceiling`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+    // `max` is the literal a cgroup writes for "no limit", and it is the state the measured
+    // incident ran under. It must read as null so the page draws no meter, rather than as a number.
+    val census = ServeProcessCensusSnapshot.read(tmp, cgroupV2(tmp, "2140", "max"))!!
+
+    assertEquals(2140L, census.pidsCurrent)
+    assertNull(census.pidsMax)
+  }
+
+  @Test
+  fun `answers no budget where the host has no pid controller`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+
+    val census = ServeProcessCensusSnapshot.read(tmp, File(tmp, "no-cgroup"))!!
+
+    assertNull(census.pidsCurrent)
+    assertNull(census.pidsMax)
+  }
+
+  @Test
+  fun `samples once per interval rather than once per request`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+    var now = 1_000L
+    val census =
+      ServeProcessCensus(
+        intervalMillis = 5_000,
+        procDir = tmp,
+        cgroupDir = File(tmp, "no-cgroup"),
+        clock = { now },
+      )
+
+    assertEquals(1, census.sample()!!.total)
+    // A second process appears, and a caller inside the window still gets the previous reading —
+    // which is the point: `/status` is unauthenticated and uncached, so a monitor polling every
+    // second must not turn a 2,000-process box into 2,000 file reads a second.
+    proc(tmp, 2, "java", 'S')
+    assertEquals(1, census.sample()!!.total)
+
+    now += 5_000
+    assertEquals(2, census.sample()!!.total)
+  }
+
+  @Test
+  fun `resamples when the clock goes backwards`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+    var now = 10_000L
+    val census =
+      ServeProcessCensus(
+        intervalMillis = 5_000,
+        procDir = tmp,
+        cgroupDir = File(tmp, "no-cgroup"),
+        clock = { now },
+      )
+
+    assertEquals(1, census.sample()!!.total)
+    proc(tmp, 2, "java", 'S')
+    // A reading taken in the future is not a reading this cache may serve: without the guard, a
+    // clock step backwards would pin the census until wall time caught up again.
+    now = 1_000
+    assertEquals(2, census.sample()!!.total)
+  }
 }

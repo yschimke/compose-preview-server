@@ -7395,6 +7395,13 @@ class ServeHttpServer(
   }
 
   /**
+   * One census for the whole server, resampled on a short interval rather than per request — see
+   * [ServeProcessCensus]. Held here because `/status` and `/status.json` are unauthenticated and
+   * uncached on the public deployment, so the traversal's cost is set by whoever is polling.
+   */
+  private val processCensusSampler = ServeProcessCensus()
+
+  /**
    * Raw status snapshot; the single source both the HTML page and the JSON response project from.
    */
   private inner class StatusData(
@@ -7479,8 +7486,15 @@ class ServeHttpServer(
      * This container's subprocesses ([ServeProcessCensusSnapshot]) — the page and the JSON read the
      * same census, so `/status` and `/status.json` cannot disagree about a leak that is running
      * while they are both being read.
+     *
+     * Box-wide, so a site-scoped snapshot omits it entirely, like every other unattributed
+     * container counter here ([branchFetch], [themeCache], [catalogCache]). A census cannot say
+     * which catalog a JVM or a defunct child belongs to, so publishing it on `m3.preview.coo.ee`
+     * would put another app's leak on this site's `/status.json` and let it trip this site's
+     * monitor.
      */
-    val processCensus: ServeProcessCensusSnapshot? = ServeProcessCensusSnapshot.read()
+    val processCensus: ServeProcessCensusSnapshot? =
+      if (onlySystem == null) processCensusSampler.sample() else null
     val overallOk: Boolean =
       failures.isEmpty() &&
         catalogLoadFailureCount == 0 &&
