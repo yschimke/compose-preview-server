@@ -183,6 +183,28 @@ class ServeUiBuilderComponentDriftRoutesTest {
   }
 
   @Test
+  fun `an entry the index still names but this host refuses is unusable, not a removal`() {
+    publish(title = "Contribution cell")
+    val server = start()
+    createDesign(server, importedDigest = publishedDigest())
+
+    // The index parses and its other entries are fine; only this one is refused, for a file name
+    // that cannot be joined onto a fetch URL. The project is still publishing the component — the
+    // entry is broken — so this is `unusable`. It read as `withdrawn` before, because a dropped
+    // entry is indistinguishable from an absent one once the index is a plain list.
+    File(components, "index.json")
+      .writeText(
+        """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
+           "components":[{"id":"$COMPONENT_KEY","title":"Cell","file":"../escape.json"}]}"""
+      )
+
+    assertEquals(
+      "unusable",
+      drift(server, OPERATOR_TOKEN).single()["state"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
   fun `a component authored in the design is not a row`() {
     publish(title = "Contribution cell")
     val server = start()

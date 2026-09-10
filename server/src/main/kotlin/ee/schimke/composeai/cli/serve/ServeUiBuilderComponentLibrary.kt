@@ -118,7 +118,7 @@ class ServeUiBuilderComponentLibrary(
      * minutes must not be told the project deleted it; the drift report reserves a separate state
      * for exactly this, and it can only use it if the failure survives the cache.
      */
-    val entries: List<Entry>?,
+    val entries: IndexRead?,
   )
 
   private val indexes = ConcurrentHashMap<String, CachedIndex>()
@@ -128,6 +128,16 @@ class ServeUiBuilderComponentLibrary(
     catalogs.flatMap(::index)
 
   /**
+   * A parsed index: what it offers, and which ids it named but this host will not offer.
+   *
+   * [rejected] is not a diagnostic. "The project no longer publishes this" and "the project still
+   * names this and the entry is broken" are different answers, and without the rejected ids the
+   * second is indistinguishable from the first — a malformed `file` on an entry reads as a deletion
+   * to anything asking whether a component is still there.
+   */
+  data class IndexRead(val entries: List<Entry>, val rejected: Set<String> = emptySet())
+
+  /**
    * One catalog's published components.
    *
    * Concurrent for the reason the design index is: two viewers opening a palette at once reach this
@@ -135,17 +145,19 @@ class ServeUiBuilderComponentLibrary(
    * so two of them are harmless where a lock would put both behind one.
    */
   fun index(catalog: ServeUiBuilderDesignLibrary.Coordinate): List<Entry> =
-    indexOrNull(catalog).orEmpty()
+    readIndex(catalog)?.entries.orEmpty()
 
   /**
-   * The same read, keeping the one distinction [index] throws away: null is *could not read it*.
+   * The same read, keeping the two distinctions [index] throws away: null is *could not read it*,
+   * and [IndexRead.rejected] is *named but not offerable*.
    *
-   * A palette has nothing to do with the difference — there is nothing to offer either way — so
-   * [index] flattens it. The drift report does: "the project removed this component" and "the
-   * project's index could not be read just now" are the two states it exists to keep apart, and
-   * folding a failed read into an empty index turns a branch that is briefly down into a deletion.
+   * A palette has nothing to do with either — there is nothing to offer in any of those cases — so
+   * [index] flattens them. The drift report does: "the project removed this component", "its index
+   * could not be read just now" and "it still names this component and the entry is broken" are
+   * three different answers, and flattening any of them into an empty index reports a deletion that
+   * did not happen.
    */
-  fun indexOrNull(catalog: ServeUiBuilderDesignLibrary.Coordinate): List<Entry>? {
+  fun readIndex(catalog: ServeUiBuilderDesignLibrary.Coordinate): IndexRead? {
     val cached = indexes[catalog.system]
     if (
       catalog.cacheable &&
@@ -329,39 +341,53 @@ class ServeUiBuilderComponentLibrary(
       onLog = onLog,
     )
 
-  private fun parseIndex(system: String, body: String): List<Entry> {
+  private fun parseIndex(system: String, body: String): IndexRead {
     val root = json.parseToJsonElement(body).jsonObject
     val schema = root["schema"]?.jsonPrimitive?.content
     require(schema == INDEX_SCHEMA) { "expected schema $INDEX_SCHEMA, got ${schema ?: "none"}" }
     val seen = mutableSetOf<String>()
-    return root["components"]?.jsonArray.orEmpty().mapNotNull { element ->
-      val entry = element.jsonObject
-      val componentId = entry.text("id") ?: return@mapNotNull null
-      // A published id becomes a palette symbol and reaches a URL path, so the ones that can be
-      // neither are refused here rather than discovered at the second step.
-      if (!COMPONENT_ID.matches(componentId)) {
-        onLog("serve: $system publishes a component with an unusable id `$componentId`")
-        return@mapNotNull null
+    // Ids this index names and this host will not offer. Kept so that "still named, and broken"
+    // stays distinguishable from "no longer named" for anything that has to tell the two apart.
+    val rejected = mutableSetOf<String>()
+    val entries =
+      root["components"]?.jsonArray.orEmpty().mapNotNull { element ->
+        val entry = element.jsonObject
+        val componentId = entry.text("id") ?: return@mapNotNull null
+        // A published id becomes a palette symbol and reaches a URL path, so the ones that can be
+        // neither are refused here rather than discovered at the second step.
+        if (!COMPONENT_ID.matches(componentId)) {
+          onLog("serve: $system publishes a component with an unusable id `$componentId`")
+          rejected += componentId
+          return@mapNotNull null
+        }
+        // Not rejected: the first entry under this id was accepted, so the id *is* offered.
+        if (!seen.add(componentId)) {
+          onLog("serve: $system publishes `$componentId` twice; keeping the first")
+          return@mapNotNull null
+        }
+        val file = entry.text("file") ?: "$componentId.json"
+        // Joined onto a fetch URL, so it stays one flat name under the components directory rather
+        // than anything that could climb out of it.
+        if (!COMPONENT_FILE.matches(file)) {
+          onLog("serve: $system publishes `$componentId` with an unusable file `$file`")
+          rejected += componentId
+          return@mapNotNull null
+        }
+        Entry(
+          system = system,
+          componentId = componentId,
+          title = entry.text("title") ?: componentId,
+          description = entry.text("description"),
+          file = file,
+        )
       }
-      if (!seen.add(componentId)) {
-        onLog("serve: $system publishes `$componentId` twice; keeping the first")
-        return@mapNotNull null
-      }
-      val file = entry.text("file") ?: "$componentId.json"
-      // Joined onto a fetch URL, so it stays one flat name under the components directory rather
-      // than anything that could climb out of it.
-      if (!COMPONENT_FILE.matches(file)) {
-        onLog("serve: $system publishes `$componentId` with an unusable file `$file`")
-        return@mapNotNull null
-      }
-      Entry(
-        system = system,
-        componentId = componentId,
-        title = entry.text("title") ?: componentId,
-        description = entry.text("description"),
-        file = file,
-      )
-    }
+    // Minus what is actually offered, not minus what was *seen*: an id reaches `seen` before its
+    // file name is checked, so subtracting that set silently emptied `rejected` for the very case
+    // it exists to describe. An id is only un-rejected if some entry under it did produce a symbol.
+    return IndexRead(
+      entries = entries,
+      rejected = rejected - entries.map { it.componentId }.toSet(),
+    )
   }
 
   private fun JsonObject.text(key: String): String? =

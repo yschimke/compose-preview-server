@@ -674,6 +674,16 @@ data class EditorProblem(
   val message: String,
   val nodeId: String? = null,
   val componentId: String? = null,
+  /**
+   * Whether this actually stops an export, as against something the panel reports and the export
+   * runs through anyway.
+   *
+   * Defaulted true because everything read out of the export gate is a refusal by construction. The
+   * panel's copy — "what the Compose export gate refuses", and an empty list reading "nothing is
+   * blocking a Compose export" — is a claim about every row it shows, so an advisory listed among
+   * them makes that claim untrue and tells somebody their export will fail when it will not.
+   */
+  val blocking: Boolean = true,
 )
 
 data class EditorThemeSettings(

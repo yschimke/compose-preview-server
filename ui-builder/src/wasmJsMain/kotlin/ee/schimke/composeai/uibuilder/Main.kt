@@ -615,6 +615,14 @@ private fun LiveSessionApp(
   // JVM-only catalog, which is why they cross the wire at all.
   LaunchedEffect(localSession) { devicePresets = loadDevicePresets(localSession?.text) }
 
+  // Asked once per design rather than per revision: the answer is about another host's library,
+  // not about this document, and re-asking on every keystroke would put an HTTP round trip behind
+  // the editing loop for a fact that changes when somebody merges to the project — not when
+  // somebody types. The findings that a later edit invalidates are dropped by the reducer.
+  var componentDrift by
+    remember(config.designId) { mutableStateOf(emptyList<ComponentDriftFinding>()) }
+  LaunchedEffect(config.designId) { componentDrift = loadComponentDrift(config.designId) }
+
   // The reference overlay's browser half: the file picker, the paste listener, the snapshot and
   // the store behind them all. Rebuilt only when the design changes, because it is addressed to
   // one design.
@@ -1222,6 +1230,7 @@ private fun LiveSessionApp(
       initialCatalogQuery = catalogQuery,
       initialEnabledPacks = enabledPacks,
       collaborators = collaborators,
+      componentDrift = componentDrift,
       devicePresets = devicePresets,
       newDesignCatalogs = newDesignCatalogs,
       onCreateDesign = createDesign,
@@ -1957,6 +1966,71 @@ private const val IDENTITY_PATH = "/api/ui-builder/v1/identity"
 private val identityJson = Json { ignoreUnknownKeys = true }
 
 @kotlinx.serialization.Serializable private data class IdentityPayload(val actorId: String = "")
+
+private fun componentDriftPath(designId: String): String =
+  "/api/ui-builder/v1/designs/$designId/component-drift"
+
+/** Tolerant like the rest: a state or field this build does not know must not blank the report. */
+private val componentDriftJson = Json { ignoreUnknownKeys = true }
+
+@kotlinx.serialization.Serializable
+private data class ComponentDriftPayload(val components: List<ComponentDriftWire> = emptyList())
+
+@kotlinx.serialization.Serializable
+private data class ComponentDriftWire(
+  val componentKey: String = "",
+  val system: String = "",
+  val componentId: String = "",
+  val paletteId: String = "",
+  val state: String = "",
+  val importedDigest: String = "",
+  val currentDigest: String? = null,
+)
+
+/**
+ * Whether the shared components this design imported still match the library they came from.
+ *
+ * A design holds the body of every component it imported, so it draws and exports the same way
+ * whatever the project does afterwards — which is exactly why nothing in the document can answer
+ * this and it has to be asked over the wire.
+ *
+ * A failure is not fatal, for the reason [loadDevicePresets]'s is not: a host that serves no
+ * component library answers 404 here, and an editor that refused to open over that would be an
+ * editor most hosts could not run. An unrecognised state is dropped rather than guessed at — a
+ * verdict this build cannot name is one it cannot word either.
+ */
+private suspend fun loadComponentDrift(designId: String): List<ComponentDriftFinding> =
+  try {
+    componentDriftJson
+      .decodeFromString(
+        ComponentDriftPayload.serializer(),
+        fetchText(componentDriftPath(designId)),
+      )
+      .components
+      .mapNotNull { row ->
+        val state =
+          when (row.state) {
+            "unchanged" -> ComponentDriftState.UNCHANGED
+            "drifted" -> ComponentDriftState.DRIFTED
+            "withdrawn" -> ComponentDriftState.WITHDRAWN
+            "unusable" -> ComponentDriftState.UNUSABLE
+            else -> return@mapNotNull null
+          }
+        ComponentDriftFinding(
+          componentKey = row.componentKey,
+          system = row.system,
+          componentId = row.componentId,
+          paletteId = row.paletteId,
+          state = state,
+          importedDigest = row.importedDigest,
+          currentDigest = row.currentDigest,
+        )
+      }
+  } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+    throw cancelled
+  } catch (_: Exception) {
+    emptyList()
+  }
 
 private const val DEVICE_PRESETS_PATH = "/api/ui-builder/v1/device-presets"
 
