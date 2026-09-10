@@ -283,7 +283,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * component you could insert and could not export.
    *
    * It is no longer the whole answer. The emitter falls back to the component RECORD for a
-   * component it has no case for, and twenty-four of the twenty-seven now export — measured in
+   * component it has no case for, and twenty-three of the twenty-seven now export — measured in
    * [what the published shelf can export is the reviewed set], which is the test to read for
    * whether the shelf is usable. This one stays because the hand-written cases and the fallback are
    * different mechanisms with different failure modes, and a case appearing here should be a
@@ -652,14 +652,20 @@ class PublishedRemoteM3CatalogEquivalenceTest {
 
   private companion object {
     /**
-     * The three published components the widget exporter still cannot write, and why.
+     * The four published components the widget exporter cannot write, and why each one.
      *
-     * Twenty-four of the twenty-seven do, which is the number this test exists to keep honest. All
-     * three left are the same kind of thing — a required parameter whose TYPE no design value
-     * becomes — and none is a mapping the emitter could add without the design model growing a way
-     * to say it. The two page indicators want a `RemotePageIndicatorState`, which is a runtime
-     * object rather than a value; the icon wants an `ImageVector`, which a design carries as an
-     * asset key rather than as a vector.
+     * Twenty-three of the twenty-seven do, which is the number this test exists to keep honest —
+     * and it was reported as twenty-four until the emitter started checking whether a recovered
+     * signature is a callable a generated file can reach. `remote-m3/theme-specimen` has a
+     * signature and is not public, so writing the call from its parameters produced source that
+     * imports and invokes something no other file may name. Found in review, and worth the count
+     * moving the wrong way: a number that counts an uncompilable export as a success is what this
+     * gate exists to stop.
+     *
+     * The other three are a required parameter whose TYPE no design value becomes, and none is a
+     * mapping the emitter could add without the design model growing a way to say it: the page
+     * indicators want a `RemotePageIndicatorState`, a runtime object rather than a value, and the
+     * icon an `ImageVector`, which a design carries as an asset key.
      */
     val EXPORT_REFUSALS =
       mapOf(
@@ -672,6 +678,9 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         "remote-m3/remote-vertical-page-indicator" to
           "`state: RemotePageIndicatorState` and the design carries no value this generator can " +
             "write as one",
+        "remote-m3/theme-specimen" to
+          "`remote-m3/theme-specimen` is not public or internal, so a generated file cannot " +
+            "call it",
       )
   }
 }

@@ -488,6 +488,28 @@ internal class RemoteContentEmitter(
    */
   private fun recordCall(node: UiBuilderNode, depth: Int): List<String>? {
     val record = components[node.componentId] ?: return null
+    // The guards `ComponentSnippets.callSite` applies before it looks at a single parameter, and
+    // for its reasons. A recovered signature is not a call site: `remote-m3/theme-specimen` has
+    // one and is not public, so writing the call from its parameters produced an import and an
+    // invocation of something a generated file cannot reach. Each of these is a property of the
+    // CALLABLE, which no design value can supply, so each refuses whatever the design says.
+    val inaccessible =
+      when {
+        !record.callableFromAnotherFile ->
+          "is not public or internal, so a generated file cannot call it"
+        record.overloadsCollided ->
+          "has overloads that collided under one id, so no single call site identifies one"
+        record.hasTypeParameters ->
+          "declares type parameters a call omitting defaulted arguments cannot infer"
+        record.hasContextReceivers -> "declares a context a generated widget cannot supply"
+        record.symbol.receiver != null ->
+          "is declared on ${record.symbol.receiver}, so a call needs that scope around it"
+        else -> null
+      }
+    if (inaccessible != null) {
+      refusals += "`${node.componentId}` $inaccessible"
+      return emptyList()
+    }
     if (!record.signatureKnown) {
       refusals +=
         "`${node.componentId}` has no recovered signature, so no call to it can be written"
@@ -542,6 +564,10 @@ internal class RemoteContentEmitter(
           authored != null -> remoteValue(parameter, authored)
           parameter.hasDefault -> null
           parameter.typeFqn == ACTION_FQN -> actionExpression(node, parameter)
+          // Nullable and no default: optional to the design, mandatory to Kotlin. Omitting it
+          // does not compile and refusing it would reject a design that legitimately left it
+          // out, so the absence is written down as what it is.
+          parameter.nullable -> "null"
           else -> null
         }
       if (expression == null) {
@@ -582,13 +608,16 @@ internal class RemoteContentEmitter(
       headArguments.forEach { lines += "$pad$INDENT$it," }
       named.forEach { (name, ids) ->
         lines += "$pad$INDENT$name = {"
-        lines += ids.flatMap { emit(it, depth + 2) }
+        lines += inSlotScope(slotParameters.first { it.name == name }) {
+          ids.flatMap { emit(it, depth + 2) }
+        }
         lines += "$pad$INDENT},"
       }
       lines += if (trailingName == null) "$pad)" else "$pad)$OPENING_BRACE"
     }
     if (trailingName != null) {
-      lines += blocks.first { it.first == trailingName }.second.flatMap { emit(it, depth + 1) }
+      val slot = slotParameters.first { it.name == trailingName }
+      lines += inSlotScope(slot) { blocks.first { it.first == trailingName }.second.flatMap { emit(it, depth + 1) } }
       lines += "$pad}"
     }
     return lines
@@ -722,6 +751,25 @@ internal class RemoteContentEmitter(
         }
       else -> null
     }
+  }
+
+  /**
+   * Emit a slot's children inside the scope its lambda gives them.
+   *
+   * `RemoteButton.content` is a `RemoteRowScope` lambda, so a child in it may carry `weight` —
+   * and `weightCall` reads [scope], which the hand-written row and column path sets and this one
+   * did not. A design whose button holds a weighted child was refused as "not in a row or
+   * column" while standing in exactly one. The receiver's simple name without its `Scope` suffix
+   * is the vocabulary the rest of this file already uses.
+   */
+  private fun <T> inSlotScope(slot: TargetParameter, body: () -> T): T {
+    val receiver = slot.composableSlotReceiver?.substringAfterLast('.')?.removeSuffix("Scope")
+    if (receiver == null) return body()
+    val enclosing = scope
+    scope = receiver
+    val result = body()
+    scope = enclosing
+    return result
   }
 
   private fun lambdaActionExpression(): String {

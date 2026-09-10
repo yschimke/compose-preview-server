@@ -223,6 +223,19 @@ internal object ComponentRecordPacks {
       "kotlin.Long" -> "integer"
       "kotlin.Float",
       "kotlin.Double" -> "number"
+      // The Remote Compose value types, which a Remote catalog's components take instead of the
+      // Kotlin ones: `RemoteText(text: RemoteString)` rather than `Text(text: String)`. Left out,
+      // every component of such a catalog was served with NO editable properties at all — a text
+      // with no `text` — so a design could not author one and the export then reported the value
+      // missing. What a design carries is the same JSON either way; the difference is only the
+      // expression the emitter writes around it (`"…".rs`), which is the emitter's business.
+      "androidx.compose.remote.creation.compose.state.RemoteString",
+      // A colour travels as a string in both vocabularies — `#RRGGBB` or a token name — which is
+      // what the frozen catalogs already say for every `color` property they carry.
+      "androidx.compose.remote.creation.compose.state.RemoteColor" -> "string"
+      "androidx.compose.remote.creation.compose.state.RemoteBoolean" -> "boolean"
+      "androidx.compose.remote.creation.compose.state.RemoteInt" -> "integer"
+      "androidx.compose.remote.creation.compose.state.RemoteFloat" -> "number"
       else -> null
     }
 

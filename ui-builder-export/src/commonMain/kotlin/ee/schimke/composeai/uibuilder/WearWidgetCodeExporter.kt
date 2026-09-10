@@ -79,8 +79,11 @@ object WearWidgetCodeExporter {
     document: UiBuilderDocument,
     packageName: String? = null,
     assets: WidgetAssetContents,
+    components: Map<String, ComponentRecord> = emptyMap(),
   ): BundleResult =
-    when (val outcome = generate(document, packageName, WidgetAssetBytes { null }, assets)) {
+    when (
+      val outcome = generate(document, packageName, WidgetAssetBytes { null }, assets, components)
+    ) {
       is Outcome.Refused -> BundleResult.Refused(outcome.reasons)
       is Outcome.Generated ->
         BundleResult.Emitted(
