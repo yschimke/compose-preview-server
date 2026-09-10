@@ -87,12 +87,19 @@ internal class ServeUiBuilderComponentDrift(private val library: ServeUiBuilderC
     // and reporting it as a removal sends its reader looking for a symbol that is still there.
     var unreadable = false
     matching.forEach { catalog ->
-      val index = library.indexOrNull(catalog)
+      val index = library.readIndex(catalog)
       if (index == null) {
         unreadable = true
         return@forEach
       }
-      val entry = index.firstOrNull { it.componentId == source.componentId } ?: return@forEach
+      // Named by this index and refused by this host — a malformed file name, an id that cannot
+      // become a palette symbol. The project still publishes it, so it is broken rather than gone.
+      if (source.componentId in index.rejected) {
+        published = true
+        return@forEach
+      }
+      val entry =
+        index.entries.firstOrNull { it.componentId == source.componentId } ?: return@forEach
       published = true
       val symbol = library.symbol(catalog, entry) ?: return@forEach
       return if (symbol.digest == source.digest) copy(state = State.UNCHANGED)

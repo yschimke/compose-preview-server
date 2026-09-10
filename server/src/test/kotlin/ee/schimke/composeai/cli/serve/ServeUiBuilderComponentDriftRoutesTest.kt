@@ -33,6 +33,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -183,6 +184,28 @@ class ServeUiBuilderComponentDriftRoutesTest {
   }
 
   @Test
+  fun `an entry the index still names but this host refuses is unusable, not a removal`() {
+    publish(title = "Contribution cell")
+    val server = start()
+    createDesign(server, importedDigest = publishedDigest())
+
+    // The index parses and its other entries are fine; only this one is refused, for a file name
+    // that cannot be joined onto a fetch URL. The project is still publishing the component — the
+    // entry is broken — so this is `unusable`. It read as `withdrawn` before, because a dropped
+    // entry is indistinguishable from an absent one once the index is a plain list.
+    File(components, "index.json")
+      .writeText(
+        """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
+           "components":[{"id":"$COMPONENT_KEY","title":"Cell","file":"../escape.json"}]}"""
+      )
+
+    assertEquals(
+      "unusable",
+      drift(server, OPERATOR_TOKEN).single()["state"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
   fun `a component authored in the design is not a row`() {
     publish(title = "Contribution cell")
     val server = start()
@@ -191,6 +214,38 @@ class ServeUiBuilderComponentDriftRoutesTest {
     // Nothing to drift against, and listing it as unchanged would pad the report with a row that
     // can never say anything else.
     assertEquals(emptyList(), drift(server, OPERATOR_TOKEN))
+  }
+
+  /**
+   * An editor opened at `?revision=` is showing what that revision imported.
+   *
+   * Reporting against head there is answering a question nobody asked: a component the pinned
+   * revision holds and head no longer does would simply be missing from the report, and the panel
+   * would go quiet about a design that has genuinely drifted.
+   */
+  @Test
+  fun `a pinned revision is reported against that revision, not the head`() {
+    publish(title = "Contribution cell")
+    val server = start()
+    createDesign(server, importedDigest = publishedDigest())
+
+    val (code, body) = ask(server, OPERATOR_TOKEN, revision = 0)
+
+    assertEquals(200, code, body)
+    assertEquals(0, Json.parseToJsonElement(body).jsonObject["revision"]!!.jsonPrimitive.int)
+  }
+
+  @Test
+  fun `a revision that is not a number is refused rather than ignored`() {
+    publish(title = "Contribution cell")
+    val server = start()
+    createDesign(server, importedDigest = publishedDigest())
+
+    // Silently falling back to head would answer a different question than the one asked, and the
+    // response's own `revision` field would be the only clue.
+    val (code, body) = ask(server, OPERATOR_TOKEN, rawRevision = "yesterday")
+
+    assertEquals(400, code, body)
   }
 
   @Test
@@ -283,11 +338,14 @@ class ServeUiBuilderComponentDriftRoutesTest {
     server: RunningServer,
     token: String?,
     designId: String = DESIGN_ID,
+    revision: Long? = null,
+    rawRevision: String? = null,
   ): Pair<Int, String> {
+    val query = rawRevision?.let { "?revision=$it" } ?: revision?.let { "?revision=$it" } ?: ""
     val request =
       Request.Builder()
         .url(
-          "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$designId/component-drift"
+          "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$designId/component-drift$query"
         )
         .apply { if (token != null) header(ServeHttpServer.TOKEN_HEADER, token) }
         .build()
