@@ -39,7 +39,12 @@ const limits = {
     "focused comparison": 70_000,
     "design page": 44_000,
     parity: 52_000,
-    viewer: 68_000,
+    // 68_000 until the resting comparison chips learned to score the current preview's Figma and
+    // paired-catalog sources, and the variant strip learned to fit visible ink rather than unlike
+    // transparent canvases. Measured at 68_217 gzip bytes: +217 over the former ceiling, while
+    // avoiding the expensive version of the feature (eagerly scoring every strip row). Raised by
+    // the usual 2 kB step so the next small viewer fix does not become another budget edit.
+    viewer: 70_000,
     // 180_000 until the report form's body writer learned to fill a locator's `overrides:` from
     // live viewer state (#5000). That put `fillOverrides` and the classification read-back into
     // `viewer-components.js`, which this page carries for its report affordance: measured at

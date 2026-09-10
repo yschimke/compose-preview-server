@@ -37,6 +37,19 @@ export interface SpecSource {
 }
 
 /**
+ * The server omits a picker for the common one-source lane. Preserve that source as an ordinary
+ * descriptor for code that needs to inspect or score it, while keeping the DOM free of a one-item
+ * control. Picker-backed lanes remain authoritative when they exist.
+ */
+export function sourcesOrFallback(
+    sources: readonly SpecSource[],
+    fallback: SpecSource | null,
+): SpecSource[] {
+    if (sources.length > 0) return Array.from(sources);
+    return fallback && fallback.src ? [fallback] : [];
+}
+
+/**
  * The active source: the one marked pressed, else the first.
  *
  * Falling back to the first rather than to "none" is what makes the picker's initial state
@@ -91,6 +104,22 @@ export function changesSource(
     if (!active) return false;
     if (active.id === nextId) return false;
     return sources.some((source) => source.id === nextId);
+}
+
+/**
+ * Whether a resting-bar source chip should close the comparison lane.
+ *
+ * Every source on that bar is a toggle, not just the imported kit. A pressed chip means its source
+ * is already on the stage, so pressing it again returns to the render; an unpressed peer still
+ * selects its source. Keeping this as one decision prevents the primary and peer click handlers
+ * from quietly acquiring different interaction rules again.
+ */
+export function closesSource(
+    onComparisonLane: boolean,
+    pressedId: string | null,
+    sourceId: string,
+): boolean {
+    return onComparisonLane && pressedId === sourceId;
 }
 
 /**

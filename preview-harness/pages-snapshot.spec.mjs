@@ -73,6 +73,13 @@ const designRenderPlaceholder = resolve(
   pagesDir,
   "_design-render-placeholder.png",
 );
+// The paired-catalog comparison needs both forms a real delivery can publish: a component on a
+// padded canvas and the exact same pixels cropped tightly. Serving those two forms makes the strip
+// baseline prove that it fits visible ink rather than scaling the full image dimensions.
+const stripTightRenderPlaceholder = resolve(
+  pagesDir,
+  "_strip-render-placeholder-tight.png",
+);
 // The motion lane's stub, and it has to be a genuinely ANIMATED file rather than another flat
 // placeholder: what the capture below is asserting is that the lane puts a moving image on the
 // stage in place of the still, and a static PNG served as `image/apng` would satisfy every
@@ -2814,7 +2821,10 @@ const FIXTURE_STATES = [
   },
   {
     // The same pair switched from its inherited Figma target to the sibling implementation. The
-    // views stay put; only the reference source and its provenance change.
+    // views stay put; only the reference source and its provenance change. The strip images have
+    // settled onto ink-fitted placements too: the sibling may publish a tightly cropped frame
+    // while Remote Compose carries the same card inside transparent canvas margin, and whole-canvas
+    // `contain` made every row look like a scale mismatch.
     fixture: "serve-viewer-rc-parallel",
     suffix: "paired-wear",
     apply: async (page) => {
@@ -2825,6 +2835,35 @@ const FIXTURE_STATES = [
             .querySelector('[data-cp-spec-source="parallel"]')
             ?.getAttribute("aria-pressed") === "true",
       );
+      await page.waitForFunction(() => {
+        const images = Array.from(
+          document.querySelectorAll(
+            '.cp-strip [data-cp-strip-source="parallel"] img',
+          ),
+        ).filter((image) => image.offsetParent !== null);
+        return (
+          images.length > 0 &&
+          images.every((image) => image.style.width && image.style.height)
+        );
+      });
+      await page.mouse.move(0, 0);
+    },
+  },
+  {
+    // Every top-level comparison source is a toggle. Pressing the lit peer again returns to the
+    // render, just as pressing the lit Figma chip already did; this is the state that used to be a
+    // no-op and left Figma looking like the peer lane's only exit.
+    fixture: "serve-viewer-rc-parallel",
+    suffix: "paired-wear-closed",
+    apply: async (page) => {
+      await page.click('[data-cp-spec-open-source="parallel"]');
+      await expect(page.locator(".cp-viewer")).toHaveAttribute(
+        "data-mode",
+        "snapshot",
+      );
+      await expect(
+        page.locator('[data-cp-spec-open-source="parallel"]'),
+      ).toHaveAttribute("aria-pressed", "false");
       await page.mouse.move(0, 0);
     },
   },
@@ -4098,6 +4137,24 @@ for (const fixture of listPageFixtures()) {
             return route.fulfill({
               body: SIBLING_RENDER_PLACEHOLDER,
               contentType: "image/svg+xml",
+            });
+          }
+          if (
+            fixture === "serve-viewer-rc-parallel" &&
+            url.pathname.startsWith("/wear-m3-catalog/render/")
+          ) {
+            return route.fulfill({
+              path: stripTightRenderPlaceholder,
+              contentType: "image/png",
+            });
+          }
+          if (
+            fixture === "serve-viewer-rc-parallel" &&
+            url.pathname.startsWith("/remote-m3/render/")
+          ) {
+            return route.fulfill({
+              path: designRenderPlaceholder,
+              contentType: "image/png",
             });
           }
           const svg = url.pathname.endsWith(".svg");

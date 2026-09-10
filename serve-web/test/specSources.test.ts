@@ -5,11 +5,13 @@ import assert from "node:assert/strict";
 import {
     activeSource,
     changesSource,
+    closesSource,
     isSpecSource,
     offersChoice,
     sourceForParam,
     sourceNote,
     sourceParam,
+    sourcesOrFallback,
     type SpecSource,
 } from "../src/spec/sources.js";
 
@@ -63,6 +65,16 @@ describe("spec lane sources", () => {
         assert.equal(offersChoice([kit, parallel]), true);
     });
 
+    it("recovers the single source from the lane when the server omits its picker", () => {
+        assert.deepEqual(sourcesOrFallback([], kit), [kit]);
+        assert.deepEqual(sourcesOrFallback([], null), []);
+        assert.deepEqual(
+            sourcesOrFallback([parallel], kit),
+            [parallel],
+            "picker-backed sources stay authoritative",
+        );
+    });
+
     it("treats re-picking the showing source as a no-op", () => {
         // Re-entering costs a raster request and a fresh normalisation pass.
         assert.equal(changesSource([kit, parallel], "kit", "kit"), false);
@@ -75,6 +87,13 @@ describe("spec lane sources", () => {
 
     it("refuses a source the lane does not offer", () => {
         assert.equal(changesSource([kit, parallel], "kit", "invented"), false);
+    });
+
+    it("closes the comparison when its pressed source chip is pressed again", () => {
+        assert.equal(closesSource(true, "kit", "kit"), true);
+        assert.equal(closesSource(true, "parallel", "parallel"), true);
+        assert.equal(closesSource(true, "kit", "parallel"), false);
+        assert.equal(closesSource(false, "parallel", "parallel"), false);
     });
 
     it("says nothing when the pressed default is implicit", () => {

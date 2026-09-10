@@ -25,11 +25,14 @@ import * as rules from "./viewer/rules.js";
 import { CONTINUOUS_EDIT_DEBOUNCE_MS, debounced } from "./viewer/debounce.js";
 import { viewParam } from "./spec/views.js";
 import {
+    KIT_SOURCE,
     activeSource,
     changesSource,
+    closesSource,
     isSpecSource,
     sourceForParam,
     sourceParam,
+    sourcesOrFallback,
     offersChoice,
     sourceNote,
     type SpecSource,
@@ -39,6 +42,9 @@ import { reportBody } from "./report/body.js";
 import { withStage } from "./annotate/report.js";
 import { isTransparent } from "./backgroundChoice.js";
 import { writeThemeMemory } from "./chrome/themeMemory.js";
+import { fitInk, imageInk, type InkBounds } from "./design/ink.js";
+import { compareApi } from "./compare/api.js";
+import { chipText, matchBand } from "./spec/verdict.js";
 import {
     effectiveUnseeded,
     isChecked,
@@ -1104,6 +1110,7 @@ function syncSpecBaseline() {
     var at = specAtBaseline();
     root.setAttribute("data-spec-baseline", at ? "1" : "0");
     if (window.cpSpecCompare) window.cpSpecCompare.baseline(at);
+    preScoreComparisonChips(at);
 }
 function withMode(url: string, mode: string) {
     return url + (url.indexOf("?") >= 0 ? "&" : "?") + "mode=" + mode;
@@ -2075,7 +2082,7 @@ var specSourceButtons: HTMLButtonElement[] = specSourceGroup
     : [];
 /** The picker as `spec/sources.ts` sees it: the markup read once, into plain descriptors. */
 function specSourceList(): SpecSource[] {
-    return specSourceButtons.map(function (button) {
+    const sources = specSourceButtons.map(function (button) {
         return {
             id: button.getAttribute("data-cp-spec-source") || "",
             label: button.getAttribute("data-spec-label") || "",
@@ -2083,6 +2090,18 @@ function specSourceList(): SpecSource[] {
             provenance: button.getAttribute("data-spec-provenance") || "",
         };
     });
+    return sourcesOrFallback(
+        sources,
+        specLane
+            ? {
+                  id: KIT_SOURCE,
+                  label: specLane.getAttribute("data-spec-label") || "",
+                  src: specLane.getAttribute("data-spec-src") || "",
+                  provenance:
+                      specLane.getAttribute("data-spec-provenance") || "",
+              }
+            : null,
+    );
 }
 function specPressedId(): string | null {
     for (var i = 0; i < specSourceButtons.length; i++)
@@ -2128,11 +2147,141 @@ function specSourceParam(): string {
 // comparison the visitor had just stopped making, and one that ignored the picker described a
 // comparison they were not making at all.
 const specStrip = may<HTMLElement>("cp-compare-strip");
+
+// The strip compares images from different producers. A design/Remote Compose frame commonly has
+// the same 344×353 card inside a 454×400 transparent canvas while the Wear render is already
+// tightly cropped to 344×353. `object-fit: contain` fits those CANVASES and therefore displays
+// identical content at different scales. Measure and fit the visible pixels, just as the design
+// page's render swap does, so the row compares content at one scale without stretching either side.
+const stripInk = new WeakMap<HTMLImageElement, InkBounds | null>();
+function fitStripImage(image: HTMLImageElement) {
+    var shot = image.closest<HTMLElement>(".cp-strip-shot");
+    if (!shot || shot.offsetParent === null || !image.complete) return;
+    var ink = stripInk.get(image);
+    if (ink === undefined) {
+        ink = imageInk(image);
+        stripInk.set(image, ink);
+    }
+    var placed = fitInk(
+        { width: shot.clientWidth, height: shot.clientHeight },
+        ink,
+    );
+    if (!placed) return;
+    Object.assign(image.style, placed);
+}
+function fitStripImages() {
+    if (!specStrip) return;
+    specStrip
+        .querySelectorAll<HTMLImageElement>(".cp-strip-shot img")
+        .forEach(function (image) {
+            if (image.complete) fitStripImage(image);
+            else
+                image.addEventListener("load", () => fitStripImage(image), {
+                    once: true,
+                });
+        });
+}
+fitStripImages();
+if (specStrip && typeof ResizeObserver === "function")
+    new ResizeObserver(fitStripImages).observe(specStrip);
+
+// One score per resting-bar source, for the preview already on the stage. This is deliberately NOT
+// the strip's seventeen rows: those would turn one viewer visit into 34 eager image decodes. The
+// two top-level answers cost only the two references plus the current render the page already has,
+// and `format-compare.js` is already present for the comparison lane.
+var previewScoreGeneration = 0;
+var previewScoreKey = "";
+function comparisonChipFor(source: SpecSource): HTMLButtonElement | null {
+    if (specSourceButtons.length === 0 || source.id === specPrimaryId())
+        return specChip;
+    for (const chip of document.querySelectorAll<HTMLButtonElement>(
+        "[data-cp-spec-open-source]",
+    ))
+        if (chip.getAttribute("data-cp-spec-open-source") === source.id)
+            return chip;
+    return null;
+}
+function restorePreviewScoreChips() {
+    for (const chip of document.querySelectorAll<HTMLButtonElement>(
+        "[data-cp-preview-score]",
+    )) {
+        chip.textContent =
+            chip.getAttribute("data-cp-preview-score-label") ||
+            chip.textContent;
+        chip.removeAttribute("data-cp-preview-score");
+        chip.removeAttribute("data-spec-match");
+        const tip = chip.getAttribute("data-cp-preview-score-tip");
+        if (tip) chip.title = tip;
+    }
+}
+function preScoreComparisonChips(atBaseline: boolean) {
+    if (!atBaseline) {
+        previewScoreGeneration++;
+        previewScoreKey = "";
+        restorePreviewScoreChips();
+        return;
+    }
+    // The lane owns its own live readout and chip while open; a background result must never race
+    // it and repaint a resting verdict over the pair currently being inspected.
+    if (specActive() || !img.complete || !img.naturalWidth) return;
+    const api = compareApi();
+    const actual = specActualUrl();
+    const sources = specSourceList();
+    if (!api || !actual || !sources.length) return;
+    const key = actual + "\n" + sources.map((source) => source.src).join("\n");
+    if (key === previewScoreKey) return;
+    previewScoreKey = key;
+    const generation = ++previewScoreGeneration;
+    // Decode the current render once and share it across the sources. Calling `scoreImageUrls` for
+    // each chip would decode the same candidate once per button, which is exactly the hidden cost
+    // this small surface is meant to avoid.
+    const actualImage = api.loadImage(actual);
+    for (const source of sources) {
+        const chip = comparisonChipFor(source);
+        if (!chip) continue;
+        // A catalog-published kit score is already the cheaper, authoritative answer. The live
+        // work is for sources (and catalogs) that did not publish one.
+        if (
+            chip.hasAttribute("data-spec-match") &&
+            !chip.hasAttribute("data-cp-preview-score")
+        )
+            continue;
+        Promise.all([api.loadImage(source.src), actualImage])
+            .then(([reference, candidate]) =>
+                api.scoreImages(reference, candidate),
+            )
+            .then((result) => {
+                if (
+                    generation !== previewScoreGeneration ||
+                    !specAtBaseline() ||
+                    specActive()
+                )
+                    return;
+                if (!chip.hasAttribute("data-cp-preview-score-label")) {
+                    chip.setAttribute(
+                        "data-cp-preview-score-label",
+                        source.label,
+                    );
+                    chip.setAttribute("data-cp-preview-score-tip", chip.title);
+                }
+                chip.textContent = chipText(source.label, result.percent);
+                chip.setAttribute("data-spec-match", matchBand(result.percent));
+                chip.setAttribute("data-cp-preview-score", "");
+                chip.title = `${result.percent.toFixed(1)}% match against ${source.label} — click to see where`;
+            })
+            .catch(() => {});
+    }
+}
+img.addEventListener("load", () => preScoreComparisonChips(specAtBaseline()));
+
 function syncSpecStrip() {
     if (!specStrip || !specStrip.hasAttribute("data-cp-strip-source")) return;
     var active = activeSource(specSourceList(), specPressedId());
     if (!active) return;
     specStrip.setAttribute("data-cp-strip-source", active.id);
+    // The newly revealed baseline may have been `display:none` when its image decoded, which gives
+    // it no box to fit against. Refit after layout includes that column.
+    requestAnimationFrame(fitStripImages);
     // …and the rows have to lead where the strip is pointing. Each one links to another variant of
     // the same component, and `comparisonStripHtml` writes that destination with the credential
     // query alone — so clicking the next variant off a strip showing the SIBLING's renders opened
@@ -2309,6 +2458,11 @@ function closeSpec() {
     if (specSourceGroup) specSourceGroup.hidden = true;
     img.style.removeProperty("display");
     img.hidden = false;
+    // `<cp-spec-compare>` restores the kit chip's baked/plain label as it closes. Invalidate the
+    // resting score, but let refreshSnapshot's decoded frame refill it: fetching here would request
+    // the same no-store render twice and let the two daemon renders race each other.
+    previewScoreGeneration++;
+    previewScoreKey = "";
 }
 // One listener per button, bound once. The buttons are server-rendered and never replaced, so this
 // needs no delegation and no re-binding.
@@ -4315,6 +4469,13 @@ for (var pi = 0; pi < specPeerChips.length; pi++) {
         chip.addEventListener("click", function () {
             if (!specAvailable()) return;
             var wanted = chip.getAttribute("data-cp-spec-open-source") || "";
+            // Every comparison chip is a toggle. The kit chip already returned to the render when
+            // pressed on its own source; the peer used to select itself again, which was a no-op
+            // and left the only apparent way out labelled "Figma".
+            if (closesSource(specActive(), specPressedId(), wanted)) {
+                setMode("png");
+                return;
+            }
             var target: HTMLButtonElement | null = null;
             for (var i = 0; i < specSourceButtons.length; i++) {
                 if (
