@@ -384,6 +384,10 @@ dependencies {
   implementation(libs.composeai.data.pseudolocale.core)
   implementation(libs.composeai.data.preview.overrides.core)
   implementation(libs.composeai.data.remotecompose.core)
+  // Projects a captured `.rc` into document JSON for `GET /render/<id>.rc.json`. Distinct from
+  // `data-remotecompose-core` above, which carries the KNOB payload (`RemoteComposeDeclarations`) a
+  // sticker's editable named values ride in — the two share a name and nothing else.
+  implementation(libs.composeai.remotecompose.json)
   implementation(libs.composeai.data.render.core)
 
   implementation(libs.kotlinx.serialization.json)

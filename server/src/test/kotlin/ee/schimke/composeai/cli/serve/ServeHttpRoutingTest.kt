@@ -11,6 +11,7 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideType
 import ee.schimke.composeai.data.overrides.PreviewOverridesPayload
 import ee.schimke.composeai.data.remotecompose.RemoteComposeDeclarationsPayload
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
+import ee.schimke.composeai.remotecompose.json.RemoteComposeJson
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -256,8 +257,31 @@ class ServeHttpRoutingTest {
   private val rcColorKnob =
     RemoteComposeKnobDeclaration("shaderColor", RemoteNamedValue.ColorValue("#FF7DE2FF"))
 
-  /** Arbitrary Remote Compose document bytes, carried into the bundle as an `ir/<id>.rc`. */
-  private val rcDocBytes = byteArrayOf(0x52, 0x43, 0x01, 0x02, 0x03)
+  /**
+   * A **real** Remote Compose document, carried into the bundle as an `ir/<id>.rc`.
+   *
+   * It used to be five arbitrary bytes, which was enough while every lane over it copied bytes
+   * verbatim. `GET /render/<id>.rc.json` inflates them, so the fixture now has to be a document —
+   * and a fixture that is "plausible but not a document" is precisely the class of thing this
+   * whole area is about, so it is worth not keeping one around even where it would still pass.
+   *
+   * Compiled here rather than checked in as a binary so the assertions below can be read against
+   * their source: `bg` is why the projection names a `ColorConstant`.
+   */
+  private val rcDocBytes =
+    RemoteComposeJson.compile(
+      """
+      {
+        "header": { "width": 100, "height": 100, "contentDescription": "routing fixture" },
+        "resources": { "colors": [ { "name": "bg", "value": "#FF102030" } ] },
+        "root": [ { "box": { "modifiers": [ { "size": 100.0 }, { "background": "@colors.bg" } ] } } ]
+      }
+      """
+        .trimIndent()
+    )
+
+  /** Bytes that are not a document at all — the 422 lane's fixture. */
+  private val notADocument = byteArrayOf(0x52, 0x43, 0x01, 0x02, 0x03)
 
   private fun bundle(
     label: String,
@@ -513,6 +537,15 @@ class ServeHttpRoutingTest {
     registry.register(
       "staging-rc",
       host = bundle("staging-rc", rcDoc = rcDocBytes, stagesRcCompare = true),
+      pinned = true,
+    )
+    // A catalog whose `ir/<id>.rc` is NOT a document this server can inflate — what a bundle baked
+    // on a newer Remote Compose alpha than this server's `remote-core` looks like from here. The
+    // `.rc` lane still serves it (bytes are bytes; the browser player may well read it), and only
+    // the projection lane has to have an answer. Kept off `catalogSessions` like `baked-only`.
+    registry.register(
+      "broken-rc",
+      host = bundle("broken-rc", rcDoc = notADocument),
       pinned = true,
     )
     // A PLAIN BUNDLE — the shape `--bundles` and an upload produce: the same `ServeBundleHost`
@@ -2575,6 +2608,35 @@ class ServeHttpRoutingTest {
       )
       assertTrue(rcDocBytes.contentEquals(r.body.bytes()), "rc bytes served verbatim")
     }
+  }
+
+  @Test
+  fun `the rc json lane projects the captured document`() {
+    // The same document as the `.rc` lane above, projected rather than copied: text for a person,
+    // a `diff` in a review, or `jq` in a script, where `.rc` is bytes for the in-browser player.
+    val (code, body) = get("/compose-m3/render/$previewId.rc.json")
+
+    assertEquals(200, code)
+    // The document's DECLARED size, not a measured one — nothing here ran a layout pass, and
+    // `CoreDocument.getWidth()` would report 0 for a document that has not.
+    assertTrue(body.contains("\"width\": 100"), "declared header size: $body")
+    // The named colour resource survives compilation as a `ColorConstant` plus the `NamedVariable`
+    // that gave it its name. Asserting on that rather than on `bg` is the point: the projection is
+    // of the COMPILED document, not of the JSON that produced it.
+    assertTrue(body.contains("ColorConstant"), "operations projected: $body")
+    assertTrue(body.contains("RootLayoutComponent"), "layout tree projected: $body")
+  }
+
+  @Test
+  fun `the rc json lane 422s a document it cannot inflate`() {
+    // A real state rather than a hypothetical: a bundle carries its own Remote Compose coordinates
+    // and can be baked on a newer alpha than the `remote-core` this server links. That is a
+    // statement about one document, not about the server's health, so it is a 422 and not a 500 —
+    // and the message names which document and why, so a catalog owner can act on it.
+    val (code, body) = get("/render/$previewId.rc.json?session=broken-rc")
+
+    assertEquals(422, code)
+    assertTrue(body.contains("cannot project"), "names the failure: $body")
   }
 
   @Test

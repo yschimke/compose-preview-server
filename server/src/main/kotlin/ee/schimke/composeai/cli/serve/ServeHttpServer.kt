@@ -14,6 +14,8 @@ import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
 import ee.schimke.composeai.data.render.PreviewClip
 import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
+import ee.schimke.composeai.remotecompose.json.RemoteComposeJson
+import ee.schimke.composeai.remotecompose.json.RemoteComposeJsonException
 import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.decodeNewDesignStates
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
@@ -10196,6 +10198,12 @@ class ServeHttpServer(
       val wantA11y = rawName.endsWith(".a11y")
       val wantAnnotations = rawName.endsWith(".annotations")
       val wantRcDoc = rawName.endsWith(".rc")
+      // `.rc.json` is the same document as `.rc`, projected. It is a separate lane rather than a
+      // query parameter on the `.rc` one because it is a different media type with a different
+      // audience: `.rc` is bytes for the in-browser player, `.rc.json` is text for a person, a
+      // `diff` in a review, or `jq` in a script. Ordering matters below — `.rc.json` has to come
+      // off the name before `.rc` would strip nothing and `.json` is not a suffix this lane knows.
+      val wantRcJson = rawName.endsWith(".rc.json")
       val previewId =
         rawName
           .removeSuffix(".png")
@@ -10203,6 +10211,7 @@ class ServeHttpServer(
           .removeSuffix(".slots")
           .removeSuffix(".a11y")
           .removeSuffix(".annotations")
+          .removeSuffix(".rc.json")
           .removeSuffix(".rc")
       // `?bg=`: composite the preview's resolved stage into the PNG ([ServeRenderMatte]).
       //
@@ -10279,6 +10288,7 @@ class ServeHttpServer(
           !wantA11y &&
           !wantAnnotations &&
           !wantRcDoc &&
+          !wantRcJson &&
           plainThumbRequest() &&
           staleGeneration(renderHost) == null
       ) {
@@ -10354,7 +10364,7 @@ class ServeHttpServer(
       // here was silently the same bug pointing the other way (#4714 review).
       if (
         staleGeneration != null &&
-          (wantSvg || wantSlots || wantA11y || wantAnnotations || wantRcDoc)
+          (wantSvg || wantSlots || wantA11y || wantAnnotations || wantRcDoc || wantRcJson)
       ) {
         call.respondText(
           "only the baked render is published per generation; this catalog has moved on from " +
@@ -10371,7 +10381,7 @@ class ServeHttpServer(
         // none of them per revision, so there is nothing historical to serve, and *falling through*
         // would be the worst of the three options: `/render/<id>.svg?at=<sha>` would answer with
         // today's export under a URL that names an old publish. Refusing says so.
-        if (wantSvg || wantSlots || wantA11y || wantAnnotations || wantRcDoc) {
+        if (wantSvg || wantSlots || wantA11y || wantAnnotations || wantRcDoc || wantRcJson) {
           call.respondText(
             "only the baked render is published per revision; drop " +
               "'${ServeCatalogRevision.PARAM}' to ask the daemon for this product",
@@ -10404,10 +10414,32 @@ class ServeHttpServer(
       // pass — the in-browser player replays the doc and applies knob edits client-side), so it
       // short-circuits ahead of the override parse. A host with no `ir/<id>.rc` sidecar (a
       // daemon-only host, or an unknown id) returns null → 404.
-      if (wantRcDoc) {
+      if (wantRcDoc || wantRcJson) {
         val bytes = renderHost.remoteComposeDoc(previewId)
         if (bytes == null) {
           call.respondText("no such remote compose document", status = HttpStatusCode.NotFound)
+        } else if (wantRcJson) {
+          // Projected on demand rather than cached beside the document. The projection is a pure
+          // function of bytes already on disk and costs an inflate, and a cached copy is a second
+          // thing that can be stale — `ir/<id>.rc` is rewritten whenever the catalog re-bakes.
+          //
+          // A document this server can serve but its linked `remote-core` cannot inflate is a real
+          // state, not a hypothetical: a bundle carries its own Remote Compose coordinates and can
+          // be baked on a newer alpha than the sidecar this server runs (the split-family case
+          // `RemoteComposePairing` names). It is a 422 and not a 500 — the request was well-formed
+          // and the server is healthy; this particular document is the thing that cannot be read,
+          // and the message says which document and why so a catalog owner can act on it.
+          try {
+            call.respondText(
+              RemoteComposeJson.dump(bytes),
+              ContentType.Application.Json,
+            )
+          } catch (e: RemoteComposeJsonException) {
+            call.respondText(
+              "cannot project that remote compose document: ${e.message}",
+              status = HttpStatusCode.UnprocessableEntity,
+            )
+          }
         } else {
           call.respondBytes(bytes, ContentType.Application.OctetStream)
         }
