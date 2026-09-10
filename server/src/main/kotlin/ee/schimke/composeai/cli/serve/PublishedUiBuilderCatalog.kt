@@ -204,7 +204,7 @@ internal object PublishedUiBuilderCatalog {
       checkSlots(componentId, policy.slotCapabilities.orEmpty())
     }
     semantics.builtins.forEach { (builtinId, builtin) ->
-      checkProperties(builtinId, builtin.propertyCapabilities.orEmpty())
+      checkProperties(builtinId, builtin.properties.orEmpty())
     }
     if (unreadable.isNotEmpty()) {
       return Result.Unusable(
@@ -453,6 +453,29 @@ internal object PublishedUiBuilderCatalog {
     ComponentRecordPacks.structuralModifiers(container)
 
   /**
+   * The shelf role of a builtin: `Scaffold`, `Container` or `Leaf`.
+   *
+   * Two different words are spelled `role` around here and they are not the same vocabulary. A
+   * builtin's own `role` is the STRUCTURAL one — the template engine's closed set (`screen-root`,
+   * `list`, `list-item`, `overlay`, `controlled`, `decoration`) — which says which template writes
+   * it. The shelf's is `Scaffold` / `Container` / `Leaf`, which decides what the editor calls it
+   * and which slots will take it.
+   *
+   * The structural one was read and then dropped, and the shelf role derived from whether there
+   * were slots at all. That makes a design ROOT — `remote-m3/widget-container-small`, whose
+   * synthesised twin in `ProductionUiBuilderRuntime.widget()` is a `Scaffold` — arrive as an
+   * ordinary `Container`. `screen-root` is the one structural role that names a scaffold outright,
+   * so it is the one that maps; every other builtin keeps the derivation, because `list` and
+   * `overlay` say how a thing is WRITTEN and not what shape it is on the shelf.
+   */
+  private fun shelfRole(builtin: UiBuilderBuiltin): String =
+    when {
+      builtin.role == "screen-root" -> "Scaffold"
+      builtin.slots.isNotEmpty() -> "Container"
+      else -> "Leaf"
+    }
+
+  /**
    * A builtin, as a component.
    *
    * A builtin exists because it has NO call site — there is nothing in the record to discover — so
@@ -463,17 +486,21 @@ internal object PublishedUiBuilderCatalog {
     ComponentCapabilityV1(
       componentId = id,
       displayName = builtin.displayName ?: id.substringAfterLast('/'),
-      role = if (builtin.slots.isNotEmpty()) "Container" else "Leaf",
-      traits = emptyList(),
+      role = shelfRole(builtin),
+      traits = builtin.traits,
       slots =
-        builtin.slots.keys.map { name ->
+        builtin.slots.map { (name, slot) ->
           SlotCapabilityV1(
             name = name,
-            cardinality = SlotCardinalityV1(min = 0, max = null),
+            // `required` is the only cardinality the schema lets a builtin state, and it means at
+            // least one child. Unbounded above, as it was.
+            cardinality = SlotCardinalityV1(min = if (slot.required) 1 else 0, max = null),
             ordered = true,
+            acceptedRoles = slot.acceptedRoles,
+            acceptedTraits = slot.acceptedTraits,
           )
         },
-      properties = builtin.propertyCapabilities.orEmpty().map { it.toCapability() },
+      properties = builtin.properties.orEmpty().map { it.toCapability() },
       modifierCapabilities =
         builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()),
       wasm = wasm(builtin.canvas, nativeOnly = false, callable = null),
@@ -596,14 +623,41 @@ internal object PublishedUiBuilderCatalog {
     val role: String = "",
     val displayName: String? = null,
     val canvas: String? = null,
-    val slots: Map<String, JsonElement> = emptyMap(),
+    val traits: List<String> = emptyList(),
+    val slots: Map<String, UiBuilderBuiltinSlot> = emptyMap(),
     /**
-     * See [UiBuilderComponentPolicy.propertyCapabilities]. A builtin has no record, so this is its
-     * only source.
+     * A builtin has no record, so this is its only source.
+     *
+     * Named `properties`, unlike [UiBuilderComponentPolicy.propertyCapabilities] beside it, because
+     * that is the name on the wire: `ui-builder.policy.schema.json` spells a builtin's list
+     * `properties` with `additionalProperties: false`, and the generator's own `UiBuilderBuiltin`
+     * carries it through under that name. This read `propertyCapabilities` — a name no schema-valid
+     * catalog can write — so every builtin composed with zero properties and the one test that
+     * covered the path wrote the server's name into its own fixture and passed. The argument for
+     * the distinct `…Capabilities` names is a real one and it is about COMPONENTS, where `slots`
+     * and `properties` are already taken by other types; a builtin has no such collision, and
+     * copying the convention across cost the field its only writer.
      */
-    val propertyCapabilities: List<UiBuilderPropertyPolicy>? = null,
+    val properties: List<UiBuilderPropertyPolicy>? = null,
     /** See [UiBuilderComponentPolicy.modifierCapabilities]. */
     val modifierCapabilities: List<String>? = null,
+  )
+
+  /**
+   * One slot a builtin declares, as `ui-builder.policy.schema.json` spells it.
+   *
+   * Decoded as `Map<String, JsonElement>` before, which parsed every shape and read none: a slot
+   * marked `required` composed with `min = 0`, and its `acceptedTraits` were dropped, so the rules
+   * that stop a design putting a scaffold inside a widget's background slot were gone. The `role`
+   * here is the STRUCTURAL role each child is written with — the template engine's closed set, not
+   * the shelf's `Container`/`Leaf` — so it is carried and not turned into `acceptedRoles`.
+   */
+  @Serializable
+  internal data class UiBuilderBuiltinSlot(
+    val acceptedRoles: List<String> = emptyList(),
+    val acceptedTraits: List<String> = emptyList(),
+    val required: Boolean = false,
+    val role: String? = null,
   )
 
   @Serializable

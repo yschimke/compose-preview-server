@@ -209,6 +209,85 @@ class PublishedUiBuilderCatalogHostileInputTest {
    * failure mode this whole file exists to catch, one level up. The assertion below is what stops
    * it recurring: a fixture that stopped colliding would take two components, not one.
    */
+  /**
+   * A builtin's properties reach `builtinCapability` by the same route a component's reach
+   * `capability`, and are read by the same validator — checking only `components` was the container
+   * half of that fix.
+   *
+   * Written against this file's own two-component record rather than m3-catalog's published
+   * fixture, which is where it started. That fixture states no builtins at all (m3-catalog's policy
+   * says the catalog owns none), so the test inserted one by string-splicing a `builtins` block
+   * ahead of the first `"components": {` it found. It passed, and it was one regeneration of that
+   * fixture away from splicing into nothing and passing anyway. A refusal test that depends on the
+   * shape of an unrelated catalog is checking that catalog, not the validator.
+   *
+   * The second half of the same lesson, found the next time this file was read: the key here was
+   * `propertyCapabilities`, which is what the SERVER called the field and not what a catalog can
+   * write. `ui-builder.policy.schema.json` spells a builtin's list `properties` with
+   * `additionalProperties: false`, so the only documents this validator had ever seen were the ones
+   * this test wrote for it. Every real builtin composed with zero properties and nothing said so.
+   * The key below is now the wire name, which makes this a mutation check on it: rename the field
+   * back and this test fails.
+   */
+  @Test
+  fun `a builtin's malformed jsonType is refused`() {
+    val document =
+      """
+      {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
+       "record":{"file":"components.json","schemaVersion":1,"components":2},
+       "statusSemantics":{"componentIdPrefix":"h/",
+         "builtins":{"layout/box":{"role":"Container",
+           "properties":[{"name":"pad","jsonType":{}}]}}}}
+      """
+        .trimIndent()
+
+    val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Unusable,
+      "a builtin with a jsonType of {} composed instead of being refused",
+    )
+    assertTrue(
+      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("layout/box.pad"),
+      "the refusal does not name the builtin property: ${result.reason}",
+    )
+  }
+
+  /**
+   * `max` below `min` is a slot no child count satisfies, so the component cannot be authored at
+   * all — the same "impossible to author" the malformed `jsonType` above is refused for.
+   *
+   * `validateCatalog` requires `catalogSystemId == "m3-catalog"`, so it only ever sees the packaged
+   * catalog; a published one reaches the shelf unvalidated unless this refuses it.
+   *
+   * Moved here for the reason above, and for one more: its previous form spliced `"max": 0,` into
+   * the first `"cardinality": {` in m3-catalog's fixture, so which slot of which component it
+   * corrupted was whatever the serialiser happened to order first.
+   */
+  @Test
+  fun `a slot cardinality no child count satisfies is refused`() {
+    val document =
+      """
+      {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
+       "record":{"file":"components.json","schemaVersion":1,"components":2},
+       "statusSemantics":{"componentIdPrefix":"h/",
+         "components":{"h/widget":{"record":":hostile/com.example.AKt.Widget",
+           "slotCapabilities":[{"name":"content","cardinality":{"min":1,"max":0}}]}}}}
+      """
+        .trimIndent()
+
+    val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Unusable,
+      "max below min composed into a component nobody can author",
+    )
+    assertTrue(
+      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("h/widget.content"),
+      "the refusal does not name the cardinality: ${result.reason}",
+    )
+  }
+
   @Test
   fun `the collision fixture actually collides`() {
     val result = PublishedUiBuilderCatalog.compose(COLLIDING, record, exports)
