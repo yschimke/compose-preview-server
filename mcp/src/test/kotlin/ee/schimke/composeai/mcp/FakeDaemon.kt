@@ -426,18 +426,25 @@ class FakeDaemon : DaemonSpawn {
         // window between the offer (which wakes the polling thread) and the add to the
         // overrides list.
         renderOverrides.add(overrides)
+        // Decide the auto-emitted outcome for each preview BEFORE offering on `renderRequests`,
+        // for the same reason as the overrides above: a test that polls `renderRequests` and then
+        // reassigns [autoRenderUnchanged] (the freshness-sampling test does, between its two
+        // probes) must see this request answered with the lambda that was set when it was made.
+        // Reading the lambda after the offer let the test's reassignment win the race on a loaded
+        // box, so the first probe carried the second probe's answer.
+        val finished =
+          autoRenderPngPath?.let { provider ->
+            previews.mapNotNull { pid ->
+              provider(pid)?.let { path -> Triple(pid, path, autoRenderUnchanged?.invoke(pid)) }
+            }
+          } ?: emptyList()
         renderRequests.offer(previews)
         val result = RenderNowResult(queued = previews, rejected = emptyList())
         sendResponse(id, json.encodeToJsonElement(RenderNowResult.serializer(), result))
         // Auto-emit renderFinished for any preview whose path the test pre-registered. The
         // emission happens AFTER the response so the daemon-protocol ordering matches what a
         // real backend produces (queued → started → finished).
-        autoRenderPngPath?.let { provider ->
-          previews.forEach { pid ->
-            val path = provider(pid)
-            if (path != null) emitRenderFinished(pid, path, autoRenderUnchanged?.invoke(pid))
-          }
-        }
+        finished.forEach { (pid, path, unchanged) -> emitRenderFinished(pid, path, unchanged) }
       }
       "shutdown" -> {
         sendResponse(id, kotlinx.serialization.json.JsonNull)
