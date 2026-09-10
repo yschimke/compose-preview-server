@@ -1,5 +1,30 @@
 # Changelog
 
+## [3.23.0](https://github.com/yschimke/compose-preview-server/compare/v3.22.0...v3.23.0) (2026-09-10)
+
+
+### Features
+
+* **serve:** put the component library behind the door a palette can open ([#692](https://github.com/yschimke/compose-preview-server/issues/692)) ([8b47d21](https://github.com/yschimke/compose-preview-server/commit/8b47d21310da88eec4037e006561b910ef9b100e))
+* **serve:** read the components a project shares between its designs ([#685](https://github.com/yschimke/compose-preview-server/issues/685)) ([0e2b24f](https://github.com/yschimke/compose-preview-server/commit/0e2b24f52551dba7014314f847b37d3aba2805ba))
+* **ui-builder:** a Remote design's actions and placements, and five findings from [#686](https://github.com/yschimke/compose-preview-server/issues/686)'s review ([#690](https://github.com/yschimke/compose-preview-server/issues/690)) ([36d97e9](https://github.com/yschimke/compose-preview-server/commit/36d97e9c10072fd1b63ffc0592619f2b292aefe1))
+* **ui-builder:** reach the Remote record fallback, and check the two m3 fields nothing checked ([#691](https://github.com/yschimke/compose-preview-server/issues/691)) ([87e1c59](https://github.com/yschimke/compose-preview-server/commit/87e1c594668559dca7a25483e3dbde718336d27c))
+* **ui-builder:** write a Remote component from its record, and measure what the shelf exports ([#686](https://github.com/yschimke/compose-preview-server/issues/686)) ([fb8e1a2](https://github.com/yschimke/compose-preview-server/commit/fb8e1a2afd7f8ee7e91783d50fc5c393d72363f2))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to v2.5.0 ([#684](https://github.com/yschimke/compose-preview-server/issues/684)) ([47529b3](https://github.com/yschimke/compose-preview-server/commit/47529b3ca07258120f644b7fce62cbf38342c79e))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.60.1 ([#682](https://github.com/yschimke/compose-preview-server/issues/682)) ([c2d0850](https://github.com/yschimke/compose-preview-server/commit/c2d08503df77cff75203044a03b6c10b7f25bcdc))
+* **serve:** refuse a cyclic symbol, and search every source a system has ([#688](https://github.com/yschimke/compose-preview-server/issues/688)) ([53f1ee2](https://github.com/yschimke/compose-preview-server/commit/53f1ee2b57e2c7718e498b15a058fff1b3ac42cd))
+* **ui-builder:** make remote component picker visual ([#671](https://github.com/yschimke/compose-preview-server/issues/671)) ([52ed06f](https://github.com/yschimke/compose-preview-server/commit/52ed06f7b39cdf261f4387380fbbf3272b794cae))
+* **ui-builder:** the loop export's six holes, and which lane it is in ([#672](https://github.com/yschimke/compose-preview-server/issues/672)) ([74ead61](https://github.com/yschimke/compose-preview-server/commit/74ead617f01106b15f2cfcce9b2a451e810e9dcb))
+
+
+### Performance Improvements
+
+* **serve:** keep warm Android sandbox workers for catalog daemons to adopt ([#677](https://github.com/yschimke/compose-preview-server/issues/677)) ([e97a0a4](https://github.com/yschimke/compose-preview-server/commit/e97a0a4c3e3631662531f953c634b5b4b4bf8610))
+
 ## [3.22.0](https://github.com/yschimke/compose-preview-server/compare/v3.21.0...v3.22.0) (2026-09-09)
 
 
