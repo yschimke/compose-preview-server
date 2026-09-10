@@ -73,6 +73,13 @@ const designRenderPlaceholder = resolve(
   pagesDir,
   "_design-render-placeholder.png",
 );
+// The paired-catalog comparison needs both forms a real delivery can publish: a component on a
+// padded canvas and the exact same pixels cropped tightly. Serving those two forms makes the strip
+// baseline prove that it fits visible ink rather than scaling the full image dimensions.
+const stripTightRenderPlaceholder = resolve(
+  pagesDir,
+  "_strip-render-placeholder-tight.png",
+);
 // The motion lane's stub, and it has to be a genuinely ANIMATED file rather than another flat
 // placeholder: what the capture below is asserting is that the lane puts a moving image on the
 // stage in place of the still, and a static PNG served as `image/apng` would satisfy every
@@ -4130,6 +4137,24 @@ for (const fixture of listPageFixtures()) {
             return route.fulfill({
               body: SIBLING_RENDER_PLACEHOLDER,
               contentType: "image/svg+xml",
+            });
+          }
+          if (
+            fixture === "serve-viewer-rc-parallel" &&
+            url.pathname.startsWith("/wear-m3-catalog/render/")
+          ) {
+            return route.fulfill({
+              path: stripTightRenderPlaceholder,
+              contentType: "image/png",
+            });
+          }
+          if (
+            fixture === "serve-viewer-rc-parallel" &&
+            url.pathname.startsWith("/remote-m3/render/")
+          ) {
+            return route.fulfill({
+              path: designRenderPlaceholder,
+              contentType: "image/png",
             });
           }
           const svg = url.pathname.endsWith(".svg");
