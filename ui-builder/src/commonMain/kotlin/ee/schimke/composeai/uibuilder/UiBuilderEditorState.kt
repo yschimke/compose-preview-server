@@ -3365,6 +3365,49 @@ class UiBuilderEditorReducer(
       ?: findDestination(state.document, state.selectedNodeId, component)
   }
 
+  /**
+   * The compatible slot physically under a catalog drag, without a selection fallback.
+   *
+   * A measured slot uses its child-union bounds. An empty (including unmaterialized) declared slot
+   * has no such union, so its parent's bounds are its honest landing region. The smallest matching
+   * region wins, keeping a nested container more specific than the container around it.
+   */
+  fun catalogDropTarget(
+    state: UiBuilderEditorState,
+    componentId: String,
+    slots: List<UiBuilderSlotInspection>,
+    nodeBounds: Map<String, UiBuilderPixelBounds>,
+    pointX: Float,
+    pointY: Float,
+  ): ParentSlot? {
+    val component = catalog.componentsById[componentId] ?: return null
+    val inspectedSlots = slots.associateBy { it.parentNodeId to it.slotName }
+    return state.document.nodes.values
+      .flatMap { parent ->
+        val capability = catalog.componentsById[parent.componentId] ?: return@flatMap emptyList()
+        capability.slots.mapNotNull { declared ->
+          val target = ParentSlot(parent.id, declared.name)
+          if (!acceptsComponent(state.document, target, component)) return@mapNotNull null
+          val children = parent.slots[declared.name].orEmpty()
+          val bounds =
+            inspectedSlots[parent.id to declared.name]?.bounds
+              ?: nodeBounds[parent.id]?.takeIf { children.isEmpty() }
+              ?: return@mapNotNull null
+          if (
+            pointX < bounds.x ||
+              pointX > bounds.right ||
+              pointY < bounds.y ||
+              pointY > bounds.bottom
+          ) {
+            return@mapNotNull null
+          }
+          target to bounds
+        }
+      }
+      .minByOrNull { (_, bounds) -> bounds.width * bounds.height }
+      ?.first
+  }
+
   /** Whether the node owning [slot] declares it, accepts [component] there, and has room. */
   private fun acceptsComponent(
     document: UiBuilderDocument,
@@ -3390,9 +3433,7 @@ class UiBuilderEditorReducer(
     val parent = document.nodes[target.nodeId] ?: return false
     val capability = catalog.componentsById[parent.componentId] ?: return false
     val declared = capability.slot(target.slot) ?: return false
-    return target.slot in parent.slots &&
-      declared.accepts(component) &&
-      declared.hasRoom(parent.slots[target.slot].orEmpty().size)
+    return declared.accepts(component) && declared.hasRoom(parent.slots[target.slot].orEmpty().size)
   }
 
   private fun promotePiece(

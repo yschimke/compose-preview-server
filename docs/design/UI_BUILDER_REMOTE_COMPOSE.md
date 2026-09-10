@@ -114,7 +114,7 @@ collapses ids that differ only in their final capture-frame segment, keeps the c
 deterministic fetch source, and removes the frame suffix from the displayed state. Other state
 segments remain distinct and searchable.
 
-![Remote Compose picker with capture-size duplicates collapsed](evidence/ui-builder-remote-compose/picker-deduplicated.png)
+![Remote Compose picker with capture-size duplicates collapsed](../evidence/ui-builder-remote-compose/picker-deduplicated.png)
 
 | Before: ids used as labels, with no picture | After: state names and rendered thumbnails |
 | --- | --- |
@@ -165,7 +165,7 @@ it:
   the Wasm editor, not a replacement for it. **3 panes** adds a clean interactive Wasm rendition;
   for `remote-m3` that is the common CMP player on the same wire document.
 
-![Editor, static target preview, and interactive preview](evidence/ui-builder-remote-compose/workspace-three-panes.png)
+![Editor, static target preview, and interactive preview](../evidence/ui-builder-remote-compose/workspace-three-panes.png)
 
 ## Two ways in, and one way back out
 

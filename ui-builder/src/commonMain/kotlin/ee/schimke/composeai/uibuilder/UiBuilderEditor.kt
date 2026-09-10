@@ -827,14 +827,15 @@ fun UiBuilderEditor(
   fun canvasTarget(componentId: String, position: Offset): ParentSlot? {
     if (!canvasBounds.contains(position)) return null
     return canvasInspection?.let { snapshot ->
-      reducer.promotionTarget(
+      reducer.catalogDropTarget(
         state,
         componentId,
         snapshot.slots,
+        snapshot.nodes.mapNotNull { node -> node.bounds?.let { node.nodeId to it } }.toMap(),
         position.x,
         position.y,
       )
-    } ?: reducer.dropTarget(state, componentId)
+    }
   }
   val draggedTarget = draggedComponentId?.let { componentId ->
     catalogDragPosition?.let { position -> canvasTarget(componentId, position) }
@@ -1796,8 +1797,9 @@ fun UiBuilderEditor(
                   else ->
                     inspector(
                       Modifier.width(INSPECTOR_WIDTH).fillMaxHeight(),
-                      // The same condition the canvas is drawn under, a few lines above.
-                      state.previewSurface != EditorPreviewSurface.Native || !nativeRequested,
+                      // The editor canvas and its variant strip are now present in every additive
+                      // pane layout, including the two-pane editor + native preview choice.
+                      true,
                     )
                 }
                 EditorRail(
@@ -3276,20 +3278,20 @@ private fun EditorPreviewSurface.label(): String =
  * and the interesting one — those are stand-ins for a library no browser can link — is exactly what
  * somebody choosing a renderer needs to read.
  */
-private fun EditorPreviewSurface.supportingText(
+internal fun EditorPreviewSurface.supportingText(
   surfaces: UiBuilderPreviewSurfaces = UiBuilderPreviewSurfaces.DEFAULT
-): String =
-  when (this) {
-    EditorPreviewSurface.Wasm -> "Visual editor · Wasm"
+): String {
+  val wasmDescription =
+    if (surfaces.wasm.fidelity.isAuthoritative) "Wasm" else "Wasm stand-in, for authoring"
+  return when (this) {
+    EditorPreviewSurface.Wasm -> "Visual editor · $wasmDescription"
     EditorPreviewSurface.Native ->
       if (surfaces.native.backend == UiBuilderPreviewSurfaces.BACKEND_ANDROID)
-        "Editor + static Android preview"
-      else "Editor + static target preview"
-    EditorPreviewSurface.Both ->
-      if (surfaces.wasm.fidelity.isAuthoritative)
-        "Editor + static target + interactive Wasm preview"
-      else "Editor + static target + interactive Wasm stand-in"
+        "Editor · $wasmDescription + static Android preview"
+      else "Editor · $wasmDescription + static target preview"
+    EditorPreviewSurface.Both -> "Editor · $wasmDescription + static target + interactive preview"
   }
+}
 
 /**
  * One icon control, with the label and its chord in the tooltip and in the semantics.

@@ -111,6 +111,22 @@ class UiBuilderEditorStateTest {
   }
 
   @Test
+  fun `a canvas drop materializes a declared empty slot omitted by a persisted node`() {
+    val initial = reducer.initial(document, selectedNodeId = "chip-news")
+    val target = requireNotNull(reducer.dropTarget(initial, "m3/icon"))
+    assertEquals(ParentSlot("chip-news", "leadingIcon"), target)
+    assertFalse("leadingIcon" in document.nodes.getValue("chip-news").slots)
+
+    val inserted = reducer.reduce(initial, UiBuilderEditorEvent.InsertComponent("m3/icon", target))
+
+    assertIs<CommandOutcome.Accepted>(inserted.lastOutcome)
+    assertEquals(
+      inserted.selectedNodeId,
+      inserted.document.nodes.getValue("chip-news").slots.getValue("leadingIcon").single(),
+    )
+  }
+
+  @Test
   fun `configured live actor emits one uniquely scoped accepted submission`() {
     val liveReducer = UiBuilderEditorReducer(catalog, actorId = "github:alice", clientId = "tab-a")
     val initial = liveReducer.initial(document, selectedNodeId = "main-episode-title")
