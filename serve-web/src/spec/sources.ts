@@ -37,6 +37,19 @@ export interface SpecSource {
 }
 
 /**
+ * The server omits a picker for the common one-source lane. Preserve that source as an ordinary
+ * descriptor for code that needs to inspect or score it, while keeping the DOM free of a one-item
+ * control. Picker-backed lanes remain authoritative when they exist.
+ */
+export function sourcesOrFallback(
+    sources: readonly SpecSource[],
+    fallback: SpecSource | null,
+): SpecSource[] {
+    if (sources.length > 0) return Array.from(sources);
+    return fallback && fallback.src ? [fallback] : [];
+}
+
+/**
  * The active source: the one marked pressed, else the first.
  *
  * Falling back to the first rather than to "none" is what makes the picker's initial state

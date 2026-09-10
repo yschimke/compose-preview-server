@@ -11,6 +11,7 @@ import {
     sourceForParam,
     sourceNote,
     sourceParam,
+    sourcesOrFallback,
     type SpecSource,
 } from "../src/spec/sources.js";
 
@@ -62,6 +63,16 @@ describe("spec lane sources", () => {
         assert.equal(offersChoice([kit]), false);
         assert.equal(offersChoice([]), false);
         assert.equal(offersChoice([kit, parallel]), true);
+    });
+
+    it("recovers the single source from the lane when the server omits its picker", () => {
+        assert.deepEqual(sourcesOrFallback([], kit), [kit]);
+        assert.deepEqual(sourcesOrFallback([], null), []);
+        assert.deepEqual(
+            sourcesOrFallback([parallel], kit),
+            [parallel],
+            "picker-backed sources stay authoritative",
+        );
     });
 
     it("treats re-picking the showing source as a no-op", () => {

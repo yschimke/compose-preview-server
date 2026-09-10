@@ -25,12 +25,14 @@ import * as rules from "./viewer/rules.js";
 import { CONTINUOUS_EDIT_DEBOUNCE_MS, debounced } from "./viewer/debounce.js";
 import { viewParam } from "./spec/views.js";
 import {
+    KIT_SOURCE,
     activeSource,
     changesSource,
     closesSource,
     isSpecSource,
     sourceForParam,
     sourceParam,
+    sourcesOrFallback,
     offersChoice,
     sourceNote,
     type SpecSource,
@@ -2080,7 +2082,7 @@ var specSourceButtons: HTMLButtonElement[] = specSourceGroup
     : [];
 /** The picker as `spec/sources.ts` sees it: the markup read once, into plain descriptors. */
 function specSourceList(): SpecSource[] {
-    return specSourceButtons.map(function (button) {
+    const sources = specSourceButtons.map(function (button) {
         return {
             id: button.getAttribute("data-cp-spec-source") || "",
             label: button.getAttribute("data-spec-label") || "",
@@ -2088,6 +2090,18 @@ function specSourceList(): SpecSource[] {
             provenance: button.getAttribute("data-spec-provenance") || "",
         };
     });
+    return sourcesOrFallback(
+        sources,
+        specLane
+            ? {
+                  id: KIT_SOURCE,
+                  label: specLane.getAttribute("data-spec-label") || "",
+                  src: specLane.getAttribute("data-spec-src") || "",
+                  provenance:
+                      specLane.getAttribute("data-spec-provenance") || "",
+              }
+            : null,
+    );
 }
 function specPressedId(): string | null {
     for (var i = 0; i < specSourceButtons.length; i++)
@@ -2178,7 +2192,8 @@ if (specStrip && typeof ResizeObserver === "function")
 var previewScoreGeneration = 0;
 var previewScoreKey = "";
 function comparisonChipFor(source: SpecSource): HTMLButtonElement | null {
-    if (source.id === specPrimaryId()) return specChip;
+    if (specSourceButtons.length === 0 || source.id === specPrimaryId())
+        return specChip;
     for (const chip of document.querySelectorAll<HTMLButtonElement>(
         "[data-cp-spec-open-source]",
     ))
@@ -2443,10 +2458,11 @@ function closeSpec() {
     if (specSourceGroup) specSourceGroup.hidden = true;
     img.style.removeProperty("display");
     img.hidden = false;
-    // `<cp-spec-compare>` restores the kit chip's baked/plain label as it closes. Refill any live
-    // resting scores (including that chip) once the comparison lane no longer owns the readout.
+    // `<cp-spec-compare>` restores the kit chip's baked/plain label as it closes. Invalidate the
+    // resting score, but let refreshSnapshot's decoded frame refill it: fetching here would request
+    // the same no-store render twice and let the two daemon renders race each other.
+    previewScoreGeneration++;
     previewScoreKey = "";
-    preScoreComparisonChips(specAtBaseline());
 }
 // One listener per button, bound once. The buttons are server-rendered and never replaced, so this
 // needs no delegation and no re-binding.
