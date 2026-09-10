@@ -1,9 +1,25 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
+import ee.schimke.composeai.uibuilder.protocol.BooleanValueV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.DecimalValueV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
+import ee.schimke.composeai.uibuilder.protocol.EnumValueV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
+import ee.schimke.composeai.uibuilder.protocol.IntegerValueV1
+import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
+import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.StringValueV1
+import ee.schimke.composeai.uibuilder.protocol.ThemeV1
+import ee.schimke.composeai.uibuilder.protocol.UiValueV1
+import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import java.io.File
 import kotlin.test.Test
@@ -12,6 +28,7 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -47,7 +64,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   private val frozen: CatalogCapabilityV1 =
     json.decodeFromString(fixture("m3-catalog-capabilities-v1.json"))
 
-  private val composed: CatalogCapabilityV1 by lazy {
+  private val result: PublishedUiBuilderCatalog.Result.Composed by lazy {
     val record =
       json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-generated-record-v1.json"))
     val result =
@@ -60,8 +77,18 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       result is PublishedUiBuilderCatalog.Result.Composed,
       "the generated pair must compose: ${(result as? PublishedUiBuilderCatalog.Result.Unusable)?.reason}",
     )
-    (result as PublishedUiBuilderCatalog.Result.Composed).catalog
+    result as PublishedUiBuilderCatalog.Result.Composed
   }
+
+  private val composed: CatalogCapabilityV1
+    get() = result.catalog
+
+  /**
+   * The record behind each published component, under the builder id a design names it with — the
+   * composition's own join, and the map `ServeRunner` hands the export executor.
+   */
+  private val composedRecords: Map<String, ComponentRecord>
+    get() = result.records
 
   /**
    * The one of the frozen twenty-five the published catalog cannot offer, and why.
@@ -459,7 +486,15 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     val unwritable =
       offered
         .mapNotNull { id ->
-          val component = byCanonicalId[recordOf[id]] ?: return@mapNotNull null
+          // Not `?: return@mapNotNull null`, which is how this read before: a published component
+          // whose `record` names a canonical id the record file does not carry was silently
+          // dropped from the measurement rather than reported. Nothing carries that shape today
+          // and this is what says so.
+          val component =
+            requireNotNull(byCanonicalId[recordOf[id]]) {
+              "published component `$id` names record `${recordOf[id]}`, which the component " +
+                "record does not carry"
+            }
           val reason =
             when {
               !component.signatureKnown -> "the signature was never recovered"
@@ -488,7 +523,195 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     )
   }
 
+  /**
+   * How much of the published m3 shelf the generator can actually write, component by component.
+   *
+   * The remote-m3 sibling has asked this of its exporter since #673. m3 could not be asked until
+   * now: `ScreenGenerator` resolves a node against the record's `componentIds`, the generated
+   * record carries the catalog's own taxonomy (`Dialog/Basic`), and the published file names `m3/…`
+   * — so every component refused to resolve before its call site was considered, and #691 said so
+   * rather than pinning a number that described the fixture pairing. Aliasing the record with the
+   * published ids (compose-preview-server#694) is what makes the question answerable.
+   *
+   * Asked the way an author would: a screen whose root IS the component, with a value authored for
+   * every required property the shelf declares. What refuses is pinned with the generator's own
+   * first reason, so teaching it one shortens this list and says so.
+   */
+  @Test
+  fun `what the published m3 shelf can export is the reviewed set`() {
+    val record =
+      json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-generated-record-v1.json"))
+    val executor =
+      ScreenGeneratorComposeExportExecutor(
+        { systemId ->
+          if (systemId == "m3-catalog") ComponentRecordSource.Lookup.Found(record)
+          else ComponentRecordSource.Lookup.Unconfigured
+        },
+        "generated.uibuilder",
+        publishedComponents = { systemId ->
+          if (systemId == "m3-catalog") composedRecords else emptyMap()
+        },
+      )
+
+    val refused = sortedMapOf<String, String>()
+    val offered = composed.components.filter { it.componentId.startsWith("m3/") }
+    for (component in offered) {
+      val generated = executor.generate(screenAround(component))
+      if (generated is ScreenGeneratorComposeExportExecutor.Generated.Refused) {
+        val reason = generated.reasons.first()
+        refused[component.componentId] = reason.substringAfter("has no call site: ", reason)
+      }
+    }
+
+    assertEquals(
+      110,
+      offered.size,
+      "the number of published m3 components measured for export has changed",
+    )
+    assertEquals(
+      M3_EXPORT_REFUSALS,
+      refused.toMap(),
+      "the set of published m3 components the generator cannot write has changed",
+    )
+  }
+
+  /** A screen whose root IS [component], with every required property the shelf declares. */
+  private fun screenAround(component: ComponentCapabilityV1): DesignDocumentV1 =
+    DesignDocumentV1(
+      schema = "compose-ui-builder-document/v1-candidate",
+      id = "m3-export-parity",
+      title = "Export parity",
+      revision = 1,
+      catalogPin =
+        CatalogReferenceV1(
+          systemId = "m3-catalog",
+          catalogRevision = "candidate",
+          capabilityDigest = "candidate",
+          nativeRuntimeId = "candidate",
+        ),
+      environment =
+        DesignEnvironmentV1(
+          widthDp = 400,
+          heightDp = 800,
+          density = 1.0,
+          theme = ThemeV1.LIGHT,
+          locale = "en-US",
+          fontScale = 1.0,
+          layoutDirection = LayoutDirectionV1.LTR,
+          windowPosture = WindowPostureV1.FLAT,
+          animations = AnimationStateV1.SETTLED,
+          networkAccess = false,
+        ),
+      // The subject IS the root. A `layout/column` wrapper reads naturally and is not in the
+      // catalog's record — it is one of the builder's own donor components, synthesised by the
+      // runtime — so every component would refuse for the wrapper rather than for itself.
+      roots = listOf("subject"),
+      nodes =
+        linkedMapOf(
+          "subject" to
+            DesignNodeV1(
+              id = "subject",
+              componentId = component.componentId,
+              properties =
+                component.properties.filter { it.required }.associate { it.name to authored(it) },
+            )
+        ),
+    )
+
+  /** A value of the declared `jsonType`, or the first allowed value where the shelf states one. */
+  private fun authored(property: PropertyCapabilityV1): UiValueV1 {
+    property.allowedValues?.firstOrNull()?.jsonPrimitive?.contentOrNull?.let {
+      return EnumValueV1(it)
+    }
+    val declared =
+      (property.jsonType as? JsonPrimitive)?.contentOrNull
+        ?: (property.jsonType as? JsonArray)?.firstOrNull()?.jsonPrimitive?.contentOrNull
+    return when (declared) {
+      "boolean" -> BooleanValueV1(true)
+      "integer" -> IntegerValueV1(1)
+      "number" -> DecimalValueV1(0.5)
+      else -> StringValueV1("value")
+    }
+  }
+
   private companion object {
+    /**
+     * The thirty-one published m3 components the generator cannot write, each with its first
+     * reason. See the test above; teaching the generator one of these shortens the list.
+     *
+     * Twenty-five are discovery's own "no call site" judgement — a member of a `Defaults` object, a
+     * scope receiver, type parameters, not public, or a required parameter of a type no design
+     * value becomes. The other six are not that:
+     * - three refuse because `ScreenDocumentProjection`'s variant table names canonical ids
+     *   prefixed `m3-catalog/`, and this record's are prefixed `catalog/` — the module it was
+     *   discovered from. See yschimke/compose-preview-server#698.
+     * - two declare an enum whose values nothing maps to Kotlin members.
+     * - one, `m3/primary-tab-row`, declares a property its component does not take.
+     */
+    val M3_EXPORT_REFUSALS =
+      mapOf(
+        "m3/adaptive-sticker" to "not public or internal, so a generated file cannot call it",
+        "m3/animated-pane" to
+          "declares type parameters that a call omitting defaulted arguments cannot infer",
+        "m3/app-bar-with-search" to
+          "no placeholder can be written for required parameter `state: SearchBarState`",
+        "m3/button" to
+          "no component `m3-catalog/androidx.compose.material3.ButtonKt.Button` in this catalog",
+        "m3/centered-track" to
+          "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
+        "m3/date-picker" to
+          "node `subject`.`mode` is the enum value `picker`, and nothing maps this catalog property's values to Kotlin members",
+        "m3/elevated-leading-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/elevated-trailing-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/horizontal-centered-hero-carousel" to
+          "no placeholder can be written for required parameter `state: CarouselState`",
+        "m3/horizontal-multi-browse-carousel" to
+          "no placeholder can be written for required parameter `state: CarouselState`",
+        "m3/horizontal-uncontained-carousel" to
+          "no placeholder can be written for required parameter `state: CarouselState`",
+        "m3/icon" to
+          "no placeholder can be written for required parameter `imageVector: ImageVector`",
+        "m3/leading-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/list-detail-pane-scaffold" to
+          "no placeholder can be written for required parameter `directive: PaneScaffoldDirective`",
+        "m3/outlined-leading-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/outlined-trailing-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/primary-tab-row" to "`PrimaryTabRow` has no parameter `selectedIndex`",
+        "m3/progress-indicator" to
+          "no component `m3-catalog/androidx.compose.material3.ProgressIndicatorKt.LinearProgressIndicator` in this catalog",
+        "m3/range-slider" to
+          "no placeholder can be written for required parameter `value: ClosedFloatingPointRange<Float>`",
+        "m3/search-bar" to
+          "no placeholder can be written for required parameter `state: SearchBarState`",
+        "m3/search-input-field" to
+          "a member of androidx.compose.material3.SearchBarDefaults, so a call site needs an instance of it",
+        "m3/segmented-button" to
+          "declared on androidx.compose.material3.MultiChoiceSegmentedButtonRowScope, so a call site needs that scope around it",
+        "m3/supporting-pane-scaffold" to
+          "no placeholder can be written for required parameter `directive: PaneScaffoldDirective`",
+        "m3/text-field" to
+          "no component `m3-catalog/androidx.compose.material3.TextFieldKt.TextField` in this catalog",
+        "m3/thumb" to
+          "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
+        "m3/time-picker" to
+          "node `subject`.`mode` is the enum value `dial`, and nothing maps this catalog property's values to Kotlin members",
+        "m3/tonal-leading-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/tonal-trailing-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/track" to
+          "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
+        "m3/trailing-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/tri-state-checkbox" to
+          "no placeholder can be written for required parameter `state: ToggleableState`",
+      )
+
     /**
      * The seven components whose composed import list is not the frozen one. See the test above:
      * the frozen file merged sibling variants and the composed entry imports what the recorded call

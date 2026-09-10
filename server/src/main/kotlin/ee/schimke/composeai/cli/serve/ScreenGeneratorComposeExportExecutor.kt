@@ -414,9 +414,22 @@ internal class ScreenGeneratorComposeExportExecutor(
         is PackRecords.Refused -> return Generated.Refused(packs.code, packs.reasons)
         is PackRecords.Found -> packs.records
       }
+    // The catalog's own record, wearing the ids the published file gave its components.
+    //
+    // `ScreenGenerator` resolves a node by matching `componentId` against a record component's
+    // `componentIds`, and a published catalog names its components `<prefix><slug>` — ids the
+    // record does not carry. m3-catalog's record carries its own taxonomy (`Dialog/Basic`,
+    // `TopAppBar/Small`), so before this every node of a published m3 design refused with "no
+    // component `m3/…` in this catalog" before its call site was ever considered.
+    //
+    // Added rather than replaced, which is where this differs from
+    // `ComponentRecordPacks.aliasedRecord`: a pack component is only ever named by its pack id,
+    // while a catalog's own component may still be named by a design pinned before the swap. Both
+    // ids resolve to one record entry.
+    val aliased = aliasPublished(record, publishedComponents(catalogSystemId))
     val merged =
-      if (packRecords.isEmpty()) record
-      else record.copy(components = record.components + packRecords.flatMap { it.components })
+      if (packRecords.isEmpty()) aliased
+      else aliased.copy(components = aliased.components + packRecords.flatMap { it.components })
     val screenName = ScreenDocumentProjection.screenNameFor(document)
     val projection =
       when (val outcome = ScreenDocumentProjection.project(document, screenName, tagNodes)) {
@@ -581,6 +594,37 @@ internal class ScreenGeneratorComposeExportExecutor(
       }
     }
     return RecordFreeComponents.Found(published + packRecords.byComponentId())
+  }
+
+  /**
+   * [record] with every published builder id added to the component the published file says it
+   * describes.
+   *
+   * The join comes from `PublishedUiBuilderCatalog.Result.Composed.records`, which is the only
+   * place it exists: the published file states each component's `record` canonical id, and derives
+   * an id for the ones it does not name. Matched here by `canonicalId` rather than by object
+   * identity, because the composed map and this record are separate decodes of the same file and
+   * nothing guarantees they share instances.
+   *
+   * A no-op for a catalog serving nothing published, which is every catalog today.
+   */
+  private fun aliasPublished(
+    record: ComponentRecordFile,
+    published: Map<String, ComponentRecord>,
+  ): ComponentRecordFile {
+    if (published.isEmpty()) return record
+    val aliases = mutableMapOf<String, MutableList<String>>()
+    for ((builderId, component) in published) {
+      aliases.getOrPut(component.canonicalId) { mutableListOf() }.add(builderId)
+    }
+    return record.copy(
+      components =
+        record.components.map { component ->
+          val added = aliases[component.canonicalId]?.filterNot { it in component.componentIds }
+          if (added.isNullOrEmpty()) component
+          else component.copy(componentIds = component.componentIds + added)
+        }
+    )
   }
 
   /** Each pack component under the id the design refers to it by, for the record-free emitter. */
