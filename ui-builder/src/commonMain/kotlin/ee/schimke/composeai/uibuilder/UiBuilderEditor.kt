@@ -737,6 +737,7 @@ fun UiBuilderEditor(
   }
   var catalogDragPosition by remember { mutableStateOf<Offset?>(null) }
   var draggedComponentId by remember { mutableStateOf<String?>(null) }
+  var draggedRemoteThumbnail by remember { mutableStateOf<ImageBitmap?>(null) }
   var canvasBounds by remember { mutableStateOf(Rect.Zero) }
   // The scale the design is pinned at, or null while it is framed to the workspace. Local rather
   // than in [UiBuilderEditorState] for the same reason the open panels are: how far somebody has
@@ -783,6 +784,9 @@ fun UiBuilderEditor(
   // insert the same component twice — the second insert lands against a document the first already
   // changed, and neither the author nor their collaborators asked for it.
   var pendingRemoteSource by remember(document.id) { mutableStateOf<RemoteComposeSource?>(null) }
+  // A Remote Compose drop captures its pointer-resolved slot before fetching the document bytes.
+  // Null is the ordinary Add path, which resolves against the current selection after the fetch.
+  var pendingRemoteTarget by remember(document.id) { mutableStateOf<ParentSlot?>(null) }
   // Only a transport failure. A document that fetched and did not decode is refused by the reducer,
   // which reports it through the same rejection channel as every other refused edit rather than a
   // second status line saying a different thing about the same click.
@@ -1021,6 +1025,7 @@ fun UiBuilderEditor(
         onCatalogDrag = { componentId, position ->
           if (position != null) focusEditor()
           draggedComponentId = componentId
+          draggedRemoteThumbnail = null
           catalogDragPosition = position
         },
         onCatalogDrop = { componentId, variant, position ->
@@ -1036,6 +1041,7 @@ fun UiBuilderEditor(
             if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
           }
           draggedComponentId = null
+          draggedRemoteThumbnail = null
           catalogDragPosition = null
         },
         // Beside the design, every component can be added: a top-level item is in no slot, so there
@@ -1075,8 +1081,32 @@ fun UiBuilderEditor(
         resolveRemoteComposeThumbnail = resolveRemoteComposeThumbnail,
         onAddRemoteComposeSource = { source ->
           focusEditor()
-          if (pendingRemoteSource == null) pendingRemoteSource = source
+          if (pendingRemoteSource == null) {
+            pendingRemoteTarget = null
+            pendingRemoteSource = source
+          }
           if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
+        },
+        onRemoteComposeDrag = { source, thumbnail, position ->
+          if (position != null) focusEditor()
+          draggedComponentId = REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID
+          draggedRemoteThumbnail = thumbnail
+          catalogDragPosition = position
+          if (position == null) {
+            draggedComponentId = null
+            draggedRemoteThumbnail = null
+          }
+        },
+        onRemoteComposeDrop = { source, position ->
+          val target = canvasTarget(REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID, position)
+          if (target != null && pendingRemoteSource == null) {
+            pendingRemoteTarget = target
+            pendingRemoteSource = source
+            if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
+          }
+          draggedComponentId = null
+          draggedRemoteThumbnail = null
+          catalogDragPosition = null
         },
         moveRefusal = { nodeId, target -> reducer.moveRefusal(state, nodeId, target) },
         onEditorInteraction = ::focusEditor,
@@ -1108,7 +1138,11 @@ fun UiBuilderEditor(
       },
       dropHovered = canvasDropHovered,
       dropTarget = draggedTarget,
-      dragPreview = draggedComponentId?.let { reducer.previewDocument(it, null) },
+      dragPreview =
+        if (draggedRemoteThumbnail == null)
+          draggedComponentId?.let { reducer.previewDocument(it, null) }
+        else null,
+      dragPreviewBitmap = draggedRemoteThumbnail,
       dragPosition = catalogDragPosition,
       showSelectionOverlay = showSelectionOverlay && !state.previewMode,
       reference = state.reference,
@@ -1262,7 +1296,13 @@ fun UiBuilderEditor(
   }
   LaunchedEffect(pendingRemoteSource) {
     val source = pendingRemoteSource ?: return@LaunchedEffect
-    val resolve = resolveRemoteComposeDocument ?: return@LaunchedEffect
+    val resolve =
+      resolveRemoteComposeDocument
+        ?: run {
+          pendingRemoteTarget = null
+          pendingRemoteSource = null
+          return@LaunchedEffect
+        }
     val encoded =
       try {
         resolve(source)
@@ -1270,9 +1310,20 @@ fun UiBuilderEditor(
         throw cancelled
       } catch (failure: Throwable) {
         remoteSourceFailure = "${source.label}: ${failure.message ?: "could not be fetched"}"
+        pendingRemoteTarget = null
         pendingRemoteSource = null
         return@LaunchedEffect
       }
+    // A pointer drop promised a particular visible slot before this network round trip began.
+    // Preserve that promise: the reducer validates the captured slot against the current document,
+    // so a collaborator removing it during the fetch is refused instead of silently retargeted.
+    pendingRemoteTarget?.let { target ->
+      remoteSourceFailure = null
+      dispatch(UiBuilderEditorEvent.InsertRemoteComposeDocument(source, encoded, target))
+      pendingRemoteTarget = null
+      pendingRemoteSource = null
+      return@LaunchedEffect
+    }
     // Resolved against the selection as it stands NOW, not as it stood when the row was pressed: a
     // fetch takes a round trip, and the reducer would refuse a target the author has since moved
     // away from. Asking again is what makes the insert land where the canvas says it will.
@@ -1287,6 +1338,7 @@ fun UiBuilderEditor(
       if (refusal == null) {
         dispatch(UiBuilderEditorEvent.InsertRemoteComposeDocumentBeside(source, encoded))
       }
+      pendingRemoteTarget = null
       pendingRemoteSource = null
       return@LaunchedEffect
     }
@@ -1297,6 +1349,7 @@ fun UiBuilderEditor(
       remoteSourceFailure = null
       dispatch(UiBuilderEditorEvent.InsertRemoteComposeDocument(source, encoded, target))
     }
+    pendingRemoteTarget = null
     pendingRemoteSource = null
   }
   // Every `documentUrl` the design references, and what came back for it.
@@ -3705,6 +3758,8 @@ private fun EditorNavigator(
   remoteComposeFailure: String?,
   resolveRemoteComposeThumbnail: (suspend (RemoteComposeSource) -> ImageBitmap?)?,
   onAddRemoteComposeSource: (RemoteComposeSource) -> Unit,
+  onRemoteComposeDrag: (RemoteComposeSource, ImageBitmap?, Offset?) -> Unit,
+  onRemoteComposeDrop: (RemoteComposeSource, Offset) -> Unit,
   moveRefusal: (String, ParentSlot) -> EditorMoveRefusal?,
   onEditorInteraction: () -> Unit,
   onTextInputFocusChanged: (Boolean) -> Unit,
@@ -3742,6 +3797,8 @@ private fun EditorNavigator(
             remoteComposeFailure = remoteComposeFailure,
             resolveRemoteComposeThumbnail = resolveRemoteComposeThumbnail,
             onAddRemoteComposeSource = onAddRemoteComposeSource,
+            onRemoteComposeDrag = onRemoteComposeDrag,
+            onRemoteComposeDrop = onRemoteComposeDrop,
             onTextInputFocusChanged = onTextInputFocusChanged,
             dispatch = dispatch,
           )
@@ -3804,6 +3861,8 @@ private fun InsertPanel(
   remoteComposeFailure: String?,
   resolveRemoteComposeThumbnail: (suspend (RemoteComposeSource) -> ImageBitmap?)?,
   onAddRemoteComposeSource: (RemoteComposeSource) -> Unit,
+  onRemoteComposeDrag: (RemoteComposeSource, ImageBitmap?, Offset?) -> Unit,
+  onRemoteComposeDrop: (RemoteComposeSource, Offset) -> Unit,
   onTextInputFocusChanged: (Boolean) -> Unit,
   dispatch: (UiBuilderEditorEvent) -> Unit,
 ) {
@@ -3918,6 +3977,8 @@ private fun InsertPanel(
               pendingRemoteComposeSource == null &&
                 canAddCatalogComponent(REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID),
             onAdd = { onAddRemoteComposeSource(source) },
+            onDrag = { thumbnail, position -> onRemoteComposeDrag(source, thumbnail, position) },
+            onDrop = { onRemoteComposeDrop(source, it) },
           )
         }
       }
@@ -4265,6 +4326,8 @@ internal fun PinnedDesignCanvas(
   dropTarget: ParentSlot? = null,
   /** The same generated document the palette thumbnail draws, carried beside the pointer. */
   dragPreview: UiBuilderDocument? = null,
+  /** The published Remote Compose capture carried while its document bytes are still remote. */
+  dragPreviewBitmap: ImageBitmap? = null,
   /** Pointer position in the editor root coordinate space. */
   dragPosition: Offset? = null,
   showSelectionOverlay: Boolean,
@@ -4561,16 +4624,18 @@ internal fun PinnedDesignCanvas(
         hoverEditor()
       }
     }
-    if (dropHovered && dragPreview != null && dragPosition != null) {
-      DragPreviewGhost(
-        document = dragPreview,
-        modifier =
-          Modifier.align(Alignment.TopStart)
-            .offset(
-              x = with(density) { (dragPosition.x - workspaceBounds.left + 14f).toDp() },
-              y = with(density) { (dragPosition.y - workspaceBounds.top + 14f).toDp() },
-            ),
-      )
+    if (dropHovered && dragPosition != null) {
+      val ghostModifier =
+        Modifier.align(Alignment.TopStart)
+          .offset(
+            x = with(density) { (dragPosition.x - workspaceBounds.left + 14f).toDp() },
+            y = with(density) { (dragPosition.y - workspaceBounds.top + 14f).toDp() },
+          )
+      when {
+        dragPreview != null -> DragPreviewGhost(document = dragPreview, modifier = ghostModifier)
+        dragPreviewBitmap != null ->
+          DragBitmapPreviewGhost(bitmap = dragPreviewBitmap, modifier = ghostModifier)
+      }
     }
     // Over the workspace rather than in the status bar, where every canvas tool puts it, and
     // outside the scrolling box so it stays put while the design under it moves.
@@ -4649,6 +4714,25 @@ private fun DragPreviewGhost(document: UiBuilderDocument, modifier: Modifier = M
         UiBuilderSurface(document = document, editorOverlay = false)
       }
     }
+  }
+}
+
+/** The catalog's real published capture travelling with a Remote Compose document drag. */
+@Composable
+private fun DragBitmapPreviewGhost(bitmap: ImageBitmap, modifier: Modifier = Modifier) {
+  Surface(
+    modifier.size(88.dp, 66.dp).alpha(0.88f),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+    tonalElevation = 6.dp,
+  ) {
+    Image(
+      bitmap = bitmap,
+      contentDescription = null,
+      modifier = Modifier.fillMaxSize().padding(4.dp).clearAndSetSemantics {},
+      contentScale = ContentScale.Fit,
+    )
   }
 }
 
@@ -4942,11 +5026,10 @@ private fun GroupHeading(group: String) {
 }
 
 /**
- * One published Remote Compose document, addable into the selected slot.
+ * One published Remote Compose document, addable or draggable into a compatible slot.
  *
- * No drag handle, unlike [CatalogRow]. A drag inserts on release, and this insert cannot: the bytes
- * are a network round trip away, so the drop would land nothing and the row would have promised
- * otherwise. Add is honest about being asynchronous; a drag would not be.
+ * The thumbnail is the grip, like [CatalogRow]. A drop captures the exact slot immediately, then
+ * fetches the document bytes; the reducer revalidates that captured slot when the fetch completes.
  */
 @Composable
 private fun RemoteComposeSourceRow(
@@ -4954,6 +5037,8 @@ private fun RemoteComposeSourceRow(
   resolveThumbnail: (suspend (RemoteComposeSource) -> ImageBitmap?)?,
   canAdd: Boolean,
   onAdd: () -> Unit,
+  onDrag: (ImageBitmap?, Offset?) -> Unit,
+  onDrop: (Offset) -> Unit,
 ) {
   var thumbnail by remember(source.id) { mutableStateOf<ImageBitmap?>(null) }
   LaunchedEffect(source.id, resolveThumbnail) {
@@ -4971,7 +5056,13 @@ private fun RemoteComposeSourceRow(
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Surface(
-      Modifier.size(COMPONENT_THUMBNAIL_SIZE),
+      Modifier.size(COMPONENT_THUMBNAIL_SIZE)
+        .catalogDrag(
+          dragKey = source.id,
+          onDrag = { onDrag(thumbnail, it) },
+          onDrop = onDrop,
+        )
+        .semantics { contentDescription = "Drag ${source.label}" },
       shape = RoundedCornerShape(4.dp),
       color = MaterialTheme.colorScheme.surfaceContainerHighest,
     ) {

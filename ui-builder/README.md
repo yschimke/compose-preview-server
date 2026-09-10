@@ -60,10 +60,12 @@ against the clean harness's. Explicit `?mode=…` URLs retain the frozen local f
 transforms.
 
 A palette drag carries a live rendering of the component under the pointer and highlights the exact
-compatible slot it will fill. Pointer-resolved slots are validated directly by the reducer; they no
-longer have to agree with the layer selected before the drag began. Clicking a layer focuses the
-editor, and Delete or Backspace removes the selected subtree through the same guarded delete
-operation as the context menu.
+compatible slot it will fill. Remote Compose rows use their published capture as the drag preview;
+their drop captures that slot before fetching the document, then revalidates it when the bytes
+arrive. Pointer-resolved slots are validated directly by the reducer; they no longer have to agree
+with the layer selected before the drag began. Clicking a layer focuses the editor, and Delete or
+Backspace removes the selected subtree through the same guarded delete operation as the context
+menu.
 
 On desktop, the renderer control is an additive one-, two-, or three-pane workspace. The Wasm
 visual editor is always first. The second pane is the static target render compiled by the host.

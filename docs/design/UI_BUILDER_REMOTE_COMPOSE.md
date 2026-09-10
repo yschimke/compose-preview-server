@@ -63,10 +63,12 @@ UI builder now reads that lane:
    `hasRemoteComposeDoc`. `modes` could not answer it — a Remote Compose sticker and a Jetpack
    Compose preview are both `snapshot` — and probing `.rc` per preview is 476 requests to learn
    something the host already knows.
-2. **Add** fetches `render/<id>.rc`, Base64-encodes it, and the reducer decodes it before building
-   the operation. The renderer decodes it too, because playing it is what it does; refusing here is
-   what stops a catalog lane's HTML error page from becoming a saved design revision that every
-   collaborator sees as an error box.
+2. **Add or drop** fetches `render/<id>.rc`, Base64-encodes it, and the reducer decodes it before
+   building the operation. A drag carries the published capture and highlights the exact compatible
+   slot; the editor captures that slot on release and revalidates it after the fetch rather than
+   silently retargeting to a later selection. The renderer decodes the bytes too, because playing
+   them is what it does; refusing here is what stops a catalog lane's HTML error page from becoming
+   a saved design revision that every collaborator sees as an error box.
 3. The insert lands as one `InsertNode` carrying the bytes, not an insert followed by a property
    write. The intermediate state — a `remote-compose/document` with no document — renders as its
    own diagnostic, and collaborators would watch it appear.
