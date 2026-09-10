@@ -201,11 +201,20 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * loses. Restore them and every design is record-free and meets this refusal head on; leave them
    * out and designs cannot be rooted correctly in the first place.
    *
-   * The record-driven lane is not an escape either, but this test does not prove that and does not
-   * claim to. Its own comment says `remote-m3` "ha[s] no component record and the record-driven
-   * generator can only refuse them" — written when the record did not exist, which is the thing
-   * this work changed, so the sentence needs re-checking rather than citing. What is checkable here
-   * is the emitter's vocabulary, and that is what is asserted.
+   * Whether the record-driven lane is an escape is OPEN, and deliberately not answered here. Its
+   * own comment says `remote-m3` "ha[s] no component record and the record-driven generator can
+   * only refuse them" — written when the record did not exist, which is the thing this work
+   * changed, so the sentence needs re-checking rather than citing.
+   *
+   * Re-checking it needs more than calling the executor. `ScreenGeneratorComposeExportExecutor`
+   * resolves a component through its own `components(catalogSystemId)` source rather than through
+   * the `catalog` on the export request: handed the real composed catalog — 27 components,
+   * `remote-m3/remote-text` among them — it still answers "no component `remote-m3/remote-text` in
+   * this catalog". A probe that does not wire that source measures its own fixture, which is what
+   * two attempts at one did before this note replaced them.
+   *
+   * What is checkable without that wiring is the emitter's vocabulary, and that is what is asserted
+   * below.
    *
    * `RemoteM3VocabularyParityTest` already holds the synthesised palette to this invariant — a
    * component you can insert and cannot export is worse than one that is missing, because the
