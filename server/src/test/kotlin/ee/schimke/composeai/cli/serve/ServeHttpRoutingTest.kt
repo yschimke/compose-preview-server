@@ -48,6 +48,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
  */
 class ServeHttpRoutingTest {
 
+  private companion object {
+    /** The projection bound this suite configures, so its oversized fixture stays a kilobyte. */
+    const val PROJECTION_LIMIT = 1024
+  }
+
   private val previewId = "com.example.Red"
   private val refreshes = mutableListOf<String>()
   @Volatile private var blockRefresh = false
@@ -284,10 +289,15 @@ class ServeHttpRoutingTest {
   private val notADocument = byteArrayOf(0x52, 0x43, 0x01, 0x02, 0x03)
 
   /**
-   * Past the 8 MB projection bound. Allocated rather than checked in, obviously — and it is never
-   * inflated, because the size check is what this fixture exists to reach.
+   * Past [PROJECTION_LIMIT], the bound this suite's server is configured with — not the production
+   * 8 MB one.
+   *
+   * That indirection is the whole point. JUnit builds this class once per test method, so an 8 MiB
+   * instance property is allocated 102 times and written into a temp bundle by every test that
+   * touches `server`: hundreds of megabytes of allocation and file I/O to prove one refusal. The
+   * limit is a constructor parameter precisely so the fixture can be a kilobyte.
    */
-  private val oversizedDocument = ByteArray(8 * 1024 * 1024 + 1)
+  private val oversizedDocument = ByteArray(PROJECTION_LIMIT + 1)
 
   private fun bundle(
     label: String,
@@ -581,6 +591,7 @@ class ServeHttpRoutingTest {
         sessions = registry,
         defaultSessionId = "default-mod",
         isPublic = true,
+        maxProjectableDocumentBytes = PROJECTION_LIMIT,
         rcPlayerWasmDir = rcWasmDir,
         catalogSessions = listOf("compose-m3"),
         catalogRefresh = { system, force ->
@@ -2650,6 +2661,28 @@ class ServeHttpRoutingTest {
 
     assertEquals(422, code)
     assertTrue(body.contains("cannot project"), "names the failure: $body")
+  }
+
+  @Test
+  fun `the document lanes keep their bytes out of shared caches`() {
+    // The token can arrive in the `X-Compose-Preview-Token` header, which no cache keys on, so an
+    // uncached-but-cacheable document could be handed to a later caller or outlive a revoked
+    // grant. This fixture server is `isPublic = true`, so the published-content policy is the one
+    // asserted here; a token-gated deployment takes `no-store` down the same branch.
+    for (suffix in listOf(".rc", ".rc.json")) {
+      val req =
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}/compose-m3/render/$previewId$suffix")
+          .build()
+      client.newCall(req).execute().use { r ->
+        assertEquals(200, r.code, "$suffix")
+        assertEquals(
+          "public, max-age=300, stale-while-revalidate=3600",
+          r.header("Cache-Control"),
+          suffix,
+        )
+      }
+    }
   }
 
   @Test

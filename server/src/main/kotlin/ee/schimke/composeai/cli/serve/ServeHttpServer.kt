@@ -186,6 +186,12 @@ class ServeHttpServer(
   /** Render the streamlined Storybook-like catalog/component browsing presentation. */
   private val componentBrowser: Boolean = false,
   /**
+   * Largest `ir/<id>.rc` `GET /render/<id>.rc.json` will inflate. See [projectDocument] for why
+   * there is a bound at all; it is a parameter so a test can prove the refusal with a
+   * kilobyte-sized fixture instead of allocating the production limit 102 times over.
+   */
+  private val maxProjectableDocumentBytes: Int = DEFAULT_MAX_PROJECTABLE_DOCUMENT_BYTES,
+  /**
    * In-browser CMP tier: system id → the assembled Wasm app directory (the
    * `:samples:cmp-wasm-catalog:wasmCatalogDist` output). When a catalog session's id is a key here,
    * its viewer offers a "Run in browser (Wasm)" toggle that mounts `/wasm/<system>/?id=<component>`
@@ -10416,6 +10422,18 @@ class ServeHttpServer(
       // daemon-only host, or an unknown id) returns null → 404.
       if (wantRcDoc || wantRcJson) {
         val bytes = renderHost.remoteComposeDoc(previewId)
+        // A captured document is published catalog content on a public server and a token-gated
+        // response everywhere else, and neither lane was saying so. `no-store` is what
+        // `DYNAMIC_RESOURCE_CACHE_CONTROL` documents for "all token-gated responses": the token can
+        // arrive in the `X-Compose-Preview-Token` header, which no cache keys on, so without this a
+        // shared cache could hand one caller's document to another, or keep serving it after the
+        // grant is revoked.
+        //
+        // Applied to BOTH lanes rather than only the one this change adds. They are the same bytes
+        // from the same read in the same block; marking the projection and leaving the raw document
+        // uncached would be a strictly stranger state than the one being fixed.
+        val documentCacheControl =
+          if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else DYNAMIC_RESOURCE_CACHE_CONTROL
         if (bytes == null) {
           call.respondText("no such remote compose document", status = HttpStatusCode.NotFound)
         } else if (wantRcJson) {
@@ -10430,14 +10448,20 @@ class ServeHttpServer(
           // and the server is healthy; this particular document is the thing that cannot be read,
           // and the message says which document and why so a catalog owner can act on it.
           try {
-            call.respondText(projectDocument(bytes), ContentType.Application.Json)
+            val projected = projectDocument(bytes)
+            call.response.headers.append(HttpHeaders.CacheControl, documentCacheControl)
+            call.respondText(projected, ContentType.Application.Json)
           } catch (e: RemoteComposeJsonException) {
+            // The refusal is cached no more freely than the document: its message names the
+            // document's size, which is not something to hand a later caller from a shared cache.
+            call.response.headers.append(HttpHeaders.CacheControl, DYNAMIC_RESOURCE_CACHE_CONTROL)
             call.respondText(
               "cannot project that remote compose document: ${e.message}",
               status = HttpStatusCode.UnprocessableEntity,
             )
           }
         } else {
+          call.response.headers.append(HttpHeaders.CacheControl, documentCacheControl)
           call.respondBytes(bytes, ContentType.Application.OctetStream)
         }
         return@withLeasedSession
@@ -11328,17 +11352,14 @@ class ServeHttpServer(
    * message says which and why.
    */
   private fun projectDocument(bytes: ByteArray): String {
-    if (bytes.size > MAX_PROJECTABLE_DOCUMENT_BYTES) {
+    if (bytes.size > maxProjectableDocumentBytes) {
       throw RemoteComposeJsonException(
-        "document is ${bytes.size} bytes, above the ${MAX_PROJECTABLE_DOCUMENT_BYTES}-byte " +
+        "document is ${bytes.size} bytes, above the ${maxProjectableDocumentBytes}-byte " +
           "projection limit; fetch the .rc lane for the bytes themselves"
       )
     }
     return RemoteComposeJson.dump(bytes)
   }
-
-  /** See [projectDocument]. */
-  private val MAX_PROJECTABLE_DOCUMENT_BYTES = 8 * 1024 * 1024
 
   private val DAEMON_ONLY_RENDER_SUFFIXES =
     // `.rc.json` sits beside `.rc` rather than being covered by it: `endsWith(".rc")` is false for
@@ -14367,6 +14388,9 @@ class ServeHttpServer(
 
     /** Variant renders and all token-gated responses stay out of shared and browser caches. */
     private const val DYNAMIC_RESOURCE_CACHE_CONTROL = "no-store"
+
+    /** Default for [maxProjectableDocumentBytes]. See `projectDocument`. */
+    private const val DEFAULT_MAX_PROJECTABLE_DOCUMENT_BYTES = 8 * 1024 * 1024
 
     /** The path segment that introduces a UI-builder bundle version. */
     private const val UI_BUILDER_VERSION_SEGMENT = "v"
