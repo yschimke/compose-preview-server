@@ -40,9 +40,18 @@ import kotlinx.serialization.json.contentOrNull
  * key it, had no collisions and hid the whole problem.
  *
  * So: passing here is necessary before `--ui-builder-published-catalogs` names `m3-catalog`, and it
- * is not sufficient. The sufficient check is this test against a fixture regenerated from a real
+ * is not sufficient. The next thing it needs is to run against a fixture regenerated from a real
  * `composePreviewDiscover` run, which needs the id derivation fixed
- * (yschimke/compose-ai-tools#5354) and m3-catalog's vocabulary authored.
+ * (yschimke/compose-ai-tools#5354) and m3-catalog's vocabulary authored. Even then it is a floor
+ * rather than a proof: [compare] checks what a design depends on, and a catalog can still differ in
+ * something no assertion here reads.
+ *
+ * One caution for that regeneration, since it is the reason this fixture exists at all: do NOT edit
+ * the generated file to keep this test green. The frozen shelf and a published m3 catalog hold
+ * deliberately different component sets — `UI_BUILDER_CATALOG_CONTRACT.md` says so, and a real run
+ * offers about sixty components the frozen one does not. The assertion that the composed catalog
+ * offers nothing extra encodes the opposite, and settling that is a decision about the contract
+ * rather than a fixture to adjust.
  *
  * Everything left here compares a composed shelf against the frozen one, which is the question this
  * fixture can answer honestly. Two of the composer's REFUSALS used to live here too — a builtin
@@ -128,7 +137,22 @@ class PublishedM3CatalogEquivalenceTest {
     check("displayName", expected.displayName, actual.displayName)
     check("role", expected.role, actual.role)
     check("traits", expected.traits.sorted(), actual.traits.sorted())
+    // Slots by name, then field by field — the same reason the properties below get it, and the
+    // one place the lesson had not been applied. `cardinality` decides how many children can be
+    // authored and `acceptedRoles`/`acceptedTraits` decide which components may go in, so a slot
+    // that kept its name while losing its shape breaks designs exactly as a changed property does
+    // and this comparison passed it (Codex, #673).
     check("slots", expected.slots.map { it.name }.sorted(), actual.slots.map { it.name }.sorted())
+    val wantSlots = expected.slots.associateBy { it.name }
+    val gotSlots = actual.slots.associateBy { it.name }
+    for ((name, w) in wantSlots) {
+      val g = gotSlots[name] ?: continue
+      check("slots[$name].cardinality.min", w.cardinality.min, g.cardinality.min)
+      check("slots[$name].cardinality.max", w.cardinality.max, g.cardinality.max)
+      check("slots[$name].ordered", w.ordered, g.ordered)
+      check("slots[$name].acceptedRoles", w.acceptedRoles.sorted(), g.acceptedRoles.sorted())
+      check("slots[$name].acceptedTraits", w.acceptedTraits.sorted(), g.acceptedTraits.sorted())
+    }
     check(
       "modifierCapabilities",
       expected.modifierCapabilities.sorted(),
