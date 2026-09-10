@@ -294,6 +294,57 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     )
   }
 
+  /**
+   * The question that stops `remote-m3`, asked of m3 — and the answer is the other one.
+   *
+   * `remote-m3` offers twenty-five components and `RemoteContentEmitter` can write none of them:
+   * its `emit` is a `when (node.componentId)` with a hand-written function per component, so a
+   * component it has no case for is one a person can insert and then cannot export. m3 does not
+   * take that lane. Its screens are written by the record-driven generator, which emits a call from
+   * the component's own recorded signature — so "can this be written" is "was the signature
+   * recovered", and that is a fact the record states.
+   *
+   * All 108 say yes. This is a floor rather than a proof — a recovered signature is not a compiled
+   * screen, and the round trip through generated Kotlin belongs in m3-catalog against its own
+   * classpath (`UI_BUILDER_CATALOG_CONTRACT.md` phase 2, item 11) — but it is the half that can be
+   * checked here, and it is the half that is false for the other catalog.
+   *
+   * `m3/current-scheme` is pinned separately: it is a companion property rather than a callable
+   * taking arguments, so an empty parameter list is correct for it and suspicious for anything
+   * else.
+   */
+  @Test
+  fun `every component the catalog offers has a signature the generator can write`() {
+    val record =
+      json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-generated-record-v1.json"))
+    val byCanonicalId = record.components.associateBy { it.canonicalId }
+    val recordOf =
+      json
+        .parseToJsonElement(fixture("m3-catalog-generated-published-v1.json"))
+        .jsonObject["statusSemantics"]!!
+        .jsonObject["components"]!!
+        .jsonObject
+        .mapValues { (_, v) -> v.jsonObject["record"]!!.jsonPrimitive.content }
+
+    val offered = composed.components.map { it.componentId }
+    val unwritable =
+      offered.filterNot { byCanonicalId[recordOf[it]]?.signatureKnown == true }.sorted()
+    assertEquals(
+      emptyList(),
+      unwritable,
+      "a component is on the shelf whose signature was never recovered, so the generator cannot " +
+        "write a call to it — insertable and unexportable, which is the blocker remote-m3 has",
+    )
+
+    val noArguments =
+      offered.filter { byCanonicalId[recordOf[it]]?.parameters.orEmpty().isEmpty() }.sorted()
+    assertEquals(
+      listOf("m3/current-scheme"),
+      noArguments,
+      "a component with no recorded parameter takes no argument a design can set",
+    )
+  }
+
   private companion object {
     /**
      * The eighty-five components the real catalog adds; see the test above for why they are pinned.
