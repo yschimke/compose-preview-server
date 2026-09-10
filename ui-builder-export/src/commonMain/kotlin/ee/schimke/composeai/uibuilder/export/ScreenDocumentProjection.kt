@@ -2543,29 +2543,37 @@ object ScreenDocumentProjection {
         ),
     )
 
-  private const val CARD_ID = "m3-catalog/androidx.compose.material3.CardKt.Card"
-  private const val ELEVATED_CARD_ID = "m3-catalog/androidx.compose.material3.CardKt.ElevatedCard"
-  private const val OUTLINED_CARD_ID = "m3-catalog/androidx.compose.material3.CardKt.OutlinedCard"
-  private const val BUTTON_ID = "m3-catalog/androidx.compose.material3.ButtonKt.Button"
-  private const val FILLED_TONAL_BUTTON_ID =
-    "m3-catalog/androidx.compose.material3.ButtonKt.FilledTonalButton"
-  private const val TEXT_BUTTON_ID = "m3-catalog/androidx.compose.material3.ButtonKt.TextButton"
+  // The variant table names CALLABLES, not catalog components: a `style` of `elevated` on
+  // `m3/card` means the design calls `ElevatedCard` instead of `Card`. They were written as
+  // canonical ids — `m3-catalog/<fqn>` — and a canonical id carries the MODULE it was discovered
+  // from. m3-catalog's shipped record was discovered from a module called `m3-catalog`; its own
+  // repository discovers from `:catalog`, so every one of these missed on the catalog's own
+  // record and three components refused with "no component `m3-catalog/…` in this catalog".
+  //
+  // Named by the callable alone, which is the part that is actually true of both. The record is
+  // aliased with the same form by [callableAliases] so the generator can resolve it.
+  private const val CARD_ID = "androidx.compose.material3.CardKt.Card"
+  private const val ELEVATED_CARD_ID = "androidx.compose.material3.CardKt.ElevatedCard"
+  private const val OUTLINED_CARD_ID = "androidx.compose.material3.CardKt.OutlinedCard"
+  private const val BUTTON_ID = "androidx.compose.material3.ButtonKt.Button"
+  private const val FILLED_TONAL_BUTTON_ID = "androidx.compose.material3.ButtonKt.FilledTonalButton"
+  private const val TEXT_BUTTON_ID = "androidx.compose.material3.ButtonKt.TextButton"
   private const val FAB_ID =
-    "m3-catalog/androidx.compose.material3.FloatingActionButtonKt.FloatingActionButton"
-  private const val ICON_BUTTON_ID = "m3-catalog/androidx.compose.material3.IconButtonKt.IconButton"
+    "androidx.compose.material3.FloatingActionButtonKt.FloatingActionButton"
+  private const val ICON_BUTTON_ID = "androidx.compose.material3.IconButtonKt.IconButton"
   private const val FILLED_ICON_BUTTON_ID =
-    "m3-catalog/androidx.compose.material3.IconButtonKt.FilledIconButton"
+    "androidx.compose.material3.IconButtonKt.FilledIconButton"
   private const val FILLED_TONAL_ICON_BUTTON_ID =
-    "m3-catalog/androidx.compose.material3.IconButtonKt.FilledTonalIconButton"
+    "androidx.compose.material3.IconButtonKt.FilledTonalIconButton"
   private const val OUTLINED_ICON_BUTTON_ID =
-    "m3-catalog/androidx.compose.material3.IconButtonKt.OutlinedIconButton"
-  private const val TEXT_FIELD_ID = "m3-catalog/androidx.compose.material3.TextFieldKt.TextField"
+    "androidx.compose.material3.IconButtonKt.OutlinedIconButton"
+  private const val TEXT_FIELD_ID = "androidx.compose.material3.TextFieldKt.TextField"
   private const val OUTLINED_TEXT_FIELD_ID =
-    "m3-catalog/androidx.compose.material3.TextFieldKt.OutlinedTextField"
+    "androidx.compose.material3.TextFieldKt.OutlinedTextField"
   private const val LINEAR_INDICATOR_ID =
-    "m3-catalog/androidx.compose.material3.ProgressIndicatorKt.LinearProgressIndicator"
+    "androidx.compose.material3.ProgressIndicatorKt.LinearProgressIndicator"
   private const val CIRCULAR_INDICATOR_ID =
-    "m3-catalog/androidx.compose.material3.ProgressIndicatorKt.CircularProgressIndicator"
+    "androidx.compose.material3.ProgressIndicatorKt.CircularProgressIndicator"
 
   /**
    * Properties that name a node's **identity to the builder**, not a value in the design.

@@ -9,6 +9,7 @@ import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
+import ee.schimke.composeai.uibuilder.export.callableAliases
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
@@ -426,7 +427,10 @@ internal class ScreenGeneratorComposeExportExecutor(
     // `ComponentRecordPacks.aliasedRecord`: a pack component is only ever named by its pack id,
     // while a catalog's own component may still be named by a design pinned before the swap. Both
     // ids resolve to one record entry.
-    val aliased = aliasPublished(record, publishedComponents(catalogSystemId))
+    // Two aliasings, for two different reasons. `callableAliases` lets the generator resolve what
+    // `ScreenDocumentProjection`'s variant table substituted; `aliasPublished` lets it resolve the
+    // ids the published file gave this catalog's components.
+    val aliased = aliasPublished(record.callableAliases(), publishedComponents(catalogSystemId))
     val merged =
       if (packRecords.isEmpty()) aliased
       else aliased.copy(components = aliased.components + packRecords.flatMap { it.components })
