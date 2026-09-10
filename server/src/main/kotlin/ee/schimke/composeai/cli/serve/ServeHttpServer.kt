@@ -4,6 +4,7 @@ import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.bundle.BundleVerifier
+import ee.schimke.composeai.daemon.client.SandboxSparePool
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.data.layoutinspector.ComposeFigmaSvgProduct
@@ -272,6 +273,11 @@ class ServeHttpServer(
    * [maxLiveSeats], which is what every other entry point (and every test) wants.
    */
   liveSeatLimiter: LiveSeatLimiter? = null,
+  /**
+   * The server's spare Android sandbox workers ([ServeSpareSandboxes]), for `/status.json`: null
+   * when the server keeps none. A supplier rather than a snapshot, read per status request.
+   */
+  private val spareSandboxSnapshot: () -> SandboxSparePool.Snapshot? = { null },
   /**
    * Recent daemon **startup failures** — the render/live daemon a session tried to (re)open but
    * couldn't. Populated by [ServeCommand.openHost] (the single choke point every registry-driven
@@ -7696,6 +7702,17 @@ class ServeHttpServer(
             liveSeatRefusalsUnverified = liveSeats.unverifiedRefusalCount(),
             leasedSessions = leasedSessions,
             busyLeasedSessions = busyLeasedSessions,
+            spareSandboxes =
+              spareSandboxSnapshot()?.let {
+                SpareSandboxesDto(
+                  warm = it.warm,
+                  booting = it.booting,
+                  signatures = it.signatures,
+                  adopted = it.adopted,
+                  returned = it.returned,
+                  coldLaunches = it.coldLaunches,
+                )
+              },
           ),
         config =
           ConfigDto(
@@ -14866,6 +14883,22 @@ private data class CatalogSummaryDto(
   val pending: Int,
 )
 
+/**
+ * The spare Android sandbox workers ([ServeSpareSandboxes]): what is warm and waiting, what is
+ * still booting, and — the figures that say whether the pool is earning its memory — how many
+ * daemon launches adopted spares, how many reaped daemons handed theirs back, and how many launches
+ * went cold because nothing warm matched.
+ */
+@Serializable
+private data class SpareSandboxesDto(
+  val warm: Int,
+  val booting: Int,
+  val signatures: Int,
+  val adopted: Long,
+  val returned: Long,
+  val coldLaunches: Long,
+)
+
 @Serializable
 private data class DaemonSummaryDto(
   /** Total known sessions (resident + suspended). */
@@ -14917,6 +14950,8 @@ private data class DaemonSummaryDto(
    * read *busy*, which is the state that stands the theme optimizer down.
    */
   val busyLeasedSessions: List<String> = emptyList(),
+  /** Null when the server keeps no spare sandbox workers (`--spare-sandboxes 0`). */
+  val spareSandboxes: SpareSandboxesDto? = null,
 )
 
 /**

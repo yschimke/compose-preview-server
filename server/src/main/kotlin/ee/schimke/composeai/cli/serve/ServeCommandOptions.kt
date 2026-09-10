@@ -75,6 +75,16 @@ public class ServeCommandOptions(
   override val backgroundRenders: Int? =
     args.flagValue("--background-renders")?.toIntOrNull()?.takeIf { it >= 1 }
 
+  /**
+   * Warm Android sandbox workers to keep ahead of demand ([ServeOptions.spareSandboxes]). The flag,
+   * else the `composeai.serve.spareSandboxes` system property — the prebuilt image configures the
+   * server through `JAVA_TOOL_OPTIONS`, like its other `composeai.serve.*` knobs — else none.
+   */
+  override val spareSandboxes: Int =
+    (args.flagValue("--spare-sandboxes") ?: System.getProperty(SPARE_SANDBOXES_PROP))
+      ?.toIntOrNull()
+      ?.coerceAtLeast(0) ?: 0
+
   override val exportPath: String? = args.flagValue("--export")?.takeIf { it.isNotBlank() }
 
   override val inlineBundle: Boolean = "--inline" in args
@@ -1149,6 +1159,13 @@ public class ServeCommandOptions(
                           tier is on (--allow-render-trusted); an over-budget stream is refused (WS
                           1013) rather than risking the OOM killer. Default 0 = unbounded. Snapshot +
                           Wasm sessions never take a permit.
+        --spare-sandboxes <n>
+                          Warm Android sandbox workers kept booted ahead of demand, server-wide, for
+                          catalog daemons to adopt instead of booting their own: a daemon then
+                          answers `initialize` in well under a second instead of 4-9 s, and hands
+                          the workers back warm when it is reaped. Each spare is a resident
+                          Robolectric JVM (~500 MB). Default 0 = none. Also read from the
+                          composeai.serve.spareSandboxes system property.
         --exit-when-idle[=<seconds>]
                           Ephemeral mode: shut the server down once it's been idle (no open
                           connections and no requests) for <seconds> (default ${ServeDefaults.DEFAULT_IDLE_EXIT_SECONDS}s). Use a small
@@ -1449,6 +1466,9 @@ public class ServeCommandOptions(
  * options object exists — [ServerCommands] and [LocalUiBuilder] decide which flags a command
  * implies, and a second copy of this rule would be a second spelling to keep in step.
  */
+/** System-property spelling of `--spare-sandboxes`; see [ServeCommandOptions.spareSandboxes]. */
+internal const val SPARE_SANDBOXES_PROP: String = "composeai.serve.spareSandboxes"
+
 internal fun List<String>.flagValue(flag: String): String? {
   firstOrNull { it.startsWith("$flag=") }
     ?.let {

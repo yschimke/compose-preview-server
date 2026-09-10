@@ -53,6 +53,14 @@ public interface ServeOptions {
    */
   public val backgroundRenders: Int?
 
+  /**
+   * Warm Android sandbox workers kept booted ahead of demand, server-wide, for the catalog daemons
+   * to adopt instead of booting their own ([ServeSpareSandboxes]). `0` (default) keeps none: every
+   * daemon boots as before. Each spare is a resident Robolectric JVM (~450-500 MB), which is why it
+   * is a budget of its own rather than a share of [liveSeats].
+   */
+  public val spareSandboxes: Int
+
   public val exportPath: String?
 
   public val inlineBundle: Boolean

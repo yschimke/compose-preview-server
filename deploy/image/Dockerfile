@@ -378,13 +378,26 @@ COPY --from=desktop-daemon /opt/lib-bta /opt/lib-bta
 # needs the strict all-ready contract. `ServeBundleDaemon` already defaults bundle-spawned Android
 # daemons in; carrying it in JAVA_TOOL_OPTIONS extends the same behaviour to the Gradle
 # source-build catalog path (its daemon JVMs inherit this env). Desktop daemons ignore the knob.
+#
+# composeai.serve.spareSandboxes — the server keeps this many Android sandbox workers booted and
+# warm ahead of demand (ServeSpareSandboxes / daemon-client's SandboxSparePool), keyed by daemon
+# classpath, and every Android catalog daemon it spawns adopts them instead of booting its own:
+# `initialize` answers in well under a second instead of 4-9 s, and a reaped daemon hands its
+# workers back warm for the next one. Two spares is one daemon's worth at sandboxCount=3 (its own
+# in-process sandbox fills the third slot), ~1 GB resident held in reserve.
+#
+# lazyInProcessSandbox — a daemon that adopted spares defers its own in-process sandbox until a path
+# only it can serve asks (a held interactive session, @PreviewParameter rows, or a render with no
+# worker left), instead of booting it in the background on every open: a boot and ~220 MB per
+# catalog daemon that a serve box mostly never needs. Off by default because the Gradle / VS Code
+# path wants that sandbox for the panel's live toggle; here it boots on first use.
 ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     SERVE_IDLE_EXIT=0 \
     SERVE_TIMEOUT=1800 \
     COMPOSE_PREVIEW_INIT_USE_MAVEN_LOCAL=1 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
-    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true"
+    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true -Dcomposeai.daemon.lazyInProcessSandbox=true -Dcomposeai.serve.spareSandboxes=2"
 
 WORKDIR /project
 # Carry the release Maven tree so live bundles can resolve the plugin/runtime
