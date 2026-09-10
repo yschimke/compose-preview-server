@@ -683,8 +683,84 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(emitted)
     assertContains(
       emitted.source,
-      "TimePicker(state = rememberTimePickerState(initialHour = 1, initialMinute = 1))",
+      "TimePicker(state = rememberTimePickerState(initialHour = 1, initialMinute = 1, " +
+        "is24Hour = true))",
       message = "a time picker's hour and minute reach `rememberTimePickerState`",
+    )
+  }
+
+  /**
+   * The two things `BuilderTimePicker` does to a property before it reaches the state factory, and
+   * an export that skipped either would draw a different picture from the canvas that accepted it.
+   *
+   * `is24Hour` is OPTIONAL and the canvas defaults it to `true` (`UiBuilderRenderer`:
+   * `node.bool("is24Hour", true)`). Omitting the argument is not neutral — Material's own default
+   * is the device locale, so the same design is a 24-hour dial in the builder and a 12-hour one on
+   * a US phone. `hour` and `minute` are clamped there too (`coerceIn(0, 23)` / `coerceIn(0, 59)`),
+   * and the catalog validator only checks that a property is an integer, so 25 reaches here from an
+   * MCP client or an imported document and reaches Material as an hour it rejects at composition.
+   * Clamped rather than refused, because the builder already drew this design with the clamped
+   * value and the export that matches the picture is that one.
+   *
+   * Both raised by the review bot on #713 and both true.
+   */
+  @Test
+  fun `a time picker's state carries the canvas's default and its clamp`() {
+    val record =
+      json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-generated-record-v1.json"))
+    val executor =
+      ScreenGeneratorComposeExportExecutor(
+        { systemId ->
+          if (systemId == "m3-catalog") ComponentRecordSource.Lookup.Found(record)
+          else ComponentRecordSource.Lookup.Unconfigured
+        },
+        "generated.uibuilder",
+        publishedComponents = { systemId ->
+          if (systemId == "m3-catalog") composedRecords else emptyMap()
+        },
+      )
+    val picker = composed.components.single { it.componentId == "m3/time-picker" }
+
+    val out = screenAround(picker)
+    val subject = out.nodes.getValue("subject")
+    val outOfRange =
+      out.copy(
+        nodes =
+          linkedMapOf(
+            "subject" to
+              subject.copy(
+                properties =
+                  subject.properties +
+                    mapOf("hour" to IntegerValueV1(25), "minute" to IntegerValueV1(-1))
+              )
+          )
+      )
+    val clamped = executor.generate(outOfRange)
+    assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(clamped)
+    assertContains(
+      clamped.source,
+      "rememberTimePickerState(initialHour = 23, initialMinute = 0, is24Hour = true)",
+      message = "an hour outside 0..23 reaches Material clamped, as the canvas clamps it",
+    )
+
+    // And an authored `is24Hour` wins over the canvas's default rather than being overwritten by
+    // it — the default is a fallback, not a constant.
+    val twelveHour =
+      out.copy(
+        nodes =
+          linkedMapOf(
+            "subject" to
+              subject.copy(
+                properties = subject.properties + mapOf("is24Hour" to BooleanValueV1(false))
+              )
+          )
+      )
+    val authored = executor.generate(twelveHour)
+    assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(authored)
+    assertContains(
+      authored.source,
+      "is24Hour = false",
+      message = "an authored `is24Hour` is what reaches the state factory",
     )
   }
 

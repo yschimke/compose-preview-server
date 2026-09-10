@@ -612,18 +612,28 @@ object ScreenDocumentProjection {
           spent += present.keys
           val named =
             present
-              .mapNotNull { (property, parameter) ->
-                value(node.properties.getValue(property), node, property)?.let { parameter to it }
+              .mapNotNull { (property, argument) ->
+                stateArgument(argument, node, property)?.let { argument.parameter to it }
               }
               .toMap()
           // The same all-or-nothing rule the colour bundles keep, for the same reason: a state
           // built from two of a component's three settings is a component configured differently
           // from the one on the canvas, and it compiles.
           if (named.size == present.size) {
+            // The canvas's defaults for what the design left unset, in the table's own order, so
+            // the call reads the way the factory declares it.
+            val complete =
+              bundle.arguments
+                .mapNotNull { (property, argument) ->
+                  val supplied = named[argument.parameter]
+                  val fallback = if (property in node.properties) null else argument.whenAbsent
+                  (supplied ?: fallback)?.let { argument.parameter to it }
+                }
+                .toMap()
             arguments[bundle.parameter] =
               ScreenValue.Construct(
                 callableFqn = bundle.factoryFqn,
-                named = named,
+                named = complete,
                 typeFqn = bundle.typeFqn,
                 requiredOptIns = bundle.optIns,
               )
@@ -632,6 +642,28 @@ object ScreenDocumentProjection {
       }
       if (node.componentId == COLOUR_DOT) spent += colourDot(node, fromProperties)
       return spent
+    }
+
+    /**
+     * One state-factory argument, clamped to the range the canvas clamps to.
+     *
+     * `coerceIn` rather than a refusal, deliberately, and only where the canvas coerces: the
+     * builder already drew this design with the clamped value, so the export that matches the
+     * picture is the clamped one. Refusing instead would reject a document the service accepted and
+     * the canvas rendered — the disagreement between surfaces this projection exists to remove. A
+     * value the catalog validator lets through as "an integer" and Material rejects as an hour is
+     * the case this closes: 25 becomes 23 here exactly as it does on the canvas.
+     */
+    private fun stateArgument(
+      argument: StateArgument,
+      node: DesignNodeV1,
+      property: String,
+    ): ScreenValue? {
+      val raw = value(node.properties.getValue(property), node, property) ?: return null
+      val range = argument.range ?: return raw
+      if (raw !is ScreenValue.Whole) return raw
+      return if (raw.value in range.first.toLong()..range.last.toLong()) raw
+      else ScreenValue.Whole(raw.value.coerceIn(range.first.toLong(), range.last.toLong()))
     }
 
     /**
@@ -2428,8 +2460,28 @@ object ScreenDocumentProjection {
     val parameter: String,
     val factoryFqn: String,
     val typeFqn: String,
-    val arguments: Map<String, String>,
+    val arguments: Map<String, StateArgument>,
     val optIns: List<String>,
+  )
+
+  /**
+   * One factory parameter, and the two things the CANVAS does to the property before passing it.
+   *
+   * Both exist because the canvas is what the author saw. `BuilderTimePicker` reads
+   * `node.integer("hour", …).coerceIn(0, 23)` and `node.bool("is24Hour", true)`, so an export that
+   * forwarded the raw property would draw a different picture from the one on screen — or fail in
+   * composition, for an hour a validator accepted as "an integer" and Material rejects as an hour.
+   *
+   * @property range the bounds the canvas clamps to, or null where the value is not a number.
+   * @property whenAbsent the value the canvas uses for an OPTIONAL property nobody set. Without it
+   *   the argument is simply omitted and Material's own default applies — for `is24Hour` that is
+   *   the device locale, so the same design draws a 24-hour dial in the builder and a 12-hour one
+   *   on a US phone. A default the canvas states is part of the design, not an absence.
+   */
+  private class StateArgument(
+    val parameter: String,
+    val range: IntRange? = null,
+    val whenAbsent: ScreenValue? = null,
   )
 
   private val STATE_BUNDLES: Map<String, StateBundle> =
@@ -2440,7 +2492,11 @@ object ScreenDocumentProjection {
           factoryFqn = "androidx.compose.material3.rememberTimePickerState",
           typeFqn = "androidx.compose.material3.TimePickerState",
           arguments =
-            mapOf("hour" to "initialHour", "minute" to "initialMinute", "is24Hour" to "is24Hour"),
+            mapOf(
+              "hour" to StateArgument("initialHour", range = 0..23),
+              "minute" to StateArgument("initialMinute", range = 0..59),
+              "is24Hour" to StateArgument("is24Hour", whenAbsent = ScreenValue.Bool(true)),
+            ),
           // None: discovery records `TimePicker(state = rememberTimePickerState())` with an empty
           // `requiredOptIns`, so both halves of that call are stable API and claiming an opt-in
           // here would write an `@OptIn` the file does not need.
