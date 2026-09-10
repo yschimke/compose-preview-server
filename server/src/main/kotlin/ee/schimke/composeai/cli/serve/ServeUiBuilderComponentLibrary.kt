@@ -52,10 +52,14 @@ import kotlinx.serialization.json.jsonPrimitive
  *   again, so every symbol carries a [Symbol.digest] over its content. An importing design records
  *   the id *and* the digest, and a design whose library has moved is reported as drifted rather
  *   than silently redrawn. Computing it is this class's job; acting on it is the importer's.
- * - **A symbol may only use components from the pinned catalog.** A body that places another
- *   project symbol is refused by name: cross-symbol composition needs an import graph, a cycle
- *   check and a digest per edge, none of which exist yet, and half-supporting it would mean a
- *   design that imports one symbol silently depends on another it never named.
+ * - **A symbol may only use components from the pinned catalog.** Split across two places, because
+ *   only one of them holds a catalog. What is enforced *here* is the part that needs no catalog: a
+ *   body placing another project symbol is refused by name, since cross-symbol composition needs an
+ *   import graph, a cycle check and a digest per edge, and half-supporting it would mean a design
+ *   that imports one symbol silently depends on another it never named. Whether each node's
+ *   `componentId` exists in the catalog is checked where the catalog is — at import, exactly as a
+ *   published *design* has its nodes validated when it is installed rather than when it is listed.
+ *   [Symbol.catalogPin] is carried out of here so an importer can do that against the right one.
  *
  * Both refusals are per symbol and never per project: one unusable file is dropped with a line in
  * the log, and the components either side of it are still offered.
@@ -226,18 +230,39 @@ class ServeUiBuilderComponentLibrary(
     val body = linkedMapOf<String, DesignNodeV1>()
     val missing = mutableListOf<String>()
     val placements = mutableListOf<String>()
+    val cyclic = mutableListOf<String>()
+    // Two different questions, and one set cannot answer both. `body` is what has been collected,
+    // so a node reached twice down two branches is simply already done; `onStack` is what is being
+    // walked right now, so a node reached again while it is still open is a back edge. Reading the
+    // first as the second is how a slot pointing at its own ancestor read as a finished subtree,
+    // and the file was published as usable for an importer to hang on.
+    val onStack = linkedSetOf<String>()
     fun walk(nodeId: String) {
+      if (nodeId in onStack) {
+        cyclic += nodeId
+        return
+      }
       if (nodeId in body) return
       val node = document.nodes[nodeId]
       if (node == null) {
         missing += nodeId
         return
       }
+      onStack += nodeId
       body[nodeId] = node
       if (node.componentId == COMPONENT_INSTANCE_ID) placements += nodeId
       node.slots.entries.sortedBy { it.key }.forEach { (_, children) -> children.forEach(::walk) }
+      onStack -= nodeId
     }
     walk(root)
+
+    if (cyclic.isNotEmpty()) {
+      onLog(
+        "serve: $system's component $id has a body that contains itself at " +
+          "${cyclic.sorted().joinToString()}; a symbol is a tree"
+      )
+      return null
+    }
 
     if (missing.isNotEmpty()) {
       onLog(

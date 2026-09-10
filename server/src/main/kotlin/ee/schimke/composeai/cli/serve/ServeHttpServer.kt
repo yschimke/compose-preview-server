@@ -5262,21 +5262,31 @@ class ServeHttpServer(
     system: String,
     componentId: String,
   ) {
-    val catalog = uiBuilderDesignCatalogs().firstOrNull { it.system == system }
-    if (catalog == null) {
+    // Every coordinate for this system, not the first: `--ui-builder-designs` can name a local
+    // checkout for the same system a served catalog covers, and the listing flattens both. Taking
+    // only the head made a component published solely on the branch 404 here while appearing there.
+    val catalogs = uiBuilderDesignCatalogs().filter { it.system == system }
+    if (catalogs.isEmpty()) {
       call.respondText(
         "$system is not a catalog this host serves",
         status = HttpStatusCode.NotFound,
       )
       return
     }
-    // One index read for both, so the metadata and the body describe the same symbol even when the
-    // source is a local directory somebody is exporting into.
-    val entry =
+    // In configured order, so a local export still shadows the branch when both publish the id, and
+    // the first *usable* one answers: a source that publishes the id but fails the library's checks
+    // should not hide a good symbol behind it, having already been reported in the log.
+    // One index read per coordinate feeds both the metadata and the body, so they describe the same
+    // symbol even when the source is a directory somebody is exporting into as this runs.
+    val symbol =
       withContext(Dispatchers.IO) {
-        library.index(catalog).firstOrNull { it.componentId == componentId }
+        catalogs.firstNotNullOfOrNull { catalog ->
+          library
+            .index(catalog)
+            .firstOrNull { it.componentId == componentId }
+            ?.let { library.symbol(catalog, it) }
+        }
       }
-    val symbol = entry?.let { withContext(Dispatchers.IO) { library.symbol(catalog, it) } }
     if (symbol == null) {
       call.respondText(
         "$system publishes no usable component called $componentId",
