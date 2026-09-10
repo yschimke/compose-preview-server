@@ -572,22 +572,20 @@ sealed interface EditorGeneratedCode {
 }
 
 /**
- * Which renderer draws the design.
+ * How many design panes the workspace draws.
  *
- * Not a toggle between "canvas" and "extra pane", because the two are alternatives rather than a
- * base and an addition: a Compose Multiplatform project that targets Wasm is best previewed in the
- * browser, and a project that targets only Android or desktop has no browser renderer to fall back
- * on — the host's is the *only* one. [Both] is the deliberate third case, for the times a Wasm
- * project wants to see what the same design looks like off the browser.
+ * The authoring canvas is always the first pane and always Compose/Wasm. [Native] adds the static
+ * target render; [Both] also adds a clean interactive Wasm rendition. The enum names remain stable
+ * because hosts and visual fixtures already select them, while the UI presents the pane meaning.
  */
 enum class EditorPreviewSurface {
-  /** The editor's own Compose/Wasm canvas. Immediate, and costs the host nothing. */
+  /** The editor's own Compose/Wasm canvas only. */
   Wasm,
 
-  /** The host compiles the design and renders it with real Compose. */
+  /** Editor plus a static target-platform render compiled by the host. */
   Native,
 
-  /** Both at once, for comparing them. */
+  /** Editor, static target preview, and a clean interactive rendition. */
   Both,
 }
 
@@ -2712,12 +2710,11 @@ class UiBuilderEditorReducer(
   ): UiBuilderEditorState {
     val component = catalog.componentsById[componentId] ?: return state
     val sequence = state.operationSequence + 1
-    val resolvedTarget = findDestination(state.document, state.selectedNodeId, component)
-    if (resolvedTarget == null || resolvedTarget != target) {
+    if (!acceptsComponent(state.document, target, component)) {
       return state.rejected(
         sequence,
         RejectionCode.INVALID_LOCATION,
-        "${component.displayName} has no compatible selected slot",
+        "${component.displayName} cannot be inserted into ${target.nodeId}.${target.slot}",
       )
     }
     return insertAt(state, component, target, action, component.variantProperties(variant))
@@ -2973,12 +2970,11 @@ class UiBuilderEditorReducer(
         return state.rejected(sequence, RejectionCode.INVALID_LOCATION, it)
       }
     } else {
-      val resolvedTarget = findDestination(state.document, state.selectedNodeId, component)
-      if (resolvedTarget == null || resolvedTarget != target) {
+      if (!acceptsComponent(state.document, target, component)) {
         return state.rejected(
           sequence,
           RejectionCode.INVALID_LOCATION,
-          "${component.displayName} has no compatible selected slot",
+          "${component.displayName} cannot be inserted into ${target.nodeId}.${target.slot}",
         )
       }
     }
@@ -3375,11 +3371,28 @@ class UiBuilderEditorReducer(
     slot: UiBuilderSlotInspection,
     component: ComponentCapability,
   ): Boolean {
-    val parent = document.nodes[slot.parentNodeId] ?: return false
+    return acceptsComponent(document, ParentSlot(slot.parentNodeId, slot.slotName), component)
+  }
+
+  /**
+   * Whether [target] is a real, compatible slot in [document].
+   *
+   * An Add resolves this target from the selection, while a canvas drop resolves it from pointer
+   * geometry. Validation belongs here rather than requiring both gestures to have the same
+   * selection: otherwise the editor highlights the slot under the pointer and then rejects that
+   * exact slot because an unrelated layer was selected before the drag began.
+   */
+  private fun acceptsComponent(
+    document: UiBuilderDocument,
+    target: ParentSlot,
+    component: ComponentCapability,
+  ): Boolean {
+    val parent = document.nodes[target.nodeId] ?: return false
     val capability = catalog.componentsById[parent.componentId] ?: return false
-    val declared = capability.slot(slot.slotName) ?: return false
-    return declared.accepts(component) &&
-      declared.hasRoom(parent.slots[slot.slotName].orEmpty().size)
+    val declared = capability.slot(target.slot) ?: return false
+    return target.slot in parent.slots &&
+      declared.accepts(component) &&
+      declared.hasRoom(parent.slots[target.slot].orEmpty().size)
   }
 
   private fun promotePiece(

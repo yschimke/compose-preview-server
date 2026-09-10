@@ -93,6 +93,24 @@ class UiBuilderEditorStateTest {
   }
 
   @Test
+  fun `a canvas drop inserts into a compatible slot under the pointer not the selection`() {
+    val selectedElsewhere = reducer.initial(document, selectedNodeId = "root-surface")
+    val pointerTarget = ParentSlot("discover-grid", "items")
+
+    val inserted =
+      reducer.reduce(
+        selectedElsewhere,
+        UiBuilderEditorEvent.InsertComponent("m3/text", pointerTarget),
+      )
+
+    assertIs<CommandOutcome.Accepted>(inserted.lastOutcome)
+    assertEquals(
+      inserted.selectedNodeId,
+      inserted.document.nodes.getValue("discover-grid").slots.getValue("items").last(),
+    )
+  }
+
+  @Test
   fun `configured live actor emits one uniquely scoped accepted submission`() {
     val liveReducer = UiBuilderEditorReducer(catalog, actorId = "github:alice", clientId = "tab-a")
     val initial = liveReducer.initial(document, selectedNodeId = "main-episode-title")
@@ -283,14 +301,14 @@ class UiBuilderEditorStateTest {
   }
 
   @Test
-  fun `insert rejects a stale or incompatible destination without changing the document`() {
+  fun `insert rejects an incompatible destination without changing the document`() {
     val initial = reducer.initial(document, selectedNodeId = "discover-grid")
     val attempted =
       reducer.reduce(
         initial,
         UiBuilderEditorEvent.InsertComponent(
           componentId = "m3/text",
-          target = ParentSlot("root-surface", "content"),
+          target = ParentSlot("root-surface", "no-such-slot"),
         ),
       )
 

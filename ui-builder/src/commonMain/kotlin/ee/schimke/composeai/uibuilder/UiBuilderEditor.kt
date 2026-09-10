@@ -738,9 +738,6 @@ fun UiBuilderEditor(
   var catalogDragPosition by remember { mutableStateOf<Offset?>(null) }
   var draggedComponentId by remember { mutableStateOf<String?>(null) }
   var canvasBounds by remember { mutableStateOf(Rect.Zero) }
-  // The factor between the frame's own pixels and the pane it is drawn in, kept so a drop landing
-  // at a window coordinate can be asked about in the space the renderer reports its slots in.
-  var canvasScale by remember { mutableFloatStateOf(1f) }
   // The scale the design is pinned at, or null while it is framed to the workspace. Local rather
   // than in [UiBuilderEditorState] for the same reason the open panels are: how far somebody has
   // zoomed in is a fact about their window, not about the design, and an authoritative snapshot
@@ -823,9 +820,22 @@ fun UiBuilderEditor(
     selectedThreadId = threadId
     onSelectedThreadChanged?.invoke(threadId)
   }
-  val draggedTarget = draggedComponentId?.let { reducer.dropTarget(state, it) }
-  val canvasDropHovered =
-    catalogDragPosition?.let(canvasBounds::contains) == true && draggedTarget != null
+  fun canvasTarget(componentId: String, position: Offset): ParentSlot? {
+    if (!canvasBounds.contains(position)) return null
+    return canvasInspection?.let { snapshot ->
+      reducer.promotionTarget(
+        state,
+        componentId,
+        snapshot.slots,
+        position.x,
+        position.y,
+      )
+    } ?: reducer.dropTarget(state, componentId)
+  }
+  val draggedTarget = draggedComponentId?.let { componentId ->
+    catalogDragPosition?.let { position -> canvasTarget(componentId, position) }
+  }
+  val canvasDropHovered = draggedTarget != null
   /**
    * One editor event, and the one place a pinned revision stops being editable.
    *
@@ -1020,17 +1030,8 @@ fun UiBuilderEditor(
           // the last click had been. The renderer already reports each slot's box, and the
           // reference
           // overlay already promotes a piece into the slot under it — this asks the same question.
-          val target =
-            canvasInspection?.let { snapshot ->
-              reducer.promotionTarget(
-                state,
-                componentId,
-                snapshot.slots,
-                (position.x - canvasBounds.left) / canvasScale,
-                (position.y - canvasBounds.top) / canvasScale,
-              )
-            } ?: reducer.dropTarget(state, componentId)
-          if (canvasBounds.contains(position) && target != null) {
+          val target = canvasTarget(componentId, position)
+          if (target != null) {
             dispatch(UiBuilderEditorEvent.InsertComponent(componentId, target, variant))
             if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
           }
@@ -1100,15 +1101,15 @@ fun UiBuilderEditor(
         focusEditor()
         dispatch(UiBuilderEditorEvent.SelectNode(it))
       },
-      onCanvasMetrics = { width, height, scale ->
-        canvasScale = scale
-        onCanvasMetrics(width, height, scale)
-      },
+      onCanvasMetrics = { width, height, scale -> onCanvasMetrics(width, height, scale) },
       onCanvasBounds = {
         canvasBounds = it
         onCanvasBoundsChanged(it)
       },
       dropHovered = canvasDropHovered,
+      dropTarget = draggedTarget,
+      dragPreview = draggedComponentId?.let { reducer.previewDocument(it, null) },
+      dragPosition = catalogDragPosition,
       showSelectionOverlay = showSelectionOverlay && !state.previewMode,
       reference = state.reference,
       onMarkDrawn = { kind, points ->
@@ -1659,28 +1660,16 @@ fun UiBuilderEditor(
                     )
                   } else {
                     Row(Modifier.fillMaxWidth().weight(1f)) {
-                      // One renderer or the other, normally. A CMP project that targets Wasm is
-                      // best
-                      // previewed in the browser; a project that targets only Android or desktop
-                      // has
-                      // no browser renderer at all, and the host's is not an extra pane but the
-                      // whole
-                      // preview. `Both` is the deliberate third case — comparing them — rather than
-                      // the layout everything else is squeezed into.
-                      if (state.previewSurface != EditorPreviewSurface.Native || !nativeRequested) {
-                        canvas(
-                          Modifier.weight(1f)
-                            .fillMaxHeight()
-                            .background(Color(0xff0d0e11))
-                            .padding(24.dp),
-                          // Centred now that the canvas has the window rather than the strip
-                          // between
-                          // two nailed-open panels. A design pinned to the top-left of a workspace
-                          // it
-                          // does not fill reads as a page that failed to load.
-                          Alignment.Center,
-                        )
-                      }
+                      // The visual editor never leaves the workspace. Additional positions are
+                      // previews of the same document, not alternative renderers that replace the
+                      // authoring coordinate space.
+                      canvas(
+                        Modifier.weight(1f)
+                          .fillMaxHeight()
+                          .background(Color(0xff0d0e11))
+                          .padding(24.dp),
+                        Alignment.Center,
+                      )
                       if (nativeRequested) {
                         NativeRenderPane(
                           render = nativeRender,
@@ -1690,6 +1679,12 @@ fun UiBuilderEditor(
                             focusEditor()
                             dispatch(UiBuilderEditorEvent.SelectNode(it))
                           },
+                          modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                      }
+                      if (state.previewSurface == EditorPreviewSurface.Both) {
+                        LiveWasmPreviewPane(
+                          document = state.document,
                           modifier = Modifier.weight(1f).fillMaxHeight(),
                         )
                       }
@@ -2776,7 +2771,7 @@ private fun RenderSurfaceMenu(
   Box {
     TextButton(
       onClick = { open = true },
-      modifier = Modifier.semantics { contentDescription = "Render surface (${surface.label()})" },
+      modifier = Modifier.semantics { contentDescription = "Workspace panes (${surface.label()})" },
     ) {
       Icon(Icons.Filled.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
       Text(surface.label(), Modifier.padding(start = 6.dp))
@@ -3215,9 +3210,9 @@ private fun StatusText(text: String, color: Color = MaterialTheme.colorScheme.on
 
 private fun EditorPreviewSurface.label(): String =
   when (this) {
-    EditorPreviewSurface.Wasm -> "Wasm"
-    EditorPreviewSurface.Native -> "Native"
-    EditorPreviewSurface.Both -> "Both"
+    EditorPreviewSurface.Wasm -> "1 pane"
+    EditorPreviewSurface.Native -> "2 panes"
+    EditorPreviewSurface.Both -> "3 panes"
   }
 
 /**
@@ -3232,14 +3227,15 @@ private fun EditorPreviewSurface.supportingText(
   surfaces: UiBuilderPreviewSurfaces = UiBuilderPreviewSurfaces.DEFAULT
 ): String =
   when (this) {
-    EditorPreviewSurface.Wasm ->
-      if (surfaces.wasm.fidelity.isAuthoritative) "Drawn in this browser"
-      else "Drawn in this browser — stand-ins, for authoring"
+    EditorPreviewSurface.Wasm -> "Visual editor · Wasm"
     EditorPreviewSurface.Native ->
       if (surfaces.native.backend == UiBuilderPreviewSurfaces.BACKEND_ANDROID)
-        "Compiled and drawn on the host, on Android"
-      else "Compiled and drawn on the host"
-    EditorPreviewSurface.Both -> "Side by side, to compare them"
+        "Editor + static Android preview"
+      else "Editor + static target preview"
+    EditorPreviewSurface.Both ->
+      if (surfaces.wasm.fidelity.isAuthoritative)
+        "Editor + static target + interactive Wasm preview"
+      else "Editor + static target + interactive Wasm stand-in"
   }
 
 /**
@@ -4265,6 +4261,12 @@ internal fun PinnedDesignCanvas(
   onCanvasMetrics: (Int, Int, Float) -> Unit,
   onCanvasBounds: (Rect) -> Unit,
   dropHovered: Boolean,
+  /** The exact slot under the dragged pointer, or null outside a compatible target. */
+  dropTarget: ParentSlot? = null,
+  /** The same generated document the palette thumbnail draws, carried beside the pointer. */
+  dragPreview: UiBuilderDocument? = null,
+  /** Pointer position in the editor root coordinate space. */
+  dragPosition: Offset? = null,
   showSelectionOverlay: Boolean,
   reference: ReferenceOverlayState,
   onMarkDrawn: (ReferenceMarkupKind, List<Float>) -> Unit,
@@ -4414,7 +4416,7 @@ internal fun PinnedDesignCanvas(
                   onCanvasBounds(frameBounds)
                 }
                 .then(
-                  if (dropHovered) Modifier.border(4.dp, MaterialTheme.colorScheme.primary)
+                  if (dropHovered) Modifier.border(1.dp, MaterialTheme.colorScheme.primary)
                   else Modifier
                 ),
               shape = RoundedCornerShape(0.dp),
@@ -4486,6 +4488,12 @@ internal fun PinnedDesignCanvas(
                   },
                   onInspectionInvalidated = onInspectionInvalidated,
                 )
+                DropTargetOverlay(
+                  dropTarget = dropTarget,
+                  inspection = inspection,
+                  frameBounds = frameBounds,
+                  drawScale = drawScale,
+                )
                 // Over the document and under the collaborators: the reference is being compared
                 // against
                 // what the document draws, so it goes on top of that; another person's selection is
@@ -4553,6 +4561,17 @@ internal fun PinnedDesignCanvas(
         hoverEditor()
       }
     }
+    if (dropHovered && dragPreview != null && dragPosition != null) {
+      DragPreviewGhost(
+        document = dragPreview,
+        modifier =
+          Modifier.align(Alignment.TopStart)
+            .offset(
+              x = with(density) { (dragPosition.x - workspaceBounds.left + 14f).toDp() },
+              y = with(density) { (dragPosition.y - workspaceBounds.top + 14f).toDp() },
+            ),
+      )
+    }
     // Over the workspace rather than in the status bar, where every canvas tool puts it, and
     // outside the scrolling box so it stays put while the design under it moves.
     CanvasZoomControls(
@@ -4561,6 +4580,75 @@ internal fun PinnedDesignCanvas(
       onZoomChanged = onZoomChanged,
       modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
     )
+  }
+}
+
+/** The compatible slot the pointer will insert into, on the geometry the renderer reported. */
+@Composable
+private fun DropTargetOverlay(
+  dropTarget: ParentSlot?,
+  inspection: UiBuilderInspectionSnapshot?,
+  frameBounds: Rect,
+  drawScale: Float,
+) {
+  val target = dropTarget ?: return
+  val slotBounds =
+    inspection
+      ?.slots
+      ?.firstOrNull { it.parentNodeId == target.nodeId && it.slotName == target.slot }
+      ?.bounds
+  // An empty slot has no child-union box yet. Its parent is the honest visible landing region;
+  // once it has children the tighter slot union wins.
+  val bounds =
+    slotBounds ?: inspection?.nodes?.firstOrNull { it.nodeId == target.nodeId }?.bounds ?: return
+  val local =
+    UiBuilderPixelBounds(
+      x = (bounds.x - frameBounds.left) / drawScale,
+      y = (bounds.y - frameBounds.top) / drawScale,
+      width = bounds.width / drawScale,
+      height = bounds.height / drawScale,
+    )
+  val color = MaterialTheme.colorScheme.primary
+  Canvas(Modifier.fillMaxSize().clearAndSetSemantics {}) {
+    drawRect(
+      color = color.copy(alpha = 0.16f),
+      topLeft = Offset(local.x, local.y),
+      size = Size(local.width, local.height),
+    )
+    drawRect(
+      color = color,
+      topLeft = Offset(local.x, local.y),
+      size = Size(local.width, local.height),
+      style = Stroke(width = 4f),
+    )
+  }
+}
+
+/** A translucent live rendering of the component travelling with a catalog drag. */
+@Composable
+private fun DragPreviewGhost(document: UiBuilderDocument, modifier: Modifier = Modifier) {
+  val width = 88.dp
+  val height = 66.dp
+  val scale = width.value / PREVIEW_FRAME_WIDTH_DP
+  Surface(
+    modifier.size(width, height).alpha(0.88f),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+    tonalElevation = 6.dp,
+  ) {
+    Box(Modifier.clipToBounds(), contentAlignment = Alignment.Center) {
+      Box(
+        Modifier.requiredSize(PREVIEW_FRAME_WIDTH_DP.dp, PREVIEW_FRAME_HEIGHT_DP.dp)
+          .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+          }
+          .clearAndSetSemantics {}
+      ) {
+        UiBuilderSurface(document = document, editorOverlay = false)
+      }
+    }
   }
 }
 
@@ -7117,6 +7205,51 @@ private fun NativeRenderPane(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
           )
+      }
+    }
+  }
+}
+
+/**
+ * A clean, interactive rendition beside the editing canvas.
+ *
+ * It shares the document but not the editor overlay or renderer session, so controls can be used
+ * without changing selection and without their remembered state leaking into the authoring pane.
+ * Remote M3 plays through the real CMP/Wasm Remote Compose player here; catalogs whose own
+ * capability declaration calls Wasm a stand-in continue to say so in the pane chooser.
+ */
+@Composable
+private fun LiveWasmPreviewPane(
+  document: UiBuilderDocument,
+  modifier: Modifier = Modifier,
+) {
+  val widthDp =
+    document.environment["widthDp"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 1280f
+  val heightDp =
+    document.environment["heightDp"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 800f
+  val hostDensity = LocalDensity.current
+  val densityRatio = document.renderDensity(hostDensity).density / hostDensity.density
+  Surface(modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
+      Text(
+        "Live preview · interactive Wasm target",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+      )
+      BoxWithConstraints(
+        Modifier.fillMaxWidth().weight(1f).padding(top = 8.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        val scale =
+          minOf(maxWidth.value / widthDp, maxHeight.value / heightDp).coerceIn(MIN_CANVAS_ZOOM, 1f)
+        ConstrainedFramePane(
+          document = document,
+          widthDp = widthDp,
+          heightDp = heightDp,
+          scale = scale,
+          densityRatio = densityRatio,
+          renderSessionId = "live-preview",
+        )
       }
     }
   }
