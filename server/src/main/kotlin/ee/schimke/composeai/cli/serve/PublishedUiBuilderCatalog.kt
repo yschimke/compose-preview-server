@@ -453,6 +453,29 @@ internal object PublishedUiBuilderCatalog {
     ComponentRecordPacks.structuralModifiers(container)
 
   /**
+   * The shelf role of a builtin: `Scaffold`, `Container` or `Leaf`.
+   *
+   * Two different words are spelled `role` around here and they are not the same vocabulary. A
+   * builtin's own `role` is the STRUCTURAL one — the template engine's closed set (`screen-root`,
+   * `list`, `list-item`, `overlay`, `controlled`, `decoration`) — which says which template writes
+   * it. The shelf's is `Scaffold` / `Container` / `Leaf`, which decides what the editor calls it
+   * and which slots will take it.
+   *
+   * The structural one was read and then dropped, and the shelf role derived from whether there
+   * were slots at all. That makes a design ROOT — `remote-m3/widget-container-small`, whose
+   * synthesised twin in `ProductionUiBuilderRuntime.widget()` is a `Scaffold` — arrive as an
+   * ordinary `Container`. `screen-root` is the one structural role that names a scaffold outright,
+   * so it is the one that maps; every other builtin keeps the derivation, because `list` and
+   * `overlay` say how a thing is WRITTEN and not what shape it is on the shelf.
+   */
+  private fun shelfRole(builtin: UiBuilderBuiltin): String =
+    when {
+      builtin.role == "screen-root" -> "Scaffold"
+      builtin.slots.isNotEmpty() -> "Container"
+      else -> "Leaf"
+    }
+
+  /**
    * A builtin, as a component.
    *
    * A builtin exists because it has NO call site — there is nothing in the record to discover — so
@@ -463,7 +486,7 @@ internal object PublishedUiBuilderCatalog {
     ComponentCapabilityV1(
       componentId = id,
       displayName = builtin.displayName ?: id.substringAfterLast('/'),
-      role = if (builtin.slots.isNotEmpty()) "Container" else "Leaf",
+      role = shelfRole(builtin),
       traits = builtin.traits,
       slots =
         builtin.slots.map { (name, slot) ->

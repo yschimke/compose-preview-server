@@ -1812,6 +1812,7 @@
     {
       "canonicalId": "remote-catalog/androidx.wear.compose.remote.material3.RemoteIconKt.RemoteIcon",
       "componentIds": [
+        "AppCard",
         "Button/Child",
         "Button/Compact",
         "Button/Filled",
@@ -1826,7 +1827,8 @@
         "IconButton/Outlined",
         "IconButton/Standard",
         "IconButton/Tonal",
-        "ListSubHeader"
+        "ListSubHeader",
+        "Stepper"
       ],
       "symbol": {
         "jvmOwner": "androidx.wear.compose.remote.material3.RemoteIconKt",
@@ -2013,6 +2015,7 @@
     {
       "canonicalId": "remote-catalog/androidx.wear.compose.remote.material3.RemotePageIndicatorKt.RemoteHorizontalPageIndicator",
       "componentIds": [
+        "PageIndicator/Horizontal",
         "PageIndicator/Interactive"
       ],
       "symbol": {
@@ -3776,8 +3779,16 @@
         "ButtonGroup",
         "Card",
         "Card/Outlined",
+        "CheckboxButton",
         "EdgeButton",
+        "ListHeader",
         "ListSubHeader",
+        "PageIndicator/Interactive",
+        "RadioButton",
+        "Scaffold",
+        "Shader/LinearGradient",
+        "Stepper",
+        "SwitchButton",
         "Text/Body",
         "Text/Branded",
         "Text/Caption",
@@ -3789,8 +3800,14 @@
         "Theme/Specimen-Droidcon",
         "Theme/Specimen-GoogleSansFlex",
         "Theme/Specimen-KotlinConf",
+        "Theme/Typography",
         "TitleCard",
-        "Typeface/Specimen"
+        "Typeface/Specimen",
+        "Typeface/VariableWeight",
+        "Typeface/VariableWidth",
+        "WidgetContainer/GradientBackground",
+        "WidgetContainer/Large",
+        "WidgetContainer/Small"
       ],
       "symbol": {
         "jvmOwner": "androidx.wear.compose.remote.material3.RemoteTextKt",

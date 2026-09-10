@@ -1,4 +1,5 @@
 {
+  "$comment": "GENERATED, unlike its m3 sibling — captured verbatim from `./gradlew :remote-catalog:composePreviewDiscover` in yschimke/wear-m3-catalog, with the plugin built from yschimke/compose-ai-tools#5354. That is the pair the cutover will actually use, so this fixture answers the question the hand-built m3 one cannot: can the catalog produce a usable published file. Regenerate the same way whenever remote-catalog gains or loses a component.",
   "schema": "compose-ui-builder-catalog/v1",
   "catalog": {
     "id": "remote-m3",
@@ -84,7 +85,7 @@
           "group": "Buttons"
         },
         "remote-m3/remote-icon": {
-          "group": "Buttons"
+          "group": "Containment"
         },
         "remote-m3/remote-linear-progress-indicator": {
           "group": "Communication"
@@ -174,7 +175,126 @@
       ]
     },
     "assetRegistry": null,
-    "builtins": {},
+    "builtins": {
+      "remote-m3/widget-container-small": {
+        "role": "screen-root",
+        "displayName": "Wear widget · Small (216×76dp)",
+        "group": "Widget Container",
+        "canvas": "widget-container",
+        "traits": [
+          "ScreenContent",
+          "WearWidgetHost",
+          "RemoteContentHost"
+        ],
+        "slots": {
+          "background": {
+            "acceptedRoles": [
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "DrawLayer",
+              "ImageContent"
+            ]
+          },
+          "content": {
+            "acceptedRoles": [
+              "Scaffold",
+              "Container",
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "AnyContent"
+            ]
+          }
+        },
+        "properties": [
+          {
+            "name": "background",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The widget's own background, painted by the host as the rounded rect. Defaults to #FF272430, the colour WearWidgetContainer applies to a widget that declares none."
+          },
+          {
+            "name": "horizontalPaddingDp",
+            "jsonType": "number",
+            "required": false,
+            "notes": "WearWidgetParams.horizontalPaddingDp; 8 in every shipped preview spec."
+          },
+          {
+            "name": "verticalPaddingDp",
+            "jsonType": "number",
+            "required": false,
+            "notes": "WearWidgetParams.verticalPaddingDp; 8 in every shipped preview spec."
+          },
+          {
+            "name": "cornerRadiusDp",
+            "jsonType": "number",
+            "required": false,
+            "notes": "WearWidgetParams.cornerRadiusDp: 26 squircle, 999 round, 0 rectangular. The host draws this radius behind the content rather than clipping to it."
+          }
+        ],
+        "modifierCapabilities": []
+      },
+      "remote-m3/widget-container-large": {
+        "role": "screen-root",
+        "displayName": "Wear widget · Large (216×124dp)",
+        "group": "Widget Container",
+        "canvas": "widget-container",
+        "traits": [
+          "ScreenContent",
+          "WearWidgetHost",
+          "RemoteContentHost"
+        ],
+        "slots": {
+          "background": {
+            "acceptedRoles": [
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "DrawLayer",
+              "ImageContent"
+            ]
+          },
+          "content": {
+            "acceptedRoles": [
+              "Scaffold",
+              "Container",
+              "Leaf"
+            ],
+            "acceptedTraits": [
+              "AnyContent"
+            ]
+          }
+        },
+        "properties": [
+          {
+            "name": "background",
+            "jsonType": "string",
+            "required": false,
+            "notes": "The widget's own background, painted by the host as the rounded rect. Defaults to #FF272430, the colour WearWidgetContainer applies to a widget that declares none."
+          },
+          {
+            "name": "horizontalPaddingDp",
+            "jsonType": "number",
+            "required": false,
+            "notes": "WearWidgetParams.horizontalPaddingDp; 8 in every shipped preview spec."
+          },
+          {
+            "name": "verticalPaddingDp",
+            "jsonType": "number",
+            "required": false,
+            "notes": "WearWidgetParams.verticalPaddingDp; 8 in every shipped preview spec."
+          },
+          {
+            "name": "cornerRadiusDp",
+            "jsonType": "number",
+            "required": false,
+            "notes": "WearWidgetParams.cornerRadiusDp: 26 squircle, 999 round, 0 rectangular. The host draws this radius behind the content rather than clipping to it."
+          }
+        ],
+        "modifierCapabilities": []
+      }
+    },
     "components": {
       "remote-m3/remote-app-card": {
         "record": "remote-catalog/androidx.wear.compose.remote.material3.RemoteAppCardKt.RemoteAppCard",
@@ -773,6 +893,5 @@
       "subject": "remote-m3/theme-specimen",
       "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
     }
-  ],
-  "$comment": "GENERATED, unlike its m3 sibling — captured verbatim from `./gradlew :remote-catalog:composePreviewDiscover` in yschimke/wear-m3-catalog, with the plugin built from yschimke/compose-ai-tools#5354. That is the pair the cutover will actually use, so this fixture answers the question the hand-built m3 one cannot: can the catalog produce a usable published file. Regenerate the same way whenever remote-catalog gains or loses a component."
+  ]
 }

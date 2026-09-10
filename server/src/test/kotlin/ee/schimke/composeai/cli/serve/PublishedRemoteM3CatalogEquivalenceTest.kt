@@ -26,21 +26,31 @@ import kotlinx.serialization.json.jsonPrimitive
  *   until recently the record could not name at all (all 49 catalog ids collapsed onto the
  *   project's own `RemoteSticker` wrapper, two records for the whole module) — but not one of them
  *   can be EXPORTED, so calling them a gain would be wrong (see below);
- * - it **loses** five, in two different ways.
+ * - it **loses** three, and it lost five until the two that mattered most came back.
  *
- * The loss is the blocker, and nothing else states it. `ProductionUiBuilderRuntime`'s donor unions
- * in `layout/`, `shape/`, `asset/` and `remote-compose/` and nothing else — deliberately, because
+ * The loss is a blocker, and nothing else states it. `ProductionUiBuilderRuntime`'s donor unions in
+ * `layout/`, `shape/`, `asset/` and `remote-compose/` and nothing else — deliberately, because
  * those are the builder's own vocabulary rather than any catalog's. Anything else the synthesised
- * shelf offers and the published file omits is simply gone:
- * - `remote-m3/widget-container-small`, `remote-m3/widget-container-large` and `remote-m3/lottie`
- *   are catalog-owned, and the record does not name them;
- * - `m3/surface` and `m3/text` are **borrowed** from the m3 catalog by the synthesised shelf, and
- *   `m3/` is not a donor namespace either, so borrowing does not survive the swap.
+ * shelf offers and the published file omits is simply gone.
  *
- * Two of the five are the widget host itself, and this catalog's own policy calls that where a
- * Remote design begins: *"a Remote design starts from a container: everything else goes inside
- * one."* Cutting over while they are missing takes the container away from every design that has
- * one.
+ * **The two widget containers came back as builtins**, which is what a builtin is for: the Glance
+ * Wear container is a HOST frame rather than a `remote-material3` component, so nothing calls it
+ * and no record can carry it, and `UiBuilderBuiltin`'s own KDoc says a policy file may declare
+ * exactly that. They mattered more than two components' worth — this catalog's policy says *"a
+ * Remote design starts from a container: everything else goes inside one"* and `RecordFreeExport`
+ * routes on the ROOT component id, so without them a published catalog is one whose designs cannot
+ * be rooted.
+ *
+ * That path did not work before this PR: the composer read a builtin's properties under a key the
+ * policy schema forbids, dropped its slot policy, and hardcoded its traits to empty. Three defects
+ * on a seam no catalog had ever crossed.
+ *
+ * What is still lost:
+ * - `remote-m3/lottie` — catalog-owned, no call site, and the same builtin argument reaches it. It
+ *   needs a shelf this catalog does not declare, and inventing one is a catalog decision.
+ * - `m3/surface` and `m3/text` — **borrowed** from the m3 catalog by the synthesised shelf, and
+ *   `m3/` is not a donor namespace, so either the published file states them or the server donates
+ *   them. Which is right is open: yschimke/compose-preview-server#674.
  */
 class PublishedRemoteM3CatalogEquivalenceTest {
 
@@ -72,15 +82,16 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    */
   private val knownAbsent =
     mapOf(
-      "remote-m3/widget-container-small" to
-        "WidgetContainerPreviews.kt renders through Glance Wear's WearWidgetPreview wrapper, and " +
-          "androidx.glance.wear is not a component-library prefix, so no record entry exists",
-      "remote-m3/widget-container-large" to "the same wrapper, at the 216x124 host size",
-      "remote-m3/lottie" to "an asset player, not a Remote Compose component call the record sees",
+      "remote-m3/lottie" to
+        "an asset player, not a Remote Compose component call the record sees. The same argument " +
+          "that made the widget containers builtins reaches it, and the catalog has not made it: " +
+          "lottie needs a shelf remote-catalog does not have — the frozen catalog files it under " +
+          "`Content`, which is a builder shelf — and inventing one is a catalog decision",
       "m3/surface" to
         "borrowed from the m3 catalog by the synthesised shelf; `m3/` is not a donor namespace, " +
-          "so the published file would have to state it, or this catalog would have to draw it",
-      "m3/text" to "borrowed the same way, and lost the same way",
+          "so either the published file states it or the server donates it. Which of those is " +
+          "right is open — yschimke/compose-preview-server#674",
+      "m3/text" to "borrowed the same way, and open the same way",
     )
 
   /** The four namespaces `ProductionUiBuilderRuntime` donates back to a published catalog. */
@@ -133,9 +144,67 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         "remote-m3/remote-title-card",
         "remote-m3/remote-vertical-page-indicator",
         "remote-m3/theme-specimen",
+        // Not records: the two host frames the policy declares as builtins, because the Glance
+        // Wear container is a host frame rather than a `remote-material3` component and nothing
+        // calls it. Everything above is a record component.
+        "remote-m3/widget-container-large",
+        "remote-m3/widget-container-small",
       ),
       composed.components.map { it.componentId }.filter { it.startsWith("remote-m3/") }.sorted(),
       "the composed remote-m3 shelf has changed",
+    )
+  }
+
+  /**
+   * The restored containers are the frozen ones, field by field — not just ids that match.
+   *
+   * A builtin is transcribed rather than derived, so "it composes" says nothing about whether it
+   * composes into the right thing, and the id-set test above would pass on an empty shell. Every
+   * field a design depends on is compared against the frozen shelf here: what the editor calls it,
+   * what other components' slots can match on, what may go inside, and what a person can set.
+   *
+   * The one divergence is pinned rather than hidden. `UiBuilderBuiltinSlot` can say `required` and
+   * cannot say a maximum, so the frozen `content` slot's `max: 1` — one design per host — is
+   * unbounded here. A schema that grows a cardinality closes it; until then this states what a
+   * cutover would actually ship.
+   */
+  @Test
+  fun `a restored widget container matches the frozen one field by field`() {
+    val byId = composed.components.associateBy { it.componentId }
+    val frozenById = frozen.components.associateBy { it.componentId }
+    val differences = mutableListOf<String>()
+    for (id in listOf("remote-m3/widget-container-small", "remote-m3/widget-container-large")) {
+      val want = frozenById.getValue(id)
+      val got = byId[id] ?: error("$id did not compose")
+      fun check(field: String, a: Any?, b: Any?) {
+        if (a != b) differences += "$id.$field: frozen=$a composed=$b"
+      }
+      check("displayName", want.displayName, got.displayName)
+      check("role", want.role, got.role)
+      check("traits", want.traits.sorted(), got.traits.sorted())
+      check("modifierCapabilities", want.modifierCapabilities, got.modifierCapabilities)
+      check("properties", want.properties.map { it.name }, got.properties.map { it.name })
+      for (property in want.properties) {
+        val mine = got.properties.singleOrNull { it.name == property.name } ?: continue
+        check("properties[${property.name}].jsonType", property.jsonType, mine.jsonType)
+        check("properties[${property.name}].required", property.required, mine.required)
+      }
+      check("slots", want.slots.map { it.name }.sorted(), got.slots.map { it.name }.sorted())
+      for (slot in want.slots) {
+        val mine = got.slots.singleOrNull { it.name == slot.name } ?: continue
+        check("slots[${slot.name}].acceptedRoles", slot.acceptedRoles, mine.acceptedRoles)
+        check("slots[${slot.name}].acceptedTraits", slot.acceptedTraits, mine.acceptedTraits)
+        check("slots[${slot.name}].cardinality.min", slot.cardinality.min, mine.cardinality.min)
+        check("slots[${slot.name}].cardinality.max", slot.cardinality.max, mine.cardinality.max)
+      }
+    }
+    assertEquals(
+      listOf(
+        "remote-m3/widget-container-large.slots[content].cardinality.max: frozen=1 composed=null",
+        "remote-m3/widget-container-small.slots[content].cardinality.max: frozen=1 composed=null",
+      ),
+      differences.sorted(),
+      "a restored container differs from the frozen one in a way nobody has reviewed",
     )
   }
 
@@ -233,7 +302,10 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         .filterNot { it.startsWith("remote-m3/widget-container-") }
         .sorted()
     assertEquals(
-      offered.filter { it.startsWith("remote-m3/") }.sorted(),
+      offered
+        .filter { it.startsWith("remote-m3/") }
+        .filterNot { it.startsWith("remote-m3/widget-container-") }
+        .sorted(),
       inexportable,
       "the set of offered-but-unexportable components has changed — if the emitter grew a case, " +
         "shorten this; if the catalog grew a component, it needs one",

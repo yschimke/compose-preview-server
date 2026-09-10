@@ -266,6 +266,10 @@ class PublishedUiBuilderCatalogTest {
       }
 
     assertEquals("The Host", host.displayName)
+    // `screen-root` is the structural role, and the shelf role that follows from it is Scaffold —
+    // not the Container that "it has slots" would derive. A design root arriving as an ordinary
+    // container is what the editor then calls it.
+    assertEquals("Scaffold", host.role)
     assertEquals(listOf("WidgetHost"), host.traits)
     assertEquals(listOf("padding"), host.modifierCapabilities)
     assertEquals(
