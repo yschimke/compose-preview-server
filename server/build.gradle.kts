@@ -722,6 +722,10 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:data-pseudolocale-core",
       "ee.schimke.composeai:data-remotecompose-core",
       "ee.schimke.composeai:data-render-core",
+      // The Remote Compose JSON codec behind `GET /render/<id>.rc.json`. Named here for the reason
+      // the allowlist is positive: it is a NEW internal coordinate, and one that carries a
+      // Remote Compose runtime, so it has to be declared rather than arrive.
+      "ee.schimke.composeai:remotecompose-json",
       "ee.schimke.composeai:data-theme-core",
       "ee.schimke.composeai:parity-issues-protocol",
       "ee.schimke.composeai:preview-data-api",

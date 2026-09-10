@@ -262,8 +262,8 @@ class ServeHttpRoutingTest {
    *
    * It used to be five arbitrary bytes, which was enough while every lane over it copied bytes
    * verbatim. `GET /render/<id>.rc.json` inflates them, so the fixture now has to be a document —
-   * and a fixture that is "plausible but not a document" is precisely the class of thing this
-   * whole area is about, so it is worth not keeping one around even where it would still pass.
+   * and a fixture that is "plausible but not a document" is precisely the class of thing this whole
+   * area is about, so it is worth not keeping one around even where it would still pass.
    *
    * Compiled here rather than checked in as a binary so the assertions below can be read against
    * their source: `bg` is why the projection names a `ColorConstant`.
@@ -282,6 +282,12 @@ class ServeHttpRoutingTest {
 
   /** Bytes that are not a document at all — the 422 lane's fixture. */
   private val notADocument = byteArrayOf(0x52, 0x43, 0x01, 0x02, 0x03)
+
+  /**
+   * Past the 8 MB projection bound. Allocated rather than checked in, obviously — and it is never
+   * inflated, because the size check is what this fixture exists to reach.
+   */
+  private val oversizedDocument = ByteArray(8 * 1024 * 1024 + 1)
 
   private fun bundle(
     label: String,
@@ -546,6 +552,13 @@ class ServeHttpRoutingTest {
     registry.register(
       "broken-rc",
       host = bundle("broken-rc", rcDoc = notADocument),
+      pinned = true,
+    )
+    // A document past the projection bound. Its bytes are never inflated, so they need not be a
+    // real document — the size check runs first, which is the property under test.
+    registry.register(
+      "huge-rc",
+      host = bundle("huge-rc", rcDoc = oversizedDocument),
       pinned = true,
     )
     // A PLAIN BUNDLE — the shape `--bundles` and an upload produce: the same `ServeBundleHost`
@@ -2637,6 +2650,22 @@ class ServeHttpRoutingTest {
 
     assertEquals(422, code)
     assertTrue(body.contains("cannot project"), "names the failure: $body")
+  }
+
+  @Test
+  fun `the rc json lane refuses a document too large to project`() {
+    // The projection holds the input, the parsed operation graph and the expanded JSON at once,
+    // each larger than the last, and an uploaded bundle may carry up to 100 MB of extracted
+    // content. Same 422 as an uninflatable document, because it is the same statement: this
+    // particular document is not one this lane will read.
+    val (code, body) = get("/render/$previewId.rc.json?session=huge-rc")
+
+    assertEquals(422, code)
+    assertTrue(body.contains("projection limit"), "names the limit: $body")
+    // The `.rc` lane still hands over the bytes — it reads the file either way, and a browser
+    // player is welcome to them.
+    val (rcCode, _) = get("/render/$previewId.rc?session=huge-rc")
+    assertEquals(200, rcCode)
   }
 
   @Test

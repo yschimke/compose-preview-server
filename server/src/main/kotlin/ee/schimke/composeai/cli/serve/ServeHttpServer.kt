@@ -10430,10 +10430,7 @@ class ServeHttpServer(
           // and the server is healthy; this particular document is the thing that cannot be read,
           // and the message says which document and why so a catalog owner can act on it.
           try {
-            call.respondText(
-              RemoteComposeJson.dump(bytes),
-              ContentType.Application.Json,
-            )
+            call.respondText(projectDocument(bytes), ContentType.Application.Json)
           } catch (e: RemoteComposeJsonException) {
             call.respondText(
               "cannot project that remote compose document: ${e.message}",
@@ -11315,7 +11312,39 @@ class ServeHttpServer(
    * document (bundle-host, read per request). Only `<id>.png` — or no suffix — serves published
    * bytes off disk.
    */
-  private val DAEMON_ONLY_RENDER_SUFFIXES = listOf(".svg", ".slots", ".a11y", ".annotations", ".rc")
+  /**
+   * Project [bytes], refusing a document too large to be one.
+   *
+   * The `.rc` lane hands back bytes it has already read; this one additionally holds the parsed
+   * operation graph and the expanded JSON response, all three at once and each larger than the
+   * input. An uploaded bundle may carry up to 100 MB of extracted content, so without a bound a
+   * public caller could pick the largest `ir/<id>.rc` in one and ask for it repeatedly.
+   *
+   * [MAX_PROJECTABLE_DOCUMENT_BYTES] is generous against reality rather than against the upload
+   * limit: a captured sticker is kilobytes — across wear-m3-catalog's 719-document sheet the
+   * largest is well under a megabyte — so 8 MB leaves real documents untouched while still refusing
+   * the shape this guards against. Reported as the same 422 an uninflatable document gets, because
+   * it is the same statement: this particular document is not one this lane will read, and the
+   * message says which and why.
+   */
+  private fun projectDocument(bytes: ByteArray): String {
+    if (bytes.size > MAX_PROJECTABLE_DOCUMENT_BYTES) {
+      throw RemoteComposeJsonException(
+        "document is ${bytes.size} bytes, above the ${MAX_PROJECTABLE_DOCUMENT_BYTES}-byte " +
+          "projection limit; fetch the .rc lane for the bytes themselves"
+      )
+    }
+    return RemoteComposeJson.dump(bytes)
+  }
+
+  /** See [projectDocument]. */
+  private val MAX_PROJECTABLE_DOCUMENT_BYTES = 8 * 1024 * 1024
+
+  private val DAEMON_ONLY_RENDER_SUFFIXES =
+    // `.rc.json` sits beside `.rc` rather than being covered by it: `endsWith(".rc")` is false for
+    // it, so leaving it out classified the projection lane as a replay of baked bytes and sent a
+    // HEAD probe for it down a different admission path from the identical `.rc` request.
+    listOf(".svg", ".slots", ".a11y", ".annotations", ".rc", ".rc.json")
 
   /**
    * Whether `/render/{name}` names one of [DAEMON_ONLY_RENDER_SUFFIXES] — i.e. a product this route
