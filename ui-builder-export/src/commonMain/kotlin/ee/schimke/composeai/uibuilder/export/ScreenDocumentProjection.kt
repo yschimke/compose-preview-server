@@ -2063,6 +2063,13 @@ object ScreenDocumentProjection {
           "iconKey" to ParameterTarget("imageVector", TargetKind.RENAME),
           "color" to ParameterTarget("tint", TargetKind.RENAME),
         ),
+      // The builder has always called this `selectedIndex` — the frozen catalog names it that,
+      // the inspector edits it under that name, and `CapabilityComposeCodeExporter` has written
+      // `selectedTabIndex = …` from it since it was added. This lane had no such rename, so a
+      // published `m3/primary-tab-row` refused with "`PrimaryTabRow` has no parameter
+      // `selectedIndex`" — the property is right and the two exporters disagreed about it.
+      "m3/primary-tab-row" to
+        mapOf("selectedIndex" to ParameterTarget("selectedTabIndex", TargetKind.RENAME)),
       "asset/image" to mapOf("assetKey" to ParameterTarget("painter", TargetKind.ASSET_PAINTER)),
       // Three of the four styles; `fab` overrides this in `COMPONENT_VARIANTS` because it takes a
       // bare `Color` on a different parameter.

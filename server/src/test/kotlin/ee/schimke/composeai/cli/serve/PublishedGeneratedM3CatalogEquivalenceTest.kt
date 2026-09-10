@@ -636,17 +636,15 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
   private companion object {
     /**
-     * The twenty-eight published m3 components the generator cannot write, each with its first
-     * reason. **Eighty-two export.** Teaching the generator one of these shortens the list, and the
-     * test above fails until it is shortened here.
+     * The twenty-seven published m3 components the generator cannot write, each with its first
+     * reason. **Eighty-three export.** Teaching the generator one of these shortens the list, and
+     * the test above fails until it is shortened here.
      *
      * Twenty-five are discovery's own "no call site" judgement — a member of a `Defaults` object, a
      * scope receiver, type parameters, not public, or a required parameter of a type no design
-     * value becomes. Those are upstream API shapes rather than gaps here. The other three are ours:
-     * - `m3/date-picker` and `m3/time-picker` declare a `mode` enum whose values nothing maps to
-     *   Kotlin members.
-     * - `m3/primary-tab-row` declares a property `selectedIndex` its component does not take — a
-     *   catalog bug this measurement found.
+     * value becomes. Those are upstream API shapes rather than gaps here. The other two are ours:
+     * `m3/date-picker` and `m3/time-picker` declare a `mode` enum whose values nothing maps to
+     * Kotlin members.
      */
     val M3_EXPORT_REFUSALS =
       mapOf(
@@ -679,7 +677,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
         "m3/outlined-trailing-button" to
           "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
-        "m3/primary-tab-row" to "`PrimaryTabRow` has no parameter `selectedIndex`",
         "m3/range-slider" to
           "no placeholder can be written for required parameter `value: ClosedFloatingPointRange<Float>`",
         "m3/search-bar" to
