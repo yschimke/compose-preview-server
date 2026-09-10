@@ -52,6 +52,29 @@ exports them through the production service.
 Null initial values, state comparisons and callbacks that consume an event value still require
 extensions to the shared model. Their refusals remain explicit; they are required follow-up work.
 
+## State selection generator
+
+The shared generator extension is implemented in
+[compose-ai-tools#5383](https://github.com/yschimke/compose-ai-tools/pull/5383) and is available through
+the local dependency workflow. `ScreenNode.selection` selects ordinary child slots with a typed
+`when`, preserving authored values such as `10` and `20` and an optional fallback. Every branch is
+validated. Selection introduces no layout or receiver scope, so a containing layout's modifiers
+remain usable. It follows ordinary Compose composition behavior; transitions and retention of
+inactive branches remain later polish.
+
+The proof discovers real Material 3 components, generates Kotlin, compiles it, and clicks from
+the initial branch to a second branch and then the fallback. The
+[generated source](https://github.com/yschimke/compose-ai-tools/blob/2b16c83bf2a8596d22a37f22f795afb5c49085d9/docs/evidence/screen-selection/SelectedScreen.kt.txt)
+and [render evidence](https://github.com/yschimke/compose-ai-tools/tree/2b16c83bf2a8596d22a37f22f795afb5c49085d9/docs/evidence/screen-selection)
+are committed with the extension. Its 42 screen-model tests, 574 discovery tests, four real Compose
+functional tests and Wasm compilation pass. The existing builder also passes 915 JVM tests, 31
+shared-export tests, 16 targeted behavior/MCP tests and Wasm compilation against the locally staged
+generator. Those consumer tests verify compatibility; they do not yet prove selection authoring.
+
+The existing editor still needs the state-selection component, its inspector and the design
+projection into this model, followed by Remote StateLayout lowering. The generator proof does not
+claim those surfaces are implemented.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
