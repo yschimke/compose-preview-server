@@ -19,6 +19,8 @@ class ServeCommandOptionsTest {
           "--port=9090",
           "--live-seats",
           "-4",
+          "--spare-sandboxes",
+          "-2",
           "--revisions-allow",
           " main, release/*, ,",
           "--accept-bundles-from",
@@ -45,6 +47,7 @@ class ServeCommandOptionsTest {
     assertEquals(ServeUrls.ALL_INTERFACES, options.host)
     assertEquals(9090, options.requestedPort)
     assertEquals(0, options.liveSeats)
+    assertEquals(0, options.spareSandboxes)
     assertEquals(listOf("main", "release/*"), options.revisionAllowRefs)
     assertEquals(listOf("artifacts.example", "cdn.example"), options.acceptBundlesFrom)
     assertTrue(options.exitWhenIdle)

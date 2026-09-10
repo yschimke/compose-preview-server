@@ -11,6 +11,8 @@ import ee.schimke.composeai.previewdata.PreviewInfo
 import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
 import ee.schimke.composeai.render.session.RenderSessionException
+import ee.schimke.composeai.render.session.RenderSessionFactory
+import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
@@ -183,6 +185,23 @@ public class ServeRunner(
    * separate limiters would each believe it owned the whole box.
    */
   private val liveSeatLimiter: LiveSeatLimiter = LiveSeatLimiter(liveSeats)
+
+  /**
+   * The warm sandbox workers every Android catalog daemon on this server adopts from, when
+   * `--spare-sandboxes` asks for any ([ServeSpareSandboxes]). Built here, beside the seat budget,
+   * for the same reason: the catalog pools that spawn daemons exist before the server does, and
+   * they all draw on this one pool. Closed with the server's other closeables.
+   */
+  private val spareSandboxPool: ServeSpareSandboxes? =
+    ServeSpareSandboxes.forBudget(options.spareSandboxes)
+
+  /**
+   * How every daemon-backed host this runner opens forks its daemon: through the spare pool when
+   * there is one, else `ServeRenderHost.open`'s own default. One value, so a session reopened on
+   * resume gets the same treatment as the one opened at startup.
+   */
+  private val renderSessions: RenderSessionFactory =
+    spareSandboxPool?.sessions ?: SubprocessRenderSessions
 
   /**
    * Why each catalog's live-lane launch failed, so `/status.json` and the viewer banner can name
@@ -992,6 +1011,7 @@ public class ServeRunner(
           label = module.gradlePath,
           declaredThemes = declaredThemes,
           onLog = { System.err.println("[daemon serve] $it") },
+          factory = renderSessions,
         )
       } catch (e: RenderSessionException) {
         System.err.println("serve: failed to open render session (${e.message})")
@@ -1094,6 +1114,7 @@ public class ServeRunner(
       mdnsPreviewIds = previews.map { it.id },
       closeables =
         listOf(
+          spareSandboxPool,
           catalogReg?.loader,
           catalogRefresher,
           worktrees,
@@ -1165,6 +1186,7 @@ public class ServeRunner(
             label = module.gradlePath,
             declaredThemes = declaredThemes,
             onLog = { System.err.println("[daemon browse ${module.gradlePath}] $it") },
+            factory = renderSessions,
           )
         } catch (e: RenderSessionException) {
           System.err.println(
@@ -1214,7 +1236,7 @@ public class ServeRunner(
       bannerPreviewCount = opened.sumOf { it.second.size },
       mdnsModuleLabel = null,
       mdnsPreviewIds = null,
-      closeables = emptyList(),
+      closeables = listOf(spareSandboxPool),
       catalogLoads = null,
       localCatalogSessions = opened.map { it.first.gradlePath },
       localSourceRoots = opened.associate { it.first.gradlePath to it.first.projectDir },
@@ -1311,6 +1333,7 @@ public class ServeRunner(
       mdnsPreviewIds = null,
       closeables =
         listOfNotNull(
+          spareSandboxPool,
           catalogReg?.loader,
           catalogRefresher,
           catalogPerPreviewPoolsCloseable,
@@ -1353,6 +1376,7 @@ public class ServeRunner(
         declaredThemes = state.declaredThemes,
         systemPropertyOverrides = systemPropertyOverrides,
         onLog = { System.err.println("[daemon serve] $it") },
+        factory = renderSessions,
       )
     val daemon = openDaemon()
     val fallback = state.bakedFallback
@@ -3193,6 +3217,7 @@ public class ServeRunner(
         catalogFeed = catalogFeed,
         maxLiveSeats = liveSeats,
         liveSeatLimiter = liveSeatLimiter,
+        spareSandboxSnapshot = { spareSandboxPool?.snapshot() },
         daemonLog = daemonLog,
         allowRenderTrusted = allowRenderTrusted,
         trustStoreConfigured = trustStorePath != null,

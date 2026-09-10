@@ -462,7 +462,7 @@ internal object PublishedUiBuilderCatalog {
    * and which slots will take it.
    *
    * The structural one was read and then dropped, and the shelf role derived from whether there
-   * were slots at all. That makes a design ROOT — `remote-m3/widget-container-small`, whose
+   * were slots at all. That makes a design ROOT — a Wear catalog's `widget-container-small`, whose
    * synthesised twin in `ProductionUiBuilderRuntime.widget()` is a `Scaffold` — arrive as an
    * ordinary `Container`. `screen-root` is the one structural role that names a scaffold outright,
    * so it is the one that maps; every other builtin keeps the derivation, because `list` and
