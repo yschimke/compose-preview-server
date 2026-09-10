@@ -157,6 +157,20 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * is in that set and is one of the five the published catalog LOSES; not one of the twenty-five
    * it adds is.
    *
+   * WHICH lane a design takes is decided by its ROOT, not by its catalog:
+   * `RecordFreeExport.applies` is `roots.single().componentId` being a `WearWidgetScaffoldSize` or
+   * the Wear scaffold. So the two blockers here are coupled, and it is worth saying which way
+   * round. A Remote design is rooted at a widget container — this catalog's policy says a Remote
+   * design starts from one — and the widget containers are exactly what the published catalog
+   * loses. Restore them and every design is record-free and meets this refusal head on; leave them
+   * out and designs cannot be rooted correctly in the first place.
+   *
+   * The record-driven lane is not an escape either, but this test does not prove that and does not
+   * claim to. Its own comment says `remote-m3` "ha[s] no component record and the record-driven
+   * generator can only refuse them" — written when the record did not exist, which is the thing
+   * this work changed, so the sentence needs re-checking rather than citing. What is checkable here
+   * is the emitter's vocabulary, and that is what is asserted.
+   *
    * `RemoteM3VocabularyParityTest` already holds the synthesised palette to this invariant — a
    * component you can insert and cannot export is worse than one that is missing, because the
    * author finds out at the end with the design already built. It does not cover a published
