@@ -27,8 +27,25 @@ import kotlinx.serialization.json.contentOrNull
  * same mistake as counting components and calling it identity.
  *
  * So this compares the composed component against the frozen one field by field, for every
- * component the frozen catalog owns. It is the check that has to pass before
- * `--ui-builder-published-catalogs` names `m3-catalog`.
+ * component the frozen catalog owns.
+ *
+ * **What it does not prove, and what happened when that was assumed.** The published fixture is
+ * hand-built: its `statusSemantics.components` block was written here, keyed on the ids the frozen
+ * catalog uses. That makes this a real test of the COMPOSER — given a well-formed published pair,
+ * does the shelf come out right — and no test at all of whether m3-catalog can produce that pair.
+ * The two were conflated once already. Swapping in a genuinely generated pair turned 14 green tests
+ * into 11 failures, all one root cause: m3-catalog derived its component ids from a catalog id's
+ * last segment, which names the VARIANT, so `Button/Filled`, `Card/Filled` and four more all
+ * claimed `m3/filled` and 49 of 108 components collided. The fixture, keyed the way a person would
+ * key it, had no collisions and hid the whole problem.
+ *
+ * So: passing here is necessary before `--ui-builder-published-catalogs` names `m3-catalog`, and it
+ * is not sufficient. The sufficient check is this test against a fixture regenerated from a real
+ * `composePreviewDiscover` run, which needs the id derivation fixed
+ * (yschimke/compose-ai-tools#5354) and m3-catalog's vocabulary authored. Two of the tests below —
+ * the builtin and cardinality refusals — mutate a `builtins` block the real catalog does not have,
+ * so they must be moved onto their own synthetic fixture in the same change, or they will pass
+ * while checking nothing.
  */
 class PublishedM3CatalogEquivalenceTest {
 
