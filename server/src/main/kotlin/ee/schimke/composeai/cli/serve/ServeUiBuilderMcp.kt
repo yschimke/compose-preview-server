@@ -336,7 +336,10 @@ class ServeUiBuilderMcp(
     return "${slot.name}[$cardinality]" + if (accepted.isEmpty()) "" else ":$accepted"
   }
 
-  /** `name:type`, `!` when required, then `=` and the allowed values `|`-separated. */
+  /**
+   * `name:type`, `!` when required, then `=` and the allowed values `|`-separated — or, past
+   * [SUMMARY_ALLOWED_VALUES] of them, how many there are instead of what they are.
+   */
   private fun summarize(property: PropertyCapabilityV1): String {
     val type =
       when (val jsonType = property.jsonType) {
@@ -347,9 +350,12 @@ class ServeUiBuilderMcp(
     // in one. This is a human-readable summary, so an object renders as its JSON rather than
     // taking the whole `ui_builder_list_catalogs` response down with an exception.
     val allowed =
-      property.allowedValues.joinToString("|") { value ->
-        (value as? JsonPrimitive)?.content ?: value.toString()
-      }
+      if (property.allowedValues.size > SUMMARY_ALLOWED_VALUES)
+        "<${property.allowedValues.size} values; ask for full>"
+      else
+        property.allowedValues.joinToString("|") { value ->
+          (value as? JsonPrimitive)?.content ?: value.toString()
+        }
     return "${property.name}:$type" +
       (if (property.required) "!" else "") +
       (if (allowed.isEmpty()) "" else "=$allowed")
@@ -1094,6 +1100,24 @@ class ServeUiBuilderMcp(
   }
 
   companion object {
+    /**
+     * How many allowed values a summary row spells out before it reports a count instead.
+     *
+     * The summary exists to be small — "the released envelope is about 58 KB and this about 12", as
+     * `ServeUiBuilderMcpIntegrationTest` puts it — and a `|`-separated enumeration is the one field
+     * on it whose length the catalog, not this surface, decides. #710 exposed the complete Material
+     * icon inventory and `m3/icon`.`iconKey` became 11,431 names, which took the *summary* to 241
+     * KB: four times the full envelope it exists to be an alternative to, on every
+     * `ui_builder_list_catalogs` call.
+     *
+     * Twenty-four is chosen to be past every enumeration a person authored — the longest of those
+     * on the packaged m3 catalog is `m3/text`.`style`'s fifteen typography roles — and far short of
+     * a generated inventory. A row over it says how many values there are and where to get them,
+     * which is what the summary/full split is for: an agent that needs all 11,431 asks for `full`,
+     * and the other ninety-nine calls do not pay for them.
+     */
+    private const val SUMMARY_ALLOWED_VALUES = 24
+
     const val LIST_CATALOGS = "ui_builder_list_catalogs"
     const val LIST_DESIGNS = "ui_builder_list_designs"
     const val GET_DESIGN = "ui_builder_get_design"

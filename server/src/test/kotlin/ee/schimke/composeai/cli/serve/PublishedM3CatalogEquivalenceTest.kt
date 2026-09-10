@@ -4,6 +4,7 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
+import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import java.io.File
 import kotlin.test.Test
@@ -169,9 +170,49 @@ class PublishedM3CatalogEquivalenceTest {
       val g = got[name] ?: continue
       check("properties[$name].jsonType", w.jsonType, g.jsonType)
       check("properties[$name].required", w.required, g.required)
-      check("properties[$name].allowedValues", w.allowedValues, g.allowedValues)
+      allowed(name, w, g)?.let { out += it }
     }
     return out
+  }
+
+  /**
+   * Properties whose allowed values are a GENERATED inventory rather than an authored enumeration.
+   * See [allowed].
+   */
+  private val generatedInventory = setOf("iconKey")
+
+  /**
+   * The one property field where equality is the wrong question: an **inventory**, not a choice.
+   *
+   * Every other allowed-value list on this shelf is an enumeration somebody authored —
+   * `m3/text`.`style`'s fifteen typography roles — and equality is exactly right for those: a value
+   * appearing or disappearing is a design decision, and it belongs in a diff.
+   *
+   * `m3/icon`.`iconKey` is not that. It is the Material icon set, generated, and the two sides are
+   * pinned independently: the frozen catalog is packaged in THIS repository, and the composed one
+   * is whatever m3-catalog last published. #710 exposed the complete inventory here while
+   * m3-catalog still ships the forty-six-icon hand-picked list, and equality then made this
+   * comparison red on a fact neither repository can act on from the other side — printing all
+   * 11,431 names into the failure, which is also how nobody reads it.
+   *
+   * The question worth asking survives the growth: **does the published catalog offer an icon the
+   * builder cannot draw?** That is containment. It is stable while the inventory grows, it fails on
+   * the thing that would actually break a design, and it names only the offending values.
+   */
+  private fun allowed(
+    name: String,
+    want: PropertyCapabilityV1,
+    got: PropertyCapabilityV1,
+  ): String? {
+    val field = "properties[$name].allowedValues"
+    if (name !in generatedInventory) {
+      return if (want.allowedValues == got.allowedValues) null
+      else "$field: frozen=${want.allowedValues} composed=${got.allowedValues}"
+    }
+    val undrawable = got.allowedValues.filterNot { it in want.allowedValues }
+    return if (undrawable.isEmpty()) null
+    else
+      "$field: composed offers ${undrawable.size} value(s) the frozen shelf does not: $undrawable"
   }
 
   /**
