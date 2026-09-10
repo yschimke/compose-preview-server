@@ -398,31 +398,49 @@ internal class RemoteContentEmitter(
       return emptyList()
     }
     val pad = INDENT.repeat(depth)
-    val children = node.slots["children"].orEmpty()
-    val contentSlots = record.parameters.filter { it.composableSlot && !it.hasDefault }
-    if (contentSlots.size > 1) {
+    val slotParameters = record.parameters.filter { it.composableSlot }
+
+    // Which design children go into which slot. A slot is filled by the children the design put
+    // under ITS OWN NAME, so a component with several says which is which — `appName`, `title`
+    // and `content` on a card are three different places and a design that named none of them
+    // has not said where anything goes. `children` is the single-slot spelling every design uses
+    // today, accepted only when there is exactly one slot to mean.
+    val single = slotParameters.singleOrNull()
+    val filled =
+      slotParameters.mapNotNull { parameter ->
+        val ids =
+          node.slots[parameter.name]
+            ?: if (parameter == single) node.slots["children"] else null
+        ids?.takeIf { it.isNotEmpty() }?.let { parameter to it }
+      }
+    val strayChildren =
+      node.slots["children"].orEmpty().isNotEmpty() && (single == null || filled.isEmpty())
+    if (strayChildren) {
       refusals +=
-        "`${node.componentId}` takes ${contentSlots.size} content slots " +
-          "(${contentSlots.joinToString { it.name }}) and a design says only which children it " +
-          "has, so which slot each belongs in is not recoverable"
-      return emptyList()
-    }
-    val content = contentSlots.singleOrNull()
-    if (content != null && record.parameters.lastOrNull()?.name != content.name) {
-      refusals +=
-        "`${node.componentId}` declares its content slot `${content.name}` before other " +
-          "parameters, so it cannot be written as a trailing lambda"
-      return emptyList()
-    }
-    if (children.isNotEmpty() && content == null) {
-      refusals +=
-        "`${node.componentId}` has children in the design and no content slot to put them in"
+        if (slotParameters.isEmpty()) {
+          "`${node.componentId}` has children in the design and no content slot to put them in"
+        } else {
+          "`${node.componentId}` takes ${slotParameters.size} content slots " +
+            "(${slotParameters.joinToString { it.name }}) and the design names none of them, so " +
+            "which slot each child belongs in is not recoverable"
+        }
       return emptyList()
     }
 
     val arguments = mutableListOf<String>()
+    val blocks = mutableListOf<Pair<String, List<String>>>()
     for (parameter in record.parameters) {
-      if (parameter.name == content?.name) continue
+      if (parameter.composableSlot) {
+        val children = filled.firstOrNull { it.first == parameter }?.second
+        when {
+          children != null -> blocks += parameter.name to children
+          // A required slot with no children is an empty lambda, not an omitted argument: the
+          // parameter has no default, so leaving it off does not compile, and empty is what the
+          // design says — a container nobody has filled yet.
+          !parameter.hasDefault -> blocks += parameter.name to emptyList()
+        }
+        continue
+      }
       val authored = node.properties[parameter.name]
       val expression =
         when {
@@ -446,14 +464,38 @@ internal class RemoteContentEmitter(
 
     usedComponentImports += record.symbol.callable
     val symbol = record.symbol.name
-    if (content == null || children.isEmpty()) {
-      return (pad + call(symbol, arguments, pad)).split("\n")
+    if (blocks.isEmpty()) return (pad + call(symbol, arguments, pad)).split("\n")
+
+    // The LAST parameter's slot is written as a trailing lambda when it is the last parameter of
+    // the call; every other slot is a named argument whose value is a lambda. Both are ordinary
+    // Kotlin, and the split matters only for how it reads.
+    val trailingName =
+      record.parameters.lastOrNull()?.takeIf { it.composableSlot }?.name?.takeIf { name ->
+        blocks.any { it.first == name }
+      }
+    val named = blocks.filterNot { it.first == trailingName }
+    val lines = mutableListOf<String>()
+    val headArguments = arguments.toMutableList()
+    if (named.isEmpty() && headArguments.size <= 1) {
+      lines +=
+        pad +
+          (if (headArguments.isEmpty()) "$symbol {"
+          else "${call(symbol, headArguments, pad, trailing = OPENING_BRACE.length)}$OPENING_BRACE")
+    } else {
+      lines += "$pad$symbol("
+      headArguments.forEach { lines += "$pad$INDENT$it," }
+      named.forEach { (name, ids) ->
+        lines += "$pad$INDENT$name = {"
+        lines += ids.flatMap { emit(it, depth + 2) }
+        lines += "$pad$INDENT},"
+      }
+      lines += if (trailingName == null) "$pad)" else "$pad)$OPENING_BRACE"
     }
-    val head =
-      if (arguments.isEmpty()) "$symbol {"
-      else "${call(symbol, arguments, pad, trailing = OPENING_BRACE.length)}$OPENING_BRACE"
-    val body = children.flatMap { emit(it, depth + 1) }
-    return (pad + head).split("\n") + body + listOf("$pad}")
+    if (trailingName != null) {
+      lines += blocks.first { it.first == trailingName }.second.flatMap { emit(it, depth + 1) }
+      lines += "$pad}"
+    }
+    return lines
   }
 
   private fun lambdaActionExpression(): String {
