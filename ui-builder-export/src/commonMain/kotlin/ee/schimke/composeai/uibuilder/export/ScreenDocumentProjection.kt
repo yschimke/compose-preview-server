@@ -561,11 +561,12 @@ object ScreenDocumentProjection {
      * The arguments built from **more than one** property, and the properties they consumed.
      *
      * Every other property is one value on one parameter, which the loop in [arguments] handles a
-     * row at a time. Three shapes are not: an arrangement and a spacing name **one** `Arrangement`
-     * between them, two colour roles fill **one** `TopAppBarColors` bundle, and a colour dot is a
-     * `Box` whose entire meaning is a modifier chain built from both its properties. Read one at a
-     * time, the second of each pair would silently overwrite the first in the argument map — a row
-     * with `spaceBetween` and an 8dp gap exporting as whichever the document happened to list last.
+     * row at a time. Four shapes are not: an arrangement and a spacing name **one** `Arrangement`
+     * between them, two colour roles fill **one** `TopAppBarColors` bundle, a time picker's hour
+     * and minute are **one** `TimePickerState`, and a colour dot is a `Box` whose entire meaning is
+     * a modifier chain built from both its properties. Read one at a time, the second of each pair
+     * would silently overwrite the first in the argument map — a row with `spaceBetween` and an 8dp
+     * gap exporting as whichever the document happened to list last.
      */
     private fun composite(
       node: DesignNodeV1,
@@ -595,6 +596,30 @@ object ScreenDocumentProjection {
           // Only when every role resolved: a bundle missing one would export a bar whose colour
           // silently fell back to Material's, which is the wrong-picture-that-compiles case.
           if (named.size == roles.size) {
+            arguments[bundle.parameter] =
+              ScreenValue.Construct(
+                callableFqn = bundle.factoryFqn,
+                named = named,
+                typeFqn = bundle.typeFqn,
+                requiredOptIns = bundle.optIns,
+              )
+          }
+        }
+      }
+      STATE_BUNDLES[node.componentId]?.let { bundle ->
+        val present = bundle.arguments.filterKeys { it in node.properties }
+        if (present.isNotEmpty()) {
+          spent += present.keys
+          val named =
+            present
+              .mapNotNull { (property, parameter) ->
+                value(node.properties.getValue(property), node, property)?.let { parameter to it }
+              }
+              .toMap()
+          // The same all-or-nothing rule the colour bundles keep, for the same reason: a state
+          // built from two of a component's three settings is a component configured differently
+          // from the one on the canvas, and it compiles.
+          if (named.size == present.size) {
             arguments[bundle.parameter] =
               ScreenValue.Construct(
                 callableFqn = bundle.factoryFqn,
@@ -2375,6 +2400,51 @@ object ScreenDocumentProjection {
           typeFqn = "androidx.compose.material3.TopAppBarColors",
           roles = listOf("containerColor", "scrolledContainerColor"),
           optIns = listOf(EXPERIMENTAL_MATERIAL3),
+        )
+    )
+
+  /**
+   * Properties that configure a component's **remembered state** rather than its call, per
+   * component.
+   *
+   * `TimePicker` takes no `hour`: it takes a `TimePickerState`, and the hour is what that state was
+   * remembered with. Discovery already writes `state = rememberTimePickerState()` as the
+   * placeholder for the required parameter — the record's `noArgFactory` — so the shape is already
+   * the right one and the only thing missing was the arguments. This fills them in, which turns the
+   * placeholder into the design: the same factory call, carrying what the canvas draws.
+   *
+   * A [ColorBundle] by another name — several properties into one constructed argument — and kept
+   * apart from it because the values are the properties' own rather than colours, and because the
+   * parameter names differ from the property names (`hour` is `initialHour`).
+   *
+   * `m3/date-picker` is the same shape and is deliberately absent: its `selectedDate` is a date
+   * string and `rememberDatePickerState` wants `initialSelectedDateMillis`, a conversion this
+   * projection has no vocabulary for.
+   *
+   * @property arguments the catalog property, in the factory's own parameter order, mapped to the
+   *   factory parameter it fills.
+   */
+  private class StateBundle(
+    val parameter: String,
+    val factoryFqn: String,
+    val typeFqn: String,
+    val arguments: Map<String, String>,
+    val optIns: List<String>,
+  )
+
+  private val STATE_BUNDLES: Map<String, StateBundle> =
+    mapOf(
+      "m3/time-picker" to
+        StateBundle(
+          parameter = "state",
+          factoryFqn = "androidx.compose.material3.rememberTimePickerState",
+          typeFqn = "androidx.compose.material3.TimePickerState",
+          arguments =
+            mapOf("hour" to "initialHour", "minute" to "initialMinute", "is24Hour" to "is24Hour"),
+          // None: discovery records `TimePicker(state = rememberTimePickerState())` with an empty
+          // `requiredOptIns`, so both halves of that call are stable API and claiming an opt-in
+          // here would write an `@OptIn` the file does not need.
+          optIns = emptyList(),
         )
     )
 

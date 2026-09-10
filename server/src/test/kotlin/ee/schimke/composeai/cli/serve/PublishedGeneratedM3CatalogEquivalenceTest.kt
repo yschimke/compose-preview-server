@@ -23,7 +23,9 @@ import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -573,6 +575,19 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       refused.toMap(),
       "the set of published m3 components the generator cannot write has changed",
     )
+
+    // The one component on this shelf whose properties reach a *state factory* rather than its
+    // own parameters, and the reason `M3_EXPORT_REFUSALS` is shorter than it was. Pinned as the
+    // emitted call, because "it no longer refuses" is also what a `TimePicker` that silently
+    // dropped the authored hour would look like.
+    val picker = offered.single { it.componentId == "m3/time-picker" }
+    val emitted = executor.generate(screenAround(picker))
+    assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(emitted)
+    assertContains(
+      emitted.source,
+      "TimePicker(state = rememberTimePickerState(initialHour = 1, initialMinute = 1))",
+      message = "a time picker's hour and minute reach `rememberTimePickerState`",
+    )
   }
 
   /** A screen whose root IS [component], with every required property the shelf declares. */
@@ -636,24 +651,26 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
   private companion object {
     /**
-     * The twenty-seven published m3 components the generator cannot write, each with its first
-     * reason. **Eighty-three export.** Teaching the generator one of these shortens the list, and
+     * The twenty-six published m3 components the generator cannot write, each with its first
+     * reason. **Eighty-four export.** Teaching the generator one of these shortens the list, and
      * the test above fails until it is shortened here.
      *
      * Twenty-five are discovery's own "no call site" judgement — a member of a `Defaults` object, a
      * scope receiver, type parameters, not public, or a required parameter of a type no design
      * value becomes. Those are upstream API shapes rather than gaps here.
      *
-     * The other two are ours, and they are the same shape: a property that configures the
-     * component's remembered STATE rather than its call. `m3/time-picker` declares `hour` and
-     * `minute`, which reach `rememberTimePickerState(initialHour = …)`; `m3/date-picker` declares
-     * `mode`, which reaches `rememberDatePickerState(initialDisplayMode = …)`. This projection can
-     * rename a property onto a parameter and pick between callables, and cannot yet pass one into a
-     * state factory.
+     * The last one is ours: a property that configures the component's remembered STATE rather than
+     * its call. `m3/date-picker` declares `selectedDate`, which reaches
+     * `rememberDatePickerState(initialSelectedDateMillis = …)` — a date string where the factory
+     * wants a `Long`, and this projection has no vocabulary for that conversion. Its `mode` is the
+     * first reason recorded, but teaching `mode` alone would leave the date behind.
      *
-     * `mode` on `m3/time-picker` was here for a different reason until the variant table learned
-     * it: `dial` and `input` are `TimePicker` and `TimeInput`, two callables of identical shape,
-     * which is the `m3/progress-indicator` precedent the catalog's own note names.
+     * `m3/time-picker` was here on the same grounds until `STATE_BUNDLES` learned it, and it is the
+     * worked precedent: `hour` and `minute` are now `rememberTimePickerState(initialHour = …,
+     * initialMinute = …)`, pinned by the test above. `mode` was a separate refusal until the
+     * variant table learned it: `dial` and `input` are `TimePicker` and `TimeInput`, two callables
+     * of identical shape, which is the `m3/progress-indicator` precedent the catalog's own note
+     * names.
      */
     val M3_EXPORT_REFUSALS =
       mapOf(
@@ -698,7 +715,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "no placeholder can be written for required parameter `directive: PaneScaffoldDirective`",
         "m3/thumb" to
           "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
-        "m3/time-picker" to "`TimePicker` has no parameter `hour`",
         "m3/tonal-leading-button" to
           "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
         "m3/tonal-trailing-button" to
