@@ -83,6 +83,24 @@ internal class ScreenGeneratorComposeExportExecutor(
    * always was.
    */
   private val packs: Set<String> = emptySet(),
+  /**
+   * A catalog's OWN components, by the builder id a design names them with, for the record-free
+   * emitters — `PublishedUiBuilderCatalog.Result.Composed.records`, per catalog system id.
+   *
+   * The Remote emitter has hand-written cases for the components a widget is usually made of and
+   * falls back to the record for the rest, which is most of what a Remote catalog publishes. That
+   * fallback had no way to be reached in production: [packs] is the only component map this
+   * executor built, a **pack**'s, and `remote-m3` is not a pack of itself — so an ordinary widget
+   * design still refused every component the emitter had no case for.
+   *
+   * A function rather than a map because the published catalogs are composed after this executor is
+   * constructed, and a value read at startup would be the empty map forever. Defaults to no
+   * components, which is the honest answer for a host serving nothing published: the emitter then
+   * refuses by name exactly as it did before.
+   */
+  private val publishedComponents: (catalogSystemId: String) -> Map<String, ComponentRecord> = {
+    emptyMap()
+  },
 ) : UiBuilderExportExecutor {
 
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
@@ -116,7 +134,7 @@ internal class ScreenGeneratorComposeExportExecutor(
       RecordFreeExport.generate(
           request.document,
           packageName,
-          packComponents = packRecords.byComponentId(),
+          packComponents = recordFreeComponents(request.document, packRecords),
           assets = request.document.widgetAssetBytes(),
         )
         ?.let { recordFree ->
@@ -275,6 +293,11 @@ internal class ScreenGeneratorComposeExportExecutor(
             packageName,
             document.widgetAssetBytes(),
             widgetHostShape,
+            // A widget draws no pack component, so this lane's vocabulary is the catalog's own
+            // and nothing else. Passed here as well as in `export` because the render and the
+            // file are two views of one design: a component the file can write and the picture
+            // cannot is a hole in the canvas nobody can explain.
+            publishedComponents(document.catalogPin.systemId),
           )
       ) {
         // Unreachable: `isWearWidget` was true, so the widget emitter owns this document. Reported
@@ -306,7 +329,7 @@ internal class ScreenGeneratorComposeExportExecutor(
             document,
             packageName,
             tagNodes,
-            packComponents = packRecords.byComponentId(),
+            packComponents = recordFreeComponents(document, packRecords),
           )
       ) {
         // Unreachable: `applies` was true, so the emitter owns this document. Reported as a
@@ -495,6 +518,22 @@ internal class ScreenGeneratorComposeExportExecutor(
       }
     return PackRecords.Found(records)
   }
+
+  /**
+   * Every component a record-free emitter may resolve for [document]: this catalog's own, plus the
+   * packs the design draws on.
+   *
+   * The two are keyed the same way and cannot collide — a pack component's id is `<packId>/<name>`
+   * and a catalog component's is `<catalogSystemId>/<name>`, and a catalog is not admitted as a
+   * pack of itself — so the union is the whole vocabulary the emitter can prove a call for. Packs
+   * are merged last so that if that ever stops being true, the entry naming the pack the design
+   * explicitly draws on wins.
+   */
+  private fun recordFreeComponents(
+    document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
+    packRecords: List<ComponentRecordFile>,
+  ): Map<String, ComponentRecord> =
+    publishedComponents(document.catalogPin.systemId) + packRecords.byComponentId()
 
   /** Each pack component under the id the design refers to it by, for the record-free emitter. */
   private fun List<ComponentRecordFile>.byComponentId(): Map<String, ComponentRecord> =

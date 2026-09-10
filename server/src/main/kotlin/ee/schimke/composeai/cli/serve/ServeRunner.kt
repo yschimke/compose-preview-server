@@ -7,6 +7,7 @@ import ee.schimke.composeai.bundle.BundleReader
 import ee.schimke.composeai.bundle.BundleVerifier
 import ee.schimke.composeai.bundle.TrustStore
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.previewdata.PreviewInfo
 import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
@@ -2616,11 +2617,20 @@ public class ServeRunner(
         )
       }
       .getOrNull()
+    // What each published catalog composed, by catalog system id, for the record-free emitters.
+    //
+    // Filled below, when the published files are read, and read by the executor constructed here —
+    // which is why it is a map handed over as an accessor rather than a value. The two cannot be
+    // reordered: the executor is what `ProductionUiBuilderExportExecutor` wraps, and
+    // `uiBuilderExports` is computed FROM that wrapper and then handed to the composition, so
+    // composing first would need the capabilities the wrapper has not been built to state yet.
+    val publishedRecords = mutableMapOf<String, Map<String, ComponentRecord>>()
     val compose =
       ScreenGeneratorComposeExportExecutor(
         records::record,
         packs = packs.map { it.id }.toSet(),
         assetStore = assetStore,
+        publishedComponents = { systemId -> publishedRecords[systemId].orEmpty() },
       )
     val exporter =
       renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
@@ -2702,6 +2712,12 @@ public class ServeRunner(
           ) {
             is PublishedUiBuilderCatalog.Result.Composed -> {
               publishedCatalogs[systemId] = composed.catalog
+              // The join only this composition can make: a design node names a builder id, and
+              // which record component that id was derived from is stated by the published file.
+              // Without it the Remote emitter's record fallback is unreachable in production —
+              // the only component map the export executor could build is a *pack*'s, and a
+              // catalog is not a pack of itself.
+              publishedRecords[systemId] = composed.records
               System.err.println("serve: UI-builder catalog ${composed.note}")
             }
             is PublishedUiBuilderCatalog.Result.Unusable ->

@@ -70,8 +70,24 @@ internal object PublishedUiBuilderCatalog {
 
   /** The outcome of composing one catalog, which is never an exception. */
   sealed interface Result {
-    /** [catalog] is ready to serve; [note] is the one startup line saying where it came from. */
-    data class Composed(val catalog: CatalogCapabilityV1, val note: String) : Result
+    /**
+     * [catalog] is ready to serve; [note] is the one startup line saying where it came from.
+     *
+     * [records] is each component of [catalog] that came from the record, under the builder id it
+     * is served as — the join this composition performs and nothing else can. A design node names a
+     * builder id; only the published file states which record component that id was derived from,
+     * so a reader handed the record alone would have to re-run [derivedId] and the policy's
+     * `record` field to get back here. Carried rather than re-derived, because two implementations
+     * of one derivation is how a saved design and the code generated for it come to disagree.
+     *
+     * Builtins are absent by construction: a builtin is declared precisely because no record
+     * component backs it.
+     */
+    data class Composed(
+      val catalog: CatalogCapabilityV1,
+      val note: String,
+      val records: Map<String, ComponentRecord>,
+    ) : Result
 
     /**
      * The published file could not be used, and [reason] says why in a form an operator can act on.
@@ -217,6 +233,9 @@ internal object PublishedUiBuilderCatalog {
     val policyByRecordId =
       semantics.components.entries.associateBy({ it.value.record }, { it.key to it.value })
     val taken = linkedMapOf<String, ComponentCapabilityV1>()
+    // The same join as `taken`, kept as the records rather than the capabilities. See
+    // [Result.Composed.records].
+    val recordsById = linkedMapOf<String, ComponentRecord>()
     val skipped = mutableListOf<String>()
     // Counted apart from the rest of `skipped`, because a collision means something the other skip
     // reasons do not: two components claimed one identity. See [COLLISION_REFUSAL_RATE].
@@ -245,6 +264,7 @@ internal object PublishedUiBuilderCatalog {
         else -> {
           eligible++
           taken[componentId] = capability(componentId, component, policy)
+          recordsById[componentId] = component
         }
       }
     }
@@ -321,7 +341,7 @@ internal object PublishedUiBuilderCatalog {
       "$id — published ui-builder.json (${taken.size} component(s)" +
         (if (skipped.isEmpty()) "" else ", ${skipped.size} skipped") +
         ")"
-    return Result.Composed(catalog, note)
+    return Result.Composed(catalog, note, recordsById)
   }
 
   /**
