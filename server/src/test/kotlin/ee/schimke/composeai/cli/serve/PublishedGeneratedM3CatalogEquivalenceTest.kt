@@ -247,7 +247,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    * The six left are the ones that fix cannot reach: nothing declares them, so they carry no
    * catalog id and there is no shelf to inherit. Only `ui-builder.policy.json` can place them, and
    * where an adaptive-layout scaffold belongs on a Material 3 shelf is a catalog decision rather
-   * than something this test can assert — m3-catalog#318.
+   * than something this test can assert — m3-catalog#323.
    */
   @Test
   fun `every component is on a shelf, or is one nothing declares`() {
@@ -272,7 +272,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    * `FloatingActionButton` off Bottom app bar. These four are the remainder, and they are different
    * in kind: the catalog has no section they belong to, so placing them means inventing a shelf
    * rather than correcting a derivation. Pinned so the choice is visible in a diff and shortening
-   * this list is what fixing one looks like — m3-catalog#318.
+   * this list is what fixing one looks like — m3-catalog#323.
    */
   @Test
   fun `the shelves nobody has chosen are the reviewed set`() {
