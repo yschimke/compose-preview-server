@@ -640,6 +640,40 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       "the set of published m3 components the generator cannot write has changed",
     )
 
+    // Every ALLOWED VALUE of every enumerated required property, not just the first.
+    //
+    // The loop above authors `authored(property)`, which takes `allowedValues.first()`. That is
+    // enough to ask whether a component exports at all and blind to the thing an enumeration is
+    // for: `m3/text-field` passed on `filled` while `outlined` refused, because the variant table
+    // spelled `TextFieldKt.OutlinedTextField` and Material declares that callable in
+    // `OutlinedTextFieldKt`. One wrong string, invisible to a measurement that only ever asked
+    // for the first value — the shelf advertised the variant as exportable and the server said
+    // `no component`. Raised by the review bot on #703 and true.
+    //
+    // Asserted as `emptyList()` rather than as a reviewed set: a component that exports on one
+    // value of a property and refuses on another is a defect every time, not a decision. It costs
+    // one more export per allowed value on the components that already export.
+    val variantRefusals = sortedMapOf<String, String>()
+    for (component in offered) {
+      if (component.componentId in M3_EXPORT_REFUSALS) continue
+      for (property in component.properties.filter { it.required }) {
+        val values =
+          property.allowedValues.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.drop(1)
+        for (value in values) {
+          val generated = executor.generate(screenAround(component, mapOf(property.name to value)))
+          if (generated is ScreenGeneratorComposeExportExecutor.Generated.Refused) {
+            variantRefusals["${component.componentId}.${property.name}=$value"] =
+              generated.reasons.first()
+          }
+        }
+      }
+    }
+    assertEquals(
+      emptyList(),
+      variantRefusals.keys.toList(),
+      "a component that exports on one allowed value refuses on another: $variantRefusals",
+    )
+
     // The one component on this shelf whose properties reach a *state factory* rather than its
     // own parameters, and the reason `M3_EXPORT_REFUSALS` is shorter than it was. Pinned as the
     // emitted call, because "it no longer refuses" is also what a `TimePicker` that silently
@@ -654,8 +688,14 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     )
   }
 
-  /** A screen whose root IS [component], with every required property the shelf declares. */
-  private fun screenAround(component: ComponentCapabilityV1): DesignDocumentV1 =
+  /**
+   * A screen whose root IS [component], with every required property the shelf declares — and,
+   * where [choose] names one, a specific value rather than the first allowed one.
+   */
+  private fun screenAround(
+    component: ComponentCapabilityV1,
+    choose: Map<String, String> = emptyMap(),
+  ): DesignDocumentV1 =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",
       id = "m3-export-parity",
@@ -692,7 +732,12 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
               id = "subject",
               componentId = component.componentId,
               properties =
-                component.properties.filter { it.required }.associate { it.name to authored(it) },
+                component.properties
+                  .filter { it.required }
+                  .associate { property ->
+                    property.name to
+                      (choose[property.name]?.let { EnumValueV1(it) } ?: authored(property))
+                  },
             )
         ),
     )

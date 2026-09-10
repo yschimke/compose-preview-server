@@ -2657,8 +2657,13 @@ object ScreenDocumentProjection {
   private const val TIME_PICKER_ID = "androidx.compose.material3.TimePickerKt.TimePicker"
   private const val TIME_INPUT_ID = "androidx.compose.material3.TimePickerKt.TimeInput"
   private const val TEXT_FIELD_ID = "androidx.compose.material3.TextFieldKt.TextField"
+  // `OutlinedTextFieldKt`, not `TextFieldKt`: Material declares the outlined field in its own
+  // file. The alias `callableAliases()` adds is the record's canonical id minus the module, so an
+  // id naming the wrong file resolves to nothing and the variant refuses — which is what this one
+  // did, on every authored outlined field, until the parity test below started authoring every
+  // variant rather than the first.
   private const val OUTLINED_TEXT_FIELD_ID =
-    "androidx.compose.material3.TextFieldKt.OutlinedTextField"
+    "androidx.compose.material3.OutlinedTextFieldKt.OutlinedTextField"
   private const val LINEAR_INDICATOR_ID =
     "androidx.compose.material3.ProgressIndicatorKt.LinearProgressIndicator"
   private const val CIRCULAR_INDICATOR_ID =
