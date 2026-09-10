@@ -2,6 +2,8 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_MODIFIERS
+import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CodeCapabilityV1
@@ -263,7 +265,7 @@ internal object PublishedUiBuilderCatalog {
         }
         else -> {
           eligible++
-          taken[componentId] = capability(componentId, component, policy)
+          taken[componentId] = capability(componentId, component, policy, semantics.platform)
           recordsById[componentId] = component
         }
       }
@@ -273,7 +275,7 @@ internal object PublishedUiBuilderCatalog {
       if (taken.containsKey(builtinId)) {
         skipped += "$builtinId — declared as a builtin, but a record component publishes this id"
       } else {
-        taken[builtinId] = builtinCapability(builtinId, builtin)
+        taken[builtinId] = builtinCapability(builtinId, builtin, semantics.platform)
       }
     }
 
@@ -395,6 +397,7 @@ internal object PublishedUiBuilderCatalog {
     componentId: String,
     component: ComponentRecord,
     policy: UiBuilderComponentPolicy?,
+    platform: String,
   ): ComponentCapabilityV1 {
     // The catalog's slots, or failing that the composable's. See
     // `UiBuilderComponentPolicy.slotCapabilities`.
@@ -441,7 +444,9 @@ internal object PublishedUiBuilderCatalog {
       slots = slots,
       properties = properties,
       modifierCapabilities =
-        policy?.modifierCapabilities ?: structuralModifiers(slots.isNotEmpty()),
+        (policy?.modifierCapabilities ?: structuralModifiers(slots.isNotEmpty())).writableOn(
+          platform
+        ),
       wasm = wasm(policy?.canvas, policy?.nativeOnly == true, component.symbol.callable),
       code =
         CodeCapabilityV1(
@@ -502,7 +507,11 @@ internal object PublishedUiBuilderCatalog {
    * everything it offers comes from the policy. It carries no [CodeCapabilityV1] for the same
    * reason: the templates named by its role are what write it.
    */
-  private fun builtinCapability(id: String, builtin: UiBuilderBuiltin): ComponentCapabilityV1 =
+  private fun builtinCapability(
+    id: String,
+    builtin: UiBuilderBuiltin,
+    platform: String,
+  ): ComponentCapabilityV1 =
     ComponentCapabilityV1(
       componentId = id,
       displayName = builtin.displayName ?: id.substringAfterLast('/'),
@@ -522,7 +531,8 @@ internal object PublishedUiBuilderCatalog {
         },
       properties = builtin.properties.orEmpty().map { it.toCapability() },
       modifierCapabilities =
-        builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()),
+        (builtin.modifierCapabilities ?: structuralModifiers(builtin.slots.isNotEmpty()))
+          .writableOn(platform),
       wasm = wasm(builtin.canvas, nativeOnly = false, callable = null),
     )
 
@@ -549,6 +559,40 @@ internal object PublishedUiBuilderCatalog {
           else -> "Drawn on the canvas as a named placeholder: this catalog claims no adapter."
         },
     )
+  }
+
+  /**
+   * The modifiers this platform's emitter can actually write, or null where every modifier the
+   * structural default offers is writable.
+   *
+   * A shelf must never offer what an export then refuses — the invariant
+   * `RemoteM3VocabularyParityTest` holds the synthesised palette to, because a control you can
+   * apply and cannot export is worse than one that is missing: the author finds out at the end,
+   * with the design already built.
+   *
+   * The structural default is the server's own invention (`ComponentRecordPacks`), and it is a
+   * JETPACK COMPOSE default: it carries `testTag`, `aspectRatio` and, for a container, `shadow`.
+   * `RemoteContentEmitter` writes none of the three, so a published `remote-compose` catalog
+   * advertised three controls whose use made every export of that design fail
+   * (compose-preview-server#674 blocker 3).
+   *
+   * Keyed on the platform the CATALOG declares rather than on anything about the catalog itself:
+   * which modifiers an emitter can write is the server's fact about its own emitters, and the
+   * platform word is the catalog saying which emitter it is for.
+   *
+   * A stated `modifierCapabilities` is narrowed too, not only the default. A catalog naming a
+   * modifier its own lane cannot write is the same defect written by hand, and the honest shelf is
+   * the same either way.
+   */
+  private fun writableModifiers(platform: String): Set<String>? =
+    when (UiBuilderCatalogPlatform.fromWord(platform)) {
+      UiBuilderCatalogPlatform.REMOTE_COMPOSE -> REMOTE_CONTENT_MODIFIERS
+      else -> null
+    }
+
+  private fun List<String>.writableOn(platform: String): List<String> {
+    val writable = writableModifiers(platform) ?: return this
+    return filter { it in writable }
   }
 
   /**
@@ -634,6 +678,13 @@ internal object PublishedUiBuilderCatalog {
   @Serializable
   internal data class UiBuilderStatusSemantics(
     val componentIdPrefix: String = "",
+    /**
+     * The word the catalog uses for its lane — `mobile`, `wear`, `remote-compose`.
+     *
+     * Read for one purpose: a platform whose emitter has a narrower modifier vocabulary than the
+     * structural default cannot be offered the difference. See [writableModifiers].
+     */
+    val platform: String = "",
     val builtins: Map<String, UiBuilderBuiltin> = emptyMap(),
     val components: Map<String, UiBuilderComponentPolicy> = emptyMap(),
   )

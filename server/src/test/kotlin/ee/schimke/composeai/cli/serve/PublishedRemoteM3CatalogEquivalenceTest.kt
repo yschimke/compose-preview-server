@@ -363,32 +363,39 @@ class PublishedRemoteM3CatalogEquivalenceTest {
   }
 
   /**
-   * The modifiers it advertises are unexportable too, which is the same blocker one level down.
+   * Every modifier the published catalog advertises is one this lane can write.
    *
-   * Not one of the twenty-seven states `modifierCapabilities`, so the composer hands each the
-   * structural default — `LEAF_MODIFIERS` for a leaf, plus `fillMaxSize`, `shadow` and the rest for
-   * a container. Three of those are outside [REMOTE_CONTENT_MODIFIERS]: `testTag` and `aspectRatio`
-   * on everything, `shadow` on every container. `RemoteM3VocabularyParityTest` holds the
-   * synthesised palette to this and does not cover a published one.
+   * The invariant `RemoteM3VocabularyParityTest` holds the synthesised palette to, now true of a
+   * published one: a control you can apply and cannot export is worse than one that is missing,
+   * because the author finds out at the end with the design already built.
    *
-   * It matters independently of the component blocker: clear that one by teaching the emitter these
-   * components, and the shelf would still offer three controls whose use makes export fail later.
-   * Raised in review on #673.
+   * It was false, and #673 pinned the three that broke it. Not one of the twenty-seven states
+   * `modifierCapabilities`, so the composer handed each the structural default — and that default
+   * is `ComponentRecordPacks`', which is a JETPACK COMPOSE default: `testTag` and `aspectRatio` on
+   * everything, `shadow` on every container. `RemoteContentEmitter` writes none of the three, so
+   * the shelf offered three controls whose use made every export of that design fail (#674 blocker
+   * 3).
+   *
+   * Fixed by narrowing to what the catalog's declared `platform` can write rather than by
+   * twenty-seven hand-written lists — which modifiers an emitter writes is the server's fact about
+   * its own emitters, and the platform word is the catalog saying which emitter it is for. Asserted
+   * as empty rather than as a set, because there is no longer a reviewed exception: a new entry
+   * here is a regression, not a longer list.
    */
   @Test
-  fun `the modifiers the published catalog advertises are unexportable too`() {
+  fun `every modifier the published catalog advertises can be written`() {
     val offending =
       composed.components
         .filter { it.componentId.startsWith("remote-m3/") }
-        .flatMap { it.modifierCapabilities }
-        .filterNot { it in REMOTE_CONTENT_MODIFIERS }
+        .flatMap { component -> component.modifierCapabilities.map { component.componentId to it } }
+        .filterNot { (_, modifier) -> modifier in REMOTE_CONTENT_MODIFIERS }
         .distinct()
-        .sorted()
+        .sortedBy { it.second }
     assertEquals(
-      listOf("aspectRatio", "shadow", "testTag"),
+      emptyList(),
       offending,
-      "the set of advertised-but-unwritable modifiers has changed — if the emitter grew one, " +
-        "shorten this; if the composer's structural default did, it needs one",
+      "the published shelf advertises a modifier `RemoteContentEmitter` cannot write — a control " +
+        "an author can apply and then cannot export",
     )
   }
 
