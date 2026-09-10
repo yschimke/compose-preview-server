@@ -134,7 +134,11 @@ internal class ScreenGeneratorComposeExportExecutor(
       RecordFreeExport.generate(
           request.document,
           packageName,
-          packComponents = recordFreeComponents(request.document, packRecords),
+          packComponents =
+            when (val resolved = recordFreeComponents(request.document, packRecords)) {
+              is RecordFreeComponents.Refused -> return refused(resolved.code, resolved.reasons)
+              is RecordFreeComponents.Found -> resolved.components
+            },
           assets = request.document.widgetAssetBytes(),
         )
         ?.let { recordFree ->
@@ -294,10 +298,15 @@ internal class ScreenGeneratorComposeExportExecutor(
             document.widgetAssetBytes(),
             widgetHostShape,
             // A widget draws no pack component, so this lane's vocabulary is the catalog's own
-            // and nothing else. Passed here as well as in `export` because the render and the
-            // file are two views of one design: a component the file can write and the picture
-            // cannot is a hole in the canvas nobody can explain.
-            publishedComponents(document.catalogPin.systemId),
+            // and nothing else. Resolved through the same helper as `export` because the render
+            // and the file are two views of one design: a component the file can write and the
+            // picture cannot is a hole in the canvas nobody can explain, and a record version
+            // one lane refuses and the other reads is the same disagreement one layer down.
+            when (val resolved = recordFreeComponents(document, emptyList())) {
+              is RecordFreeComponents.Refused ->
+                return Generated.Refused(resolved.code, resolved.reasons)
+              is RecordFreeComponents.Found -> resolved.components
+            },
           )
       ) {
         // Unreachable: `isWearWidget` was true, so the widget emitter owns this document. Reported
@@ -329,7 +338,12 @@ internal class ScreenGeneratorComposeExportExecutor(
             document,
             packageName,
             tagNodes,
-            packComponents = recordFreeComponents(document, packRecords),
+            packComponents =
+              when (val resolved = recordFreeComponents(document, packRecords)) {
+                is RecordFreeComponents.Refused ->
+                  return Generated.Refused(resolved.code, resolved.reasons)
+                is RecordFreeComponents.Found -> resolved.components
+              },
           )
       ) {
         // Unreachable: `applies` was true, so the emitter owns this document. Reported as a
@@ -519,6 +533,12 @@ internal class ScreenGeneratorComposeExportExecutor(
     return PackRecords.Found(records)
   }
 
+  private sealed interface RecordFreeComponents {
+    data class Found(val components: Map<String, ComponentRecord>) : RecordFreeComponents
+
+    data class Refused(val code: String, val reasons: List<String>) : RecordFreeComponents
+  }
+
   /**
    * Every component a record-free emitter may resolve for [document]: this catalog's own, plus the
    * packs the design draws on.
@@ -528,12 +548,40 @@ internal class ScreenGeneratorComposeExportExecutor(
    * pack of itself — so the union is the whole vocabulary the emitter can prove a call for. Packs
    * are merged last so that if that ever stops being true, the entry naming the pack the design
    * explicitly draws on wins.
+   *
+   * The catalog's own half is version-checked here, the way the record-DRIVEN lane checks it in
+   * [generate] and [packRecordsFor] checks each pack. It has to be: `ComponentRecordSource`
+   * deserialises a newer schema with unknown fields ignored, so a record this build does not
+   * generate from arrives looking like one it does. Passing its components straight to the emitter
+   * would write Kotlin from a shape nobody promised, where the record-driven lane says which
+   * version it read and what to re-run. Raised in review on #691.
    */
   private fun recordFreeComponents(
     document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
     packRecords: List<ComponentRecordFile>,
-  ): Map<String, ComponentRecord> =
-    publishedComponents(document.catalogPin.systemId) + packRecords.byComponentId()
+  ): RecordFreeComponents {
+    val catalogSystemId = document.catalogPin.systemId
+    val published = publishedComponents(catalogSystemId)
+    if (published.isNotEmpty()) {
+      // Only when there is something to gate. A catalog serving no published composition — the
+      // deployment `remote-m3` runs in today — reaches the emitter with its hand-written cases and
+      // no record at all, and refusing it for the version of a record it never had would be a
+      // diagnostic about nothing.
+      val lookup = components(catalogSystemId)
+      if (lookup is ComponentRecordSource.Lookup.Found && !generatesFrom(lookup.record)) {
+        return RecordFreeComponents.Refused(
+          NO_COMPONENT_RECORD,
+          listOf(
+            "the component record for catalog `$catalogSystemId` is schema " +
+              "${lookup.record.schemaVersion}, and this build generates from " +
+              "$COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to $COMPONENT_RECORD_SCHEMA_VERSION; " +
+              "re-run discovery against a matching plugin version"
+          ),
+        )
+      }
+    }
+    return RecordFreeComponents.Found(published + packRecords.byComponentId())
+  }
 
   /** Each pack component under the id the design refers to it by, for the record-free emitter. */
   private fun List<ComponentRecordFile>.byComponentId(): Map<String, ComponentRecord> =

@@ -245,6 +245,47 @@ class RecordFreeComposeExportTest {
     )
   }
 
+  /**
+   * A published catalog's components are version-checked, like every other record this executor
+   * reads.
+   *
+   * `ComponentRecordSource` deserialises a newer schema with unknown fields ignored — deliberately,
+   * so a host serving a catalog built by a newer plugin still shows a shelf. Generating from one is
+   * a different question, and the record-driven lane and the pack lane both refuse it by version.
+   * The published half went straight to the emitter, which would write Kotlin from a shape nobody
+   * promised where the other two say which version they read and what to re-run. Raised in review
+   * on #691.
+   */
+  @Test
+  fun `a published catalog on a schema this build will not generate from refuses by version`() {
+    val ahead =
+      ScreenGeneratorComposeExportExecutor(
+        { ComponentRecordSource.Lookup.Found(remoteM3Record.copy(schemaVersion = 99)) },
+        PACKAGE_NAME,
+        publishedComponents = { publishedRemoteM3 },
+      )
+
+    val artifact =
+      ahead.export(
+        RevisionPinnedUiBuilderExport(
+          actor = AuthenticatedUiBuilderActor("tester"),
+          designId = widgetAroundRemoteText().id,
+          revision = widgetAroundRemoteText().revision,
+          documentHash = "hash",
+          document = widgetAroundRemoteText(),
+          catalog = catalog,
+          format = ExportFormatV1.COMPOSE,
+        )
+      )
+
+    assertEquals(
+      listOf(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD),
+      artifact.diagnostics.map { it.code },
+      artifact.content,
+    )
+    assertTrue("is schema 99" in artifact.diagnostics.single().message)
+  }
+
   @Test
   fun `the record-free catalogs are the two that ship without a record`() {
     assertEquals(setOf("remote-m3", "wear-m3"), RecordFreeExport.CATALOG_SYSTEM_IDS)
@@ -254,12 +295,15 @@ class RecordFreeComposeExportTest {
    * What `remote-m3` composes to on a host that reads its published file — the map `ServeRunner`
    * hands the executor, built here by the same call it makes.
    */
+  private val remoteM3Record: ComponentRecordFile by lazy {
+    json.decodeFromString(
+      java.io.File("../docs/design/fixtures/ui-builder/remote-m3-record-v1.json").readText()
+    )
+  }
+
   private val publishedRemoteM3: Map<String, ComponentRecord> by lazy {
     val fixtures = java.io.File("../docs/design/fixtures/ui-builder")
-    val record =
-      json.decodeFromString<ComponentRecordFile>(
-        fixtures.resolve("remote-m3-record-v1.json").readText()
-      )
+    val record = remoteM3Record
     val composed =
       PublishedUiBuilderCatalog.compose(
         fixtures.resolve("remote-m3-published-v1.json").readText(),
