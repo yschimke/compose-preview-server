@@ -2225,17 +2225,20 @@ function preScoreComparisonChips(atBaseline: boolean) {
     // it and repaint a resting verdict over the pair currently being inspected.
     if (specActive() || !img.complete || !img.naturalWidth) return;
     const api = compareApi();
-    const actual = specActualUrl();
+    // The candidate is already decoded on the stage. Re-loading its `/render` URL is not merely a
+    // redundant decode: no-store override renders can hit the daemon again and race the frame the
+    // visitor is actually looking at. Key by that frame's URL, but score the element itself.
+    const actual = img.currentSrc || img.src;
     const sources = specSourceList();
     if (!api || !actual || !sources.length) return;
     const key = actual + "\n" + sources.map((source) => source.src).join("\n");
     if (key === previewScoreKey) return;
     previewScoreKey = key;
     const generation = ++previewScoreGeneration;
-    // Decode the current render once and share it across the sources. Calling `scoreImageUrls` for
-    // each chip would decode the same candidate once per button, which is exactly the hidden cost
-    // this small surface is meant to avoid.
-    const actualImage = api.loadImage(actual);
+    // Share the already-decoded candidate across the sources. Calling `scoreImageUrls` for each
+    // chip would request the same render once per button, which is exactly the hidden cost this
+    // small surface is meant to avoid.
+    const actualImage = Promise.resolve(img);
     for (const source of sources) {
         const chip = comparisonChipFor(source);
         if (!chip) continue;
