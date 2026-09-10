@@ -1345,9 +1345,14 @@ class ServeUiBuilderMcp(
         tool(
           APPLY,
           "Apply design mutations — insertNode, setProperty, deleteNode, moveNode and the rest of " +
-            "DesignMutationV1 — as one operation. `baseRevision` is the revision you read, and a " +
-            "mismatch is reported rather than merged, so a concurrent edit cannot be lost. This " +
+            "DesignMutationV1 — as one operation. `baseRevision` is the revision you read; " +
+            "the outcome reports conflicts or rejected edits. This " +
             "is how an agent adds a scaffold, fills its slots and sets modifiers. " +
+            "Use `setStateVariable` with `name` and `declaration` to add or edit state, " +
+            "`removeStateVariable` with `name` to remove unused state, and `setEventBinding` " +
+            "with `nodeId`, `event` and an ordered `actions` array to edit behavior. " +
+            "An empty actions array removes the event handler. These are the same edits as " +
+            "Screen > State and Properties > Actions in the browser. " +
             "`removeNodeProperty` (or a setProperty whose value is `{\"type\":\"null\"}`) " +
             "unsets the property — the way back after trying one — and is refused, naming the " +
             "node and the field, when the catalog requires it. When somebody has commented on " +
@@ -1360,7 +1365,7 @@ class ServeUiBuilderMcp(
             "operationId":{"type":"string","description":"Your id for this operation; makes a retry idempotent."},
             "baseRevision":{"type":"integer","description":"The revision these mutations were written against."},
             "clientId":{"type":"string"},
-            "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects."}
+            "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects. State example: {\"type\":\"setStateVariable\",\"name\":\"expanded\",\"declaration\":{\"type\":\"value\",\"valueType\":\"bool\",\"initialValue\":false,\"nullable\":false,\"persistence\":\"preview\"}}. Event example: {\"type\":\"setEventBinding\",\"nodeId\":\"button\",\"event\":\"click\",\"actions\":[{\"type\":\"toggle\",\"variable\":\"expanded\"}]}. Declare state before binding it in the batch."}
           },"required":["designId","operationId","baseRevision","operations"],"additionalProperties":false}
           """,
         ),

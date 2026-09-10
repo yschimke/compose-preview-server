@@ -2081,9 +2081,7 @@ private fun NewDesignDialog(
           isError = designId.isNotEmpty() && !designIdValid,
           singleLine = true,
         )
-        // State is declared here because `CreateDesign` carries a whole document and no released
-        // mutation reaches `stateVariables` afterwards. Until one does, this is the only moment a
-        // design can be given the variables the inspector then binds properties to.
+        // Optional starting state. The Screen inspector can add and edit declarations later.
         if (!stateExpanded && declared.isEmpty()) {
           TextButton(
             onClick = { stateExpanded = true },
@@ -6492,6 +6490,8 @@ private fun InspectorBody(
       // section joined them below. A tab that silently clips its last control is worse than one
       // that scrolls.
       Column(Modifier.verticalScroll(rememberScrollState())) {
+        StateVariablesInspector(state.document, onTextInputFocusChanged, dispatch)
+        HorizontalDivider(Modifier.padding(vertical = 10.dp))
         ScreenEnvironmentInspector(
           document = state.document,
           devicePresets = devicePresets,
@@ -6667,6 +6667,9 @@ private fun InspectorBody(
             )
           }
         }
+      }
+      if (node.componentId in COMPOSE_EMITTED_CLICK_COMPONENTS || node.eventBindings.isNotEmpty()) {
+        item { EventActionsInspector(state.document, node, onTextInputFocusChanged, dispatch) }
       }
       if (node.modifiers.isNotEmpty()) {
         item {

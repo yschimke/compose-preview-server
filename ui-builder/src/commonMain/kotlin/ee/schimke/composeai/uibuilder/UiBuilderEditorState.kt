@@ -889,6 +889,20 @@ sealed interface UiBuilderEditorEvent {
     val draft: String,
   ) : UiBuilderEditorEvent
 
+  data class SetStateVariable(val name: String, val declaration: JsonObject) : UiBuilderEditorEvent
+
+  data class RemoveStateVariable(val name: String) : UiBuilderEditorEvent
+
+  data class SetEventBinding(val nodeId: String, val event: String, val actions: JsonArray) :
+    UiBuilderEditorEvent
+
+  data class AppendAction(
+    val nodeId: String,
+    val event: String,
+    val action: EditorStateAction,
+    val index: Int? = null,
+  ) : UiBuilderEditorEvent
+
   data class UpdateEnvironment(val settings: ScreenEnvironmentSettings) : UiBuilderEditorEvent
 
   data class ShowInspector(val mode: EditorInspectorMode) : UiBuilderEditorEvent
@@ -914,10 +928,8 @@ sealed interface UiBuilderEditorEvent {
   /**
    * Insert a component already wired to write state when it is clicked.
    *
-   * Insertion is the only moment a client can put an event binding on a node: the wire's mutation
-   * set reaches properties and never `eventBindings`, while `InsertNode` carries a whole node. The
-   * same shape of limit as declaring state at creation, and the same fix — `setEventBinding` on the
-   * wire — after which a handler can be added to a node that already exists.
+   * Insert the node and its initial handler atomically. Existing handlers can also be edited with
+   * [SetEventBinding].
    */
   data class InsertComponentWithAction(
     val componentId: String,
@@ -1465,6 +1477,25 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.BindPropertyToState ->
         bindPropertyToState(state, event.nodeId, event.property, event.variable, event.equalsValue)
       is UiBuilderEditorEvent.UnbindProperty -> unbindProperty(state, event.nodeId, event.property)
+      is UiBuilderEditorEvent.SetStateVariable ->
+        state.apply(
+          state.operationSequence + 1,
+          listOf(DesignOperation.SetStateVariable(event.name, event.declaration)),
+          selectionAfter = state.selectedNodeId,
+        )
+      is UiBuilderEditorEvent.RemoveStateVariable ->
+        state.apply(
+          state.operationSequence + 1,
+          listOf(DesignOperation.RemoveStateVariable(event.name)),
+          selectionAfter = state.selectedNodeId,
+        )
+      is UiBuilderEditorEvent.SetEventBinding ->
+        state.apply(
+          state.operationSequence + 1,
+          listOf(DesignOperation.SetEventBinding(event.nodeId, event.event, event.actions)),
+          selectionAfter = event.nodeId,
+        )
+      is UiBuilderEditorEvent.AppendAction -> appendAction(state, event)
       is UiBuilderEditorEvent.UpdateEnvironment -> updateEnvironment(state, event.settings)
       is UiBuilderEditorEvent.ToggleModifier -> toggleModifier(state, event.nodeId, event.type)
       is UiBuilderEditorEvent.SetModifierValue ->
@@ -1675,6 +1706,10 @@ class UiBuilderEditorReducer(
         is DesignOperation.RemoveNodeProperty ->
           "Cleared ${operation.property} on ${label(operation.nodeId)}"
         is DesignOperation.SetEnvironment -> "Set ${operation.field} on the screen"
+        is DesignOperation.SetStateVariable -> "Set state ${operation.name}"
+        is DesignOperation.RemoveStateVariable -> "Removed state ${operation.name}"
+        is DesignOperation.SetEventBinding ->
+          "Changed ${operation.event} actions on ${label(operation.nodeId)}"
         is DesignOperation.SetModifiers -> "Changed the layout of ${label(operation.nodeId)}"
       }
     }
@@ -2916,6 +2951,35 @@ class UiBuilderEditorReducer(
    * against the catalog itself — and re-deriving it from the selection would refuse a slot that is
    * demonstrably legal, because the selection is wherever the operator last clicked.
    */
+  private fun appendAction(
+    state: UiBuilderEditorState,
+    event: UiBuilderEditorEvent.AppendAction,
+  ): UiBuilderEditorState {
+    val sequence = state.operationSequence + 1
+    val declaration =
+      state.document.stateVariables[event.action.variable] as? JsonObject
+        ?: return state.rejected(
+          sequence,
+          RejectionCode.INVALID_PROPERTY,
+          "Unknown state ${event.action.variable}",
+        )
+    event.action.valueRefusal(declaration)?.let {
+      return state.rejected(sequence, RejectionCode.INVALID_PROPERTY, it)
+    }
+    val node = state.document.nodes[event.nodeId] ?: return state
+    val actions = (node.eventBindings[event.event] as? JsonArray).orEmpty().toMutableList()
+    if (event.index == null) actions += event.action.encoded(declaration)
+    else if (event.index in actions.indices)
+      actions[event.index] = event.action.encoded(declaration)
+    else
+      return state.rejected(sequence, RejectionCode.INVALID_COMMAND, "That action no longer exists")
+    return state.apply(
+      sequence,
+      listOf(DesignOperation.SetEventBinding(event.nodeId, event.event, JsonArray(actions))),
+      selectionAfter = event.nodeId,
+    )
+  }
+
   private fun insertAt(
     state: UiBuilderEditorState,
     component: ComponentCapability,
@@ -5561,6 +5625,9 @@ private fun AcceptedCommand.subjectNodeId(): String? =
       is DesignOperation.SetProperty -> operation.nodeId
       is DesignOperation.RemoveNodeProperty -> operation.nodeId
       is DesignOperation.SetModifiers -> operation.nodeId
+      is DesignOperation.SetStateVariable -> null
+      is DesignOperation.RemoveStateVariable -> null
+      is DesignOperation.SetEventBinding -> operation.nodeId
       is DesignOperation.SetEnvironment -> null
     }
   }
@@ -5576,7 +5643,12 @@ private fun AcceptedCommand.subjectNodeId(): String? =
 private fun AcceptedCommand.describeChanges(): List<EditorOperationChange> =
   propertyChanges.map {
     EditorOperationChange(
-      label = it.address.property,
+      label =
+        when (it.address.target) {
+          PropertyTarget.StateVariable -> "State ${it.address.property}"
+          PropertyTarget.EventBinding -> "${it.address.property} actions"
+          PropertyTarget.Property -> it.address.property
+        },
       before = it.before?.displayValue(),
       after = it.afterValue?.displayValue(),
     )

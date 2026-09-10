@@ -173,7 +173,6 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 enum class UiBuilderLayer {
@@ -507,6 +506,13 @@ fun UiBuilderSurface(
         }
       }
     }
+  var appliedDeclarations by remember(document.id) { mutableStateOf(document.stateVariables) }
+  SideEffect {
+    if (appliedDeclarations != document.stateVariables) {
+      reconcilePreviewState(state, appliedDeclarations, document.stateVariables)
+      appliedDeclarations = document.stateVariables
+    }
+  }
   val theme = document.environment["theme"]?.jsonPrimitive?.contentOrNull
   val dark = theme == "dark" || (theme == "system" && isSystemInDarkTheme())
   val platformDensity = LocalDensity.current
@@ -3126,10 +3132,33 @@ private fun UiBuilderNode.dispatch(
   onState: (String, String?) -> Unit,
 ) {
   val actions = eventBindings[event] as? JsonArray ?: return
-  actions.forEach { element ->
-    uiBuilderStateWrite(element.jsonObject, state)?.let { (variable, next) ->
-      onState(variable, next)
-    }
+  uiBuilderStateWrites(actions, state).forEach { (variable, next) -> onState(variable, next) }
+}
+
+/** Later actions observe earlier writes even when a host applies callbacks after dispatch. */
+internal fun uiBuilderStateWrites(
+  actions: JsonArray,
+  state: Map<String, String?>,
+): List<Pair<String, String?>> {
+  val working = state.toMutableMap()
+  return actions.mapNotNull { element ->
+    (element as? JsonObject)
+      ?.let { uiBuilderStateWrite(it, working) }
+      ?.also { (name, value) -> working[name] = value }
+  }
+}
+
+/** Authoring a declaration resets that variable's preview value; unrelated interactions survive. */
+internal fun reconcilePreviewState(
+  state: MutableMap<String, String?>,
+  before: JsonObject,
+  after: JsonObject,
+) {
+  (before.keys - after.keys).forEach { state.remove(it) }
+  after.forEach { (name, declaration) ->
+    if (declaration != before[name])
+      state[name] =
+        ((declaration as? JsonObject)?.get("initialValue") as? JsonPrimitive)?.contentOrNull
   }
 }
 

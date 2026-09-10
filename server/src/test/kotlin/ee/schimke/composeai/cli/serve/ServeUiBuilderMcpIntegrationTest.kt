@@ -163,6 +163,75 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `MCP authors and reads the state and ordered actions edited by the browser`() {
+    val server = start()
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    val applied =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"wire-behavior","baseRevision":0,
+      "operations":[
+        {"type":"setStateVariable","name":"expanded","declaration":{"type":"value","valueType":"bool","initialValue":false,"nullable":false,"persistence":"preview"}},
+        {"type":"setEventBinding","nodeId":"session","event":"click","actions":[{"type":"toggle","variable":"expanded"},{"type":"set","variable":"expanded","value":true}]}
+      ]
+    }""",
+      )
+    assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(applied)).outcome)
+    val snapshot =
+      assertIs<SnapshotResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.GET_DESIGN,
+              """{"designId":"agent-screen","includeCatalog":true}""",
+            )
+          )
+        )
+        .snapshot
+        .state
+        .document
+    assertEquals(
+      false,
+      snapshot.stateVariables
+        .getValue("expanded")
+        .initialValue
+        .jsonPrimitive
+        .content
+        .toBooleanStrict(),
+    )
+    val actions = snapshot.nodes.getValue("session").eventBindings.getValue("click")
+    assertEquals(2, actions.size)
+    assertIs<ee.schimke.composeai.uibuilder.protocol.ToggleActionV1>(actions.first())
+    assertIs<ee.schimke.composeai.uibuilder.protocol.SetValueActionV1>(actions.last())
+    val refused =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"remove-used","baseRevision":1,
+      "operations":[{"type":"removeStateVariable","name":"expanded"}]
+    }""",
+      )
+    assertIs<RejectedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(refused)).outcome)
+    val removed =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"clear-behavior","baseRevision":1,
+      "operations":[{"type":"setEventBinding","nodeId":"session","event":"click","actions":[]},{"type":"removeStateVariable","name":"expanded"}]
+    }""",
+      )
+    assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(removed)).outcome)
+  }
+
+  @Test
   fun `an agent shares a design with somebody else and takes it back`() {
     val server = start()
     envelope(

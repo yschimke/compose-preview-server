@@ -318,6 +318,58 @@ class RemoteContentRecordFallbackTest {
     assertTrue("RemoteButton(onClick = valueChange(page, 2.ri)) {" in source, source)
   }
 
+  @Test
+  fun `an ordered event exports every action through combinedAction`() {
+    val result =
+      WearWidgetCodeExporter.export(
+        widget(
+          mapOf(
+            "button" to
+              UiBuilderNode(
+                "button",
+                "remote-m3/remote-button",
+                slots = mapOf("children" to listOf("label")),
+                eventBindings =
+                  buildJsonObject {
+                    put(
+                      "click",
+                      JsonArray(
+                        listOf(
+                          action("set", "page", JsonPrimitive(2)),
+                          action("toggle", "expanded"),
+                        )
+                      ),
+                    )
+                  },
+              ),
+            "label" to
+              UiBuilderNode(
+                "label",
+                "remote-m3/remote-text",
+                properties = buildJsonObject { put("text", value("Next")) },
+              ),
+          ),
+          childId = "button",
+          state =
+            buildJsonObject {
+              put("page", stateVariable("int", JsonPrimitive(0)))
+              put("expanded", stateVariable("bool", JsonPrimitive(false)))
+            },
+        ),
+        components =
+          mapOf("remote-m3/remote-button" to remoteButton, "remote-m3/remote-text" to remoteText),
+      )
+    val source = assertIs<WearWidgetCodeExporter.Result.Emitted>(result).source
+    assertTrue(
+      "combinedAction(valueChange(page, 2.ri), valueChange(expanded, !expanded))" in source,
+      source,
+    )
+    assertTrue(
+      "import androidx.compose.remote.creation.compose.action.combinedAction" in source,
+      source,
+    )
+  }
+
   /**
    * `selectOrClear` assigns null, and a Remote value cannot be one. Refused by name rather than
    * given a sentinel, because clearing a selection and setting it to zero are different designs.

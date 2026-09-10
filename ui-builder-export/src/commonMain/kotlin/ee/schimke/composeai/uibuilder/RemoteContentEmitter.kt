@@ -176,6 +176,7 @@ internal class RemoteContentEmitter(
   private var usesRemoteBoolean = false
   private var usesRemoteInt = false
   private var usesLambdaAction = false
+  private var usesCombinedAction = false
 
   /** Callables the record-driven fallback wrote, so their imports are the ones it used. */
   private val usedComponentImports = mutableSetOf<String>()
@@ -637,13 +638,10 @@ internal class RemoteContentEmitter(
    * The event key is the parameter without its `on`: `onClick` reads `click`, which is what the
    * Compose lane's `actionLambda("click", …)` reads for the same component.
    *
-   * Four refusals, each because the alternative is a design that means something else:
+   * Refusals, each because the alternative is a design that means something else:
    * - **`selectOrClear`** assigns null, and `valueChange`'s second parameter is a non-null
    *   `RemoteState<T>`. A design that clears a selection and one that sets it to a sentinel are
    *   different designs, so this refuses rather than picking one.
-   * - **more than one action.** A handler runs its list in order and as a unit; a Remote `Action`
-   *   is a single write, and emitting the head would export a handler that does less than the
-   *   preview shows — which the Compose lane fixed for itself and is worth not repeating.
    * - **a variable the document does not declare**, which would compile into a write to nothing.
    * - **a `toggle` on anything but a boolean**, which is what `!` means and nothing else.
    */
@@ -651,12 +649,15 @@ internal class RemoteContentEmitter(
     val event = parameter.name.removePrefix("on").replaceFirstChar { it.lowercaseChar() }
     val actions = (node.eventBindings[event] as? JsonArray).orEmpty()
     if (actions.isEmpty()) return lambdaActionExpression()
-    if (actions.size > 1) {
-      refusals +=
-        "`${node.id}` runs ${actions.size} actions on `$event` and a Remote action is one write"
-      return null
+    val emitted = actions.map { action ->
+      actionExpression(node, event, action as? JsonObject) ?: return null
     }
-    val action = actions.single() as? JsonObject
+    if (emitted.size == 1) return emitted.single()
+    usesCombinedAction = true
+    return emitted.joinToString(", ", "combinedAction(", ")")
+  }
+
+  private fun actionExpression(node: UiBuilderNode, event: String, action: JsonObject?): String? {
     val kind = action?.plainString("type")
     val variable = action?.plainString("variable")
     if (action == null || kind == null || variable == null) {
@@ -1456,6 +1457,8 @@ internal class RemoteContentEmitter(
     if (usesLottie) imports += "com.google.android.horologist.remotecompose.lottie.LottieAnimation"
     if (usesRemoteFloat) imports += "androidx.compose.remote.creation.compose.state.rf"
     if (usesRemoteBoolean) imports += "androidx.compose.remote.creation.compose.state.rb"
+    if (usesCombinedAction)
+      imports += "androidx.compose.remote.creation.compose.action.combinedAction"
     if (usesLambdaAction) {
       imports += "androidx.compose.remote.creation.compose.action.lambdaAction"
     }
