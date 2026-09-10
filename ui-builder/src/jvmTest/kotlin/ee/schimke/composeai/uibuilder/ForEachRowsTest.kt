@@ -514,6 +514,180 @@ class ForEachRowsTest {
     )
   }
 
+  /**
+   * A component that places itself from inside a loop still recurses, so it is still refused.
+   *
+   * Scoping the cycle walk to the enclosing scope — right for parameter inference, because a
+   * template's bindings read the loop's rows — hid the placement entirely, and the export emitted a
+   * function that calls itself once per row until the stack is gone.
+   */
+  @Test
+  fun `a component placing itself from inside a loop is refused`() {
+    val recursive =
+      loopInsideComponent().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              mapOf(
+                "loop" to
+                  base.nodes.getValue("loop").copy(slots = mapOf("template" to listOf("again"))),
+                "again" to
+                  UiBuilderNode(
+                    id = "again",
+                    componentId = "design/component-instance",
+                    component = JsonObject(mapOf("componentKey" to JsonPrimitive("panel"))),
+                  ),
+              )
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(recursive, catalog())
+
+    assertTrue(
+      result.diagnostics.any { it.code == "COMPONENT_CYCLE" },
+      "${result.diagnostics.map { it.code }}",
+    )
+  }
+
+  /**
+   * A `state` read inside a loop template inside a component body names a variable the generated
+   * component function cannot see, wherever in the body it sits.
+   *
+   * The loop's own checks do not stand in for the component's: they ask what varies per row, not
+   * what the function can reach.
+   */
+  @Test
+  fun `a component body reading state through a loop template is refused`() {
+    val reads =
+      loopInsideComponent().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              ("cell" to
+                base.nodes
+                  .getValue("cell")
+                  .copy(
+                    properties =
+                      JsonObject(
+                        mapOf(
+                          "containerColor" to
+                            JsonObject(
+                              mapOf(
+                                "type" to JsonPrimitive("state"),
+                                "variable" to JsonPrimitive("tint"),
+                              )
+                            )
+                        )
+                      )
+                  ))
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(reads, catalog())
+
+    assertTrue(
+      result.diagnostics.any { it.code == "COMPONENT_BODY_READS_STATE" },
+      "${result.diagnostics.map { it.code }}",
+    )
+  }
+
+  /**
+   * An identity two placements deep is shared by every row exactly as one directly in the template
+   * is, so the walk that finds it follows placements to the bottom rather than one level down.
+   */
+  @Test
+  fun `an identity below a nested placement is refused`() {
+    val nested =
+      loopOverComponent().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              mapOf(
+                "cell" to
+                  base.nodes
+                    .getValue("cell")
+                    .copy(
+                      componentId = "m3/card",
+                      slots = mapOf("content" to listOf("inner-place")),
+                    ),
+                "inner-place" to
+                  UiBuilderNode(
+                    id = "inner-place",
+                    componentId = "design/component-instance",
+                    component = JsonObject(mapOf("componentKey" to JsonPrimitive("inner"))),
+                  ),
+                "inner" to
+                  UiBuilderNode(
+                    id = "inner",
+                    componentId = "m3/card",
+                    properties =
+                      JsonObject(
+                        mapOf("stableKey" to JsonObject(mapOf("value" to JsonPrimitive("inner"))))
+                      ),
+                  ),
+              ),
+          components =
+            JsonObject(
+              base.components +
+                ("inner" to
+                  JsonObject(
+                    mapOf("name" to JsonPrimitive("Inner"), "root" to JsonPrimitive("inner"))
+                  ))
+            ),
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(nested, catalog())
+
+    assertTrue(
+      result.diagnostics.any { it.code == "IDENTITY_IN_LOOP_TEMPLATE" },
+      "${result.diagnostics.map { it.code }}",
+    )
+  }
+
+  /**
+   * A placement argument is an open-keyed dictionary that capability validation never type-checks,
+   * so the binding reader has to survive one shaped like anything at all.
+   */
+  @Test
+  fun `a malformed placement argument does not take the gate down`() {
+    val malformed =
+      loopOverComponent().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              ("place" to
+                base.nodes
+                  .getValue("place")
+                  .copy(
+                    component =
+                      JsonObject(
+                        mapOf(
+                          "componentKey" to JsonPrimitive("cell"),
+                          "arguments" to
+                            JsonObject(
+                              mapOf(
+                                "containerColor" to
+                                  JsonObject(
+                                    mapOf(
+                                      "type" to JsonPrimitive("binding"),
+                                      "value" to JsonObject(emptyMap()),
+                                    )
+                                  )
+                              )
+                            ),
+                        )
+                      )
+                  ))
+        )
+      }
+
+    // The claim is that this returns rather than throwing; what it refuses on is secondary.
+    val result = CapabilityComposeCodeExporter.export(malformed, catalog())
+
+    assertTrue(!result.successful, "${result.diagnostics.map { it.code }}")
+  }
+
   /** A component whose body holds a loop over its own rows. */
   private fun loopInsideComponent(): UiBuilderDocument =
     document().let { base ->

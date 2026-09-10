@@ -435,7 +435,7 @@ private class ComposeEmitter(
     val placed =
       document.nodes.values
         .filter { it.componentId == DESIGN_COMPONENT_INSTANCE_ID }
-        .mapNotNull { it.component?.optionalString("componentKey") }
+        .mapNotNull { it.component?.primitiveString("componentKey") }
         .toSet()
     componentSignatures.entries
       .filter { it.key in placed }
@@ -538,7 +538,7 @@ private class ComposeEmitter(
    * The call a placement becomes: every parameter the body reads, then the placement's modifier.
    */
   private fun emitPlacement(node: UiBuilderNode, level: Int) {
-    val key = node.component?.optionalString("componentKey").orEmpty()
+    val key = node.component?.primitiveString("componentKey").orEmpty()
     val signature = componentSignatures[key] ?: return
     val arguments = node.component?.get("arguments") as? JsonObject ?: JsonObject(emptyMap())
     val passed =
@@ -615,7 +615,7 @@ private class ComposeEmitter(
     if (stableIdentity.isNotEmpty()) line(level, "key(\"${stableIdentity.escape()}\") {")
     line(
       bodyLevel,
-      "// node:${node.id.escapeComment()} component:${node.componentId.escapeComment()} symbol:${capability?.code?.symbol?.escapeComment() ?: node.component?.optionalString("componentKey")?.escapeComment()}",
+      "// node:${node.id.escapeComment()} component:${node.componentId.escapeComment()} symbol:${capability?.code?.symbol?.escapeComment() ?: node.component?.primitiveString("componentKey")?.escapeComment()}",
     )
     line(bodyLevel, "// typed-properties:${canonicalJson(node.properties).escapeComment()}")
     when (node.componentId) {
@@ -2025,22 +2025,28 @@ private fun UiBuilderDocument.componentSignatures():
   val refusals = mutableListOf<ExportRefusal>()
   componentsInDependencyOrder().forEach { (key, declaration) ->
     val component = declaration as? JsonObject ?: return@forEach
-    val root = component.optionalString("root")
+    val root = component.primitiveString("root")
     if (root == null || root !in nodes) {
       refusals += ExportRefusal("UNKNOWN_COMPONENT_ROOT", "component $key names no body", null)
       return@forEach
     }
     val parameters = linkedMapOf<String, BindingKind>()
+    // Two readings of the same body, and the difference is load-bearing. `body` is the scope whose
+    // bindings become parameters, so it stops at a loop's template — those bindings read the loop's
+    // rows. `contained` is everything the body holds, loop templates included, because "does this
+    // recurse" and "does this reach state the function cannot see" are questions about the whole
+    // subtree. Asking them of the scoped walk let a component place itself from inside a loop.
     val body = bodyNodes(root)
+    val contained = subtreeNodes(root)
     // A component that places itself — directly or through another — would export a composable
     // that calls itself, and rendering that recurses until the stack is gone. The canvas stops
     // the same shape with its ancestor guard; generated source has no guard to stop it with, so
     // it is refused rather than emitted.
-    if (placesItself(key, body)) {
+    if (placesItself(key, contained)) {
       refusals += ExportRefusal("COMPONENT_CYCLE", "component $key places itself", root)
       return@forEach
     }
-    body.forEach { node ->
+    contained.forEach { node ->
       // The design record's own refusal: a scaffold is a screen, and a screen inside a component
       // is a claim about the whole frame made from inside one box of it.
       if (node.componentId in SCAFFOLD_COMPONENT_IDS) {
@@ -2101,7 +2107,7 @@ private fun UiBuilderDocument.componentSignatures():
         parameters[bindingKey] = kind
       }
     }
-    val functionName = component.optionalString("name").orEmpty().componentFunctionName(key)
+    val functionName = component.primitiveString("name").orEmpty().componentFunctionName(key)
     // Two components that generate one function name, or a key that generates the name the
     // wrapper already uses, are duplicate declarations and shadowed parameters — source that
     // looks right and does not compile. Named here rather than discovered by the Kotlin compiler
@@ -2157,7 +2163,7 @@ private fun UiBuilderDocument.componentsInDependencyOrder(): List<Pair<String, J
       .sortedBy { it.key }
       .mapNotNull { (key, value) -> (value as? JsonObject)?.let { key to it } }
   val placed = declared.associate { (key, declaration) ->
-    val root = declaration.optionalString("root")
+    val root = declaration.primitiveString("root")
     key to
       if (root == null || root !in nodes) emptySet()
       else
@@ -2188,7 +2194,7 @@ private fun UiBuilderDocument.placementRefusals(
     .sortedBy(UiBuilderNode::id)
     .filter { it.componentId == DESIGN_COMPONENT_INSTANCE_ID }
     .flatMap { node ->
-      val key = node.component?.optionalString("componentKey").orEmpty()
+      val key = node.component?.primitiveString("componentKey").orEmpty()
       val signature =
         signatures[key]
           ?: return@flatMap listOf(
@@ -2329,19 +2335,9 @@ private fun UiBuilderDocument.loopSignatures(
       // body is reached through `component.componentKey` rather than through a slot.
       // Every iteration reaches one `key("…")`, so an identity anywhere a row draws would tie
       // remembered or scroll state to whichever row composed last — the sibling fold refuses an
-      // identity-bearing subtree for exactly this reason. "Anywhere a row draws" includes the body
-      // of a component the template places: that body is reached through `component.componentKey`
-      // rather than a slot, so a walk following slot edges alone never saw it.
-      val drawn =
-        templateNodes(template)
-          .flatMap { node ->
-            if (node.componentId != DESIGN_COMPONENT_INSTANCE_ID) listOf(node)
-            else {
-              val root = (components[node.placementKey()] as? JsonObject)?.optionalString("root")
-              listOf(node) + (root?.takeIf { it in nodes }?.let(::ownNodes) ?: emptyList())
-            }
-          }
-          .distinctBy(UiBuilderNode::id)
+      // identity-bearing subtree for exactly this reason. "Anywhere a row draws" reaches through
+      // placements at any depth, which is what `drawnNodes` walks.
+      val drawn = drawnNodes(template)
       drawn.forEach { node ->
         val identity = node.identityClaim()
         if (identity.isNotEmpty()) {
@@ -2569,6 +2565,58 @@ private fun UiBuilderDocument.ownNodes(root: String): List<UiBuilderNode> {
 }
 
 /**
+ * Everything from [root] down, **including** what a loop's template draws.
+ *
+ * The counterpart to [ownNodes], and the distinction is the point: parameter inference is scoped,
+ * because a template's bindings read the loop's rows rather than the scope around it, but the
+ * checks that ask *what does this body contain* are not. A component that places itself from inside
+ * a loop still recurses forever; a `state` read inside a loop template still names a variable the
+ * component function cannot see. Scoping those to [ownNodes] hid them.
+ */
+private fun UiBuilderDocument.subtreeNodes(root: String): List<UiBuilderNode> {
+  val visited = linkedSetOf<String>()
+  fun walk(id: String) {
+    if (!visited.add(id)) return
+    val node = nodes[id] ?: return
+    node.slots.entries.sortedBy { it.key }.forEach { (_, children) -> children.forEach(::walk) }
+  }
+  walk(root)
+  return visited.mapNotNull(nodes::get)
+}
+
+/**
+ * Every node one repetition of [root] draws: its own scope, and the body of every component
+ * reachable through a placement, at any depth.
+ *
+ * A placed body is reached through `component.componentKey` rather than through a slot, so a walk
+ * following slot edges alone stops at the placement node. One level of expansion was not enough: a
+ * template placing A, where A places B, drew B's body once per row too. [seen] guards the recursion
+ * — a cycle is refused elsewhere as `COMPONENT_CYCLE`, and this must not hang before it gets the
+ * chance.
+ *
+ * Nested loops are left to their own check: expansion uses [ownNodes] at each level, so an identity
+ * inside an inner loop's template is reported once, by that loop.
+ */
+private fun UiBuilderDocument.drawnNodes(
+  root: String,
+  seen: MutableSet<String> = mutableSetOf(),
+): List<UiBuilderNode> =
+  ownNodes(root)
+    .flatMap { node ->
+      if (node.componentId != DESIGN_COMPONENT_INSTANCE_ID) listOf(node)
+      else {
+        val key = node.placementKey()
+        val placedRoot = (components[key] as? JsonObject)?.primitiveString("root")
+        if (key.isEmpty() || placedRoot == null || placedRoot !in nodes || !seen.add(key)) {
+          listOf(node)
+        } else {
+          listOf(node) + drawnNodes(placedRoot, seen)
+        }
+      }
+    }
+    .distinctBy(UiBuilderNode::id)
+
+/**
  * A Kotlin function name for a component, from the name it declares.
  *
  * The declared name is what a designer typed, so it is sanitised rather than trusted; a component
@@ -2599,12 +2647,12 @@ private fun UiBuilderDocument.placesItself(key: String, body: List<UiBuilderNode
     val placed =
       frontier
         .filter { it.componentId == DESIGN_COMPONENT_INSTANCE_ID }
-        .mapNotNull { it.component?.optionalString("componentKey") }
+        .mapNotNull { it.component?.primitiveString("componentKey") }
     if (placed.any { it == key }) return true
     val fresh = placed.filter(seen::add)
     frontier = fresh.flatMap { placedKey ->
-      val root = (components[placedKey] as? JsonObject)?.optionalString("root")
-      if (root != null && root in nodes) bodyNodes(root) else emptyList()
+      val root = (components[placedKey] as? JsonObject)?.primitiveString("root")
+      if (root != null && root in nodes) subtreeNodes(root) else emptyList()
     }
   }
   return false
@@ -2623,6 +2671,17 @@ private const val FOR_EACH_COMPONENT_ID = "layout/for-each"
  * wire, and a malformed one is a diagnostic rather than an exception out of `export()`.
  */
 private fun JsonObject.scalar(): String? = (this["value"] as? JsonPrimitive)?.contentOrNull
+
+/**
+ * The text at [name], or null when it is absent or holds an object, an array or a null.
+ *
+ * `optionalString` throws on a non-primitive, which is right for a field the capability validator
+ * has already type-checked and wrong for one it has not. Placement arguments are not validated —
+ * they are an open-keyed dictionary — so `diagnose` reads them through this and refuses the
+ * document instead of taking the editor down with it.
+ */
+private fun JsonObject.primitiveString(name: String): String? =
+  (this[name] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.contentOrNull
 
 /** One generated component function: what it is called, and the parameters its body reads. */
 private data class ComponentSignature(
@@ -2656,8 +2715,8 @@ private fun UiBuilderNode.bindingKinds(
     val placed = components[placementKey()]
     return arguments.keys.sorted().mapNotNull { argument ->
       val value = arguments[argument] as? JsonObject ?: return@mapNotNull null
-      if (value.optionalString("type") != "binding") return@mapNotNull null
-      val key = value.optionalString("value")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+      if (value.primitiveString("type") != "binding") return@mapNotNull null
+      val key = value.primitiveString("value")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
       Triple(argument, key, placed?.parameters?.firstOrNull { it.first == argument }?.second)
     }
   }
@@ -2669,7 +2728,7 @@ private fun UiBuilderNode.bindingKinds(
 
 /** Which component a placement places, from its own field rather than a property. */
 private fun UiBuilderNode.placementKey(): String =
-  component?.optionalString("componentKey").orEmpty()
+  component?.primitiveString("componentKey").orEmpty()
 
 /** The dictionary a placement passes. */
 private fun UiBuilderNode.placementArguments(): JsonObject =
@@ -2678,8 +2737,8 @@ private fun UiBuilderNode.placementArguments(): JsonObject =
 /** The binding a placement's argument is, or null when it passes a value of its own. */
 private fun UiBuilderNode.argumentBindingKey(argument: String): String? {
   val value = placementArguments()[argument] as? JsonObject ?: return null
-  if (value.optionalString("type") != "binding") return null
-  return value.optionalString("value")?.takeIf { it.isNotEmpty() }
+  if (value.primitiveString("type") != "binding") return null
+  return value.primitiveString("value")?.takeIf { it.isNotEmpty() }
 }
 
 private data class HandledFields(
