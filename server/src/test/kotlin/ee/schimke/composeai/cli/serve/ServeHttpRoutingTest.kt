@@ -11,6 +11,7 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideType
 import ee.schimke.composeai.data.overrides.PreviewOverridesPayload
 import ee.schimke.composeai.data.remotecompose.RemoteComposeDeclarationsPayload
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
+import ee.schimke.composeai.remotecompose.json.RemoteComposeJson
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -46,6 +47,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * Runs public (no token) so the assertions stay about routing, not the auth gate ([ServeAuthTest]).
  */
 class ServeHttpRoutingTest {
+
+  private companion object {
+    /** The projection bound this suite configures, so its oversized fixture stays a kilobyte. */
+    const val PROJECTION_LIMIT = 1024
+  }
 
   private val previewId = "com.example.Red"
   private val refreshes = mutableListOf<String>()
@@ -256,8 +262,42 @@ class ServeHttpRoutingTest {
   private val rcColorKnob =
     RemoteComposeKnobDeclaration("shaderColor", RemoteNamedValue.ColorValue("#FF7DE2FF"))
 
-  /** Arbitrary Remote Compose document bytes, carried into the bundle as an `ir/<id>.rc`. */
-  private val rcDocBytes = byteArrayOf(0x52, 0x43, 0x01, 0x02, 0x03)
+  /**
+   * A **real** Remote Compose document, carried into the bundle as an `ir/<id>.rc`.
+   *
+   * It used to be five arbitrary bytes, which was enough while every lane over it copied bytes
+   * verbatim. `GET /render/<id>.rc.json` inflates them, so the fixture now has to be a document —
+   * and a fixture that is "plausible but not a document" is precisely the class of thing this whole
+   * area is about, so it is worth not keeping one around even where it would still pass.
+   *
+   * Compiled here rather than checked in as a binary so the assertions below can be read against
+   * their source: `bg` is why the projection names a `ColorConstant`.
+   */
+  private val rcDocBytes =
+    RemoteComposeJson.compile(
+      """
+      {
+        "header": { "width": 100, "height": 100, "contentDescription": "routing fixture" },
+        "resources": { "colors": [ { "name": "bg", "value": "#FF102030" } ] },
+        "root": [ { "box": { "modifiers": [ { "size": 100.0 }, { "background": "@colors.bg" } ] } } ]
+      }
+      """
+        .trimIndent()
+    )
+
+  /** Bytes that are not a document at all — the 422 lane's fixture. */
+  private val notADocument = byteArrayOf(0x52, 0x43, 0x01, 0x02, 0x03)
+
+  /**
+   * Past [PROJECTION_LIMIT], the bound this suite's server is configured with — not the production
+   * 8 MB one.
+   *
+   * That indirection is the whole point. JUnit builds this class once per test method, so an 8 MiB
+   * instance property is allocated 102 times and written into a temp bundle by every test that
+   * touches `server`: hundreds of megabytes of allocation and file I/O to prove one refusal. The
+   * limit is a constructor parameter precisely so the fixture can be a kilobyte.
+   */
+  private val oversizedDocument = ByteArray(PROJECTION_LIMIT + 1)
 
   private fun bundle(
     label: String,
@@ -515,6 +555,22 @@ class ServeHttpRoutingTest {
       host = bundle("staging-rc", rcDoc = rcDocBytes, stagesRcCompare = true),
       pinned = true,
     )
+    // A catalog whose `ir/<id>.rc` is NOT a document this server can inflate — what a bundle baked
+    // on a newer Remote Compose alpha than this server's `remote-core` looks like from here. The
+    // `.rc` lane still serves it (bytes are bytes; the browser player may well read it), and only
+    // the projection lane has to have an answer. Kept off `catalogSessions` like `baked-only`.
+    registry.register(
+      "broken-rc",
+      host = bundle("broken-rc", rcDoc = notADocument),
+      pinned = true,
+    )
+    // A document past the projection bound. Its bytes are never inflated, so they need not be a
+    // real document — the size check runs first, which is the property under test.
+    registry.register(
+      "huge-rc",
+      host = bundle("huge-rc", rcDoc = oversizedDocument),
+      pinned = true,
+    )
     // A PLAIN BUNDLE — the shape `--bundles` and an upload produce: the same `ServeBundleHost`
     // type with no `catalog.json` behind it. Kept off `catalogSessions` like `baked-only` so the
     // home-index test is unaffected.
@@ -535,6 +591,7 @@ class ServeHttpRoutingTest {
         sessions = registry,
         defaultSessionId = "default-mod",
         isPublic = true,
+        maxProjectableDocumentBytes = PROJECTION_LIMIT,
         rcPlayerWasmDir = rcWasmDir,
         catalogSessions = listOf("compose-m3"),
         catalogRefresh = { system, force ->
@@ -2575,6 +2632,73 @@ class ServeHttpRoutingTest {
       )
       assertTrue(rcDocBytes.contentEquals(r.body.bytes()), "rc bytes served verbatim")
     }
+  }
+
+  @Test
+  fun `the rc json lane projects the captured document`() {
+    // The same document as the `.rc` lane above, projected rather than copied: text for a person,
+    // a `diff` in a review, or `jq` in a script, where `.rc` is bytes for the in-browser player.
+    val (code, body) = get("/compose-m3/render/$previewId.rc.json")
+
+    assertEquals(200, code)
+    // The document's DECLARED size, not a measured one — nothing here ran a layout pass, and
+    // `CoreDocument.getWidth()` would report 0 for a document that has not.
+    assertTrue(body.contains("\"width\": 100"), "declared header size: $body")
+    // The named colour resource survives compilation as a `ColorConstant` plus the `NamedVariable`
+    // that gave it its name. Asserting on that rather than on `bg` is the point: the projection is
+    // of the COMPILED document, not of the JSON that produced it.
+    assertTrue(body.contains("ColorConstant"), "operations projected: $body")
+    assertTrue(body.contains("RootLayoutComponent"), "layout tree projected: $body")
+  }
+
+  @Test
+  fun `the rc json lane 422s a document it cannot inflate`() {
+    // A real state rather than a hypothetical: a bundle carries its own Remote Compose coordinates
+    // and can be baked on a newer alpha than the `remote-core` this server links. That is a
+    // statement about one document, not about the server's health, so it is a 422 and not a 500 —
+    // and the message names which document and why, so a catalog owner can act on it.
+    val (code, body) = get("/render/$previewId.rc.json?session=broken-rc")
+
+    assertEquals(422, code)
+    assertTrue(body.contains("cannot project"), "names the failure: $body")
+  }
+
+  @Test
+  fun `the document lanes keep their bytes out of shared caches`() {
+    // The token can arrive in the `X-Compose-Preview-Token` header, which no cache keys on, so an
+    // uncached-but-cacheable document could be handed to a later caller or outlive a revoked
+    // grant. This fixture server is `isPublic = true`, so the published-content policy is the one
+    // asserted here; a token-gated deployment takes `no-store` down the same branch.
+    for (suffix in listOf(".rc", ".rc.json")) {
+      val req =
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}/compose-m3/render/$previewId$suffix")
+          .build()
+      client.newCall(req).execute().use { r ->
+        assertEquals(200, r.code, "$suffix")
+        assertEquals(
+          "public, max-age=300, stale-while-revalidate=3600",
+          r.header("Cache-Control"),
+          suffix,
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `the rc json lane refuses a document too large to project`() {
+    // The projection holds the input, the parsed operation graph and the expanded JSON at once,
+    // each larger than the last, and an uploaded bundle may carry up to 100 MB of extracted
+    // content. Same 422 as an uninflatable document, because it is the same statement: this
+    // particular document is not one this lane will read.
+    val (code, body) = get("/render/$previewId.rc.json?session=huge-rc")
+
+    assertEquals(422, code)
+    assertTrue(body.contains("projection limit"), "names the limit: $body")
+    // The `.rc` lane still hands over the bytes — it reads the file either way, and a browser
+    // player is welcome to them.
+    val (rcCode, _) = get("/render/$previewId.rc?session=huge-rc")
+    assertEquals(200, rcCode)
   }
 
   @Test
