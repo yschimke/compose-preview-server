@@ -4556,7 +4556,15 @@ for (const fixture of listPageFixtures()) {
           fullPage: true,
           animations: "disabled",
         });
-        if (restoreViewport) await page.setViewportSize(restoreViewport);
+        if (restoreViewport) {
+          await page.setViewportSize(restoreViewport);
+          // Restoring a responsive state can dispatch `matchMedia` after setViewportSize returns.
+          // Let components finish moving their controls before the next cumulative state acts on
+          // one of them; otherwise it can focus a node immediately before that node is reparented.
+          await page.evaluate(
+            () => new Promise((resolve) => requestAnimationFrame(resolve)),
+          );
+        }
       }
     });
   }
