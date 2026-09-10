@@ -197,7 +197,6 @@ object RecordFreeExport {
    *
    * Null when [document] is not a widget at all, matching [generate]'s "this is not mine" rather
    * than refusing a caller that never asked about widgets.
-   *
    */
   fun nativePreview(
     document: DesignDocumentV1,
@@ -210,13 +209,13 @@ object RecordFreeExport {
    * As above, resolving a component the emitter has no hand-written case for through [components].
    *
    * A second function rather than a defaulted parameter on the one above, for binary compatibility
-   * rather than taste: `:ui-builder-export` is published to Maven Central, this function shipped
-   * in v3.21.0, and a default argument generates no compatibility overload — both the direct
+   * rather than taste: `:ui-builder-export` is published to Maven Central, this function shipped in
+   * v3.21.0, and a default argument generates no compatibility overload — both the direct
    * descriptor and the synthetic `nativePreview$default` would change, so a consumer compiled
    * against that release would get `NoSuchMethodError` calling it with the arguments it always
    * passed. [components] therefore has no default of its own: two overloads differing only by a
-   * defaulted tail parameter would make every four-argument call ambiguous. Raised in review on
-   * #691.
+   * defaulted tail parameter would make every four-argument call ambiguous. Raised in review
+   * on #691.
    *
    * @param components the catalog's own component record, by component id — the same map [generate]
    *   takes as `packComponents` for a widget, and it has to be the same one: a design whose picture
