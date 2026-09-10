@@ -189,9 +189,11 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * outside it has published an order the builder will not follow. `CatalogMenuTest` holds the
    * synthesised catalog to this; the generated pair is not there yet, which is the third blocker.
    *
-   * Both directions are asserted, because they fail differently: an unordered group is silently
-   * re-sorted, while a group named in the order with no component in it is a shelf that never
-   * appears. Raised in review on #673.
+   * Both directions are asserted, because they mean different things. An unordered group is a real
+   * authoring gap and was one: `Selection buttons`, `Edge-hugging buttons`, `Sliders` and
+   * `Steppers` are declared only in `src/snapshot/kotlin`, so the released-lane order never named
+   * them and the snapshot lane silently re-sorted four shelves. Fixed in wear-m3-catalog. An
+   * ORDERED group with no component is something else — see below. Raised in review on #673.
    */
   @Test
   fun `the menu order covers the groups the shelf actually uses`() {
@@ -214,11 +216,23 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         .sorted()
 
     assertEquals(
-      listOf("Edge-hugging buttons", "Selection buttons", "Sliders", "Steppers"),
+      emptyList(),
       used.filterNot { it in order },
       "groups the shelf uses that the order does not name — the editor sorts these alphabetically " +
         "after every ordered group, so the catalog's stated order is not the one a person sees",
     )
+    // The other direction, and it is NOT an authoring gap — it is what one-id-per-symbol costs.
+    //
+    // `RemoteText` is drawn by 29 of this catalog's stickers, across Text, Buttons, Containment
+    // and more. It is one record, so it gets one id and one shelf, and the shelf is the one the
+    // sorted-first catalog id names: `AppCard`, hence Containment. `Text` is left with no
+    // component of its own even though six stickers declare it, and `remote-m3/remote-text` sits
+    // somewhere a person would not look for it.
+    //
+    // That is the trade the symbol-derived id makes deliberately — 49 stickers collapse to 27
+    // components — and `@BuilderComponent(group = …)` is the sanctioned way for the catalog to
+    // place a component whose stickers span sections. Asserted as the exact current set so that
+    // annotating one shortens this list and says so.
     assertEquals(
       listOf(
         "Confetti",
@@ -233,7 +247,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         "Widget Container",
       ),
       order.filterNot { it in used }.sorted(),
-      "groups the order names that no component is on — every one is a shelf that never appears",
+      "groups the order names that no component is on",
     )
   }
 
