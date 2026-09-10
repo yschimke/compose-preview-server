@@ -38,7 +38,6 @@ server_modules=(
   mcp
   native-catalog-m3
   server
-  slot-preview-runtime
   usage-source-psi
   wasm-ui
 )

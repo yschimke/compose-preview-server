@@ -104,6 +104,11 @@ boundaries.
   still depends on it; the edge points the same way, it just crosses a repository boundary the
   correct direction now. `checkRenderHostIsServerFree` went with it.
 - Keep `checkServeModuleBoundary` a resolved-classpath positive allowlist, including transitives.
+- Shared-source ownership and update procedures live in
+  [`docs/design/SHARED_SOURCE_OWNERSHIP.md`](docs/design/SHARED_SOURCE_OWNERSHIP.md). The slot runtime
+  is consumed from compose-preview-daemon, the tools-owned PSI parser is a commit-pinned vendor
+  checked in CI, and `wasm-ui` remains the upstream for compose-ai-tools' catalog-specific pinned
+  fork. Do not reintroduce local slot sources or update a vendored surface without its pin/gate.
 - The preview-selector rule (`previewIdMatchesStandaloneRequest`) is stated in this repository and
   again in compose-ai-tools, because `serve` is a launcher and the CLI no longer passes its own rule
   in. `docs/serve/preview-selector-fixtures.json` is the shared golden table that pins them; it is
