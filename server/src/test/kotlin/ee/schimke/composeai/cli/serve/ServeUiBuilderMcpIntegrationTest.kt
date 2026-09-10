@@ -33,6 +33,7 @@ import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
+import java.io.File
 import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -229,6 +230,69 @@ class ServeUiBuilderMcpIntegrationTest {
     }""",
       )
     assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(removed)).outcome)
+  }
+
+  @Test
+  fun `an agent wires a button and exports its state and ordered handler over MCP`() {
+    val server =
+      start(recordFile = File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
+    val initial = document()
+    val doc =
+      initial.copy(
+        nodes =
+          initial.nodes +
+            mapOf(
+              "column" to
+                initial.nodes
+                  .getValue("column")
+                  .copy(slots = mapOf("children" to listOf("button"))),
+              "button" to
+                DesignNodeV1(
+                  "button",
+                  "m3/button",
+                  properties = mapOf("style" to StringValueV1("filled")),
+                  slots = mapOf("content" to listOf("session")),
+                ),
+            )
+      )
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)}}""",
+      )
+    assertIs<SnapshotResponseV1>(response(created), created)
+    val applied =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"wire-exportable-behavior","baseRevision":0,
+      "operations":[
+        {"type":"setStateVariable","name":"label","declaration":{"type":"value","valueType":"string","initialValue":"Ready","nullable":false,"persistence":"preview"}},
+        {"type":"setProperty","nodeId":"session","property":"text","value":{"type":"state","variable":"label"}},
+        {"type":"setEventBinding","nodeId":"button","event":"click","actions":[{"type":"set","variable":"label","value":"First"},{"type":"set","variable":"label","value":"Done"}]}
+      ]
+    }""",
+      )
+    assertIs<AcceptedOutcomeV1>(
+      assertIs<OperationOutcomeResponseV1>(response(applied), applied).outcome,
+      applied,
+    )
+    val exported =
+      envelope(
+        server,
+        ServeUiBuilderMcp.EXPORT,
+        """{"designId":"agent-screen","format":"compose"}""",
+      )
+    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    assertEquals(emptyList(), artifact.diagnostics, artifact.content)
+    assertTrue("mutableStateOf<kotlin.String>(\"Ready\")" in artifact.content, artifact.content)
+    assertTrue("Text(text = label.value)" in artifact.content, artifact.content)
+    assertTrue(
+      "onClick = { label.value = \"First\"; label.value = \"Done\" }" in artifact.content,
+      artifact.content,
+    )
   }
 
   @Test
@@ -680,6 +744,7 @@ class ServeUiBuilderMcpIntegrationTest {
     withUiBuilder: Boolean = true,
     withAuthorization: Boolean = true,
     withAssets: Boolean = false,
+    recordFile: File = ScreenGeneratorScreenFixture.componentsFile(),
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -699,9 +764,7 @@ class ServeUiBuilderMcpIntegrationTest {
             ),
           exporter =
             ScreenGeneratorComposeExportExecutor(
-              ComponentRecordSource(
-                mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
-              )::record
+              ComponentRecordSource(mapOf(CATALOG_SYSTEM_ID to recordFile))::record
             ),
           assets =
             if (withAssets) FileUiBuilderAssetStore(stateDirectory.resolve("assets")) else null,

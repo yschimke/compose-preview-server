@@ -721,7 +721,7 @@ private fun RenderNode(
   // Bindings are resolved once, here, rather than at each accessor: below this line a bound
   // property is an ordinary value, so every reader — colour, text, dimension, the modifier chain —
   // sees what the placement passed without knowing a placement happened.
-  val node = authored.withArguments(arguments)
+  val node = authored.withArguments(arguments).withPreviewState(state)
   val enabled = node.bool("enabled", true)
   val activate = { node.dispatch("click", state, onState) }
   if (node.eventBindings["click"] != null) {
@@ -1585,6 +1585,33 @@ private fun UiBuilderNode.withArguments(arguments: JsonObject): UiBuilderNode {
   }
   return if (substituted) copy(properties = JsonObject(resolved)) else this
 }
+
+/** Resolve reads for every property accessor while retaining the variable for two-way controls. */
+private fun UiBuilderNode.withPreviewState(state: Map<String, String?>): UiBuilderNode =
+  copy(
+    properties =
+      JsonObject(
+        properties.mapValues { (_, encoded) ->
+          val binding = encoded as? JsonObject ?: return@mapValues encoded
+          val variable =
+            (binding["variable"] as? JsonPrimitive)?.content ?: return@mapValues encoded
+          when (binding.wrapperType()) {
+            "state" ->
+              JsonObject(binding + ("value" to (state[variable]?.let(::JsonPrimitive) ?: JsonNull)))
+            "stateEquals" ->
+              JsonObject(
+                binding +
+                  mapOf(
+                    "type" to JsonPrimitive("bool"),
+                    "value" to
+                      JsonPrimitive(uiBuilderStateEquals(state[variable], binding["value"])),
+                  )
+              )
+            else -> encoded
+          }
+        }
+      )
+  )
 
 /**
  * The brush this gradient layer paints, on the axis its `direction` names.

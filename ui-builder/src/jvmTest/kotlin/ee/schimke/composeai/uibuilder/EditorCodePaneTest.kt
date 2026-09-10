@@ -102,14 +102,14 @@ class EditorCodePaneTest {
 
   @Test
   fun `a design the export refuses shows the reasons where the source would be`() {
-    // The flagship fixture does not export — enum values with no Kotlin member, a state read
-    // needing a `remember` preamble, an adaptive grid specification. A pane that went blank here
+    // The flagship fixture does not export — enum values with no Kotlin member, a text callback
+    // needing its event value, an adaptive grid specification. A pane that went blank here
     // would hide the actionable half of the answer behind a different tab.
     val code = assertIs<EditorGeneratedCode.Refused>(reducer.generatedCode(jetcaster))
 
     assertTrue(code.reasons.isNotEmpty())
     assertTrue(
-      code.reasons.any { it.contains("state variable `searchQuery`") },
+      code.reasons.any { it.contains("eventBindings.valueChange") && it.contains("callback") },
       code.reasons.toString(),
     )
     // The same answer the problems panel gives, because it is the same call.

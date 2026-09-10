@@ -1,11 +1,14 @@
 package ee.schimke.composeai.uibuilder.export
 
 import ee.schimke.composeai.discovery.ChainLink
+import ee.schimke.composeai.discovery.ScreenAction
 import ee.schimke.composeai.discovery.ScreenDocument
 import ee.schimke.composeai.discovery.ScreenNode
+import ee.schimke.composeai.discovery.ScreenState
 import ee.schimke.composeai.discovery.ScreenValue
 import ee.schimke.composeai.discovery.SlotItem
 import ee.schimke.composeai.uibuilder.cardContentFill
+import ee.schimke.composeai.uibuilder.exportedStateIdentifier
 import ee.schimke.composeai.uibuilder.protocol.AdaptiveGridValueV1
 import ee.schimke.composeai.uibuilder.protocol.AlignHorizontalModifierV1
 import ee.schimke.composeai.uibuilder.protocol.AlignModifierV1
@@ -22,6 +25,7 @@ import ee.schimke.composeai.uibuilder.protocol.ClipModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
 import ee.schimke.composeai.uibuilder.protocol.DecimalValueV1
+import ee.schimke.composeai.uibuilder.protocol.DesignActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignModifierV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
@@ -47,13 +51,19 @@ import ee.schimke.composeai.uibuilder.protocol.PaddingValueV1
 import ee.schimke.composeai.uibuilder.protocol.ResourceValueV1
 import ee.schimke.composeai.uibuilder.protocol.RotateModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ScaleModifierV1
+import ee.schimke.composeai.uibuilder.protocol.SelectActionV1
+import ee.schimke.composeai.uibuilder.protocol.SetTextActionV1
+import ee.schimke.composeai.uibuilder.protocol.SetValueActionV1
 import ee.schimke.composeai.uibuilder.protocol.ShadowModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ShapeTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.StateEqualsValueV1
+import ee.schimke.composeai.uibuilder.protocol.StateValueTypeV1
 import ee.schimke.composeai.uibuilder.protocol.StateValueV1
+import ee.schimke.composeai.uibuilder.protocol.StateVariableV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.TestTagModifierV1
+import ee.schimke.composeai.uibuilder.protocol.ToggleActionV1
 import ee.schimke.composeai.uibuilder.protocol.TypographyTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.UiValueV1
 import ee.schimke.composeai.uibuilder.protocol.VerticalAlignmentV1
@@ -65,8 +75,11 @@ import ee.schimke.composeai.uibuilder.protocol.WrapContentSizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ZIndexModifierV1
 import ee.schimke.composeai.uibuilder.toUiBuilderNode
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 
 /**
  * The Kotlin parameter a catalog slot fills, when the two are not spelled the same.
@@ -135,11 +148,10 @@ private fun parameterForSlot(componentId: String, slot: String): String =
  * rather than being dropped — the seventh, enum values, has its own section below because this file
  * claimed the opposite for a round:
  *
- * - **State.** `StateValueV1` and `StateEqualsValueV1` read a state variable, which needs a
- *   `remember { mutableStateOf(…) }` preamble and a hoisting decision. That is the
- *   "project-specific state adapter" the old warning gestured at; naming it is the first step to
- *   having one.
- * - **Events.** `eventBindings` needs the same for the other direction.
+ * - **Computed state.** Bare state reads and scalar declarations project to the generator's checked
+ *   state preamble. Comparisons and derived values need further expression shapes.
+ * - **Events beyond assignments.** Set and toggle handlers project in authored order. Callbacks
+ *   with event parameters and other action kinds need an explicit shared lowering.
  * - **Conditional nodes.** A `predicate` is a state read in disguise.
  * - **Assets.** `assetBindings` resolves to project-owned artwork through a caller-supplied
  *   adapter, which this projection has no channel for.
@@ -237,7 +249,11 @@ object ScreenDocumentProjection {
     val root = pass.node(roots.single())
     if (pass.reasons.isNotEmpty()) return Outcome.Refused(pass.reasons.distinct())
     return Outcome.Projected(
-      ScreenDocument(name = screenName, root = checkNotNull(root)),
+      ScreenDocument(
+        name = screenName,
+        root = checkNotNull(root),
+        state = pass.state.values.toList(),
+      ),
       assetPlaceholders = pass.assetPlaceholders.toList(),
     )
   }
@@ -281,6 +297,106 @@ object ScreenDocumentProjection {
   private class Pass(val document: DesignDocumentV1, val tagNodes: Boolean = false) {
     val reasons = mutableListOf<String>()
     val assetPlaceholders = mutableListOf<AssetPlaceholder>()
+    val state: Map<String, ScreenState> =
+      document.stateVariables
+        .mapNotNull { (name, declaration) ->
+          val type = stateType(declaration)
+          val initial = stateLiteral(declaration.initialValue, "state `$name` initial value", type)
+          if (type == null) refuse("state `$name` has no supported value type")
+          if (initial == null || type == null) null
+          else name to ScreenState(exportedStateIdentifier(name), type, initial)
+        }
+        .toMap()
+
+    private fun stateType(declaration: StateVariableV1): String? {
+      val initial = declaration.initialValue as? JsonPrimitive
+      val type =
+        when (declaration.valueType) {
+          StateValueTypeV1.BOOLEAN -> "kotlin.Boolean"
+          StateValueTypeV1.INTEGER -> "kotlin.Int"
+          StateValueTypeV1.DECIMAL -> "kotlin.Float"
+          StateValueTypeV1.STRING -> "kotlin.String"
+          null ->
+            when {
+              initial == null || initial is JsonNull -> null
+              initial.isString -> "kotlin.String"
+              initial.booleanOrNull != null -> "kotlin.Boolean"
+              initial.longOrNull != null -> "kotlin.Int"
+              initial.doubleOrNull != null -> "kotlin.Float"
+              else -> null
+            }
+        } ?: return null
+      return type + if (declaration.nullable == true) "?" else ""
+    }
+
+    private fun stateLiteral(
+      value: JsonElement?,
+      where: String,
+      type: String? = null,
+    ): ScreenValue? {
+      val primitive = value as? JsonPrimitive
+      return when {
+        primitive == null || primitive is JsonNull ->
+          refuse("$where is null or structured; the shared generator needs a typed value")
+        primitive.isString -> ScreenValue.Text(primitive.content)
+        primitive.booleanOrNull != null -> ScreenValue.Bool(primitive.booleanOrNull!!)
+        type?.removeSuffix("?") == "kotlin.Float" && primitive.doubleOrNull?.isFinite() == true ->
+          ScreenValue.Fractional(primitive.doubleOrNull!!)
+        primitive.longOrNull != null -> ScreenValue.Whole(primitive.longOrNull!!)
+        primitive.doubleOrNull?.isFinite() == true ->
+          ScreenValue.Fractional(primitive.doubleOrNull!!)
+        else -> refuse("$where is not a finite scalar")
+      }
+    }
+
+    private fun stateRead(variable: String, where: String): ScreenValue? {
+      val declared =
+        state[variable] ?: return refuse("$where reads undeclared state variable `$variable`")
+      return ScreenValue.StateRead(declared.name, declared.typeFqn)
+    }
+
+    private fun handlers(node: DesignNodeV1): Map<String, List<ScreenAction>> =
+      node.eventBindings.entries
+        .mapNotNull { (event, actions) ->
+          if (actions.isEmpty()) return@mapNotNull null
+          // The generator checks the recovered parameter's type. Unknown events and callbacks with
+          // parameters stay explicit refusals; a composable content slot can never become a
+          // handler.
+          val parameter = "on" + event.replaceFirstChar { it.uppercaseChar() }
+          val projected = actions.mapNotNull { action -> action(action, node.id, event) }
+          parameter to projected
+        }
+        .toMap()
+
+    private fun action(action: DesignActionV1, nodeId: String, event: String): ScreenAction? {
+      val where = "node `$nodeId`.`eventBindings.$event`"
+      fun target(variable: String): String? =
+        state[variable]?.name
+          ?: run {
+            refuse("$where writes undeclared state variable `$variable`")
+            null
+          }
+      fun assignment(variable: String, value: JsonElement): ScreenAction? {
+        val name = target(variable) ?: return null
+        val literal =
+          stateLiteral(value, "$where assignment", state.getValue(variable).typeFqn) ?: return null
+        return ScreenAction.Set(name, literal)
+      }
+      return when (action) {
+        is ToggleActionV1 -> target(action.variable)?.let(ScreenAction::Toggle)
+        is SetValueActionV1 -> assignment(action.variable, action.value)
+        is SelectActionV1 -> assignment(action.variable, action.value)
+        is SetTextActionV1 ->
+          refuse(
+            "$where consumes the callback's text value, which needs a parameter-aware shared handler"
+          )
+        else -> {
+          refuse("$where uses `${action::class.simpleName}`, which needs a shared action lowering")
+          null
+        }
+      }
+    }
+
     private val visiting = mutableSetOf<String>()
 
     /**
@@ -313,6 +429,7 @@ object ScreenDocumentProjection {
           // lists all three — and this is the projection acting on it.
           componentId = variant?.canonicalId ?: node.componentId,
           arguments = arguments(node, scope, variant),
+          handlers = handlers(node),
           slots =
             node.slots.entries.associate { (slot, children) ->
               val childScope = slotScope(node.componentId, variant, slot)
@@ -951,11 +1068,6 @@ object ScreenDocumentProjection {
     /** Names every part of a node this projection has no expression for. */
     private fun unexpressible(node: DesignNodeV1) {
       val id = node.id
-      if (node.eventBindings.isNotEmpty()) {
-        reasons +=
-          "node `$id` binds the event(s) ${node.eventBindings.keys.sorted().joinToString(", ")}, " +
-            "which need an event adapter this projection has no channel for"
-      }
       if (node.predicate != null) {
         reasons += "node `$id` is conditional on a predicate, which reads state"
       }
@@ -1471,11 +1583,13 @@ object ScreenDocumentProjection {
           when (value) {
             is DecimalValueV1 -> value.value
             is IntegerValueV1 -> value.value.toDouble()
-            // A `state` read is the catalog's other spelling for `progress` and for a slider's
-            // `value`, and it refuses under its own name rather than this one: the lambda is
-            // expressible now, and the state variable inside it still needs the `remember`
-            // preamble this projection does not emit.
-            else -> return value(value, node, property)
+            // The state read belongs inside the progress callback so recomposition observes the
+            // current value, just as the numeric spelling belongs inside a constant callback.
+            else -> {
+              val projected = value(value, node, property) ?: return null
+              return if (target.kind == TargetKind.FLOAT_LAMBDA) ScreenValue.Lambda(projected)
+              else projected
+            }
           }
         val narrowed = fraction.toFloat()
         // The same narrowing every other number here gets. A value past `Float` becomes `Infinity`
@@ -1596,15 +1710,11 @@ object ScreenDocumentProjection {
             "$where reads `${value.value}` from the arguments of the component or loop around it, " +
               "which this projection does not generate"
           )
-        is StateValueV1 ->
-          refuse(
-            "$where reads the state variable `${value.variable}`, which needs a " +
-              "`remember { mutableStateOf(…) }` preamble this projection does not emit"
-          )
+        is StateValueV1 -> stateRead(value.variable, where)
         is StateEqualsValueV1 ->
           refuse(
-            "$where compares the state variable `${value.variable}`, which needs the same state " +
-              "preamble"
+            "$where compares the state variable `${value.variable}`, which needs a shared " +
+              "comparison expression"
           )
         is InsetsValueV1 ->
           refuse("$where is window insets, which are read through a composable call, not a value")
@@ -1836,7 +1946,7 @@ object ScreenDocumentProjection {
       )
     }
 
-    private fun refuse(reason: String): ScreenValue? {
+    private fun refuse(reason: String): Nothing? {
       reasons += reason
       return null
     }

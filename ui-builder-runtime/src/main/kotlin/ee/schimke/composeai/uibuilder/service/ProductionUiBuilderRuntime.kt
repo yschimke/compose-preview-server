@@ -28,6 +28,7 @@ import ee.schimke.composeai.uibuilder.protocol.SvgCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.UiValueV1
 import ee.schimke.composeai.uibuilder.protocol.UploadedAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
+import ee.schimke.composeai.uibuilder.stateBindingMatchesCatalog
 import java.io.Closeable
 import java.nio.file.Files
 import java.nio.file.Path
@@ -384,7 +385,18 @@ public class CurrentM3UiBuilderCatalogExecutor(
               name,
             )
         val unwrapped = value.unwrapTypedValue()
-        if (!capability.jsonType.accepts(unwrapped)) {
+        val bindingMatches =
+          stateBindingMatchesCatalog(
+            value,
+            capability.jsonType,
+            capability.allowedValues,
+            encodedDocument.objectOrEmpty("stateVariables"),
+            name,
+          )
+        if (
+          bindingMatches == false ||
+            (bindingMatches == null && !capability.jsonType.accepts(unwrapped))
+        ) {
           return issue(
             "INVALID_PROPERTY_TYPE",
             "property $name does not match its catalog JSON type",
@@ -392,7 +404,11 @@ public class CurrentM3UiBuilderCatalogExecutor(
             name,
           )
         }
-        if (capability.allowedValues.isNotEmpty() && unwrapped !in capability.allowedValues) {
+        if (
+          bindingMatches == null &&
+            capability.allowedValues.isNotEmpty() &&
+            unwrapped !in capability.allowedValues
+        ) {
           return issue(
             "INVALID_PROPERTY_VALUE",
             "property $name is outside its catalog allowed values",

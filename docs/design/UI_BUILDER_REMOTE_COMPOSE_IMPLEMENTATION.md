@@ -28,10 +28,34 @@ site. `BehaviorInspectorTest` drives the controls through the editor reducer. Th
 suite and `ServeUiBuilderMcpIntegrationTest` cover browser/local collaboration and actual MCP
 requests respectively; the browser Wasm target also compiles.
 
+## Shared Compose export
+
+The browser code pane and the server's record-driven export now project scalar declarations,
+state reads and ordered click handlers into the shared generator. Progress values bound to state
+are read inside the generated callback. Declared decimal state accepts integer JSON spellings
+such as `0` and `1` without changing the Kotlin type.
+
+Catalog scalar properties now accept state reads of a matching declared type, using one rule shared
+by the browser and service. A text property can bind String state, and a Boolean property can bind
+a flag or a comparison. Nullable state still needs a property that admits null; colours, assets and
+constrained enums retain their own value requirements. The existing canvas resolves these property
+reads while preserving the variable references used by two-way inputs.
+
+`BehaviorScreenExportTest` pins the generated source byte for byte against
+[`state-actions.kt.txt`](fixtures/ui-builder/state-actions.kt.txt). The builder compiles that exact
+file as test source, and `GeneratedStateActionsTest` clicks both the existing builder canvas and the
+resulting Material 3 button using the same saved document. It checks the changed label, enabled
+state and progress. This is generated code running against real Compose. The MCP integration test
+also authors a declaration, binding and ordered handler, then
+exports them through the production service.
+
+Null initial values, state comparisons and callbacks that consume an event value still require
+extensions to the shared model. Their refusals remain explicit; they are required follow-up work.
+
 ## Remaining production work
 
-- Connect typed state and event handlers to the shared record-driven Compose generator, so the
-  code pane, server preview and export agree with the authoring surface.
+- Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
+  callbacks, preserving the same meaning in the code pane, server preview and export.
 - Implement state selection with named cases, normal modifiers and state bindings; lower it to
   Remote StateLayout and Compose `when`. Transitions and inactive-branch retention can follow.
 - Bring the proven direct JSON assembly and real player path into production preview, JSON and

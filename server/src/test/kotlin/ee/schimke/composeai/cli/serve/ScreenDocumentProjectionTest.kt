@@ -77,10 +77,7 @@ class ScreenDocumentProjectionTest {
   @Test
   fun `a state read is refused by variable name, not dropped`() {
     assertEquals(
-      listOf(
-        "node `text`.`text` reads the state variable `query`, which needs a " +
-          "`remember { mutableStateOf(…) }` preamble this projection does not emit"
-      ),
+      listOf("node `text`.`text` reads undeclared state variable `query`"),
       refusal(
         document(
           DesignNodeV1(
@@ -96,10 +93,7 @@ class ScreenDocumentProjectionTest {
   @Test
   fun `an event binding is refused by event name`() {
     assertEquals(
-      listOf(
-        "node `text` binds the event(s) click, which need an event adapter this projection has " +
-          "no channel for"
-      ),
+      listOf("node `text`.`eventBindings.click` writes undeclared state variable `expanded`"),
       refusal(
         document(text().copy(eventBindings = mapOf("click" to listOf(ToggleActionV1("expanded")))))
       ),
@@ -993,13 +987,9 @@ class ScreenDocumentProjectionTest {
 
   @Test
   fun `a progress read from state still refuses under its own name`() {
-    // The lambda is expressible now; the state variable inside it is not, and it says so as a state
-    // read rather than as a progress problem.
+    // A progress lambda can read declared state; an undeclared name remains a located refusal.
     assertEquals(
-      listOf(
-        "node `bar`.`progress` reads the state variable `pct`, which needs a " +
-          "`remember { mutableStateOf(…) }` preamble this projection does not emit"
-      ),
+      listOf("node `bar`.`progress` reads undeclared state variable `pct`"),
       refusal(document(indicator("progress" to StateValueV1("pct")), roots = listOf("bar"))),
     )
   }

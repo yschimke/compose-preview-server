@@ -183,7 +183,10 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -6601,7 +6604,18 @@ private fun InspectorBody(
         PropertyControl(
           field = field,
           stateVariables = if (field.name in bindableProperties) stateVariables else emptyList(),
-          needsComparison = field.name in comparisonBindingProperties,
+          needsComparison = { variable ->
+            val declaration = state.document.stateVariables[variable] as? JsonObject
+            val valueType = (declaration?.get("valueType") as? JsonPrimitive)?.content
+            val booleanState =
+              valueType == "bool" ||
+                (valueType == null &&
+                  (declaration?.get("initialValue") as? JsonPrimitive)?.booleanOrNull != null)
+            val nullableState =
+              (declaration?.get("nullable") as? JsonPrimitive)?.booleanOrNull == true ||
+                declaration?.get("initialValue") is JsonNull
+            field.name in comparisonBindingProperties && (!booleanState || nullableState)
+          },
           onTextInputFocusChanged = onTextInputFocusChanged,
           onBind = { variable, equalsValue ->
             dispatch(
@@ -6719,7 +6733,7 @@ private fun AddPropertyRow(field: EditorPropertyField, onAdd: () -> Unit) {
 private fun PropertyControl(
   field: EditorPropertyField,
   stateVariables: List<String>,
-  needsComparison: Boolean,
+  needsComparison: (String) -> Boolean,
   onTextInputFocusChanged: (Boolean) -> Unit,
   onBind: (String, String?) -> Unit,
   onUnbind: () -> Unit,
@@ -6841,7 +6855,7 @@ private fun StateBindingRow(variable: String, onUnbind: () -> Unit) {
 private fun StateBindMenu(
   field: EditorPropertyField,
   stateVariables: List<String>,
-  needsComparison: Boolean,
+  needsComparison: (String) -> Boolean,
   onTextInputFocusChanged: (Boolean) -> Unit,
   onBind: (String, String?) -> Unit,
 ) {
@@ -6861,7 +6875,7 @@ private fun StateBindMenu(
           text = { Text(variable) },
           onClick = {
             open = false
-            if (needsComparison) pending = variable else onBind(variable, null)
+            if (needsComparison(variable)) pending = variable else onBind(variable, null)
           },
         )
       }

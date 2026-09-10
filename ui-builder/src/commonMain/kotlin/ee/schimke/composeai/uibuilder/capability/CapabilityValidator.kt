@@ -4,6 +4,7 @@ import ee.schimke.composeai.uibuilder.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.UiBuilderNode
 import ee.schimke.composeai.uibuilder.export.PropertyValueKinds
 import ee.schimke.composeai.uibuilder.optionalString
+import ee.schimke.composeai.uibuilder.stateBindingMatchesCatalog
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -282,12 +283,13 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
       return
     }
 
-    validateProperties(node, capability, issues)
+    validateProperties(document, node, capability, issues)
     validateModifiers(node, capability, issues)
     validateSlots(document, node, capability, issues)
   }
 
   private fun validateProperties(
+    document: UiBuilderDocument,
     node: UiBuilderNode,
     capability: ComponentCapability,
     issues: MutableList<CapabilityValidationIssue>,
@@ -304,7 +306,15 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
           )
       } else {
         val value = encodedValue.unwrapPropertyValue()
-        if (!property.acceptsType(value)) {
+        val bindingMatches =
+          stateBindingMatchesCatalog(
+            encodedValue,
+            property.jsonType,
+            property.allowedValues,
+            document.stateVariables,
+            name,
+          )
+        if (bindingMatches == false || (bindingMatches == null && !property.acceptsType(value))) {
           issues +=
             issue(
               CapabilityIssueCode.INVALID_PROPERTY_TYPE,
@@ -312,7 +322,11 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
               "property $name does not match ${property.typeNames().joinToString(" or ")}",
               name,
             )
-        } else if (property.allowedValues.isNotEmpty() && value !in property.allowedValues) {
+        } else if (
+          bindingMatches == null &&
+            property.allowedValues.isNotEmpty() &&
+            value !in property.allowedValues
+        ) {
           issues +=
             issue(
               CapabilityIssueCode.INVALID_PROPERTY_VALUE,
