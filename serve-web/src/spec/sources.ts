@@ -94,6 +94,22 @@ export function changesSource(
 }
 
 /**
+ * Whether a resting-bar source chip should close the comparison lane.
+ *
+ * Every source on that bar is a toggle, not just the imported kit. A pressed chip means its source
+ * is already on the stage, so pressing it again returns to the render; an unpressed peer still
+ * selects its source. Keeping this as one decision prevents the primary and peer click handlers
+ * from quietly acquiring different interaction rules again.
+ */
+export function closesSource(
+    onComparisonLane: boolean,
+    pressedId: string | null,
+    sourceId: string,
+): boolean {
+    return onComparisonLane && pressedId === sourceId;
+}
+
+/**
  * What the lane should say about the panel it is showing.
  *
  * The two kinds are NOT symmetric and the label is where that is admitted. The kit reference is a

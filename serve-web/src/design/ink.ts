@@ -117,6 +117,30 @@ export function inkFrom(
     };
 }
 
+/** Measure an already-decoded image's visible pixels, failing soft for an unreadable canvas. */
+export function imageInk(image: HTMLImageElement): InkBounds | null {
+    const sample = sampleSize(image.naturalWidth, image.naturalHeight);
+    if (!sample || typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = sample.width;
+    canvas.height = sample.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return null;
+    try {
+        context.drawImage(image, 0, 0, sample.width, sample.height);
+        return inkFrom(
+            context.getImageData(0, 0, sample.width, sample.height).data,
+            sample,
+            image.naturalWidth,
+            image.naturalHeight,
+        );
+    } catch {
+        // A cross-origin image taints the canvas. Callers retain their plain `object-fit: contain`
+        // fallback rather than losing the picture merely because its visible bounds are unreadable.
+        return null;
+    }
+}
+
 /** A percentage of a span, as a CSS length. */
 export function pct(value: number, span: number): string {
     return `${(value / span) * 100}%`;

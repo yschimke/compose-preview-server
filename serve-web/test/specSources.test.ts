@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
     activeSource,
     changesSource,
+    closesSource,
     isSpecSource,
     offersChoice,
     sourceForParam,
@@ -75,6 +76,13 @@ describe("spec lane sources", () => {
 
     it("refuses a source the lane does not offer", () => {
         assert.equal(changesSource([kit, parallel], "kit", "invented"), false);
+    });
+
+    it("closes the comparison when its pressed source chip is pressed again", () => {
+        assert.equal(closesSource(true, "kit", "kit"), true);
+        assert.equal(closesSource(true, "parallel", "parallel"), true);
+        assert.equal(closesSource(true, "kit", "parallel"), false);
+        assert.equal(closesSource(false, "parallel", "parallel"), false);
     });
 
     it("says nothing when the pressed default is implicit", () => {

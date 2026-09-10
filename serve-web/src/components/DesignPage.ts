@@ -33,7 +33,7 @@ import {
     tipAt,
     type Box,
 } from "../design/geometry.js";
-import { fitInk, inkFrom, sampleSize, type InkBounds } from "../design/ink.js";
+import { fitInk, imageInk, type InkBounds } from "../design/ink.js";
 import {
     DIFF_ALL_CLASS,
     allowsBaseline,
@@ -357,30 +357,7 @@ export class DesignPage extends ControllerElement {
      * render). Both fall back to the plain `contain` this lane had before.
      */
     private inkBounds(image: HTMLImageElement): InkBounds | null {
-        const sample = sampleSize(image.naturalWidth, image.naturalHeight);
-        if (!sample) return null;
-        const canvas = document.createElement("canvas");
-        canvas.width = sample.width;
-        canvas.height = sample.height;
-        const context = canvas.getContext("2d", { willReadFrequently: true });
-        if (!context) return null;
-        context.drawImage(image, 0, 0, sample.width, sample.height);
-        try {
-            const data = context.getImageData(
-                0,
-                0,
-                sample.width,
-                sample.height,
-            ).data;
-            return inkFrom(
-                data,
-                sample,
-                image.naturalWidth,
-                image.naturalHeight,
-            );
-        } catch {
-            return null;
-        }
+        return imageInk(image);
     }
 
     private takeInk(entry: Entry, picture: Picture): void {

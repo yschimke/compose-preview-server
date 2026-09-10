@@ -1006,12 +1006,12 @@ input, select, textarea, progress { accent-color: var(--md-sys-color-primary); }
 .cp-strip-row:hover:not([aria-current="true"]) { background: var(--cp-bg); }
 /* Both pictures in ONE box, the same rule the comparison wall follows: a design export rasterised
    at a different scale must not sit in a bigger frame than the render it is compared against. */
-.cp-strip-shot { display: grid; place-items: center; height: 84px; border-radius: 8px;
+.cp-strip-shot { position: relative; display: grid; place-items: center; height: 84px; border-radius: 8px;
   overflow: hidden; background: repeating-conic-gradient(var(--cp-surface-2) 0% 25%,
   var(--cp-surface) 0% 50%) 50% / 12px 12px; }
 .cp-viewer[data-bg-theme="dark"] ~ .cp-strip .cp-strip-shot,
 .cp-strip[data-bg-theme="dark"] .cp-strip-shot { background: #111113; }
-.cp-strip-shot img { width: 100%; height: 100%; object-fit: contain; }
+.cp-strip-shot img { position: absolute; width: 100%; height: 100%; object-fit: contain; }
 /* A variant with nothing in the design file mapped to it. An empty FRAME rather than an empty
    cell: a row that jumps left because this variant is unmapped reads as a layout fault, where a
    blank frame reads as the missing mapping it is. */
