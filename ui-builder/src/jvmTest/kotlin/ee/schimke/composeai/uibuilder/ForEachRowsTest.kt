@@ -651,7 +651,103 @@ class ForEachRowsTest {
    */
   @Test
   fun `a malformed placement argument does not take the gate down`() {
-    val malformed =
+    // The claim is that this returns rather than throwing; what it refuses on is secondary.
+    val result = CapabilityComposeCodeExporter.export(malformedPlacementArgument(), catalog())
+
+    assertTrue(!result.successful, "${result.diagnostics.map { it.code }}")
+  }
+
+  /**
+   * A row key that normalises to a Kotlin keyword generates `val class: Color` and `row.class`.
+   *
+   * `identifier()` does not escape hard keywords — nothing downstream writes the backticks — so the
+   * name is refused where it is claimed rather than emitted and discovered by the compiler.
+   */
+  @Test
+  fun `a row key that generates a Kotlin keyword is refused`() {
+    val keyword =
+      document().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              mapOf(
+                "loop" to
+                  base.nodes
+                    .getValue("loop")
+                    .copy(
+                      properties =
+                        JsonObject(
+                          mapOf(
+                            "data" to
+                              JsonObject(
+                                mapOf(
+                                  "type" to JsonPrimitive("list"),
+                                  "values" to
+                                    JsonArray(
+                                      shades.map { shade ->
+                                        JsonObject(
+                                          mapOf(
+                                            "type" to JsonPrimitive("object"),
+                                            "fields" to
+                                              JsonObject(
+                                                mapOf(
+                                                  "class" to
+                                                    JsonObject(
+                                                      mapOf(
+                                                        "value" to
+                                                          JsonPrimitive(shade.toDesignHex())
+                                                      )
+                                                    )
+                                                )
+                                              ),
+                                          )
+                                        )
+                                      }
+                                    ),
+                                )
+                              )
+                          )
+                        )
+                    ),
+                "cell" to
+                  base.nodes
+                    .getValue("cell")
+                    .copy(properties = JsonObject(mapOf("containerColor" to binding("class")))),
+              )
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(keyword, catalog())
+
+    assertTrue(
+      result.diagnostics.any { it.code == "RESERVED_ROW_PROPERTY" },
+      "${result.diagnostics.map { it.code }}",
+    )
+  }
+
+  /**
+   * The canvas survives the malformed placement argument the exporter refuses.
+   *
+   * The refusal is shown in a panel the canvas has to stay alive to draw, so a wrapper shaped
+   * `{"type": "binding", "value": {}}` has to leave the property holding what it already held
+   * rather than reach `jsonPrimitive` and take the composition down.
+   */
+  @Test
+  fun `a malformed placement argument does not take the canvas down`() {
+    val malformed = malformedPlacementArgument()
+
+    val image = renderComposeScene(FRAME_PX, FRAME_PX, Density(1f)) { UiBuilderSurface(malformed) }
+
+    assertEquals(FRAME_PX, image.width)
+  }
+
+  /**
+   * An argument the placed component does not declare is never written into the emitted call, so it
+   * is refused for being unread rather than for being an unsupported binding.
+   */
+  @Test
+  fun `an argument the component does not take is named as unknown`() {
+    val stray =
       loopOverComponent().let { base ->
         base.copy(
           nodes =
@@ -667,13 +763,8 @@ class ForEachRowsTest {
                           "arguments" to
                             JsonObject(
                               mapOf(
-                                "containerColor" to
-                                  JsonObject(
-                                    mapOf(
-                                      "type" to JsonPrimitive("binding"),
-                                      "value" to JsonObject(emptyMap()),
-                                    )
-                                  )
+                                "containerColor" to binding("shade"),
+                                "notAParameter" to binding("shade"),
                               )
                             ),
                         )
@@ -682,10 +773,13 @@ class ForEachRowsTest {
         )
       }
 
-    // The claim is that this returns rather than throwing; what it refuses on is secondary.
-    val result = CapabilityComposeCodeExporter.export(malformed, catalog())
+    val result = CapabilityComposeCodeExporter.export(stray, catalog())
 
-    assertTrue(!result.successful, "${result.diagnostics.map { it.code }}")
+    assertTrue(
+      result.diagnostics.any { it.code == "UNKNOWN_ARGUMENT" } &&
+        result.diagnostics.none { it.code == "UNSUPPORTED_BINDING" },
+      "${result.diagnostics.map { it.code to it.message }}",
+    )
   }
 
   /** A component whose body holds a loop over its own rows. */
@@ -784,6 +878,38 @@ class ForEachRowsTest {
                 )
             )
           ),
+      )
+    }
+
+  /** A placement whose bound argument holds an object where a key belongs. */
+  private fun malformedPlacementArgument(): UiBuilderDocument =
+    loopOverComponent().let { base ->
+      base.copy(
+        nodes =
+          base.nodes +
+            ("place" to
+              base.nodes
+                .getValue("place")
+                .copy(
+                  component =
+                    JsonObject(
+                      mapOf(
+                        "componentKey" to JsonPrimitive("cell"),
+                        "arguments" to
+                          JsonObject(
+                            mapOf(
+                              "containerColor" to
+                                JsonObject(
+                                  mapOf(
+                                    "type" to JsonPrimitive("binding"),
+                                    "value" to JsonObject(emptyMap()),
+                                  )
+                                )
+                            )
+                          ),
+                      )
+                    )
+                ))
       )
     }
 

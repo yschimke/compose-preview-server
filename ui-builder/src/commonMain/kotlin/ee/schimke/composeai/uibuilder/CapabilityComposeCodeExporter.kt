@@ -2258,6 +2258,24 @@ private fun UiBuilderDocument.placementRefusals(
               )
           }
         }
+        // An argument the component does not declare is never written into the call, so it is a
+        // claim the design makes and the export silently drops. Named here rather than left to
+        // binding inference, which called a bound one `UNSUPPORTED_BINDING` — true of nothing, and
+        // said only of bound arguments while a stray plain value went through unremarked.
+        val declared = signature.parameters.map { it.first }.toSet()
+        arguments
+          .orEmpty()
+          .keys
+          .sorted()
+          .filterNot { it in declared }
+          .forEach { argument ->
+            this +=
+              ExportRefusal(
+                "UNKNOWN_ARGUMENT",
+                "placement of ${signature.functionName} passes '$argument', which it does not take",
+                node.id,
+              )
+          }
       }
     }
 
@@ -2376,10 +2394,23 @@ private fun UiBuilderDocument.loopSignatures(
               )
             return@forEach
           }
+          // A key that normalises to a hard keyword generates `val class: Color` and `row.class`,
+          // neither of which is Kotlin. `identifier()` does not escape them — nothing downstream
+          // writes the backticks — so the name has to be refused where it is claimed.
+          val identifier = key.identifier()
+          if (identifier in KOTLIN_HARD_KEYWORDS) {
+            refusals +=
+              ExportRefusal(
+                "RESERVED_ROW_PROPERTY",
+                "loop ${loop.id} reads '$key', which generates the property name '$identifier' — " +
+                  "a Kotlin keyword",
+                node.id,
+              )
+            return@forEach
+          }
           // Two keys that normalise to one Kotlin name would generate a data class with duplicate
           // properties and a constructor call with duplicate arguments. Refused for the reason a
           // component's parameters are.
-          val identifier = key.identifier()
           if (properties[key] == null && !identifiers.add(identifier)) {
             refusals +=
               ExportRefusal(
@@ -2711,14 +2742,22 @@ private fun UiBuilderNode.bindingKinds(
   components: Map<String, ComponentSignature> = emptyMap()
 ): List<Triple<String, String, BindingKind?>> {
   if (componentId == DESIGN_COMPONENT_INSTANCE_ID) {
+    val placed = components[placementKey()] ?: return emptyList()
+    // Only the arguments the placed component actually declares. An argument it does not take is
+    // inert — the emitted call writes `signature.parameters` and nothing else — so inferring a
+    // kind for it produced `UNSUPPORTED_BINDING` on a binding that was never going to be written.
+    // It is still refused, by `strayArgumentRefusals`, under a code that says what is wrong.
     val arguments = placementArguments()
-    val placed = components[placementKey()]
-    return arguments.keys.sorted().mapNotNull { argument ->
-      val value = arguments[argument] as? JsonObject ?: return@mapNotNull null
-      if (value.primitiveString("type") != "binding") return@mapNotNull null
-      val key = value.primitiveString("value")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
-      Triple(argument, key, placed?.parameters?.firstOrNull { it.first == argument }?.second)
-    }
+    return placed.parameters
+      .map { it.first }
+      .sorted()
+      .mapNotNull { argument ->
+        val value = arguments[argument] as? JsonObject ?: return@mapNotNull null
+        if (value.primitiveString("type") != "binding") return@mapNotNull null
+        val key =
+          value.primitiveString("value")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        Triple(argument, key, placed.parameters.firstOrNull { it.first == argument }?.second)
+      }
   }
   return properties.keys.sorted().mapNotNull { property ->
     val key = bindingKey(property) ?: return@mapNotNull null
