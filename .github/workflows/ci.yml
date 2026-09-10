@@ -185,6 +185,22 @@ jobs:
             --component-id-prefix "remote-m3/" \
             --strict
 
+      # And m3, whose pair is generated the same way. It is NOT the same comparison: the frozen
+      # m3-catalog document is a hand transcription of the packaged Jetcaster catalog, unrelated
+      # to yschimke/m3-catalog, so the contract says a byte-equal result would be the surprising
+      # outcome and the reviewed difference list is the deliverable. `--strict` anyway — the point
+      # of the list is that every entry pins the catalog value AND the frozen value it was read
+      # against, so it fails when either side moves.
+      - name: m3 catalog-level equivalence
+        run: |
+          .github/scripts/ui-builder-equivalence.sh \
+            --policy docs/design/fixtures/ui-builder/m3-catalog-generated-published-v1.json \
+            --golden docs/design/fixtures/ui-builder/m3-catalog-capabilities-v1.json \
+            --differences docs/design/fixtures/ui-builder/m3-catalog-differences.json \
+            --catalog-id m3-catalog \
+            --component-id-prefix "m3/" \
+            --strict
+
   visual-harness:
     runs-on: ubuntu-latest
     steps:

@@ -40,18 +40,20 @@ import kotlinx.serialization.json.contentOrNull
  * key it, had no collisions and hid the whole problem.
  *
  * So: passing here is necessary before `--ui-builder-published-catalogs` names `m3-catalog`, and it
- * is not sufficient. The next thing it needs is to run against a fixture regenerated from a real
- * `composePreviewDiscover` run, which needs the id derivation fixed
- * (yschimke/compose-ai-tools#5354) and m3-catalog's vocabulary authored. Even then it is a floor
- * rather than a proof: [compare] checks what a design depends on, and a catalog can still differ in
- * something no assertion here reads.
+ * is not sufficient. The sufficient one now exists beside it:
+ * [PublishedGeneratedM3CatalogEquivalenceTest] runs the same [compare] against a pair captured from
+ * a real `composePreviewDiscover`, and the `m3 catalog-level equivalence` step in `ci.yml` holds
+ * that pair to the frozen catalog fact by fact. Read that one for what m3-catalog can actually
+ * offer; read this one for whether the composer turns a well-formed pair into the right shelf. Even
+ * together they are a floor rather than a proof: [compare] checks what a design depends on, and a
+ * catalog can still differ in something no assertion here reads.
  *
- * One caution for that regeneration, since it is the reason this fixture exists at all: do NOT edit
- * the generated file to keep this test green. The frozen shelf and a published m3 catalog hold
- * deliberately different component sets — `UI_BUILDER_CATALOG_CONTRACT.md` says so, and a real run
- * offers about sixty components the frozen one does not. The assertion that the composed catalog
- * offers nothing extra encodes the opposite, and settling that is a decision about the contract
- * rather than a fixture to adjust.
+ * One caution, since it is the reason this fixture exists at all: do NOT edit a generated file to
+ * keep a test green. The frozen shelf and a published m3 catalog hold deliberately different
+ * component sets — `UI_BUILDER_CATALOG_CONTRACT.md` says so, and a real run offers about sixty
+ * components the frozen one does not. The assertion that the composed catalog offers nothing extra
+ * encodes the opposite, and settling that is a decision about the contract rather than a fixture to
+ * adjust.
  *
  * Everything left here compares a composed shelf against the frozen one, which is the question this
  * fixture can answer honestly. Two of the composer's REFUSALS used to live here too — a builtin
