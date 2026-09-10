@@ -3114,6 +3114,20 @@ public class ServeRunner(
       } else {
         null
       }
+    // The components those same projects share between their designs, read from the same
+    // coordinates and through the same counted fetcher. Its own instance rather than a mode of the
+    // design library, because the two cache separately: a project republishes a design far more
+    // often than it changes a component, and one invalidating the other would throw away a warm
+    // index for no reason.
+    val uiBuilderComponentLibrary =
+      if (uiBuilderAdmin != null) {
+        ServeUiBuilderComponentLibrary(
+          fetch = ::fetchRegistryDocument,
+          onLog = { System.err.println(it) },
+        )
+      } else {
+        null
+      }
     // Telling the room: comment activity, posted out to one URL. Off unless an operator named one.
     //
     // Constructed here and attached in the same breath, so it subscribes before the routes that
@@ -3233,6 +3247,7 @@ public class ServeRunner(
         uiBuilderDesignCatalogs = {
           uiBuilderDesignDirectories() + uiBuilderDesignCatalogCoordinates(catalogLoads)
         },
+        uiBuilderComponentLibrary = uiBuilderComponentLibrary,
         trustAdmin = trustAdmin,
         adminToken = adminToken,
         docStore = docStore,
