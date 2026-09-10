@@ -1,5 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.discovery.ComponentRecord
+import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.helloWidgetUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
@@ -185,9 +187,120 @@ class RecordFreeComposeExportTest {
     )
   }
 
+  /**
+   * The record fallback, through the executor a server actually builds.
+   *
+   * `RemoteContentEmitter` falls back to the component record for a component it has no
+   * hand-written case for, and that fallback shipped unreachable: the only component map this
+   * executor could build was a **pack**'s, and `remote-m3` is not a pack of itself, so an ordinary
+   * widget holding an ordinary catalog component still refused. Unit tests passed the map directly
+   * and could not see it.
+   *
+   * So this asks the production question — build the executor the way `ServeRunner` builds it and
+   * export a design — and asks it BOTH ways, because only the pair is evidence. Without the publish
+   * the component refuses by name, which is the honest answer for a host that composed no catalog;
+   * with it the same design writes the call.
+   *
+   * `remote-m3/remote-text` is the subject because it is the plainest thing a Remote design is made
+   * of and the emitter has no case for it: one required parameter, a `RemoteString`.
+   */
+  @Test
+  fun `a published catalog's own component exports, and refuses without the publish`() {
+    val design = widgetAroundRemoteText()
+
+    val unpublished = export(design)
+    assertEquals(
+      listOf(ScreenGeneratorComposeExportExecutor.UNEXPRESSIBLE_DOCUMENT),
+      unpublished.diagnostics.map { it.code },
+      unpublished.content,
+    )
+    assertTrue("remote-m3/remote-text" in unpublished.diagnostics.single().message)
+
+    val artifact =
+      publishedExecutor.export(
+        RevisionPinnedUiBuilderExport(
+          actor = AuthenticatedUiBuilderActor("tester"),
+          designId = design.id,
+          revision = design.revision,
+          documentHash = "hash",
+          document = design,
+          catalog = catalog,
+          format = ExportFormatV1.COMPOSE,
+        )
+      )
+
+    assertEquals(emptyList(), artifact.diagnostics, artifact.content)
+    assertTrue("RemoteText(" in artifact.content, artifact.content)
+    assertTrue("text = \"Hello\".rs" in artifact.content, artifact.content)
+
+    // And the picture, which is a third lane rather than the same one: the native preview
+    // exporter builds its own emitter. A design whose file writes a component and whose render
+    // refuses it is a hole in the canvas nobody can explain from the artifact.
+    val preview =
+      publishedExecutor.generate(design) as ScreenGeneratorComposeExportExecutor.Generated.Emitted
+    assertTrue("RemoteText(" in preview.source, preview.source)
+    assertTrue(
+      executor.generate(design) is ScreenGeneratorComposeExportExecutor.Generated.Refused,
+      "the same design must refuse for the host that composed no catalog",
+    )
+  }
+
   @Test
   fun `the record-free catalogs are the two that ship without a record`() {
     assertEquals(setOf("remote-m3", "wear-m3"), RecordFreeExport.CATALOG_SYSTEM_IDS)
+  }
+
+  /**
+   * What `remote-m3` composes to on a host that reads its published file — the map `ServeRunner`
+   * hands the executor, built here by the same call it makes.
+   */
+  private val publishedRemoteM3: Map<String, ComponentRecord> by lazy {
+    val fixtures = java.io.File("../docs/design/fixtures/ui-builder")
+    val record =
+      json.decodeFromString<ComponentRecordFile>(
+        fixtures.resolve("remote-m3-record-v1.json").readText()
+      )
+    val composed =
+      PublishedUiBuilderCatalog.compose(
+        fixtures.resolve("remote-m3-published-v1.json").readText(),
+        record,
+        ExportCapabilitiesV1(composeCode = true, svg = false, png = false),
+      )
+    assertTrue(composed is PublishedUiBuilderCatalog.Result.Composed, composed.toString())
+    (composed as PublishedUiBuilderCatalog.Result.Composed).records
+  }
+
+  /** The executor as a host serving the published `remote-m3` catalog builds it. */
+  private val publishedExecutor by lazy {
+    ScreenGeneratorComposeExportExecutor(
+      { ComponentRecordSource.Lookup.Unconfigured },
+      PACKAGE_NAME,
+      publishedComponents = { systemId ->
+        if (systemId == "remote-m3") publishedRemoteM3 else emptyMap()
+      },
+    )
+  }
+
+  /** The Hello widget with its text swapped for the catalog's own `RemoteText`. */
+  private fun widgetAroundRemoteText(): DesignDocumentV1 {
+    val document = helloWidgetUiBuilderDocument("widget-1", pin("remote-m3"), environment)
+    val text = document.nodes.getValue("hello-text")
+    return document
+      .copy(
+        nodes =
+          document.nodes +
+            ("hello-text" to
+              text.copy(
+                componentId = "remote-m3/remote-text",
+                properties =
+                  JsonObject(
+                    mapOf(
+                      "text" to json.parseToJsonElement("""{"type":"string","value":"Hello"}""")
+                    )
+                  ),
+              ))
+      )
+      .toDesignDocumentV1()
   }
 
   private fun export(document: DesignDocumentV1) =

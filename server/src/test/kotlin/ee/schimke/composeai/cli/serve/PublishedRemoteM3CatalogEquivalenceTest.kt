@@ -75,7 +75,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
   private val frozen: CatalogCapabilityV1 =
     json.decodeFromString(fixture("remote-m3-capabilities-v1.json"))
 
-  private val composed: CatalogCapabilityV1 by lazy {
+  private val result: PublishedUiBuilderCatalog.Result.Composed by lazy {
     val record = json.decodeFromString<ComponentRecordFile>(fixture("remote-m3-record-v1.json"))
     val result =
       PublishedUiBuilderCatalog.compose(fixture("remote-m3-published-v1.json"), record, exports)
@@ -83,8 +83,23 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       result is PublishedUiBuilderCatalog.Result.Composed,
       "the generated pair must compose: ${(result as? PublishedUiBuilderCatalog.Result.Unusable)?.reason}",
     )
-    (result as PublishedUiBuilderCatalog.Result.Composed).catalog
+    result as PublishedUiBuilderCatalog.Result.Composed
   }
+
+  private val composed: CatalogCapabilityV1
+    get() = result.catalog
+
+  /**
+   * The record behind each published component, under the builder id a design names it with.
+   *
+   * The composition's own join rather than one this test performs. It used to read
+   * `statusSemantics.components[id].record` out of the fixture and look the canonical id up itself,
+   * which measured a map production never builds — the derived-id half of the join was missing
+   * entirely, so an unannotated component could not appear. Now it is the same map `ServeRunner`
+   * hands the export executor.
+   */
+  private val composedRecords: Map<String, ComponentRecord>
+    get() = result.records
 
   /**
    * The five the published catalog cannot offer, and why each one.
@@ -462,14 +477,9 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    */
   @Test
   fun `what the published shelf can export is the reviewed set`() {
-    val record = json.decodeFromString<ComponentRecordFile>(fixture("remote-m3-record-v1.json"))
-    val byId =
-      composed.components
-        .map { it.componentId }
-        .filter { it.startsWith("remote-m3/") }
-        .filterNot { it.startsWith("remote-m3/widget-container-") }
-        .mapNotNull { id -> recordFor(id, record)?.let { id to it } }
-        .toMap()
+    val byId = composedRecords.filterKeys {
+      it.startsWith("remote-m3/") && !it.startsWith("remote-m3/widget-container-")
+    }
 
     val refused = mutableMapOf<String, String>()
     for ((id, component) in byId) {
@@ -483,26 +493,20 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       }
     }
 
+    // The denominator, pinned. "23 of 27" is the number this work is quoted by, and without this
+    // line a join that silently dropped four components would report a shorter refusal list as an
+    // improvement. It is also what proves the composition's join and the one this test used to
+    // perform by hand agree: both find 27.
+    assertEquals(
+      27,
+      byId.size,
+      "the number of published remote-m3 components measured for export has changed",
+    )
     assertEquals(
       EXPORT_REFUSALS,
       refused.toSortedMap().toMap(),
       "the set of published components the widget exporter cannot write has changed",
     )
-  }
-
-  /** The record component a published id names, by the `record` the published file states. */
-  private fun recordFor(id: String, record: ComponentRecordFile): ComponentRecord? {
-    val canonical =
-      json
-        .parseToJsonElement(fixture("remote-m3-published-v1.json"))
-        .jsonObject["statusSemantics"]!!
-        .jsonObject["components"]!!
-        .jsonObject[id]
-        ?.jsonObject
-        ?.get("record")
-        ?.jsonPrimitive
-        ?.content ?: return null
-    return record.components.singleOrNull { it.canonicalId == canonical }
   }
 
   /** A widget whose whole body is [id], with every required parameter the design can express. */

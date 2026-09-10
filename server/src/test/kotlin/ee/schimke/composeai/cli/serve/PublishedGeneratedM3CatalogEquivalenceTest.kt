@@ -11,6 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -136,6 +137,92 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /** The same comparison [PublishedM3CatalogEquivalenceTest] makes, for the same reasons. */
+  /**
+   * The two fields the comparison above leaves out, and the blocker one of them is.
+   *
+   * `compare()` checked names, roles, traits, slots, modifiers and properties, and said nothing
+   * about `wasm` — what the browser canvas draws — or `code` — what an export calls. A component
+   * can keep every checked field and start drawing a named placeholder, and nothing would have
+   * noticed. Codex raised exactly that on #673 and it is not hypothetical: it is true of the whole
+   * shelf.
+   *
+   * **Every drawn component loses its canvas.** `PublishedUiBuilderCatalog.wasm()` computes `drawn`
+   * from the policy's `canvas`, m3-catalog's policy declares none, so every component composes to
+   * `platformSupported = false` / `UNSUPPORTED` — "drawn on the canvas as a named placeholder: this
+   * catalog claims no adapter". The frozen shelf draws twenty-five of them. That is a cutover
+   * blocker for m3 and the one this pair had not surfaced: the shelf is right, the properties are
+   * right, and the canvas goes blank.
+   *
+   * The `code` differences are not losses and are asserted as such so they cannot quietly become
+   * some other difference: the composed symbol is the FQN whose simple name is the frozen one (the
+   * frozen file abbreviates), and the composed imports are the frozen ones minus the sibling
+   * variants a hand-transcribed entry merged into one component.
+   */
+  @Test
+  fun `the published shelf draws no canvas, and its calls are the frozen ones spelled out`() {
+    val composedById = composed.components.associateBy { it.componentId }
+    val shared = frozen.components.filter { it.componentId in composedById }
+
+    val lostCanvas =
+      shared
+        .filter { it.wasm.platformSupported == JsonPrimitive(true) }
+        .map { it.componentId }
+        .filter { composedById.getValue(it).wasm.platformSupported == JsonPrimitive(false) }
+        .sorted()
+    assertEquals(
+      shared
+        .filter { it.wasm.platformSupported == JsonPrimitive(true) }
+        .map { it.componentId }
+        .sorted(),
+      lostCanvas,
+      "a drawn component kept its canvas — if m3-catalog's policy started declaring `canvas`, " +
+        "this test is the one that should say so",
+    )
+
+    for (component in shared) {
+      val got = composedById.getValue(component.componentId)
+      val frozenSymbol = component.code?.symbol ?: continue
+      val composedSymbol = got.code?.symbol
+      // One component is a member of an object rather than a top-level callable. The frozen file
+      // writes it the way it is called — symbol `SearchBarDefaults.InputField`, importing the
+      // object — and the record knows only the callable's own name, so the composed entry names
+      // `InputField` and imports a member. It is not a different component; it is the same one,
+      // uncallable, which the call-site test below reports for it by name.
+      if (component.componentId == "m3/search-input-field") continue
+      assertEquals(
+        frozenSymbol,
+        composedSymbol?.substringAfterLast('.'),
+        "${component.componentId} composes a call to a different symbol, not the same one spelled " +
+          "in full",
+      )
+      assertTrue(
+        composedSymbol in got.code?.imports.orEmpty(),
+        "${component.componentId} names a symbol it does not import: " +
+          "$composedSymbol not in ${got.code?.imports}",
+      )
+    }
+
+    // Where the import LISTS differ, and they differ in both directions. The frozen file merged
+    // sibling variants into one entry and imported all of them (`Button`, `OutlinedButton`,
+    // `TextButton` under `m3/button`); the composed entry imports the one callable it names, plus
+    // whatever the recorded call site actually needs — `m3/text-field` gains
+    // `rememberTextFieldState`, which the hand-written entry never had and a compiling call does.
+    // Pinned so a new divergence is a review rather than a surprise.
+    val importsDiffer =
+      shared
+        .filter {
+          composedById.getValue(it.componentId).code?.imports?.sorted() !=
+            it.code?.imports?.sorted()
+        }
+        .map { it.componentId }
+        .sorted()
+    assertEquals(
+      IMPORTS_DIFFER,
+      importsDiffer,
+      "the set of components whose composed imports differ from the frozen ones has changed",
+    )
+  }
+
   private fun compare(
     expected: ComponentCapabilityV1,
     actual: ComponentCapabilityV1,
@@ -164,6 +251,11 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       expected.modifierCapabilities.sorted(),
       actual.modifierCapabilities.sorted(),
     )
+    // `wasm` and `code` are deliberately NOT compared here, and this comparison used to leave
+    // them out without saying so — which is the finding. They differ for every single component,
+    // systematically, and burying twenty-five identical entries in this list would hide the two
+    // fields rather than check them. They get their own test below, which states what the
+    // difference IS. Raised in review on #673.
     val want = expected.properties.associateBy { it.name }
     val got = actual.properties.associateBy { it.name }
     check("properties", want.keys.sorted(), got.keys.sorted())
@@ -301,26 +393,43 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * The question that stops `remote-m3`, asked of m3 — and the answer is the other one.
+   * The question that stops `remote-m3`, asked of m3 — and the answer is not the one this test used
+   * to give.
    *
-   * `remote-m3` offers twenty-five components and `RemoteContentEmitter` can write none of them:
-   * its `emit` is a `when (node.componentId)` with a hand-written function per component, so a
-   * component it has no case for is one a person can insert and then cannot export. m3 does not
-   * take that lane. Its screens are written by the record-driven generator, which emits a call from
-   * the component's own recorded signature — so "can this be written" is "was the signature
-   * recovered", and that is a fact the record states.
+   * It asked `signatureKnown`, which every one of the 110 record components sets, and concluded
+   * that all 108 offered components were writable. That is the same mistake #690's review found on
+   * the Remote side, in the same words: **a recovered signature is not a callable**. A component
+   * can be a member of a `Defaults` object, need a receiver scope around it, declare type
+   * parameters, or require a parameter of a type no design value becomes — and its signature is
+   * recovered all the same.
    *
-   * All 108 say yes. This is a floor rather than a proof — a recovered signature is not a compiled
-   * screen, and the round trip through generated Kotlin belongs in m3-catalog against its own
-   * classpath (`UI_BUILDER_CATALOG_CONTRACT.md` phase 2, item 11) — but it is the half that can be
-   * checked here, and it is the half that is false for the other catalog.
+   * The record already states the stronger fact, because discovery computes it: `code.call` is the
+   * call site it could write, and `code.refusedReason` says why it could not. Asked that way,
+   * **twenty-five of the offered components have no call site**, and the reasons split in two:
+   * - *structural* — not public, a member of an object, a scope receiver, type parameters. These
+   *   are unconditional: no design can supply its way past them.
+   * - *a required parameter no value becomes* — `SearchBarState`, `CarouselState`,
+   *   `PaneScaffoldDirective`, `ImageVector`, `ToggleableState`, a `ClosedFloatingPointRange`.
+   *   Discovery is judging a standalone snippet, and a design authoring that parameter would be
+   *   judged by the generator instead — but none of these six is a type this builder's value
+   *   vocabulary has, so in practice they land the same way.
+   *
+   * Pinned as the reviewed set rather than as `isEmpty()`, so the day discovery learns one of them
+   * this test fails and says to shorten the list.
+   *
+   * What this still is not: the generator-driven measurement `remote-m3` has, where every offered
+   * component is put through the real exporter. Running the generator over this pair asks a
+   * question this fixture cannot answer honestly — the generated record's `componentIds` are the
+   * catalog's own taxonomy (`Dialog/Basic`), not the `m3/…` ids the published file names, so every
+   * component refuses to resolve before its call site is ever considered. Whether that is a real
+   * cutover blocker or the wrong record for the question is compose-preview-server#674.
    *
    * `m3/current-scheme` is pinned separately: it is a companion property rather than a callable
    * taking arguments, so an empty parameter list is correct for it and suspicious for anything
    * else.
    */
   @Test
-  fun `every component the catalog offers has a signature the generator can write`() {
+  fun `every component the catalog offers has a recorded call site, or a stated reason`() {
     val record =
       json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-generated-record-v1.json"))
     val byCanonicalId = record.components.associateBy { it.canonicalId }
@@ -334,12 +443,26 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
     val offered = composed.components.map { it.componentId }
     val unwritable =
-      offered.filterNot { byCanonicalId[recordOf[it]]?.signatureKnown == true }.sorted()
+      offered
+        .mapNotNull { id ->
+          val component = byCanonicalId[recordOf[id]] ?: return@mapNotNull null
+          val reason =
+            when {
+              !component.signatureKnown -> "the signature was never recovered"
+              component.code?.call == null ->
+                component.code?.refusedReason ?: "discovery recorded no call site"
+              else -> null
+            }
+          reason?.let { id to it }
+        }
+        .sortedBy { it.first }
+        .toMap()
     assertEquals(
-      emptyList(),
+      UNCALLABLE,
       unwritable,
-      "a component is on the shelf whose signature was never recovered, so the generator cannot " +
-        "write a call to it — insertable and unexportable, which is the blocker remote-m3 has",
+      "the set of shelf components with no recorded call site has changed — teaching discovery " +
+        "one of these shortens the list, and a new entry is a component that became insertable " +
+        "and unexportable",
     )
 
     val noArguments =
@@ -352,6 +475,79 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   private companion object {
+    /**
+     * The seven components whose composed import list is not the frozen one. See the test above:
+     * the frozen file merged sibling variants and the composed entry imports what the recorded call
+     * needs.
+     */
+    val IMPORTS_DIFFER =
+      listOf(
+        "m3/button",
+        "m3/card",
+        "m3/icon-button",
+        "m3/progress-indicator",
+        "m3/search-input-field",
+        "m3/text-field",
+        "m3/time-picker",
+      )
+
+    /**
+     * The twenty-five offered components discovery could not write a call site for, each with the
+     * reason it recorded. See the test above for what the two kinds of reason mean.
+     */
+    val UNCALLABLE =
+      mapOf(
+        "m3/adaptive-sticker" to "not public or internal, so a generated file cannot call it",
+        "m3/animated-pane" to
+          "declares type parameters that a call omitting defaulted arguments cannot infer",
+        "m3/app-bar-with-search" to
+          "no placeholder can be written for required parameter `state: SearchBarState`",
+        "m3/centered-track" to
+          "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
+        "m3/elevated-leading-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/elevated-trailing-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/horizontal-centered-hero-carousel" to
+          "no placeholder can be written for required parameter `state: CarouselState`",
+        "m3/horizontal-multi-browse-carousel" to
+          "no placeholder can be written for required parameter `state: CarouselState`",
+        "m3/horizontal-uncontained-carousel" to
+          "no placeholder can be written for required parameter `state: CarouselState`",
+        "m3/icon" to
+          "no placeholder can be written for required parameter `imageVector: ImageVector`",
+        "m3/leading-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/list-detail-pane-scaffold" to
+          "no placeholder can be written for required parameter `directive: PaneScaffoldDirective`",
+        "m3/outlined-leading-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/outlined-trailing-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/range-slider" to
+          "no placeholder can be written for required parameter `value: ClosedFloatingPointRange<Float>`",
+        "m3/search-bar" to
+          "no placeholder can be written for required parameter `state: SearchBarState`",
+        "m3/search-input-field" to
+          "a member of androidx.compose.material3.SearchBarDefaults, so a call site needs an instance of it",
+        "m3/segmented-button" to
+          "declared on androidx.compose.material3.MultiChoiceSegmentedButtonRowScope, so a call site needs that scope around it",
+        "m3/supporting-pane-scaffold" to
+          "no placeholder can be written for required parameter `directive: PaneScaffoldDirective`",
+        "m3/thumb" to
+          "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
+        "m3/tonal-leading-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/tonal-trailing-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/track" to
+          "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
+        "m3/trailing-button" to
+          "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
+        "m3/tri-state-checkbox" to
+          "no placeholder can be written for required parameter `state: ToggleableState`",
+      )
+
     /**
      * The eighty-six components the real catalog adds; see the test above for why they are pinned.
      */
