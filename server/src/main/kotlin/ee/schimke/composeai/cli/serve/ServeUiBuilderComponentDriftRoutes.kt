@@ -82,6 +82,7 @@ internal fun Route.installUiBuilderComponentDriftRoutes(
                 componentKey = it.componentKey,
                 system = it.source.system,
                 componentId = it.source.componentId,
+                paletteId = ServeUiBuilderComponentLibrary.paletteId(it.source.componentId),
                 state = it.state.name.lowercase(),
                 importedDigest = it.source.digest,
                 currentDigest = it.currentDigest,
@@ -136,6 +137,8 @@ internal data class ComponentDriftDto(
   val componentKey: String,
   val system: String,
   val componentId: String,
+  /** How the same symbol is named on the palette, so a client need not re-derive the rule. */
+  val paletteId: String,
   val state: String,
   /** The digest recorded when this design imported the symbol. */
   val importedDigest: String,
@@ -156,4 +159,10 @@ internal data class ComponentDriftResponse(
 internal const val UI_BUILDER_COMPONENT_DRIFT_PATH =
   "/api/ui-builder/v1/designs/{designId}/component-drift"
 
-private val DRIFT_JSON = Json { encodeDefaults = true }
+// `encodeDefaults` so the schema and an empty component list are always written; `explicitNulls`
+// off so `currentDigest` is absent rather than null when nothing changed — the field is evidence
+// for a claim of drift, and a present-but-null one reads as a digest that could not be computed.
+private val DRIFT_JSON = Json {
+  encodeDefaults = true
+  explicitNulls = false
+}
