@@ -120,11 +120,45 @@ of them was new:
 
 Instance paths carry the copies (`loop#2/cell`), which is why this needed step 2 first.
 
-**The export is not built**: `CapabilityComposeCodeExporter` refuses a loop by name
-(`UNSUPPORTED_CODE_COMPONENT`). A faithful `forEach` needs a generated data class for the row, its
-properties derived from the keys the template binds — the same derivation that gives a component its
-parameters — and `items(rows, key = { … })` where the loop sits inside a lazy container. That is the
-next step rather than a guess made here.
+**The export — in the editor's own lane.** This matters, and the first version of this section did
+not say it. `CapabilityComposeCodeExporter` is what the Issues panel reads and what writes the
+checked-in benchmark fixture. What the **code pane** shows, and what the server's export and native
+preview write, is the record-driven lane (`ScreenExportGate` → `ScreenDocumentProjection` →
+`ScreenGenerator`), which has no loop: a design holding one is refused there by name, and
+`ForEachRowsTest` pins that so the claim cannot rot. Teaching that lane a loop means a `forEach` in
+`ScreenGenerator`, which lives in `compose-ai-tools` and reaches this repository through a release.
+
+What the editor lane generates, with the same derivation a component's parameters use — because a
+row and a placement's arguments are the same dictionary seen from two sides:
+
+```kotlin
+Column(modifier = Modifier, verticalArrangement = Arrangement.spacedBy(0.dp)) {
+    kotlin.collections.listOf(LoopRow(shade = Color(0xFF9BE9A8)), LoopRow(shade = Color(0xFF40C463))).forEach { row ->
+        Surface(…, color = row.shade, …) { }
+    }
+}
+
+private data class LoopRow(val shade: Color)
+```
+
+The rows are checked at the gate rather than at each use, because the design carries them: a row
+missing a key its template reads is `MISSING_ROW_VALUE`, and one holding the wrong shape is
+`INVALID_ROW_VALUE` — a defaulted parameter and a `Color.Unspecified` both compile and draw the
+wrong cell. Three more refusals came out of review, each of them source that looks right and does
+not compile or does not behave: an identity (`stableKey`, `scrollStateKey`) inside a template, where
+every row would reach one `key("…")` and remembered state would follow whichever row composed last;
+two row keys that generate one Kotlin identifier; and a loop's own signature reaching into a nested
+loop's template, whose bindings read the inner rows.
+
+**A template may be a placement**, which is the composition worth having both for: one body, defined
+once, drawn per row. A placement reads through its `arguments` rather than its properties, so the
+signature reads those too and the call prints `Cell(containerColor = row.shade, …)`. `kotlin.collections.listOf` is qualified and the lambda binds a named `row` (never `it`)
+for the capture reason the sibling fold names.
+
+**A loop inside a lazy container is refused** (`LOOP_IN_LAZY_CONTAINER`). Its children are emitted
+as `item(key = …)` blocks, and rows belong in `items(rows, key = { … })` — a different call, with a
+key per row rather than one for the loop; a `forEach` inside an `item` would compose every row as a
+single recycling unit. That emitter is the remaining piece.
 
 ## 2. A reusable component that becomes its own composable
 
@@ -267,5 +301,6 @@ only has to carry a symbol during the phase where it is still moving — the fai
    draws a second copy.
 3. **Component symbols and instances**, in-document — built, canvas and export.
 4. **`ui-builder/components/`**, reusing the designs reader; graduation needs nothing new.
-5. **Data-driven loops** — the canvas is built; the export (a row data class and a `forEach`) is
-   what remains.
+5. **Data-driven loops** — built on the canvas and in the editor's export lane. Two emitters are
+   still refused by name: `items(rows, key = { … })` for a loop inside a lazy container, and the
+   record-driven lane the code pane and the server use.

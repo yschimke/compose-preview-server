@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * Does the shelf composed from m3-catalog's published files match the shelf this server
@@ -26,8 +27,41 @@ import kotlinx.serialization.json.JsonPrimitive
  * same mistake as counting components and calling it identity.
  *
  * So this compares the composed component against the frozen one field by field, for every
- * component the frozen catalog owns. It is the check that has to pass before
- * `--ui-builder-published-catalogs` names `m3-catalog`.
+ * component the frozen catalog owns.
+ *
+ * **What it does not prove, and what happened when that was assumed.** The published fixture is
+ * hand-built: its `statusSemantics.components` block was written here, keyed on the ids the frozen
+ * catalog uses. That makes this a real test of the COMPOSER — given a well-formed published pair,
+ * does the shelf come out right — and no test at all of whether m3-catalog can produce that pair.
+ * The two were conflated once already. Swapping in a genuinely generated pair turned 14 green tests
+ * into 11 failures, all one root cause: m3-catalog derived its component ids from a catalog id's
+ * last segment, which names the VARIANT, so `Button/Filled`, `Card/Filled` and four more all
+ * claimed `m3/filled` and 49 of 108 components collided. The fixture, keyed the way a person would
+ * key it, had no collisions and hid the whole problem.
+ *
+ * So: passing here is necessary before `--ui-builder-published-catalogs` names `m3-catalog`, and it
+ * is not sufficient. The sufficient one now exists beside it:
+ * [PublishedGeneratedM3CatalogEquivalenceTest] runs the same [compare] against a pair captured from
+ * a real `composePreviewDiscover`, and the `m3 catalog-level equivalence` step in `ci.yml` holds
+ * that pair to the frozen catalog fact by fact. Read that one for what m3-catalog can actually
+ * offer; read this one for whether the composer turns a well-formed pair into the right shelf. Even
+ * together they are a floor rather than a proof: [compare] checks what a design depends on, and a
+ * catalog can still differ in something no assertion here reads.
+ *
+ * One caution, since it is the reason this fixture exists at all: do NOT edit a generated file to
+ * keep a test green. The frozen shelf and a published m3 catalog hold deliberately different
+ * component sets — `UI_BUILDER_CATALOG_CONTRACT.md` says so, and a real run offers about sixty
+ * components the frozen one does not. The assertion that the composed catalog offers nothing extra
+ * encodes the opposite, and settling that is a decision about the contract rather than a fixture to
+ * adjust.
+ *
+ * Everything left here compares a composed shelf against the frozen one, which is the question this
+ * fixture can answer honestly. Two of the composer's REFUSALS used to live here too — a builtin
+ * with a malformed `jsonType`, a slot cardinality no child count satisfies — reaching their input
+ * by string-splicing this fixture. Both now sit in `PublishedUiBuilderCatalogHostileInputTest`
+ * against its own two-component record, because m3-catalog's policy states the catalog owns no
+ * builtins: on a regenerated fixture the splice would land nowhere and both would have passed while
+ * checking nothing.
  */
 class PublishedM3CatalogEquivalenceTest {
 
@@ -105,7 +139,22 @@ class PublishedM3CatalogEquivalenceTest {
     check("displayName", expected.displayName, actual.displayName)
     check("role", expected.role, actual.role)
     check("traits", expected.traits.sorted(), actual.traits.sorted())
+    // Slots by name, then field by field — the same reason the properties below get it, and the
+    // one place the lesson had not been applied. `cardinality` decides how many children can be
+    // authored and `acceptedRoles`/`acceptedTraits` decide which components may go in, so a slot
+    // that kept its name while losing its shape breaks designs exactly as a changed property does
+    // and this comparison passed it (Codex, #673).
     check("slots", expected.slots.map { it.name }.sorted(), actual.slots.map { it.name }.sorted())
+    val wantSlots = expected.slots.associateBy { it.name }
+    val gotSlots = actual.slots.associateBy { it.name }
+    for ((name, w) in wantSlots) {
+      val g = gotSlots[name] ?: continue
+      check("slots[$name].cardinality.min", w.cardinality.min, g.cardinality.min)
+      check("slots[$name].cardinality.max", w.cardinality.max, g.cardinality.max)
+      check("slots[$name].ordered", w.ordered, g.ordered)
+      check("slots[$name].acceptedRoles", w.acceptedRoles.sorted(), g.acceptedRoles.sorted())
+      check("slots[$name].acceptedTraits", w.acceptedTraits.sorted(), g.acceptedTraits.sorted())
+    }
     check(
       "modifierCapabilities",
       expected.modifierCapabilities.sorted(),
@@ -281,47 +330,137 @@ class PublishedM3CatalogEquivalenceTest {
     }
   }
 
+  /** Every refusal this round added, each as the smallest document that triggers it. */
   @Test
-  fun `a builtin's malformed jsonType is refused too, not only a component's`() {
+  fun `declarations the builder cannot serve are refused`() {
     val record = json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-record-v1.json"))
-    // A builtin's properties reach `builtinCapability` by the same route and are read by the same
-    // validator; checking only `components` was the container half of this fix.
-    val withBuiltin =
-      fixture("m3-catalog-published-v1.json")
-        .replaceFirst(
-          "\"components\": {",
-          "\"builtins\": { \"layout/box\": { \"role\": \"Container\", " +
-            "\"propertyCapabilities\": [ { \"name\": \"pad\", \"jsonType\": {} } ] } }, " +
-            "\"components\": {",
+    val published = fixture("m3-catalog-published-v1.json")
+    fun refusalFor(edit: (String) -> String, what: String): String {
+      val broken = edit(published)
+      assertTrue(broken != published, "precondition failed for $what")
+      val result = PublishedUiBuilderCatalog.compose(broken, record, exports)
+      assertTrue(
+        result is PublishedUiBuilderCatalog.Result.Unusable,
+        "$what composed instead of being refused",
+      )
+      return (result as PublishedUiBuilderCatalog.Result.Unusable).reason
+    }
+    // `[]` is a union of nothing, and `all {}` is vacuously true — which is how it passed the
+    // first cut of the readability check.
+    assertTrue(
+      refusalFor(
+          { it.replaceFirst("\"jsonType\": \"string\"", "\"jsonType\": []") },
+          "an empty jsonType",
         )
-    val result = PublishedUiBuilderCatalog.compose(withBuiltin, record, exports)
-    assertTrue(
-      result is PublishedUiBuilderCatalog.Result.Unusable,
-      "a builtin with a jsonType of {} composed instead of being refused",
+        .contains("empty"),
+      "the refusal does not say the jsonType is empty",
     )
+    // A name the runtime's `accepts` does not know matches nothing, so a required property
+    // declaring one is a component nobody can author.
     assertTrue(
-      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("layout/box.pad"),
-      "the refusal does not name the builtin property: ${result.reason}",
+      refusalFor(
+          { it.replaceFirst("\"jsonType\": \"string\"", "\"jsonType\": \"date\"") },
+          "an unknown type name",
+        )
+        .contains("not a type name"),
+      "the refusal does not name the unknown type",
+    )
+    // The editor seeds a new node from the first allowed value and reads it as a primitive.
+    assertTrue(
+      refusalFor(
+          { it.replaceFirst("\"allowedValues\": [", "\"allowedValues\": [ {},") },
+          "a non-primitive allowed value",
+        )
+        .contains("not a literal"),
+      "the refusal does not name the non-literal allowed value",
     )
   }
 
+  /**
+   * The set this file mirrors from the runtime's `accepts`, checked against the catalogs that
+   * exist.
+   *
+   * Not proof the two agree — they are in different modules and the runtime's is a private `when` —
+   * but it makes the drift visible from the side that matters: a catalog starting to declare a type
+   * name this server would refuse fails here rather than in the field.
+   */
   @Test
-  fun `a slot cardinality no child count satisfies is refused`() {
-    val record = json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-record-v1.json"))
-    val published = fixture("m3-catalog-published-v1.json")
-    // `validateCatalog` requires `catalogSystemId == "m3-catalog"`, so it only ever sees the
-    // packaged catalog; a published one reaches the shelf unvalidated.
-    val impossible = published.replaceFirst("\"cardinality\": {", "\"cardinality\": { \"max\": 0,")
-    assertTrue(impossible != published, "precondition: the fixture states a cardinality")
-    val result = PublishedUiBuilderCatalog.compose(impossible, record, exports)
-    assertTrue(
-      result is PublishedUiBuilderCatalog.Result.Unusable,
-      "max below min composed into a component nobody can author",
+  fun `every type name the frozen catalogs declare is one the server accepts`() {
+    val known = setOf("null", "string", "boolean", "number", "integer", "array", "object")
+    val declared =
+      frozen.components
+        .flatMap { it.properties }
+        .flatMap { property ->
+          when (val type = property.jsonType) {
+            is JsonArray -> type.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            is JsonPrimitive -> listOf(type.content)
+            else -> emptyList()
+          }
+        }
+        .toSortedSet()
+    assertEquals(
+      emptySet<String>(),
+      declared - known,
+      "the frozen catalog declares a type name this server's SUPPORTED_JSON_TYPES does not carry",
+    )
+  }
+
+  /**
+   * The builder's shelves land where the donor puts them, not where the injection loop reached
+   * them.
+   */
+  @Test
+  fun `injected groups follow the donor's order, not the injection order`() {
+    val served =
+      CurrentM3UiBuilderCatalogExecutor(
+          catalogSystemIds = linkedSetOf("m3-catalog"),
+          published = mapOf("m3-catalog" to composed),
+        )
+        .listCatalogs()
+        .single()
+    val order =
+      ((served.statusSemantics["componentMenu"] as JsonObject)["groupOrder"] as JsonArray).map {
+        (it as JsonPrimitive).content
+      }
+    val donorOrder =
+      ((frozen.statusSemantics["componentMenu"] as JsonObject)["groupOrder"] as JsonArray).map {
+        (it as JsonPrimitive).content
+      }
+    // Every group the donor knows is present, and any two of them appear in the donor's relative
+    // order — "Layout" before "Content", "Scaffolds" before "Layout".
+    val shared = donorOrder.filter { it in order }
+    assertEquals(
+      shared,
+      order.filter { it in donorOrder },
+      "the shelves are not in the donor's relative order",
     )
     assertTrue(
-      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("cardinality"),
-      "the refusal does not name the cardinality: ${result.reason}",
+      order.indexOf("Layout") < order.indexOf("Styles"),
+      "Layout landed below Styles: $order",
     )
+  }
+
+  /** The donor's asset keys are unioned in, not only used to fill an absent registry. */
+  @Test
+  fun `the donor's asset keys are merged into a catalog's own registry`() {
+    val ownRegistry =
+      JsonObject(
+        composed.statusSemantics +
+          ("assetRegistry" to
+            JsonObject(mapOf("keys" to JsonArray(listOf(JsonPrimitive("catalog.own"))))))
+      )
+    val served =
+      CurrentM3UiBuilderCatalogExecutor(
+          catalogSystemIds = linkedSetOf("m3-catalog"),
+          published = mapOf("m3-catalog" to composed.copy(statusSemantics = ownRegistry)),
+        )
+        .listCatalogs()
+        .single()
+    val keys = CurrentM3UiBuilderCatalogExecutor.declaredAssetKeys(served).orEmpty()
+    assertTrue("catalog.own" in keys, "the catalog's own key was dropped: $keys")
+    // The editor seeds a new image with this builder-owned key, so an injected `asset/image`
+    // without it is a palette component that cannot be inserted.
+    assertTrue("editor.placeholder" in keys, "the donor's placeholder key was not merged: $keys")
   }
 
   @Test
