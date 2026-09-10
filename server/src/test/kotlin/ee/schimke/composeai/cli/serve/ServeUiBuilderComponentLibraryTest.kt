@@ -216,6 +216,66 @@ class ServeUiBuilderComponentLibraryTest {
     assertTrue(danglingChild.any { "absent" in it }, danglingChild.toString())
   }
 
+  /**
+   * A slot pointing back at an ancestor is a cycle, not a subtree already collected.
+   *
+   * The walk's "seen" set answers "have I collected this", which a back edge satisfies — so a body
+   * containing itself read as complete and was published as usable for an importer to recurse on.
+   */
+  @Test
+  fun `a body that contains itself is refused`() {
+    val selfRoot = mutableListOf<String>()
+    assertNull(
+      library(onLog = selfRoot::add) { url ->
+          if (url.endsWith("index.json")) index(entry()) else symbol(childId = "cell")
+        }
+        .symbol(m3, "contribution-cell"),
+      "a root whose slot names itself",
+    )
+    assertTrue(selfRoot.any { "contains itself" in it }, selfRoot.toString())
+
+    val longer = mutableListOf<String>()
+    assertNull(
+      library(onLog = longer::add) { url ->
+          if (url.endsWith("index.json")) index(entry())
+          else
+            symbol(
+              childId = "middle",
+              extraNodes =
+                """, "middle": {"id": "middle", "componentId": "layout/column",
+                 "properties": {}, "modifiers": [], "slots": {"children": ["cell"]},
+                 "eventBindings": {}}""",
+            )
+        }
+        .symbol(m3, "contribution-cell"),
+      "a cycle two edges long",
+    )
+    assertTrue(longer.any { "contains itself" in it }, longer.toString())
+  }
+
+  /** One node reached down two branches is shared, not cyclic, and stays usable. */
+  @Test
+  fun `a node reached twice without a cycle is kept once`() {
+    val library = library { url ->
+      if (url.endsWith("index.json")) index(entry())
+      else
+        symbol(
+          childId = "left",
+          extraNodes =
+            """, "left": {"id": "left", "componentId": "layout/column",
+               "properties": {}, "modifiers": [], "slots": {"children": ["cell-label"]},
+               "eventBindings": {}},
+               "cell-label": {"id": "cell-label", "componentId": "m3/text",
+               "properties": {}, "modifiers": [], "slots": {}, "eventBindings": {}}""",
+          alsoInRootSlot = "cell-label",
+        )
+    }
+
+    val symbol = assertNotNull(library.symbol(m3, "contribution-cell"))
+
+    assertEquals(setOf("cell", "left", "cell-label"), symbol.nodes.keys)
+  }
+
   @Test
   fun `an unusable id or file is dropped and the components either side of it are kept`() {
     val logged = mutableListOf<String>()
@@ -286,6 +346,7 @@ class ServeUiBuilderComponentLibraryTest {
     label: String = "Cell",
     extraNodes: String = "",
     reorderedKeys: Boolean = false,
+    alsoInRootSlot: String? = null,
   ): ByteArray {
     val labelNode =
       if (childId != "cell-label") ""
@@ -296,16 +357,17 @@ class ServeUiBuilderComponentLibraryTest {
           "properties": {"text": {"type": "string", "value": "$label"}},
           "modifiers": [], "slots": {}, "eventBindings": {}
         }"""
+    val rootChildren = listOfNotNull(childId, alsoInRootSlot).joinToString(", ") { "\"$it\"" }
     val cell =
       if (reorderedKeys)
         """"cell": {
-          "eventBindings": {}, "slots": {"content": ["$childId"]}, "modifiers": [],
+          "eventBindings": {}, "slots": {"content": [$rootChildren]}, "modifiers": [],
           "properties": {}, "componentId": "m3/card", "id": "cell"
         }"""
       else
         """"cell": {
           "id": "cell", "componentId": "m3/card",
-          "properties": {}, "modifiers": [], "slots": {"content": ["$childId"]},
+          "properties": {}, "modifiers": [], "slots": {"content": [$rootChildren]},
           "eventBindings": {}
         }"""
     return """

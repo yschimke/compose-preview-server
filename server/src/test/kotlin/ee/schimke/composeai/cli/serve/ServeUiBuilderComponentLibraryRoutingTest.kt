@@ -27,6 +27,7 @@ class ServeUiBuilderComponentLibraryRoutingTest {
     File(dir, ServeUiBuilderComponentLibrary.COMPONENTS_DIR).apply { mkdirs() }
   private val registry = ServeSessionRegistry(open = { null })
   private var server: ServeHttpServer? = null
+  private var extraSource: File? = null
   private val client = OkHttpClient()
 
   @AfterTest
@@ -121,6 +122,43 @@ class ServeUiBuilderComponentLibraryRoutingTest {
     assertEquals(404, send("/admin/ui-builder/component-library/local/broken").first)
   }
 
+  /**
+   * A system can have more than one source — `--ui-builder-designs` names a local checkout for the
+   * same system a served catalog covers — and the listing flattens all of them.
+   *
+   * Resolving one symbol therefore has to search them all: taking only the first made a component
+   * published solely on the second 404 here while appearing in the listing.
+   */
+  @Test
+  fun `a symbol published only by the second source for a system still resolves`() {
+    val second = createTempDirectory("component-library-2").toFile()
+    val secondComponents =
+      File(second, ServeUiBuilderComponentLibrary.COMPONENTS_DIR).apply { mkdirs() }
+    File(secondComponents, "index.json")
+      .writeText(
+        """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
+           "components":[{"id":"branch-only","title":"Branch only"}]}"""
+      )
+    File(secondComponents, "branch-only.json").writeText(symbolFile("branch-only", "Branch only"))
+    publish()
+    start(extraSource = second)
+
+    try {
+      val listed =
+        Json.parseToJsonElement(send("/admin/ui-builder/component-library").second)
+          .jsonObject["components"]!!
+          .jsonArray
+          .map { it.jsonObject["componentId"]!!.jsonPrimitive.content }
+      assertEquals(listOf("contribution-cell", "branch-only"), listed)
+
+      // Both listed, so both must resolve.
+      assertEquals(200, send("/admin/ui-builder/component-library/local/contribution-cell").first)
+      assertEquals(200, send("/admin/ui-builder/component-library/local/branch-only").first)
+    } finally {
+      second.deleteRecursively()
+    }
+  }
+
   private fun publish() {
     File(components, "index.json")
       .writeText(
@@ -128,12 +166,15 @@ class ServeUiBuilderComponentLibraryRoutingTest {
            "components":[{"id":"contribution-cell","title":"Contribution cell"}]}"""
       )
     File(components, "contribution-cell.json")
-      .writeText(
-        """
+      .writeText(symbolFile("contribution-cell", "Contribution cell"))
+  }
+
+  private fun symbolFile(id: String, title: String): String =
+    """
         {
           "schema": "compose-ui-builder-document/v1-candidate",
-          "id": "contribution-cell",
-          "title": "Contribution cell",
+          "id": "$id",
+          "title": "$title",
           "revision": 0,
           "catalogPin": {
             "systemId": "m3-catalog", "catalogRevision": "candidate",
@@ -154,18 +195,18 @@ class ServeUiBuilderComponentLibraryRoutingTest {
             }
           },
           "components": {
-            "contribution-cell": {"name": "Contribution cell", "root": "cell"}
+            "$id": {"name": "$title", "root": "cell"}
           }
         }
         """
-          .trimIndent()
-      )
-  }
+      .trimIndent()
 
   private fun start(
     library: ServeUiBuilderComponentLibrary? =
-      ServeUiBuilderComponentLibrary(fetch = { _, _ -> null })
+      ServeUiBuilderComponentLibrary(fetch = { _, _ -> null }),
+    extraSource: File? = null,
   ) {
+    this.extraSource = extraSource
     server =
       ServeHttpServer(
           host = "127.0.0.1",
@@ -176,11 +217,17 @@ class ServeUiBuilderComponentLibraryRoutingTest {
           isPublic = true,
           uiBuilderComponentLibrary = library,
           uiBuilderDesignCatalogs = {
-            listOf(
+            listOfNotNull(
               ServeUiBuilderDesignLibrary.Coordinate(
                 system = "local",
                 source = ServeUiBuilderDesignLibrary.Source.Directory(dir),
-              )
+              ),
+              extraSource?.let {
+                ServeUiBuilderDesignLibrary.Coordinate(
+                  system = "local",
+                  source = ServeUiBuilderDesignLibrary.Source.Directory(it),
+                )
+              },
             )
           },
           adminToken = adminToken,
