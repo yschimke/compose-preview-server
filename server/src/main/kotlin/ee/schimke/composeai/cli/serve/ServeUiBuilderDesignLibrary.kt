@@ -216,23 +216,18 @@ class ServeUiBuilderDesignLibrary(
 
   private fun CachedIndex.isStale(): Boolean = clock() - readAt >= ttlMillis
 
-  /** One path from one project, whichever kind of source it is. */
+  /**
+   * One path from one project, whichever kind of source it is. Shared with the component library.
+   */
   private fun read(catalog: Coordinate, path: String, maxBytes: Long): ByteArray? =
-    when (val source = catalog.source) {
-      is Source.Directory -> {
-        // Resolved against the directory and then checked to be inside it: `file` is already
-        // refused unless it is one flat name, and this is the second lock on the same door.
-        val root = source.dir.canonicalFile
-        val file = File(root, path).canonicalFile
-        if (!file.path.startsWith(root.path + File.separator) || !file.isFile) null
-        else if (file.length() > maxBytes) {
-          onLog("serve: ${catalog.system}'s $path is larger than $maxBytes bytes; ignoring it")
-          null
-        } else file.readBytes()
-      }
-      is Source.Branch ->
-        fetch("https://raw.githubusercontent.com/${source.repo}/${source.branch}/$path", maxBytes)
-    }
+    ServeUiBuilderProjectFiles.read(
+      system = catalog.system,
+      source = catalog.source,
+      path = path,
+      maxBytes = maxBytes,
+      fetch = fetch,
+      onLog = onLog,
+    )
 
   private fun parseIndex(system: String, body: String): List<Entry> {
     val root = json.parseToJsonElement(body).jsonObject

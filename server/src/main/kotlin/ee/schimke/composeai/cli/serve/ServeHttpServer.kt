@@ -16,9 +16,12 @@ import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.decodeNewDesignStates
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
+import ee.schimke.composeai.uibuilder.protocol.DesignComponentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
@@ -372,6 +375,13 @@ class ServeHttpServer(
   private val uiBuilderDesignCatalogs: () -> List<ServeUiBuilderDesignLibrary.Coordinate> = {
     emptyList()
   },
+  /**
+   * The components those same projects publish ([ServeUiBuilderComponentLibrary]), read from the
+   * same coordinates as their designs. Listing them is read-only — nothing on this host changes
+   * until a design imports one — but it sits behind the same admin token as the design library
+   * because it exposes the same projects.
+   */
+  private val uiBuilderComponentLibrary: ServeUiBuilderComponentLibrary? = null,
   /**
    * Shared secret for the `/admin/catalogs` routes (`--admin-token`). Separate from the browsing
    * [token] on purpose: a public box hands its browse URL to everyone, so admin needs its own
@@ -782,6 +792,15 @@ class ServeHttpServer(
       uiBuilderService != null &&
       uiBuilderDir != null &&
       !adminToken.isNullOrBlank()
+
+  /**
+   * As [uiBuilderDesignLibraryEnabled], for `/admin/ui-builder/component-library`.
+   *
+   * Needs no service or directory of its own: listing components reads projects and writes nothing
+   * here, so a host can offer the component library while its editor is read-only.
+   */
+  private val uiBuilderComponentLibraryEnabled: Boolean =
+    uiBuilderComponentLibrary != null && !adminToken.isNullOrBlank()
 
   /** As [adminEnabled], for `POST /admin/onboard`. Same token, separately supplied onboarder. */
   private val onboardingEnabled: Boolean = onboarding != null && !adminToken.isNullOrBlank()
@@ -1725,6 +1744,25 @@ class ServeHttpServer(
               library = library,
               system = call.parameters["system"].orEmpty(),
               designId = call.parameters["designId"].orEmpty(),
+            )
+          }
+        }
+
+        // The components those projects share between their own designs. Listing only: importing
+        // one into a design is the editor's move, and it needs the symbol's digest recorded
+        // alongside its id, which is a design write rather than a library read.
+        if (uiBuilderComponentLibraryEnabled) {
+          val components = uiBuilderComponentLibrary!!
+          get("/admin/ui-builder/component-library") {
+            if (rejectBadAdminToken()) return@get
+            respondAdminUiBuilderComponentLibrary(components)
+          }
+          get("/admin/ui-builder/component-library/{system}/{componentId}") {
+            if (rejectBadAdminToken()) return@get
+            respondAdminUiBuilderComponentSymbol(
+              library = components,
+              system = call.parameters["system"].orEmpty(),
+              componentId = call.parameters["componentId"].orEmpty(),
             )
           }
         }
@@ -5171,6 +5209,95 @@ class ServeHttpServer(
                 description = it.description,
               )
             },
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /**
+   * `GET /admin/ui-builder/component-library`: every component the projects this host serves share.
+   *
+   * On the IO dispatcher and best-effort per project for the reasons the design listing is: a cold
+   * index is one HTTP round trip per project, and one unreachable branch must not empty the list
+   * for the rest.
+   */
+  private suspend fun RoutingContext.respondAdminUiBuilderComponentLibrary(
+    library: ServeUiBuilderComponentLibrary
+  ) {
+    val catalogs = uiBuilderDesignCatalogs()
+    val entries = withContext(Dispatchers.IO) { library.list(catalogs) }
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.respondText(
+      JSON.encodeToString(
+        AdminUiBuilderComponentLibraryResponse.serializer(),
+        AdminUiBuilderComponentLibraryResponse(
+          catalogsSearched = catalogs.map { it.system },
+          components =
+            entries.map {
+              AdminUiBuilderComponentDto(
+                system = it.system,
+                componentId = it.componentId,
+                paletteId = ServeUiBuilderComponentLibrary.paletteId(it.componentId),
+                title = it.title,
+                description = it.description,
+              )
+            },
+        ),
+      ),
+      ContentType.Application.Json,
+    )
+  }
+
+  /**
+   * `GET /admin/ui-builder/component-library/{system}/{componentId}`: one symbol, checked.
+   *
+   * Answers with the body an importing design would copy in and the digest it would record beside
+   * the id — the pair that lets a later read say the library moved rather than silently redrawing.
+   * A symbol that does not check out is a 404 with the reason the library logged: from the caller's
+   * side there is no such usable component, which is the same answer as none at all.
+   */
+  private suspend fun RoutingContext.respondAdminUiBuilderComponentSymbol(
+    library: ServeUiBuilderComponentLibrary,
+    system: String,
+    componentId: String,
+  ) {
+    val catalog = uiBuilderDesignCatalogs().firstOrNull { it.system == system }
+    if (catalog == null) {
+      call.respondText(
+        "$system is not a catalog this host serves",
+        status = HttpStatusCode.NotFound,
+      )
+      return
+    }
+    // One index read for both, so the metadata and the body describe the same symbol even when the
+    // source is a local directory somebody is exporting into.
+    val entry =
+      withContext(Dispatchers.IO) {
+        library.index(catalog).firstOrNull { it.componentId == componentId }
+      }
+    val symbol = entry?.let { withContext(Dispatchers.IO) { library.symbol(catalog, it) } }
+    if (symbol == null) {
+      call.respondText(
+        "$system publishes no usable component called $componentId",
+        status = HttpStatusCode.NotFound,
+      )
+      return
+    }
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.respondText(
+      JSON.encodeToString(
+        AdminUiBuilderComponentSymbolResponse.serializer(),
+        AdminUiBuilderComponentSymbolResponse(
+          system = symbol.entry.system,
+          componentId = symbol.componentId,
+          paletteId = ServeUiBuilderComponentLibrary.paletteId(symbol.componentId),
+          title = symbol.entry.title,
+          description = symbol.entry.description,
+          digest = symbol.digest,
+          catalogPin = symbol.catalogPin,
+          component = symbol.component,
+          nodes = symbol.nodes,
         ),
       ),
       ContentType.Application.Json,
@@ -15562,6 +15689,46 @@ private data class AdminUiBuilderLibraryResponse(
    */
   val catalogsSearched: List<String> = emptyList(),
   val designs: List<AdminUiBuilderLibraryDto> = emptyList(),
+)
+
+/** One shared component on `GET /admin/ui-builder/component-library`. */
+@Serializable
+private data class AdminUiBuilderComponentDto(
+  val system: String,
+  val componentId: String,
+  /** What the symbol is called once it reaches a palette: `project/<id>`. */
+  val paletteId: String,
+  val title: String,
+  val description: String? = null,
+)
+
+@Serializable
+private data class AdminUiBuilderComponentLibraryResponse(
+  val schema: String = "compose-preview-serve/admin-ui-builder-component-library/v1",
+  /** Which projects were looked in, so an empty list separates "none served" from "none shared". */
+  val catalogsSearched: List<String> = emptyList(),
+  val components: List<AdminUiBuilderComponentDto> = emptyList(),
+)
+
+/**
+ * One checked symbol on `GET /admin/ui-builder/component-library/{system}/{componentId}`.
+ *
+ * [digest] is the half of the reference that makes this reuse rather than copying: a design records
+ * it beside [componentId], and a later read that computes a different one has found drift to report
+ * rather than a redraw to perform silently.
+ */
+@Serializable
+private data class AdminUiBuilderComponentSymbolResponse(
+  val schema: String = "compose-preview-serve/admin-ui-builder-component-symbol/v1",
+  val system: String,
+  val componentId: String,
+  val paletteId: String,
+  val title: String,
+  val description: String? = null,
+  val digest: String,
+  val catalogPin: CatalogReferenceV1,
+  val component: DesignComponentV1,
+  val nodes: Map<String, DesignNodeV1>,
 )
 
 /** The result of `POST /admin/ui-builder/library/{system}/{designId}`. */
