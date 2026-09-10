@@ -738,6 +738,7 @@ fun UiBuilderEditor(
   }
   var catalogDragPosition by remember { mutableStateOf<Offset?>(null) }
   var draggedComponentId by remember { mutableStateOf<String?>(null) }
+  var draggedComponentVariant by remember { mutableStateOf<EditorCatalogVariant?>(null) }
   var draggedRemoteThumbnail by remember { mutableStateOf<ImageBitmap?>(null) }
   var canvasBounds by remember { mutableStateOf(Rect.Zero) }
   // The scale the design is pinned at, or null while it is framed to the workspace. Local rather
@@ -1024,9 +1025,15 @@ fun UiBuilderEditor(
         layerRows = layerRows,
         collaborators = collaborators,
         dropTarget = reducer.dropTarget(state, draggedComponentId ?: "m3/text"),
-        onCatalogDrag = { componentId, position ->
-          if (position != null) focusEditor()
-          draggedComponentId = componentId
+        onCatalogDrag = { componentId, variant, position ->
+          if (position == null) {
+            draggedComponentId = null
+            draggedComponentVariant = null
+          } else {
+            focusEditor()
+            draggedComponentId = componentId
+            draggedComponentVariant = variant
+          }
           draggedRemoteThumbnail = null
           catalogDragPosition = position
         },
@@ -1043,6 +1050,7 @@ fun UiBuilderEditor(
             if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
           }
           draggedComponentId = null
+          draggedComponentVariant = null
           draggedRemoteThumbnail = null
           catalogDragPosition = null
         },
@@ -1092,10 +1100,12 @@ fun UiBuilderEditor(
         onRemoteComposeDrag = { source, thumbnail, position ->
           if (position != null) focusEditor()
           draggedComponentId = REMOTE_COMPOSE_DOCUMENT_COMPONENT_ID
+          draggedComponentVariant = null
           draggedRemoteThumbnail = thumbnail
           catalogDragPosition = position
           if (position == null) {
             draggedComponentId = null
+            draggedComponentVariant = null
             draggedRemoteThumbnail = null
           }
         },
@@ -1107,6 +1117,7 @@ fun UiBuilderEditor(
             if (closeAfterDrop) mobilePanel = MobileEditorPanel.None
           }
           draggedComponentId = null
+          draggedComponentVariant = null
           draggedRemoteThumbnail = null
           catalogDragPosition = null
         },
@@ -1142,7 +1153,7 @@ fun UiBuilderEditor(
       dropTarget = draggedTarget,
       dragPreview =
         if (draggedRemoteThumbnail == null)
-          draggedComponentId?.let { reducer.previewDocument(it, null) }
+          draggedComponentId?.let { reducer.previewDocument(it, draggedComponentVariant) }
         else null,
       dragPreviewBitmap = draggedRemoteThumbnail,
       dragPosition = catalogDragPosition,
@@ -1768,7 +1779,7 @@ fun UiBuilderEditor(
                     state = state,
                     sessionLabel = sessionLabel,
                     dropTargetLabel =
-                      reducer.dropTargetLabel(state, draggedComponentId ?: "m3/text"),
+                      draggedTarget?.let { "${it.nodeId}.${it.slot}" } ?: "No compatible slot",
                     dragging = draggedComponentId != null,
                   )
                 }
@@ -3741,7 +3752,7 @@ private fun EditorNavigator(
   layerRows: List<EditorLayerRow>,
   collaborators: List<UiBuilderCollaborator>,
   dropTarget: ParentSlot?,
-  onCatalogDrag: (String, Offset?) -> Unit,
+  onCatalogDrag: (String, EditorCatalogVariant?, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
   canAddCatalogComponent: (String) -> Boolean,
   /**
@@ -3844,7 +3855,7 @@ private fun InsertPanel(
   /** The document a row's picture draws, from the reducer that would perform the insert. */
   thumbnailOf: (String, EditorCatalogVariant?) -> UiBuilderDocument?,
   dropTarget: ParentSlot?,
-  onCatalogDrag: (String, Offset?) -> Unit,
+  onCatalogDrag: (String, EditorCatalogVariant?, Offset?) -> Unit,
   onCatalogDrop: (String, EditorCatalogVariant?, Offset) -> Unit,
   canAddCatalogComponent: (String) -> Boolean,
   /**
@@ -3932,7 +3943,7 @@ private fun InsertPanel(
               item = row.item,
               thumbnail = thumbnailOf(row.item.componentId, null),
               expanded = row.expanded,
-              onDrag = { onCatalogDrag(row.item.componentId, it) },
+              onDrag = { onCatalogDrag(row.item.componentId, null, it) },
               onDrop = { onCatalogDrop(row.item.componentId, null, it) },
               canAdd = canAddCatalogComponent(row.item.componentId),
               refusal = catalogAddRefusal(row.item.componentId),
@@ -3946,7 +3957,7 @@ private fun InsertPanel(
               variant = row.variant,
               thumbnail = thumbnailOf(row.variant.componentId, row.variant),
               componentName = row.componentName,
-              onDrag = { onCatalogDrag(row.variant.componentId, it) },
+              onDrag = { onCatalogDrag(row.variant.componentId, row.variant, it) },
               onDrop = { onCatalogDrop(row.variant.componentId, row.variant, it) },
               canAdd = canAddCatalogComponent(row.variant.componentId),
               refusal = catalogAddRefusal(row.variant.componentId),
@@ -3974,6 +3985,7 @@ private fun InsertPanel(
           RemoteComposeSourceRow(
             source = source,
             resolveThumbnail = resolveRemoteComposeThumbnail,
+            canDrag = pendingRemoteComposeSource == null,
             // Enabled off the same question the insert will ask, so a row that cannot land is
             // visibly unavailable rather than pressable and then refused.
             canAdd =
@@ -5038,6 +5050,7 @@ private fun GroupHeading(group: String) {
 private fun RemoteComposeSourceRow(
   source: RemoteComposeSource,
   resolveThumbnail: (suspend (RemoteComposeSource) -> ImageBitmap?)?,
+  canDrag: Boolean,
   canAdd: Boolean,
   onAdd: () -> Unit,
   onDrag: (ImageBitmap?, Offset?) -> Unit,
@@ -5058,14 +5071,19 @@ private fun RemoteComposeSourceRow(
     Modifier.fillMaxWidth().height(44.dp).padding(start = 14.dp, end = 12.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
+    val dragModifier =
+      if (canDrag) {
+        Modifier.catalogDrag(
+            dragKey = source.id,
+            onDrag = { onDrag(thumbnail, it) },
+            onDrop = onDrop,
+          )
+          .semantics { contentDescription = "Drag ${source.label}" }
+      } else {
+        Modifier
+      }
     Surface(
-      Modifier.size(COMPONENT_THUMBNAIL_SIZE)
-        .catalogDrag(
-          dragKey = source.id,
-          onDrag = { onDrag(thumbnail, it) },
-          onDrop = onDrop,
-        )
-        .semantics { contentDescription = "Drag ${source.label}" },
+      Modifier.size(COMPONENT_THUMBNAIL_SIZE).then(dragModifier),
       shape = RoundedCornerShape(4.dp),
       color = MaterialTheme.colorScheme.surfaceContainerHighest,
     ) {
