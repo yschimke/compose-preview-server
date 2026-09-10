@@ -1023,6 +1023,17 @@ class ServeHttpServer(
           if (uiBuilderAssets != null) {
             installUiBuilderAssetRoutes(uiBuilderAuthorization, uiBuilderAssets)
           }
+          // Whether a design's imported components still match the library they came from. Inside
+          // this block rather than beside the library listing: it reads *a design*, so it needs the
+          // service, and the design's own access control is what decides who may ask.
+          if (uiBuilderComponentLibrary != null) {
+            installUiBuilderComponentDriftRoutes(
+              uiBuilderService,
+              uiBuilderAuthorization,
+              ServeUiBuilderComponentDrift(uiBuilderComponentLibrary),
+              uiBuilderDesignCatalogs,
+            )
+          }
         }
         // The components the served projects share. Behind the builder's own credential rather than
         // the admin token, because a palette has to read this and the editor holds no admin token —
