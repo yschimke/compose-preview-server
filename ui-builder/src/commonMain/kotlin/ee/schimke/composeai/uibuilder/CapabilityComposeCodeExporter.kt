@@ -2093,6 +2093,22 @@ private fun UiBuilderDocument.componentSignatures():
             )
           return@forEach
         }
+        // A key that normalises to a hard keyword generates `fun Cell(class: Color)`, which is no
+        // more Kotlin than the `val class: Color` a row key generates. The same refusal, because
+        // it is the same mistake: `identifier()` does not escape them and nothing downstream
+        // writes the backticks. Reachable through a placement now that a bound argument
+        // contributes its key to the enclosing component's signature.
+        val identifier = bindingKey.identifier()
+        if (identifier in KOTLIN_HARD_KEYWORDS) {
+          refusals +=
+            ExportRefusal(
+              "RESERVED_PARAMETER",
+              "component $key reads '$bindingKey', which generates the parameter name " +
+                "'$identifier' — a Kotlin keyword",
+              node.id,
+            )
+          return@forEach
+        }
         val existing = parameters[bindingKey]
         if (existing != null && existing != kind) {
           refusals +=

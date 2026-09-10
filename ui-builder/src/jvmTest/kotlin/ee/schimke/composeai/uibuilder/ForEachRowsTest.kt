@@ -782,6 +782,61 @@ class ForEachRowsTest {
     )
   }
 
+  /**
+   * A component parameter derived through a placement is subject to the same keyword rule as a row
+   * property — `fun Cell(class: Color)` is no more Kotlin than `val class: Color`.
+   *
+   * Reachable because a bound placement argument now contributes its key to the enclosing
+   * component's signature, which is what this change introduced.
+   */
+  @Test
+  fun `a component parameter that generates a Kotlin keyword is refused`() {
+    val keyword =
+      loopInsideComponent().let { base ->
+        base.copy(
+          nodes =
+            base.nodes +
+              mapOf(
+                "panel" to
+                  base.nodes.getValue("panel").copy(slots = mapOf("children" to listOf("inner"))),
+                "inner" to
+                  UiBuilderNode(
+                    id = "inner",
+                    componentId = "design/component-instance",
+                    component =
+                      JsonObject(
+                        mapOf(
+                          "componentKey" to JsonPrimitive("cell"),
+                          "arguments" to JsonObject(mapOf("containerColor" to binding("class"))),
+                        )
+                      ),
+                  ),
+                "cell" to
+                  base.nodes
+                    .getValue("cell")
+                    .copy(
+                      properties = JsonObject(mapOf("containerColor" to binding("containerColor")))
+                    ),
+              ),
+          components =
+            JsonObject(
+              base.components +
+                ("cell" to
+                  JsonObject(
+                    mapOf("name" to JsonPrimitive("Cell"), "root" to JsonPrimitive("cell"))
+                  ))
+            ),
+        )
+      }
+
+    val result = CapabilityComposeCodeExporter.export(keyword, catalog())
+
+    assertTrue(
+      result.diagnostics.any { it.code == "RESERVED_PARAMETER" },
+      "${result.diagnostics.map { it.code to it.message }}",
+    )
+  }
+
   /** A component whose body holds a loop over its own rows. */
   private fun loopInsideComponent(): UiBuilderDocument =
     document().let { base ->
