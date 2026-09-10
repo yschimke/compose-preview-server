@@ -642,9 +642,18 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
      *
      * Twenty-five are discovery's own "no call site" judgement — a member of a `Defaults` object, a
      * scope receiver, type parameters, not public, or a required parameter of a type no design
-     * value becomes. Those are upstream API shapes rather than gaps here. The other two are ours:
-     * `m3/date-picker` and `m3/time-picker` declare a `mode` enum whose values nothing maps to
-     * Kotlin members.
+     * value becomes. Those are upstream API shapes rather than gaps here.
+     *
+     * The other two are ours, and they are the same shape: a property that configures the
+     * component's remembered STATE rather than its call. `m3/time-picker` declares `hour` and
+     * `minute`, which reach `rememberTimePickerState(initialHour = …)`; `m3/date-picker` declares
+     * `mode`, which reaches `rememberDatePickerState(initialDisplayMode = …)`. This projection can
+     * rename a property onto a parameter and pick between callables, and cannot yet pass one into a
+     * state factory.
+     *
+     * `mode` on `m3/time-picker` was here for a different reason until the variant table learned
+     * it: `dial` and `input` are `TimePicker` and `TimeInput`, two callables of identical shape,
+     * which is the `m3/progress-indicator` precedent the catalog's own note names.
      */
     val M3_EXPORT_REFUSALS =
       mapOf(
@@ -689,8 +698,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "no placeholder can be written for required parameter `directive: PaneScaffoldDirective`",
         "m3/thumb" to
           "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
-        "m3/time-picker" to
-          "node `subject`.`mode` is the enum value `dial`, and nothing maps this catalog property's values to Kotlin members",
+        "m3/time-picker" to "`TimePicker` has no parameter `hour`",
         "m3/tonal-leading-button" to
           "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
         "m3/tonal-trailing-button" to

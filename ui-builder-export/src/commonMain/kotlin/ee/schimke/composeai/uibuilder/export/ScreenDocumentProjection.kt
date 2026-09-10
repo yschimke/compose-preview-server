@@ -2481,6 +2481,11 @@ object ScreenDocumentProjection {
       "m3/icon-button" to "variant",
       "m3/text-field" to "variant",
       "m3/progress-indicator" to "variant",
+      // The catalog's own note names the precedent: `TimePicker` and `TimeInput` are "two
+      // composables over one state, spelled as one component the way `m3/progress-indicator`
+      // spells linear and circular". Identical parameter lists, so the only decision is which
+      // one to call.
+      "m3/time-picker" to "mode",
     )
 
   /**
@@ -2539,6 +2544,11 @@ object ScreenDocumentProjection {
           "filled" to ComponentVariant(TEXT_FIELD_ID, "textField"),
           "outlined" to ComponentVariant(OUTLINED_TEXT_FIELD_ID, "outlinedTextField"),
         ),
+      "m3/time-picker" to
+        mapOf(
+          "dial" to ComponentVariant(TIME_PICKER_ID, "timePicker"),
+          "input" to ComponentVariant(TIME_INPUT_ID, "timePicker"),
+        ),
       // The two indicators. Each name is TWO Compose overloads — a determinate one taking
       // `progress: () -> Float` and an indeterminate one whose parameters all default — and the
       // argument list picks between them, so both live under one record and one entry here. Which
@@ -2574,6 +2584,8 @@ object ScreenDocumentProjection {
     "androidx.compose.material3.IconButtonKt.FilledTonalIconButton"
   private const val OUTLINED_ICON_BUTTON_ID =
     "androidx.compose.material3.IconButtonKt.OutlinedIconButton"
+  private const val TIME_PICKER_ID = "androidx.compose.material3.TimePickerKt.TimePicker"
+  private const val TIME_INPUT_ID = "androidx.compose.material3.TimePickerKt.TimeInput"
   private const val TEXT_FIELD_ID = "androidx.compose.material3.TextFieldKt.TextField"
   private const val OUTLINED_TEXT_FIELD_ID =
     "androidx.compose.material3.TextFieldKt.OutlinedTextField"
