@@ -116,6 +116,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -5651,29 +5652,31 @@ private fun Modifier.catalogDrag(
   var dragDistance by remember { mutableFloatStateOf(0f) }
   var dragOrigin by remember { mutableStateOf(Offset.Zero) }
   var lastPosition by remember { mutableStateOf(Offset.Zero) }
+  val currentOnDrag = rememberUpdatedState(onDrag)
+  val currentOnDrop = rememberUpdatedState(onDrop)
   Modifier.onGloballyPositioned { dragOrigin = it.boundsInRoot().topLeft }
     .pointerInput(dragKey) {
       detectDragGestures(
         onDragStart = {
           dragDistance = 0f
           lastPosition = dragOrigin + it
-          onDrag(lastPosition)
+          currentOnDrag.value(lastPosition)
         },
         onDragEnd = {
           // Below the threshold it was a press, not a drag, so the insert is withdrawn rather
           // than landed wherever the pointer happened to rest.
-          if (dragDistance > 8f) onDrop(lastPosition) else onDrag(null)
+          if (dragDistance > 8f) currentOnDrop.value(lastPosition) else currentOnDrag.value(null)
           dragDistance = 0f
         },
         onDragCancel = {
           dragDistance = 0f
-          onDrag(null)
+          currentOnDrag.value(null)
         },
         onDrag = { change, amount ->
           change.consume()
           dragDistance += amount.getDistance()
           lastPosition = dragOrigin + change.position
-          onDrag(lastPosition)
+          currentOnDrag.value(lastPosition)
         },
       )
     }
