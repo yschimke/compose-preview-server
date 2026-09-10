@@ -220,6 +220,14 @@ class PublishedUiBuilderCatalogHostileInputTest {
    * ahead of the first `"components": {` it found. It passed, and it was one regeneration of that
    * fixture away from splicing into nothing and passing anyway. A refusal test that depends on the
    * shape of an unrelated catalog is checking that catalog, not the validator.
+   *
+   * The second half of the same lesson, found the next time this file was read: the key here was
+   * `propertyCapabilities`, which is what the SERVER called the field and not what a catalog can
+   * write. `ui-builder.policy.schema.json` spells a builtin's list `properties` with
+   * `additionalProperties: false`, so the only documents this validator had ever seen were the ones
+   * this test wrote for it. Every real builtin composed with zero properties and nothing said so.
+   * The key below is now the wire name, which makes this a mutation check on it: rename the field
+   * back and this test fails.
    */
   @Test
   fun `a builtin's malformed jsonType is refused`() {
@@ -229,7 +237,7 @@ class PublishedUiBuilderCatalogHostileInputTest {
        "record":{"file":"components.json","schemaVersion":1,"components":2},
        "statusSemantics":{"componentIdPrefix":"h/",
          "builtins":{"layout/box":{"role":"Container",
-           "propertyCapabilities":[{"name":"pad","jsonType":{}}]}}}}
+           "properties":[{"name":"pad","jsonType":{}}]}}}}
       """
         .trimIndent()
 

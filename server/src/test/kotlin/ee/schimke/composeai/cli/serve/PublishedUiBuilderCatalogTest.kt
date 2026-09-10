@@ -209,6 +209,90 @@ class PublishedUiBuilderCatalogTest {
     )
   }
 
+  /**
+   * Everything a builtin declares reaches the shelf, which nothing checked.
+   *
+   * A builtin is the only way a catalog can offer a component the record cannot carry — a host
+   * frame, a shape, an image asset with no call site — so what it declares is all there is. Three
+   * fields were being read past:
+   * - `properties` was decoded under the server's own name `propertyCapabilities`, which
+   *   `ui-builder.policy.schema.json` forbids (`additionalProperties: false`), so every builtin a
+   *   real catalog could publish composed with **zero** properties;
+   * - `slots` was `Map<String, JsonElement>`, so `required` became `min = 0` and `acceptedTraits`
+   *   vanished — the rules that stop a design putting a scaffold inside a widget's background slot
+   *   with it;
+   * - `traits` was hardcoded to the empty list, so no other component's slot could accept one.
+   *
+   * Each is asserted here against the wire names, so the fixture is a document a catalog could
+   * actually publish rather than one written to match the reader.
+   */
+  @Test
+  fun `a builtin's declared vocabulary reaches the shelf`() {
+    val document =
+      published(
+        extra =
+          """,
+        "builtins": {
+          "test-catalog/host": {
+            "role": "screen-root",
+            "displayName": "The Host",
+            "traits": ["WidgetHost"],
+            "slots": {
+              "content": {
+                "required": true,
+                "acceptedRoles": ["Container", "Leaf"],
+                "acceptedTraits": ["AnyContent"],
+                "role": "overlay"
+              },
+              "background": { "acceptedTraits": ["DrawLayer"] }
+            },
+            "properties": [
+              { "name": "cornerRadiusDp", "jsonType": "number" },
+              { "name": "mode", "jsonType": "string", "required": true,
+                "allowedValues": ["squircle", "round"] }
+            ],
+            "modifierCapabilities": ["padding"]
+          }
+        }"""
+      )
+    val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Composed,
+      "the builtin did not compose: ${(result as? PublishedUiBuilderCatalog.Result.Unusable)?.reason}",
+    )
+    val host =
+      (result as PublishedUiBuilderCatalog.Result.Composed).catalog.components.single {
+        it.componentId == "test-catalog/host"
+      }
+
+    assertEquals("The Host", host.displayName)
+    assertEquals(listOf("WidgetHost"), host.traits)
+    assertEquals(listOf("padding"), host.modifierCapabilities)
+    assertEquals(
+      listOf("cornerRadiusDp", "mode"),
+      host.properties.map { it.name }.sorted(),
+      "a builtin's properties are its only source, and they were being dropped",
+    )
+    assertEquals(true, host.properties.single { it.name == "mode" }.required)
+    assertEquals(
+      listOf("squircle", "round"),
+      host.properties.single { it.name == "mode" }.allowedValues.map { it.toString().trim('"') },
+    )
+    val content = host.slots.single { it.name == "content" }
+    assertEquals(
+      1,
+      content.cardinality.min,
+      "a required slot that accepts zero children is not required",
+    )
+    assertEquals(listOf("AnyContent"), content.acceptedTraits)
+    assertEquals(listOf("Container", "Leaf"), content.acceptedRoles)
+    assertEquals(
+      listOf("DrawLayer"),
+      host.slots.single { it.name == "background" }.acceptedTraits,
+    )
+    assertEquals(0, host.slots.single { it.name == "background" }.cardinality.min)
+  }
+
   @Test
   fun `a catalog of builtins alone needs no component record`() {
     // Policy without inventory is the simplest thing the contract can express, and refusing it here
