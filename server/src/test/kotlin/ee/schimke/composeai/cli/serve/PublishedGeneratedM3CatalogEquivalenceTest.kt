@@ -138,20 +138,34 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
   /** The same comparison [PublishedM3CatalogEquivalenceTest] makes, for the same reasons. */
   /**
-   * The two fields the comparison above leaves out, and the blocker one of them is.
+   * The two fields the comparison above leaves out: what the shelf CLAIMS about the canvas, and
+   * what an export calls.
    *
    * `compare()` checked names, roles, traits, slots, modifiers and properties, and said nothing
-   * about `wasm` — what the browser canvas draws — or `code` — what an export calls. A component
-   * can keep every checked field and start drawing a named placeholder, and nothing would have
-   * noticed. Codex raised exactly that on #673 and it is not hypothetical: it is true of the whole
-   * shelf.
+   * about `wasm` or `code`. Codex raised that on #673 and it was worth fixing — but the first
+   * version of this test drew the wrong conclusion from it, and the wrong conclusion is worth
+   * keeping written down because it is the more tempting reading.
    *
-   * **Every drawn component loses its canvas.** `PublishedUiBuilderCatalog.wasm()` computes `drawn`
-   * from the policy's `canvas`, m3-catalog's policy declares none, so every component composes to
-   * `platformSupported = false` / `UNSUPPORTED` — "drawn on the canvas as a named placeholder: this
-   * catalog claims no adapter". The frozen shelf draws twenty-five of them. That is a cutover
-   * blocker for m3 and the one this pair had not surfaced: the shelf is right, the properties are
-   * right, and the canvas goes blank.
+   * **Every component's `wasm` status goes UNSUPPORTED, and the canvas does not change.**
+   * `PublishedUiBuilderCatalog.wasm()` computes `drawn` from the policy's `canvas`, m3-catalog's
+   * policy declares none, so all twenty-five compose to `platformSupported = false` with the note
+   * "drawn on the canvas as a named placeholder: this catalog claims no adapter". That note is
+   * false, and so was this test's first KDoc, which called it a cutover blocker.
+   *
+   * What actually draws the canvas is `UiBuilderRenderer.RenderNode`, a `when (componentId)` over
+   * literal ids compiled into `:ui-builder` for Wasm. It never reads `adapterStatus` or
+   * `platformSupported` — nothing does, outside `CapabilityValidator`, whose two derived fields
+   * feed the harness diagnostic publisher and nothing else. The adapter id itself never leaves
+   * `wasm()`: it appears only inside that prose note. A registry keyed by adapter id is a planned
+   * future (`UI_BUILDER_CATALOG_CONTRACT.md` § item 17), not the present.
+   *
+   * So `m3/button` keeps drawing after the swap because it is still called `m3/button`. What breaks
+   * is the STATUS: a shelf that reports every component unsupported while drawing it. That is a
+   * real defect — a surface lying about another surface — and it is not the canvas going blank.
+   *
+   * The canvas gap that IS real belongs to the components this pair ADDS, and this test does not
+   * measure it: 110 published `m3/` ids, 24 with a case in the renderer, **86 falling to the `else`
+   * branch** and drawing `UnsupportedComponentDiagnostic`. See yschimke/m3-catalog#324.
    *
    * The `code` differences are not losses and are asserted as such so they cannot quietly become
    * some other difference: the composed symbol is the FQN whose simple name is the frozen one (the
@@ -159,7 +173,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    * variants a hand-transcribed entry merged into one component.
    */
   @Test
-  fun `the published shelf draws no canvas, and its calls are the frozen ones spelled out`() {
+  fun `the published shelf reports no canvas adapter, and its calls are the frozen ones spelled out`() {
     val composedById = composed.components.associateBy { it.componentId }
     val shared = frozen.components.filter { it.componentId in composedById }
 
@@ -175,8 +189,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         .map { it.componentId }
         .sorted(),
       lostCanvas,
-      "a drawn component kept its canvas — if m3-catalog's policy started declaring `canvas`, " +
-        "this test is the one that should say so",
+      "a drawn component kept its `wasm` status — if m3-catalog's policy started declaring " +
+        "`canvas`, this test is the one that should say so",
     )
 
     for (component in shared) {
