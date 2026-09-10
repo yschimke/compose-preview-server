@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Interface authoring · feasibility proof</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f6f7f8;color:#17212b;font:15px system-ui,sans-serif}main{max-width:1100px;margin:40px auto;padding:0 24px}h1{font-size:30px;margin:8px 0}p{color:#53616e;line-height:1.5}.eyebrow{color:#006c4c;font-size:12px;font-weight:700;letter-spacing:.1em}section{background:white;border:1px solid #dfe4e8;border-radius:12px;padding:24px;margin:20px 0}#composeApp{height:320px;width:100%;overflow:hidden}textarea{width:100%;height:270px;font:13px/1.5 ui-monospace,monospace;border:1px solid #bac5cd;border-radius:6px;padding:12px}button,a.button{display:inline-block;border:1px solid #bac5cd;background:white;color:#17212b;border-radius:6px;padding:10px 16px;font:inherit;text-decoration:none;cursor:pointer;margin:8px 6px 0 0}button.primary{background:#006c4c;color:white;border-color:#006c4c}#status{font-size:13px;white-space:pre-wrap}pre{white-space:pre-wrap;font-size:12px}details summary{cursor:pointer;font-weight:600}.columns{display:grid;grid-template-columns:1.5fr 1fr;gap:24px}
+</style><main>
+<div class="eyebrow">FEASIBILITY PROOF · LOCAL ONLY</div><h1>Design once. Run the interface.</h1>
+<p>Tap Off / On in either preview. The remote side plays actual compiled document bytes; state changes run inside the player. No composable compilation is needed to edit the remote document.</p>
+<section><div id="composeApp"></div><div id="status">Loading compiler…</div></section>
+<section class="columns"><div><details open><summary>Interface model</summary><p>Edit the title, padding, badge labels or repeat count, then apply. Both people and automation use the same local API.</p><textarea id="model" aria-label="Interface model"></textarea><button class="primary" id="apply">Apply and preview</button></details></div>
+<div><h3>Export</h3><p>Authoring JSON, real document bytes, and self-contained Kotlin generated from the same model.</p><a class="button" id="json" download="interface.remote.json">Authoring JSON</a><a class="button" id="rc" download="interface.rc">Remote document</a><a class="button" id="kt" download="Interface.kt">Compose Kotlin</a><h3>Host actions</h3><pre id="events" aria-live="polite">No actions yet.</pre></div></section>
+<p>This isolated proof tests selection, actions, drawing repetition and component reuse. The compiled Compose pane is the initial exported fixture; edits update the remote preview and all downloadable exports. Transition polish, arbitrary catalogs and production editor integration are outside this proof.</p>
+</main><script>
+let urls=[];
+async function apply(){ const status=document.getElementById('status');status.textContent='Compiling authoring JSON…';
+try{const model=JSON.parse(document.getElementById('model').value);const start=performance.now();const r=await fetch('/compile-model',{method:'POST',headers:{'Content-Type':'application/json','X-Preview-Density':String(window.devicePixelRatio || 1)},body:JSON.stringify(model)});const data=await r.json();if(!r.ok)throw Error(data.error);window.pocPayload=data.base64;urls.forEach(URL.revokeObjectURL);urls=[];
+const rc=Uint8Array.from(atob(data.base64),c=>c.charCodeAt(0));for(const [id,body,type] of [['json',data.authoringJson,'application/json'],['rc',rc,'application/octet-stream'],['kt',data.kotlin,'text/plain']]){const url=URL.createObjectURL(new Blob([body],{type}));urls.push(url);document.getElementById(id).href=url;}
+status.textContent=`${rc.length} document bytes · ${(performance.now()-start).toFixed(0)} ms including local JVM startup · click to interact`;
+}catch(e){status.textContent=e.message;}}
+document.getElementById('apply').onclick=apply;fetch('/model.json').then(r=>r.text()).then(text=>{document.getElementById('model').value=text;apply();});
+</script><script src="/app/remote-compose-poc.js"></script></html>

@@ -1,0 +1,218 @@
+{
+  "header": {
+    "width": 320,
+    "height": 260,
+    "apiLevel": 7,
+    "profiles": 513
+  },
+  "root": [
+    {
+      "type": "resources",
+      "integers": {
+        "mode": {
+          "value": 0,
+          "export": true
+        }
+      }
+    },
+    {
+      "type": "definePattern",
+      "name": "Badge",
+      "parameters": [
+        "label"
+      ],
+      "children": [
+        {
+          "type": "box",
+          "modifiers": [
+            {
+              "width": 138
+            },
+            {
+              "height": 36
+            },
+            {
+              "background": "#FFE0E9E4"
+            },
+            {
+              "padding": 8
+            }
+          ],
+          "children": [
+            {
+              "type": "text",
+              "value": "@label",
+              "fontSize": 16,
+              "color": "#FF17212B"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "column",
+      "modifiers": [
+        "fillMaxSize",
+        {
+          "background": "#FFFFFFFF"
+        },
+        {
+          "padding": 16
+        }
+      ],
+      "children": [
+        {
+          "type": "text",
+          "value": "Kitchen lighting",
+          "fontSize": 24,
+          "color": "#FF17212B"
+        },
+        {
+          "type": "spacer",
+          "modifiers": [
+            {
+              "height": 16
+            },
+            {
+              "width": 1
+            }
+          ]
+        },
+        {
+          "type": "stateLayout",
+          "indexId": "@mode",
+          "modifiers": [
+            {
+              "width": 288
+            },
+            {
+              "height": 72
+            },
+            {
+              "onClick": [
+                {
+                  "type": "valueIntegerExpressionChange",
+                  "target": "@mode",
+                  "expression": "1 - @mode"
+                },
+                {
+                  "type": "hostNamedAction",
+                  "name": "lighting.changed"
+                }
+              ]
+            }
+          ],
+          "children": [
+            {
+              "type": "box",
+              "modifiers": [
+                "fillMaxSize",
+                {
+                  "background": "#FF455A64"
+                },
+                {
+                  "padding": 16
+                }
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Off",
+                  "fontSize": 24,
+                  "color": "#FFFFFFFF"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "modifiers": [
+                "fillMaxSize",
+                {
+                  "background": "#FF006C4C"
+                },
+                {
+                  "padding": 16
+                }
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "value": "On",
+                  "fontSize": 24,
+                  "color": "#FFFFFFFF"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "spacer",
+          "modifiers": [
+            {
+              "height": 12
+            },
+            {
+              "width": 1
+            }
+          ]
+        },
+        {
+          "type": "canvas",
+          "modifiers": [
+            {
+              "width": 288
+            },
+            {
+              "height": 28
+            }
+          ],
+          "commands": [
+            {
+              "type": "setColor",
+              "color": "#FF006C4C"
+            },
+            {
+              "type": "loop",
+              "index": "i",
+              "from": 0,
+              "until": 4,
+              "step": 1,
+              "commands": [
+                {
+                  "type": "drawCircle",
+                  "cx": "12 + @i * 24",
+                  "cy": 12,
+                  "radius": 8
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "spacer",
+          "modifiers": [
+            {
+              "height": 8
+            },
+            {
+              "width": 1
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "children": [
+            {
+              "type": "Badge",
+              "label": "Kitchen"
+            },
+            {
+              "type": "Badge",
+              "label": "Downstairs"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

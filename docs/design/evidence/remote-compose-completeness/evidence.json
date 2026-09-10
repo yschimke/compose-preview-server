@@ -1,0 +1,23 @@
+{
+  "date": "2026-09-10",
+  "androidxRevision": "36dfbf59a0566d34121e31a6c495c094105124d7",
+  "creationCore": "1.0.0-alpha19",
+  "player": "1.60.1",
+  "jvmTests": 5,
+  "jvmTestsPassed": 5,
+  "documentApi": 7,
+  "profileMask": 513,
+  "densityProfiles": [
+    1,
+    2
+  ],
+  "images": {
+    "remote-before.png": "35259df4f884fd45e83a7f94820ca70231e1c699dd5edf8cdc15fa51a17d631a",
+    "compose-before.png": "bfafa5a5b16bbe7f9992b01870f0d8fc33856dcfb216e6bf3829f94b89e22d1e",
+    "compose-after.png": "3473e45c729f873f73f494060b041255f4afc6b52aaa4d1ce4bddfc41dc57f3d",
+    "remote-density2-after.png": "0489aedbbddd521e77b6bea322e06e3715ba098b6ef8ee15e5f78095ba8fa3e7",
+    "remote-after.png": "79ba1af6a81da8dd7032444c98a1f094584cbb10209e70b5a6310e1ad8e64656"
+  },
+  "httpMcpSmoke": "passed; identical artifacts and located validation errors",
+  "browser": "Wasm: both previews clicked; remote title, labels and repetition edited"
+}

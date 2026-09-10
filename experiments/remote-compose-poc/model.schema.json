@@ -1,0 +1,92 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "title",
+    "width",
+    "height",
+    "padding",
+    "state",
+    "onClick",
+    "repeat",
+    "component"
+  ],
+  "properties": {
+    "schema": {
+      "const": "poc.interface/v1"
+    },
+    "title": {
+      "type": "string"
+    },
+    "width": {
+      "const": 320
+    },
+    "height": {
+      "const": 260
+    },
+    "padding": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 32
+    },
+    "state": {
+      "const": {
+        "name": "mode",
+        "type": "int",
+        "initial": 0,
+        "cases": [
+          "Off",
+          "On"
+        ]
+      }
+    },
+    "onClick": {
+      "const": [
+        {
+          "type": "toggle",
+          "state": "mode"
+        },
+        {
+          "type": "host",
+          "name": "lighting.changed"
+        }
+      ]
+    },
+    "repeat": {
+      "type": "object",
+      "required": [
+        "count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        }
+      }
+    },
+    "component": {
+      "type": "object",
+      "required": [
+        "name",
+        "labels"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "Badge"
+        },
+        "labels": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
