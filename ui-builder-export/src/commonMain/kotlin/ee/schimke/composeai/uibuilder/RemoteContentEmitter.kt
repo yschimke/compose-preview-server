@@ -3,6 +3,7 @@ package ee.schimke.composeai.uibuilder
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.TargetParameter
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -173,10 +174,24 @@ internal class RemoteContentEmitter(
   private var usesDp = false
   private var usesTextAlign = false
   private var usesRemoteBoolean = false
+  private var usesRemoteInt = false
   private var usesLambdaAction = false
 
   /** Callables the record-driven fallback wrote, so their imports are the ones it used. */
   private val usedComponentImports = mutableSetOf<String>()
+
+  /**
+   * The document state variables an emitted action writes to, as their declarations.
+   *
+   * A `valueChange` writes into a REMOTE mutable, so a design's `stateVariables` have to exist in
+   * the generated body before an action can name one. Collected while emitting and read back by
+   * the caller through [stateLocals], because which variables a widget needs is not known until
+   * its actions have been written — the same order [background] already works in.
+   */
+  private val stateWrites = linkedMapOf<String, String>()
+
+  /** `val <name> = rememberMutableRemote…(<initial>)` for each variable an action wrote to. */
+  fun stateLocals(): List<String> = stateWrites.values.toList()
 
   /** The `WearWidgetBrush` chain a container's background declares. */
   data class Background(
@@ -445,7 +460,7 @@ internal class RemoteContentEmitter(
           parameter.name == MODIFIER_PARAMETER -> node.modifierExpression(pad)
           authored != null -> remoteValue(parameter, authored)
           parameter.hasDefault -> null
-          parameter.typeFqn == ACTION_FQN -> lambdaActionExpression()
+          parameter.typeFqn == ACTION_FQN -> actionExpression(node, parameter)
           else -> null
         }
       if (expression == null) {
@@ -496,6 +511,136 @@ internal class RemoteContentEmitter(
       lines += "$pad}"
     }
     return lines
+  }
+
+  /**
+   * What a design's event binding becomes, or `lambdaAction {}` when it binds nothing.
+   *
+   * Every action a document can carry is a state WRITE — `set`, `select` and `setText` assign,
+   * `toggle` negates — each naming a variable declared in `stateVariables`. Nothing in the model
+   * calls out to the host, so all of them are one `valueChange`, and the spellings are compiled
+   * in wear-m3-catalog's `RemoteActionVocabularyProbe` rather than guessed here.
+   *
+   * The event key is the parameter without its `on`: `onClick` reads `click`, which is what the
+   * Compose lane's `actionLambda("click", …)` reads for the same component.
+   *
+   * Four refusals, each because the alternative is a design that means something else:
+   * - **`selectOrClear`** assigns null, and `valueChange`'s second parameter is a non-null
+   *   `RemoteState<T>`. A design that clears a selection and one that sets it to a sentinel are
+   *   different designs, so this refuses rather than picking one.
+   * - **more than one action.** A handler runs its list in order and as a unit; a Remote `Action`
+   *   is a single write, and emitting the head would export a handler that does less than the
+   *   preview shows — which the Compose lane fixed for itself and is worth not repeating.
+   * - **a variable the document does not declare**, which would compile into a write to nothing.
+   * - **a `toggle` on anything but a boolean**, which is what `!` means and nothing else.
+   */
+  private fun actionExpression(node: UiBuilderNode, parameter: TargetParameter): String? {
+    val event = parameter.name.removePrefix("on").replaceFirstChar { it.lowercaseChar() }
+    val actions = (node.eventBindings[event] as? JsonArray).orEmpty()
+    if (actions.isEmpty()) return lambdaActionExpression()
+    if (actions.size > 1) {
+      refusals +=
+        "`${node.id}` runs ${actions.size} actions on `$event` and a Remote action is one write"
+      return null
+    }
+    val action = actions.single() as? JsonObject
+    val kind = action?.plainString("type")
+    val variable = action?.plainString("variable")
+    if (action == null || kind == null || variable == null) {
+      refusals += "the `$event` binding on `${node.id}` is not an action naming a variable"
+      return null
+    }
+    if (kind == "selectOrClear") {
+      refusals +=
+        "`${node.id}` clears `$variable` on `$event`, and a Remote value cannot be null — " +
+          "clearing a selection and setting it to a sentinel are different designs"
+      return null
+    }
+    val declared = document.stateVariables[variable] as? JsonObject
+    val valueType = declared?.plainString("valueType")
+    if (declared == null || valueType == null) {
+      refusals += "`${node.id}` writes `$variable` on `$event`, which the design does not declare"
+      return null
+    }
+    val target = variable.remoteIdentifier()
+    val written =
+      when (kind) {
+        "set",
+        "select",
+        "setText" -> remoteLiteral(valueType, action["value"])
+        "toggle" ->
+          if (valueType == "bool") "!$target"
+          else {
+            refusals +=
+              "`${node.id}` toggles `$variable` on `$event` and it is declared `$valueType`, " +
+                "which has no negation"
+            return null
+          }
+        else -> null
+      }
+    if (written == null) {
+      refusals +=
+        "`${node.id}` writes `$variable` on `$event` with `$kind`, which this generator " +
+          "cannot express as a Remote value"
+      return null
+    }
+    val factory = stateFactory(valueType)
+    if (factory == null) {
+      refusals += "`$variable` is declared `$valueType`, which has no Remote mutable"
+      return null
+    }
+    stateWrites.getOrPut(variable) {
+      "val $target = $factory(${remoteInitial(valueType, declared["initialValue"])})"
+    }
+    return "valueChange($target, $written)"
+  }
+
+  private fun stateFactory(valueType: String): String? =
+    when (valueType) {
+      "bool" -> "rememberMutableRemoteBoolean"
+      "int" -> "rememberMutableRemoteInt"
+      "float" -> "rememberMutableRemoteFloat"
+      "string" -> "rememberMutableRemoteString"
+      else -> null
+    }
+
+  /** The Kotlin literal a mutable's factory takes, which is a plain one and not a Remote value. */
+  private fun remoteInitial(valueType: String, initial: JsonElement?): String {
+    val primitive = initial as? JsonPrimitive
+    return when (valueType) {
+      "bool" -> (primitive?.booleanOrNull ?: false).toString()
+      "int" -> (primitive?.intOrNull ?: 0).toString()
+      "float" -> "${primitive?.floatOrNull ?: 0f}f"
+      else -> "\"${primitive?.contentOrNull.orEmpty().escaped()}\""
+    }
+  }
+
+  /** A design's action value as a Remote value of the variable's declared type. */
+  private fun remoteLiteral(valueType: String, value: JsonElement?): String? {
+    val primitive = value as? JsonPrimitive ?: return null
+    return when (valueType) {
+      "bool" ->
+        primitive.booleanOrNull?.let {
+          usesRemoteBoolean = true
+          "$it.rb"
+        }
+      "int" ->
+        primitive.intOrNull?.let {
+          usesRemoteInt = true
+          "$it.ri"
+        }
+      "float" ->
+        primitive.floatOrNull?.let {
+          usesRemoteFloat = true
+          "${it}f.rf"
+        }
+      "string" ->
+        primitive.contentOrNull?.let {
+          usesRemoteString = true
+          "\"${it.escaped()}\".rs"
+        }
+      else -> null
+    }
   }
 
   private fun lambdaActionExpression(): String {
@@ -1182,6 +1327,14 @@ internal class RemoteContentEmitter(
     if (usesLambdaAction) {
       imports += "androidx.compose.remote.creation.compose.action.lambdaAction"
     }
+    if (stateWrites.isNotEmpty()) {
+      imports += "androidx.compose.remote.creation.compose.action.valueChange"
+      stateWrites.values.forEach { declaration ->
+        val factory = declaration.substringAfter("= ").substringBefore('(')
+        imports += "androidx.compose.remote.creation.compose.state.$factory"
+      }
+    }
+    if (usesRemoteInt) imports += "androidx.compose.remote.creation.compose.state.ri"
     imports += usedComponentImports
     if (usesAlignment) imports += "androidx.compose.remote.creation.compose.layout.RemoteAlignment"
     if (usesArrangement) {
@@ -1707,6 +1860,25 @@ private const val REMOTE_BOOLEAN_FQN =
   "androidx.compose.remote.creation.compose.state.RemoteBoolean"
 private const val REMOTE_FLOAT_FQN = "androidx.compose.remote.creation.compose.state.RemoteFloat"
 private const val REMOTE_COLOR_FQN = "androidx.compose.remote.creation.compose.state.RemoteColor"
+
+/** A plain string field of an action or a state declaration — not the `{type, value}` wrapper. */
+private fun JsonObject.plainString(key: String): String? =
+  (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+
+/** A state variable's name as a Kotlin identifier the generated body can declare. */
+private fun String.remoteIdentifier(): String =
+  buildString {
+      this@remoteIdentifier.forEachIndexed { index, character ->
+        append(
+          when {
+            character.isLetter() || character == '_' -> character
+            character.isDigit() && index > 0 -> character
+            else -> '_'
+          }
+        )
+      }
+    }
+    .ifEmpty { "state" }
 
 internal fun kotlinx.serialization.json.JsonElement.boolOrNull(): Boolean? =
   (this as? JsonObject)?.get("value")?.jsonPrimitive?.booleanOrNull

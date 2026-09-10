@@ -206,6 +206,11 @@ object WearWidgetCodeExporter {
       appendLine("@RemoteComposable")
       appendLine("@Composable")
       appendLine("fun ${name}Content(${parameterList(parameters)}) {")
+      // The design's state, before anything that writes it. A `valueChange` action names a REMOTE
+      // mutable, so the variables an action touched have to be declared here — and only those,
+      // because a widget that declares a variable nothing reads is an operation the player
+      // carries for nothing.
+      emitter.stateLocals().forEach { appendLine("$INDENT$it") }
       if (emitter.usesTheme) {
         appendLine("${INDENT}RemoteMaterialTheme {")
         body.forEach(::appendLine)
