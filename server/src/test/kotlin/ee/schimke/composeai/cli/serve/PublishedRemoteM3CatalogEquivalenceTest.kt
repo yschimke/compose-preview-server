@@ -270,17 +270,25 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * loses. Restore them and every design is record-free and meets this refusal head on; leave them
    * out and designs cannot be rooted correctly in the first place.
    *
-   * Whether the record-driven lane is an escape is OPEN, and deliberately not answered here. Its
-   * own comment says `remote-m3` "ha[s] no component record and the record-driven generator can
-   * only refuse them" — written when the record did not exist, which is the thing this work
-   * changed, so the sentence needs re-checking rather than citing.
+   * Whether the record-driven lane is an escape was open here, and the record answers it. Its own
+   * comment says `remote-m3` "ha[s] no component record and the record-driven generator can only
+   * refuse them" — written when the record did not exist, which is the thing this work changed, so
+   * the sentence needed re-checking rather than citing. Re-checked: the record exists and the
+   * generator still refuses, and now it says why. `code.refusedReason` on 25 of the 27 names a
+   * required parameter whose TYPE has no writable value — `RemoteString`, `RemoteBoolean`,
+   * `RemoteFloat`, `Action`. A `remote-material3` component takes Remote Compose values, not Kotlin
+   * ones, and neither generator can conjure one.
    *
-   * Re-checking it needs more than calling the executor. `ScreenGeneratorComposeExportExecutor`
-   * resolves a component through its own `components(catalogSystemId)` source rather than through
-   * the `catalog` on the export request: handed the real composed catalog — 27 components,
-   * `remote-m3/remote-text` among them — it still answers "no component `remote-m3/remote-text` in
-   * this catalog". A probe that does not wire that source measures its own fixture, which is what
-   * two attempts at one did before this note replaced them.
+   * That reframes the cost rather than removing it, and the reframing is the useful part: six
+   * types, not twenty-five components — pinned as a histogram in
+   * [the export blocker is six value types, not twenty-five components].
+   *
+   * Note what still cannot be measured from here, so nobody mistakes the histogram for a plan.
+   * `ScreenGeneratorComposeExportExecutor` resolves a component through its own
+   * `components(catalogSystemId)` source rather than through the `catalog` on the export request:
+   * handed the real composed catalog it still answers "no component `remote-m3/remote-text` in this
+   * catalog". A probe that does not wire that source measures its own fixture, which is what two
+   * attempts at one did before this note replaced them.
    *
    * What is checkable without that wiring is the emitter's vocabulary, and that is what is asserted
    * below.
@@ -339,6 +347,66 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       offending,
       "the set of advertised-but-unwritable modifiers has changed — if the emitter grew one, " +
         "shorten this; if the composer's structural default did, it needs one",
+    )
+  }
+
+  /**
+   * What the export blocker actually costs, from the record rather than from a count of `when`
+   * branches.
+   *
+   * "Twenty-five components means twenty-five hand-written emitter cases" is the shape of it from
+   * the emitter's side, and it is the wrong unit. The record already answers the same question one
+   * level down: `code.refusedReason` says why a component has no call site, and every refusal here
+   * names a required parameter whose TYPE has no value a generator can write.
+   *
+   * Six types, not twenty-five components — and the fix is a type-directed mapping, which is what
+   * `RemoteContentEmitter` already does for the modifier half (`modifierCalls` maps the catalog's
+   * whole modifier vocabulary onto `RemoteModifier` generically, and refuses three by name). The
+   * per-component half is `text`, `lottie`, `image` and the container argument builders, and what
+   * they are doing by hand is turning a design's property into a Remote Compose value: a string
+   * into a `RemoteString`, a colour into a `RemoteColor`.
+   *
+   * Two caveats this test does not let anyone skip:
+   * - A refusal here is about a PLACEHOLDER — the snippet generator inventing a value out of
+   *   nothing. An export has the design's real value, so `text: RemoteString` is not the same
+   *   obstacle in both places. `Action` is: nine components require one and a design carries no
+   *   action to map, so those need a policy before they need a mapper.
+   * - None of this says the generated source compiles. That belongs in wear-m3-catalog against
+   *   remote-material3's own classpath (`UI_BUILDER_CATALOG_CONTRACT.md` phase 2, item 11), and
+   *   until it exists an emitter case is a claim rather than a fact.
+   *
+   * Asserted as the exact histogram so that teaching one type shows up as a number moving.
+   */
+  @Test
+  fun `the export blocker is six value types, not twenty-five components`() {
+    val record = json.decodeFromString<ComponentRecordFile>(fixture("remote-m3-record-v1.json"))
+    val refusals =
+      record.components.mapNotNull { it.code?.refusedReason }.groupingBy { it }.eachCount()
+    val byRequiredType =
+      refusals.entries
+        .groupingBy { (reason, _) ->
+          reason.substringAfterLast(": ").removeSuffix("`").ifBlank { reason }
+        }
+        .fold(0) { total, (_, count) -> total + count }
+
+    assertEquals(
+      25,
+      refusals.values.sum(),
+      "the number of components with no call site has changed; 27 components, 2 of which write one",
+    )
+    assertEquals(
+      mapOf(
+        "Action" to 9,
+        "RemoteBoolean" to 6,
+        "RemoteFloat" to 5,
+        "RemotePageIndicatorState" to 2,
+        "ImageVector" to 1,
+        "RemoteString" to 1,
+        // Not a type at all — one callable this catalog cannot call from a generated file.
+        "not public or internal, so a generated file cannot call it" to 1,
+      ),
+      byRequiredType,
+      "the set of types blocking a call site has changed",
     )
   }
 
