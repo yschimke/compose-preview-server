@@ -5799,6 +5799,18 @@ class ServeWebFixtureTest {
         assetText("playground.css").contains(".cp-pg-inline-error"),
       "located compiler errors are shown inline and cleared through CodeMirror's moving line handle",
     )
+    // A compiler message is not one line — K2 reports an overload failure as a head, a block per
+    // candidate and a caret excerpt (yschimke/compose-preview-server#699). The summary keeps every
+    // line, the inline widget keeps only the head so the code stays on screen.
+    assertTrue(
+      assetText("playground.css").contains("white-space: pre-wrap"),
+      "the diagnostic summary renders a multi-line compiler message as multiple lines",
+    )
+    assertTrue(
+      playground.contains("String(d.message).split(\"\\n\")[0]") &&
+        playground.contains("message.title = d.message"),
+      "the inline widget shows the head line and keeps the full text in its tooltip",
+    )
     assertTrue(
       playground
         .substringAfter("removeFile.addEventListener")

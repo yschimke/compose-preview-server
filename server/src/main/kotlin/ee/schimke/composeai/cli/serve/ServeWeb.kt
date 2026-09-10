@@ -8026,7 +8026,13 @@ ${captureControlsHtml().prependIndent("          ")}
           // The live summary below already announces the same diagnostic. Keep this visual copy
           // out of the accessibility tree so a compile failure is not read twice.
           message.setAttribute("aria-hidden", "true");
-          message.textContent = d.message;
+          // Only the head line goes inline. A K2 overload failure is a head plus a block per
+          // candidate plus a caret excerpt, and pasting all of it into a line widget pushes the
+          // code the reader is editing off the screen. The full text stays one glance away, in the
+          // summary below and in this widget's tooltip.
+          var head = String(d.message).split("\n")[0];
+          message.textContent = head === d.message ? d.message : head + " …";
+          message.title = d.message;
           var widget = editor.addLineWidget(d.line, message, { coverGutter: false, noHScroll: true });
           var mark = null;
           if (d.ch != null) {
@@ -8137,8 +8143,10 @@ ${captureControlsHtml().prependIndent("          ")}
           // of ours, make the entry jump to its tab.
           var owner = indexOfFile(d.file || "");
           var where = (d.file ? d.file : "") + ((d.line != null) ? (":" + (d.line + 1)) : "");
-          var loc = where ? (" (" + where + ")") : "";
-          li.textContent = (d.severity || "info") + ": " + d.message + loc;
+          // The location leads rather than trails: a K2 diagnostic runs to several lines (candidate
+          // blocks, a `^^^^` excerpt), and a trailing "(Snippet.kt:31)" landed under the caret at
+          // the far end of the message instead of beside the thing it locates.
+          li.textContent = (d.severity || "info") + ": " + (where ? where + " — " : "") + d.message;
           if (owner >= 0) {
             li.style.cursor = "pointer";
             li.title = "Show " + d.file + (d.line != null ? ":" + (d.line + 1) : "");

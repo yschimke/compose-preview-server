@@ -42,7 +42,11 @@
   background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
 .cp-pg-diags { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
   gap: 6px; }
-.cp-pg-diag { font-family: var(--md-sys-typescale-mono-font);
+/* `pre-wrap`, because a compiler message is not one line. K2 renders an overload failure as a
+   head line, one block per candidate and a `^^^^` caret excerpt; collapsing that whitespace ran
+   the candidates together into an unreadable paragraph and misaligned the caret. Long lines still
+   wrap, so the column never scrolls sideways. */
+.cp-pg-diag { font-family: var(--md-sys-typescale-mono-font); white-space: pre-wrap;
   font-size: 12.5px; padding: 10px 14px; border-radius: var(--md-sys-shape-corner-small);
   background: var(--md-sys-color-surface-container-high); }
 /* A compiler error takes the M3 error container pair; a warning keeps its literal amber, which —
@@ -55,7 +59,7 @@
    message immediately beneath the offending line. */
 .cp-pg-line-error { background: color-mix(in srgb, var(--md-sys-color-error-container) 55%, transparent); }
 .cp-pg-line-warning { background: light-dark(#fff4df, #362600); }
-.cp-pg-inline-diag { padding: 4px 12px; border-left: 3px solid currentcolor;
+.cp-pg-inline-diag { padding: 4px 12px; border-left: 3px solid currentcolor; white-space: pre-wrap;
   font-family: var(--md-sys-typescale-mono-font); font-size: 12.5px; line-height: 1.45; }
 .cp-pg-inline-error { background: var(--md-sys-color-error-container);
   color: var(--md-sys-color-on-error-container); }
