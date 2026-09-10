@@ -1,8 +1,12 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_COMPONENT_IDS
 import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_MODIFIERS
+import ee.schimke.composeai.uibuilder.UiBuilderDocument
+import ee.schimke.composeai.uibuilder.UiBuilderNode
+import ee.schimke.composeai.uibuilder.WearWidgetCodeExporter
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
@@ -11,8 +15,12 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * What `remote-m3` gains and what it loses if `--ui-builder-published-catalogs` names it.
@@ -45,12 +53,17 @@ import kotlinx.serialization.json.jsonPrimitive
  * policy schema forbids, dropped its slot policy, and hardcoded its traits to empty. Three defects
  * on a seam no catalog had ever crossed.
  *
- * What is still lost:
- * - `remote-m3/lottie` — catalog-owned, no call site, and the same builtin argument reaches it. It
- *   needs a shelf this catalog does not declare, and inventing one is a catalog decision.
- * - `m3/surface` and `m3/text` — **borrowed** from the m3 catalog by the synthesised shelf, and
- *   `m3/` is not a donor namespace, so either the published file states them or the server donates
- *   them. Which is right is open: yschimke/compose-preview-server#674.
+ * **The other three are not losses**, which took asking the person who owns the catalog:
+ * - `m3/surface` — there is no Surface in Remote Compose or Wear Material 3. The synthesised shelf
+ *   borrowing one from the m3 catalog was the mistake, and the emitter already tells an author to
+ *   reach for a `layout/box` with `background` and `clip` instead.
+ * - `m3/text` — **is** `RemoteText`, published here as `remote-m3/remote-text`. The component is
+ *   not missing; the id a design stores changes.
+ * - `remote-m3/lottie` — the catalog draws no Lottie sticker at all, so there is nothing here to
+ *   publish. It is on the synthesised shelf because the server builds one from `asset/image`.
+ *
+ * So the shelf comparison is settled, and what remains is export — a different question, measured
+ * below.
  */
 class PublishedRemoteM3CatalogEquivalenceTest {
 
@@ -83,15 +96,23 @@ class PublishedRemoteM3CatalogEquivalenceTest {
   private val knownAbsent =
     mapOf(
       "remote-m3/lottie" to
-        "an asset player, not a Remote Compose component call the record sees. The same argument " +
-          "that made the widget containers builtins reaches it, and the catalog has not made it: " +
-          "lottie needs a shelf remote-catalog does not have — the frozen catalog files it under " +
-          "`Content`, which is a builder shelf — and inventing one is a catalog decision",
+        "the catalog draws no Lottie sticker at all — `grep -r Lottie remote-catalog/src/main` " +
+          "finds nothing — so there is no component here to publish. It exists on the " +
+          "synthesised shelf because the server builds one from `asset/image` and the emitter " +
+          "can write Horologist's `LottieAnimation`. Publishing it means the catalog drawing " +
+          "one, on a shelf it would have to declare",
       "m3/surface" to
-        "borrowed from the m3 catalog by the synthesised shelf; `m3/` is not a donor namespace, " +
-          "so either the published file states it or the server donates it. Which of those is " +
-          "right is open — yschimke/compose-preview-server#674",
-      "m3/text" to "borrowed the same way, and open the same way",
+        "NOT a loss: there is no Surface in Remote Compose or Wear Material 3, so a Remote " +
+          "design never had one to place. The synthesised shelf borrowed it from the m3 catalog, " +
+          "which was the mistake — a coloured, rounded container in a widget body is a " +
+          "`layout/box` with `background` and `clip`, which is exactly what the emitter already " +
+          "tells an author who tries",
+      "m3/text" to
+        "NOT a loss either, and not the same thing as `m3/surface`: `m3/text` IS `RemoteText` in " +
+          "remote-material3, and this catalog publishes it under its own id, " +
+          "`remote-m3/remote-text`. What the swap changes is the id a design stores, not whether " +
+          "the component is there — and the emitter has written `m3/text` as `RemoteText` all " +
+          "along, which is the same identity spelled the m3 way",
     )
 
   /** The four namespaces `ProductionUiBuilderRuntime` donates back to a published catalog. */
@@ -254,13 +275,19 @@ class PublishedRemoteM3CatalogEquivalenceTest {
   }
 
   /**
-   * Offered is not usable, and this is the second blocker.
+   * Offered is not usable, and this measures one half of that.
    *
-   * `RemoteContentEmitter.emit` writes a design to Remote Compose creation-DSL Kotlin, and it can
-   * write exactly the ids in [REMOTE_CONTENT_COMPONENT_IDS] — eleven of them. Everything else hits
-   * its catch-all: "has no Remote Compose counterpart this generator can write". `remote-m3/lottie`
-   * is in that set and is one of the five the published catalog LOSES; not one of the twenty-five
-   * it adds is.
+   * `RemoteContentEmitter.emit` is a `when` over component ids with a hand-written function each,
+   * and it knows exactly the ids in [REMOTE_CONTENT_COMPONENT_IDS] — eleven. Not one of the
+   * twenty-five the published catalog adds is among them, which was once the whole answer: a
+   * component you could insert and could not export.
+   *
+   * It is no longer the whole answer. The emitter falls back to the component RECORD for a
+   * component it has no case for, and twenty-four of the twenty-seven now export — measured in
+   * [what the published shelf can export is the reviewed set], which is the test to read for
+   * whether the shelf is usable. This one stays because the hand-written cases and the fallback are
+   * different mechanisms with different failure modes, and a case appearing here should be a
+   * deliberate act rather than a surprise.
    *
    * WHICH lane a design takes is decided by its ROOT, not by its catalog:
    * `RecordFreeExport.applies` is `roots.single().componentId` being a `WearWidgetScaffoldSize` or
@@ -302,7 +329,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * these components this test fails and says to shorten the list. Raised in review on #673.
    */
   @Test
-  fun `not one component the published catalog adds can be exported`() {
+  fun `the emitter has a hand-written case for none of the components the catalog adds`() {
     val offered = composed.components.map { it.componentId }
     val inexportable =
       offered
@@ -411,6 +438,122 @@ class PublishedRemoteM3CatalogEquivalenceTest {
   }
 
   /**
+   * How much of the published shelf can now be EXPORTED, component by component.
+   *
+   * This is the invariant a cutover turns on and the one `RemoteM3VocabularyParityTest` holds the
+   * synthesised palette to: a component you can insert and cannot export is worse than one that is
+   * missing, because the author finds out at the end with the design already built. It did not
+   * cover a published catalog, so the swap escaped it — and when this test was written the answer
+   * was *none of the twenty-five*.
+   *
+   * It is not none any more. `RemoteContentEmitter` falls back to the component record for a
+   * component it has no hand-written case for, mapping each parameter by its declared type, so the
+   * question stopped being "has someone written a `when` branch" and became "can a design fill what
+   * this component requires".
+   *
+   * Asked here the way an author would: for each component the catalog publishes, a widget whose
+   * body is that component, with a value authored for every required parameter the design can
+   * express. What still refuses is pinned with the reason the emitter gave, so teaching the mapper
+   * one more type shortens this list and says so.
+   *
+   * The three the caller has to know about, and none of them is a mapping gap:
+   * - `RemotePageIndicatorState` and `ImageVector` are types no design value becomes;
+   * - one callable is not public or internal, so no generated file can call it at all.
+   */
+  @Test
+  fun `what the published shelf can export is the reviewed set`() {
+    val record = json.decodeFromString<ComponentRecordFile>(fixture("remote-m3-record-v1.json"))
+    val byId =
+      composed.components
+        .map { it.componentId }
+        .filter { it.startsWith("remote-m3/") }
+        .filterNot { it.startsWith("remote-m3/widget-container-") }
+        .mapNotNull { id -> recordFor(id, record)?.let { id to it } }
+        .toMap()
+
+    val refused = mutableMapOf<String, String>()
+    for ((id, component) in byId) {
+      val result =
+        WearWidgetCodeExporter.export(
+          widgetAround(id, component),
+          components = mapOf(id to component),
+        )
+      if (result is WearWidgetCodeExporter.Result.Refused) {
+        refused[id] = result.reasons.first().substringAfter("requires ", result.reasons.first())
+      }
+    }
+
+    assertEquals(
+      EXPORT_REFUSALS,
+      refused.toSortedMap().toMap(),
+      "the set of published components the widget exporter cannot write has changed",
+    )
+  }
+
+  /** The record component a published id names, by the `record` the published file states. */
+  private fun recordFor(id: String, record: ComponentRecordFile): ComponentRecord? {
+    val canonical =
+      json
+        .parseToJsonElement(fixture("remote-m3-published-v1.json"))
+        .jsonObject["statusSemantics"]!!
+        .jsonObject["components"]!!
+        .jsonObject[id]
+        ?.jsonObject
+        ?.get("record")
+        ?.jsonPrimitive
+        ?.content ?: return null
+    return record.components.singleOrNull { it.canonicalId == canonical }
+  }
+
+  /** A widget whose whole body is [id], with every required parameter the design can express. */
+  private fun widgetAround(id: String, component: ComponentRecord): UiBuilderDocument {
+    val properties = buildJsonObject {
+      for (parameter in component.parameters) {
+        if (parameter.hasDefault || parameter.composableSlot) continue
+        val authored =
+          when (parameter.typeFqn) {
+            "androidx.compose.remote.creation.compose.state.RemoteString",
+            "kotlin.String" -> designValue("string", JsonPrimitive("value"))
+            "androidx.compose.remote.creation.compose.state.RemoteFloat",
+            "kotlin.Float" -> designValue("number", JsonPrimitive(0.5))
+            "androidx.compose.remote.creation.compose.state.RemoteBoolean",
+            "kotlin.Boolean" -> designValue("boolean", JsonPrimitive(true))
+            "androidx.compose.remote.creation.compose.state.RemoteColor" ->
+              designValue("string", JsonPrimitive("#FF6750A4"))
+            "kotlin.Int" -> designValue("number", JsonPrimitive(1))
+            else -> null
+          }
+        if (authored != null) put(parameter.name, authored)
+      }
+    }
+    return UiBuilderDocument(
+      schema = "compose-ui-builder-document/v1-candidate",
+      id = "export-parity",
+      title = "Export parity",
+      revision = 1,
+      catalogPin = JsonObject(emptyMap()),
+      environment = JsonObject(emptyMap()),
+      stateVariables = JsonObject(emptyMap()),
+      roots = listOf("host"),
+      nodes =
+        mapOf(
+          "host" to
+            UiBuilderNode(
+              id = "host",
+              componentId = "remote-m3/widget-container-small",
+              slots = mapOf("content" to listOf("subject")),
+            ),
+          "subject" to UiBuilderNode(id = "subject", componentId = id, properties = properties),
+        ),
+    )
+  }
+
+  private fun designValue(type: String, value: JsonPrimitive) = buildJsonObject {
+    put("type", JsonPrimitive(type))
+    put("value", value)
+  }
+
+  /**
    * Every shelf the components use has to be in the menu order, or the editor invents one.
    *
    * `UiBuilderEditorState` appends a group the order does not name after every group it does, and
@@ -505,5 +648,30 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       builderOwned.filterNot { it in servedIds },
       "a published catalog lost builder components the synthesised one offers",
     )
+  }
+
+  private companion object {
+    /**
+     * The three published components the widget exporter still cannot write, and why.
+     *
+     * Twenty-four of the twenty-seven do, which is the number this test exists to keep honest. All
+     * three left are the same kind of thing — a required parameter whose TYPE no design value
+     * becomes — and none is a mapping the emitter could add without the design model growing a way
+     * to say it. The two page indicators want a `RemotePageIndicatorState`, which is a runtime
+     * object rather than a value; the icon wants an `ImageVector`, which a design carries as an
+     * asset key rather than as a vector.
+     */
+    val EXPORT_REFUSALS =
+      mapOf(
+        "remote-m3/remote-horizontal-page-indicator" to
+          "`state: RemotePageIndicatorState` and the design carries no value this generator can " +
+            "write as one",
+        "remote-m3/remote-icon" to
+          "`imageVector: ImageVector` and the design carries no value this generator can write " +
+            "as one",
+        "remote-m3/remote-vertical-page-indicator" to
+          "`state: RemotePageIndicatorState` and the design carries no value this generator can " +
+            "write as one",
+      )
   }
 }
