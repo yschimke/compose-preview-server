@@ -3119,15 +3119,21 @@ public class ServeRunner(
     // design library, because the two cache separately: a project republishes a design far more
     // often than it changes a component, and one invalidating the other would throw away a warm
     // index for no reason.
-    val uiBuilderComponentLibrary =
-      if (uiBuilderAdmin != null) {
-        ServeUiBuilderComponentLibrary(
-          fetch = ::fetchRegistryDocument,
-          onLog = { System.err.println(it) },
-        )
-      } else {
-        null
-      }
+    //
+    // Gated on the builder being served at all, **not** on the admin surface. It first shipped
+    // beside the admin routes and inherited their `uiBuilderAdmin != null`, which needs an
+    // `--admin-token`; the palette reads this through the builder's own credential, so on an
+    // ordinary host without an admin token the endpoint it needs would never have registered.
+    // Nothing here writes, so serving the builder is the whole requirement.
+    // Written as the same `uiBuilderLane?.let` the authorization below uses, on purpose: the routes
+    // register only when *both* are present, so the two have to be keyed on one thing. Spelled two
+    // different ways is how they came to disagree in the first place.
+    val uiBuilderComponentLibrary = uiBuilderLane?.let {
+      ServeUiBuilderComponentLibrary(
+        fetch = ::fetchRegistryDocument,
+        onLog = { System.err.println(it) },
+      )
+    }
     // Telling the room: comment activity, posted out to one URL. Off unless an operator named one.
     //
     // Constructed here and attached in the same breath, so it subscribes before the routes that
