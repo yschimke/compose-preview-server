@@ -1382,7 +1382,12 @@ class UiBuilderEditorReducer(
           enabledPacks =
             event.packIds.filterTo(mutableSetOf()) { catalog.componentPacks[it] != null }
         )
-      is UiBuilderEditorEvent.SetComponentDrift -> state.copy(componentDrift = event.findings)
+      // Filtered on the way in, against the document as it stands, by the same rule a rebuilt
+      // state uses. The host hands over what it fetched — it does not track the edits made since —
+      // so a finding whose component has already moved on must not reach the panel and wait for
+      // the next rebuild to be taken back out.
+      is UiBuilderEditorEvent.SetComponentDrift ->
+        state.copy(componentDrift = event.findings.stillDescribing(state.document))
       is UiBuilderEditorEvent.ToggleCatalogComponent ->
         state.copy(
           expandedCatalogComponents = state.expandedCatalogComponents.toggled(event.componentId)

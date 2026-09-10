@@ -33,6 +33,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -215,6 +216,38 @@ class ServeUiBuilderComponentDriftRoutesTest {
     assertEquals(emptyList(), drift(server, OPERATOR_TOKEN))
   }
 
+  /**
+   * An editor opened at `?revision=` is showing what that revision imported.
+   *
+   * Reporting against head there is answering a question nobody asked: a component the pinned
+   * revision holds and head no longer does would simply be missing from the report, and the panel
+   * would go quiet about a design that has genuinely drifted.
+   */
+  @Test
+  fun `a pinned revision is reported against that revision, not the head`() {
+    publish(title = "Contribution cell")
+    val server = start()
+    createDesign(server, importedDigest = publishedDigest())
+
+    val (code, body) = ask(server, OPERATOR_TOKEN, revision = 0)
+
+    assertEquals(200, code, body)
+    assertEquals(0, Json.parseToJsonElement(body).jsonObject["revision"]!!.jsonPrimitive.int)
+  }
+
+  @Test
+  fun `a revision that is not a number is refused rather than ignored`() {
+    publish(title = "Contribution cell")
+    val server = start()
+    createDesign(server, importedDigest = publishedDigest())
+
+    // Silently falling back to head would answer a different question than the one asked, and the
+    // response's own `revision` field would be the only clue.
+    val (code, body) = ask(server, OPERATOR_TOKEN, rawRevision = "yesterday")
+
+    assertEquals(400, code, body)
+  }
+
   @Test
   fun `the route is gated by the builder credential before any design is read`() {
     publish(title = "Contribution cell")
@@ -305,11 +338,14 @@ class ServeUiBuilderComponentDriftRoutesTest {
     server: RunningServer,
     token: String?,
     designId: String = DESIGN_ID,
+    revision: Long? = null,
+    rawRevision: String? = null,
   ): Pair<Int, String> {
+    val query = rawRevision?.let { "?revision=$it" } ?: revision?.let { "?revision=$it" } ?: ""
     val request =
       Request.Builder()
         .url(
-          "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$designId/component-drift"
+          "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$designId/component-drift$query"
         )
         .apply { if (token != null) header(ServeHttpServer.TOKEN_HEADER, token) }
         .build()

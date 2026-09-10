@@ -862,7 +862,15 @@ fun UiBuilderEditor(
   // The host's answer, into the state the Issues panel reads. An effect rather than a value folded
   // in at composition because the fetch lands after mount, and the reducer's copy has to survive
   // the document rebuilds that happen between then and the next fetch.
-  LaunchedEffect(componentDrift) {
+  //
+  // Re-dispatched whenever the document's component declarations change, and that is not belt and
+  // braces. `stillDescribing` drops a finding the moment its component stops matching, which is
+  // right — but an edit that drops one is very often reversible, and undo restores the exact
+  // source the finding described. Without this the row would stay gone until a reload, because the
+  // host has no reason to fetch again. Re-handing the host's own unfiltered list lets the reducer
+  // decide afresh; anything still invalid is filtered out again, so this cannot resurrect a row
+  // that has stopped being true.
+  LaunchedEffect(componentDrift, state.document.components) {
     dispatch(UiBuilderEditorEvent.SetComponentDrift(componentDrift))
   }
   // Following the address bar after the first paint, for the navigation the browser answers without

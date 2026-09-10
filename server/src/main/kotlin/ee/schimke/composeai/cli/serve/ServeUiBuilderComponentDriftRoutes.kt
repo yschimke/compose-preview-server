@@ -64,8 +64,17 @@ internal fun Route.installUiBuilderComponentDriftRoutes(
       call.respondDriftError(HttpStatusCode.BadRequest, "a design id is required")
       return@get
     }
+    // The revision the caller is looking at, when it is not the head. An editor opened at a pinned
+    // revision is showing the components *that* revision imported, and a report computed against
+    // head would silently miss one it holds and head does not.
+    val revision = call.request.queryParameters["revision"]
+    val pinned = revision?.toLongOrNull()
+    if (revision != null && pinned == null) {
+      call.respondDriftError(HttpStatusCode.BadRequest, "`revision` must be a number")
+      return@get
+    }
     val document =
-      when (val read = service.documentFor(designId, actor)) {
+      when (val read = service.documentFor(designId, pinned, actor)) {
         is DesignRead.Readable -> read.document
         // One answer for "no such design" and "not yours": the second must not be distinguishable
         // from the first, or this route enumerates design ids for anyone holding a read capability.
@@ -128,12 +137,13 @@ private sealed interface DesignRead {
 
 private suspend fun UiBuilderServicePort.documentFor(
   designId: String,
+  revision: Long?,
   actor: AuthenticatedUiBuilderActor,
 ): DesignRead {
   val mapping =
     UiBuilderProtocolMapper.toServiceCall(
       actor,
-      GetSnapshotRequestV1(designId = designId, revision = null),
+      GetSnapshotRequestV1(designId = designId, revision = revision),
     )
   // The mapper refusing is the actor failing the design's own access control, which is exactly the
   // case that must be indistinguishable from a design that does not exist.
@@ -193,7 +203,10 @@ internal data class ComponentDriftDto(
 internal data class ComponentDriftResponse(
   val schema: String = "compose-preview-serve/ui-builder-component-drift/v1",
   val designId: String,
-  /** The revision the answer was computed over, so a later write is legibly not covered by it. */
+  /**
+   * The revision the answer was computed over, so a later write is legibly not covered by it — and
+   * so a caller that asked for a specific one can see it got that one.
+   */
   val revision: Long,
   /** Imported components only, in key order; a component authored here has nothing to drift. */
   val components: List<ComponentDriftDto> = emptyList(),

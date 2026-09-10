@@ -621,7 +621,13 @@ private fun LiveSessionApp(
   // somebody types. The findings that a later edit invalidates are dropped by the reducer.
   var componentDrift by
     remember(config.designId) { mutableStateOf(emptyList<ComponentDriftFinding>()) }
-  LaunchedEffect(config.designId) { componentDrift = loadComponentDrift(config.designId) }
+  // Re-asked when the revision on screen changes, because the answer is about the components *that*
+  // revision imported. Not re-asked per edit: the library moves when somebody merges to the
+  // project, not when somebody types, and a round trip behind every keystroke would buy nothing.
+  val pinnedRevision = revisionPin?.takeIf { it.pinned }?.requested
+  LaunchedEffect(config.designId, pinnedRevision) {
+    componentDrift = loadComponentDrift(config.designId, pinnedRevision)
+  }
 
   // The reference overlay's browser half: the file picker, the paste listener, the snapshot and
   // the store behind them all. Rebuilt only when the design changes, because it is addressed to
@@ -1967,8 +1973,23 @@ private val identityJson = Json { ignoreUnknownKeys = true }
 
 @kotlinx.serialization.Serializable private data class IdentityPayload(val actorId: String = "")
 
-private fun componentDriftPath(designId: String): String =
-  "/api/ui-builder/v1/designs/$designId/component-drift"
+/**
+ * Encoded, because a design id is not guaranteed to be URL-safe.
+ *
+ * The legacy query form only requires an id to be non-blank, so one carrying a `#` would request
+ * the report for the part before it — the rest becomes a fragment the server never sees — and one
+ * carrying a `/` would address a different route entirely. Either way the broad catch below turns
+ * the wrong answer into an empty report, which is silence rather than a visible failure.
+ */
+@JsFun("value => encodeURIComponent(value)")
+private external fun encodeUrlComponent(value: String): String
+
+private fun componentDriftPath(designId: String, revision: Long?): String =
+  "/api/ui-builder/v1/designs/${encodeUrlComponent(designId)}/component-drift" +
+    // The revision on screen, not the head. A design opened at `?revision=` shows the components
+    // that revision held, and the report has to be about those or it answers a question nobody
+    // asked — silently missing a component the pinned revision imported and head no longer has.
+    (revision?.let { "?revision=$it" } ?: "")
 
 /** Tolerant like the rest: a state or field this build does not know must not blank the report. */
 private val componentDriftJson = Json { ignoreUnknownKeys = true }
@@ -1999,12 +2020,15 @@ private data class ComponentDriftWire(
  * editor most hosts could not run. An unrecognised state is dropped rather than guessed at — a
  * verdict this build cannot name is one it cannot word either.
  */
-private suspend fun loadComponentDrift(designId: String): List<ComponentDriftFinding> =
+private suspend fun loadComponentDrift(
+  designId: String,
+  revision: Long?,
+): List<ComponentDriftFinding> =
   try {
     componentDriftJson
       .decodeFromString(
         ComponentDriftPayload.serializer(),
-        fetchText(componentDriftPath(designId)),
+        fetchText(componentDriftPath(designId, revision)),
       )
       .components
       .mapNotNull { row ->
