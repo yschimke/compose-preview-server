@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_COMPONENT_IDS
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
@@ -9,6 +10,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * What `remote-m3` gains and what it loses if `--ui-builder-published-catalogs` names it.
@@ -18,9 +21,10 @@ import kotlinx.serialization.json.Json
  * from `:remote-catalog:composePreviewDiscover`, so the question here is the real one.
  *
  * The answer is not symmetric, and that is the point of writing it down:
- * - it **gains** twenty-five Remote Compose components the synthesised shelf has never had, which
+ * - it **offers** twenty-five Remote Compose components the synthesised shelf has never had, which
  *   until recently the record could not name at all (all 49 catalog ids collapsed onto the
- *   project's own `RemoteSticker` wrapper, two records for the whole module);
+ *   project's own `RemoteSticker` wrapper, two records for the whole module) — but not one of them
+ *   can be EXPORTED, so calling them a gain would be wrong (see below);
  * - it **loses** five, in two different ways.
  *
  * The loss is the blocker, and nothing else states it. `ProductionUiBuilderRuntime`'s donor unions
@@ -111,10 +115,12 @@ class PublishedRemoteM3CatalogEquivalenceTest {
   }
 
   /**
-   * The gain, asserted so a regression in discovery shows up here rather than in the builder.
+   * The components reach the shelf at all, asserted so a discovery regression shows up here rather
+   * than in the builder. Every one was invisible while the AAR carrying them was off the scan
+   * classpath.
    *
-   * These are the Remote Compose components remote-catalog actually draws. Every one of them was
-   * invisible while the AAR carrying them was off the scan classpath.
+   * Reaching the shelf is necessary and nowhere near sufficient — none of them can be exported yet;
+   * see the test below.
    */
   @Test
   fun `the Remote Compose components the catalog draws are all offered`() {
@@ -139,6 +145,95 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       emptyList(),
       expected.filterNot { it in offered },
       "components remote-catalog draws are missing from the published shelf",
+    )
+  }
+
+  /**
+   * Offered is not usable, and this is the second blocker.
+   *
+   * `RemoteContentEmitter.emit` writes a design to Remote Compose creation-DSL Kotlin, and it can
+   * write exactly the ids in [REMOTE_CONTENT_COMPONENT_IDS] — eleven of them. Everything else hits
+   * its catch-all: "has no Remote Compose counterpart this generator can write". `remote-m3/lottie`
+   * is in that set and is one of the five the published catalog LOSES; not one of the twenty-five
+   * it adds is.
+   *
+   * `RemoteM3VocabularyParityTest` already holds the synthesised palette to this invariant — a
+   * component you can insert and cannot export is worse than one that is missing, because the
+   * author finds out at the end with the design already built. It does not cover a published
+   * catalog, so the swap escapes it.
+   *
+   * Asserted as the exact current set rather than as `isEmpty()`, so the day the emitter learns
+   * these components this test fails and says to shorten the list. Raised in review on #673.
+   */
+  @Test
+  fun `not one component the published catalog adds can be exported`() {
+    val offered = composed.components.map { it.componentId }
+    val inexportable =
+      offered
+        .filterNot { it in REMOTE_CONTENT_COMPONENT_IDS }
+        .filterNot { it.startsWith("remote-m3/widget-container-") }
+        .sorted()
+    assertEquals(
+      offered.filter { it.startsWith("remote-m3/") }.sorted(),
+      inexportable,
+      "the set of offered-but-unexportable components has changed — if the emitter grew a case, " +
+        "shorten this; if the catalog grew a component, it needs one",
+    )
+  }
+
+  /**
+   * Every shelf the components use has to be in the menu order, or the editor invents one.
+   *
+   * `UiBuilderEditorState` appends a group the order does not name after every group it does, and
+   * sorts those alphabetically — so a catalog that states an order and then uses four groups
+   * outside it has published an order the builder will not follow. `CatalogMenuTest` holds the
+   * synthesised catalog to this; the generated pair is not there yet, which is the third blocker.
+   *
+   * Both directions are asserted, because they fail differently: an unordered group is silently
+   * re-sorted, while a group named in the order with no component in it is a shelf that never
+   * appears. Raised in review on #673.
+   */
+  @Test
+  fun `the menu order covers the groups the shelf actually uses`() {
+    val menu =
+      json
+        .parseToJsonElement(fixture("remote-m3-published-v1.json"))
+        .jsonObject["statusSemantics"]!!
+        .jsonObject["componentMenu"]!!
+        .jsonObject
+    val order =
+      menu["groupOrder"]!!
+        .let { it as kotlinx.serialization.json.JsonArray }
+        .map { it.jsonPrimitive.content }
+    val used =
+      menu["components"]!!
+        .jsonObject
+        .values
+        .mapNotNull { it.jsonObject["group"]?.jsonPrimitive?.content }
+        .distinct()
+        .sorted()
+
+    assertEquals(
+      listOf("Edge-hugging buttons", "Selection buttons", "Sliders", "Steppers"),
+      used.filterNot { it in order },
+      "groups the shelf uses that the order does not name — the editor sorts these alphabetically " +
+        "after every ordered group, so the catalog's stated order is not the one a person sees",
+    )
+    assertEquals(
+      listOf(
+        "Confetti",
+        "Iconography",
+        "Position indicators",
+        "Scaffold templates",
+        "Shaders",
+        "Shapes",
+        "Text",
+        "Typeface",
+        "Wear M3",
+        "Widget Container",
+      ),
+      order.filterNot { it in used }.sorted(),
+      "groups the order names that no component is on — every one is a shelf that never appears",
     )
   }
 
