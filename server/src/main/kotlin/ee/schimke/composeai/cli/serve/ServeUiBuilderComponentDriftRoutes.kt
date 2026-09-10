@@ -1,6 +1,8 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
+import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.ProtocolRequestMapping
 import ee.schimke.composeai.uibuilder.service.UiBuilderProtocolMapper
@@ -62,13 +64,26 @@ internal fun Route.installUiBuilderComponentDriftRoutes(
       call.respondDriftError(HttpStatusCode.BadRequest, "a design id is required")
       return@get
     }
-    val document = service.documentFor(designId, actor)
-    if (document == null) {
-      // One answer for "no such design" and "not yours": the second must not be distinguishable
-      // from the first, or this route enumerates design ids for anyone holding a read capability.
-      call.respondDriftError(HttpStatusCode.NotFound, "no design `$designId` this actor can read")
-      return@get
-    }
+    val document =
+      when (val read = service.documentFor(designId, actor)) {
+        is DesignRead.Readable -> read.document
+        // One answer for "no such design" and "not yours": the second must not be distinguishable
+        // from the first, or this route enumerates design ids for anyone holding a read capability.
+        DesignRead.Absent -> {
+          call.respondDriftError(
+            HttpStatusCode.NotFound,
+            "no design `$designId` this actor can read",
+          )
+          return@get
+        }
+        // Anything else the service refused with. Folding these into the 404 above would tell an
+        // owner their own design does not exist during a catalog outage or a failed migration —
+        // a retryable condition reported as a permanent one, with nothing to act on.
+        is DesignRead.Refused -> {
+          call.respondDriftError(HttpStatusCode.fromValue(read.status), read.message)
+          return@get
+        }
+      }
     val findings = withContext(Dispatchers.IO) { drift.check(document.components, catalogs()) }
     call.respondText(
       DRIFT_JSON.encodeToString(
@@ -96,21 +111,49 @@ internal fun Route.installUiBuilderComponentDriftRoutes(
 }
 
 /**
- * The design as this actor may read it, or null when they may not — the two are one answer here.
+ * What reading the design said: the document, "there is no such design for you", or a refusal.
+ *
+ * [Absent] is deliberately one state for two facts — no such design, and not yours — because the
+ * route must not let a read capability enumerate design ids. Everything else keeps its own status:
+ * a catalog outage and a required migration are conditions the caller can act on or retry, and
+ * reporting them as a missing design tells an owner their own design is gone.
  */
+private sealed interface DesignRead {
+  data class Readable(val document: DesignDocumentV1) : DesignRead
+
+  data object Absent : DesignRead
+
+  data class Refused(val status: Int, val message: String) : DesignRead
+}
+
 private suspend fun UiBuilderServicePort.documentFor(
   designId: String,
   actor: AuthenticatedUiBuilderActor,
-) =
-  (UiBuilderProtocolMapper.toServiceCall(
+): DesignRead {
+  val mapping =
+    UiBuilderProtocolMapper.toServiceCall(
       actor,
       GetSnapshotRequestV1(designId = designId, revision = null),
-    ) as? ProtocolRequestMapping.Mapped)
-    ?.let { withContext(Dispatchers.IO) { execute(it.call) } }
-    .let { it as? UiBuilderServiceResponse.Snapshot }
-    ?.snapshot
-    ?.state
-    ?.document
+    )
+  // The mapper refusing is the actor failing the design's own access control, which is exactly the
+  // case that must be indistinguishable from a design that does not exist.
+  val mapped = mapping as? ProtocolRequestMapping.Mapped ?: return DesignRead.Absent
+  return when (val response = withContext(Dispatchers.IO) { execute(mapped.call) }) {
+    is UiBuilderServiceResponse.Snapshot ->
+      response.snapshot.state?.document?.let(DesignRead::Readable) ?: DesignRead.Absent
+    is UiBuilderServiceResponse.Error ->
+      when (response.error.code) {
+        ServiceErrorCodeV1.NOT_FOUND,
+        ServiceErrorCodeV1.FORBIDDEN,
+        ServiceErrorCodeV1.UNAUTHORIZED -> DesignRead.Absent
+        else -> DesignRead.Refused(response.httpStatusValue(), response.error.message)
+      }
+    // A snapshot request that came back as something else entirely is this host's fault, not the
+    // caller's, and saying so beats implying the design is missing.
+    else ->
+      DesignRead.Refused(HttpStatusCode.InternalServerError.value, "the design could not be read")
+  }
+}
 
 private suspend fun ApplicationCall.respondDriftError(status: HttpStatusCode, message: String) {
   respondText(

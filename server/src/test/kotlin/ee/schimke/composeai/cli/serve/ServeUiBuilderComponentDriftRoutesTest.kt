@@ -10,12 +10,18 @@ import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.HttpRequestEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
+import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceError
+import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import java.io.File
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
@@ -132,6 +138,47 @@ class ServeUiBuilderComponentDriftRoutesTest {
     assertEquals(
       "withdrawn",
       drift(server, OPERATOR_TOKEN).single()["state"]!!.jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `an index this host cannot read is unusable, not a removal`() {
+    publish(title = "Contribution cell")
+    val server = start()
+    createDesign(server, importedDigest = publishedDigest())
+
+    // The index itself, not the symbol file: a half-written index or a branch that is briefly
+    // unreachable used to read out here as "the project deleted your component", because the
+    // library flattened a failed read into an empty list of published components.
+    File(components, "index.json").writeText("{ not an index")
+
+    assertEquals(
+      "unusable",
+      drift(server, OPERATOR_TOKEN).single()["state"]!!.jsonPrimitive.content,
+    )
+  }
+
+  /**
+   * A refusal that is not about access keeps its own status.
+   *
+   * `CATALOG_UNAVAILABLE` is retryable and says so; answering it with the 404 above would tell an
+   * owner their own design does not exist because a base catalog is down.
+   */
+  @Test
+  fun `a service refusal that is not about access is not a missing design`() {
+    publish(title = "Contribution cell")
+    val server = start(refuseSnapshots = true)
+
+    val (code, body) = ask(server, OPERATOR_TOKEN)
+
+    assertEquals(409, code, body)
+    assertTrue(
+      Json.parseToJsonElement(body)
+        .jsonObject["error"]!!
+        .jsonPrimitive
+        .content
+        .contains("catalog is rebuilding"),
+      body,
     )
   }
 
@@ -312,7 +359,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
         ),
     )
 
-  private fun start(): RunningServer {
+  private fun start(refuseSnapshots: Boolean = false): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
       PersistentUiBuilderService(
@@ -333,7 +380,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
           token = OPERATOR_TOKEN,
           sessions = registry,
           defaultSessionId = "unused",
-          uiBuilderService = service,
+          uiBuilderService = if (refuseSnapshots) RefusingSnapshots(service) else service,
           uiBuilderAuthorization = credentials(),
           uiBuilderComponentLibrary = library,
           uiBuilderDesignCatalogs = { listOf(catalog) },
@@ -352,6 +399,21 @@ class ServeUiBuilderComponentDriftRoutesTest {
         else -> UiBuilderAuthorizationDecision.Missing
       }
     }
+
+  /** A service whose snapshot reads are down for a reason that has nothing to do with access. */
+  private class RefusingSnapshots(private val delegate: UiBuilderServicePort) :
+    UiBuilderServicePort by delegate {
+    override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse =
+      if (call.request is UiBuilderServiceRequest.GetSnapshot)
+        UiBuilderServiceResponse.Error(
+          UiBuilderServiceError(
+            code = ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
+            message = "the base catalog is rebuilding",
+            retryable = true,
+          )
+        )
+      else delegate.execute(call)
+  }
 
   private data class RunningServer(
     val server: ServeHttpServer,

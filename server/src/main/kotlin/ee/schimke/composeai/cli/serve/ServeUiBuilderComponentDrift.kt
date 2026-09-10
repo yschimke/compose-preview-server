@@ -82,17 +82,24 @@ internal class ServeUiBuilderComponentDrift(private val library: ServeUiBuilderC
     if (matching.isEmpty()) return copy(state = State.UNUSABLE)
 
     var published = false
+    // An index this host could not read at all. Distinct from an index that lists nothing: a
+    // branch that is down, or a malformed index, is not evidence that anybody removed anything,
+    // and reporting it as a removal sends its reader looking for a symbol that is still there.
+    var unreadable = false
     matching.forEach { catalog ->
-      val entry =
-        library.index(catalog).firstOrNull { it.componentId == source.componentId }
-          ?: return@forEach
+      val index = library.indexOrNull(catalog)
+      if (index == null) {
+        unreadable = true
+        return@forEach
+      }
+      val entry = index.firstOrNull { it.componentId == source.componentId } ?: return@forEach
       published = true
       val symbol = library.symbol(catalog, entry) ?: return@forEach
       return if (symbol.digest == source.digest) copy(state = State.UNCHANGED)
       else copy(state = State.DRIFTED, currentDigest = symbol.digest)
     }
-    // Named by the project but unreadable, versus not named at all. The first is a broken publish
-    // or an unreachable branch; the second is a removal.
-    return copy(state = if (published) State.UNUSABLE else State.WITHDRAWN)
+    // Named by the project but unreadable, or named by nobody because nobody could be asked,
+    // versus genuinely not named at all. Only the last of those is a removal.
+    return copy(state = if (published || unreadable) State.UNUSABLE else State.WITHDRAWN)
   }
 }

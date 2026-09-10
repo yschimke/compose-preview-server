@@ -110,7 +110,15 @@ class ServeUiBuilderComponentLibrary(
   private data class CachedIndex(
     val generation: String?,
     val readAt: Long,
-    val entries: List<Entry>,
+    /**
+     * Null when the read itself failed — an unreachable source or an index this host cannot parse.
+     *
+     * Cached as a failure rather than as "publishes nothing", because those are different facts and
+     * one of them is a lie. A design that imported a component from a branch that is down for ten
+     * minutes must not be told the project deleted it; the drift report reserves a separate state
+     * for exactly this, and it can only use it if the failure survives the cache.
+     */
+    val entries: List<Entry>?,
   )
 
   private val indexes = ConcurrentHashMap<String, CachedIndex>()
@@ -126,7 +134,18 @@ class ServeUiBuilderComponentLibrary(
    * on different request threads, a cold read is one HTTP round trip, and the read is idempotent —
    * so two of them are harmless where a lock would put both behind one.
    */
-  fun index(catalog: ServeUiBuilderDesignLibrary.Coordinate): List<Entry> {
+  fun index(catalog: ServeUiBuilderDesignLibrary.Coordinate): List<Entry> =
+    indexOrNull(catalog).orEmpty()
+
+  /**
+   * The same read, keeping the one distinction [index] throws away: null is *could not read it*.
+   *
+   * A palette has nothing to do with the difference — there is nothing to offer either way — so
+   * [index] flattens it. The drift report does: "the project removed this component" and "the
+   * project's index could not be read just now" are the two states it exists to keep apart, and
+   * folding a failed read into an empty index turns a branch that is briefly down into a deletion.
+   */
+  fun indexOrNull(catalog: ServeUiBuilderDesignLibrary.Coordinate): List<Entry>? {
     val cached = indexes[catalog.system]
     if (
       catalog.cacheable &&
@@ -143,7 +162,7 @@ class ServeUiBuilderComponentLibrary(
       .onFailure { onLog("serve: ${catalog.system} component index unreadable (${it.message})") }
       .getOrNull()
     val entries =
-      if (bytes == null) emptyList()
+      if (bytes == null) null
       else
         runCatching { parseIndex(catalog.system, bytes.toString(Charsets.UTF_8)) }
           .getOrElse {
@@ -154,8 +173,11 @@ class ServeUiBuilderComponentLibrary(
               "serve: ${catalog.system} publishes a component index that is not readable " +
                 "(${it.message})"
             )
-            emptyList()
+            null
           }
+    // A failure is cached too, and deliberately: without it an unreachable branch is re-fetched on
+    // every request that touches the palette. What must not be cached is the *wrong* answer, and
+    // that is why the failure is kept as itself rather than as an empty list.
     if (catalog.cacheable)
       indexes[catalog.system] = CachedIndex(catalog.generation, clock(), entries)
     return entries
