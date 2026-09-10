@@ -184,9 +184,9 @@ internal class RemoteContentEmitter(
    * The document state variables an emitted action writes to, as their declarations.
    *
    * A `valueChange` writes into a REMOTE mutable, so a design's `stateVariables` have to exist in
-   * the generated body before an action can name one. Collected while emitting and read back by
-   * the caller through [stateLocals], because which variables a widget needs is not known until
-   * its actions have been written — the same order [background] already works in.
+   * the generated body before an action can name one. Collected while emitting and read back by the
+   * caller through [stateLocals], because which variables a widget needs is not known until its
+   * actions have been written — the same order [background] already works in.
    */
   private val stateWrites = linkedMapOf<String, String>()
 
@@ -379,12 +379,12 @@ internal class RemoteContentEmitter(
   /**
    * The arguments each enclosing placement supplied, innermost last.
    *
-   * A design component's body reads `{"type":"binding","value":"<key>"}` and the placement
-   * supplies the key, so a body node means something different at each placement of it. Resolved
-   * where the node is FETCHED rather than where each property is read: `emit` is the one place
-   * that turns an id into a node, so substituting there is what makes every downstream reader —
-   * the text case, the record fallback, the modifier walk — see the resolved value without any
-   * of them knowing placements exist.
+   * A design component's body reads `{"type":"binding","value":"<key>"}` and the placement supplies
+   * the key, so a body node means something different at each placement of it. Resolved where the
+   * node is FETCHED rather than where each property is read: `emit` is the one place that turns an
+   * id into a node, so substituting there is what makes every downstream reader — the text case,
+   * the record fallback, the modifier walk — see the resolved value without any of them knowing
+   * placements exist.
    */
   private val argumentScopes = ArrayDeque<JsonObject>()
 
@@ -393,13 +393,13 @@ internal class RemoteContentEmitter(
    *
    * Inlined rather than emitted as a function, which is what the Compose lane does. A design
    * component's body is ordinary catalog nodes, and this emitter can already write every one of
-   * them — whereas a `RemoteCustomComponent` hole would be actively wrong here: the host
-   * registers renderers by name, and nothing is registered under a design-local component key, so
-   * the widget would reserve the bounds and draw nothing.
+   * them — whereas a `RemoteCustomComponent` hole would be actively wrong here: the host registers
+   * renderers by name, and nothing is registered under a design-local component key, so the widget
+   * would reserve the bounds and draw nothing.
    *
    * A pack component is a different thing wearing a similar shape — `<packId>/<name>`, whose
-   * picture comes from the native lane compiled against the served bundle — and it is not this:
-   * it has no body in this document to inline, so it falls through to the ordinary refusal.
+   * picture comes from the native lane compiled against the served bundle — and it is not this: it
+   * has no body in this document to inline, so it falls through to the ordinary refusal.
    */
   private fun placement(node: UiBuilderNode, placement: JsonObject, depth: Int): List<String> {
     val key = placement.plainString("componentKey")
@@ -426,26 +426,25 @@ internal class RemoteContentEmitter(
   }
 
   /**
-   * [this] with every `binding` property replaced by what the placement passed for it, or null
-   * when the placement passed nothing — which is a refusal rather than an empty value, because a
-   * body that reads a key nobody supplied is a component being placed wrongly.
+   * [this] with every `binding` property replaced by what the placement passed for it, or null when
+   * the placement passed nothing — which is a refusal rather than an empty value, because a body
+   * that reads a key nobody supplied is a component being placed wrongly.
    */
   private fun UiBuilderNode.withArguments(arguments: JsonObject?): UiBuilderNode? {
     if (arguments == null || properties.isEmpty()) return this
     var missing: String? = null
-    val resolved =
-      properties.mapValues { (name, value) ->
-        val binding = (value as? JsonObject)?.takeIf { it.plainString("type") == "binding" }
-        if (binding == null) value
-        else {
-          val key = binding.plainString("value")
-          val supplied = key?.let { arguments[it] }
-          if (supplied == null) {
-            missing = "`$name` reads `${key ?: "an unnamed argument"}`"
-            value
-          } else supplied
-        }
+    val resolved = properties.mapValues { (name, value) ->
+      val binding = (value as? JsonObject)?.takeIf { it.plainString("type") == "binding" }
+      if (binding == null) value
+      else {
+        val key = binding.plainString("value")
+        val supplied = key?.let { arguments[it] }
+        if (supplied == null) {
+          missing = "`$name` reads `${key ?: "an unnamed argument"}`"
+          value
+        } else supplied
       }
+    }
     missing?.let {
       refusals += "the placed component's $it, which its placement does not supply"
       return null
@@ -608,16 +607,20 @@ internal class RemoteContentEmitter(
       headArguments.forEach { lines += "$pad$INDENT$it," }
       named.forEach { (name, ids) ->
         lines += "$pad$INDENT$name = {"
-        lines += inSlotScope(slotParameters.first { it.name == name }) {
-          ids.flatMap { emit(it, depth + 2) }
-        }
+        lines +=
+          inSlotScope(slotParameters.first { it.name == name }) {
+            ids.flatMap { emit(it, depth + 2) }
+          }
         lines += "$pad$INDENT},"
       }
       lines += if (trailingName == null) "$pad)" else "$pad)$OPENING_BRACE"
     }
     if (trailingName != null) {
       val slot = slotParameters.first { it.name == trailingName }
-      lines += inSlotScope(slot) { blocks.first { it.first == trailingName }.second.flatMap { emit(it, depth + 1) } }
+      lines +=
+        inSlotScope(slot) {
+          blocks.first { it.first == trailingName }.second.flatMap { emit(it, depth + 1) }
+        }
       lines += "$pad}"
     }
     return lines
@@ -628,8 +631,8 @@ internal class RemoteContentEmitter(
    *
    * Every action a document can carry is a state WRITE — `set`, `select` and `setText` assign,
    * `toggle` negates — each naming a variable declared in `stateVariables`. Nothing in the model
-   * calls out to the host, so all of them are one `valueChange`, and the spellings are compiled
-   * in wear-m3-catalog's `RemoteActionVocabularyProbe` rather than guessed here.
+   * calls out to the host, so all of them are one `valueChange`, and the spellings are compiled in
+   * wear-m3-catalog's `RemoteActionVocabularyProbe` rather than guessed here.
    *
    * The event key is the parameter without its `on`: `onClick` reads `click`, which is what the
    * Compose lane's `actionLambda("click", …)` reads for the same component.
@@ -756,11 +759,11 @@ internal class RemoteContentEmitter(
   /**
    * Emit a slot's children inside the scope its lambda gives them.
    *
-   * `RemoteButton.content` is a `RemoteRowScope` lambda, so a child in it may carry `weight` —
-   * and `weightCall` reads [scope], which the hand-written row and column path sets and this one
-   * did not. A design whose button holds a weighted child was refused as "not in a row or
-   * column" while standing in exactly one. The receiver's simple name without its `Scope` suffix
-   * is the vocabulary the rest of this file already uses.
+   * `RemoteButton.content` is a `RemoteRowScope` lambda, so a child in it may carry `weight` — and
+   * `weightCall` reads [scope], which the hand-written row and column path sets and this one did
+   * not. A design whose button holds a weighted child was refused as "not in a row or column" while
+   * standing in exactly one. The receiver's simple name without its `Scope` suffix is the
+   * vocabulary the rest of this file already uses.
    */
   private fun <T> inSlotScope(slot: TargetParameter, body: () -> T): T {
     val receiver = slot.composableSlotReceiver?.substringAfterLast('.')?.removeSuffix("Scope")
@@ -1998,19 +2001,18 @@ private fun JsonObject.plainString(key: String): String? =
   (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
 /** A state variable's name as a Kotlin identifier the generated body can declare. */
-private fun String.remoteIdentifier(): String =
-  buildString {
-      this@remoteIdentifier.forEachIndexed { index, character ->
-        append(
-          when {
-            character.isLetter() || character == '_' -> character
-            character.isDigit() && index > 0 -> character
-            else -> '_'
-          }
-        )
+private fun String.remoteIdentifier(): String = buildString {
+  this@remoteIdentifier.forEachIndexed { index, character ->
+    append(
+      when {
+        character.isLetter() || character == '_' -> character
+        character.isDigit() && index > 0 -> character
+        else -> '_'
       }
-    }
-    .ifEmpty { "state" }
+    )
+  }
+}
+  .ifEmpty { "state" }
 
 internal fun kotlinx.serialization.json.JsonElement.boolOrNull(): Boolean? =
   (this as? JsonObject)?.get("value")?.jsonPrimitive?.booleanOrNull
