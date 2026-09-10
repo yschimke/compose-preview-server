@@ -5,7 +5,7 @@
   "description": "Workflow-only driver for the weekly Design Artifacts job. Pins the published design-parity export engine (no checkout of the private repo, no cross-repo secret) and runs generate-design-catalog.mjs over a compose-preview render.",
   "type": "module",
   "engines": {
-    "node": "v26.8.1"
+    "node": "26.8.2"
   },
   "scripts": {
     "test": "node --test"
