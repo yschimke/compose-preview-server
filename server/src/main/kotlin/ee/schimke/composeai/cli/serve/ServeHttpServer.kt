@@ -16,12 +16,9 @@ import ee.schimke.composeai.designpages.DesignPage
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.uibuilder.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.decodeNewDesignStates
-import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
-import ee.schimke.composeai.uibuilder.protocol.DesignComponentV1
-import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GrantActorAccessMutationV1
@@ -1027,6 +1024,19 @@ class ServeHttpServer(
             installUiBuilderAssetRoutes(uiBuilderAuthorization, uiBuilderAssets)
           }
         }
+        // The components the served projects share. Behind the builder's own credential rather than
+        // the admin token, because a palette has to read this and the editor holds no admin token —
+        // and outside the block above, because reading a project's published components needs a
+        // credential checker and a library, not a design service. A host that serves the builder
+        // read-only still has a palette.
+        if (uiBuilderAuthorization != null && uiBuilderComponentLibrary != null) {
+          installUiBuilderComponentLibraryRoutes(
+            uiBuilderAuthorization,
+            uiBuilderComponentLibrary,
+            uiBuilderDesignCatalogs,
+          )
+        }
+
         // `/healthz` — ungated liveness: "ok" the moment the listener is up. Leaks nothing, and
         // proves nothing beyond "the process is answering HTTP". The rolling-update gate is
         // `/readyz` below, not this.
@@ -5230,12 +5240,12 @@ class ServeHttpServer(
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
       JSON.encodeToString(
-        AdminUiBuilderComponentLibraryResponse.serializer(),
-        AdminUiBuilderComponentLibraryResponse(
+        UiBuilderComponentLibraryResponse.serializer(),
+        UiBuilderComponentLibraryResponse(
           catalogsSearched = catalogs.map { it.system },
           components =
             entries.map {
-              AdminUiBuilderComponentDto(
+              UiBuilderComponentDto(
                 system = it.system,
                 componentId = it.componentId,
                 paletteId = ServeUiBuilderComponentLibrary.paletteId(it.componentId),
@@ -5297,8 +5307,8 @@ class ServeHttpServer(
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
       JSON.encodeToString(
-        AdminUiBuilderComponentSymbolResponse.serializer(),
-        AdminUiBuilderComponentSymbolResponse(
+        UiBuilderComponentSymbolResponse.serializer(),
+        UiBuilderComponentSymbolResponse(
           system = symbol.entry.system,
           componentId = symbol.componentId,
           paletteId = ServeUiBuilderComponentLibrary.paletteId(symbol.componentId),
@@ -15699,46 +15709,6 @@ private data class AdminUiBuilderLibraryResponse(
    */
   val catalogsSearched: List<String> = emptyList(),
   val designs: List<AdminUiBuilderLibraryDto> = emptyList(),
-)
-
-/** One shared component on `GET /admin/ui-builder/component-library`. */
-@Serializable
-private data class AdminUiBuilderComponentDto(
-  val system: String,
-  val componentId: String,
-  /** What the symbol is called once it reaches a palette: `project/<id>`. */
-  val paletteId: String,
-  val title: String,
-  val description: String? = null,
-)
-
-@Serializable
-private data class AdminUiBuilderComponentLibraryResponse(
-  val schema: String = "compose-preview-serve/admin-ui-builder-component-library/v1",
-  /** Which projects were looked in, so an empty list separates "none served" from "none shared". */
-  val catalogsSearched: List<String> = emptyList(),
-  val components: List<AdminUiBuilderComponentDto> = emptyList(),
-)
-
-/**
- * One checked symbol on `GET /admin/ui-builder/component-library/{system}/{componentId}`.
- *
- * [digest] is the half of the reference that makes this reuse rather than copying: a design records
- * it beside [componentId], and a later read that computes a different one has found drift to report
- * rather than a redraw to perform silently.
- */
-@Serializable
-private data class AdminUiBuilderComponentSymbolResponse(
-  val schema: String = "compose-preview-serve/admin-ui-builder-component-symbol/v1",
-  val system: String,
-  val componentId: String,
-  val paletteId: String,
-  val title: String,
-  val description: String? = null,
-  val digest: String,
-  val catalogPin: CatalogReferenceV1,
-  val component: DesignComponentV1,
-  val nodes: Map<String, DesignNodeV1>,
 )
 
 /** The result of `POST /admin/ui-builder/library/{system}/{designId}`. */
