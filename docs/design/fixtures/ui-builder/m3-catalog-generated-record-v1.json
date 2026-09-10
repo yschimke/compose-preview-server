@@ -9,7 +9,8 @@
       "componentIds": [
         "Dialog/Basic",
         "Dialog/List",
-        "TimePicker/Dial"
+        "TimePicker/Dial",
+        "TimePicker/Input"
       ],
       "symbol": {
         "jvmOwner": "androidx.compose.material3.AlertDialog_skikoKt",
@@ -1901,10 +1902,12 @@
         "Card/Elevated",
         "Card/Filled",
         "Card/Outlined",
+        "DatePicker/Modal",
         "Dialog/Basic",
         "Dialog/List",
         "Snackbar/Message",
-        "TimePicker/Dial"
+        "TimePicker/Dial",
+        "TimePicker/Input"
       ],
       "symbol": {
         "jvmOwner": "androidx.compose.material3.ButtonKt",
@@ -4230,6 +4233,333 @@
       "androidxOptIns": []
     },
     {
+      "canonicalId": "catalog/androidx.compose.material3.DatePickerDialog_skikoKt.DatePickerDialog",
+      "componentIds": [
+        "DatePicker/Modal"
+      ],
+      "symbol": {
+        "jvmOwner": "androidx.compose.material3.DatePickerDialog_skikoKt",
+        "callable": "androidx.compose.material3.DatePickerDialog",
+        "name": "DatePickerDialog",
+        "origin": "LIBRARY",
+        "jvmName": "DatePickerDialog-GmEhDVc",
+        "descriptor": "(Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function2;Landroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function2;Landroidx/compose/ui/graphics/Shape;FLandroidx/compose/material3/DatePickerColors;Landroidx/compose/ui/window/DialogProperties;Lkotlin/jvm/functions/Function3;Landroidx/compose/runtime/Composer;II)V",
+        "sourceFile": null,
+        "docs": "unavailable",
+        "receiver": null
+      },
+      "parameters": [
+        {
+          "name": "onDismissRequest",
+          "type": "() -> Unit",
+          "typeFqn": "kotlin.Function0",
+          "hasDefault": false,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": "kotlin.Unit"
+        },
+        {
+          "name": "confirmButton",
+          "type": "() -> Unit",
+          "typeFqn": "kotlin.Function0",
+          "hasDefault": false,
+          "composableSlot": true,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": "kotlin.Unit"
+        },
+        {
+          "name": "modifier",
+          "type": "Modifier",
+          "typeFqn": "androidx.compose.ui.Modifier",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "dismissButton",
+          "type": "(() -> Unit)?",
+          "typeFqn": "kotlin.Function0",
+          "hasDefault": true,
+          "composableSlot": true,
+          "composableSlotReceiver": null,
+          "nullable": true,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": "kotlin.Unit"
+        },
+        {
+          "name": "shape",
+          "type": "Shape",
+          "typeFqn": "androidx.compose.ui.graphics.Shape",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "tonalElevation",
+          "type": "Dp",
+          "typeFqn": "androidx.compose.ui.unit.Dp",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "colors",
+          "type": "DatePickerColors",
+          "typeFqn": "androidx.compose.material3.DatePickerColors",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "properties",
+          "type": "DialogProperties",
+          "typeFqn": "androidx.compose.ui.window.DialogProperties",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "content",
+          "type": "ColumnScope.() -> Unit",
+          "typeFqn": "kotlin.Function1",
+          "hasDefault": false,
+          "composableSlot": true,
+          "composableSlotReceiver": "androidx.compose.foundation.layout.ColumnScope",
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": "kotlin.Unit"
+        }
+      ],
+      "slots": [
+        {
+          "name": "confirmButton",
+          "required": true,
+          "receiverScope": null
+        },
+        {
+          "name": "dismissButton",
+          "required": false,
+          "receiverScope": null
+        },
+        {
+          "name": "content",
+          "required": true,
+          "receiverScope": "androidx.compose.foundation.layout.ColumnScope"
+        }
+      ],
+      "code": {
+        "call": "DatePickerDialog(onDismissRequest = {}, confirmButton = {}, content = {})",
+        "imports": [
+          "androidx.compose.material3.DatePickerDialog"
+        ],
+        "refusedReason": null,
+        "requiredOptIns": [
+          "androidx.compose.material3.ExperimentalMaterial3Api"
+        ],
+        "androidxOptIns": []
+      },
+      "signatureKnown": true,
+      "callableFromAnotherFile": true,
+      "hasTypeParameters": false,
+      "hasContextReceivers": false,
+      "overloadsCollided": false,
+      "builder": null,
+      "requiredOptIns": [
+        "androidx.compose.material3.ExperimentalMaterial3Api"
+      ],
+      "androidxOptIns": []
+    },
+    {
+      "canonicalId": "catalog/androidx.compose.material3.DatePickerKt.DatePicker",
+      "componentIds": [
+        "DatePicker/Modal"
+      ],
+      "symbol": {
+        "jvmOwner": "androidx.compose.material3.DatePickerKt",
+        "callable": "androidx.compose.material3.DatePicker",
+        "name": "DatePicker",
+        "origin": "LIBRARY",
+        "jvmName": "DatePicker",
+        "descriptor": "(Landroidx/compose/material3/DatePickerState;Landroidx/compose/ui/Modifier;Landroidx/compose/material3/DatePickerFormatter;Landroidx/compose/material3/DatePickerColors;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZLandroidx/compose/ui/focus/FocusRequester;Landroidx/compose/runtime/Composer;II)V",
+        "sourceFile": null,
+        "docs": "unavailable",
+        "receiver": null
+      },
+      "parameters": [
+        {
+          "name": "state",
+          "type": "DatePickerState",
+          "typeFqn": "androidx.compose.material3.DatePickerState",
+          "hasDefault": false,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": "androidx.compose.material3.rememberDatePickerState",
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "modifier",
+          "type": "Modifier",
+          "typeFqn": "androidx.compose.ui.Modifier",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "dateFormatter",
+          "type": "DatePickerFormatter",
+          "typeFqn": "androidx.compose.material3.DatePickerFormatter",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "colors",
+          "type": "DatePickerColors",
+          "typeFqn": "androidx.compose.material3.DatePickerColors",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "title",
+          "type": "(() -> Unit)?",
+          "typeFqn": "kotlin.Function0",
+          "hasDefault": true,
+          "composableSlot": true,
+          "composableSlotReceiver": null,
+          "nullable": true,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": "kotlin.Unit"
+        },
+        {
+          "name": "headline",
+          "type": "(() -> Unit)?",
+          "typeFqn": "kotlin.Function0",
+          "hasDefault": true,
+          "composableSlot": true,
+          "composableSlotReceiver": null,
+          "nullable": true,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": "kotlin.Unit"
+        },
+        {
+          "name": "showModeToggle",
+          "type": "Boolean",
+          "typeFqn": "kotlin.Boolean",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": false,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        },
+        {
+          "name": "focusRequester",
+          "type": "FocusRequester?",
+          "typeFqn": "androidx.compose.ui.focus.FocusRequester",
+          "hasDefault": true,
+          "composableSlot": false,
+          "composableSlotReceiver": null,
+          "nullable": true,
+          "noArgConstructible": false,
+          "noArgFactory": null,
+          "scopeDslReceiver": null,
+          "lambdaReturnTypeFqn": null
+        }
+      ],
+      "slots": [
+        {
+          "name": "title",
+          "required": false,
+          "receiverScope": null
+        },
+        {
+          "name": "headline",
+          "required": false,
+          "receiverScope": null
+        }
+      ],
+      "code": {
+        "call": "DatePicker(state = rememberDatePickerState())",
+        "imports": [
+          "androidx.compose.material3.DatePicker",
+          "androidx.compose.material3.rememberDatePickerState"
+        ],
+        "refusedReason": null,
+        "requiredOptIns": [],
+        "androidxOptIns": []
+      },
+      "signatureKnown": true,
+      "callableFromAnotherFile": true,
+      "hasTypeParameters": false,
+      "hasContextReceivers": false,
+      "overloadsCollided": false,
+      "builder": null,
+      "requiredOptIns": [],
+      "androidxOptIns": []
+    },
+    {
       "canonicalId": "catalog/androidx.compose.material3.DateRangePickerKt.DateRangePicker",
       "componentIds": [
         "DatePicker/Modal"
@@ -6510,6 +6840,8 @@
         "Search/Bar",
         "Snackbar/Message",
         "TimePicker/Dial",
+        "TimePicker/Input",
+        "Toolbar/HorizontalFloating",
         "TopAppBar/Small"
       ],
       "symbol": {
@@ -6790,6 +7122,7 @@
         "Chip/Suggestion",
         "Dialog/Basic",
         "Dialog/List",
+        "Fab/Extended",
         "Fab/Standard",
         "IconButton/Filled",
         "IconButton/Outlined",
@@ -6809,10 +7142,12 @@
         "TextField/Filled",
         "TextField/Outlined",
         "TimePicker/Dial",
+        "TimePicker/Input",
         "ToggleButton/Elevated",
         "ToggleButton/Filled",
         "ToggleButton/Outlined",
         "ToggleButton/Tonal",
+        "Toolbar/HorizontalFloating",
         "TopAppBar/Small"
       ],
       "symbol": {
@@ -14146,6 +14481,7 @@
         "Chip/Input",
         "Chip/Suggestion",
         "Color/Role grid",
+        "DatePicker/Modal",
         "Dialog/Basic",
         "Dialog/List",
         "Divider/Horizontal",
@@ -14165,6 +14501,7 @@
         "TextField/Filled",
         "TextField/Outlined",
         "TimePicker/Dial",
+        "TimePicker/Input",
         "ToggleButton/Elevated",
         "ToggleButton/Filled",
         "ToggleButton/Outlined",
@@ -14441,7 +14778,8 @@
     {
       "canonicalId": "catalog/androidx.compose.material3.TimePickerKt.TimeInput",
       "componentIds": [
-        "TimePicker/Dial"
+        "TimePicker/Dial",
+        "TimePicker/Input"
       ],
       "symbol": {
         "jvmOwner": "androidx.compose.material3.TimePickerKt",
@@ -14518,7 +14856,8 @@
     {
       "canonicalId": "catalog/androidx.compose.material3.TimePickerKt.TimePicker",
       "componentIds": [
-        "TimePicker/Dial"
+        "TimePicker/Dial",
+        "TimePicker/Input"
       ],
       "symbol": {
         "jvmOwner": "androidx.compose.material3.TimePickerKt",
@@ -17430,7 +17769,6 @@
         "TextField/Outlined",
         "TimePicker/Dial",
         "TimePicker/Input",
-        "ToggleButton/Filled",
         "Toolbar/HorizontalFloating",
         "TopAppBar/Small"
       ],

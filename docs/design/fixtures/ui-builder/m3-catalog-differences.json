@@ -121,12 +121,22 @@
   },
   {
     "field": "componentMenu.components.m3/date-picker",
-    "why": "The catalog states no shelf for `m3/date-picker` because it publishes no such component: the record does not carry the callable. Asserted absent with its reason, component by component, in PublishedGeneratedM3CatalogEquivalenceTest.knownAbsent — yschimke/m3-catalog#317.",
-    "policy": null,
+    "why": "Same place, finer name: the catalog files `m3/date-picker` on `Date pickers`, which is a shelf inside its own `Selection` section, and `Selection` is the word the frozen catalog uses. The frozen menu groups by section; this one groups by shelf. The frozen entry also carries `variantProperty: mode`, which the catalog does not: the frozen shelf collapses the variants into one component with a property, and m3-catalog publishes them as separate components — one record per symbol, which is what makes its id 1:1 with a callable.",
+    "policy": {
+      "group": "Date pickers"
+    },
     "frozen": {
       "group": "Selection",
       "variantProperty": "mode"
     }
+  },
+  {
+    "field": "componentMenu.components.m3/date-picker-dialog",
+    "why": "m3-catalog publishes `m3/date-picker-dialog` and the frozen catalog carries no component for it, so there is no shelf to agree with. It is on `Date pickers`, inside this catalog's `Selection` section. That the two catalogs hold different component sets on purpose is argued once, with the contract's own words, in the `componentMenu.groupOrder` entry.",
+    "policy": {
+      "group": "Date pickers"
+    },
+    "frozen": null
   },
   {
     "field": "componentMenu.components.m3/date-range-picker",
@@ -670,7 +680,7 @@
   },
   {
     "field": "componentMenu.components.m3/snackbar-host",
-    "why": "The catalog states no shelf for `m3/snackbar-host` because it publishes no such component: the record does not carry the callable. Asserted absent with its reason, component by component, in PublishedGeneratedM3CatalogEquivalenceTest.knownAbsent — yschimke/m3-catalog#317.",
+    "why": "The catalog states no shelf for `m3/snackbar-host` because it publishes no such component. For this one that is deliberate rather than a gap: there is no SnackbarHost preview, m3-catalog's Snackbar.kt calling the host a dispatcher and composing snackbars directly. Asserted absent with that reason in PublishedGeneratedM3CatalogEquivalenceTest.knownAbsent.",
     "policy": null,
     "frozen": {
       "group": "Communication"

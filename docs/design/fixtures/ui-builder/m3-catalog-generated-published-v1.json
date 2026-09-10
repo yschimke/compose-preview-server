@@ -12,7 +12,7 @@
   "record": {
     "file": "components.json",
     "schemaVersion": 2,
-    "components": 108
+    "components": 110
   },
   "statusSemantics": {
     "platform": "mobile",
@@ -141,6 +141,12 @@
         },
         "m3/suggestion-chip": {
           "group": "Chips"
+        },
+        "m3/date-picker-dialog": {
+          "group": "Date pickers"
+        },
+        "m3/date-picker": {
+          "group": "Date pickers"
         },
         "m3/date-range-picker": {
           "group": "Date pickers"
@@ -1255,6 +1261,84 @@
         "propertyCapabilities": null,
         "slotCapabilities": null,
         "modifierCapabilities": null
+      },
+      "m3/date-picker-dialog": {
+        "record": "catalog/androidx.compose.material3.DatePickerDialog_skikoKt.DatePickerDialog",
+        "catalogId": null,
+        "displayName": null,
+        "canvas": null,
+        "nativeOnly": false,
+        "traits": [],
+        "slots": {},
+        "stateCallbacks": {},
+        "starter": {},
+        "variantProperty": null,
+        "variants": {},
+        "excluded": null,
+        "propertyCapabilities": null,
+        "slotCapabilities": null,
+        "modifierCapabilities": null
+      },
+      "m3/date-picker": {
+        "record": "catalog/androidx.compose.material3.DatePickerKt.DatePicker",
+        "catalogId": null,
+        "displayName": "Date picker",
+        "canvas": null,
+        "nativeOnly": false,
+        "traits": [
+          "PickerContent",
+          "DateContent"
+        ],
+        "slots": {},
+        "stateCallbacks": {},
+        "starter": {},
+        "variantProperty": null,
+        "variants": {},
+        "excluded": null,
+        "propertyCapabilities": [
+          {
+            "name": "mode",
+            "jsonType": "string",
+            "required": true,
+            "allowedValues": [
+              "picker",
+              "input"
+            ],
+            "notes": "Material's own DisplayMode: the calendar, or the typed date field."
+          },
+          {
+            "name": "selectedDate",
+            "jsonType": "string",
+            "required": true,
+            "notes": "ISO-8601 `YYYY-MM-DD`. Pinned rather than read from the clock so a render is the same picture on every day."
+          },
+          {
+            "name": "showModeToggle",
+            "jsonType": "boolean",
+            "required": false
+          }
+        ],
+        "slotCapabilities": [],
+        "modifierCapabilities": [
+          "size",
+          "fillMaxWidth",
+          "padding",
+          "alpha",
+          "offset",
+          "rotate",
+          "scale",
+          "zIndex",
+          "testTag",
+          "width",
+          "height",
+          "widthIn",
+          "heightIn",
+          "aspectRatio",
+          "align",
+          "alignHorizontal",
+          "alignVertical",
+          "weight"
+        ]
       },
       "m3/date-range-picker": {
         "record": "catalog/androidx.compose.material3.DateRangePickerKt.DateRangePicker",
@@ -3976,6 +4060,16 @@
     {
       "code": "component.canvas.unclaimed",
       "subject": "m3/suggestion-chip",
+      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
+    },
+    {
+      "code": "component.canvas.unclaimed",
+      "subject": "m3/date-picker-dialog",
+      "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
+    },
+    {
+      "code": "component.canvas.unclaimed",
+      "subject": "m3/date-picker",
       "message": "no canvas adapter claimed, so it draws as a placeholder. That is the honest default and needs no fixing; it is reported so a shelf drawn entirely in placeholders is visible rather than mysterious."
     },
     {

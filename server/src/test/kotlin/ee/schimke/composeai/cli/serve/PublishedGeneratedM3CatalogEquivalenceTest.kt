@@ -29,11 +29,11 @@ import kotlinx.serialization.json.jsonPrimitive
  * different component sets on purpose … so here the reviewed difference list is the point and a
  * byte-equal result would be the surprising outcome". So this test does not ask for equality. It
  * asks three separable questions and pins each as an exact set:
- * - which of the frozen twenty-five the real catalog can offer (**twenty-three**, and the two it
- *   cannot are named with a reason);
- * - what each of those twenty-three offers, field by field, against the frozen vocabulary a saved
+ * - which of the frozen twenty-five the real catalog can offer (**twenty-four**, and the one it
+ *   cannot is named with a reason);
+ * - what each of those twenty-four offers, field by field, against the frozen vocabulary a saved
  *   design was authored against;
- * - what the real catalog adds (**eighty-five**), because a shelf growing by that much is a product
+ * - what the real catalog adds (**eighty-six**), because a shelf growing by that much is a product
  *   change rather than a rounding error.
  */
 class PublishedGeneratedM3CatalogEquivalenceTest {
@@ -63,20 +63,26 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * The two of the frozen twenty-five the published catalog cannot offer, and why each one.
+   * The one of the frozen twenty-five the published catalog cannot offer, and why.
    *
    * Asserted ABSENT rather than skipped: a gap nothing states is a gap that stops being noticed,
-   * and if one starts composing this test fails and says to move it out rather than passing
-   * quietly. `m3/time-picker` was here until the scan classpath resolved dependencies by coordinate
-   * (yschimke/compose-ai-tools#5354) and the record grew `TimePicker` and `TimeInput`.
+   * and if it starts composing this test fails and says to move it out rather than passing quietly.
+   *
+   * Two left this list on the way here, and both were the same kind of thing — a callable the
+   * record could not REACH rather than one the catalog does not draw. `m3/time-picker` went when
+   * the scan classpath started resolving dependencies by coordinate rather than by cache path;
+   * `m3/date-picker` went when the walk learned to follow a singleton lambda held by another
+   * singleton lambda, which is how `DatePickerModalSticker` reaches `DatePicker` four frames in
+   * (both yschimke/compose-ai-tools#5354; the diagnosis is yschimke/m3-catalog#317).
+   *
+   * What is left is different in kind, which is why the reason and not just the id is in the map.
    */
   private val knownAbsent =
     mapOf(
-      "m3/date-picker" to
-        "the record carries DateRangePicker but not DatePicker — the preview reaches it through a " +
-          "second singleton lambda, and the walk follows the accessor call rather than the " +
-          "GETSTATIC read of the private `lambda$<key>` field (yschimke/m3-catalog#317)",
-      "m3/snackbar-host" to "the record carries Snackbar but not SnackbarHost",
+      "m3/snackbar-host" to
+        "not a discovery gap. There is no SnackbarHost preview, deliberately: m3-catalog's " +
+          "Snackbar.kt says the host is a dispatcher and the catalog composes snackbars " +
+          "directly, so the record cannot carry a callable no sticker draws"
     )
 
   private fun frozenOwned() = frozen.components.filter { it.componentId.startsWith("m3/") }
@@ -96,15 +102,15 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    * What the real catalog ADDS, as an exact set.
    *
    * The contract document predicted this ("fifty-nine rendered components against twenty-five
-   * transcribed ones") and the measured number is eighty-five, so the prediction was the right
-   * shape and the wrong size — which is the argument for pinning it rather than bounding it. Every
-   * entry is a component a design could be built on, so the list growing or shrinking is a change
-   * to what the builder offers and belongs in a diff someone reads.
+   * transcribed ones") and the measured number is eighty-six, so the prediction was the right shape
+   * and the wrong size — which is the argument for pinning it rather than bounding it. Every entry
+   * is a component a design could be built on, so the list growing or shrinking is a change to what
+   * the builder offers and belongs in a diff someone reads.
    *
    * Note what is NOT asserted here: that each is exportable. m3-catalog's lane writes Compose
    * source through the record-driven generator rather than through `RemoteContentEmitter`'s
    * hand-written cases, so the blocker that stops `remote-m3` does not apply — but "does every one
-   * of these eighty-five round-trip to compiling Kotlin" is a separate question and this is not it.
+   * of these eighty-six round-trip to compiling Kotlin" is a separate question and this is not it.
    */
   @Test
   fun `the components the real catalog adds are the reviewed set`() {
@@ -347,7 +353,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
   private companion object {
     /**
-     * The eighty-five components the real catalog adds; see the test above for why they are pinned.
+     * The eighty-six components the real catalog adds; see the test above for why they are pinned.
      */
     val ADDED =
       listOf(
@@ -362,6 +368,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         "m3/circular-wavy-progress-indicator",
         "m3/contained-loading-indicator",
         "m3/current-scheme",
+        "m3/date-picker-dialog",
         "m3/date-range-picker",
         "m3/docked-search-bar",
         "m3/elevated-assist-chip",
