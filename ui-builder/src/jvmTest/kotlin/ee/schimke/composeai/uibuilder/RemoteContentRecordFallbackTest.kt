@@ -401,6 +401,147 @@ class RemoteContentRecordFallbackTest {
     )
   }
 
+  private fun binding(key: String) = buildJsonObject {
+    put("type", JsonPrimitive("binding"))
+    put("value", JsonPrimitive(key))
+  }
+
+  /**
+   * A placed design component is its body, inlined, with the placement's arguments substituted.
+   *
+   * Inlined rather than emitted as a function, which is what the Compose lane does: a design
+   * component's body is ordinary catalog nodes and this emitter can write every one of them. A
+   * `RemoteCustomComponent` hole would be actively wrong — the host registers renderers by name and
+   * nothing is registered under a design-local key, so the widget would reserve bounds and draw
+   * nothing.
+   */
+  @Test
+  fun `a placed design component is inlined with its arguments`() {
+    val document =
+      widget(
+          mapOf(
+            "place" to
+              UiBuilderNode(
+                id = "place",
+                componentId = "design/component-instance",
+                component =
+                  buildJsonObject {
+                    put("componentKey", JsonPrimitive("headline"))
+                    put("arguments", buildJsonObject { put("caption", value("Next train")) })
+                  },
+              ),
+            "headline-root" to
+              UiBuilderNode(
+                id = "headline-root",
+                componentId = "remote-m3/remote-text",
+                properties = buildJsonObject { put("text", binding("caption")) },
+              ),
+          ),
+          childId = "place",
+        )
+        .copy(
+          components =
+            buildJsonObject {
+              put(
+                "headline",
+                buildJsonObject {
+                  put("name", JsonPrimitive("Headline"))
+                  put("root", JsonPrimitive("headline-root"))
+                },
+              )
+            }
+        )
+
+    val source =
+      assertIs<WearWidgetCodeExporter.Result.Emitted>(
+          WearWidgetCodeExporter.export(
+            document,
+            components = mapOf("remote-m3/remote-text" to remoteText),
+          )
+        )
+        .source
+
+    assertTrue("RemoteText(text = \"Next train\".rs)" in source, source)
+    // Inlined, so nothing names the component: no function, no hole, no key.
+    assertTrue("headline" !in source, source)
+  }
+
+  /** A body reading a key the placement does not supply is a component placed wrongly. */
+  @Test
+  fun `a binding the placement does not supply is refused`() {
+    val document =
+      widget(
+          mapOf(
+            "place" to
+              UiBuilderNode(
+                id = "place",
+                componentId = "design/component-instance",
+                component =
+                  buildJsonObject {
+                    put("componentKey", JsonPrimitive("headline"))
+                    put("arguments", JsonObject(emptyMap()))
+                  },
+              ),
+            "headline-root" to
+              UiBuilderNode(
+                id = "headline-root",
+                componentId = "remote-m3/remote-text",
+                properties = buildJsonObject { put("text", binding("caption")) },
+              ),
+          ),
+          childId = "place",
+        )
+        .copy(
+          components =
+            buildJsonObject {
+              put(
+                "headline",
+                buildJsonObject {
+                  put("name", JsonPrimitive("Headline"))
+                  put("root", JsonPrimitive("headline-root"))
+                },
+              )
+            }
+        )
+
+    val refused =
+      assertIs<WearWidgetCodeExporter.Result.Refused>(
+        WearWidgetCodeExporter.export(
+          document,
+          components = mapOf("remote-m3/remote-text" to remoteText),
+        )
+      )
+    assertTrue(
+      refused.reasons.any { "reads `caption`" in it && "does not supply" in it },
+      refused.reasons.toString(),
+    )
+  }
+
+  /** A placement naming a component the design does not define refuses by name. */
+  @Test
+  fun `a placement of an undefined component is refused`() {
+    val refused =
+      assertIs<WearWidgetCodeExporter.Result.Refused>(
+        WearWidgetCodeExporter.export(
+          widget(
+            mapOf(
+              "place" to
+                UiBuilderNode(
+                  id = "place",
+                  componentId = "design/component-instance",
+                  component = buildJsonObject { put("componentKey", JsonPrimitive("missing")) },
+                )
+            ),
+            childId = "place",
+          )
+        )
+      )
+    assertTrue(
+      refused.reasons.any { "places `missing`" in it },
+      refused.reasons.toString(),
+    )
+  }
+
   /**
    * Without a record the refusal is the one it always was, so nothing that has no record changes.
    */

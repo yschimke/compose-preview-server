@@ -328,7 +328,11 @@ internal class RemoteContentEmitter(
 
   /** The node and its subtree, as indented source lines. */
   fun emit(nodeId: String, depth: Int): List<String> {
-    val node = document.nodes[nodeId] ?: return emptyList()
+    val raw = document.nodes[nodeId] ?: return emptyList()
+    val node = raw.withArguments(argumentScopes.lastOrNull()) ?: return emptyList()
+    node.component?.let { placement ->
+      return placement(node, placement, depth)
+    }
     val pad = INDENT.repeat(depth)
     return when (node.componentId) {
       "m3/text" -> (pad + text(node, pad)).split("\n")
@@ -370,6 +374,83 @@ internal class RemoteContentEmitter(
         }
       else -> recordCall(node, depth) ?: refuseUnknown(node)
     }
+  }
+
+  /**
+   * The arguments each enclosing placement supplied, innermost last.
+   *
+   * A design component's body reads `{"type":"binding","value":"<key>"}` and the placement
+   * supplies the key, so a body node means something different at each placement of it. Resolved
+   * where the node is FETCHED rather than where each property is read: `emit` is the one place
+   * that turns an id into a node, so substituting there is what makes every downstream reader —
+   * the text case, the record fallback, the modifier walk — see the resolved value without any
+   * of them knowing placements exist.
+   */
+  private val argumentScopes = ArrayDeque<JsonObject>()
+
+  /**
+   * A placed design component: its body, inlined, with the placement's arguments substituted.
+   *
+   * Inlined rather than emitted as a function, which is what the Compose lane does. A design
+   * component's body is ordinary catalog nodes, and this emitter can already write every one of
+   * them — whereas a `RemoteCustomComponent` hole would be actively wrong here: the host
+   * registers renderers by name, and nothing is registered under a design-local component key, so
+   * the widget would reserve the bounds and draw nothing.
+   *
+   * A pack component is a different thing wearing a similar shape — `<packId>/<name>`, whose
+   * picture comes from the native lane compiled against the served bundle — and it is not this:
+   * it has no body in this document to inline, so it falls through to the ordinary refusal.
+   */
+  private fun placement(node: UiBuilderNode, placement: JsonObject, depth: Int): List<String> {
+    val key = placement.plainString("componentKey")
+    val definition = key?.let { document.components[it] as? JsonObject }
+    val root = definition?.plainString("root")
+    if (key == null || root == null || root !in document.nodes) {
+      refusals +=
+        "`${node.id}` places `${key ?: "an unnamed component"}`, which this design does not define"
+      return emptyList()
+    }
+    // A component that places itself, directly or through another, would inline for ever. The
+    // depth is small on purpose: a design component nested three deep is a design nobody wrote by
+    // accident, and an unbounded walk turns a malformed document into a hang.
+    if (argumentScopes.size >= MAX_PLACEMENT_DEPTH) {
+      refusals +=
+        "`${node.id}` places `$key` more than $MAX_PLACEMENT_DEPTH deep, which is a component " +
+          "placing itself"
+      return emptyList()
+    }
+    argumentScopes.addLast(placement["arguments"] as? JsonObject ?: JsonObject(emptyMap()))
+    val body = emit(root, depth)
+    argumentScopes.removeLast()
+    return body
+  }
+
+  /**
+   * [this] with every `binding` property replaced by what the placement passed for it, or null
+   * when the placement passed nothing — which is a refusal rather than an empty value, because a
+   * body that reads a key nobody supplied is a component being placed wrongly.
+   */
+  private fun UiBuilderNode.withArguments(arguments: JsonObject?): UiBuilderNode? {
+    if (arguments == null || properties.isEmpty()) return this
+    var missing: String? = null
+    val resolved =
+      properties.mapValues { (name, value) ->
+        val binding = (value as? JsonObject)?.takeIf { it.plainString("type") == "binding" }
+        if (binding == null) value
+        else {
+          val key = binding.plainString("value")
+          val supplied = key?.let { arguments[it] }
+          if (supplied == null) {
+            missing = "`$name` reads `${key ?: "an unnamed argument"}`"
+            value
+          } else supplied
+        }
+      }
+    missing?.let {
+      refusals += "the placed component's $it, which its placement does not supply"
+      return null
+    }
+    return if (resolved == properties) this else copy(properties = JsonObject(resolved))
   }
 
   private fun refuseUnknown(node: UiBuilderNode): List<String> {
@@ -1853,6 +1934,9 @@ private fun kotlinx.serialization.json.JsonElement.numberValue(): Float? =
 
 /** The parameter names and types the record-driven fallback in [RemoteContentEmitter] knows. */
 private const val MODIFIER_PARAMETER = "modifier"
+
+/** How deeply a design component may place another before this calls it a cycle. */
+private const val MAX_PLACEMENT_DEPTH = 4
 
 private const val ACTION_FQN = "androidx.compose.remote.creation.compose.action.Action"
 private const val REMOTE_STRING_FQN = "androidx.compose.remote.creation.compose.state.RemoteString"
