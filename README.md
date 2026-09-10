@@ -45,6 +45,9 @@ The build is intentionally repository-independent. Compose Preview implementatio
 from Maven Central at the version in `gradle/libs.versions.toml`; wire contracts resolve separately
 from [`compose-preview-contracts`](https://github.com/yschimke/compose-preview-contracts). There is
 no composite build, project substitution, shared version catalog, or `mavenLocal()` repository.
+For unreleased contract or generator changes, an explicit
+[local dependency manifest](docs/development/LOCAL_DEPENDENCIES.md) selects artifacts compiled from
+local checkouts. Leaving that option unset retains the released dependency graph.
 
 ## Java
 

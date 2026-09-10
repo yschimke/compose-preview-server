@@ -49,6 +49,7 @@ jobs:
       - run: .github/scripts/ui-builder-project-boundary.sh
       - name: Check tools-owned parser vendor
         run: python3 .github/scripts/check-usage-source-psi-vendor.py
+      - run: python3 scripts/local-dependencies/test_stage.py
       # The catalog names, which shrink to nothing over phases 4 and 5. Runs beside the project
       # boundary because it is the same kind of line for the same reason: an undrawn one rots.
       - run: .github/scripts/ui-builder-catalog-literals.sh

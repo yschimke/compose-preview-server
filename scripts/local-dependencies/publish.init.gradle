@@ -1,0 +1,14 @@
+import org.gradle.api.publish.PublishingExtension
+
+// Invoke only the selected projects' publishAllPublicationsToUiBuilderLocalRepository tasks.
+// This adds a file repository; it never invokes an upstream release or Maven Central task.
+gradle.projectsEvaluated {
+    rootProject.allprojects.each { project ->
+        if (project.pluginManager.hasPlugin("maven-publish")) {
+            project.extensions.getByType(PublishingExtension).repositories.maven {
+                name = "uiBuilderLocal"
+                url = project.uri(project.providers.gradleProperty("uiBuilderLocalRepository").get())
+            }
+        }
+    }
+}

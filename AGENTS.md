@@ -64,8 +64,11 @@ boundaries.
 
 ## Boundary rules
 
-- The build resolves released coordinates from Maven Central. Do not add `mavenLocal()`, a composite
-  include of `compose-ai-tools`, project substitution, or a shared catalog outside this repository.
+- Default builds resolve released coordinates from Maven Central. Do not add `mavenLocal()`, a
+  composite include of `compose-ai-tools`, project substitution, or a shared catalog outside this
+  repository. For user-authorized local prototyping, use the opt-in staged-publication workflow in
+  [`docs/development/LOCAL_DEPENDENCIES.md`](docs/development/LOCAL_DEPENDENCIES.md); keep released
+  builds independent of local checkouts.
 - **The UI builder is a second project inside this repository, on the same release line.** Which
   modules are in it, the four published seams the server may reach it through, and the rule that it
   never depends on the server, are written once in

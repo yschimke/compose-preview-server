@@ -70,6 +70,22 @@ extensions to the shared model. Their refusals remain explicit; they are require
 - Verify coverage against the pinned operation census, including operands and target limitations;
   rendering one fixture or accepting an opcode is not an 80% implementation claim.
 
-Local dependency overrides are authorized for this project. Introduce them when a contract or
-shared generator extension requires one, and verify that development works without publishing
-another repository first. Released builds should continue using pinned coordinates by default.
+## Local dependency development
+
+[`stage-local-dependency.py`](../../scripts/stage-local-dependency.py) builds selected modules in
+their owning checkouts and stages their normal JVM and Wasm publications. An explicit
+`-PlocalDependencies=…` manifest selects them for the existing builder and server. Shared generator
+publications are staged together, because both `screen-model` and `preview-discovery` carry its
+classes. Released builds continue using pinned coordinates by default. Usage is in
+[the local build guide](../development/LOCAL_DEPENDENCIES.md).
+
+Verified by compiling local `ui-builder-protocol` JVM/Wasm publications and both shared generator
+publications, then running 915 builder JVM tests, 31 shared-export tests and 16 targeted server
+behavior/MCP tests against them. Wasm compilation and both resolved-classpath boundary checks
+also pass. Gradle dependency reports confirm the selected snapshot versions; omitting the manifest
+restores `ui-builder-protocol:2.15.0` and `preview-discovery:2.7.0`.
+
+The first current-main contracts probe found an additional integration requirement:
+contracts 2.16.0 adds `declareComponent` and `removeComponent` mutations, which this branch does
+not yet handle in the persistent service. That remains part of the reusable-component work above;
+local build verification uses contracts source at the existing 2.15.0 pin until it is integrated.
