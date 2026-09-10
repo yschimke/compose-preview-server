@@ -194,13 +194,13 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    * real defect — a surface lying about another surface — and it is not the canvas going blank.
    *
    * Both halves of that were true when this test was written and the first is now fixed:
-   * m3-catalog#327 declares `canvas` for the twenty-four components the renderer has a case for,
-   * so the shelf reports what the builder actually draws and this assertion is `emptyList()`
-   * rather than the list of everything drawn.
+   * m3-catalog#327 declares `canvas` for the twenty-four components the renderer has a case for, so
+   * the shelf reports what the builder actually draws and this assertion is `emptyList()` rather
+   * than the list of everything drawn.
    *
    * The canvas gap that IS real belongs to the components this pair ADDS, and this test does not
-   * measure it: 108 published `m3/` ids, 24 with a case in the renderer, **84 falling to the
-   * `else` branch** and drawing `UnsupportedComponentDiagnostic`. See yschimke/m3-catalog#324.
+   * measure it: 108 published `m3/` ids, 24 with a case in the renderer, **84 falling to the `else`
+   * branch** and drawing `UnsupportedComponentDiagnostic`. See yschimke/m3-catalog#324.
    *
    * The `code` differences are not losses and are asserted as such so they cannot quietly become
    * some other difference: the composed symbol is the FQN whose simple name is the frozen one (the
@@ -412,9 +412,9 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    *
    * One component is one SYMBOL, and a symbol several stickers draw is filed under whichever
    * catalog id sorts first. Four survived every earlier correction because the catalog had no
-   * section they belonged to, so placing them meant inventing a shelf. m3-catalog#327 made all
-   * four calls: `Icons` and `Surfaces` are new headings for `m3/icon` and `m3/surface`, and the
-   * other two are **not components** — `Sticker` is the frame every preview is drawn inside and
+   * section they belonged to, so placing them meant inventing a shelf. m3-catalog#327 made all four
+   * calls: `Icons` and `Surfaces` are new headings for `m3/icon` and `m3/surface`, and the other
+   * two are **not components** — `Sticker` is the frame every preview is drawn inside and
    * `MaterialExpressiveTheme` is the theme scope wrapping them, so both are `excluded` with the
    * reason published.
    *
@@ -422,9 +422,9 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    * design. They are still on the MENU, which is the generator writing a shelf entry for a
    * component the consumer refuses to serve: a palette item that disappears on insert. Fixed in
    * yschimke/compose-ai-tools#5378 and not yet released, and m3-catalog pins the released plugin —
-   * so this fixture captures the bug, and this test says so rather than leaving it unremarked.
-   * When the catalog bumps its plugin and the fixture is re-captured, the last assertion here
-   * fails and is deleted.
+   * so this fixture captures the bug, and this test says so rather than leaving it unremarked. When
+   * the catalog bumps its plugin and the fixture is re-captured, the last assertion here fails and
+   * is deleted.
    */
   @Test
   fun `an excluded component is not served, though the menu still lists it`() {

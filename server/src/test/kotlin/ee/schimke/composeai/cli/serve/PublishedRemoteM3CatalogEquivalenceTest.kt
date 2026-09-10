@@ -15,6 +15,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -173,7 +174,6 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         "remote-m3/remote-split-radio-button",
         "remote-m3/remote-split-switch-button",
         "remote-m3/remote-stepper",
-        "remote-m3/remote-sticker",
         "remote-m3/remote-switch-button",
         "remote-m3/remote-text",
         "remote-m3/remote-text-button",
@@ -188,6 +188,57 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       ),
       composed.components.map { it.componentId }.filter { it.startsWith("remote-m3/") }.sorted(),
       "the composed remote-m3 shelf has changed",
+    )
+  }
+
+  /**
+   * `remote-sticker` left the shelf above, and the one place it has not left yet.
+   *
+   * It is the frame every preview in this catalog is drawn inside rather than a component anyone
+   * places in a design, so wear-m3-catalog#425 excludes it and publishes the reason. The exclusion
+   * takes effect where it matters: it is not served, so it cannot be inserted, and the exporter is
+   * no longer asked to write it.
+   *
+   * It is still on the MENU, which is the generator writing a palette entry for a component the
+   * consumer refuses to serve — an item that disappears on insert. Fixed in
+   * yschimke/compose-ai-tools#5378, not yet released, and this catalog pins the release; the same
+   * assertion stands on the m3 sibling. Delete this last check when the catalog bumps its plugin
+   * and the fixture is re-captured, rather than shortening it.
+   */
+  @Test
+  fun `an excluded component is not served, though the menu still lists it`() {
+    val semantics =
+      json
+        .parseToJsonElement(fixture("remote-m3-published-v1.json"))
+        .jsonObject["statusSemantics"]!!
+        .jsonObject
+    val excluded =
+      semantics["components"]!!
+        .jsonObject
+        .filterValues { component ->
+          component.jsonObject["excluded"].let { it != null && it !is JsonNull }
+        }
+        .keys
+        .sorted()
+    assertEquals(
+      listOf("remote-m3/remote-sticker"),
+      excluded,
+      "the set of components the catalog excludes has changed",
+    )
+
+    val offered = composed.components.map { it.componentId }.toSet()
+    assertEquals(
+      emptyList(),
+      excluded.filter { it in offered },
+      "an excluded component is being served — the published reason says the catalog refuses it",
+    )
+
+    val menu = semantics["componentMenu"]!!.jsonObject["components"]!!.jsonObject
+    assertEquals(
+      excluded,
+      excluded.filter { it in menu },
+      "an excluded component left the menu — compose-ai-tools#5378 has reached this catalog, so " +
+        "delete this assertion rather than shortening it",
     )
   }
 
@@ -298,7 +349,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * component you could insert and could not export.
    *
    * It is no longer the whole answer. The emitter falls back to the component RECORD for a
-   * component it has no case for, and twenty-three of the twenty-seven now export — measured in
+   * component it has no case for, and twenty-two of the twenty-six now export — measured in
    * [what the published shelf can export is the reviewed set], which is the test to read for
    * whether the shelf is usable. This one stays because the hand-written cases and the fallback are
    * different mechanisms with different failure modes, and a case appearing here should be a
@@ -500,12 +551,15 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       }
     }
 
-    // The denominator, pinned. "23 of 27" is the number this work is quoted by, and without this
-    // line a join that silently dropped four components would report a shorter refusal list as an
-    // improvement. It is also what proves the composition's join and the one this test used to
-    // perform by hand agree: both find 27.
+    // The denominator, pinned. Without this line a join that silently dropped four components
+    // would report a shorter refusal list as an improvement. It is also what proves the
+    // composition's join and the one this test used to perform by hand agree.
+    //
+    // Twenty-six, not the twenty-seven this was written with: wear-m3-catalog#425 excludes
+    // `remote-sticker`, the frame every preview is drawn inside, so the shelf no longer offers
+    // it and the exporter is no longer asked about it. Twenty-two of the twenty-six export.
     assertEquals(
-      27,
+      26,
       byId.size,
       "the number of published remote-m3 components measured for export has changed",
     )
@@ -613,18 +667,21 @@ class PublishedRemoteM3CatalogEquivalenceTest {
     // somewhere a person would not look for it.
     //
     // That is the trade the symbol-derived id makes deliberately — 49 stickers collapse to 27
-    // components — and `@BuilderComponent(group = …)` is the sanctioned way for the catalog to
-    // place a component whose stickers span sections. Asserted as the exact current set so that
-    // annotating one shortens this list and says so.
+    // components — and the policy's `group` is the sanctioned way for the catalog to place a
+    // component whose stickers span sections. wear-m3-catalog#425 used it for six of them, which
+    // is why `Text`, `Iconography` and `Position indicators` are no longer on this list: the
+    // components that belong on them say so now instead of inheriting `AppCard`'s shelf.
+    // Asserted as the exact current set so that placing one shortens this list and says so.
+    //
+    // The remaining seven are not placements anyone withheld. They hold stickers whose symbols
+    // publish no component of their own, so there is nothing to place — `Widget Container` is the
+    // exception and already has its two builtins, which the menu's component map does not list.
     assertEquals(
       listOf(
         "Confetti",
-        "Iconography",
-        "Position indicators",
         "Scaffold templates",
         "Shaders",
         "Shapes",
-        "Text",
         "Typeface",
         "Wear M3",
         "Widget Container",
