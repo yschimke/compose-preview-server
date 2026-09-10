@@ -42,10 +42,15 @@ import kotlinx.serialization.json.contentOrNull
  * So: passing here is necessary before `--ui-builder-published-catalogs` names `m3-catalog`, and it
  * is not sufficient. The sufficient check is this test against a fixture regenerated from a real
  * `composePreviewDiscover` run, which needs the id derivation fixed
- * (yschimke/compose-ai-tools#5354) and m3-catalog's vocabulary authored. Two of the tests below —
- * the builtin and cardinality refusals — mutate a `builtins` block the real catalog does not have,
- * so they must be moved onto their own synthetic fixture in the same change, or they will pass
- * while checking nothing.
+ * (yschimke/compose-ai-tools#5354) and m3-catalog's vocabulary authored.
+ *
+ * Everything left here compares a composed shelf against the frozen one, which is the question this
+ * fixture can answer honestly. Two of the composer's REFUSALS used to live here too — a builtin
+ * with a malformed `jsonType`, a slot cardinality no child count satisfies — reaching their input
+ * by string-splicing this fixture. Both now sit in `PublishedUiBuilderCatalogHostileInputTest`
+ * against its own two-component record, because m3-catalog's policy states the catalog owns no
+ * builtins: on a regenerated fixture the splice would land nowhere and both would have passed while
+ * checking nothing.
  */
 class PublishedM3CatalogEquivalenceTest {
 
@@ -297,49 +302,6 @@ class PublishedM3CatalogEquivalenceTest {
       assertEquals(want, got, "$builderOwned reached the shelf with no group, or the wrong one")
       assertTrue(want in order, "group $want is not in groupOrder, so the panel cannot render it")
     }
-  }
-
-  @Test
-  fun `a builtin's malformed jsonType is refused too, not only a component's`() {
-    val record = json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-record-v1.json"))
-    // A builtin's properties reach `builtinCapability` by the same route and are read by the same
-    // validator; checking only `components` was the container half of this fix.
-    val withBuiltin =
-      fixture("m3-catalog-published-v1.json")
-        .replaceFirst(
-          "\"components\": {",
-          "\"builtins\": { \"layout/box\": { \"role\": \"Container\", " +
-            "\"propertyCapabilities\": [ { \"name\": \"pad\", \"jsonType\": {} } ] } }, " +
-            "\"components\": {",
-        )
-    val result = PublishedUiBuilderCatalog.compose(withBuiltin, record, exports)
-    assertTrue(
-      result is PublishedUiBuilderCatalog.Result.Unusable,
-      "a builtin with a jsonType of {} composed instead of being refused",
-    )
-    assertTrue(
-      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("layout/box.pad"),
-      "the refusal does not name the builtin property: ${result.reason}",
-    )
-  }
-
-  @Test
-  fun `a slot cardinality no child count satisfies is refused`() {
-    val record = json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-record-v1.json"))
-    val published = fixture("m3-catalog-published-v1.json")
-    // `validateCatalog` requires `catalogSystemId == "m3-catalog"`, so it only ever sees the
-    // packaged catalog; a published one reaches the shelf unvalidated.
-    val impossible = published.replaceFirst("\"cardinality\": {", "\"cardinality\": { \"max\": 0,")
-    assertTrue(impossible != published, "precondition: the fixture states a cardinality")
-    val result = PublishedUiBuilderCatalog.compose(impossible, record, exports)
-    assertTrue(
-      result is PublishedUiBuilderCatalog.Result.Unusable,
-      "max below min composed into a component nobody can author",
-    )
-    assertTrue(
-      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("cardinality"),
-      "the refusal does not name the cardinality: ${result.reason}",
-    )
   }
 
   /** Every refusal this round added, each as the smallest document that triggers it. */
