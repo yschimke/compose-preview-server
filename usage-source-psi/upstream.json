@@ -1,0 +1,9 @@
+{
+  "repository": "yschimke/compose-ai-tools",
+  "revision": "f904410c8ce2968fb86f1a8c1c6ee0fb10e4e7ba",
+  "prefix": "usage-source-psi/src/main/",
+  "files": {
+    "kotlin/ee/schimke/composeai/usagepsi/JsonWriter.kt": "f856dc008001cc7f2f2d1f5c5de1a0d5233f3cf54101d43c2e75c3427100650f",
+    "kotlin/ee/schimke/composeai/usagepsi/UsageSourceAnalyzer.kt": "28f4a5b03b667198dff4ae973e905b0a1ecf760e4c91f6ea2e9bce17b4dd029d"
+  }
+}

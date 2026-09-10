@@ -18,6 +18,8 @@
 //    server and the reflective surface is a single method.
 //
 // See `docs/design/PSI_PARSE_SPIKE.md` for the measurements this design came from.
+// Source ownership and the immutable vendor pin are documented in
+// `docs/design/SHARED_SOURCE_OWNERSHIP.md`; CI checks the manifest beside this module.
 plugins {
   alias(libs.plugins.kotlin.jvm)
   alias(libs.plugins.ktfmt)
