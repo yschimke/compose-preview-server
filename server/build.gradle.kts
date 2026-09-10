@@ -537,6 +537,23 @@ tasks.withType<Test>().configureEach {
     .withPropertyName("sharedWireFixtures")
     .withPathSensitivity(PathSensitivity.RELATIVE)
 
+  // The UI-builder catalog fixtures under `docs/design/fixtures/ui-builder/`, for exactly the
+  // hazard above and demonstrated on this one: `PublishedM3CatalogEquivalenceTest` and
+  // `PublishedRemoteM3CatalogEquivalenceTest` read them straight off disk, and these are the
+  // CUTOVER gates — the tests that decide whether a published catalog may replace a synthesised
+  // one. Undeclared, editing `remote-m3-published-v1.json` left `:server:test` UP-TO-DATE and the
+  // gate simply did not run. A gate that a regenerated fixture does not re-run is worse than no
+  // gate, because it reports green about the file it did not read.
+  inputs
+    .files(
+      rootProject.layout.projectDirectory
+        .dir("docs/design/fixtures/ui-builder")
+        .asFileTree
+        .matching { include("*.json") }
+    )
+    .withPropertyName("uiBuilderCatalogFixtures")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+
   // The image Dockerfile, which `ImageSandboxCountMirrorTest` reads off disk for the same reason
   // and with the same hazard: undeclared, editing `JAVA_TOOL_OPTIONS` could be served UP-TO-DATE or
   // from the build cache with the assertion never re-running — which is precisely the silent drift

@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_COMPONENT_IDS
+import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_MODIFIERS
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
@@ -92,14 +93,49 @@ class PublishedRemoteM3CatalogEquivalenceTest {
   private fun frozenOwned() =
     frozen.components.filterNot { c -> donorNamespaces.any { c.componentId.startsWith(it) } }
 
+  /**
+   * Every component the pair composes, by name.
+   *
+   * A count floor was not enough and the review said so: at `size > 20` on a 27-component fixture,
+   * six could vanish — `remote-button-group`, `remote-compact-button`, the progress indicators —
+   * and no test here would notice, which is the one thing a pre-cutover gate exists to catch.
+   * remote-catalog published TWO records before the scan classpath resolved AARs by coordinate, so
+   * a regression of that size is the shape of the bug this is watching for.
+   */
   @Test
-  fun `the generated pair composes at all`() {
-    // The floor. remote-catalog published two component records until the scan classpath started
-    // resolving AARs by coordinate, and a two-record file for a 725-preview module composes to a
-    // shelf with nothing on it.
-    assertTrue(
-      composed.components.size > 20,
-      "composed only ${composed.components.size} components",
+  fun `the generated pair composes exactly the components it should`() {
+    assertEquals(
+      listOf(
+        "remote-m3/remote-app-card",
+        "remote-m3/remote-button",
+        "remote-m3/remote-button-group",
+        "remote-m3/remote-card",
+        "remote-m3/remote-checkbox-button",
+        "remote-m3/remote-circular-progress-indicator",
+        "remote-m3/remote-compact-button",
+        "remote-m3/remote-curved-progress-indicator",
+        "remote-m3/remote-edge-button",
+        "remote-m3/remote-horizontal-page-indicator",
+        "remote-m3/remote-icon",
+        "remote-m3/remote-icon-button",
+        "remote-m3/remote-linear-progress-indicator",
+        "remote-m3/remote-outlined-card",
+        "remote-m3/remote-radio-button",
+        "remote-m3/remote-slider",
+        "remote-m3/remote-split-checkbox-button",
+        "remote-m3/remote-split-radio-button",
+        "remote-m3/remote-split-switch-button",
+        "remote-m3/remote-stepper",
+        "remote-m3/remote-sticker",
+        "remote-m3/remote-switch-button",
+        "remote-m3/remote-text",
+        "remote-m3/remote-text-button",
+        "remote-m3/remote-title-card",
+        "remote-m3/remote-vertical-page-indicator",
+        "remote-m3/theme-specimen",
+      ),
+      composed.components.map { it.componentId }.filter { it.startsWith("remote-m3/") }.sorted(),
+      "the composed remote-m3 shelf has changed",
     )
   }
 
@@ -192,6 +228,36 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       inexportable,
       "the set of offered-but-unexportable components has changed — if the emitter grew a case, " +
         "shorten this; if the catalog grew a component, it needs one",
+    )
+  }
+
+  /**
+   * The modifiers it advertises are unexportable too, which is the same blocker one level down.
+   *
+   * Not one of the twenty-seven states `modifierCapabilities`, so the composer hands each the
+   * structural default — `LEAF_MODIFIERS` for a leaf, plus `fillMaxSize`, `shadow` and the rest for
+   * a container. Three of those are outside [REMOTE_CONTENT_MODIFIERS]: `testTag` and `aspectRatio`
+   * on everything, `shadow` on every container. `RemoteM3VocabularyParityTest` holds the
+   * synthesised palette to this and does not cover a published one.
+   *
+   * It matters independently of the component blocker: clear that one by teaching the emitter these
+   * components, and the shelf would still offer three controls whose use makes export fail later.
+   * Raised in review on #673.
+   */
+  @Test
+  fun `the modifiers the published catalog advertises are unexportable too`() {
+    val offending =
+      composed.components
+        .filter { it.componentId.startsWith("remote-m3/") }
+        .flatMap { it.modifierCapabilities }
+        .filterNot { it in REMOTE_CONTENT_MODIFIERS }
+        .distinct()
+        .sorted()
+    assertEquals(
+      listOf("aspectRatio", "shadow", "testTag"),
+      offending,
+      "the set of advertised-but-unwritable modifiers has changed — if the emitter grew one, " +
+        "shorten this; if the composer's structural default did, it needs one",
     )
   }
 
