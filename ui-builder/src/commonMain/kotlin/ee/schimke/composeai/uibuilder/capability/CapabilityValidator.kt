@@ -1,10 +1,13 @@
 package ee.schimke.composeai.uibuilder.capability
 
 import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
+import ee.schimke.composeai.uibuilder.UiBuilderArgumentBindings
 import ee.schimke.composeai.uibuilder.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.UiBuilderNode
 import ee.schimke.composeai.uibuilder.export.PropertyValueKinds
+import ee.schimke.composeai.uibuilder.inspectUiBuilderArgumentBindings
 import ee.schimke.composeai.uibuilder.optionalString
+import ee.schimke.composeai.uibuilder.propertyMatches
 import ee.schimke.composeai.uibuilder.stateBindingMatchesCatalog
 import ee.schimke.composeai.uibuilder.stateSelectionIssue
 import kotlinx.serialization.json.JsonArray
@@ -95,8 +98,15 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
 
   fun validate(document: UiBuilderDocument): CapabilityValidationResult {
     val issues = mutableListOf<CapabilityValidationIssue>()
+    val bindings = inspectUiBuilderArgumentBindings(document)
+    bindings.issues.forEach { failure ->
+      document.nodes[failure.nodeId]?.let { node ->
+        issues +=
+          issue(CapabilityIssueCode.INVALID_PROPERTY_VALUE, node, failure.message, failure.field)
+      }
+    }
     document.nodes.values.sortedBy(UiBuilderNode::id).forEach { node ->
-      validateNode(document, node, issues)
+      validateNode(document, node, issues, bindings)
       stateSelectionIssue(node, document.stateVariables)?.let {
         issues += issue(CapabilityIssueCode.INVALID_PROPERTY_VALUE, node, it, SHOW_BY_STATE)
       }
@@ -262,6 +272,7 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
     document: UiBuilderDocument,
     node: UiBuilderNode,
     issues: MutableList<CapabilityValidationIssue>,
+    bindings: UiBuilderArgumentBindings,
   ) {
     // A placement is a document construct rather than a catalog component: no catalog declares
     // `design/component-instance`, so it has no capability of its own. What it does have is the
@@ -288,7 +299,7 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
       return
     }
 
-    validateProperties(document, node, capability, issues)
+    validateProperties(document, node, capability, issues, bindings)
     validateModifiers(node, capability, issues)
     validateSlots(document, node, capability, issues)
   }
@@ -298,6 +309,7 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
     node: UiBuilderNode,
     capability: ComponentCapability,
     issues: MutableList<CapabilityValidationIssue>,
+    bindings: UiBuilderArgumentBindings,
   ) {
     node.properties.forEach { (name, encodedValue) ->
       val property = capability.propertiesByName[name]
@@ -311,14 +323,28 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
           )
       } else {
         val value = encodedValue.unwrapPropertyValue()
+        val argumentMatches =
+          bindings.propertyMatches(node.id, name, encodedValue) { supplied ->
+            stateBindingMatchesCatalog(
+              supplied,
+              property.jsonType,
+              property.allowedValues,
+              document.stateVariables,
+              name,
+            )
+              ?: (property.acceptsType(supplied.unwrapPropertyValue()) &&
+                (property.allowedValues.isEmpty() ||
+                  supplied.unwrapPropertyValue() in property.allowedValues))
+          }
         val bindingMatches =
-          stateBindingMatchesCatalog(
-            encodedValue,
-            property.jsonType,
-            property.allowedValues,
-            document.stateVariables,
-            name,
-          )
+          argumentMatches
+            ?: stateBindingMatchesCatalog(
+              encodedValue,
+              property.jsonType,
+              property.allowedValues,
+              document.stateVariables,
+              name,
+            )
         if (bindingMatches == false || (bindingMatches == null && !property.acceptsType(value))) {
           issues +=
             issue(

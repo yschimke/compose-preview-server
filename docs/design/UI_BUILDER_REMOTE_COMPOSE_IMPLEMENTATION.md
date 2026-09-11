@@ -427,7 +427,7 @@ two densities, covering adjacent Floats, subnormals, opposite finite extremes, o
 integer/Boolean regression cases and padding. All 53 shared-export tests and 953 editor tests pass;
 the final main-based compiler passes 35 tests and its ABI check.
 
-## Repetition feasibility, before production integration
+## Repetition and reusable instances in JSON export
 
 [The static expansion proof](evidence/ui-builder-repetition-proof/README.md) now establishes that
 authored rows can place a parameterized reusable body and compile into ordinary Remote layouts.
@@ -435,10 +435,23 @@ The existing editor canvas, temporary expanded tree and real compiled document m
 at densities 1 and 2. All six expanded cells remain independently clickable and update the shared
 selection. Placement padding and row-specific spacing are retained.
 
-This is deliberately test-only. Production JSON still refuses loops and instances; the proof pins
-that fact. Validation, supported binding fields, record-driven Kotlin loops/calls and per-instance
-MCP addressing remain integration work. Static expansion does not substitute for runtime lists,
-lazy keys, scoped state or callback/slot parameters.
+The [production integration](evidence/ui-builder-repetition-export/README.md) now accepts authored
+rows and reusable instances in the shared JSON exporter. It preserves placement modifiers, ordered
+actions and lexical argument scopes, with bounded expansion and reference validation. Browser and
+service validation check the supplied argument values; both reducers recognize detached component
+bodies, so editing the design does not fail on a body with no screen parent. Remote catalogs offer
+the existing For each layout, and its inspector reports the row count.
+
+The actual WASM app passes live clicks on all six repeated cells and saves an initial-state edit.
+All six JSON/RC/PNG downloads, before and after that edit, match hosted MCP artifacts byte for byte.
+MCP also creates a design, edits its row data and exports the saved revision while retaining its
+component definition. Tests pass for 65 shared-export cases, 191 runtime cases and 954 editor cases;
+one separate opt-in canvas proof is skipped in the ordinary editor suite. Runtime ABI and WASM
+distribution checks pass.
+
+Remote Kotlin loop generation, record-driven Compose loops/calls and per-instance MCP addressing
+remain integration work. Static expansion does not substitute for runtime lists, lazy keys, scoped
+state or callback/slot parameters.
 
 ## Remaining production work
 

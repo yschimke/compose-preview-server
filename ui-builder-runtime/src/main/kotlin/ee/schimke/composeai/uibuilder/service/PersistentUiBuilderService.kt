@@ -4208,6 +4208,9 @@ private fun validateTopology(document: DesignDocumentV1): RejectedOutcomeV1? {
       placements[child] = (placements[child] ?: 0) + 1
     }
   }
+  // A definition owns a detached body once; calls do not add structural placements.
+  // Existing declarations may also name a subtree already placed in the screen.
+  document.components.values.forEach { placements.putIfAbsent(it.root, 1) }
   val unknown = placements.keys - document.nodes.keys
   if (unknown.isNotEmpty()) {
     return rejected(
@@ -4230,14 +4233,21 @@ private fun validateTopology(document: DesignDocumentV1): RejectedOutcomeV1? {
   val visiting = mutableSetOf<String>()
   val visited = mutableSetOf<String>()
   fun visit(id: String): Boolean {
-    if (!visiting.add(id)) return false
     if (id in visited) return true
-    document.nodes.getValue(id).slots.values.flatten().forEach { if (!visit(it)) return false }
+    if (!visiting.add(id) || visiting.size > 128) return false
+    val node = document.nodes.getValue(id)
+    node.slots.values.flatten().forEach { if (!visit(it)) return false }
+    node.component?.componentKey?.let { key ->
+      document.components[key]?.root?.let { if (!visit(it)) return false }
+    }
     visiting.remove(id)
     visited += id
     return true
   }
-  if (document.roots.any { !visit(it) } || visited != document.nodes.keys) {
+  if (
+    (document.roots + document.components.values.map { it.root }).any { !visit(it) } ||
+      visited != document.nodes.keys
+  ) {
     return rejected(
       "",
       document.revision,

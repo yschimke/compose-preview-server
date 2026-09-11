@@ -2330,6 +2330,15 @@ internal fun UiBuilderDocument.requireValidPlacement() {
   }
   roots.forEach(::record)
   nodes.values.forEach { node -> node.slots.values.flatten().forEach(::record) }
+  val componentRoots = components.mapValues { (key, definition) ->
+    ((definition as? JsonObject)?.get("root") as? JsonPrimitive)?.takeIf { it.isString }?.content
+      ?: fail(RejectionCode.INVALID_DOCUMENT, "component $key names no body root")
+  }
+  componentRoots.values.forEach { root ->
+    // A declaration owns its detached body once. Existing declarations over a screen subtree
+    // remain valid, and placing that component does not create a second structural parent.
+    if (root !in locations) record(root)
+  }
   nodes.keys.sorted().forEach { nodeId ->
     val count = locations[nodeId] ?: 0
     if (count != 1) {
@@ -2345,11 +2354,23 @@ internal fun UiBuilderDocument.requireValidPlacement() {
   fun visit(nodeId: String) {
     if (nodeId in visiting) fail(RejectionCode.CYCLE, "cycle at $nodeId", nodeId)
     if (!visited.add(nodeId)) return
+    if (visiting.size >= 128)
+      fail(RejectionCode.INVALID_DOCUMENT, "nesting exceeds 128 levels", nodeId)
     visiting += nodeId
-    nodes.getValue(nodeId).slots.values.flatten().forEach(::visit)
+    val node = nodes.getValue(nodeId)
+    node.slots.values.flatten().forEach(::visit)
+    node.component?.let { placement ->
+      val key = (placement["componentKey"] as? JsonPrimitive)?.contentOrNull
+      val root =
+        componentRoots[key]
+          ?: fail(RejectionCode.INVALID_DOCUMENT, "unknown component $key", nodeId)
+      visit(root)
+    }
     visiting -= nodeId
   }
   roots.forEach(::visit)
+  componentRoots.values.forEach(::visit)
+  if (visited.size != nodes.size) fail(RejectionCode.CYCLE, "unreachable cycle in design")
 }
 
 private fun UiBuilderDocument.descendants(rootId: String): Set<String> {

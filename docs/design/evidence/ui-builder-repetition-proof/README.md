@@ -1,8 +1,9 @@
 # Repetition and reusable component feasibility proof
 
-This is a test-only proof of static expansion, before production integration. The existing
-`RemoteDocumentJsonExporter` still rejects the authored loop; the proof asserts that limitation.
-No authoring schema, editor controls, service validation or MCP behavior changed in this slice.
+This records the independent static-expansion proof at commit `e44c52ae`, before production
+integration. The [subsequent integration](../ui-builder-repetition-export/README.md) now accepts the
+authored loop in `RemoteDocumentJsonExporter` and verifies browser/MCP edits and exports. The
+test-only expansion remains an independent oracle; production emission must match it exactly.
 
 The semantic document defines one `layout/for-each`, three authored row dictionaries and one
 reusable `Pair` component. A row's `gap` argument becomes the component's `spacing` parameter,
@@ -66,10 +67,9 @@ The prototype's recursive substitution is not a specification of every bindable 
 production pass must validate binding locations and types, preserve wrapper modifier order and
 selection references, reject unsupported authored fields, and bound expansion before emitting bytes.
 
-The fixture intentionally exercises shared-state actions in a reusable body directly through the
-canvas and lower-level exporter. Current component export validation rejects these bodies, so this
-does not claim they already pass the UI/server/MCP authoring gates. The production integration must
-give the Kotlin generator explicit parameter/callback scope and align those gates.
+The initial fixture exercised shared-state actions in a reusable body directly through the canvas
+and lower-level exporter. The subsequent integration covers the UI/server/MCP authoring gates for
+JSON/RC/PNG. Kotlin generation still needs explicit parameter/callback scope for these bodies.
 
 Physical clicks on all copies are proven here. The existing inspection/action wire fields still
 name authored nodes; addressing a particular instance over MCP requires its own change and tests.

@@ -49,6 +49,7 @@ object RemoteDocumentJsonExporter {
     val strings = linkedMapOf<String, JsonElement>()
     val textLiterals = mutableListOf<JsonObject>()
     val active = mutableSetOf<String>()
+    var emittedNodes = 0
     var expressionIndex = 0
     var usesIntegerProfile = false
     var usesStateProfile = false
@@ -77,7 +78,9 @@ object RemoteDocumentJsonExporter {
       document.stateVariables.entries
         .sortedBy { it.key }
         .forEach { (name, value) -> declare(name, value) }
-      val roots = document.roots.mapNotNull(::node)
+      validateReferences()
+      if (errors.isNotEmpty()) return Result.Refused(errors.distinct())
+      val roots = document.roots.mapNotNull { node(it, JsonObject(emptyMap())) }
       val source = buildJsonObject {
         if (strings.isNotEmpty() || usesStateProfile) put("compilerProfile", STATE_PROFILE)
         else if (usesIntegerProfile) put("compilerProfile", INTEGER_PROFILE)
@@ -148,120 +151,271 @@ object RemoteDocumentJsonExporter {
       }
     }
 
-    fun node(id: String): JsonObject? {
-      val node = document.nodes[id]
-      if (node == null) {
-        errors += "nodes.$id: missing node"
-        return null
+    /** Validate references even under an empty loop, where no body is emitted. */
+    fun validateReferences() {
+      val visiting = mutableSetOf<String>()
+      val visited = mutableSetOf<String>()
+      fun visit(id: String) {
+        if (id in visited) return
+        require(visiting.size < 128) { "nodes.$id: nesting exceeds 128 levels" }
+        if (!visiting.add(id)) {
+          errors += "nodes.$id: cyclic child or component reference"
+          return
+        }
+        val authored = document.nodes[id]
+        if (authored == null) errors += "nodes.$id: missing node"
+        else {
+          authored.slots.values.flatten().forEach(::visit)
+          authored.component?.let { placement ->
+            componentRoot(placement, "nodes.$id.component")?.let(::visit)
+          }
+        }
+        visiting.remove(id)
+        visited.add(id)
       }
+      document.roots.forEach(::visit)
+    }
+
+    fun componentRoot(placement: JsonObject, path: String): String? {
+      val key = (placement["componentKey"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+      val definition = key?.let { document.components[it] as? JsonObject }
+      val root = (definition?.get("root") as? JsonPrimitive)?.takeIf { it.isString }?.content
+      if (root == null) errors += "$path: missing component definition or root for $key"
+      definition
+        ?.keys
+        ?.filter { it !in setOf("name", "root", "description", "source") }
+        ?.forEach { errors += "components.$key.$it: component field lowering is not available" }
+      return root
+    }
+
+    // Match the canvas's lexical argument scopes: direct property reads and forwarded arguments.
+    // Nested modifier/action bindings are not substituted until those surfaces define their types.
+    fun resolve(value: JsonElement, arguments: JsonObject, path: String): JsonElement {
+      val binding =
+        (value as? JsonObject)?.takeIf { it["type"] == JsonPrimitive("binding") } ?: return value
+      val key = (binding["value"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+      val supplied = key?.let { arguments[it] }
+      if (
+        binding.keys != setOf("type", "value") ||
+          supplied == null ||
+          (supplied as? JsonObject)?.get("type") == JsonPrimitive("binding")
+      ) {
+        errors += "$path: missing or invalid argument ${key ?: "binding key"}"
+        return value
+      }
+      return supplied
+    }
+
+    fun node(id: String, arguments: JsonObject): JsonObject? {
+      require(++emittedNodes <= 10_000) { "nodes.$id: expanded document exceeds 10000 nodes" }
+      require(active.size < 128) { "nodes.$id: nesting exceeds 128 levels" }
+      val raw = document.nodes[id] ?: return null // Already checked by validateReferences.
       if (!active.add(id)) {
-        errors += "nodes.$id: cyclic child reference"
+        errors += "nodes.$id: cyclic child or component reference"
         return null
       }
       try {
         val path = "nodes.$id"
-        if (node.component != null) {
-          errors += "$path.component: reusable component lowering is not available"
-          return null
-        }
-        val type =
-          when (node.componentId) {
-            "layout/box" -> "box"
-            "layout/row" -> "row"
-            "layout/column" -> "column"
-            else -> {
-              errors +=
-                "$path.componentId: ${node.componentId} needs a declared Remote JSON lowering recipe"
-              return null
-            }
-          }
-        val allowedProperties =
-          setOf(SHOW_BY_STATE) +
-            when (type) {
-              "row" -> setOf("verticalAlignment", "horizontalSpacingDp")
-              "column" -> setOf("horizontalAlignment", "verticalSpacingDp")
-              else -> emptySet()
-            }
-        node.properties.keys
-          .filter { it !in allowedProperties }
-          .forEach { errors += "$path.properties.$it: property lowering is not available" }
-        node.slots.keys
-          .filter { it != "children" }
-          .forEach { errors += "$path.slots.$it: unsupported slot" }
-        stateSelectionIssue(node, document.stateVariables)?.let {
-          errors += "$path.$SHOW_BY_STATE: $it"
-          return null
-        }
-        val authoredChildren = node.slots["children"].orEmpty()
-        if (authoredChildren.size != authoredChildren.toSet().size)
-          errors += "$path.slots.children: duplicate child references"
-        val children =
-          authoredChildren.mapNotNull { child -> node(child)?.let { child to it } }.toMap()
-        val selection = node.stateSelection()
-        val contents =
-          if (selection == null) children.values.toList() else selection(node, selection, children)
-        val modifiers =
-          node.modifiers
-            .flatMapIndexed { index, value ->
-              modifier(value as? JsonObject, "$path.modifiers[$index]")
-            }
-            .toMutableList()
-        val spacing = if (type == "row") "horizontalSpacingDp" else "verticalSpacingDp"
-        node.properties[spacing]?.let { value ->
-          val literal = value as? JsonObject
+        val node =
+          raw.copy(
+            properties =
+              JsonObject(
+                raw.properties.mapValues { (name, value) ->
+                  resolve(value, arguments, "$path.properties.$name")
+                }
+              )
+          )
+        val placement = node.component
+        if (placement != null) {
           if (
-            literal?.get("type") !in listOf(JsonPrimitive("int"), JsonPrimitive("float")) ||
-              literal?.get("value") == null
+            node.componentId != "design/component-instance" ||
+              node.properties.isNotEmpty() ||
+              node.slots.isNotEmpty()
           )
-            errors += "$path.properties.$spacing: expected a numeric literal"
-          modifiers += buildJsonObject {
-            put(
-              "spacedBy",
-              number((value as? JsonObject)?.get("value"), "$path.properties.$spacing", 0.0) *
-                density,
-            )
-          }
-        }
-        node.eventBindings.forEach { (event, value) ->
-          if (event != "click")
-            errors += "$path.eventBindings.$event: only click actions have a JSON mapping"
-          else {
-            val actions = value as? JsonArray
-            if (actions == null)
-              errors += "$path.eventBindings.$event: expected an ordered action list"
-            else
-              modifiers += buildJsonObject {
-                put(
-                  "onClick",
-                  JsonArray(
-                    actions.mapIndexedNotNull { index, action ->
-                      action(action as? JsonObject, "$path.eventBindings.$event[$index]")
-                    }
-                  ),
-                )
+            errors +=
+              "$path.component: a placement requires design/component-instance with no properties or slots"
+          placement.keys
+            .filter { it !in setOf("componentKey", "arguments") }
+            .forEach { errors += "$path.component.$it: placement field lowering is not available" }
+          val declared = placement["arguments"]
+          if (declared != null && declared !is JsonObject)
+            errors += "$path.component.arguments: expected an argument dictionary"
+          val supplied =
+            JsonObject(
+              (declared as? JsonObject).orEmpty().mapValues { (name, value) ->
+                resolve(value, arguments, "$path.component.arguments.$name")
               }
-          }
-        }
-        return buildJsonObject {
-          put("type", type)
-          put(
-            "horizontalAlignment",
-            alignment(node, "horizontalAlignment", "start", setOf("start", "center", "end")),
-          )
-          put(
-            "verticalAlignment",
-            alignment(
-              node,
-              "verticalAlignment",
-              if (type == "row") "center" else "top",
-              setOf("top", "center", "bottom"),
+            )
+          val root = componentRoot(placement, "$path.component") ?: return null
+          val body = node(root, supplied)
+          return layout(
+            node.copy(
+              componentId = "layout/box",
+              component = null,
+              properties = JsonObject(emptyMap()),
+              slots = emptyMap(),
             ),
+            arguments,
+            listOfNotNull(body),
           )
-          put("modifiers", JsonArray(modifiers))
-          if (contents.isNotEmpty()) put("children", JsonArray(contents))
         }
+        if (node.componentId == "layout/for-each") {
+          node.properties.keys
+            .filter { it !in setOf("data", "verticalSpacingDp") }
+            .forEach { errors += "$path.properties.$it: loop property lowering is not available" }
+          val template = node.slots["template"]?.singleOrNull()
+          if (template == null || node.slots.keys != setOf("template")) {
+            errors += "$path.slots: a loop requires exactly one template child"
+            return null
+          }
+          val data = node.properties["data"] as? JsonObject
+          val rows = data?.get("values") as? JsonArray
+          if (
+            data?.get("type") != JsonPrimitive("list") ||
+              data.keys != setOf("type", "values") ||
+              rows == null
+          ) {
+            errors += "$path.properties.data: expected an authored list of row objects"
+            return null
+          }
+          require(rows.size <= 10_000) {
+            "$path.properties.data: expanded document exceeds 10000 rows"
+          }
+          val children = rows.mapIndexedNotNull { index, row ->
+            val record = row as? JsonObject
+            val fields = record?.get("fields") as? JsonObject
+            if (
+              record?.get("type") != JsonPrimitive("object") ||
+                record.keys != setOf("type", "fields") ||
+                fields == null
+            ) {
+              errors += "$path.properties.data.values[$index]: expected a row object with fields"
+              null
+            } else node(template, fields)
+          }
+          return layout(
+            node.copy(
+              componentId = "layout/column",
+              properties = JsonObject(node.properties - "data"),
+              slots = emptyMap(),
+            ),
+            arguments,
+            children,
+          )
+        }
+        return layout(node, arguments)
       } finally {
         active.remove(id)
+      }
+    }
+
+    fun layout(
+      node: UiBuilderNode,
+      arguments: JsonObject,
+      expandedContents: List<JsonObject>? = null,
+    ): JsonObject? {
+      val path = "nodes.${node.id}"
+      val type =
+        when (node.componentId) {
+          "layout/box" -> "box"
+          "layout/row" -> "row"
+          "layout/column" -> "column"
+          else -> {
+            errors +=
+              "$path.componentId: ${node.componentId} needs a declared Remote JSON lowering recipe"
+            return null
+          }
+        }
+      val allowedProperties =
+        setOf(SHOW_BY_STATE) +
+          when (type) {
+            "row" -> setOf("verticalAlignment", "horizontalSpacingDp")
+            "column" -> setOf("horizontalAlignment", "verticalSpacingDp")
+            else -> emptySet()
+          }
+      node.properties.keys
+        .filter { it !in allowedProperties }
+        .forEach { errors += "$path.properties.$it: property lowering is not available" }
+      node.slots.keys
+        .filter { it != "children" }
+        .forEach { errors += "$path.slots.$it: unsupported slot" }
+      stateSelectionIssue(node, document.stateVariables)?.let {
+        errors += "$path.$SHOW_BY_STATE: $it"
+        return null
+      }
+      val authoredChildren = node.slots["children"].orEmpty()
+      if (authoredChildren.size != authoredChildren.toSet().size)
+        errors += "$path.slots.children: duplicate child references"
+      val children =
+        if (expandedContents != null) emptyMap()
+        else
+          authoredChildren
+            .mapNotNull { child -> node(child, arguments)?.let { child to it } }
+            .toMap()
+      val selection = node.stateSelection()
+      val contents =
+        expandedContents
+          ?: if (selection == null) children.values.toList()
+          else selection(node, selection, children)
+      val modifiers =
+        node.modifiers
+          .flatMapIndexed { index, value ->
+            modifier(value as? JsonObject, "$path.modifiers[$index]")
+          }
+          .toMutableList()
+      val spacing = if (type == "row") "horizontalSpacingDp" else "verticalSpacingDp"
+      node.properties[spacing]?.let { value ->
+        val literal = value as? JsonObject
+        if (
+          literal?.get("type") !in listOf(JsonPrimitive("int"), JsonPrimitive("float")) ||
+            literal?.get("value") == null
+        )
+          errors += "$path.properties.$spacing: expected a numeric literal"
+        modifiers += buildJsonObject {
+          put(
+            "spacedBy",
+            number((value as? JsonObject)?.get("value"), "$path.properties.$spacing", 0.0) *
+              density,
+          )
+        }
+      }
+      node.eventBindings.forEach { (event, value) ->
+        if (event != "click")
+          errors += "$path.eventBindings.$event: only click actions have a JSON mapping"
+        else {
+          val actions = value as? JsonArray
+          if (actions == null)
+            errors += "$path.eventBindings.$event: expected an ordered action list"
+          else
+            modifiers += buildJsonObject {
+              put(
+                "onClick",
+                JsonArray(
+                  actions.mapIndexedNotNull { index, action ->
+                    action(action as? JsonObject, "$path.eventBindings.$event[$index]")
+                  }
+                ),
+              )
+            }
+        }
+      }
+      return buildJsonObject {
+        put("type", type)
+        put(
+          "horizontalAlignment",
+          alignment(node, "horizontalAlignment", "start", setOf("start", "center", "end")),
+        )
+        put(
+          "verticalAlignment",
+          alignment(
+            node,
+            "verticalAlignment",
+            if (type == "row") "center" else "top",
+            setOf("top", "center", "bottom"),
+          ),
+        )
+        put("modifiers", JsonArray(modifiers))
+        if (contents.isNotEmpty()) put("children", JsonArray(contents))
       }
     }
 

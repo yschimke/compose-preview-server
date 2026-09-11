@@ -2352,25 +2352,39 @@ class UiBuilderEditorReducer(
             }
             .distinct()
         val encodedValues =
-          nodes.map { (it.properties[property.name] as? JsonObject)?.get("value") }.distinct()
+          nodes
+            .map {
+              if (control == EditorPropertyControl.Unsupported) it.properties[property.name]
+              else (it.properties[property.name] as? JsonObject)?.get("value")
+            }
+            .distinct()
         val mixed = encodedValues.size > 1
+        val loopRows = node.componentId == "layout/for-each" && property.name == "data"
+        val summary =
+          when {
+            loopRows && encoded?.get("type") == JsonPrimitive("list") ->
+              (encoded["values"] as? JsonArray)?.size?.let {
+                "$it ${if (it == 1) "row" else "rows"}"
+              }
+            else -> null
+          }
         EditorPropertyField(
             nodeCount = nodes.size,
             mixed = mixed,
             boundVariable = boundVariables.singleOrNull(),
             nodeId = node.id,
             name = property.name,
-            label = property.name.humanLabel(),
+            label = if (loopRows) "Rows" else property.name.humanLabel(),
             required = property.required,
             written = nodes.any { property.name in it.properties },
             control = control,
-            value = if (mixed) "" else value?.primitiveOrNull()?.content ?: "",
+            value = if (mixed) "" else summary ?: value?.primitiveOrNull()?.content ?: "",
             choices =
               property.allowedValues.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } +
                 property.editor?.suggestedValues.orEmpty(),
             numberBounds = numberBounds,
             error = state.propertyErrors[EditorPropertyLocation(node.id, property.name)],
-            notes = property.notes,
+            notes = if (loopRows) "Each row fills the same layout template." else property.notes,
           )
           .let(::listOf)
       }

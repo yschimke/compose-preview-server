@@ -178,8 +178,9 @@ existing editor and MCP is still required.
 A separate [repetition feasibility proof](../../docs/design/evidence/ui-builder-repetition-proof/README.md)
 now checks authored rows and a parameterized component through a test-only expansion, this shared
 exporter/compiler and the real player. The result matches the existing editor canvas at both
-densities, including all copies' click regions. Production loop/instance export is still refused;
-the linked evidence distinguishes what is proven from the integration still required.
+densities, including all copies' click regions. The subsequent
+[production integration](../../docs/design/evidence/ui-builder-repetition-export/README.md) now
+exports those authored loops/instances directly and verifies browser and MCP edits and downloads.
 
 `RemoteDocumentJsonExporter` in the shared production `ui-builder-export` module now lowers
 authored layout documents to JSON. Generate the exact fixtures and run them through the shared
@@ -204,7 +205,7 @@ The test explicitly skips when no production fixture directory is supplied.
 The initial mapping covers Box/Row/Column, spacing and cross-axis alignment, basic ordered
 modifiers, non-null integer/Boolean selection and numeric/Boolean state writes. Catalog-specific
 components need declared lowering recipes; typography, assets, scoped child alignment, dynamic
-dimensions, String/nullable selection and reusable instances remain to be mapped. Mutable
+dimensions, String/nullable selection and runtime lists remain to be mapped. Mutable
 String declarations use the explicit state profile below; a compiler probe retains the stock
 parser's equal-initial-text identity limitation.
 

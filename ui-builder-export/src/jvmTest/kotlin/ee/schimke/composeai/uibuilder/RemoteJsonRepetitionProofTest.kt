@@ -5,23 +5,20 @@ import kotlin.test.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
-/** Test-only prototype: prove static expansion before adding it to a production export path. */
+/** Compare production emission with the independently proven test-only expansion. */
 class RemoteJsonRepetitionProofTest {
   @Test
   fun `authored rows and component arguments expand to independently clickable layouts`() {
     val output = File("build/remote-json-repetition").apply { mkdirs() }
     for (density in listOf(1, 2)) {
-      val document = fixture(density)
-      // Keep the current product limitation explicit until the proof is integrated.
-      assertIs<RemoteDocumentJsonExporter.Result.Refused>(
-        RemoteDocumentJsonExporter.export(document)
-      )
+      val document = remoteJsonRepetitionFixture(density)
       val expanded = expand(document)
       val result =
         assertIs<RemoteDocumentJsonExporter.Result.Emitted>(
           RemoteDocumentJsonExporter.export(expanded)
         )
-      assertEquals(result, RemoteDocumentJsonExporter.export(expand(document)))
+      // Production emission must match the independently proven test-only expansion exactly.
+      assertEquals(result, RemoteDocumentJsonExporter.export(document))
       assertEquals(3, expanded.nodes.values.count { it.componentId == "layout/row" })
       assertEquals(
         listOf(0, 8, 16),
@@ -44,7 +41,7 @@ class RemoteJsonRepetitionProofTest {
 
   @Test
   fun `prototype refuses missing arguments and recursion`() {
-    val document = fixture(1)
+    val document = remoteJsonRepetitionFixture(1)
     val row = document.nodes.getValue("row")
     val missing =
       document.copy(
@@ -61,87 +58,6 @@ class RemoteJsonRepetitionProofTest {
     )
     val cyclic = document.copy(components = obj("""{"pair":{"name":"Pair","root":"place"}}"""))
     assertContains(assertFailsWith<IllegalArgumentException> { expand(cyclic) }.message!!, "cycle")
-  }
-
-  private fun fixture(density: Int): UiBuilderDocument {
-    fun cell(id: String, color: String, value: Int) =
-      UiBuilderNode(
-        id,
-        "layout/box",
-        modifiers =
-          Json.parseToJsonElement(
-              """[
-        {"type":"size","widthDp":16,"heightDp":16},
-        {"type":"background","color":{"type":"color","value":"$color"}}
-      ]"""
-            )
-            .jsonArray,
-        eventBindings = obj("""{"click":[{"type":"set","variable":"page","value":$value}]}"""),
-      )
-    val base = remoteJsonSelectionFixture(density = density)
-    return base.copy(
-      id = "repetition-proof",
-      title = "Repeated component proof",
-      environment = obj("""{"widthDp":100,"heightDp":120,"density":$density}"""),
-      roots = listOf("screen"),
-      nodes =
-        mapOf(
-          "screen" to
-            UiBuilderNode(
-              "screen",
-              "layout/column",
-              slots = mapOf("children" to listOf("loop", "indicator")),
-            ),
-          "loop" to
-            UiBuilderNode(
-              "loop",
-              "layout/for-each",
-              properties =
-                obj(
-                  """{"verticalSpacingDp":{"type":"float","value":4},"data":{"type":"list","values":[
-            {"type":"object","fields":{"gap":{"type":"float","value":0}}},
-            {"type":"object","fields":{"gap":{"type":"float","value":8}}},
-            {"type":"object","fields":{"gap":{"type":"float","value":16}}}
-          ]}}"""
-                ),
-              slots = mapOf("template" to listOf("place")),
-            ),
-          "place" to
-            UiBuilderNode(
-              "place",
-              "design/component-instance",
-              modifiers =
-                Json.parseToJsonElement(
-                    """[{"type":"padding","startDp":4,"topDp":2,"endDp":4,"bottomDp":2}]"""
-                  )
-                  .jsonArray,
-              component =
-                obj(
-                  """{"componentKey":"pair","arguments":{"spacing":{"type":"binding","value":"gap"}}}"""
-                ),
-            ),
-          "row" to
-            UiBuilderNode(
-              "row",
-              "layout/row",
-              properties = obj("""{"horizontalSpacingDp":{"type":"binding","value":"spacing"}}"""),
-              slots = mapOf("children" to listOf("red", "green")),
-            ),
-          "red" to cell("red", "#FFFF0000", 10),
-          "green" to cell("green", "#FF00FF00", 20),
-          "indicator" to
-            base.nodes
-              .getValue("switch")
-              .copy(
-                id = "indicator",
-                modifiers =
-                  Json.parseToJsonElement("""[{"type":"size","widthDp":60,"heightDp":20}]""")
-                    .jsonArray,
-                eventBindings = JsonObject(emptyMap()),
-              ),
-        ) + base.nodes.filterKeys { it != "switch" },
-      components = obj("""{"pair":{"name":"Pair","root":"row"}}"""),
-    )
   }
 
   /** A bounded, deliberately test-only elaboration; no change to the authored document or API. */

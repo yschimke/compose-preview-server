@@ -5,6 +5,8 @@ package ee.schimke.composeai.uibuilder.service
 import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
 import ee.schimke.composeai.uibuilder.STATE_SELECTION_CONTAINER
+import ee.schimke.composeai.uibuilder.inspectUiBuilderArgumentBindings
+import ee.schimke.composeai.uibuilder.propertyMatches
 import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
 import ee.schimke.composeai.uibuilder.protocol.AssetKeyValueV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogAssetSourceV1
@@ -33,6 +35,7 @@ import ee.schimke.composeai.uibuilder.protocol.UploadedAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
 import ee.schimke.composeai.uibuilder.stateBindingMatchesCatalog
 import ee.schimke.composeai.uibuilder.stateSelectionIssue
+import ee.schimke.composeai.uibuilder.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.toUiBuilderNode
 import java.io.Closeable
 import java.nio.file.Files
@@ -346,6 +349,10 @@ public class CurrentM3UiBuilderCatalogExecutor(
     val catalogComponents = components.getValue(systemId)
     val encodedDocument = json.encodeToJsonElement(document).jsonObject
     val encodedNodes = encodedDocument.getValue("nodes").jsonObject
+    val argumentBindings = inspectUiBuilderArgumentBindings(document.toUiBuilderDocument())
+    argumentBindings.issues.firstOrNull()?.let {
+      return issue("INVALID_ARGUMENT_BINDING", it.message, it.nodeId, it.field)
+    }
     for ((nodeId, nodeElement) in encodedNodes.entries.sortedBy { it.key }) {
       val node = nodeElement.jsonObject
       val componentId = node.requiredString("componentId")
@@ -426,14 +433,30 @@ public class CurrentM3UiBuilderCatalogExecutor(
               name,
             )
         val unwrapped = value.unwrapTypedValue()
+        val argumentMatches =
+          argumentBindings.propertyMatches(nodeId, name, value) { supplied ->
+            val stateMatches =
+              stateBindingMatchesCatalog(
+                supplied,
+                capability.jsonType,
+                capability.allowedValues,
+                encodedDocument.objectOrEmpty("stateVariables"),
+                name,
+              )
+            stateMatches
+              ?: (capability.jsonType.accepts(supplied.unwrapTypedValue()) &&
+                (capability.allowedValues.isEmpty() ||
+                  supplied.unwrapTypedValue() in capability.allowedValues))
+          }
         val bindingMatches =
-          stateBindingMatchesCatalog(
-            value,
-            capability.jsonType,
-            capability.allowedValues,
-            encodedDocument.objectOrEmpty("stateVariables"),
-            name,
-          )
+          argumentMatches
+            ?: stateBindingMatchesCatalog(
+              value,
+              capability.jsonType,
+              capability.allowedValues,
+              encodedDocument.objectOrEmpty("stateVariables"),
+              name,
+            )
         if (
           bindingMatches == false ||
             (bindingMatches == null && !capability.jsonType.accepts(unwrapped))
@@ -1257,6 +1280,7 @@ private fun remoteM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
       "layout/box",
       "layout/column",
       "layout/row",
+      "layout/for-each",
       "m3/surface",
       "m3/text",
       "remote-compose/document",

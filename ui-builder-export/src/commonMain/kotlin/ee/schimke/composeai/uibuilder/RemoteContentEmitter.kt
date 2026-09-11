@@ -75,6 +75,7 @@ public val REMOTE_CONTENT_COMPONENT_IDS: Set<String> =
     "layout/box",
     "layout/column",
     "layout/row",
+    "layout/for-each",
     "m3/surface",
     "m3/text",
     "remote-m3/lottie",
@@ -343,6 +344,11 @@ internal class RemoteContentEmitter(
       "layout/box" -> container(node, depth, "RemoteBox", boxArguments(node, pad))
       "layout/column" -> container(node, depth, "RemoteColumn", columnArguments(node, pad))
       "layout/row" -> container(node, depth, "RemoteRow", rowArguments(node, pad))
+      "layout/for-each" ->
+        emptyList<String>().also {
+          refusals +=
+            "`${node.id}` repeats authored rows: JSON and RC export support this layout; Remote Kotlin loop generation is not yet available"
+        }
       "remote-m3/lottie" -> lottie(node, pad)?.let { (pad + it).split("\n") } ?: emptyList()
       "asset/image" -> image(node, pad)?.let { (pad + it).split("\n") } ?: emptyList()
       // Authored refusals, not the catch-all below. `m3/surface` and `shape/linear-gradient` are

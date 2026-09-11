@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
 
 class RemotePngExportProofTest {
+  private val repetition = System.getenv("VERIFY_REMOTE_REPETITION_BROWSER") == "true"
   @TempDir lateinit var work: Path
 
   @Test
@@ -34,7 +35,9 @@ class RemotePngExportProofTest {
             )
           )
           .let {
-            if (System.getenv("VERIFY_REMOTE_FLOAT_BROWSER") == "true") decimalSelection(it) else it
+            if (repetition) repetitionDocument(it)
+            else if (System.getenv("VERIFY_REMOTE_FLOAT_BROWSER") == "true") decimalSelection(it)
+            else it
           }
       ServeUiBuilderRenderPort.open(work.resolve("renderer")).use { renderer ->
         for (density in listOf(1.0, 2.0)) {
@@ -68,12 +71,23 @@ class RemotePngExportProofTest {
           )
           assertTrue(artifact.diagnostics.any { it.code == "REMOTE_DOCUMENT_PNG" })
           val png = Base64.getDecoder().decode(artifact.content)
-          val size = (360 * density).toInt()
+          val size = (document.environment.widthDp * density).toInt()
           val output = Path.of("build/remote-png-proof").also(Files::createDirectories)
           Files.write(output.resolve("density-${density.toInt()}.png"), png)
           val frame = assertNotNull(ImageIO.read(png.inputStream()))
           assertEquals(size, frame.width)
-          assertEquals(size, frame.height)
+          assertEquals((document.environment.heightDp * density).toInt(), frame.height)
+          if (repetition) {
+            for (row in 0..2) {
+              val y = ((10 + row * 24) * density).toInt()
+              assertEquals(0xff0000, frame.getRGB((12 * density).toInt(), y) and 0xffffff)
+              assertEquals(
+                0x00ff00,
+                frame.getRGB(((28 + row * 8) * density).toInt(), y) and 0xffffff,
+              )
+            }
+            continue
+          }
           val padding = (24 * density).toInt()
           assertEquals(0x008577, frame.getRGB(padding, size / 2) and 0xffffff)
           assertEquals(0x008577, frame.getRGB(size / 2, size - padding - 1) and 0xffffff)
@@ -86,6 +100,38 @@ class RemotePngExportProofTest {
       if (old == null) System.clearProperty("composeai.cli.appHome")
       else System.setProperty("composeai.cli.appHome", old)
     }
+  }
+
+  private fun repetitionDocument(source: DesignDocumentV1): DesignDocumentV1 {
+    val fixture =
+      Json.parseToJsonElement(
+          Files.readString(
+            Path.of("../docs/design/evidence/ui-builder-repetition-proof/rows-1.document.json")
+          )
+        )
+        .jsonObject
+    val base =
+      Json.encodeToJsonElement(
+          source.copy(
+            title = "Repeated component export",
+            environment = source.environment.copy(widthDp = 100, heightDp = 120),
+            stateVariables =
+              source.stateVariables.mapValues { (_, state) ->
+                state.copy(initialValue = JsonPrimitive(10))
+              },
+          )
+        )
+        .jsonObject
+    return Json.decodeFromJsonElement(
+      JsonObject(
+        base +
+          mapOf(
+            "nodes" to fixture.getValue("nodes"),
+            "roots" to fixture.getValue("roots"),
+            "components" to fixture.getValue("components"),
+          )
+      )
+    )
   }
 
   private fun decimalSelection(source: DesignDocumentV1): DesignDocumentV1 {
@@ -303,7 +349,8 @@ class RemotePngExportProofTest {
         val process =
           ProcessBuilder(
               "node",
-              "../preview-harness/verify-remote-png-export.mjs",
+              if (repetition) "../preview-harness/verify-remote-repetition-export.mjs"
+              else "../preview-harness/verify-remote-png-export.mjs",
               "http://127.0.0.1:${server.port}",
               output.toAbsolutePath().toString(),
             )
