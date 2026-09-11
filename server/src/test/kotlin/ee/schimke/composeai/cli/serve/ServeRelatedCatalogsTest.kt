@@ -41,15 +41,45 @@ class ServeRelatedCatalogsTest {
   }
 
   @Test
-  fun `drops a link back to this catalog, case-insensitively`() {
+  fun `drops a link back to this catalog`() {
     // A spec is written against a system NAME, so the export cannot always tell it is describing
     // the catalog it will be published as. Self-links are a producer slip, not a reader's problem.
     val out =
       ServeRelatedCatalogs.declaredFor(
-        declared("wear-m3-catalog" to null, "WEAR-M3-CATALOG" to null, "wear-m3-samples" to null),
-        selfSystem = "wear-m3-catalog",
+        declared("kit" to null, "samples" to null),
+        selfSystem = "kit",
       )
-    assertEquals(listOf("wear-m3-samples"), out.map { it.system })
+    assertEquals(listOf("samples"), out.map { it.system })
+  }
+
+  @Test
+  fun `a miscased system is a different catalog, not a self-link`() {
+    // A catalog id is a case-sensitive key everywhere else — the session map, catalogs.json's
+    // duplicate check, the URL segment — so `Kit` and `kit` are two catalogs and folding them here
+    // would drop a real link. A merely miscased self-link is not registered under that spelling, so
+    // resolve drops it anyway and nothing is owed to it.
+    val out = ServeRelatedCatalogs.declaredFor(declared("KIT" to null), selfSystem = "kit")
+    assertEquals(listOf("KIT"), out.map { it.system })
+  }
+
+  @Test
+  fun `resolve collapses a short form and a restated one naming the same component`() {
+    // The case declaredFor cannot see: a component inherits `("samples")` from its @CatalogGroup
+    // and restates it as `("samples", "Button")`. Two declarations, one destination, and only the
+    // fallback makes that visible. First wins, as it does in declaredFor.
+    val links =
+      ServeRelatedCatalogs.resolve(
+        listOf(
+          ServeRelatedCatalogs.Declared("samples", label = "call sites"),
+          ServeRelatedCatalogs.Declared("samples", "Button", "call sites, again"),
+        ),
+        componentId = "Button",
+        selfSystem = "kit",
+        registered = setOf("samples"),
+        isLive = { true },
+      )
+    assertEquals(1, links.size)
+    assertEquals("call sites", links.single().label)
   }
 
   @Test

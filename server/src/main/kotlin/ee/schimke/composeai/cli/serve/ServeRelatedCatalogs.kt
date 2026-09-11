@@ -83,9 +83,18 @@ object ServeRelatedCatalogs {
    *
    * Dropped: a blank system (a producer slip, and there is nothing to point at), and a link back to
    * [selfSystem] (a catalog is not related to itself; the export cannot always tell, because a spec
-   * is written against a system name rather than the catalog it will be published as). Deduplicated
-   * on system + component, first declaration winning, so a component that inherits a link from a
-   * `@CatalogGroup` and restates it does not show it twice.
+   * is written against a system name rather than the catalog it will be published as). The
+   * self-link comparison is EXACT, not case-insensitive: a catalog id is a case-sensitive map key
+   * everywhere else it is used — the registry's session map, `catalogs.json`'s duplicate check, the
+   * URL path segment — so `Kit` and `kit` are two catalogs here too, and folding them would drop a
+   * real link between them. A merely miscased self-link costs nothing: it is not registered under
+   * that spelling, so [resolve] drops it anyway.
+   *
+   * Deduplicated on system + component, first declaration winning, so a component that inherits a
+   * link from a `@CatalogGroup` and restates it does not show it twice. Only the pair as DECLARED
+   * can be deduplicated here, because the short `"<system>"` form does not name its component until
+   * [resolve] fills one in — a mixed `("samples")` + `("samples", "Button")` pair is collapsed
+   * there instead.
    *
    * NOT dropped: a link to a system this box does not serve. That is [resolve]'s call, because it
    * depends on what is registered right now and this function has to be stable across a catalog
@@ -95,7 +104,7 @@ object ServeRelatedCatalogs {
     val seen = mutableSetOf<Pair<String, String?>>()
     return entries.mapNotNull { entry ->
       val system = entry.system.trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
-      if (selfSystem != null && system.equals(selfSystem, ignoreCase = true)) return@mapNotNull null
+      if (system == selfSystem) return@mapNotNull null
       val componentId = entry.componentId?.trim()?.takeIf { it.isNotEmpty() }
       if (!seen.add(system to componentId)) return@mapNotNull null
       Declared(
@@ -120,6 +129,13 @@ object ServeRelatedCatalogs {
    * considered and rejected: a catalog declares `related` from its own source tree, so it can name
    * a system this particular box has never heard of — a fork serving one catalog would otherwise
    * show a column of links to nothing, and be right to think the server was broken.
+   *
+   * Deduplicated again, on the RESOLVED pair. [declaredFor] can only see what was declared, and the
+   * short `"<system>"` form does not name a component until the fallback above fills one in — so a
+   * component that inherits `("samples")` from its `@CatalogGroup` and restates it as `("samples",
+   * "Button")` arrives here as two entries naming one destination. First wins, as it does there,
+   * which keeps the inherited link's position and the restated one's label out of a tie-break
+   * nobody would be able to predict.
    */
   fun resolve(
     entries: List<Declared>,
@@ -130,6 +146,7 @@ object ServeRelatedCatalogs {
   ): List<Link> =
     declaredFor(entries, selfSystem)
       .filter { it.system in registered }
+      .distinctBy { it.system to (it.componentId ?: componentId) }
       .map { declared ->
         Link(
           system = declared.system,
