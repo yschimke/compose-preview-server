@@ -169,6 +169,8 @@ internal class RemoteContentEmitter(
   private var usesColumn = false
   private var usesRow = false
   private var usesBox = false
+  private var usesStateLayout = false
+  private var usesValueChange = false
   private var usesArrangement = false
   private var usesAlignment = false
   private var usesDp = false
@@ -334,10 +336,7 @@ internal class RemoteContentEmitter(
     node.component?.let { placement ->
       return placement(node, placement, depth)
     }
-    if (SHOW_BY_STATE in node.properties) {
-      refusals += "node `${node.id}`.$SHOW_BY_STATE requires Remote StateLayout lowering"
-      return emptyList()
-    }
+    if (SHOW_BY_STATE in node.properties) return stateSelection(node, depth)
     val pad = INDENT.repeat(depth)
     return when (node.componentId) {
       "m3/text" -> (pad + text(node, pad)).split("\n")
@@ -565,7 +564,7 @@ internal class RemoteContentEmitter(
       val expression =
         when {
           parameter.name == MODIFIER_PARAMETER -> node.modifierExpression(pad)
-          authored != null -> remoteValue(parameter, authored)
+          authored != null -> remoteValue(node, parameter, authored)
           parameter.hasDefault -> null
           parameter.typeFqn == ACTION_FQN -> actionExpression(node, parameter)
           // Nullable and no default: optional to the design, mandatory to Kotlin. Omitting it
@@ -680,7 +679,7 @@ internal class RemoteContentEmitter(
       refusals += "`${node.id}` writes `$variable` on `$event`, which the design does not declare"
       return null
     }
-    val target = variable.remoteIdentifier()
+    val target = remoteState(variable, valueType, "`${node.id}`.$event") ?: return null
     val written =
       when (kind) {
         "set",
@@ -702,15 +701,144 @@ internal class RemoteContentEmitter(
           "cannot express as a Remote value"
       return null
     }
-    val factory = stateFactory(valueType)
-    if (factory == null) {
-      refusals += "`$variable` is declared `$valueType`, which has no Remote mutable"
+    usesValueChange = true
+    return "valueChange($target, $written)"
+  }
+
+  /** Reads and writes must name the same mutable, even when a selector has no local action. */
+  private fun remoteState(variable: String, expectedType: String, where: String): String? {
+    val declaration = document.stateVariables[variable] as? JsonObject
+    val initial = declaration?.get("initialValue") as? JsonPrimitive
+    val kind =
+      declaration?.plainString("valueType")
+        ?: initial?.let {
+          when {
+            it.isString -> "string"
+            it.booleanOrNull != null -> "bool"
+            it.intOrNull != null -> "int"
+            else -> "float"
+          }
+        }
+    val valid =
+      initial != null &&
+        initial !is kotlinx.serialization.json.JsonNull &&
+        when (kind) {
+          "string" -> initial.isString
+          "bool" -> !initial.isString && initial.booleanOrNull != null
+          "int" -> !initial.isString && initial.intOrNull != null
+          "float" -> !initial.isString && initial.floatOrNull?.isFinite() == true
+          else -> false
+        }
+    if (
+      !valid ||
+        kind != expectedType ||
+        (declaration?.get("nullable") as? JsonPrimitive)?.booleanOrNull == true
+    ) {
+      refusals +=
+        "$where requires declared, non-null $expectedType state `$variable` with a representable initial value"
       return null
     }
-    stateWrites.getOrPut(variable) {
-      "val $target = $factory(${remoteInitial(valueType, declared["initialValue"])})"
+    val target = variable.remoteIdentifier()
+    if (
+      target in KOTLIN_HARD_KEYWORDS ||
+        document.stateVariables.keys.any { it != variable && it.remoteIdentifier() == target }
+    ) {
+      refusals += "$where state `$variable` conflicts with a generated Kotlin identifier"
+      return null
     }
-    return "valueChange($target, $written)"
+    val factory = stateFactory(expectedType) ?: return null
+    stateWrites.getOrPut(variable) {
+      "val $target = $factory(${remoteInitial(expectedType, initial)})"
+    }
+    return target
+  }
+
+  private val selectionNames =
+    document.stateVariables.keys.map { it.remoteIdentifier() }.toMutableSet()
+
+  private fun selectionName(): String {
+    var index = 0
+    while (!selectionNames.add("selectionIndex$index")) index++
+    return "selectionIndex$index"
+  }
+
+  /**
+   * StateLayout indexes physical children, not authored case values. Retain the Box: expressions
+   * directly under the implicit document root do not update in the alpha18 Android player. Each
+   * selection is materialized separately to stay within IntegerExpression's operand mask.
+   */
+  private fun stateSelection(node: UiBuilderNode, depth: Int): List<String> {
+    stateSelectionIssue(node, document.stateVariables)?.let {
+      refusals += "`${node.id}`.$SHOW_BY_STATE: $it"
+      return emptyList()
+    }
+    val selection = requireNotNull(node.stateSelection())
+    val variable = selection.selector.plainString("variable")
+    val declaration = variable?.let { document.stateVariables[it] as? JsonObject }
+    val kind =
+      if (variable != null)
+        declaration?.plainString("valueType")
+          ?: (declaration?.get("initialValue") as? JsonPrimitive)?.let {
+            when {
+              it.isString -> "string"
+              it.booleanOrNull != null -> "bool"
+              it.intOrNull != null -> "int"
+              else -> "float"
+            }
+          }
+      else selection.selector.plainString("type")
+    if (kind !in setOf("bool", "int", "float")) {
+      refusals +=
+        "`${node.id}`.$SHOW_BY_STATE: this Remote Compose target has no String equality operation; use a number or flag selector"
+      return emptyList()
+    }
+    val subject =
+      if (variable != null) remoteState(variable, kind!!, "`${node.id}`.$SHOW_BY_STATE")
+      else remoteLiteral(kind!!, selection.selector["value"])
+    if (subject == null) return emptyList()
+    usesRemoteInt = true
+    usesStateLayout = true
+    usesBox = true
+    val pad = INDENT.repeat(depth)
+    val clean = node.copy(properties = JsonObject(node.properties - SHOW_BY_STATE))
+    val arguments = boxArguments(clean, pad)
+    val head = if (arguments.isEmpty()) "RemoteBox {" else call("RemoteBox", arguments, pad) + " {"
+    val lines = (pad + head).split("\n").toMutableList()
+    var ordinal = "${selection.cases.size}.ri"
+    selection.cases.entries.toList().withIndex().reversed().forEach { (index, entry) ->
+      val literal = requireNotNull(remoteLiteral(kind, entry.value))
+      // alpha18 equality takes abs(a - b), which overflows for Int.MIN_VALUE. Compare
+      // each 16-bit half instead; their differences cannot overflow a signed Int.
+      val match =
+        if (kind == "int") {
+          val value = entry.value.intOrNull!!
+          val low = requireNotNull(remoteLiteral("int", JsonPrimitive(value and 65535)))
+          val high = requireNotNull(remoteLiteral("int", JsonPrimitive(value shr 16)))
+          "($subject and 65535.ri).isEqualTo($low).and(($subject shr 16.ri).isEqualTo($high))"
+        } else "$subject.isEqualTo($literal)"
+      val local = selectionName()
+      lines += "$pad${INDENT}val $local ="
+      val expressionPad = pad + INDENT.repeat(2)
+      lines += (expressionPad + match.replace(".and(", "\n$expressionPad    .and(")).split("\n")
+      lines += "$expressionPad    .select($index.ri, $ordinal).createReference()"
+      ordinal = local
+    }
+    val branch = selectionName()
+    val positions = (0..selection.cases.size).joinToString(", ")
+    lines += "$pad${INDENT}RemoteStateLayout($ordinal, $positions) { $branch ->"
+    lines += "$pad${INDENT.repeat(2)}when ($branch) {"
+    val enclosing = scope
+    scope = "RemoteBox"
+    (selection.cases.keys.toList() + selection.fallback).forEachIndexed { index, id ->
+      lines += "$pad${INDENT.repeat(3)}$index -> RemoteBox {"
+      if (id != null) lines += emit(id, depth + 4)
+      lines += "$pad${INDENT.repeat(3)}}"
+    }
+    scope = enclosing
+    lines += "$pad${INDENT.repeat(2)}}"
+    lines += "$pad$INDENT}"
+    lines += "$pad}"
+    return lines
   }
 
   private fun stateFactory(valueType: String): String? =
@@ -735,7 +863,10 @@ internal class RemoteContentEmitter(
 
   /** A design's action value as a Remote value of the variable's declared type. */
   private fun remoteLiteral(valueType: String, value: JsonElement?): String? {
-    val primitive = value as? JsonPrimitive ?: return null
+    val primitive =
+      (value as? JsonPrimitive)?.takeUnless { it is kotlinx.serialization.json.JsonNull }
+        ?: return null
+    if (valueType != "string" && primitive.isString) return null
     return when (valueType) {
       "bool" ->
         primitive.booleanOrNull?.let {
@@ -745,18 +876,23 @@ internal class RemoteContentEmitter(
       "int" ->
         primitive.intOrNull?.let {
           usesRemoteInt = true
-          "$it.ri"
+          if (it < 0) "($it).ri" else "$it.ri"
         }
       "float" ->
-        primitive.floatOrNull?.let {
-          usesRemoteFloat = true
-          "${it}f.rf"
-        }
+        primitive.floatOrNull
+          ?.takeIf { it.isFinite() }
+          ?.let {
+            usesRemoteFloat = true
+            "${it}f.rf"
+          }
       "string" ->
-        primitive.contentOrNull?.let {
-          usesRemoteString = true
-          "\"${it.escaped()}\".rs"
-        }
+        primitive
+          .takeIf { it.isString }
+          ?.contentOrNull
+          ?.let {
+            usesRemoteString = true
+            "\"${it.escaped()}\".rs"
+          }
       else -> null
     }
   }
@@ -792,8 +928,32 @@ internal class RemoteContentEmitter(
    * prints a simple name, so `com.example.RemoteString` and the real one read identically, and a
    * generator that answers off the spelling writes source that does not compile.
    */
-  private fun remoteValue(parameter: TargetParameter, value: JsonElement): String? =
-    when (parameter.typeFqn) {
+  private fun remoteValue(
+    node: UiBuilderNode,
+    parameter: TargetParameter,
+    value: JsonElement,
+  ): String? {
+    if ((value as? JsonObject)?.plainString("type") == "state") {
+      val kind =
+        when (parameter.typeFqn) {
+          REMOTE_STRING_FQN -> "string"
+          REMOTE_BOOLEAN_FQN -> "bool"
+          REMOTE_FLOAT_FQN -> "float"
+          "androidx.compose.remote.creation.compose.state.RemoteInt" -> "int"
+          else -> null
+        }
+      if (kind == null) {
+        refusals +=
+          "`${node.id}`.${parameter.name} cannot bind Remote scalar state to ${parameter.typeFqn}"
+        return null
+      }
+      return remoteState(
+        value.plainString("variable").orEmpty(),
+        kind,
+        "`${node.id}`.${parameter.name}",
+      )
+    }
+    return when (parameter.typeFqn) {
       REMOTE_STRING_FQN ->
         value.stringOrNull()?.let {
           usesRemoteString = true
@@ -823,6 +983,7 @@ internal class RemoteContentEmitter(
       "kotlin.Float" -> value.numberOrNull()?.let { "${it}f" }
       else -> null
     }
+  }
 
   private fun container(
     node: UiBuilderNode,
@@ -1030,8 +1191,13 @@ internal class RemoteContentEmitter(
 
   private fun text(node: UiBuilderNode, pad: String = ""): String {
     usesMaterialText = true
-    val arguments =
-      mutableListOf("text = \"${node.properties["text"]?.stringOrNull().orEmpty().escaped()}\".rs")
+    val authored = node.properties["text"]
+    val expression =
+      if ((authored as? JsonObject)?.plainString("type") == "state")
+        remoteState(authored.plainString("variable").orEmpty(), "string", "`${node.id}`.text")
+          ?: "\"\".rs"
+      else "\"${authored?.stringOrNull().orEmpty().escaped()}\".rs"
+    val arguments = mutableListOf("text = $expression")
     node.modifierExpression(pad)?.let { arguments += "modifier = $it" }
     node.properties["color"]
       ?.stringOrNull()
@@ -1451,6 +1617,8 @@ internal class RemoteContentEmitter(
     val imports = mutableSetOf<String>()
     if (widget is WidgetSourceShape.Exported) imports += "android.content.Context"
     if (usesBox) imports += "androidx.compose.remote.creation.compose.layout.RemoteBox"
+    if (usesStateLayout)
+      imports += "androidx.compose.remote.creation.compose.layout.RemoteStateLayout"
     if (usesColumn) imports += "androidx.compose.remote.creation.compose.layout.RemoteColumn"
     imports += "androidx.compose.remote.creation.compose.layout.RemoteComposable"
     if (usesCustomComponent) {
@@ -1467,7 +1635,7 @@ internal class RemoteContentEmitter(
       imports += "androidx.compose.remote.creation.compose.action.lambdaAction"
     }
     if (stateWrites.isNotEmpty()) {
-      imports += "androidx.compose.remote.creation.compose.action.valueChange"
+      if (usesValueChange) imports += "androidx.compose.remote.creation.compose.action.valueChange"
       stateWrites.values.forEach { declaration ->
         val factory = declaration.substringAfter("= ").substringBefore('(')
         imports += "androidx.compose.remote.creation.compose.state.$factory"

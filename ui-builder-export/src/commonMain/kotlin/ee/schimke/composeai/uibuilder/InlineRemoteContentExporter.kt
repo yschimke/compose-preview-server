@@ -125,6 +125,7 @@ public object InlineRemoteContentExporter {
           appendLine(
             "fun $name(${emitter.imageParameters.joinToString { "${it.identifier}: RemoteImageBitmap" }}) {"
           )
+          emitter.stateLocals().forEach { appendLine("$INDENT$it") }
           if (emitter.usesTheme) {
             appendLine("${INDENT}RemoteMaterialTheme {")
             body.forEach(::appendLine)

@@ -84,7 +84,8 @@ The design projection emits the shared generator's structural selection inside t
 Until the upstream generator is released, opt in to locally staged `screen-model` and
 `preview-discovery` artifacts. The released generator floor explicitly refuses the unsupported
 selection shape; it cannot silently turn selection into simultaneous children. Remote StateLayout
-lowering remains required, and Remote Kotlin export currently refuses this property explicitly.
+lowering now supports non-null integer, decimal and Boolean selectors, including an empty branch
+when no fallback is authored. String and nullable selectors still require target support.
 This is an implementation chunk, not completion of the Remote Compose scope.
 
 `StateSelectionInspectorTest` operates the actual inspector, changes the bound declaration, and
@@ -105,12 +106,38 @@ with the local generator override. The existing Wasm target compiles, runtime AB
 passes, and golden regeneration adds only the Box property to the two synthesized catalogs.
 
 
+## Remote StateLayout export
+
+The production Remote emitter retains the authored Box and its modifiers, maps case values to
+physical StateLayout child indexes, and records a fallback branch even when it must be empty.
+Selectors, scalar property reads and action writes share one mutable declaration. Inline Remote
+content now emits those declarations as well as the component body.
+
+The [standalone Android proof](../../experiments/remote-state-selection/README.md) compiles exact
+production exports against AndroidX alpha18, captures real `.rc` bytes, and exercises state changes
+in the native Android player. Its seven scenarios cover integers, booleans, decimals (including adjacent Float values), an empty
+fallback, 13 cases, and signed integer limits. This caught the player's integer equality overflow;
+the emitter compares two 16-bit halves so the generated condition retains exact Int semantics.
+Expressions are materialized per case to bound operand-mask size. Keeping expressions inside the
+authored Box also ensures they update during the player's ordinary paint path.
+
+The proof uses host overrides, not synthetic clicks. Transition appearance and inactive-branch
+retention are not asserted here. This adds Remote Kotlin lowering to the existing editor/MCP
+selection shape; production direct JSON and binary export still require the work below.
+
+Verification: seven real-player scenarios, 39 shared-export tests, 931 existing builder tests,
+189 runtime tests, and 15 targeted server/MCP tests pass. The local generator manifest also
+passes the export/runtime/server checks after the rebase. Wasm compilation passes. Golden
+regeneration changes only the selection capability notes in the three catalog fixtures.
+The preview plugin now registers its desktop tasks after evaluation; a separate build fix preserves
+the production-only preview filter, with a test inspecting the actual packaged `previews.json`.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
   callbacks, preserving the same meaning in the code pane, server preview and export.
-- Implement state selection with named cases, normal modifiers and state bindings; lower it to
-  Remote StateLayout and Compose `when`. Transitions and inactive-branch retention can follow.
+- Extend Remote state selection to String and nullable selectors without changing authored
+  semantics. Transitions and inactive-branch retention can follow.
 - Bring the proven direct JSON assembly and real player path into production preview, JSON and
   `.rc` exports, with revision and target-profile checks.
 - Complete loops, reusable component parameters/callbacks and per-instance addressing through all
