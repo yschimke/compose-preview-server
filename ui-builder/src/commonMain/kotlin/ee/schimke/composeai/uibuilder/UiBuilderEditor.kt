@@ -1254,9 +1254,17 @@ fun UiBuilderEditor(
                     dispatch(UiBuilderEditorEvent.CommitProperty(it, name, value))
                   }
                 },
-                onCommitModifier = { type, field, value ->
+                onCommitModifier = { field, value ->
                   state.selectedNodeId?.let {
-                    dispatch(UiBuilderEditorEvent.SetModifierValue(it, type, field, value))
+                    dispatch(
+                      UiBuilderEditorEvent.SetModifierValue(
+                        it,
+                        field.type,
+                        field.field,
+                        value,
+                        field.index,
+                      )
+                    )
                   }
                 },
                 onTextInputFocusChanged = { textInputFocused = it },
@@ -1547,6 +1555,8 @@ fun UiBuilderEditor(
       state = state,
       onClose = { inspectorOpen = false },
       fields = propertyFields,
+      modifierFields = reducer.modifierFields(state),
+      modifierToggles = reducer.modifierToggles(state),
       stateVariables = reducer.stateVariableNames(state),
       comparisonBindingProperties = comparisonBindingProperties,
       bindableProperties = bindableProperties,
@@ -6113,7 +6123,7 @@ private fun SelectionHoverEditor(
   focusTarget: String?,
   onFocusHandled: () -> Unit,
   onCommitProperty: (String, String) -> Unit,
-  onCommitModifier: (String, String, String) -> Unit,
+  onCommitModifier: (EditorModifierField, String) -> Unit,
   onTextInputFocusChanged: (Boolean) -> Unit,
 ) {
   Surface(
@@ -6157,7 +6167,7 @@ private fun SelectionHoverEditor(
             onFocusHandled = onFocusHandled,
             onTextInputFocusChanged = onTextInputFocusChanged,
           ) {
-            onCommitModifier(field.type, field.field, it)
+            onCommitModifier(field, it)
           }
         }
         if (fields.isEmpty() && modifierFields.isEmpty()) {
@@ -6333,6 +6343,8 @@ private fun PropertyInspector(
   state: UiBuilderEditorState,
   onClose: (() -> Unit)?,
   fields: List<EditorPropertyField>,
+  modifierFields: List<EditorModifierField>,
+  modifierToggles: List<EditorModifierToggle>,
   stateVariables: List<String>,
   comparisonBindingProperties: Set<String>,
   bindableProperties: Set<String>,
@@ -6397,6 +6409,8 @@ private fun PropertyInspector(
         state = state,
         node = node,
         fields = fields,
+        modifierFields = modifierFields,
+        modifierToggles = modifierToggles,
         stateVariables = stateVariables,
         comparisonBindingProperties = comparisonBindingProperties,
         bindableProperties = bindableProperties,
@@ -6434,6 +6448,8 @@ private fun InspectorBody(
   state: UiBuilderEditorState,
   node: UiBuilderNode?,
   fields: List<EditorPropertyField>,
+  modifierFields: List<EditorModifierField>,
+  modifierToggles: List<EditorModifierToggle>,
   stateVariables: List<String>,
   comparisonBindingProperties: Set<String>,
   bindableProperties: Set<String>,
@@ -6712,25 +6728,78 @@ private fun InspectorBody(
       if (node.componentId in COMPOSE_EMITTED_CLICK_COMPONENTS || node.eventBindings.isNotEmpty()) {
         item { EventActionsInspector(state.document, node, onTextInputFocusChanged, dispatch) }
       }
-      if (node.modifiers.isNotEmpty()) {
+      if (node.modifiers.isNotEmpty() || modifierToggles.isNotEmpty()) {
         item {
           HorizontalDivider(Modifier.padding(vertical = 12.dp))
-          Text("Modifiers", style = MaterialTheme.typography.labelLarge)
-          Text(
-            "Shown from the document. Modifier parameter editing waits for an authoritative modifier operation.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelSmall,
-          )
+          Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Layout", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+            var addModifier by remember(node.id) { mutableStateOf(false) }
+            val available = modifierToggles.filterNot { it.applied }
+            Box {
+              TextButton(onClick = { addModifier = true }, enabled = available.isNotEmpty()) {
+                Text("Add modifier")
+              }
+              DropdownMenu(expanded = addModifier, onDismissRequest = { addModifier = false }) {
+                available.forEach { item ->
+                  DropdownMenuItem(
+                    text = { Text(item.label) },
+                    onClick = {
+                      addModifier = false
+                      dispatch(UiBuilderEditorEvent.ToggleModifier(node.id, item.type))
+                    },
+                  )
+                }
+              }
+            }
+          }
         }
-        itemsIndexed(node.modifiers) { _, modifier ->
-          Text(
-            modifier.toString(),
-            Modifier.padding(top = 6.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-          )
+        itemsIndexed(node.modifiers) { index, modifier ->
+          val type = (modifier as? JsonObject)?.get("type")?.jsonPrimitive?.content.orEmpty()
+          val editable = modifierFields.filter { it.index == index }
+          val label =
+            modifierToggles
+              .firstOrNull { it.type == type }
+              ?.label
+              ?.removePrefix("Add ")
+              ?.replaceFirstChar { it.uppercase() }
+              ?: type.replace(Regex("([a-z])([A-Z])"), "$1 $2").replaceFirstChar { it.uppercase() }
+          Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium)
+            editable.forEach { field ->
+              key(node.id, index, field.field) {
+                HoverEditorRow(
+                  label = field.label,
+                  value = field.value,
+                  control =
+                    if (field.choices.isEmpty()) EditorPropertyControl.Number
+                    else EditorPropertyControl.Enum,
+                  choices = field.choices,
+                  focused = false,
+                  onFocusHandled = {},
+                  onTextInputFocusChanged = onTextInputFocusChanged,
+                ) { value ->
+                  dispatch(
+                    UiBuilderEditorEvent.SetModifierValue(
+                      node.id,
+                      field.type,
+                      field.field,
+                      value,
+                      index,
+                    )
+                  )
+                }
+              }
+            }
+            if (editable.isEmpty() && type !in modifierToggles.map { it.type }) {
+              Text(
+                modifier.toString(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+          }
         }
       }
     }

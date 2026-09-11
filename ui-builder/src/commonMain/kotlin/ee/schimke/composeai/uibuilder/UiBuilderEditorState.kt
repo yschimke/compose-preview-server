@@ -101,6 +101,8 @@ data class EditorModifierField(
   val value: String,
   /** The values this field may take, or empty when it is a number. */
   val choices: List<String> = emptyList(),
+  /** Position in the ordered chain; repeated modifier types remain independently editable. */
+  val index: Int = 0,
 )
 
 enum class EditorComponentKind(val label: String) {
@@ -887,6 +889,7 @@ sealed interface UiBuilderEditorEvent {
     val type: String,
     val field: String,
     val draft: String,
+    val modifierIndex: Int? = null,
   ) : UiBuilderEditorEvent
 
   data class SetStateVariable(val name: String, val declaration: JsonObject) : UiBuilderEditorEvent
@@ -1512,7 +1515,14 @@ class UiBuilderEditorReducer(
       is UiBuilderEditorEvent.UpdateEnvironment -> updateEnvironment(state, event.settings)
       is UiBuilderEditorEvent.ToggleModifier -> toggleModifier(state, event.nodeId, event.type)
       is UiBuilderEditorEvent.SetModifierValue ->
-        setModifierValue(state, event.nodeId, event.type, event.field, event.draft)
+        setModifierValue(
+          state,
+          event.nodeId,
+          event.type,
+          event.field,
+          event.draft,
+          event.modifierIndex,
+        )
       is UiBuilderEditorEvent.ShowInspector -> state.copy(inspectorMode = event.mode)
       is UiBuilderEditorEvent.ApplyTheme -> applyTheme(state, event.settings)
       UiBuilderEditorEvent.DeleteSelected -> deleteSelected(state)
@@ -2443,7 +2453,7 @@ class UiBuilderEditorReducer(
   fun modifierFields(state: UiBuilderEditorState): List<EditorModifierField> {
     val nodeId = state.selection.singleOrNull() ?: return emptyList()
     val node = state.document.nodes[nodeId] ?: return emptyList()
-    return node.modifiers.flatMapIndexed { _, element ->
+    return node.modifiers.flatMapIndexed { index, element ->
       val modifier = element as? JsonObject ?: return@flatMapIndexed emptyList()
       val type = modifier.optionalStringValue("type") ?: return@flatMapIndexed emptyList()
       MODIFIER_FIELDS[type].orEmpty().map { field ->
@@ -2453,6 +2463,7 @@ class UiBuilderEditorReducer(
           label = field.label,
           value = modifier[field.name]?.primitiveOrNull()?.content.orEmpty(),
           choices = field.choices,
+          index = index,
         )
       }
     }
@@ -2473,15 +2484,37 @@ class UiBuilderEditorReducer(
     type: String,
     field: String,
     draft: String,
+    modifierIndex: Int?,
   ): UiBuilderEditorState {
     val sequence = state.operationSequence + 1
     val node = state.document.nodes[nodeId] ?: return state
-    val choices =
-      MODIFIER_FIELDS[type].orEmpty().firstOrNull { it.name == field }?.choices.orEmpty()
+    val definition =
+      MODIFIER_FIELDS[type].orEmpty().firstOrNull { it.name == field }
+        ?: return state.rejected(
+          sequence,
+          RejectionCode.INVALID_PROPERTY,
+          "Unknown modifier field $type.$field",
+          nodeId,
+          "modifiers",
+        )
+    if (
+      modifierIndex != null &&
+        (node.modifiers.getOrNull(modifierIndex) as? JsonObject)?.optionalStringValue("type") !=
+          type
+    ) {
+      return state.rejected(
+        sequence,
+        RejectionCode.INVALID_PROPERTY,
+        "The modifier chain changed; select the modifier again",
+        nodeId,
+        "modifiers",
+      )
+    }
+    val choices = definition.choices
     val value =
       if (choices.isEmpty()) {
         val number =
-          draft.trim().toDoubleOrNull()
+          draft.trim().toDoubleOrNull()?.takeIf { it.isFinite() }
             ?: return state.rejected(
               sequence,
               RejectionCode.INVALID_PROPERTY,
@@ -2510,9 +2543,14 @@ class UiBuilderEditorReducer(
     var written = false
     val chain =
       JsonArray(
-        node.modifiers.map { element ->
-          val modifier = element as? JsonObject ?: return@map element
-          if (written || modifier.optionalStringValue("type") != type) return@map element
+        node.modifiers.mapIndexed { index, element ->
+          val modifier = element as? JsonObject ?: return@mapIndexed element
+          if (
+            written ||
+              modifier.optionalStringValue("type") != type ||
+              (modifierIndex != null && index != modifierIndex)
+          )
+            return@mapIndexed element
           written = true
           JsonObject(modifier + (field to value))
         }

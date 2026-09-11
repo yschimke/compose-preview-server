@@ -378,6 +378,20 @@ nullable text, text expressions and catalog-specific typography recipes remain s
 The visual text fixture is a direct authoring-JSON player proof, not a claim that arbitrary M3 Text
 components now have a precise JSON recipe.
 
+## Layout controls in the existing inspector
+
+The Properties inspector now exposes authored modifiers in a compact Layout section. Numeric and
+enum fields reuse the existing modifier editor, and Add modifier uses the catalog and parent-scope
+rules already used by the context menu. State selection remains a semantic property on the layout.
+Modifiers retain their authored order; repeated types are edited at their exact chain position.
+Modifiers without dedicated controls remain visible as source rather than being discarded.
+
+These controls dispatch the existing `SetModifiers` operation used by local persistence, undo/redo
+and the MCP mutation path. No additional wire shape or Remote-only editor is introduced.
+The [actual WASM browser proof](evidence/ui-builder-modifier-inspector/README.md) changes top padding
+from 24 to 40 dp while preserving the state link and other edges. The downloaded PNG moves its
+content boundary by precisely 16 pixels at density 1 and matches hosted MCP byte for byte.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware

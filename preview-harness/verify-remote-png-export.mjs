@@ -6,6 +6,7 @@ import { PNG } from "pngjs";
 
 const [origin, output] = process.argv.slice(2);
 const token = process.env.UI_BUILDER_TEST_TOKEN;
+const editModifiers = process.env.VERIFY_REMOTE_MODIFIER_BROWSER === "true";
 assert(origin && output && token, "Pass origin, output directory and UI_BUILDER_TEST_TOKEN");
 const sample = JSON.parse(await readFile(`${output}/document.json`, "utf8"));
 sample.id = `local-png-${Date.now()}`;
@@ -38,7 +39,7 @@ try {
   }
   await page.goto(`${origin}/ui-builder/remote-m3/${sample.id}?storage=local&token=${encodeURIComponent(token)}&node=choice`);
   await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === "true", null, { timeout: 60000 });
-  async function exportPng(name, state, color) {
+  async function exportPng(name, state, color, topPadding = 24) {
     await click(page.getByRole("button", { name: /^Export(?:$| \()/ }));
     const row = page.getByLabel("Download PNG", { exact: true });
     await row.waitFor();
@@ -52,6 +53,7 @@ try {
     const posted = response.request().postDataJSON();
     assert.equal(posted.id, sample.id);
     assert.equal(posted.stateVariables.page.initialValue, state);
+    assert.equal(posted.nodes.choice.modifiers.find(m => m.type === "padding").topDp, topPadding);
     await writeFile(`${output}/${name}.document.json`, JSON.stringify(posted, null, 2) + "\n");
     const bytes = await readFile(await download.path());
     const artifact = (await mcp("ui_builder_export_document", { document: posted, format: "png" })).artifact;
@@ -68,27 +70,42 @@ try {
     assert.deepEqual(rgb(180, 180), color);
     assert.deepEqual(rgb(24, 180), color);
     assert.notDeepEqual(rgb(23, 180), color);
+    assert.deepEqual(rgb(180, topPadding), color);
+    assert.notDeepEqual(rgb(180, topPadding - 1), color);
     assert.deepEqual(rgb(180, 335), color);
     assert.notDeepEqual(rgb(180, 336), color);
     await writeFile(`${output}/${name}.png`, bytes);
-    exports.push({ name, state, revision: posted.revision, sha256, browserMatchesMcp: true });
+    exports.push({ name, state, topPadding, revision: posted.revision, sha256, browserMatchesMcp: true });
   }
   await exportPng("local-initial", 20, [0, 133, 119]);
   // Reopen the local design to also verify that export did not replace its persisted source.
   await page.reload();
   await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === "true", null, { timeout: 60000 });
   await writeFile(`${output}/editor-accessibility.txt`, await page.locator("body").ariaSnapshot());
-  await click(page.getByLabel("Open screen panel"));
-  await click(page.getByRole("button", { name: /^State ·/ }));
-  await click(page.getByLabel("Edit state page"));
-  const initialValue = page.getByRole("textbox").nth(1);
-  await click(initialValue);
-  await page.keyboard.press("Meta+A");
-  await page.keyboard.type("30");
-  await expect.poll(() => initialValue.textContent()).toBe("30");
-  await click(page.getByLabel("Save state variable"));
-  await page.waitForFunction(() => globalThis.__uiBuilderEditor?.revision === 1);
-  await exportPng("local-edited", 30, [57, 73, 171]);
+  if (editModifiers) {
+    await page.mouse.move(1460, 820);
+    await page.mouse.wheel(0, 570);
+    const top = page.getByLabel("Top value", { exact: true });
+    await top.waitFor();
+    await page.screenshot({ path: `${output}/modifier-before.png` });
+    await click(top); await page.keyboard.press("Meta+A"); await page.keyboard.type("40");
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => globalThis.__uiBuilderEditor?.revision === 1);
+    await page.screenshot({ path: `${output}/modifier-after.png` });
+    await exportPng("local-edited", 20, [0, 133, 119], 40);
+  } else {
+    await click(page.getByLabel("Open screen panel"));
+    await click(page.getByRole("button", { name: /^State ·/ }));
+    await click(page.getByLabel("Edit state page"));
+    const initialValue = page.getByRole("textbox").nth(1);
+    await click(initialValue);
+    await page.keyboard.press("Meta+A");
+    await page.keyboard.type("30");
+    await expect.poll(() => initialValue.textContent()).toBe("30");
+    await click(page.getByLabel("Save state variable"));
+    await page.waitForFunction(() => globalThis.__uiBuilderEditor?.revision === 1);
+    await exportPng("local-edited", 30, [57, 73, 171]);
+  }
   assert.notEqual(exports[0].sha256, exports[1].sha256);
   const listed = (await mcp("ui_builder_list_designs")).designs;
   assert(!listed.some(d => d.designId === sample.id || d.id === sample.id));
