@@ -101,3 +101,45 @@ The existing production Kotlin emitter remains available; this experiment does n
 
 The schema, generator and HTTP host are disposable proof code. They are not a general-purpose
 compiler, a production service, or permission to label a generated interface production-ready.
+
+## Integer selection and empty JSON Boxes
+
+`IntegerSelectionJsonTest` extends the feasibility proof to authored values that are not physical
+child indexes. It checks 10/20/fallback, adjacent integers above Float's exact range, both signed
+Int limits, and 13 cases. Changes reach the real player through named state without recompilation.
+
+The published AndroidX alpha19 parser accepts only integer variable names for `stateLayout.indexId`.
+It has no way to declare a derived integer expression. The local `IntegerExpressions` adapter uses
+its component registry to add an experimental `integerExpression` node, materializing bounded
+expressions and recording their aliases. This is **not stock alpha19 JSON**: the test requires the
+unmodified parser to reject the extension. Production export must expose a supported parser profile
+or upstream this support before advertising these documents as portable authoring JSON.
+
+Comparing two quotient/remainder halves preserves all 32 bits using the parser's integer arithmetic
+vocabulary. The probe never converts an integer selector to a float. Expressions sit inside the
+layout-bearing Box so updates are evaluated by the normal layout/player path.
+
+The probe also found that AndroidX emits empty Boxes without `LayoutComponentContent`. The CMP
+player previously rejected them. [rc-players#92](https://github.com/yschimke/rc-players/pull/92) fixes
+this in the owning player. Use its local checkout to run the
+empty-branch proof without waiting for a release:
+
+```shell
+./gradlew -p experiments/remote-compose-poc \
+  -PlocalRcPlayers=/path/to/rc-players \
+  jvmTest --tests '*IntegerSelectionJsonTest'
+```
+
+The existing application consumes the same fix using the normal local dependency manifest:
+
+```shell
+python3 scripts/stage-local-dependency.py --checkout /path/to/rc-players \
+  --module :rc-player-trace --module :rc-player-protocol \
+  --module :rc-player-runtime --module :rc-player-compose \
+  --output build/local-dependencies/empty-box-player
+./gradlew -PlocalDependencies=build/local-dependencies/empty-box-player/local-dependencies.properties \
+  :ui-builder:jvmTest :ui-builder:compileKotlinWasmJs
+```
+
+The adapter is confined to this experiment. The production builder has not yet adopted a new JSON
+dialect, and this proof is not counted as completed JSON export or live document assembly.

@@ -132,6 +132,23 @@ regeneration changes only the selection capability notes in the three catalog fi
 The preview plugin now registers its desktop tasks after evaluation; a separate build fix preserves
 the production-only preview filter, with a test inspecting the actual packaged `previews.json`.
 
+## Direct JSON integration findings
+
+The extended JSON proof now preserves authored integer selectors, including values above Float's
+exact range and both Int limits. Five checks in `IntegerSelectionJsonTest` verify real player
+updates and make the stock parser's limitation explicit. AndroidX alpha19 cannot declare derived
+integer expressions through authoring JSON. A small experimental component-registry adapter proves
+that bounded integer expressions work, but it is not a production or stock-parser dialect.
+Production must establish that parser capability before advertising portable JSON exports.
+
+The proof also exposed valid AndroidX empty Boxes without `LayoutComponentContent`, which the CMP
+player rejected. [rc-players#92](https://github.com/yschimke/rc-players/pull/92) supplies the owning player's fix models Box content as nullable, preserves geometry and
+modifiers, and rejects stray child layouts. The local player passes 118 runtime tests, 216 Compose
+tests, ABI checks and Wasm compilation. The JSON probe passes with genuinely empty branches against
+that local build. The existing builder also passes all 931 JVM tests and Wasm compilation against
+the staged player stack. Both the experiment's local checkout option and the production staging
+workflow avoid waiting for a release. This dependency work supports the existing builder; it adds no editor.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware

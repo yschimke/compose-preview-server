@@ -10,6 +10,20 @@ fun compileRemote(source: String): ByteArray {
   return ByteArray(buffer.remaining()).also(buffer::get)
 }
 
+/** The expression probe deliberately requires an extension; stock alpha19 must reject it. */
+fun compileRemoteWithIntegerExpressions(source: String): ByteArray {
+  val writer =
+    androidx.compose.remote.creation.RemoteComposeWriter(
+      RemoteComposeJsonParser.DEFAULT_PLATFORM,
+      RemoteComposeJsonParser.parseApiLevel(source),
+      *RemoteComposeJsonParser.parseHeaderOnly(source).sortedBy { it.tag }.toTypedArray(),
+    )
+  val parser = RemoteComposeJsonParser(writer)
+  androidx.compose.remote.creation.json.IntegerExpressions.install(parser)
+  parser.parse(source)
+  return writer.encodeToByteArray()
+}
+
 fun main(args: Array<String>) {
   val bytes = compileRemote(File(args[0]).readText())
   File(args[1]).apply {

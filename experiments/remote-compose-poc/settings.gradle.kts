@@ -21,11 +21,11 @@ providers.gradleProperty("localRcPlayers").orNull?.let { path ->
   includeBuild(file(path)) {
     dependencySubstitution {
       substitute(module("ee.schimke.composeai:rc-player-compose"))
-        .using(project(":rc-player:compose"))
+        .using(project(":rc-player-compose"))
       substitute(module("ee.schimke.composeai:rc-player-protocol"))
-        .using(project(":rc-player:protocol"))
+        .using(project(":rc-player-protocol"))
       substitute(module("ee.schimke.composeai:rc-player-runtime"))
-        .using(project(":rc-player:runtime"))
+        .using(project(":rc-player-runtime"))
     }
   }
 }
