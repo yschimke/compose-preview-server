@@ -13,11 +13,15 @@ package ee.schimke.composeai.cli.serve
  *
  * `related` answers a different question, and the difference is why it cannot ride on the same
  * field. A catalog has exactly one rendition to be compared against, but any number of catalogs
- * that are ABOUT it: the AndroidX samples publish an `m3-samples` / `wear-m3-samples` catalog
- * beside each kit catalog, and `remote-m3` has already spent `wear-m3-catalog`'s single
- * `compareWith` on the Remote Compose rendition. Overloading `compareWith` would mean choosing
- * between the parity lane and the samples lane; a list means neither has to lose
- * (yschimke/compose-ai-tools#5398).
+ * that are ABOUT it. The case that forced this: the AndroidX samples are imported into a samples
+ * catalog published beside each kit catalog, and the kit catalog that most wants to point at it had
+ * already spent its single `compareWith` on a second rendition of its own components. Overloading
+ * `compareWith` would mean choosing between the parity lane and the samples lane; a list means
+ * neither has to lose (yschimke/compose-ai-tools#5398).
+ *
+ * No catalog is named anywhere in this file, deliberately: which catalogs exist is the deployment's
+ * `catalogs.json` and each catalog's own published `catalog.json` to say, never this module's
+ * Kotlin (`.github/scripts/ui-builder-catalog-literals.sh` enforces it).
  *
  * So: `compareWith` is one sibling, symmetric, about sameness. `related` is many siblings,
  * directed, about aboutness — the call sites for a component, a tile rendition of it, a motion
