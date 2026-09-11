@@ -13,9 +13,16 @@ import kotlinx.serialization.json.Json
 /**
  * Same-origin `GET` for icon outlines.
  *
- * `force-cache` because an outline is immutable for a pin: the browser answering from its own cache
- * on a second visit is the point, not an optimisation. The editor is served by the host that serves
- * these, so `same-origin` credentials carry whatever the session already has.
+ * Ordinary cache semantics, deliberately, though caching is the whole point of this route. A pinned
+ * URL (`v=…`) is answered `immutable`, so the browser serves it from its own cache with no round
+ * trip regardless — `force-cache` buys nothing there. What `force-cache` does buy is a stale hit on
+ * the *unpinned* bootstrap request, returning a cached name list without ever sending its
+ * `If-None-Match`: the client would then keep an old pin after a release, and every versioned URL
+ * it built from that pin would be wrong too. So the validator is allowed to do its job here, and a
+ * 304 costs a header exchange rather than the list.
+ *
+ * The editor is served by the host that serves these, so `same-origin` credentials carry whatever
+ * the session already has.
  */
 class BrowserMaterialSymbolsTransport : MaterialSymbolsTransport {
   override suspend fun get(url: String): MaterialSymbolsHttpResponse {
@@ -37,7 +44,7 @@ private fun fetchIcons(url: String): Promise<JsString> =
       method: 'GET',
       credentials: 'same-origin',
       headers: { 'Accept': 'application/json' },
-      cache: 'force-cache'
+      cache: 'default'
     }).then(function (response) {
       return response.text().then(function (responseBody) {
         return JSON.stringify({ statusCode: response.status, body: responseBody });
