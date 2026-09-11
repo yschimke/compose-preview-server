@@ -9225,13 +9225,11 @@ class ServeHttpServer(
     val style = call.parameters["style"].orEmpty()
     when (val result = iconResultOrNull { icons.names(style) } ?: return) {
       is IconResult.Refused -> respondIconRefusal(result.failure)
-      is IconResult.Answered -> {
-        call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl(style))
-        call.respondText(
+      is IconResult.Answered ->
+        respondIconJson(
+          style,
           JSON.encodeToString(IconNamesResponse.serializer(), result.value),
-          ContentType.Application.Json,
         )
-      }
     }
   }
 
@@ -9247,13 +9245,11 @@ class ServeHttpServer(
       }
     when (val result = iconResultOrNull { icons.outlines(style, names, axes) } ?: return) {
       is IconResult.Refused -> respondIconRefusal(result.failure)
-      is IconResult.Answered -> {
-        call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl(style))
-        call.respondText(
+      is IconResult.Answered ->
+        respondIconJson(
+          style,
           JSON.encodeToString(IconOutlinesResponse.serializer(), result.value),
-          ContentType.Application.Json,
         )
-      }
     }
   }
 
@@ -9307,6 +9303,31 @@ class ServeHttpServer(
    * of shared caches; the bytes are public font data either way, so only the URL is worth
    * protecting.
    */
+  /**
+   * Answers an icon route, with the pin as the validator.
+   *
+   * The names route cannot carry `v` on a fresh page load — the client learns the pin *from* this
+   * response — so a URL-versioned cache alone would make it refetch the whole ~79 KB list on every
+   * visit. The pin is exactly what a validator wants, though: it changes when, and only when, the
+   * data behind the answer does. So the response carries it as a strong `ETag`, and a browser that
+   * already has the list spends a conditional request rather than the list.
+   */
+  private suspend fun RoutingContext.respondIconJson(style: String, body: String) {
+    val pin = materialSymbolsIcons?.pin(style)
+    call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl(style))
+    if (pin.isNullOrEmpty()) {
+      call.respondText(body, ContentType.Application.Json)
+      return
+    }
+    val etag = "\"$pin\""
+    call.response.headers.append(HttpHeaders.ETag, etag)
+    if (ifNoneMatchHits(call.request.headers[HttpHeaders.IfNoneMatch], etag)) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    call.respondText(body, ContentType.Application.Json)
+  }
+
   private fun RoutingContext.iconCacheControl(style: String): String {
     // Only a caller that named the current pin gets an immutable answer: its URL changes when the
     // pin does, so a year-long cache entry cannot survive a digest bump. A caller that named none —
