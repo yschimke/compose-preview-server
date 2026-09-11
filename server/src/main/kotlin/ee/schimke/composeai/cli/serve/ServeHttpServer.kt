@@ -9206,7 +9206,7 @@ class ServeHttpServer(
     when (val result = iconResultOrNull { icons.names(style) } ?: return) {
       is IconResult.Refused -> respondIconRefusal(result.failure)
       is IconResult.Answered -> {
-        call.response.headers.append(HttpHeaders.CacheControl, DYNAMIC_RESOURCE_CACHE_CONTROL)
+        call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl())
         call.respondText(
           JSON.encodeToString(IconNamesResponse.serializer(), result.value),
           ContentType.Application.Json,
@@ -9228,7 +9228,7 @@ class ServeHttpServer(
     when (val result = iconResultOrNull { icons.outlines(style, names, axes) } ?: return) {
       is IconResult.Refused -> respondIconRefusal(result.failure)
       is IconResult.Answered -> {
-        call.response.headers.append(HttpHeaders.CacheControl, DYNAMIC_RESOURCE_CACHE_CONTROL)
+        call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl())
         call.respondText(
           JSON.encodeToString(IconOutlinesResponse.serializer(), result.value),
           ContentType.Application.Json,
@@ -9251,12 +9251,21 @@ class ServeHttpServer(
     try {
       block()
     } catch (failure: IllegalStateException) {
-      call.respondText(
-        "material symbols unavailable: ${failure.message}",
-        status = HttpStatusCode.ServiceUnavailable,
-      )
-      null
+      respondIconsFailed(failure)
+    } catch (failure: java.io.IOException) {
+      // The documented cold-cache case: an offline host cannot reach the pinned URL, and
+      // `openStream` throws `UnknownHostException` rather than anything this could mistake for a
+      // bad request. Without this arm the one expected failure is a 500.
+      respondIconsFailed(failure)
     }
+
+  private suspend fun <T> RoutingContext.respondIconsFailed(failure: Throwable): IconResult<T>? {
+    call.respondText(
+      "material symbols unavailable: ${failure.message ?: failure::class.simpleName}",
+      status = HttpStatusCode.ServiceUnavailable,
+    )
+    return null
+  }
 
   private suspend fun RoutingContext.respondIconRefusal(failure: IconRequestFailure) {
     val status =
@@ -9264,6 +9273,18 @@ class ServeHttpServer(
       else HttpStatusCode.BadRequest
     call.respondText(MaterialSymbolsIcons.describe(failure), status = status)
   }
+
+  /**
+   * Outlines and names are immutable for a pin, so they are cacheable — and have to be.
+   *
+   * `no-store` here would quietly cost the design its central claim: the browser transport asks for
+   * `force-cache` precisely so a reload does not refetch every visible grid page, and a store
+   * directive of `no-store` makes that request a no-op. A token-gated host keeps the response out
+   * of shared caches; the bytes are public font data either way, so only the URL is worth
+   * protecting.
+   */
+  private fun RoutingContext.iconCacheControl(): String =
+    if (isPublic) UI_BUILDER_IMMUTABLE_CACHE_CONTROL else "private, max-age=31536000, immutable"
 
   private suspend fun RoutingContext.respondIconsUnavailable() {
     call.respondText("not found", status = HttpStatusCode.NotFound)

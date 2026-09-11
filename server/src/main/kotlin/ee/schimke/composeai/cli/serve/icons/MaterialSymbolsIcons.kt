@@ -48,11 +48,17 @@ internal sealed interface IconResult<out T> {
  */
 internal class MaterialSymbolsIcons(private val source: MaterialSymbolsSource) {
 
+  /**
+   * The names a face carries.
+   *
+   * Answered from the shared code point list alone: the picker asks for this the moment it opens,
+   * and making it wait on a 10 MB font transfer would defeat the route.
+   */
   fun names(style: String): IconResult<IconNamesResponse> {
-    val catalog =
-      source.catalog(style)
+    val names =
+      source.names(style)
         ?: return IconResult.Refused(IconRequestFailure.UnknownStyle(style, source.styleIds))
-    return IconResult.Answered(IconNamesResponse(style, catalog.names.sorted()))
+    return IconResult.Answered(IconNamesResponse(style, names.sorted()))
   }
 
   fun outlines(

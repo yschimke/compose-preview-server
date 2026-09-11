@@ -110,6 +110,35 @@ class MaterialSymbolsSourceTest {
   }
 
   @Test
+  fun `names need the code point list, not the font`(@TempDir temp: File) {
+    val fetched = mutableListOf<String>()
+    val names = source(temp, onFetch = { fetched += it }).names("outlined")
+    assertEquals(16, names?.size)
+    assertEquals(
+      listOf(MaterialSymbolsSource.CODE_POINTS_URL),
+      fetched,
+      "the picker opens on this call; it must not pull a 10 MB face to list names",
+    )
+  }
+
+  @Test
+  fun `a cache entry another writer published first is accepted`(@TempDir temp: File) {
+    // Two hosts sharing a cold directory: the one that loses the rename must not fail, because the
+    // bytes are content-addressed and the destination is already correct.
+    temp.mkdirs()
+    File(temp, "outlined.ttf").writeBytes(fontBytes)
+    File(temp, "symbols.codepoints").writeBytes(codePointBytes)
+    val fetched = mutableListOf<String>()
+    assertNotNull(source(temp, onFetch = { fetched += it }).catalog("outlined")?.pathData("search"))
+    assertTrue(fetched.isEmpty(), "both files were already published, yet it fetched: $fetched")
+  }
+
+  @Test
+  fun `an unknown style has no names`(@TempDir temp: File) {
+    assertNull(source(temp).names("engraved"))
+  }
+
+  @Test
   fun `an unknown style is absent rather than an error`(@TempDir temp: File) {
     assertNull(source(temp).catalog("engraved"))
     assertEquals(listOf("outlined"), source(temp).styleIds)

@@ -44,6 +44,22 @@ internal class MaterialSymbolsSource(
     get() = styles.map { it.id }
 
   /**
+   * The icon names, which need the 79 KB code point list and none of the 10 MB font.
+   *
+   * Split out because the picker asks for names the moment it opens: resolving them through
+   * [catalog] would download and parse a whole face to hand back a list that is identical for all
+   * three of them, which is the transfer the names route exists to avoid.
+   */
+  @Synchronized
+  fun names(styleId: String): List<String>? {
+    if (styles.none { it.id == styleId }) return null
+    return MaterialSymbolsCatalog.readCodePoints(codePointsFile().decodeToString()).keys.toList()
+  }
+
+  private fun codePointsFile(): ByteArray =
+    file("symbols", "codepoints", codePointsUrl, codePointsDigest)
+
+  /**
    * The catalog for [styleId], reading the cache or filling it, or null for an unknown style.
    *
    * Faces are held once loaded: the parse is cheap but the 10.68 MB array is not, and a host serves
@@ -56,7 +72,7 @@ internal class MaterialSymbolsSource(
     }
     val style = styles.firstOrNull { it.id == styleId } ?: return null
     val font = file(style.id, "ttf", style.fontUrl, style.fontDigest)
-    val codePoints = file("symbols", "codepoints", codePointsUrl, codePointsDigest)
+    val codePoints = codePointsFile()
     return MaterialSymbolsCatalog.read(font, codePoints.decodeToString()).also {
       catalogs[styleId] = it
     }
@@ -77,12 +93,21 @@ internal class MaterialSymbolsSource(
       "$styleId.$extension from $url has SHA-256 $actual, expected $digest; refusing to use it"
     }
     cacheDirectory.mkdirs()
-    // Written beside and moved, so a crash or a second host cannot leave a half-file that the
-    // branch above would then have to detect.
-    val partial = File(cacheDirectory, "$styleId.$extension.part")
-    partial.writeBytes(bytes)
-    if (!partial.renameTo(cached)) {
-      partial.copyTo(cached, overwrite = true)
+    // A temporary name per writer, not per file: two hosts sharing a cold directory would otherwise
+    // race on one `.part`, and the one that lost could see its own source vanish under it. Whoever
+    // arrives second finds the destination already correct — the bytes are content-addressed, so
+    // losing the race is not a failure — and drops its copy.
+    val partial =
+      File(
+        cacheDirectory,
+        "$styleId.$extension.${ProcessHandle.current().pid()}-${Thread.currentThread().id}.part",
+      )
+    try {
+      partial.writeBytes(bytes)
+      if (!partial.renameTo(cached) && !(cached.isFile && sha256(cached.readBytes()) == digest)) {
+        partial.copyTo(cached, overwrite = true)
+      }
+    } finally {
       partial.delete()
     }
     return bytes
