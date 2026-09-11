@@ -1171,6 +1171,37 @@ class ServeWebFixtureTest {
         playgroundHref = "/playground?from=compose-m3/com.example.ProfileScreenPreview",
         parityIssues = parityIssues,
         parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
+        // The drawer subtree's DIRECTORIES, beside the variant rows: this component's recordings
+        // (folded out of the `motion` captures above) and the catalog that is about it. Carried by
+        // the golden for the same reason the Motion chip is — the harness then diffs the subtree on
+        // every future change to it, rather than someone remembering to screenshot a drawer.
+        //
+        // Two rows and a not-live one, because the three states are drawn differently: a resolved
+        // link, a second resolved link carrying the catalog's own wording as its tooltip, and a
+        // registered destination with no host yet, which is a row and not a link.
+        componentDirectories =
+          listOf(
+            ServeWeb.ComponentDirectory(
+              "related",
+              "Samples",
+              listOf(
+                ServeWeb.ComponentDirectoryRow(
+                  "ProfileScreenSample",
+                  "/compose-m3-samples/p/profile-screen-sample",
+                ),
+                ServeWeb.ComponentDirectoryRow(
+                  "ProfileHeaderSample",
+                  "/compose-m3-samples/p/profile-header-sample",
+                  title = "call sites",
+                ),
+                ServeWeb.ComponentDirectoryRow(
+                  "ProfileAvatarSample",
+                  "/compose-m3-samples/p/profile-avatar-sample",
+                  live = false,
+                ),
+              ),
+            )
+          ),
       )
     val spatialViewer =
       ServeWeb.viewerPage(
