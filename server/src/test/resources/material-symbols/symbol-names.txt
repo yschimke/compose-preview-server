@@ -1,5 +1,6 @@
-# The names the pinned Material Symbols Outlined face carries, from its code point list,
-# SHA-256 c18564f64d7d92dd3a6895a2c59ea69adfb56d6f553bcbbc88811c328159d715. Test scope only: the server reads the real file from its cache.
+# The names the pinned Material Symbols Outlined face carries. Test scope only: the
+# server reads the real code point list from its own cache.
+# code-point-list SHA-256 c18564f64d7d92dd3a6895a2c59ea69adfb56d6f553bcbbc88811c328159d715
 10k
 10mp
 11mp

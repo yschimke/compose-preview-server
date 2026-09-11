@@ -76,18 +76,26 @@ internal object MaterialSymbolsLegacyKeys {
    */
   private val RENAMED =
     mapOf(
-      "crop169" to "crop_16_9",
-      "crop32" to "crop_3_2",
-      "crop54" to "crop_5_4",
-      "crop75" to "crop_7_5",
-      "fireHydrantAlt" to "fire_hydrant",
-      "grid3x3" to "grid_3x3",
-      "grid4x4" to "grid_4x4",
-      "outbond" to "outbound",
-      "playCircleFilled" to "play_circle",
-      "playCircleOutline" to "play_circle",
-      "wifiTetheringErrorRounded" to "wifi_tethering_error",
+      "crop169" to Renamed("crop_16_9"),
+      "crop32" to Renamed("crop_3_2"),
+      "crop54" to Renamed("crop_5_4"),
+      "crop75" to Renamed("crop_7_5"),
+      "fireHydrantAlt" to Renamed("fire_hydrant"),
+      "grid3x3" to Renamed("grid_3x3"),
+      "grid4x4" to Renamed("grid_4x4"),
+      "outbond" to Renamed("outbound"),
+      // The one place a legacy *name* outranks the legacy *style*. `playCircleFilled` and
+      // `playCircleOutline` were two icons, each drawn in all five styles; Material Symbols has one
+      // `play_circle` and expresses the difference as `FILL`. Taking fill from the style instead
+      // would collapse the pair — `filled/playCircleOutline` would come back filled — so the name's
+      // baked fill wins and only the face follows the style.
+      "playCircleFilled" to Renamed("play_circle", fill = 1f),
+      "playCircleOutline" to Renamed("play_circle", fill = 0f),
+      "wifiTetheringErrorRounded" to Renamed("wifi_tethering_error"),
     )
+
+  /** An upstream rename, and the fill it carries when the old *name* said one. */
+  private data class Renamed(val name: String, val fill: Float? = null)
 
   /**
    * Material Icons members Material Symbols does not carry, at all, under any spelling.
@@ -118,6 +126,29 @@ internal object MaterialSymbolsLegacyKeys {
       "whatsapp",
     )
 
+  /**
+   * The unqualified compatibility keys that do not mean `filled/<the same name>`.
+   *
+   * The catalog issued 46 keys with no style before it carried styles, and it is tempting to read
+   * them as "the filled member of the same name". Five of them are not: `genres` was always
+   * `Icons.Filled.Category` — and `genres` is *also* a real Material Symbols icon, a different
+   * picture, so the tempting reading silently swaps the glyph rather than failing. `arrowBack`,
+   * `arrowForward` and `playlistAdd` were auto-mirrored members, which the same reading would stop
+   * flipping in RTL, and `bookmarkBorder` was the outlined one.
+   *
+   * Each is written as the qualified key it stands for and migrated through the ordinary path, so
+   * there is one set of rules rather than two, and all 46 are pinned in
+   * `MaterialSymbolsLegacyKeysTest` against the inventory column that issued them.
+   */
+  private val ALIASES =
+    mapOf(
+      "arrowBack" to "autoMirrored/filled/arrowBack",
+      "arrowForward" to "autoMirrored/filled/arrowForward",
+      "bookmarkBorder" to "outlined/bookmarkBorder",
+      "genres" to "filled/category",
+      "playlistAdd" to "autoMirrored/filled/playlistAdd",
+    )
+
   internal const val TWO_TONE_NOTE =
     "Material Symbols has no two-tone style; this is drawn unfilled in the outlined face."
 
@@ -129,26 +160,31 @@ internal object MaterialSymbolsLegacyKeys {
    * 404 at draw time.
    */
   fun migrate(key: String, known: (String) -> Boolean): LegacyIconMigration {
-    val autoMirror = key.startsWith(AUTO_MIRRORED_PREFIX)
-    val rest = key.removePrefix(AUTO_MIRRORED_PREFIX)
-    val parts = rest.split('/')
-    if (parts.size > 2 || parts.any(String::isEmpty)) return LegacyIconMigration.Unrecognised(key)
-    // The forty-six unqualified keys are the compatibility aliases the catalog issued before it
-    // carried styles, and they all named `Icons.Filled`.
-    val styleKey = if (parts.size == 2) parts[0] else "filled"
-    val legacyName = parts.last()
-    val (style, fill) = STYLES[styleKey] ?: return LegacyIconMigration.Unrecognised(key)
+    // An unqualified key is a compatibility alias for a qualified one. Most stand for the filled
+    // member of the same name; five do not, and are resolved here rather than assumed.
+    val qualified =
+      if ('/' in key) key else ALIASES[key] ?: "$DEFAULT_STYLE/$key".takeIf { key.isNotEmpty() }
+    if (qualified == null) return LegacyIconMigration.Unrecognised(key)
+    val autoMirror = qualified.startsWith(AUTO_MIRRORED_PREFIX)
+    val parts = qualified.removePrefix(AUTO_MIRRORED_PREFIX).split('/')
+    if (parts.size != 2 || parts.any(String::isEmpty)) return LegacyIconMigration.Unrecognised(key)
+    val (styleKey, legacyName) = parts
+    val (style, styleFill) = STYLES[styleKey] ?: return LegacyIconMigration.Unrecognised(key)
     if (legacyName in DROPPED) return LegacyIconMigration.NoEquivalent(legacyName)
-    val spellings = RENAMED[legacyName]?.let(::listOf) ?: candidates(legacyName)
+    val renamed = RENAMED[legacyName]
+    val spellings = renamed?.name?.let(::listOf) ?: candidates(legacyName)
     val name = spellings.firstOrNull(known) ?: return LegacyIconMigration.NoEquivalent(legacyName)
     return LegacyIconMigration.Migrated(
       name = name,
       style = style,
-      fill = fill,
+      fill = renamed?.fill ?: styleFill,
       autoMirror = autoMirror,
       note = if (styleKey == "twoTone") TWO_TONE_NOTE else null,
     )
   }
+
+  /** The style the 46 unqualified keys were issued against, bar the five in [ALIASES]. */
+  internal const val DEFAULT_STYLE = "filled"
 
   /**
    * The spellings a legacy member name could have upstream, best first.

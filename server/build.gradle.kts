@@ -505,11 +505,19 @@ tasks.withType<Test>().configureEach {
   // `name=path,name=path`, rather than a key per catalog: a fixed key list silently ignores any
   // checkout not named in it, so adding a third catalog would produce an empty corpus and a
   // passing run.
+  //
+  // The two icon-migration fixture inputs travel the same way, and for the same reason: the
+  // Material Symbols code point list is pinned source data the server fetches into its cache, and
+  // the Material Icons inventory is a build output, so neither is a repository file a test could
+  // just open. Absent by default, which is what CI runs — `LegacyIconNamesFixtureTest` then skips
+  // regeneration and audits the committed fixtures instead.
   for (key in
     listOf(
       "composeai.usageCorpus.repos",
       "composeai.usageCorpus.out",
       "composeai.usageCorpus.samples",
+      "composeai.materialSymbols.codePoints",
+      "composeai.materialIcons.inventory",
     )) {
     providers.systemProperty(key).orNull?.let { systemProperty(key, it) }
   }

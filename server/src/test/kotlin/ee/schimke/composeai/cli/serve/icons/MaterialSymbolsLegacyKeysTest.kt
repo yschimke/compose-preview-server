@@ -39,7 +39,7 @@ class MaterialSymbolsLegacyKeysTest {
 
   @Test
   fun `every stored icon name migrates to the name the fixture records`() {
-    assertEquals(2_133, expected.size, "the legacy inventory changed size")
+    assertEquals(2_132, expected.size, "the legacy inventory changed size")
     val wrong =
       expected.entries.mapNotNull { (legacy, target) ->
         val actual =
@@ -91,6 +91,59 @@ class MaterialSymbolsLegacyKeysTest {
   }
 
   @Test
+  fun `an unqualified key migrates as the key it actually stood for`() {
+    // Five of the 46 are not "the filled member of the same name", and reading them that way is
+    // silent rather than loud: `genres` stood for `Icons.Filled.Category`, and `genres` is *also* a
+    // real Material Symbols icon, so the tempting reading swaps the picture instead of failing.
+    val aliases =
+      lines("legacy-icon-aliases.tsv").associate {
+        val fields = it.split('\t')
+        fields[0] to fields[1]
+      }
+    assertEquals(46, aliases.size, "the compatibility alias set changed size")
+
+    val qualified =
+      mapOf(
+        "Icons.Filled." to "filled/",
+        "Icons.Outlined." to "outlined/",
+        "Icons.AutoMirrored.Filled." to "autoMirrored/filled/",
+      )
+    val wrong = aliases.mapNotNull { (alias, member) ->
+      val prefix = qualified.keys.first(member::startsWith)
+      val key =
+        qualified.getValue(prefix) + member.removePrefix(prefix).replaceFirstChar(Char::lowercase)
+      val viaAlias = MaterialSymbolsLegacyKeys.migrate(alias, known)
+      val viaKey = MaterialSymbolsLegacyKeys.migrate(key, known)
+      if (viaAlias == viaKey) null else "$alias ($member): $viaAlias, expected $viaKey"
+    }
+    assertTrue(wrong.isEmpty(), "aliases that do not migrate as their member: $wrong")
+
+    // The four that would otherwise be wrong, spelled out, because a list comparison passing is
+    // easy to believe for the wrong reason.
+    val genres = migrated("genres")
+    assertEquals("category", genres.name)
+    assertTrue(migrated("arrowBack").autoMirror, "a directional alias must keep mirroring")
+    assertTrue(migrated("playlistAdd").autoMirror)
+    assertEquals(0f, migrated("bookmarkBorder").fill, "bookmarkBorder was the outlined member")
+  }
+
+  @Test
+  fun `a fill baked into the old name outranks the style`() {
+    // `playCircleFilled` and `playCircleOutline` were two icons, each drawn in all five styles;
+    // Symbols has one `play_circle` and says the difference with FILL. Letting the style decide
+    // would collapse the pair, which is the one case where the name has to win.
+    val filled = migrated("filled/playCircleOutline")
+    assertEquals("play_circle", filled.name)
+    assertEquals(0f, filled.fill, "an outline stored under a filled style is still an outline")
+    assertEquals(1f, migrated("outlined/playCircleFilled").fill)
+    // The face still follows the style.
+    assertEquals("rounded", migrated("rounded/playCircleOutline").style)
+    // And an ordinary rename takes its fill from the style, as everything else does.
+    assertEquals(1f, migrated("filled/crop169").fill)
+    assertEquals(0f, migrated("outlined/crop169").fill)
+  }
+
+  @Test
   fun `a style is a face and a fill, and mirroring survives`() {
     // `Filled`, `Rounded` and `Sharp` are all filled drawings; only `Outlined` is stroked. Getting
     // this backwards would redraw every icon in every existing design.
@@ -102,7 +155,7 @@ class MaterialSymbolsLegacyKeysTest {
     assertEquals("rounded" to 1f, migrated("rounded/search").let { it.style to it.fill })
     assertEquals("sharp" to 1f, migrated("sharp/search").let { it.style to it.fill })
 
-    // The forty-six unqualified compatibility keys named `Icons.Filled`.
+    // Most of the forty-six unqualified compatibility keys named `Icons.Filled`.
     assertEquals(migrated("filled/search"), migrated("search"))
 
     val back = migrated("autoMirrored/filled/arrowBack")
