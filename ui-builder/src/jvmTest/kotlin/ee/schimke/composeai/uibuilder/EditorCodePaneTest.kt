@@ -73,6 +73,39 @@ class EditorCodePaneTest {
   }
 
   @Test
+  fun `the existing code pane uses production bound callback factories`() {
+    val remoteCatalog =
+      catalog.copy(
+        statusSemantics =
+          JsonObject(catalog.statusSemantics + ("platform" to JsonPrimitive("remote-compose")))
+      )
+    val document = Json {
+      ignoreUnknownKeys = true
+    }
+      .decodeFromString<UiBuilderDocument>(
+        java.io
+          .File(
+            System.getProperty("uiBuilderProjectDir"),
+            "../experiments/remote-state-selection/bound-actions.document.json",
+          )
+          .readText()
+      )
+    val code =
+      assertIs<EditorGeneratedCode.Source>(
+          UiBuilderEditorReducer(remoteCatalog).generatedCode(document)
+        )
+        .kotlin
+    val expected =
+      assertIs<RecordFreeExport.Generated.Emitted>(
+          RecordFreeExport.generate(document, UiBuilderCatalogPlatform.REMOTE_COMPOSE)
+        )
+        .source
+    assertEquals(expected, code)
+    assertTrue("valueChange(page, actionValue0.ri)" in code)
+    assertTrue("clickable(capture0(argument1))" in code)
+  }
+
+  @Test
   fun `a new design shows the Kotlin its export would write`() {
     val code = assertIs<EditorGeneratedCode.Source>(reducer.generatedCode(blank()))
 

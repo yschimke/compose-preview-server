@@ -35,8 +35,12 @@ tasks.withType<Test>().configureEach {
 
 androidComponents {
   onVariants { variant ->
-    if (providers.gradleProperty("boundActionProof").orNull == "true") {
-      variant.sources.kotlin?.addStaticSourceDirectory("build/bound-action-source/remote")
+    val productionBoundActions = providers.gradleProperty("boundActionProductionProof").orNull == "true"
+    if (productionBoundActions || providers.gradleProperty("boundActionProof").orNull == "true") {
+      variant.sources.kotlin?.addStaticSourceDirectory(
+        if (productionBoundActions) "build/bound-action-production-source/remote"
+        else "build/bound-action-source/remote"
+      )
       variant.hostTests.values.forEach { test ->
         test.sources.kotlin?.addStaticSourceDirectory("src/boundActionTest/kotlin")
       }

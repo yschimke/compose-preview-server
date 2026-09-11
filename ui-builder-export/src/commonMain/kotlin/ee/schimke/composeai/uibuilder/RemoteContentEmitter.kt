@@ -950,20 +950,117 @@ internal class RemoteContentEmitter(
     val event = parameter.name.removePrefix("on").replaceFirstChar { it.lowercaseChar() }
     val actions = (node.eventBindings[event] as? JsonArray).orEmpty()
     if (actions.isEmpty()) return lambdaActionExpression()
+    val operands = linkedMapOf<Int, ActionOperand>()
+    actions.forEachIndexed { index, element ->
+      val action = element as? JsonObject ?: return@forEachIndexed
+      val value = action["value"] as? JsonObject ?: return@forEachIndexed
+      if (value.plainString("type") != "binding") return@forEachIndexed
+      val where = "nodes.${node.id}.eventBindings.$event[$index].value"
+      val variable = action.plainString("variable")
+      val kind = (document.stateVariables[variable] as? JsonObject)?.plainString("valueType")
+      val type =
+        when (kind) {
+          "int" -> "kotlin.Int"
+          "float" -> "kotlin.Float"
+          "bool" -> "kotlin.Boolean"
+          "string" -> "kotlin.String"
+          else -> null
+        }
+      if (action.plainString("type") !in setOf("set", "select", "setText") || type == null) {
+        refusals += "$where: a bound action value needs an assignment to declared scalar state"
+        return null
+      }
+      val expression =
+        bound(value, type, where) { primitiveArgument(it, type, where) } ?: return null
+      operands[index] = ActionOperand(type, kind!!, expression, localName("actionValue$index"))
+    }
     function?.let { current ->
+      if (operands.isNotEmpty()) {
+        val factory = actionFactory(node, event, actions, operands) ?: return null
+        return "$factory(${operands.values.joinToString { it.expression }})"
+      }
       return current.capture("event:${node.id}:$event", ACTION_FQN) {
         actionExpression(node, parameter)
       }
     }
-    val emitted = actions.map { action ->
-      actionExpression(node, event, action as? JsonObject) ?: return null
+    return actionSequence(
+      node,
+      event,
+      actions,
+      operands.mapValues { (_, operand) -> remoteOperand(operand.kind, operand.expression) },
+    )
+  }
+
+  private class ActionOperand(
+    val type: String,
+    val kind: String,
+    val expression: String,
+    val parameter: String,
+  )
+
+  /** Forward the factory unchanged through callers; only its owner closes over mutable state. */
+  private fun actionFactory(
+    node: UiBuilderNode,
+    event: String,
+    actions: List<JsonElement>,
+    operands: Map<Int, ActionOperand>,
+  ): String? {
+    val type = operands.values.joinToString(", ", "(", ") -> $ACTION_FQN") { it.type }
+    function?.let { current ->
+      return current.capture("event-factory:${node.id}:$event", type) {
+        actionFactory(node, event, actions, operands)
+      }
+    }
+    val body =
+      actionSequence(
+        node,
+        event,
+        actions,
+        operands.mapValues { (_, operand) -> remoteOperand(operand.kind, operand.parameter) },
+      ) ?: return null
+    return operands.values.joinToString(", ", "{ ", " -> $body }") { it.parameter }
+  }
+
+  private fun remoteOperand(kind: String, expression: String): String =
+    when (kind) {
+      "int" -> {
+        usesRemoteInt = true
+        "$expression.ri"
+      }
+      "float" -> {
+        usesRemoteFloat = true
+        "$expression.rf"
+      }
+      "bool" -> {
+        usesRemoteBoolean = true
+        "$expression.rb"
+      }
+      else -> {
+        usesRemoteString = true
+        "$expression.rs"
+      }
+    }
+
+  private fun actionSequence(
+    node: UiBuilderNode,
+    event: String,
+    actions: List<JsonElement>,
+    operands: Map<Int, String>,
+  ): String? {
+    val emitted = actions.mapIndexed { index, action ->
+      actionExpression(node, event, action as? JsonObject, operands[index]) ?: return null
     }
     if (emitted.size == 1) return emitted.single()
     usesCombinedAction = true
     return emitted.joinToString(", ", "combinedAction(", ")")
   }
 
-  private fun actionExpression(node: UiBuilderNode, event: String, action: JsonObject?): String? {
+  private fun actionExpression(
+    node: UiBuilderNode,
+    event: String,
+    action: JsonObject?,
+    operand: String? = null,
+  ): String? {
     val kind = action?.plainString("type")
     val variable = action?.plainString("variable")
     if (action == null || kind == null || variable == null) {
@@ -987,7 +1084,7 @@ internal class RemoteContentEmitter(
       when (kind) {
         "set",
         "select",
-        "setText" -> remoteLiteral(valueType, action["value"])
+        "setText" -> operand ?: remoteLiteral(valueType, action["value"])
         "toggle" ->
           if (valueType == "bool") "!$target"
           else {

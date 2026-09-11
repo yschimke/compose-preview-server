@@ -72,7 +72,8 @@ and the equivalent typed Action factories in the Remote emitter. Then connect ty
 bindings to authoritative validation, preview, JSON lowering, the existing behavior inspector and
 MCP. Do not enable those controls merely because this standalone generator compiles.
 
-The production generators currently refuse these action-only bindings. The preview's literal
+The [production Remote emitter now supports these action factories](../ui-builder-bound-action-production/README.md);
+the ordinary Compose generator still needs integration. The preview's literal
 state-write reader also needs a safe structured-value path before such bindings are enabled.
 The build flag currently gates this proof, not a shipping UI-builder feature.
 

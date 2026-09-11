@@ -1,0 +1,241 @@
+{
+  "generator": "production RemoteContentEmitter",
+  "androidx": "1.0.0-alpha18",
+  "tests": [
+    "boundCallbacksAtDensityOne",
+    "boundCallbacksAtDensityTwo"
+  ],
+  "initialPixelEquality": [
+    1,
+    2
+  ],
+  "physicalClicks": 16,
+  "scalarFactoriesCompiled": [
+    "int",
+    "float",
+    "bool",
+    "string"
+  ],
+  "checks": [
+    {
+      "density": 1,
+      "row": 2,
+      "action": "select",
+      "indicatorRgba": [
+        0,
+        0,
+        255,
+        255
+      ],
+      "image": "remote-0-row-2-select-1.png"
+    },
+    {
+      "density": 1,
+      "row": 0,
+      "action": "select",
+      "indicatorRgba": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "image": "remote-1-row-0-select-1.png"
+    },
+    {
+      "density": 1,
+      "row": 1,
+      "action": "select",
+      "indicatorRgba": [
+        0,
+        255,
+        0,
+        255
+      ],
+      "image": "remote-2-row-1-select-1.png"
+    },
+    {
+      "density": 1,
+      "row": 2,
+      "action": "reset",
+      "indicatorRgba": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "image": "remote-3-row-2-reset-1.png"
+    },
+    {
+      "density": 1,
+      "row": 2,
+      "action": "select",
+      "indicatorRgba": [
+        0,
+        0,
+        255,
+        255
+      ],
+      "image": "remote-4-row-2-select-1.png"
+    },
+    {
+      "density": 1,
+      "row": 0,
+      "action": "reset",
+      "indicatorRgba": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "image": "remote-5-row-0-reset-1.png"
+    },
+    {
+      "density": 1,
+      "row": 1,
+      "action": "select",
+      "indicatorRgba": [
+        0,
+        255,
+        0,
+        255
+      ],
+      "image": "remote-6-row-1-select-1.png"
+    },
+    {
+      "density": 1,
+      "row": 1,
+      "action": "reset",
+      "indicatorRgba": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "image": "remote-7-row-1-reset-1.png"
+    },
+    {
+      "density": 2,
+      "row": 2,
+      "action": "select",
+      "indicatorRgba": [
+        0,
+        0,
+        255,
+        255
+      ],
+      "image": "remote-0-row-2-select-2.png"
+    },
+    {
+      "density": 2,
+      "row": 0,
+      "action": "select",
+      "indicatorRgba": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "image": "remote-1-row-0-select-2.png"
+    },
+    {
+      "density": 2,
+      "row": 1,
+      "action": "select",
+      "indicatorRgba": [
+        0,
+        255,
+        0,
+        255
+      ],
+      "image": "remote-2-row-1-select-2.png"
+    },
+    {
+      "density": 2,
+      "row": 2,
+      "action": "reset",
+      "indicatorRgba": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "image": "remote-3-row-2-reset-2.png"
+    },
+    {
+      "density": 2,
+      "row": 2,
+      "action": "select",
+      "indicatorRgba": [
+        0,
+        0,
+        255,
+        255
+      ],
+      "image": "remote-4-row-2-select-2.png"
+    },
+    {
+      "density": 2,
+      "row": 0,
+      "action": "reset",
+      "indicatorRgba": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "image": "remote-5-row-0-reset-2.png"
+    },
+    {
+      "density": 2,
+      "row": 1,
+      "action": "select",
+      "indicatorRgba": [
+        0,
+        255,
+        0,
+        255
+      ],
+      "image": "remote-6-row-1-select-2.png"
+    },
+    {
+      "density": 2,
+      "row": 1,
+      "action": "reset",
+      "indicatorRgba": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "image": "remote-7-row-1-reset-2.png"
+    }
+  ],
+  "sha256": {
+    "RemoteRepeatedContent.kt.txt": "eec5c10c189fd2428be987a8a854a0d9aa0d19a0a3d49bdc4053e33409948487",
+    "boolActions.kt.txt": "8156e099e3f945b3089209488311682e7874bdbc30e18d32f8bcb4641f5e7f60",
+    "floatActions.kt.txt": "9f023fe0201f14e21e2118faeff47bc598b46a2d75f17526313ad059c3e8f962",
+    "intActions.kt.txt": "5cefa275b4cce9f3fe9d7264c8ad35733528ce82558c60fae7676594d928d620",
+    "stringActions.kt.txt": "73277acf1b29d63406463df6d8bcad5b220fcc1c290635c6f3922cb9a2862cf2",
+    "document.json": "c541502a72a8e9e6aef26e52516700982291b7013e8edc96956f4220bc465c16",
+    "remote-initial-1.png": "a9343c52717a922f779874c938b0dc29cce0c3709bae165bea81b82c5171824d",
+    "remote-1.rc": "e9e439b6f378724455c98479e6204059a0b21147d66174d3d69c313e613ef11b",
+    "remote-0-row-2-select-1.png": "d719d7672f9b245d09b1484065469fd205caaf7c40ab4fccdb3e97e30c4b7fd4",
+    "remote-1-row-0-select-1.png": "282801be65687189abe5f623a7736b5dd1394d6e2b244d76e399135f647907e4",
+    "remote-2-row-1-select-1.png": "86408e38d833af893583ac46e400c4652359c258ea5d00cddf3609ec61fe1ee3",
+    "remote-3-row-2-reset-1.png": "3cf91d13fedad6b515bac1f9171ed5015d71e2221d4cba56cb64434a3dc978cc",
+    "remote-4-row-2-select-1.png": "9507361327c26621ffcf54ad6ca5bc8078d079889463497111acef9bec051da4",
+    "remote-5-row-0-reset-1.png": "f9979d8adc320215c6af45d268e5f5cf2611866b93d7af7f294ceeb88ee8a328",
+    "remote-6-row-1-select-1.png": "cefca3504d141137bcc91001f2a697843f956f18fc12e8dcf95b1a78a6f6275f",
+    "remote-7-row-1-reset-1.png": "c097d92b3850adb387162dbf76eefe494169c1b09a3e6f8f69c6f6629baa779a",
+    "remote-initial-2.png": "1567f462e451bfa011e1bc646a93d5e678ea92aed89303b39b946e5cdbea04d5",
+    "remote-2.rc": "a9a5e242b5ab967e54b4303bbbf11c7cf9032f5c46e98b5124f6e57a8bcb11eb",
+    "remote-0-row-2-select-2.png": "f331a0bbb53a266b3a209211760036d36e415a7a21a6d593a5be964a23e2dd1a",
+    "remote-1-row-0-select-2.png": "1567f462e451bfa011e1bc646a93d5e678ea92aed89303b39b946e5cdbea04d5",
+    "remote-2-row-1-select-2.png": "bf8e529a047859fedde41f3a8a5b14bf89197b31bf3f9e95fc62bcab47605288",
+    "remote-3-row-2-reset-2.png": "80931c38f5bba5313b20e2f7bba768fbc01ea86638bcf628ee75be580e5c6766",
+    "remote-4-row-2-select-2.png": "cb6fe7963f0886a42fafc10a33eb847de269bc032645d1fb9495302893be7354",
+    "remote-5-row-0-reset-2.png": "5232e5e27fa89c9a6820c2c1284e3070a225234c430844b99efc123aa918c4a5",
+    "remote-6-row-1-select-2.png": "642dd3fe2aebdb7bb7b33ad886d2fcf5ddd5b72d120a638dd485c514e52807da",
+    "remote-7-row-1-reset-2.png": "1758aa14b7f5aa277f5e2c6a587ded86d36bc15e5869e08a0e740d650e0ff06c"
+  }
+}

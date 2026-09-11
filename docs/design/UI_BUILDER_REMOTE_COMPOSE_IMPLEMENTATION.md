@@ -526,6 +526,17 @@ This proves the next implementation form. Shared typed callback parameters/invoc
 Remote action factories, authoritative action-binding validation, safe preview resolution and the
 existing browser/MCP authoring surfaces still need integration before enabling this feature for users.
 
+The Remote Kotlin part of those callbacks is now in the production emitter. Bound action values
+contribute typed function/row parameters, and reusable components receive explicit Action factories
+that forward through nested callers. Int, Float, Boolean and String variants compile against
+AndroidX; the unchanged row-ID fixture passes every initial pixel and sixteen select/reset clicks
+at two densities. Direct row reads, mixed action ordering and invalid scopes/types are covered by
+exporter tests. The existing Code pane and revision-pinned server export produce the same source.
+[Production callback evidence](evidence/ui-builder-bound-action-production/README.md) records the
+exact source, RC documents and frames. `-PboundActionProductionProof=true` selects that source for
+the Android proof without replacing the prototype. This is an export capability, not yet an enabled
+end-to-end authoring feature; the other integration work listed above remains.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
