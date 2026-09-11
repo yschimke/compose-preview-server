@@ -4,6 +4,12 @@ import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.bundle.BundleVerifier
+import ee.schimke.composeai.cli.serve.icons.IconNamesResponse
+import ee.schimke.composeai.cli.serve.icons.IconOutlinesResponse
+import ee.schimke.composeai.cli.serve.icons.IconRequestFailure
+import ee.schimke.composeai.cli.serve.icons.IconResult
+import ee.schimke.composeai.cli.serve.icons.MaterialSymbolsIcons
+import ee.schimke.composeai.cli.serve.icons.MaterialSymbolsSource
 import ee.schimke.composeai.daemon.client.SandboxSparePool
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
@@ -1946,6 +1952,11 @@ class ServeHttpServer(
         get("/api/render-runs/{name}") { handleRenderRuns(sessionInPath = false) }
         get("/{system}/api/render-runs/{name}") { handleRenderRuns(sessionInPath = true) }
         get("/api/components") { handleGlobalComponents() }
+        // Outlines for the icons a client is about to draw, rather than the face they come from:
+        // a grid page is ~45 KB here against 4.8 MB for the font. See
+        // docs/design/UI_BUILDER_MATERIAL_SYMBOLS.md.
+        get("/api/icons/{style}/names") { handleIconNames() }
+        get("/api/icons/{style}") { handleIconOutlines() }
         get("/api/daemons") { handleDaemonStatus(sessionInPath = false) }
         get("/{system}/api/daemons") { handleDaemonStatus(sessionInPath = true) }
         post("/api/presence") { handlePresence(sessionInPath = false) }
@@ -9164,6 +9175,184 @@ class ServeHttpServer(
    * Reads only resident or remembered metadata, so opening the palette never resumes every catalog
    * daemon. The browser fetches this lazily and keeps the result for the life of the page.
    */
+  /**
+   * The icon service, present exactly when this host authors designs.
+   *
+   * Keyed to `uiBuilderDir` because that is where the cache belongs — beside the assets and the
+   * design state, on the one directory an operator already knows to keep — and because a host that
+   * serves no builder has nobody to draw icons for.
+   */
+  private val materialSymbolsHttpClient: okhttp3.OkHttpClient by lazy {
+    okhttp3.OkHttpClient.Builder()
+      .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+      // Generous beside the 10 s page-load fetches elsewhere, because this transfers 9-15 MB once
+      // per host; still finite, which is the whole point.
+      .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+      .build()
+  }
+
+  private val materialSymbolsIcons: MaterialSymbolsIcons? by lazy {
+    val dir = uiBuilderDir ?: return@lazy null
+    MaterialSymbolsIcons(
+      MaterialSymbolsSource(
+        cacheDirectory = File(dir, "material-symbols"),
+        // Bounded, because this runs under a lock every icon request shares: a host that accepts
+        // the connection and then stops sending would otherwise stall every later request behind
+        // it forever, and never reach the 503 the cold-cache path is supposed to answer with.
+        // Bounded in size as well as time, and for the same reason: the digest can only reject
+        // bytes that have already been allocated, so a host answering this URL with an endless
+        // stream — or a captive-portal proxy answering it with a DVD image — would take the
+        // process down before there was anything to verify. Every file has a known exact size.
+        fetch = { url, expectedBytes ->
+          materialSymbolsHttpClient
+            .newCall(okhttp3.Request.Builder().url(url).build())
+            .execute()
+            .use { response ->
+              check(response.isSuccessful) { "$url answered ${response.code}" }
+              val body = checkNotNull(response.body) { "$url answered no body" }
+              val declared = body.contentLength()
+              check(declared <= expectedBytes) {
+                "$url declared $declared bytes, expected $expectedBytes; refusing to read it"
+              }
+              MaterialSymbolsSource.readAtMost(body.byteStream(), expectedBytes)
+            }
+        },
+      )
+    )
+  }
+
+  /**
+   * The icon names a face carries, which the picker filters locally as somebody types.
+   *
+   * One fetch per face for the whole list, rather than a request per keystroke: the names are ~79
+   * KB and never change between pins, so the browser caches them and search never waits on a round
+   * trip. Only the outlines of the rows actually on screen are fetched.
+   */
+  private suspend fun RoutingContext.handleIconNames() {
+    if (rejectBadToken()) return
+    val icons = materialSymbolsIcons ?: return respondIconsUnavailable()
+    val style = call.parameters["style"].orEmpty()
+    when (val result = iconResultOrNull { icons.names(style) } ?: return) {
+      is IconResult.Refused -> respondIconRefusal(result.failure)
+      is IconResult.Answered ->
+        respondIconJson(
+          style,
+          JSON.encodeToString(IconNamesResponse.serializer(), result.value),
+        )
+    }
+  }
+
+  private suspend fun RoutingContext.handleIconOutlines() {
+    if (rejectBadToken()) return
+    val icons = materialSymbolsIcons ?: return respondIconsUnavailable()
+    val style = call.parameters["style"].orEmpty()
+    val names = MaterialSymbolsIcons.parseNames(call.request.queryParameters.getAll("names"))
+    val axes =
+      when (val parsed = MaterialSymbolsIcons.parseAxes { call.request.queryParameters[it] }) {
+        is IconResult.Refused -> return respondIconRefusal(parsed.failure)
+        is IconResult.Answered -> parsed.value
+      }
+    when (val result = iconResultOrNull { icons.outlines(style, names, axes) } ?: return) {
+      is IconResult.Refused -> respondIconRefusal(result.failure)
+      is IconResult.Answered ->
+        respondIconJson(
+          style,
+          JSON.encodeToString(IconOutlinesResponse.serializer(), result.value),
+        )
+    }
+  }
+
+  /**
+   * Turns a font that will not load into a 503 rather than a stack trace.
+   *
+   * The one expected cause is a host that has never fetched the pinned face and cannot reach the
+   * network — an offline machine with a cold cache, which the design names as the cost of keeping
+   * the fonts out of git and out of the distribution. The message says which file it wanted, so
+   * warming the cache by hand is possible.
+   */
+  private suspend fun <T> RoutingContext.iconResultOrNull(
+    block: () -> IconResult<T>
+  ): IconResult<T>? =
+    try {
+      // On [Dispatchers.IO]: a cold call downloads 9-15 MB and parses a font, and the source
+      // serialises on one monitor, so leaving this on the request coroutine would let a single slow
+      // first fetch hold Ktor request threads and stall unrelated traffic — bounded by the client's
+      // timeouts, but still for as long as they allow. Same rule the render-history lane follows.
+      withContext(Dispatchers.IO) { block() }
+    } catch (failure: IllegalStateException) {
+      respondIconsFailed(failure)
+    } catch (failure: java.io.IOException) {
+      // The documented cold-cache case: an offline host cannot reach the pinned URL, and
+      // `openStream` throws `UnknownHostException` rather than anything this could mistake for a
+      // bad request. Without this arm the one expected failure is a 500.
+      respondIconsFailed(failure)
+    }
+
+  private suspend fun <T> RoutingContext.respondIconsFailed(failure: Throwable): IconResult<T>? {
+    call.respondText(
+      "material symbols unavailable: ${failure.message ?: failure::class.simpleName}",
+      status = HttpStatusCode.ServiceUnavailable,
+    )
+    return null
+  }
+
+  private suspend fun RoutingContext.respondIconRefusal(failure: IconRequestFailure) {
+    val status =
+      if (failure is IconRequestFailure.UnknownStyle) HttpStatusCode.NotFound
+      else HttpStatusCode.BadRequest
+    call.respondText(MaterialSymbolsIcons.describe(failure), status = status)
+  }
+
+  /**
+   * Outlines and names are immutable for a pin, so they are cacheable — and have to be.
+   *
+   * `no-store` here would quietly cost the design its central claim: the browser transport asks for
+   * `force-cache` precisely so a reload does not refetch every visible grid page, and a store
+   * directive of `no-store` makes that request a no-op. A token-gated host keeps the response out
+   * of shared caches; the bytes are public font data either way, so only the URL is worth
+   * protecting.
+   */
+  /**
+   * Answers an icon route, with the pin as the validator.
+   *
+   * The names route cannot carry `v` on a fresh page load — the client learns the pin *from* this
+   * response — so a URL-versioned cache alone would make it refetch the whole ~79 KB list on every
+   * visit. The pin is exactly what a validator wants, though: it changes when, and only when, the
+   * data behind the answer does. So the response carries it as a strong `ETag`, and a browser that
+   * already has the list spends a conditional request rather than the list.
+   */
+  private suspend fun RoutingContext.respondIconJson(style: String, body: String) {
+    val pin = materialSymbolsIcons?.pin(style)
+    call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl(style))
+    if (pin.isNullOrEmpty()) {
+      call.respondText(body, ContentType.Application.Json)
+      return
+    }
+    val etag = "\"$pin\""
+    call.response.headers.append(HttpHeaders.ETag, etag)
+    if (ifNoneMatchHits(call.request.headers[HttpHeaders.IfNoneMatch], etag)) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    call.respondText(body, ContentType.Application.Json)
+  }
+
+  private fun RoutingContext.iconCacheControl(style: String): String {
+    // Only a caller that named the current pin gets an immutable answer: its URL changes when the
+    // pin does, so a year-long cache entry cannot survive a digest bump. A caller that named none —
+    // or a stale one — is answered correctly and told to revalidate.
+    val presented = call.request.queryParameters["v"]
+    val current = materialSymbolsIcons?.pin(style)
+    if (presented.isNullOrEmpty() || current.isNullOrEmpty() || presented != current)
+      return "no-cache"
+    return if (isPublic) UI_BUILDER_IMMUTABLE_CACHE_CONTROL
+    else "private, max-age=31536000, immutable"
+  }
+
+  private suspend fun RoutingContext.respondIconsUnavailable() {
+    call.respondText("not found", status = HttpStatusCode.NotFound)
+  }
+
   private suspend fun RoutingContext.handleGlobalComponents() {
     if (rejectBadToken()) return
     // This is a front-door-only index. A top-level site has no multi-catalog front door (its root
