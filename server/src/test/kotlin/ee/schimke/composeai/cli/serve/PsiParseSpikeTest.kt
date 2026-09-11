@@ -1,3 +1,5 @@
+@file:OptIn(org.jetbrains.kotlin.CoreEnvironmentDeprecation::class)
+
 package ee.schimke.composeai.cli.serve
 
 import java.io.File
