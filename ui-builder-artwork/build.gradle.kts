@@ -15,7 +15,16 @@ kotlin {
   jvmToolchain(libs.versions.java.ui.builder.get().toInt())
 
   jvm()
-  @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class) wasmJs { browser() }
+  // `binaries.executable()` with no application to run: compose-multiplatform 1.12.0 added
+  // `checkComposeUiTestConfigurationForWasmJs`, which fails a wasmJs target whose test classpath
+  // resolves Skiko — as this one's does, transitively through `compose.ui` — but declares no
+  // executable for webpack to bundle that runtime into. No link is produced while `wasmJsTest` is
+  // NO-SOURCE, and it matches the six sibling targets that already declare one. See CMP-4906.
+  @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+  wasmJs {
+    browser()
+    binaries.executable()
+  }
 
   sourceSets {
     commonMain.dependencies {
