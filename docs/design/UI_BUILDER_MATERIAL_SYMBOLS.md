@@ -29,9 +29,10 @@ code.
 - **A name is the identity.** `search` is one icon. Style, fill, weight, grade and optical size are
   properties of the node, exactly as they are axes on the Material Symbols font — the four sliders
   and two dropdowns the Google Fonts page shows to the right of the grid.
-- **Nothing is generated into the bundle.** The picker's grid and the canvas get their outlines from
-  the **Material Symbols variable fonts**, loaded at runtime and turned into paths by the Skia that
-  already ships beside the Wasm.
+- **Nothing is generated into the bundle.** Outlines come from the **Material Symbols fonts**,
+  loaded at runtime and turned into paths by the Skia that already ships beside the Wasm. The
+  picker's grid resolves from the font as it browses; the canvas draws what the document's outline
+  registry recorded when the icon was chosen, so it cannot disagree with what an export emits.
 - **The export stops depending on `material-icons-extended`.** `builderIcon(key)` emits inline path
   data for the icons a design actually uses, so generated Kotlin is self-contained and any axis
   combination is expressible — which `Icons.*` cannot be, because the old Material Icons set has no
@@ -77,8 +78,11 @@ So the fonts come in two tiers:
   off. This is what a design that never touched a slider needs, what the grid paints with, and
   what first load actually pays: **2.90 MB against today's 5.28 MB**. Add `FILL 1` and it is three
   files per style, six for all three styles, ~3.2 MB of deployment.
-- **The variable font for that style**, fetched only when a design or the customise panel asks for
-  a non-default axis value. It replaces the instance in the glyph cache and everything re-resolves.
+- **The variable font for that style**, fetched only for an axis value **no static instance
+  covers**. Not "any non-default value": `FILL 1` is non-default and has an instance of its own, and
+  every migrated `filled/` key lands on it, so filled designs — most designs — stay on the static
+  tier. The variable font is for a weight, grade or optical size off the deployed points. It
+  replaces the instance in the glyph cache and everything re-resolves.
 
 That is the progressive step this design turns on, not an optimisation deferred to later: without
 it the lane makes first load worse. What is still avoided is the 42-instance matrix — six
@@ -159,8 +163,16 @@ flag: an arrow is one glyph, and nothing in the font says it should flip in RTL.
 distinction would silently render every directional icon the same way in both directions, so:
 `iconAutoMirror` is a real property, its default per name comes from a generated list seeded by the
 `autoMirrored/` keys the current inventory already enumerates, and every emitted `ImageVector`
-carries `autoMirror = <that value>`. A legacy `autoMirrored/filled/arrow_back` therefore maps to
+carries `autoMirror = <that value>`. A legacy `autoMirrored/filled/arrowBack` therefore maps to
 `arrow_back` at `fill 1` with `iconAutoMirror = true`, not merely to name and style.
+
+**The legacy keys are lower-camel, and the new names are snake_case.** `MaterialIconCatalogTasks`
+builds its key from the Kotlin member — `ArrowBack` becomes `arrowBack`, so the stored key is
+`autoMirrored/filled/arrowBack` and never `arrow_back`. A migration that treats the suffix as an
+already-valid symbol name resolves nothing. The mapping is therefore an explicit generated table
+from every real stored spelling — all 11,385 style-qualified keys plus the 46 unqualified
+compatibility aliases — to its symbol name, built from the same inventory that produced the keys,
+not derived by re-casing a string at runtime.
 
 `iconKey` stops being an 11,431-value enum and the catalog says "a name in the Material Symbols
 set", validated against the font's own name table rather than spelled out. The
@@ -217,12 +229,20 @@ mistaken for "draws".
 
 ### 2. Bundle: `res/drawable`, which is what the site hands an Android developer
 
-[`UI_BUILDER_EXPORT_BUNDLE.md`](UI_BUILDER_EXPORT_BUNDLE.md) ships files beside readable source, and
-that is where the icons site's own Android answer belongs: a `<vector>` drawable per icon in
-`res/drawable/`, referenced by `painterResource(R.drawable.ic_search)`. Upstream ships exactly these
-(`symbols/android/<name>/materialsymbolsoutlined/<name>_24px.xml`) for the variants in its static
-matrix, and for any other axis point we generate the same `<vector>` from the same glyph outline —
-strictly more than the site offers, in the shape the site taught.
+This is where the icons site's Android answer — a `<vector>` in `res/drawable/`, read through
+`painterResource(R.drawable.ic_search)` — **does not survive contact with an export**, and
+[`UI_BUILDER_EXPORT_BUNDLE.md`](UI_BUILDER_EXPORT_BUNDLE.md) already settled why: `R` is generated
+into the *application's* namespace, not the package the exported file declares, so the export would
+need the app's namespace as a second parameter it has no way to know. That doc put the bytes in
+`assets/` for exactly this reason, and refused `resources.getIdentifier` as the reflective way
+around it.
+
+So the bundle follows the decision already made rather than reopening it: the outline travels as
+data under `assets/uibuilder/<designId>/`, and the generated source builds the `ImageVector` from
+it — the same namespace-free `context.assets.open(…)` shape the images use. Upstream's own
+`symbols/android/<name>/materialsymbolsoutlined/<name>_24px.xml` drawables are what a *human*
+following the site would drop into their own module, and the README beside the bundle says so; they
+are not what an exporter that does not know the namespace can wire up for them.
 
 ### 3. Default axes on a provably identical icon: `Icons.*`
 
@@ -246,8 +266,19 @@ table, the export names `Icons.Outlined.X` only for a name on it at default axes
 else takes shape 1. A gate keeps the table honest, the same way
 `checkMaterialIconCatalogFixture` does today.
 
-That table is also the honest answer to what `material-icons-extended` is still for: an opt-in the
-*consumer's* build already has, not a dependency of ours.
+Two conditions on top of the table, because being the same picture is not sufficient:
+
+- **It is opt-in, and it names its price.** Almost all of those 2,205 members live in
+  `material-icons-extended`, not in the small core artifact, so emitting `Icons.Outlined.X` turns a
+  self-contained file into one that does not compile unless the consumer already has that
+  dependency — and it does so precisely when the "optimisation" fires. The shortcut is therefore an
+  **export option, off by default**, and an export that uses it states the coordinate to add.
+  Shape 1 stays the default for every export that did not ask.
+- **An auto-mirrored name takes `Icons.AutoMirrored.<Style>.X`, or it takes shape 1.** An alpha
+  comparison cannot see `autoMirror` — the two members draw the same pixels and differ only in RTL
+  — so a table built from pixels alone would quietly swap a mirroring arrow for a non-mirroring
+  one. The emitter selects the `AutoMirrored` member when `iconAutoMirror` is set, and falls back to
+  inline path data when no such member exists.
 
 ### Who resolves the outline when there is no browser
 
@@ -268,11 +299,35 @@ native preview and the daemon render all read it from there. It also makes a des
 sense [`UI_BUILDER_DESIGN_PORTABILITY.md`](UI_BUILDER_DESIGN_PORTABILITY.md) means it — a design
 carries its own pictures rather than depending on the host's font pin.
 
-Rejected alternative: teaching the server to instance glyphs. It means a font engine and the pinned
-fonts in a process that has neither, to recompute what the editor already knows. The cost of the
-registry is ~550 bytes per distinct icon in the document and one question — what happens when the
-font pin moves — answered the same way an asset digest is: the recorded outline stays until the
-icon is re-picked, and a refresh is a visible, reviewable change rather than a silent redraw.
+**The registry is the source of truth once an entry exists — the canvas included.** The browser
+resolves a glyph only to *create* an entry; having created one, it draws that entry like every other
+lane. Otherwise a moved font pin would give the canvas the new glyph and export the recorded one,
+from the same unchanged document, which is precisely the canvas/export divergence the registry
+exists to prevent. A font refresh is then an explicit operation that replaces entries atomically and
+is visible in the revision history, not a silent redraw on next open.
+
+### The open question: who fills the registry when no editor is involved
+
+An icon node does not only arrive through the picker. `ui_builder_apply` writes one over MCP, a
+`CreateDesign` can carry one from the start, and a design authored that way can be exported or
+natively previewed before anyone opens it in a browser. None of those paths runs the editor, so
+"the editor resolves it" leaves the registry absent exactly when the JVM lane — which has no font
+and no glyph engine — needs it. This is unresolved, and it decides how much machinery the lane
+needs:
+
+1. **Give the server a glyph resolver.** The pinned static instances plus a way to read a glyph
+   outline, in the process that already holds the fonts it serves. Honest and complete; it puts a
+   font dependency into a process whose narrow classpath is deliberate.
+2. **Make the write path supply it.** The service refuses an icon write whose outline is not in the
+   registry, the way an `asset/image` node is refused until its key is pinned
+   ([`UI_BUILDER_ASSETS.md`](UI_BUILDER_ASSETS.md)). No new dependency; it makes an agent authoring
+   a design produce path data, which is a poor thing to ask of one.
+3. **Ship the outlines as build data after all.** A generated table for the six static instances —
+   ~4.4 MB raw, ~1.5 MB gzipped, on the server only, never in the bundle — covers every default-axis
+   icon, and anything off those points still has to come from the editor.
+
+The recommendation is (1), narrowly: the resolver reads the same pinned instance the browser does,
+and only ever runs for a node that arrived without an entry.
 
 ### Why the canvas is not affected
 
@@ -312,8 +367,10 @@ Slice 1 alone returns the 17.8 MB.
 
 ## What is deliberately not here
 
-- **A server-side glyph service.** The browser has Skia, and the document records what it resolved
-  (above), so the server never needs a font engine or a round trip per axis change.
+- **A glyph endpoint the browser calls per axis change.** The browser has Skia and resolves
+  locally; the registry carries the result to every other lane. Whether the *server* needs a
+  resolver of its own for documents no editor touched is the open question above, and is a
+  different thing from this round trip.
 - **Drawing icons as text.** A ligature draw is fewer moving parts on the canvas, but the export
   needs outlines regardless, and a consumer's app would then need the font shipped with it.
 - **The full 42-instance matrix.** Six default-axis instances are a tier the design needs; 42 is
