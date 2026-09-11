@@ -1,5 +1,5 @@
 {
-  "designId": "remote-root-1789123286140",
+  "designId": "remote-root-1789123737142",
   "revision": 0,
   "catalogPin": {
     "systemId": "remote-m3",
@@ -8,7 +8,7 @@
     "nativeRuntimeId": "candidate"
   },
   "bytes": 3042,
-  "sha256": "27a7b1e452491c46460bbca6c7623b9fcef797a0641094d41f8cdffee21e2b18",
+  "sha256": "47ebf779219b586d487e0f5fd6923465c89d6de347649369ebfec9b1ade2e4b3",
   "sourceMatchesCompiledFixtureExceptDesignId": true,
   "exported": {
     "json": {

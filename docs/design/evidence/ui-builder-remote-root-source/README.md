@@ -51,8 +51,9 @@ ANDROID_HOME=/path/to/android-sdk experiments/remote-state-selection/verify.sh
 UI_BUILDER_TEST_TOKEN='<local-token>' CHROME_PATH='/path/to/Chrome' node preview-harness/verify-remote-root-export.mjs http://127.0.0.1:5624
 ```
 
-Before rebasing, combined validation passes 946 editor JVM tests, 51 shared-export tests,
-33 targeted server/MCP tests, runtime ABI checks, the WASM build and server distribution build.
+Rebased on main `7012a87a` (including Compose 1.12), combined validation passes 951 editor JVM
+tests, 51 shared-export tests and 36 targeted server/MCP tests, plus runtime ABI checks, the WASM
+build and server distribution build. The browser proof was repeated against that rebuilt host.
 The standalone Android proof passes all nine tests, including both ordinary-root density cases.
 
 This closes ordinary-root source export in the editor and MCP. The separate server native PNG

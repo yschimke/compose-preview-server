@@ -125,7 +125,9 @@ controls with an Action callback keep their authored callback even when the para
 [Ordinary-root source evidence](evidence/ui-builder-remote-root-source/README.md) records the real
 WASM Code pane, all three MCP artifacts, and Android capture/playback of the exact exported source.
 The Android proof clicks through both states and the fallback at densities 1 and 2, checking padding
-and active layout width. This proves source export and real document capture. The server's separate
+and active layout width. After rebasing onto main `7012a87a`, the combined build passes 951 editor
+JVM tests, 51 shared-export tests, 36 targeted server/MCP tests, runtime ABI checks and WASM/server
+distribution builds; the real browser export proof also passes on that build. This proves source export and real document capture. The server's separate
 native PNG compilation route still needs ordinary Remote-root support; saved-document WASM playback
 uses the JSON/binary export route described above.
 
