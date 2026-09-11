@@ -2626,12 +2626,16 @@ public class ServeRunner(
     // `uiBuilderExports` is computed FROM that wrapper and then handed to the composition, so
     // composing first would need the capabilities the wrapper has not been built to state yet.
     val publishedRecords = mutableMapOf<String, Map<String, ComponentRecord>>()
+    val catalogPlatforms = mutableMapOf<String, UiBuilderCatalogPlatform>()
     val compose =
       ScreenGeneratorComposeExportExecutor(
         records::record,
         packs = packs.map { it.id }.toSet(),
         assetStore = assetStore,
         publishedComponents = { systemId -> publishedRecords[systemId].orEmpty() },
+        catalogPlatform = { systemId ->
+          catalogPlatforms[systemId] ?: UiBuilderCatalogPlatform.DEFAULT
+        },
       )
     val pictureExporter =
       renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
@@ -2786,6 +2790,8 @@ public class ServeRunner(
       )
     val nativeBackends =
       catalogs.listCatalogs().associate { catalog ->
+        catalogPlatforms[catalog.benchmark.catalogSystemId] =
+          UiBuilderCatalogPlatform.from(catalog.statusSemantics)
         catalog.benchmark.catalogSystemId to
           UiBuilderPreviewSurfaces.from(catalog.statusSemantics).native.backend
       }

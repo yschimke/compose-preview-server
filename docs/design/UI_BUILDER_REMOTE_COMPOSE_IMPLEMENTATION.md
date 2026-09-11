@@ -343,8 +343,8 @@ The delivery and saved-preview sections above describe its editor, service and M
   semantics. Transitions and inactive-branch retention can follow.
 - Enable fully disconnected Remote document compilation; local-storage designs currently use the
   connected host compiler through the same temporary route as hosted and standalone MCP.
-- Extend the native PNG compilation route to ordinary Remote roots; source, JSON, binary export
-  and saved-document WASM playback already accept the same semantic tree.
+- Route the Export menu's PNG artifact through real Remote rendering. The native-preview route
+  now compiles ordinary Remote roots; generic PNG export still uses the packaged editor renderer.
 - Complete loops, reusable component parameters/callbacks and per-instance addressing through all
   preview and export lanes.
 - Extend typed values, expressions, action sequences, host events and modifier bindings using

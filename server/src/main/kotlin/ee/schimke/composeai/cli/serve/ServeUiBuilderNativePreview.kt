@@ -142,6 +142,12 @@ internal class ServeUiBuilderNativePreview(
           ),
         )
     val environment = document.environment
+    if (generated.remoteContent && target.confType != UiBuilderGeneratedCompose.COMPOSE_ANDROID) {
+      return UiBuilderNativePreviewOutcome.Refused(
+        NO_NATIVE_CATALOG,
+        listOf("Remote content requires an Android capture/player bundle for `$catalogSystemId`"),
+      )
+    }
     // A widget is measured by its container, not by the screen its design environment describes:
     // the generator reports the frame the host draws — the content box plus the padding this design
     // authored — and rendering at the environment's size instead would put a 216×124 container in
@@ -159,6 +165,7 @@ internal class ServeUiBuilderNativePreview(
           heightDp = widget?.heightDp ?: environment.heightDp,
           confType = target.confType,
           wearWidget = widget != null,
+          remoteCapture = generated.remoteContent,
         )
       )
     // Only asked for a frame: a compile that failed has no render to read bounds off, and asking
@@ -167,16 +174,18 @@ internal class ServeUiBuilderNativePreview(
     // the annotation lane has nothing to report. Asked only where an answer exists, rather than
     // standing up a second daemon session to come back empty.
     val bounds =
-      if (response.image == null || widget != null) emptyMap() else captureNodeBounds(response)
+      if (response.image == null || widget != null || generated.remoteContent) emptyMap()
+      else captureNodeBounds(response)
     // The tag set is reported rather than inferred by the caller: it is what a bounds lookup is
     // keyed by, and a client that recomputed it from the document would drift the moment the
     // projection stopped tagging something.
     return UiBuilderNativePreviewOutcome.Rendered(
       response,
-      // Nothing is tagged in a widget's source, and saying otherwise would have a client look up
+      // Nothing is tagged in recorded Remote content, including widgets. Claiming tags would look
+      // up
       // bounds for every node and find none — a silent "the overlay is broken" where the truth is
       // that this frame has none.
-      if (widget != null) emptyList() else document.nodes.keys.sorted(),
+      if (widget != null || generated.remoteContent) emptyList() else document.nodes.keys.sorted(),
       bounds,
       failure = if (response.image == null) response.noFrameReason() else null,
     )

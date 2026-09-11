@@ -103,6 +103,9 @@ internal class ScreenGeneratorComposeExportExecutor(
   private val publishedComponents: (catalogSystemId: String) -> Map<String, ComponentRecord> = {
     emptyMap()
   },
+  private val catalogPlatform: (String) -> UiBuilderCatalogPlatform = {
+    UiBuilderCatalogPlatform.DEFAULT
+  },
 ) : UiBuilderExportExecutor {
 
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
@@ -236,6 +239,10 @@ internal class ScreenGeneratorComposeExportExecutor(
        * identifier the three are declared under.
        */
       val widgetFrame: WidgetFrame? = null,
+      /**
+       * A plain Remote body must be recorded and played; it draws nothing when composed directly.
+       */
+      val remoteContent: Boolean = false,
     ) : Generated
 
     data class Refused(val code: String, val reasons: List<String>) : Generated
@@ -328,6 +335,43 @@ internal class ScreenGeneratorComposeExportExecutor(
             preview.name,
             widgetFrame = Generated.WidgetFrame(preview.widthDp, preview.heightDp),
           )
+      }
+    }
+    val platform = catalogPlatform(document.catalogPin.systemId)
+    if (
+      !RecordFreeExport.applies(document) && platform == UiBuilderCatalogPlatform.REMOTE_COMPOSE
+    ) {
+      val packs =
+        when (val resolved = packRecordsFor(document)) {
+          is PackRecords.Refused -> return Generated.Refused(resolved.code, resolved.reasons)
+          is PackRecords.Found -> resolved.records
+        }
+      val records =
+        when (val resolved = recordFreeComponents(document, packs)) {
+          is RecordFreeComponents.Refused ->
+            return Generated.Refused(resolved.code, resolved.reasons)
+          is RecordFreeComponents.Found -> resolved.components
+        }
+      return when (
+        val source =
+          RecordFreeExport.generate(
+            document,
+            platform,
+            packageName,
+            records,
+            document.widgetAssetBytes(),
+          )
+      ) {
+        is RecordFreeExport.Generated.Emitted ->
+          Generated.Emitted(
+            source.source,
+            requireNotNull(source.composableName),
+            remoteContent = true,
+          )
+        is RecordFreeExport.Generated.Refused ->
+          Generated.Refused(UNEXPRESSIBLE_DOCUMENT, source.reasons)
+        null ->
+          Generated.Refused(RECORD_FREE_DESIGN, listOf("no Remote emitter claimed this design"))
       }
     }
     if (RecordFreeExport.applies(document)) {
