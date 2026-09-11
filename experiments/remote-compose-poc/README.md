@@ -172,3 +172,34 @@ the proof retains its original isolated adapter while the production publication
 The existing server also consumes this same artifact with its normal `-PlocalDependencies` option.
 This establishes the supported compiler path; wiring design export and live previews to it in the
 existing editor and MCP is still required.
+
+## Play actual design-to-JSON exports
+
+`RemoteDocumentJsonExporter` in the shared production `ui-builder-export` module now lowers
+authored layout documents to JSON. Generate the exact fixtures and run them through the shared
+compiler and real player:
+
+```shell
+./gradlew :ui-builder-export:jvmTest --tests '*RemoteDocumentJsonPlayerFixturesTest'
+./gradlew -p experiments/remote-compose-poc \
+  -PlocalRcPlayers=/path/to/rc-players \
+  -PlocalJsonCompilerManifest="$PWD/build/local-dependencies/json-compiler/local-dependencies.properties" \
+  -PproductionJsonDir="$PWD/ui-builder-export/build/remote-json-selection" \
+  jvmTest
+```
+
+`ProductionJsonExportTest` exercises five generated scenarios at densities 1 and 2: ordinary and
+adjacent large integers, Int extremes, Boolean selection and 13 cases. It verifies the initial
+branch, ordered click actions, host-driven fallback and retained padding. The Boolean bridge uses
+named integers 0/1; the export result retains the authored state kinds for its host adapter.
+The test explicitly skips when no production fixture directory is supplied.
+
+The initial mapping covers Box/Row/Column, spacing and cross-axis alignment, basic ordered
+modifiers, non-null integer/Boolean selection and numeric/Boolean state writes. Catalog-specific
+components need declared lowering recipes; typography, assets, scoped child alignment, dynamic
+dimensions, String/nullable/Float selection and reusable instances remain to be mapped. Mutable
+String declarations are explicitly refused because the stock parser can give equal initial
+strings the same text ID. A compiler probe pins that identity problem.
+
+This proof now consumes production-generated JSON, but download formats, revision-pinned service
+export and live editor/MCP preview still need to be connected to the shared exporter.

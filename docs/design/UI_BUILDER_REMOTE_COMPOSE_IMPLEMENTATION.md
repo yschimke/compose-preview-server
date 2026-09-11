@@ -171,6 +171,38 @@ This is the verified compiler seam for design-to-JSON and binary export. The exi
 MCP still need to generate those documents and use them for live preview; this compiler PR alone
 does not complete that integration or expand the claimed catalog coverage.
 
+## Shared design-to-JSON lowering
+
+`RemoteDocumentJsonExporter` now lives in the existing multiplatform `ui-builder-export` module.
+It lowers authored Box/Row/Column trees, their spacing and cross-axis alignment, basic ordered
+modifiers, integer/Boolean selection and numeric/Boolean action writes into authoring JSON. The
+original Box carries its modifiers and click handler; bounded expressions precede the StateLayout
+inside it. Case order follows the authored child order. Boolean state is encoded as named integer
+0/1, with its authored kind retained in the export result for the eventual host bridge.
+
+The shared gate returns located refusals for unmapped catalog components and fields instead of
+omitting them. The protocol-document entry point checks predicates, accessibility, asset bindings
+and token bindings before converting to the editor's document shape, so that conversion cannot
+silently drop unsupported semantics. Material components still need catalog-specific recipes or
+their real compilation lane.
+
+`RemoteDocumentJsonPlayerFixturesTest` writes exact output from this exporter.
+`ProductionJsonExportTest` compiles and plays five scenarios at two densities: ordinary integers,
+adjacent integers above Float's exact range, both Int limits, Boolean selection and 13 cases.
+It checks real click dispatch with ordered state writes, host-driven fallback and retained padding.
+The player supplies its normal click indication; branch assertions identify the resulting color
+channel without treating that indication as a change to the authored fill.
+
+A separate compiler probe proves that equal initial String values share a text ID in the stock
+parser. Mutable String export is refused until the owning compiler can preserve independent state
+and literal IDs. Float selection, nullable state, dynamic dimensions, scoped child alignment,
+catalog typography/assets and reusable instances also remain to be mapped.
+
+Verification: 46 shared-export tests and 189 runtime tests pass, the shared module and existing
+editor compile for Wasm, and all 12 proof tests pass, including the ten generated-document scenarios.
+The exporter is implemented and verified; the editor download controls, revision-pinned service
+export and MCP/live-preview integration have not yet been connected to it.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
