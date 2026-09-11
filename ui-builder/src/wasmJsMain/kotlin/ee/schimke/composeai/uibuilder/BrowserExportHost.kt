@@ -16,8 +16,8 @@ import kotlinx.serialization.json.Json
  * ## One address for everything
  *
  * Saved artifacts use the design's **live export URL** —
- * `/api/ui-builder/v1/designs/<id>/export.svg` or `.png`. Current Remote drafts are submitted to
- * `/api/ui-builder/v1/documents/export.json` or `.rc`; the supplied document is captured once per
+ * `/api/ui-builder/v1/designs/<id>/export.svg` or `.png`. Current drafts are submitted to
+ * `/api/ui-builder/v1/documents/export.png`, `.json` or `.rc`; the document is captured once per
  * action. A local design has no Copy link row. Saved links retain the existing guarantee: the link
  * a person copies is the very URL the Copy and Download rows fetched, so what they pasted into
  * Figma and what a colleague opens from the link are the same bytes for the same revision. The
@@ -58,14 +58,14 @@ internal class BrowserExportHost(
 ) : UiBuilderExportHost {
 
   override suspend fun copyPicture(format: EditorExportFormat): String {
-    val document = currentRemoteDocument(format)
+    val document = currentDocument(format)
     val url = sameOriginRequestUrl(if (document == null) livePath(format) else suppliedPath(format))
     val outcome =
       try {
         when (format) {
           EditorExportFormat.Svg,
           EditorExportFormat.Json -> awaitJsString(copySvgTextPromise(url, document))
-          EditorExportFormat.Png -> awaitJsString(copyPngImagePromise(url))
+          EditorExportFormat.Png -> awaitJsString(copyPngImagePromise(url, document))
           EditorExportFormat.Rc -> return "Use Download to save the binary document"
         }
       } catch (failure: Exception) {
@@ -90,7 +90,7 @@ internal class BrowserExportHost(
   }
 
   override suspend fun download(format: EditorExportFormat): String {
-    val document = currentRemoteDocument(format)
+    val document = currentDocument(format)
     val url =
       sameOriginRequestUrl(
         if (document == null) livePath(format, download = true) else suppliedPath(format)
@@ -104,8 +104,8 @@ internal class BrowserExportHost(
     return if (outcome.isEmpty()) "Downloading $designId.${format.extension}" else outcome
   }
 
-  private fun currentRemoteDocument(format: EditorExportFormat): String? =
-    if (format != EditorExportFormat.Json && format != EditorExportFormat.Rc) null
+  private fun currentDocument(format: EditorExportFormat): String? =
+    if (format == EditorExportFormat.Svg) null
     else suppliedDocument?.invoke()?.let { Json.encodeToString(it.toDesignDocumentV1()) }
 
   private fun suppliedPath(format: EditorExportFormat): String =
@@ -227,11 +227,13 @@ private external fun copySvgTextPromise(url: String, document: String?): Promise
  * data URL nobody can paste as a picture. Resolves empty on success.
  */
 @JsFun(
-  """(url) => {
+  """(url, document) => {
     if (!navigator.clipboard || !navigator.clipboard.write || typeof ClipboardItem === 'undefined') {
       return Promise.resolve('this browser cannot copy images (try Download PNG)');
     }
-    const blob = fetch(url).then((response) => {
+    const blob = fetch(url, document == null ? undefined : {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: document,
+    }).then((response) => {
       if (!response.ok) throw new Error('HTTP ' + response.status);
       return response.blob();
     }).then((body) => body.type === 'image/png' ? body : new Blob([body], { type: 'image/png' }));
@@ -247,7 +249,7 @@ private external fun copySvgTextPromise(url: String, document: String?): Promise
     );
   }"""
 )
-private external fun copyPngImagePromise(url: String): Promise<JsString>
+private external fun copyPngImagePromise(url: String, document: String?): Promise<JsString>
 
 /**
  * Saves the file through an anchor click.

@@ -1704,8 +1704,10 @@ public class PersistentUiBuilderService(
     val document = request.document
     fun invalid(message: String) =
       UiBuilderServiceResponse.Error(UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, message))
-    if (request.format !in RemoteDocumentExportSupport.formats) {
-      return invalid("supplied documents support only Remote JSON and RC export")
+    if (
+      request.format != ExportFormatV1.PNG && request.format !in RemoteDocumentExportSupport.formats
+    ) {
+      return invalid("supplied documents support only PNG, Remote JSON and RC export")
     }
     if (document.id.isBlank() || document.revision < 0)
       return invalid("invalid document id or revision")

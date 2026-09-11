@@ -73,6 +73,9 @@ internal fun Route.installUiBuilderLiveExportRoutes(
   get(UI_BUILDER_EXPORT_SVG_PATH) {
     call.serveLiveExport(service, authorization, ExportFormatV1.SVG)
   }
+  post("/api/ui-builder/v1/documents/export.png") {
+    call.serveSuppliedDocument(service, authorization, ExportFormatV1.PNG)
+  }
   RemoteDocumentExportSupport.formats.forEach { format ->
     post("/api/ui-builder/v1/documents/export.${format.name.lowercase()}") {
       call.serveSuppliedDocument(service, authorization, format)

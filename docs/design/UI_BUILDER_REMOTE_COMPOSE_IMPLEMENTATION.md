@@ -335,6 +335,25 @@ Verification: 46 shared-export tests and 189 runtime tests pass, the shared modu
 editor compile for Wasm, and all 12 proof tests pass, including the ten generated-document scenarios.
 The delivery and saved-preview sections above describe its editor, service and MCP integration.
 
+## PNG export from compiled Remote documents
+
+The existing PNG export lane now lowers ordinary Remote layout trees through the shared JSON
+exporter and compiler, then plays those exact `.rc` bytes through the packaged Compose Remote
+player. The render projection contains a single embedded document; the authored hierarchy and
+saved source remain intact. Dimensions, density and font scale come from the authored environment.
+Compiler refusals retain their located diagnostics and return HTTP 422 for downloads.
+
+`POST /api/ui-builder/v1/documents/export.png` accepts current drafts through the existing bounded,
+authorized export service. The existing WASM Export menu enables PNG for local designs and submits
+pending edits without waiting for persistence. Hosted `ui_builder_export_document` and standalone
+`export_document` accept `png` and retain the same artifact digest and diagnostics.
+
+The real renderer proof covers densities 1 and 2, saved and supplied HTTP export, hosted MCP,
+unsupported lowering and a local browser edit. [Evidence and reproduction instructions](
+evidence/ui-builder-remote-png-export/README.md) describe the exact subset exercised.
+Imported documents, custom Remote content and Wear record-free roots keep their existing rendering
+lane; combined JSON lowering of those constructs remains separate work.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
@@ -343,8 +362,6 @@ The delivery and saved-preview sections above describe its editor, service and M
   semantics. Transitions and inactive-branch retention can follow.
 - Enable fully disconnected Remote document compilation; local-storage designs currently use the
   connected host compiler through the same temporary route as hosted and standalone MCP.
-- Route the Export menu's PNG artifact through real Remote rendering. The native-preview route
-  now compiles ordinary Remote roots; generic PNG export still uses the packaged editor renderer.
 - Complete loops, reusable component parameters/callbacks and per-instance addressing through all
   preview and export lanes.
 - Extend typed values, expressions, action sequences, host events and modifier bindings using

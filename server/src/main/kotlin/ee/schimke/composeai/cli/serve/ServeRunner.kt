@@ -2652,7 +2652,8 @@ public class ServeRunner(
     // must be handed the SAME one: a published catalog does not go through the executor's
     // `baseCatalog` copy, so a hardcoded value here would have made every published catalog
     // advertise no SVG or PNG export on a host whose renderer supports both.
-    val exporter = RemoteDocumentExportExecutor(pictureExporter)
+    val documentExporter = RemoteDocumentExportExecutor(pictureExporter)
+    val exporter = RemotePngExportExecutor(documentExporter, renderer)
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
           ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
@@ -2665,7 +2666,7 @@ public class ServeRunner(
       RemoteDocumentExportSupport.capabilities(
         pictureExports,
         json = true,
-        document = exporter.supportsBinary,
+        document = documentExporter.supportsBinary,
       )
     val publishedCatalogs = mutableMapOf<String, CatalogCapabilityV1>()
     // Which catalogs the operator lets read their own published file. Null is "every enabled one",

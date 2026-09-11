@@ -102,26 +102,28 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
         "Read durable UI-builder events after an exclusive sequence cursor.",
         """{"type":"object","properties":{"designId":{"type":"string"},"afterSequence":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":1000}},"required":["designId","afterSequence"]}""",
       ),
-      if (remoteDocumentFormats.isEmpty()) null
+      if (suppliedDocumentFormats.isEmpty()) null
       else
         tool(
           "export_document",
-          "Compile a supplied DesignDocumentV1 as Remote Compose JSON or RC without saving it. " +
+          "Compile a supplied DesignDocumentV1 as PNG, Remote Compose JSON or RC without saving it. " +
             "Use the exact catalog pin and exportCapabilities from list_components. Returns an " +
             "ExportArtifactV1 with compiler diagnostics; error diagnostics mean the content is unusable.",
-          """{"type":"object","properties":{"document":{"type":"object"},"format":{"type":"string","enum":${JsonArray(remoteDocumentFormats.map { JsonPrimitive(it.name.lowercase()) })}}},"required":["document","format"]}""",
+          """{"type":"object","properties":{"document":{"type":"object"},"format":{"type":"string","enum":${JsonArray(suppliedDocumentFormats.map { JsonPrimitive(it.name.lowercase()) })}}},"required":["document","format"]}""",
         ),
     )
 
   /** Returns null when [name] is not owned by this adapter. */
   fun handle(name: String, args: JsonObject): CallToolResult? {
-    if (name == "export_document" && remoteDocumentFormats.isNotEmpty()) {
+    if (name == "export_document" && suppliedDocumentFormats.isNotEmpty()) {
       return try {
         val document = json.decodeFromJsonElement<DesignDocumentV1>(args.required("document"))
         val formatName = args.requiredString("format")
         val format =
-          remoteDocumentFormats.firstOrNull { it.name.equals(formatName, true) }
-            ?: throw IllegalArgumentException("supplied documents support only JSON and RC export")
+          suppliedDocumentFormats.firstOrNull { it.name.equals(formatName, true) }
+            ?: throw IllegalArgumentException(
+              "supplied documents support only PNG, JSON and RC export"
+            )
         val artifact = client.exportDocument(document, format)
         CallToolResult(
           content = listOf(ContentBlock.Text(json.encodeToString(artifact))),
@@ -316,8 +318,8 @@ internal class UiBuilderDesignApiClient(
   }
 
   fun exportDocument(document: DesignDocumentV1, format: ExportFormatV1): ExportArtifactV1 {
-    require(format in remoteDocumentFormats) {
-      "supplied documents support only JSON and RC export"
+    require(format in suppliedDocumentFormats) {
+      "supplied documents support only PNG, JSON and RC export"
     }
     val response = transport.exportDocument(json.encodeToString(document), format)
     if (response.status !in 200..299) {
@@ -395,7 +397,7 @@ private class JdkUiBuilderHttpTransport(baseUrl: String, private val token: Stri
   override fun post(body: String): UiBuilderHttpResponse = post(endpoint, body)
 
   override fun exportDocument(body: String, format: ExportFormatV1): UiBuilderHttpResponse {
-    require(format in remoteDocumentFormats)
+    require(format in suppliedDocumentFormats)
     return post(endpoint.resolve("documents/export.${format.name.lowercase()}?artifact=true"), body)
   }
 
@@ -437,8 +439,10 @@ private class JdkUiBuilderHttpTransport(baseUrl: String, private val token: Stri
   }
 }
 
-private val remoteDocumentFormats =
-  ExportFormatV1.entries.filter { it.name == "JSON" || it.name == "RC" }
+private val suppliedDocumentFormats =
+  ExportFormatV1.entries
+    .filter { it.name == "JSON" || it.name == "RC" }
+    .let { if (it.isEmpty()) it else it + ExportFormatV1.PNG }
 
 private fun UiBuilderRequestV1.requesterActorId(): String? =
   when (this) {

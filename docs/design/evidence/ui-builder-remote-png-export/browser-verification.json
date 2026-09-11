@@ -1,0 +1,20 @@
+{
+  "exports": [
+    {
+      "name": "local-initial",
+      "state": 20,
+      "revision": 0,
+      "sha256": "70921791ae072a1399cfaca86905f156356d65f0f508b6f8d43a8eb7825a2403",
+      "browserMatchesMcp": true
+    },
+    {
+      "name": "local-edited",
+      "state": 30,
+      "revision": 1,
+      "sha256": "ac3427d6123e00ea9445712e9ed381d29dbbd4d583cf42d31d8d156ee6e189ce",
+      "browserMatchesMcp": true
+    }
+  ],
+  "savedOnServer": false,
+  "errors": []
+}

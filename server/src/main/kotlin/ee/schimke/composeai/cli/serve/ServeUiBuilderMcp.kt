@@ -1415,12 +1415,12 @@ class ServeUiBuilderMcp(
           tool(
             EXPORT_DOCUMENT,
             "Compile supplied DesignDocumentV1 content without saving it or reading an existing design. " +
-              "Use an exact catalog pin from ui_builder_list_catalogs. Supports Remote JSON and RC; " +
+              "Use an exact catalog pin from ui_builder_list_catalogs. Supports PNG, Remote JSON and RC; " +
               "returns the same artifact and located diagnostics as saved-document export.",
             """
           {"type":"object","properties":{
             "document":{"type":"object","description":"Complete DesignDocumentV1 content, including its catalog pin."},
-            "format":{"type":"string","enum":["json","rc"]}
+            "format":{"type":"string","enum":["png","json","rc"]}
           },"required":["document","format"],"additionalProperties":false}
           """,
           ),

@@ -785,8 +785,8 @@ private fun LiveSessionApp(
         RemoteDocumentExportSupport.documentFormat?.let {
           RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
         } == true
-      // Local Remote designs send their current content to the temporary export route. Other
-      // native formats still require a saved design; their rows remain absent in local sessions.
+      // PNG and Remote document exports can submit current drafts without saving. SVG still
+      // requires a saved design.
       //
       // And where there is one, it is pinned to the same revision the canvas is drawing, because
       // the export routes render on request: without it the Export menu would answer a question
@@ -806,7 +806,7 @@ private fun LiveSessionApp(
           formats =
             exportFormatsFor(
               svg = !config.localStorage && capability.exportCapabilities.svg,
-              png = !config.localStorage && capability.exportCapabilities.png,
+              png = capability.exportCapabilities.png,
               json =
                 RemoteDocumentExportSupport.jsonFormat?.let {
                   RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
@@ -2044,9 +2044,6 @@ private val identityJson = Json { ignoreUnknownKeys = true }
  * carrying a `/` would address a different route entirely. Either way the broad catch below turns
  * the wrong answer into an empty report, which is silence rather than a visible failure.
  */
-@JsFun("value => encodeURIComponent(value)")
-private external fun encodeUrlComponent(value: String): String
-
 private fun componentDriftPath(designId: String, revision: Long?): String =
   "/api/ui-builder/v1/designs/${encodeUrlComponent(designId)}/component-drift" +
     // The revision on screen, not the head. A design opened at `?revision=` shows the components

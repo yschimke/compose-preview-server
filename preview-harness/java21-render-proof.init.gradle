@@ -1,0 +1,12 @@
+// Opt-in packaged renderer proofs need Java 21, matching the distribution's image-export lane.
+// This does not change the published server's Java 17 floor or the default test launcher.
+gradle.projectsEvaluated {
+  def server = gradle.rootProject.findProject(':server')
+  if (server != null) {
+    server.tasks.withType(Test).configureEach {
+      javaLauncher = server.javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+      }
+    }
+  }
+}

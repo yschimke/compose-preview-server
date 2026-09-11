@@ -113,7 +113,7 @@ class UiBuilderSuppliedDocumentTest {
           put("document", JsonObject(emptyMap()))
           put("format", "rc")
         },
-        JsonObject(args(formats.first()) + ("format" to JsonPrimitive("png"))),
+        JsonObject(args(formats.first()) + ("format" to JsonPrimitive("svg"))),
       )
     for (arguments in invalid) {
       assertThat(requireNotNull(adapter.handle("export_document", arguments)).isError).isTrue()
@@ -128,7 +128,7 @@ class UiBuilderSuppliedDocumentTest {
     val token = requireNotNull(System.getenv("UI_BUILDER_TEST_TOKEN"))
     val client = UiBuilderDesignApiClient.remote(url!!, token)
     val adapter = UiBuilderMcpAdapter(client)
-    for (format in formats) {
+    for (format in formats.filter { it != ExportFormatV1.PNG }) {
       val result = requireNotNull(adapter.handle("export_document", args(format)))
       assertThat(result.isError).isFalse()
       val actual =
@@ -154,14 +154,22 @@ class UiBuilderSuppliedDocumentTest {
   private fun artifact(format: ExportFormatV1, refused: Boolean = false): ExportArtifactV1 {
     val bytes =
       if (refused) byteArrayOf()
-      else if (format.name == "RC") byteArrayOf(0, -1, -128, 42)
+      else if (format.name == "RC" || format == ExportFormatV1.PNG) byteArrayOf(0, -1, -128, 42)
       else "{\"text\":\"Résumé\"}".toByteArray()
     return ExportArtifactV1(
       format = format,
-      mediaType = if (format.name == "RC") "application/octet-stream" else "application/json",
-      encoding = if (format.name == "RC") ExportEncodingV1.BASE64 else ExportEncodingV1.UTF8,
+      mediaType =
+        when (format.name) {
+          "RC" -> "application/octet-stream"
+          "PNG" -> "image/png"
+          else -> "application/json"
+        },
+      encoding =
+        if (format.name == "RC" || format == ExportFormatV1.PNG) ExportEncodingV1.BASE64
+        else ExportEncodingV1.UTF8,
       content =
-        if (format.name == "RC") Base64.getEncoder().encodeToString(bytes)
+        if (format.name == "RC" || format == ExportFormatV1.PNG)
+          Base64.getEncoder().encodeToString(bytes)
         else bytes.decodeToString(),
       contentDigest =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) },
@@ -182,7 +190,10 @@ class UiBuilderSuppliedDocumentTest {
   }
 
   private companion object {
-    val formats = ExportFormatV1.entries.filter { it.name == "JSON" || it.name == "RC" }
+    val formats =
+      ExportFormatV1.entries
+        .filter { it.name == "JSON" || it.name == "RC" }
+        .let { if (it.isEmpty()) it else it + ExportFormatV1.PNG }
     val json = Json {
       encodeDefaults = true
       explicitNulls = false
