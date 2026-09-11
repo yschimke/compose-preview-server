@@ -82,16 +82,20 @@ class UiBuilderMcpAdapterTest {
     val tools = adapter.toolDefs()
 
     assertThat(tools.map { it.name })
-      .containsExactly(
-        "create_design",
-        "open_design",
-        "list_components",
-        "apply_design_operations",
-        "render_design",
-        "export_svg",
-        "export_compose",
-        "export_design",
-        "get_revision_diff",
+      .containsExactlyElementsIn(
+        listOf(
+          "create_design",
+          "open_design",
+          "list_components",
+          "apply_design_operations",
+          "render_design",
+          "export_svg",
+          "export_compose",
+          "export_design",
+          "get_revision_diff",
+        ) +
+          if (ExportFormatV1.entries.any { it.name == "RC" }) listOf("export_document")
+          else emptyList()
       )
       .inOrder()
     assertThat(tools.map { it.inputSchema.jsonObject["type"]?.jsonPrimitive?.content }.distinct())
@@ -336,7 +340,9 @@ class UiBuilderMcpAdapterTest {
     const val ACTOR = "agent:0123456789ab"
     val READ_TOOLS = setOf("open_design", "list_components", "get_revision_diff")
     val WRITE_TOOLS = setOf("create_design", "apply_design_operations")
-    val EXPORT_TOOLS = setOf("render_design", "export_svg", "export_compose", "export_design")
+    val EXPORT_TOOLS =
+      setOf("render_design", "export_svg", "export_compose", "export_design") +
+        if (ExportFormatV1.entries.any { it.name == "RC" }) setOf("export_document") else emptySet()
     val json = Json {
       encodeDefaults = true
       explicitNulls = false

@@ -116,6 +116,7 @@ private suspend fun ApplicationCall.serveExportArtifact(
   outcome: UiBuilderServiceResponse,
   format: ExportFormatV1,
   designId: String,
+  includeArtifact: Boolean = false,
 ) {
   val artifact =
     when (outcome) {
@@ -139,6 +140,17 @@ private suspend fun ApplicationCall.serveExportArtifact(
     respondText(
       "the export answered in ${artifact.format} rather than $format",
       status = HttpStatusCode.InternalServerError,
+    )
+    return
+  }
+  if (includeArtifact) {
+    // Machine clients need the original diagnostics as well as content. The download response
+    // below deliberately refuses error artifacts; this representation preserves that refusal.
+    response.headers.append(HttpHeaders.ETag, "\"${artifact.contentDigest}\"")
+    artifact.servedRevision()?.let { response.headers.append(UI_BUILDER_REVISION_HEADER, it) }
+    respondText(
+      UI_BUILDER_JSON.encodeToString(ExportArtifactV1.serializer(), artifact),
+      ContentType.Application.Json,
     )
     return
   }
@@ -193,7 +205,12 @@ private suspend fun ApplicationCall.serveSuppliedDocument(
     service.execute(
       UiBuilderServiceCall(actor, UiBuilderServiceRequest.ExportDocument(document, format))
     )
-  serveExportArtifact(outcome, format, "document")
+  serveExportArtifact(
+    outcome,
+    format,
+    "document",
+    includeArtifact = request.queryParameters["artifact"] == "true",
+  )
 }
 
 private suspend fun ApplicationCall.authorizeExport(

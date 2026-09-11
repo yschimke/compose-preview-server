@@ -122,6 +122,20 @@ class RemoteDocumentExportExecutorTest {
       val (binaryStatus, draftBytes) = supplied(draft, "rc")
       assertEquals(200, binaryStatus, draftBytes.decodeToString())
       assertContentEquals(RemoteComposeJson.compile(draftSource.decodeToString()), draftBytes)
+      for ((format, expected) in listOf("json" to draftSource, "rc" to draftBytes)) {
+        val (status, body) = supplied(draft, "$format?artifact=true")
+        assertEquals(200, status)
+        val artifact =
+          json.decodeFromString(
+            ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1.serializer(),
+            body.decodeToString(),
+          )
+        val content =
+          if (format == "rc") Base64.getDecoder().decode(artifact.content)
+          else artifact.content.toByteArray()
+        assertContentEquals(expected, content)
+        assertTrue(artifact.diagnostics.any { it.code == "REVISION_PINNED_REMOTE_EXPORT" })
+      }
       assertTrue(assertIs<DesignsResponseV1>(request(ListDesignsRequestV1())).designs.isEmpty())
       assertEquals(401, supplied(draft, "rc", authenticated = false).first)
       assertEquals(
@@ -130,6 +144,19 @@ class RemoteDocumentExportExecutorTest {
           .first,
       )
       assertEquals(400, supplied(draft.copy(roots = listOf("missing")), "rc").first)
+      val unsupported =
+        draft.copy(environment = draft.environment.copy(layoutDirection = LayoutDirectionV1.RTL))
+      assertEquals(422, supplied(unsupported, "rc").first)
+      val (refusalStatus, refusalBody) = supplied(unsupported, "rc?artifact=true")
+      assertEquals(200, refusalStatus)
+      val refusal =
+        json.decodeFromString(ExportArtifactV1.serializer(), refusalBody.decodeToString())
+      assertTrue(
+        refusal.diagnostics.any {
+          it.severity == DiagnosticSeverityV1.ERROR && "environment.layoutDirection" in it.message
+        }
+      )
+      assertEquals("", refusal.content)
       assertTrue(assertIs<DesignsResponseV1>(request(ListDesignsRequestV1())).designs.isEmpty())
       assertIs<SnapshotResponseV1>(request(CreateDesignRequestV1(document)))
       fun storedFiles() =

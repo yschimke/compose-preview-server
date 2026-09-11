@@ -1,0 +1,43 @@
+{
+  "designId": "unsaved-remote-1789125648359",
+  "transport": "standalone MCP stdio -> Design API HTTP",
+  "artifacts": {
+    "json": {
+      "bytes": 1875,
+      "sha256": "e717cb1f62ad6d0cbd4ad4250edf149488773cfd1151388235a57372df79993d",
+      "matchesBrowserDownload": true,
+      "diagnostics": [
+        {
+          "severity": "info",
+          "code": "REVISION_PINNED_REMOTE_EXPORT",
+          "message": "Exported design unsaved-remote-1789125648359 revision 1 (8ede8b266188b02e6f4decff4fa1ac349c5c18b09eece3fdb86a57a3dffb780c)."
+        }
+      ]
+    },
+    "rc": {
+      "bytes": 790,
+      "sha256": "8c38b6adc65002bef353b493ec7cc3296be84f6f2a3039ecf63dc96dccb62ec4",
+      "matchesBrowserDownload": true,
+      "diagnostics": [
+        {
+          "severity": "info",
+          "code": "REVISION_PINNED_REMOTE_EXPORT",
+          "message": "Exported design unsaved-remote-1789125648359 revision 1 (8ede8b266188b02e6f4decff4fa1ac349c5c18b09eece3fdb86a57a3dffb780c)."
+        }
+      ]
+    }
+  },
+  "refusal": [
+    {
+      "severity": "error",
+      "code": "REMOTE_EXPORT_UNSUPPORTED",
+      "message": "environment.layoutDirection: RTL lowering is not available"
+    },
+    {
+      "severity": "info",
+      "code": "REVISION_PINNED_REMOTE_EXPORT",
+      "message": "Exported design unsaved-remote-1789125648359 revision 1 (88a033266364a8cd6bc6b15d6c621338442eb9af81e1be7a850681e29b07f2af)."
+    }
+  ],
+  "savedOnServer": false
+}

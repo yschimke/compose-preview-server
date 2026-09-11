@@ -8,7 +8,10 @@ import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignSubmissionV1
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
+import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.GetDeltaRequestV1
 import ee.schimke.composeai.uibuilder.protocol.HttpRequestEnvelopeV1
@@ -25,7 +28,9 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.security.MessageDigest
 import java.time.Duration
+import java.util.Base64
 import java.util.UUID
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
@@ -45,7 +50,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
  */
 class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesignApiClient) {
   fun toolDefs(): List<ToolDef> =
-    listOf(
+    listOfNotNull(
       tool(
         "create_design",
         "Create and persist a UI-builder design from a complete v1 design document.",
@@ -97,10 +102,38 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
         "Read durable UI-builder events after an exclusive sequence cursor.",
         """{"type":"object","properties":{"designId":{"type":"string"},"afterSequence":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":1000}},"required":["designId","afterSequence"]}""",
       ),
+      if (remoteDocumentFormats.isEmpty()) null
+      else
+        tool(
+          "export_document",
+          "Compile a supplied DesignDocumentV1 as Remote Compose JSON or RC without saving it. " +
+            "Use the exact catalog pin and exportCapabilities from list_components. Returns an " +
+            "ExportArtifactV1 with compiler diagnostics; error diagnostics mean the content is unusable.",
+          """{"type":"object","properties":{"document":{"type":"object"},"format":{"type":"string","enum":${JsonArray(remoteDocumentFormats.map { JsonPrimitive(it.name.lowercase()) })}}},"required":["document","format"]}""",
+        ),
     )
 
   /** Returns null when [name] is not owned by this adapter. */
   fun handle(name: String, args: JsonObject): CallToolResult? {
+    if (name == "export_document" && remoteDocumentFormats.isNotEmpty()) {
+      return try {
+        val document = json.decodeFromJsonElement<DesignDocumentV1>(args.required("document"))
+        val formatName = args.requiredString("format")
+        val format =
+          remoteDocumentFormats.firstOrNull { it.name.equals(formatName, true) }
+            ?: throw IllegalArgumentException("supplied documents support only JSON and RC export")
+        val artifact = client.exportDocument(document, format)
+        CallToolResult(
+          content = listOf(ContentBlock.Text(json.encodeToString(artifact))),
+          isError = artifact.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR },
+        )
+      } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        error(name, "Design API request interrupted")
+      } catch (e: Exception) {
+        error(name, e.message ?: "Design API request failed")
+      }
+    }
     val request =
       try {
         when (name) {
@@ -282,6 +315,38 @@ internal class UiBuilderDesignApiClient(
     return envelope
   }
 
+  fun exportDocument(document: DesignDocumentV1, format: ExportFormatV1): ExportArtifactV1 {
+    require(format in remoteDocumentFormats) {
+      "supplied documents support only JSON and RC export"
+    }
+    val response = transport.exportDocument(json.encodeToString(document), format)
+    if (response.status !in 200..299) {
+      throw UiBuilderApiException("Design API returned HTTP ${response.status}")
+    }
+    val artifact =
+      try {
+        json.decodeFromString(ExportArtifactV1.serializer(), response.body)
+      } catch (e: SerializationException) {
+        throw UiBuilderApiException("Design API returned an invalid export artifact", e)
+      }
+    if (artifact.format != format)
+      throw UiBuilderApiException("Design API returned the wrong export format")
+    val bytes =
+      when (artifact.encoding) {
+        ExportEncodingV1.UTF8 -> artifact.content.toByteArray(Charsets.UTF_8)
+        ExportEncodingV1.BASE64 -> Base64.getDecoder().decode(artifact.content)
+      }
+    val digest =
+      MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    if (artifact.contentDigest != digest || response.contentDigest != "\"$digest\"") {
+      throw UiBuilderApiException("Design API export digest does not match its content")
+    }
+    if (response.revision != document.revision.toString()) {
+      throw UiBuilderApiException("Design API export revision does not match the supplied document")
+    }
+    return artifact
+  }
+
   companion object {
     fun remote(
       baseUrl: String,
@@ -303,9 +368,17 @@ internal class UiBuilderDesignApiClient(
 
 internal fun interface UiBuilderHttpTransport {
   fun post(body: String): UiBuilderHttpResponse
+
+  fun exportDocument(body: String, format: ExportFormatV1): UiBuilderHttpResponse =
+    throw UiBuilderApiException("This transport does not support supplied document exports")
 }
 
-internal data class UiBuilderHttpResponse(val status: Int, val body: String)
+internal data class UiBuilderHttpResponse(
+  val status: Int,
+  val body: String,
+  val contentDigest: String? = null,
+  val revision: String? = null,
+)
 
 internal class UiBuilderApiException(message: String, cause: Throwable? = null) :
   RuntimeException(message, cause)
@@ -319,9 +392,16 @@ private class JdkUiBuilderHttpTransport(baseUrl: String, private val token: Stri
     require(token.isNotBlank()) { "UI-builder token must not be blank" }
   }
 
-  override fun post(body: String): UiBuilderHttpResponse {
+  override fun post(body: String): UiBuilderHttpResponse = post(endpoint, body)
+
+  override fun exportDocument(body: String, format: ExportFormatV1): UiBuilderHttpResponse {
+    require(format in remoteDocumentFormats)
+    return post(endpoint.resolve("documents/export.${format.name.lowercase()}?artifact=true"), body)
+  }
+
+  private fun post(destination: URI, body: String): UiBuilderHttpResponse {
     val request =
-      HttpRequest.newBuilder(endpoint)
+      HttpRequest.newBuilder(destination)
         .timeout(Duration.ofSeconds(60))
         .header("Authorization", "Bearer $token")
         .header("Content-Type", "application/json")
@@ -332,7 +412,12 @@ private class JdkUiBuilderHttpTransport(baseUrl: String, private val token: Stri
     if (bytes.size > MAX_RESPONSE_BYTES) {
       throw UiBuilderApiException("Design API response exceeded $MAX_RESPONSE_BYTES bytes")
     }
-    return UiBuilderHttpResponse(response.statusCode(), bytes.toString(Charsets.UTF_8))
+    return UiBuilderHttpResponse(
+      response.statusCode(),
+      bytes.toString(Charsets.UTF_8),
+      response.headers().firstValue("ETag").orElse(null),
+      response.headers().firstValue("X-UI-Builder-Revision").orElse(null),
+    )
   }
 
   private companion object {
@@ -351,6 +436,9 @@ private class JdkUiBuilderHttpTransport(baseUrl: String, private val token: Stri
     }
   }
 }
+
+private val remoteDocumentFormats =
+  ExportFormatV1.entries.filter { it.name == "JSON" || it.name == "RC" }
 
 private fun UiBuilderRequestV1.requesterActorId(): String? =
   when (this) {

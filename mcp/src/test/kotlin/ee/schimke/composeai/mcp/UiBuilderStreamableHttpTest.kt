@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
+import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.HttpRequestEnvelopeV1
 import ee.schimke.composeai.uibuilder.protocol.HttpResponseEnvelopeV1
 import io.ktor.client.request.delete
@@ -90,15 +91,20 @@ class UiBuilderStreamableHttpTest {
         .jsonArray
         .map { it.jsonObject.getValue("name").jsonPrimitive.content }
     assertThat(toolNames)
-      .containsExactly(
-        "create_design",
-        "open_design",
-        "list_components",
-        "apply_design_operations",
-        "render_design",
-        "export_svg",
-        "export_compose",
-        "get_revision_diff",
+      .containsExactlyElementsIn(
+        listOf(
+          "create_design",
+          "open_design",
+          "list_components",
+          "apply_design_operations",
+          "render_design",
+          "export_svg",
+          "export_compose",
+          "export_design",
+          "get_revision_diff",
+        ) +
+          if (ExportFormatV1.entries.any { it.name == "RC" }) listOf("export_document")
+          else emptyList()
       )
       .inOrder()
 

@@ -54,7 +54,37 @@ compilation. It neither looks up a saved design nor changes saved state, revisio
 records. HTTP tests also compile a supplied document sharing a saved design's ID and verify all
 saved files remain byte-identical. Unsupported content remains a located export refusal.
 
-The temporary endpoint accepts Remote JSON/RC only. Fully disconnected compilation, native PNG
-compilation and the standalone MCP adapter's supplied-document forwarding remain separate work.
+## Standalone MCP
+
+[Standalone verification](standalone-verification.json) comes from the installed
+`compose-preview-mcp` process over MCP stdio, forwarding to a real local server with a short-lived
+`ui-builder-read` / `ui-builder-export` grant. Its `export_document` tool accepts `document` and
+`format`, returns the existing `ExportArtifactV1`, and preserves every diagnostic. It verifies
+format, content SHA-256/ETag and revision. Compiler errors set MCP `isError: true` while retaining the
+located diagnostic; the client does not turn an empty refused artifact into a usable document.
+
+The process proof checks discovery, both exact browser downloads, a located RTL refusal and the
+404 from opening the nonexistent saved design. No create or save operation is issued. The temporary
+HTTP route's `?artifact=true` representation carries the artifact and diagnostics; ordinary downloads
+retain their existing bytes and 422 refusal behavior.
+
+Run after building `:mcp:installDist` and starting a server with
+`--agent-grants --agent-grant-capabilities ui-builder-read,ui-builder-export`:
+
+```sh
+UI_BUILDER_TEST_TOKEN='<read/export grant>' python3 preview-harness/verify-standalone-document-export.py http://127.0.0.1:5626
+```
+
+Use an actual grant bearer here: the server operator token uses a different header and is not a
+standalone MCP bearer. For the optional real-server JVM test, set
+`VERIFY_SUPPLIED_DOCUMENT_SERVER` to the same base URL and `UI_BUILDER_TEST_TOKEN` to that grant.
+The staged full MCP run passes 115 tests, including the real-server test; its separate daemon
+integration test remains opt-in. All four real Remote HTTP/compiler tests pass, and the MCP
+Tooling API boundary and both distribution builds pass. The released dependency floor passes its 12 adapter/HTTP-session tests and omits the new tool;
+the four supplied-document tests require the staged contract formats. The ordinary HTTP-client tests also cover non-root URL prefixes, binary bytes, warning/error
+preservation, corrupt digests, mismatched revisions/formats and rejected authentication.
+
+The temporary endpoint accepts Remote JSON/RC only. Fully disconnected compilation and native PNG
+compilation remain separate work.
 The broader operation-coverage goal is retained in the
 [implementation tracker](../../UI_BUILDER_REMOTE_COMPOSE_IMPLEMENTATION.md).

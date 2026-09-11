@@ -79,8 +79,12 @@ record. The source is self-contained Remote JSON/RC; native image/Kotlin compila
 of saved assets are outside this operation.
 
 Hosted MCP exposes the same operation as `ui_builder_export_document`, with `document` and `format`.
-It returns the normal export artifact and located diagnostics. The standalone MCP adapter's saved
-`export_design` operation remains unchanged; forwarding supplied documents there is still pending.
+It returns the normal export artifact and located diagnostics. Standalone MCP exposes
+`export_document` with the same arguments and the same `ExportArtifactV1`, using the temporary HTTP
+route with `?artifact=true`. That representation preserves diagnostics, including refusals; the
+normal download route still answers 422 when compilation produces errors. The adapter marks a
+refused artifact as an MCP error and checks format, SHA-256/ETag and the supplied revision before
+returning content. It uses the existing contracts and adds no dependency on the server or runtime.
 
 The existing WASM Preview button compiles the current document before a live save completes and
 also works in local-storage mode. Temporary results are labelled “unsaved changes.” Local Remote
@@ -337,8 +341,8 @@ The delivery and saved-preview sections above describe its editor, service and M
   callbacks, preserving the same meaning in the code pane, server preview and export.
 - Extend Remote state selection to String and nullable selectors without changing authored
   semantics. Transitions and inactive-branch retention can follow.
-- Forward supplied-document exports through the standalone MCP adapter; the browser, HTTP and
-  hosted MCP already accept unsaved/local Remote documents.
+- Enable fully disconnected Remote document compilation; local-storage designs currently use the
+  connected host compiler through the same temporary route as hosted and standalone MCP.
 - Extend the native PNG compilation route to ordinary Remote roots; source, JSON, binary export
   and saved-document WASM playback already accept the same semantic tree.
 - Complete loops, reusable component parameters/callbacks and per-instance addressing through all
