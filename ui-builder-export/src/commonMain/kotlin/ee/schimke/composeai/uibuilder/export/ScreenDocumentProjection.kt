@@ -253,13 +253,12 @@ object ScreenDocumentProjection {
       return Outcome.Refused((listOf(counted) + pass.reasons).distinct())
     }
     val root = pass.node(roots.single())
+    val projected = root?.let {
+      pass.finish(ScreenDocument(screenName, it, pass.state.values.toList()))
+    }
     if (pass.reasons.isNotEmpty()) return Outcome.Refused(pass.reasons.distinct())
     return Outcome.Projected(
-      ScreenDocument(
-        name = screenName,
-        root = checkNotNull(root),
-        state = pass.state.values.toList(),
-      ),
+      checkNotNull(projected),
       assetPlaceholders = pass.assetPlaceholders.toList(),
     )
   }
@@ -358,6 +357,9 @@ object ScreenDocumentProjection {
     private fun stateRead(variable: String, where: String): ScreenValue? {
       val declared =
         state[variable] ?: return refuse("$where reads undeclared state variable `$variable`")
+      functionScope?.let { function ->
+        return function.capture("state:$variable", declared.typeFqn) { stateRead(variable, where) }
+      }
       return ScreenValue.StateRead(declared.name, declared.typeFqn)
     }
 
@@ -365,6 +367,7 @@ object ScreenDocumentProjection {
       node.eventBindings.entries
         .mapNotNull { (event, actions) ->
           if (actions.isEmpty()) return@mapNotNull null
+          if (functionScope != null) return@mapNotNull null
           if (event == "click" && node.componentId in MODIFIER_CLICK_COMPONENTS) {
             return@mapNotNull null
           }
@@ -381,27 +384,33 @@ object ScreenDocumentProjection {
       if (node.componentId !in MODIFIER_CLICK_COMPONENTS) return null
       val actions = node.eventBindings["click"].orEmpty()
       if (actions.isEmpty()) return null
-      val projected = actions.mapNotNull { action(it, node.id, "click") }
-      val json = Json
-      // Strict decoding keeps the released generator buildable and refuses the new vocabulary
-      // there. Local generator publications can prove this path before an upstream release.
-      val callback =
-        try {
-          json.decodeFromJsonElement<ScreenValue>(
-            buildJsonObject {
-              put("type", "ee.schimke.composeai.discovery.ScreenValue.ActionLambda")
-              put("actions", json.encodeToJsonElement(projected))
-            }
-          )
-        } catch (_: kotlinx.serialization.SerializationException) {
-          return refuse(
-            "node `${node.id}`: layout clicks need action-lambda support in the shared generator; use a local dependency build or a release containing it"
-          )
-        }
+      val callback = callback(node, "click") ?: return null
       return ChainLink(
         "androidx.compose.foundation.clickable",
         named = mapOf("onClick" to callback),
       )
+    }
+
+    private fun callback(node: DesignNodeV1, event: String): ScreenValue? {
+      functionScope?.let { function ->
+        return function.capture("event:${node.id}:$event", null) { callback(node, event) }
+      }
+      val projected = node.eventBindings[event].orEmpty().mapNotNull { action(it, node.id, event) }
+      val json = Json
+      // Strict decoding keeps the released generator buildable and refuses the new vocabulary
+      // there. Local generator publications can prove this path before an upstream release.
+      return try {
+        json.decodeFromJsonElement<ScreenValue>(
+          buildJsonObject {
+            put("type", "ee.schimke.composeai.discovery.ScreenValue.ActionLambda")
+            put("actions", json.encodeToJsonElement(projected))
+          }
+        )
+      } catch (_: kotlinx.serialization.SerializationException) {
+        return refuse(
+          "node `${node.id}`: layout clicks need action-lambda support in the shared generator; use a local dependency build or a release containing it"
+        )
+      }
     }
 
     private fun action(action: DesignActionV1, nodeId: String, event: String): ScreenAction? {
@@ -435,6 +444,355 @@ object ScreenDocumentProjection {
 
     private val visiting = mutableSetOf<String>()
 
+    private class BoundField(
+      val name: String,
+      val type: String,
+      val convert: (UiValueV1) -> ScreenValue?,
+    )
+
+    private class BindingScope(val row: Boolean) {
+      val fields = linkedMapOf<String, BoundField>()
+    }
+
+    private var bindingScope: BindingScope? = null
+    private var functionScope: FunctionBody? = null
+    private val functions = linkedMapOf<String, FunctionBody>()
+    private val defining = mutableSetOf<String>()
+
+    private inner class FunctionBody(val name: String) {
+      val bindings = BindingScope(row = false)
+      val captures = linkedMapOf<String, Pair<JsonObject, () -> ScreenValue?>>()
+      var root: ScreenNode? = null
+
+      fun capture(key: String, type: String?, supply: () -> ScreenValue?): ScreenValue? {
+        val parameter =
+          captures.getOrPut(key) { parameter("capture${captures.size}", type) to supply }.first
+        return scopedRead(
+          "ParameterRead",
+          "parameter",
+          parameter.getValue("name").jsonPrimitive.content,
+          type ?: "kotlin.Function0",
+        )
+      }
+
+      fun encode(): JsonObject = buildJsonObject {
+        put("name", name)
+        put(
+          "parameters",
+          JsonArray(
+            listOf(parameter("modifier", MODIFIER)) +
+              bindings.fields.values.map { parameter(it.name, it.type) } +
+              captures.values.map { it.first }
+          ),
+        )
+        put("root", Json.encodeToJsonElement(checkNotNull(root)))
+      }
+    }
+
+    private fun parameter(name: String, type: String?): JsonObject = buildJsonObject {
+      put(
+        "type",
+        "ee.schimke.composeai.discovery.ScreenParameter.${if (type == null) "Callback" else "Value"}",
+      )
+      put("name", name)
+      type?.let { put("typeFqn", it) }
+    }
+
+    // The additive shapes are decoded strictly: released generators refuse them while explicitly
+    // staged local publications can execute them. No generated source is assembled in this bridge.
+    private inline fun <reified T> shared(value: JsonElement, feature: String): T? =
+      try {
+        Json.decodeFromJsonElement<T>(value)
+      } catch (_: kotlinx.serialization.SerializationException) {
+        refuse(
+          "$feature needs shared generator support; use a local dependency build or a release containing it"
+        )
+      }
+
+    fun finish(screen: ScreenDocument): ScreenDocument? {
+      if (reasons.isNotEmpty()) return null
+      if (functions.isEmpty()) return screen
+      return shared(
+        JsonObject(
+          Json.encodeToJsonElement(screen).jsonObject +
+            ("functions" to JsonArray(functions.values.map { it.encode() }))
+        ),
+        "reusable components",
+      )
+    }
+
+    private fun scopedRead(kind: String, key: String, name: String, type: String): ScreenValue? =
+      shared(
+        buildJsonObject {
+          put("type", "ee.schimke.composeai.discovery.ScreenValue.$kind")
+          put(key, name)
+          put("typeFqn", type)
+        },
+        "scoped $kind",
+      )
+
+    private fun binding(
+      value: BindingValueV1,
+      type: String,
+      where: String,
+      convert: (UiValueV1) -> ScreenValue?,
+    ): ScreenValue? {
+      val scope =
+        bindingScope ?: return refuse("$where reads `${value.value}` outside a component or loop")
+      val field =
+        scope.fields.getOrPut(value.value) {
+          BoundField("argument${scope.fields.size}", type, convert)
+        }
+      if (field.type != type)
+        return refuse("$where: binding `${value.value}` is used as both ${field.type} and $type")
+      return if (scope.row) scopedRead("RowRead", "field", value.value, type)
+      else scopedRead("ParameterRead", "parameter", field.name, type)
+    }
+
+    private fun supplied(value: UiValueV1, field: BoundField, where: String): ScreenValue? =
+      if (value is BindingValueV1) binding(value, field.type, where, field.convert)
+      else field.convert(value)
+
+    private fun callbackArguments(node: DesignNodeV1): Map<String, ScreenValue> {
+      if (functionScope == null) return emptyMap()
+      return node.eventBindings
+        .filterValues { it.isNotEmpty() }
+        .mapNotNull { (event, _) ->
+          if (event == "click" && node.componentId in MODIFIER_CLICK_COMPONENTS) null
+          else
+            callback(node, event)?.let {
+              ("on" + event.replaceFirstChar { it.uppercaseChar() }) to it
+            }
+        }
+        .toMap()
+    }
+
+    private fun placementNode(placement: DesignNodeV1, scope: String?): ScreenNode? {
+      val instance = checkNotNull(placement.component)
+      val key = instance.componentKey
+      if (
+        placement.componentId != "design/component-instance" ||
+          placement.properties.isNotEmpty() ||
+          placement.slots.isNotEmpty()
+      )
+        return refuse(
+          "node `${placement.id}`: component placement needs design/component-instance with no properties or slots"
+        )
+      val definition =
+        document.components[key]
+          ?: return refuse("node `${placement.id}`: unknown component `$key`")
+      if (key in defining) return refuse("node `${placement.id}`: recursive component `$key`")
+      val function =
+        functions[key]
+          ?: run {
+            // The authored composable name is preserved; the generator validates identifiers and
+            // collisions against state, imports and other definitions before emitting any source.
+            val body = FunctionBody(definition.name)
+            functions[key] = body
+            defining += key
+            val previousBindings = bindingScope
+            val previousFunction = functionScope
+            bindingScope = body.bindings
+            functionScope = body
+            try {
+              // The canvas gives each placement a Box. Its modifiers belong at the call site; the
+              // definition's root receives BoxScope here and cannot inherit the caller's receiver.
+              val modifier =
+                scopedRead("ParameterRead", "parameter", "modifier", MODIFIER) ?: return null
+              body.root =
+                ScreenNode(
+                  BOX_CATALOG_ID,
+                  arguments = mapOf("modifier" to modifier),
+                  slots = mapOf("content" to listOfNotNull(node(definition.root, BOX_SCOPE))),
+                )
+            } finally {
+              bindingScope = previousBindings
+              functionScope = previousFunction
+              defining -= key
+            }
+            body
+          }
+      val arguments = linkedMapOf<String, ScreenValue>()
+      (instance.arguments.keys - function.bindings.fields.keys).forEach {
+        refuse("node `${placement.id}`: component `$key` has no argument `$it`")
+      }
+      function.bindings.fields.forEach { (key, field) ->
+        val raw = instance.arguments[key]
+        if (raw == null) refuse("node `${placement.id}`: missing component argument `$key`")
+        else
+          supplied(raw, field, "node `${placement.id}` argument `$key`")?.let {
+            arguments[field.name] = it
+          }
+      }
+      function.captures.values.forEach { (parameter, supply) ->
+        supply()?.let { arguments[parameter.getValue("name").jsonPrimitive.content] = it }
+      }
+      val wrapper = placement.copy(componentId = BOX_CATALOG_ID, component = null)
+      val wrapperArguments = arguments(wrapper, scope, null)
+      if (
+        wrapper.eventBindings.any { (event, actions) -> event != "click" && actions.isNotEmpty() }
+      )
+        refuse("node `${placement.id}`: only click events can be applied to a component placement")
+      arguments["modifier"] =
+        wrapperArguments["modifier"] ?: ScreenValue.Reference(MODIFIER, typeFqn = MODIFIER)
+      return shared<ScreenNode>(
+        JsonObject(
+          Json.encodeToJsonElement(ScreenNode("", arguments)).jsonObject +
+            ("function" to JsonPrimitive(function.name))
+        ),
+        "node `${placement.id}` component call",
+      )
+    }
+
+    private fun repetitionNode(loop: DesignNodeV1, scope: String?): ScreenNode? {
+      val where = "node `${loop.id}`"
+      loop.properties.keys
+        .filter { it !in setOf("data", "verticalSpacingDp") }
+        .forEach { refuse("$where: unsupported loop property `$it`") }
+      val template = loop.slots["template"]?.singleOrNull()
+      if (template == null || loop.slots.keys != setOf("template"))
+        return refuse("$where: a loop needs exactly one template child")
+      val data =
+        loop.properties["data"] as? ListValueV1
+          ?: return refuse("$where.data: expected an authored list of row objects")
+      if (data.values.size > 10_000) return refuse("$where.data: exceeds 10000 rows")
+      val rowScope = BindingScope(row = true)
+      val previous = bindingScope
+      bindingScope = rowScope
+      val body =
+        try {
+          node(template, COLUMN_SCOPE)
+        } finally {
+          bindingScope = previous
+        }
+      // Fields read by the template provide types even for an empty list. Preserve unused authored
+      // scalar fields too, without inventing a type from an absent first row.
+      data.values.forEachIndexed { index, value ->
+        val fields = (value as? ObjectValueV1)?.fields
+        if (fields == null) refuse("$where.data[$index]: expected a row object")
+        else
+          fields.forEach { (key, raw) ->
+            if (key !in rowScope.fields) {
+              val type = scalarType(raw)
+              if (type == null)
+                refuse("$where.data[$index].$key: cannot infer an unused field's type")
+              else
+                rowScope.fields[key] =
+                  BoundField(key, type) { scalar(it, type, "$where.data.$key") }
+            }
+          }
+      }
+      val rows =
+        data.values.mapIndexed { index, value ->
+          val fields = (value as? ObjectValueV1)?.fields.orEmpty()
+          rowScope.fields
+            .mapNotNull { (key, field) ->
+              val raw = fields[key]
+              if (raw == null) {
+                refuse("$where.data[$index]: missing row field `$key`")
+                null
+              } else supplied(raw, field, "$where.data[$index].$key")?.let { key to it }
+            }
+            .toMap()
+        }
+      val repeated =
+        shared<ScreenNode>(
+          JsonObject(
+            Json.encodeToJsonElement(ScreenNode("", slots = mapOf("body" to listOfNotNull(body))))
+              .jsonObject +
+              ("repetition" to
+                buildJsonObject {
+                  put(
+                    "fields",
+                    Json.encodeToJsonElement(rowScope.fields.mapValues { it.value.type }),
+                  )
+                  put("rows", Json.encodeToJsonElement(rows))
+                })
+          ),
+          "$where repetition",
+        ) ?: return null
+      val wrapper =
+        loop.copy(
+          componentId = "layout/column",
+          properties = loop.properties - "data",
+          slots = emptyMap(),
+        )
+      return ScreenNode(
+        "layout/column",
+        arguments(wrapper, scope, null) + callbackArguments(wrapper),
+        slots = mapOf("content" to listOf(repeated)),
+        handlers = handlers(wrapper),
+      )
+    }
+
+    private fun scalarType(value: UiValueV1): String? =
+      when (value) {
+        is StringValueV1 -> "kotlin.String"
+        is BooleanValueV1 -> "kotlin.Boolean"
+        is IntegerValueV1 -> "kotlin.Int"
+        is DecimalValueV1 -> "kotlin.Float"
+        is ColorValueV1,
+        is ColorTokenValueV1 -> COLOR
+        is StateValueV1 -> state[value.variable]?.typeFqn
+        else -> null
+      }
+
+    private fun scalar(value: UiValueV1, type: String, where: String): ScreenValue? {
+      if (value is StateValueV1) return stateRead(value.variable, where)
+      return when (type) {
+        "kotlin.String" -> (value as? StringValueV1)?.let { ScreenValue.Text(it.value) }
+        "kotlin.Boolean" -> (value as? BooleanValueV1)?.let { ScreenValue.Bool(it.value) }
+        "kotlin.Int" -> (value as? IntegerValueV1)?.let { ScreenValue.Whole(it.value) }
+        "kotlin.Float" -> {
+          val number =
+            when (value) {
+              is IntegerValueV1 -> value.value.toDouble()
+              is DecimalValueV1 -> value.value
+              else -> null
+            }
+          number
+            ?.takeIf { it.toFloat().isFinite() && (it == 0.0 || it.toFloat() != 0f) }
+            ?.let { ScreenValue.Fractional32(it.toFloat()) }
+        }
+        COLOR -> colour(value, where)
+        else -> null
+      } ?: refuse("$where: expected $type")
+    }
+
+    private fun propertyBinding(
+      value: BindingValueV1,
+      node: DesignNodeV1,
+      property: String,
+    ): ScreenValue? {
+      val type =
+        when {
+          PropertyValueKinds.isColour(property) -> COLOR
+          property in setOf("text", "contentDescription", "label", "placeholder", "value") ->
+            "kotlin.String"
+          property in
+            setOf("enabled", "checked", "selected", "expanded", "singleLine", "softWrap") ->
+            "kotlin.Boolean"
+          property in setOf("maxLines", "minLines", "maxValue", "minValue") -> "kotlin.Int"
+          property in setOf("progress", "fraction", "alpha") -> "kotlin.Float"
+          else -> ENUM_MEMBERS[node.componentId]?.get(property)?.typeFqn
+        } ?: return refuse("node `${node.id}`.$property: no binding type mapping")
+      return binding(value, type, "node `${node.id}`.$property") { raw ->
+        if (type.startsWith("kotlin.") || type == COLOR)
+          scalar(raw, type, "node `${node.id}`.$property")
+        else value(raw, node, property)
+      }
+    }
+
+    private fun boundDp(value: BindingValueV1, where: String): ScreenValue? =
+      binding(value, "kotlin.Float", where) { scalar(it, "kotlin.Float", where) }
+        ?.let {
+          ScreenValue.Chain(
+            it,
+            listOf(ChainLink("androidx.compose.ui.unit.dp", property = true)),
+            DP,
+          )
+        }
+
     /**
      * @param scope the receiver of the slot this node sits in, or null at the root.
      *
@@ -457,6 +815,9 @@ object ScreenDocumentProjection {
         return null
       }
       try {
+        if (visiting.size > 128) return refuse("node `$id`: nesting exceeds 128 levels")
+        if (node.component != null) return placementNode(node, scope)
+        if (node.componentId == "layout/for-each") return repetitionNode(node, scope)
         if (SHOW_BY_STATE in node.properties) return selectionNode(node, scope)
         val variant = variantOf(node)
         return ScreenNode(
@@ -465,7 +826,7 @@ object ScreenDocumentProjection {
           // callable with its own record. The catalog says as much itself — its `code.imports`
           // lists all three — and this is the projection acting on it.
           componentId = variant?.canonicalId ?: node.componentId,
-          arguments = arguments(node, scope, variant),
+          arguments = arguments(node, scope, variant) + callbackArguments(node),
           handlers = handlers(node),
           slots =
             node.slots.entries.associate { (slot, children) ->
@@ -509,7 +870,8 @@ object ScreenDocumentProjection {
             else -> return refuse("node `${node.id}` has an invalid selector")
           }
       val subject =
-        if (declared != null) ScreenValue.StateRead(declared.name, type)
+        if (declared != null)
+          stateRead(requireNotNull(variable), "node `${node.id}` selector") ?: return null
         else
           stateLiteral(selection.selector["value"], "node `${node.id}` selector", type)
             ?: return null
@@ -545,7 +907,7 @@ object ScreenDocumentProjection {
       val container = node.copy(properties = node.properties - SHOW_BY_STATE)
       return ScreenNode(
         componentId = container.componentId,
-        arguments = arguments(container, scope, null),
+        arguments = arguments(container, scope, null) + callbackArguments(container),
         handlers = handlers(container),
         slots = mapOf("content" to listOf(selected)),
       )
@@ -917,6 +1279,36 @@ object ScreenDocumentProjection {
       // same list it would have refused with alone.
       val member = enum(entry, node.componentId, axis.property, where) ?: return null
       val spacingWhere = "node `${node.id}`.`${axis.spacing}`"
+      val spacing = node.properties.getValue(axis.spacing)
+      if (spacing is BindingValueV1) {
+        val number =
+          binding(spacing, "kotlin.Float", spacingWhere) {
+            scalar(it, "kotlin.Float", spacingWhere)
+          } ?: return null
+        val alignment = axis.aligned[entry] ?: return member
+        // The canvas treats non-positive spacing as the chosen alignment without a gap.
+        val nonnegative =
+          ScreenValue.Construct(
+            "kotlin.math.max",
+            positional = listOf(ScreenValue.Fractional32(0f), number),
+            typeFqn = "kotlin.Float",
+          )
+        val dp =
+          ScreenValue.Chain(
+            nonnegative,
+            listOf(ChainLink("androidx.compose.ui.unit.dp", property = true)),
+            DP,
+          )
+        return ScreenValue.Construct(
+          "$ARRANGEMENT.spacedBy",
+          positional =
+            listOf(
+              dp,
+              ScreenValue.Reference(ALIGNMENT, listOf(alignment), typeFqn = axis.alignment),
+            ),
+          typeFqn = axis.typeFqn,
+        )
+      }
       val number =
         when (val value = node.properties.getValue(axis.spacing)) {
           is DecimalValueV1 -> value.value
@@ -1481,6 +1873,7 @@ object ScreenDocumentProjection {
     /** The colour a modifier paints with — a literal or a theme role, and nothing else. */
     private fun colour(value: UiValueV1, where: String): ScreenValue? =
       when (value) {
+        is BindingValueV1 -> binding(value, COLOR, where) { colour(it, where) }
         is ColorValueV1 -> color(value.value, where)
         is ColorTokenValueV1 -> token(value.value, COLOR_TOKENS, COLOR, "colour", where)
         else ->
@@ -1679,6 +2072,13 @@ object ScreenDocumentProjection {
         )
       }
       if (target.kind == TargetKind.FLOAT_LAMBDA || target.kind == TargetKind.FLOAT) {
+        if (value is BindingValueV1) {
+          val projected =
+            binding(value, "kotlin.Float", where) { scalar(it, "kotlin.Float", where) }
+              ?: return null
+          return if (target.kind == TargetKind.FLOAT_LAMBDA) ScreenValue.Lambda(projected)
+          else projected
+        }
         val fraction =
           when (value) {
             is DecimalValueV1 -> value.value
@@ -1702,19 +2102,21 @@ object ScreenDocumentProjection {
         return if (target.kind == TargetKind.FLOAT) float else ScreenValue.Lambda(float)
       }
       if (target.kind == TargetKind.SHAPE_TOKEN) {
+        if (value is BindingValueV1)
+          return binding(value, SHAPE, where) { retarget(target, it, node, property, variant) }
         // Only the text spelling needs help. A `shapeToken` wrapper already resolves through the
         // same table in `value`, and the checked-in fixtures use it — narrowing this to strings
         // refused a document that exported before, which is the one thing a widening must not do.
         val name = (value as? StringValueV1)?.value ?: return value(value, node, property)
         return token(name, SHAPE_TOKENS, SHAPE, "shape", where)
       }
-      val number =
+      val dp =
         when (value) {
-          is DecimalValueV1 -> value.value
-          is IntegerValueV1 -> value.value.toDouble()
+          is BindingValueV1 -> boundDp(value, where)
+          is DecimalValueV1 -> dp(value.value)
+          is IntegerValueV1 -> dp(value.value.toDouble())
           else -> return refuse("$where becomes `${target.parameter}`, which needs a number")
-        }
-      val dp = dp(number) ?: return refuse("$where is $number, which does not survive `Dp`")
+        } ?: return refuse("$where does not survive `Dp`")
       return when (target.kind) {
         TargetKind.DP -> dp
         TargetKind.CARD_ELEVATION ->
@@ -1799,17 +2201,7 @@ object ScreenDocumentProjection {
             )
         }
         is EnumValueV1 -> enum(value.value, node.componentId, property, where)
-        // A read of the dictionary in scope — a component placement's arguments, or a loop's row.
-        // Refused rather than read as a literal: this lane projects a node into a call against a
-        // component record, and a binding is an argument of the enclosing *generated* function,
-        // which this projection does not write. The capability exporter does, and names the same
-        // key as a parameter; until this lane grows components, saying so is the whole of what it
-        // can honestly do.
-        is BindingValueV1 ->
-          refuse(
-            "$where reads `${value.value}` from the arguments of the component or loop around it, " +
-              "which this projection does not generate"
-          )
+        is BindingValueV1 -> propertyBinding(value, node, property)
         is StateValueV1 -> stateRead(value.variable, where)
         is StateEqualsValueV1 ->
           refuse(

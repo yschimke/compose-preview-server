@@ -488,9 +488,22 @@ direct-loop and function compile/interaction proofs and WASM compilation.
 
 Both committed generator publications are staged locally. The existing builder passes 954 editor
 tests (one separate opt-in proof skipped), all 65 shared-export tests and WASM/server compilation
-against them. The next consumer step is the semantic loop/component projection into these shared
-forms, followed by exact generated-source and browser/MCP parity. Remote Kotlin still requires its
-corresponding integration; these upstream primitives do not complete the consumer export paths.
+against them.
+
+The semantic loop/component projection now consumes these shared forms. The existing Compose export
+gate emits real typed loops and reusable composables, preserves placement modifiers and passes state
+reads and callbacks explicitly. Nested component calls forward those parameters; nested loops use
+their own row scope while row initializers can read an enclosing row. Missing or conflicting bindings,
+cycles and invalid row data refuse instead of expanding or dropping authored content.
+
+[Production source and compiled interaction evidence](evidence/ui-builder-scoped-compose-export/README.md)
+replaces the ordinary Compose half of the earlier Python prototype. The committed editor fixture's
+exact generated source compiles and matches the independent Remote JSON reference pixel for pixel
+at densities 1 and 2. All twelve physical clicks select the expected state. Browser-gate and service
+executor tests compare the same source, with the service's revision/provenance header checked
+separately. The staged checks pass 74 shared-export tests, 954 editor tests (one separate opt-in
+proof skipped), 60 service tests and WASM compilation. A fresh live browser/MCP check and the equivalent Remote Kotlin integration remain
+required; these shared primitives do not complete all consumer paths.
 
 ## Remaining production work
 
