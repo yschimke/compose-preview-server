@@ -35,6 +35,11 @@ class LegacyIconNamesFixtureTest {
 
   private val resources = File("src/test/resources/material-symbols")
 
+  private companion object {
+    const val CODE_POINTS_PROPERTY = "composeai.materialSymbols.codePoints"
+    const val INVENTORY_PROPERTY = "composeai.materialIcons.inventory"
+  }
+
   /**
    * The file a system property names, or null when the property is absent.
    *
@@ -52,11 +57,19 @@ class LegacyIconNamesFixtureTest {
 
   @Test
   fun `regenerates the fixtures when both pinned inputs are named`() {
-    val codePoints = property("composeai.materialSymbols.codePoints")
-    val inventory = property("composeai.materialIcons.inventory")
+    val codePoints = property(CODE_POINTS_PROPERTY)
+    val inventory = property(INVENTORY_PROPERTY)
+    // Both or neither. One of the two is somebody running the documented command with a typo in
+    // the other half, and treating that as "not regenerating today" is the same silent success the
+    // resolve check above exists to stop — the run passes, the fixtures are untouched, and nobody
+    // learns that the pin bump did not land.
+    check((codePoints == null) == (inventory == null)) {
+      "regeneration needs both -D$CODE_POINTS_PROPERTY and -D$INVENTORY_PROPERTY, or neither; " +
+        "got ${if (codePoints == null) INVENTORY_PROPERTY else CODE_POINTS_PROPERTY} alone"
+    }
     assumeTrue(
-      codePoints != null && inventory != null,
-      "pass -Dcomposeai.materialSymbols.codePoints and -Dcomposeai.materialIcons.inventory to regenerate",
+      codePoints != null,
+      "pass -D$CODE_POINTS_PROPERTY and -D$INVENTORY_PROPERTY to regenerate",
     )
     val raw = codePoints!!.readBytes()
     val digest =
