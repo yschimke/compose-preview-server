@@ -308,13 +308,10 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     val want = expected.properties.filterNot { it.name in builderOwned }.associateBy { it.name }
     val got = actual.properties.associateBy { it.name }
     check("properties", want.keys.sorted(), got.keys.sorted())
-    val relaxed = relaxedRequirements[id].orEmpty()
     for ((name, w) in want) {
       val g = got[name] ?: continue
       check("properties[$name].jsonType", w.jsonType, g.jsonType)
-      if (!(name in relaxed && !w.required && g.required)) {
-        check("properties[$name].required", w.required, g.required)
-      }
+      check("properties[$name].required", w.required, g.required)
       allowed(name, w, g)?.let { out += it }
     }
     return out
@@ -351,16 +348,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "iconAutoMirror",
         )
     )
-
-  /**
-   * Where the frozen shelf is deliberately **less** demanding than the published one.
-   *
-   * `m3/icon`.`iconKey` stopped being required when `iconName` arrived beside it: a node carries
-   * one or the other. Relaxing a requirement cannot break a design the published catalog accepts —
-   * everything it validates, this validates too — so it is recorded here rather than compared. A
-   * property becoming required on either side is still a difference and still fails.
-   */
-  private val relaxedRequirements = mapOf("m3/icon" to setOf("iconKey"))
 
   /**
    * Properties whose allowed values are a GENERATED inventory rather than an authored enumeration.
