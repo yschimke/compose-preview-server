@@ -144,23 +144,70 @@ must not be hidden:
   the node. The alternative — keeping `material-icons-extended` on the classpath purely to draw
   TwoTone — reinstates the bundle cost this lane exists to remove.
 
-## The export
+## The export, and what the icons site tells a developer to do
+
+An exported design has to hand someone an icon the way they would have got one themselves. The
+Google Fonts page offers a developer three things — the SVG, the Android vector drawable, and the
+font plus `font-variation-settings` — and the three export shapes below are those three answers,
+chosen by which export it is rather than by a setting.
+
+### 1. Single-file source: inline path data
 
 `ComposeEmitter` already emits a private `builderIcon(key)` carrying only the icons a design uses.
 It keeps that shape and changes what the arms return: an `ImageVector` built with
 `ImageVector.Builder` and an `addPath(addPathNodes("…"))`, roughly **550 bytes of Kotlin per
-distinct icon**, from the same glyph-to-path call the canvas made.
+distinct icon**, from the same glyph-to-path call the canvas made. One file that compiles on its
+own is what a single-file export is for, and it is the only shape that can carry an arbitrary axis
+combination. The expression allowlist is unchanged — `ImageVector.Builder` and `addPathNodes` are
+both under `androidx.compose`.
 
-That is strictly better than what it replaces:
+### 2. Bundle: `res/drawable`, which is what the site hands an Android developer
 
-- generated source stops importing `androidx.compose.material.icons.*`, so a consumer needs no
-  `material-icons-extended` dependency;
-- an icon at `wght 300, GRAD 200` is expressible, which no `Icons.*` member can be;
-- the daemon renders path data, so the Android/Robolectric lane needs no font and no Skia — which
-  matters, because `ui-builder` targets `jvm` and `wasmJs` and the render bundle does not.
+[`UI_BUILDER_EXPORT_BUNDLE.md`](UI_BUILDER_EXPORT_BUNDLE.md) ships files beside readable source, and
+that is where the icons site's own Android answer belongs: a `<vector>` drawable per icon in
+`res/drawable/`, referenced by `painterResource(R.drawable.ic_search)`. Upstream ships exactly these
+(`symbols/android/<name>/materialsymbolsoutlined/<name>_24px.xml`) for the variants in its static
+matrix, and for any other axis point we generate the same `<vector>` from the same glyph outline —
+strictly more than the site offers, in the shape the site taught.
 
-The expression allowlist is unchanged: `ImageVector.Builder` and `addPathNodes` are both under
-`androidx.compose`.
+### 3. Default axes on a provably identical icon: `Icons.*`
+
+Worth having, because the generated code stays idiomatic and the consumer ships no path data — but
+**only where it is the same picture**, and that is a measurement, not an assumption. Upstream ships
+both sets, so the question is directly checkable: rasterise `src/<category>/<name>/materialiconsoutlined/24px.svg`
+and `symbols/web/<name>/materialsymbolsoutlined/<name>_24px.svg` at 96 px and difference their alpha.
+Over a 50-name sample of the 2,205 names that exist in both:
+
+| Difference | Names | Reading |
+| --- | --- | --- |
+| under 1% | 30 | the same drawing |
+| 1–3% | 8 | a nudged curve |
+| over 3% | 12 | redrawn — `cast_connected` 37%, `help` 31%, `calendar_today` 24% |
+
+So a blanket "defaults use `material-icons-*`" is wrong for about a quarter of the set, and
+silently: the canvas would show a Symbol and the built app a different picture, which is the
+canvas/export fidelity this repo measures everywhere else. The rule instead is **per name, decided
+at build time**: the comparison above runs over all 2,205 shared names and emits an equivalence
+table, the export names `Icons.Outlined.X` only for a name on it at default axes, and everything
+else takes shape 1. A gate keeps the table honest, the same way
+`checkMaterialIconCatalogFixture` does today.
+
+That table is also the honest answer to what `material-icons-extended` is still for: an opt-in the
+*consumer's* build already has, not a dependency of ours.
+
+### Why the canvas is not affected
+
+Whichever shape the export takes, the daemon renders path data, so the Android/Robolectric lane
+needs no font and no Skia — which matters, because `ui-builder` targets `jvm` and `wasmJs` and the
+render bundle does not.
+
+### Not a fourth shape: the font in `res/font`
+
+Shipping the variable font with the consumer's app and drawing ligatures with
+`FontVariation.Settings` is the literal translation of what the site recommends for the web, and it
+costs that app 10.68 MB to draw three icons. It is the right answer for an app using hundreds, and
+the wrong default for an exported design, so it is not built — noted here so the next person does
+not have to re-derive why.
 
 ## The picker
 
@@ -178,8 +225,9 @@ and a typeface clone is a Skia handle, not a re-parse of 10 MB.
    the existing picker, drawing the default axis point only.
 2. The property change on `m3/icon`, the legacy-key mapping, and the catalog contract.
 3. The picker's customise panel.
-4. The export change and the removal of the generated Kotlin, `material-icons-extended` and
-   `MaterialIconCatalogTasks`.
+4. The export change — inline path data, the `res/drawable` bundle shape, and the build-time
+   equivalence table behind `Icons.*` — and the removal of the generated Kotlin,
+   `material-icons-extended` and `MaterialIconCatalogTasks`.
 
 Slice 1 alone returns the 17.8 MB.
 
@@ -193,5 +241,7 @@ Slice 1 alone returns the 17.8 MB.
   paint before 4.8 MB has arrived, and they are worth revisiting if that fetch is felt — but
   shipping 42 of them is the data-file deployment again under another name.
 - **Tag and category search**, per above.
-- **The legacy Material Icons set.** `material-icons-extended` leaves the build; Material Symbols
-  is the set Google maintains.
+- **The legacy Material Icons set, as something we draw from.** `material-icons-extended` leaves
+  *our* build — nothing in the editor, the canvas or the daemon resolves an `Icons.*` member any
+  more. It survives only as a name the export may print, for a consumer who already depends on it,
+  under the equivalence table above.
