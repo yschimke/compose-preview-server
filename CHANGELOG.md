@@ -1,5 +1,39 @@
 # Changelog
 
+## [3.24.0](https://github.com/yschimke/compose-preview-server/compare/v3.23.0...v3.24.0) (2026-09-11)
+
+
+### Features
+
+* **serve:** report when a design's shared components have moved ([#702](https://github.com/yschimke/compose-preview-server/issues/702)) ([46b1b8f](https://github.com/yschimke/compose-preview-server/commit/46b1b8f6b6f7ed5aa35e40174745d33ba2effc8c))
+* **serve:** serve a captured Remote Compose document as JSON ([#698](https://github.com/yschimke/compose-preview-server/issues/698)) ([596362c](https://github.com/yschimke/compose-preview-server/commit/596362c9db1e9fd90914befabfeff3f26f5a2821))
+* **ui-builder:** expose complete Material icon catalog ([#710](https://github.com/yschimke/compose-preview-server/issues/710)) ([9f8a1e3](https://github.com/yschimke/compose-preview-server/commit/9f8a1e373d8c3602e3839dc01ab351b212eb3b90))
+* **ui-builder:** finish the m3 and remote-m3 cutover, and unstick main ([#713](https://github.com/yschimke/compose-preview-server/issues/713)) ([9df971c](https://github.com/yschimke/compose-preview-server/commit/9df971cbbeaf7b54e49808e20b818457c39185a1))
+* **ui-builder:** let a design already open declare, place and drop a component ([#712](https://github.com/yschimke/compose-preview-server/issues/712)) ([5977571](https://github.com/yschimke/compose-preview-server/commit/59775718dea7ef375017e66fdd61f68edd8c55cf))
+* **ui-builder:** make a published m3 catalog exportable — 83 of 110, from none ([#703](https://github.com/yschimke/compose-preview-server/issues/703)) ([e82cbcf](https://github.com/yschimke/compose-preview-server/commit/e82cbcfed7fdd7e038c47c05c5e4c6bb70be3d6f))
+
+
+### Bug Fixes
+
+* **build:** name composePreviewBundle after the plugin registers it ([#725](https://github.com/yschimke/compose-preview-server/issues/725)) ([d945fc8](https://github.com/yschimke/compose-preview-server/commit/d945fc8e62a1062baaf825e83ed857dedc20073e))
+* **build:** refresh the usage-source-psi vendor for Kotlin 2.4.20 ([#722](https://github.com/yschimke/compose-preview-server/issues/722)) ([641583f](https://github.com/yschimke/compose-preview-server/commit/641583fc642dbbb44c1ba065a31d930c8131c063))
+* **deps:** update compose-ai-tools to v2.8.0 ([#723](https://github.com/yschimke/compose-preview-server/issues/723)) ([01027b3](https://github.com/yschimke/compose-preview-server/commit/01027b3249de54a17a244300a6f122984f0d5ede))
+* **deps:** update compose-ai-tools to v3.2.0 ([#718](https://github.com/yschimke/compose-preview-server/issues/718)) ([7ff39bf](https://github.com/yschimke/compose-preview-server/commit/7ff39bfed59117d0d9c1bd691feb1dd865cb3eb5))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.60.2 ([#716](https://github.com/yschimke/compose-preview-server/issues/716)) ([b38bb5f](https://github.com/yschimke/compose-preview-server/commit/b38bb5fb237b960b4991ab34be1650d59bdbeb1a))
+* **deps:** update kotlin to v2.4.20 ([#717](https://github.com/yschimke/compose-preview-server/issues/717)) ([2df9e30](https://github.com/yschimke/compose-preview-server/commit/2df9e30fc26d8ef940e1cbd6cf838d5f684aef34))
+* **mcp:** construct RenderResult with the artifact daemon 3.2.0 expects ([#724](https://github.com/yschimke/compose-preview-server/issues/724)) ([1ff112c](https://github.com/yschimke/compose-preview-server/commit/1ff112c9aad5cd4cd8a8195b3ab84dbd52409526))
+* **playground:** report the compiler's actual error, not "compilation failed" ([#709](https://github.com/yschimke/compose-preview-server/issues/709)) ([f8dc0bf](https://github.com/yschimke/compose-preview-server/commit/f8dc0bfcd6f247ff53126014e1ae794d5a51494e))
+* **preview:** align comparison and editor controls ([#700](https://github.com/yschimke/compose-preview-server/issues/700)) ([dc537cf](https://github.com/yschimke/compose-preview-server/commit/dc537cf37b8df6be9b8b95864385fb01768176d0))
+* **serve:** align preview comparison controls ([#701](https://github.com/yschimke/compose-preview-server/issues/701)) ([51bb950](https://github.com/yschimke/compose-preview-server/commit/51bb95033be5bc79c8ab96588c6bd393be6a77db))
+* **serve:** score the displayed preview frame ([#704](https://github.com/yschimke/compose-preview-server/issues/704)) ([bcdc524](https://github.com/yschimke/compose-preview-server/commit/bcdc524e3365aa8b493c0b68c329225d6c35bd95))
+* **ui-builder:** a component root is not a second parent of its own body ([#720](https://github.com/yschimke/compose-preview-server/issues/720)) ([9f1277d](https://github.com/yschimke/compose-preview-server/commit/9f1277d540b0369c92f835875cb6e864e9006a87))
+* **ui-builder:** feed the drift report to the editor and stop calling it a blocker ([#705](https://github.com/yschimke/compose-preview-server/issues/705)) ([df8c8ed](https://github.com/yschimke/compose-preview-server/commit/df8c8ed249aa53ac667cb9e279f6316bddea864a))
+* **ui-builder:** fit full icon catalog in CI ([#711](https://github.com/yschimke/compose-preview-server/issues/711)) ([e9080e5](https://github.com/yschimke/compose-preview-server/commit/e9080e50d064293f7482d35c25560b6effa7b913))
+* **ui-builder:** hold a component placement to the body it draws ([#715](https://github.com/yschimke/compose-preview-server/issues/715)) ([228304f](https://github.com/yschimke/compose-preview-server/commit/228304fd92039b06bed57e06ff4d6c4a05e88e15))
+* **ui-builder:** name a component the canvas cannot draw, don't call it an error ([#727](https://github.com/yschimke/compose-preview-server/issues/727)) ([12819a9](https://github.com/yschimke/compose-preview-server/commit/12819a96fc6438dc8a13638f202ab71aae06df2f))
+* **ui-builder:** the root-surface notice is not an export refusal either ([#707](https://github.com/yschimke/compose-preview-server/issues/707)) ([f9b24c0](https://github.com/yschimke/compose-preview-server/commit/f9b24c093338d16a5802bfc1b18ebf06f55e7cbb))
+* **ui-builder:** version-check a published record, restore nativePreview's ABI, and fix the gate that missed it ([#693](https://github.com/yschimke/compose-preview-server/issues/693)) ([9fe0b62](https://github.com/yschimke/compose-preview-server/commit/9fe0b6297496bdee1d43916c71ddbf62126cec53))
+
 ## [3.23.0](https://github.com/yschimke/compose-preview-server/compare/v3.22.0...v3.23.0) (2026-09-10)
 
 
