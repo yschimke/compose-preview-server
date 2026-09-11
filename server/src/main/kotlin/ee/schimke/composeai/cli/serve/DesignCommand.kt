@@ -484,5 +484,10 @@ internal fun ExportFormatV1?.extension(): String =
     ExportFormatV1.COMPOSE -> "kt"
     // An archive: source plus the picture bytes as files. `application/zip` per the contract.
     ExportFormatV1.BUNDLE -> "zip"
+    // Added by contracts 2.17.0. A remote document is `.rc`, and its JSON form is `.json` —
+    // the same extension a null format already means here, because both are the design's own
+    // JSON.
+    ExportFormatV1.JSON -> "json"
+    ExportFormatV1.RC -> "rc"
     null -> "json"
   }
