@@ -41,6 +41,8 @@ enum class EditorExportFormat(
 ) {
   Svg("SVG", "svg"),
   Png("PNG", "png"),
+  Json("JSON", "json"),
+  Rc("Remote document (.rc)", "rc"),
 }
 
 /** What the host does with a design's picture; see [EditorExportFormat]. */
@@ -79,6 +81,8 @@ sealed interface EditorExportMenuEntry {
         when (format) {
           EditorExportFormat.Svg -> "Paste into Figma as editable layers"
           EditorExportFormat.Png -> "Paste anywhere as a picture"
+          EditorExportFormat.Json -> "Editable Remote Compose source"
+          EditorExportFormat.Rc -> "Use Download to save the binary document"
         }
   }
 
@@ -112,7 +116,7 @@ fun exportMenuEntries(formats: List<EditorExportFormat>): List<List<EditorExport
   if (formats.isEmpty()) emptyList()
   else
     listOf(
-      formats.map(EditorExportMenuEntry::CopyPicture),
+      formats.filter { it != EditorExportFormat.Rc }.map(EditorExportMenuEntry::CopyPicture),
       formats.map(EditorExportMenuEntry::CopyLink),
       formats.map(EditorExportMenuEntry::Download),
     )
@@ -132,7 +136,14 @@ suspend fun UiBuilderExportHost.perform(entry: EditorExportMenuEntry): String =
  * compose-preview-contracts and `commonMain` has no reason to depend on it for two flags. SVG leads
  * for the reason [exportMenuEntries] gives.
  */
-fun exportFormatsFor(svg: Boolean, png: Boolean): List<EditorExportFormat> = buildList {
+fun exportFormatsFor(
+  svg: Boolean,
+  png: Boolean,
+  json: Boolean = false,
+  rc: Boolean = false,
+): List<EditorExportFormat> = buildList {
   if (svg) add(EditorExportFormat.Svg)
   if (png) add(EditorExportFormat.Png)
+  if (json) add(EditorExportFormat.Json)
+  if (rc) add(EditorExportFormat.Rc)
 }

@@ -796,6 +796,14 @@ private fun LiveSessionApp(
               exportFormatsFor(
                 svg = capability.exportCapabilities.svg,
                 png = capability.exportCapabilities.png,
+                json =
+                  RemoteDocumentExportSupport.jsonFormat?.let {
+                    RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
+                  } == true,
+                rc =
+                  RemoteDocumentExportSupport.documentFormat?.let {
+                    RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
+                  } == true,
               ),
             revision = revision,
           )

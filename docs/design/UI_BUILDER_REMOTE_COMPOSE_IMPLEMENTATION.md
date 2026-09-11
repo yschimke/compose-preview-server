@@ -5,6 +5,52 @@ The scope and operation census are in
 The runnable proof is in [experiments/remote-compose-poc](../../experiments/remote-compose-poc/README.md).
 This document tracks production implementation; it does not redefine completion around the proof.
 
+## Authoring boundary
+
+The visual editor focuses on layouts. Its tree remains a semantic hierarchy of components, layouts,
+state and actions; it is not the flat Remote Compose operation stream. Richer authoring can live in
+MCP without requiring a visual control for every operation. Precise lowering belongs in the export
+layer. Common concepts keep their Compose mappings, including selection as `when`.
+
+## JSON and binary export delivery
+
+The existing service, WASM Export menu and MCP now route Remote document exports through the shared
+`RemoteDocumentJsonExporter`. The JSON source is UTF-8; `.rc` is compiled by the existing offline
+`remotecompose-json` publication and travels as base64 in the protocol. Both are revision-pinned and
+content-digested. HTTP downloads return diagnostics as 422 responses, rather than offering a partial
+or empty document as a successful file.
+
+[Contracts PR #63](https://github.com/yschimke/compose-preview-contracts/pull/63) declares `json` / `rc`
+and independently advertised `remoteJson` / `remoteDocument` flags. The host advertises them only for
+catalogs declaring the Remote Compose platform. The binary flag also requires a successful compiler
+profile probe. The temporary strict-serialization bridge keeps builds on released contracts usable;
+without local contracts the new formats are unadvertised. Remove that bridge when the release is
+pinned. Local contracts and the compiler can be staged into one manifest:
+
+```shell
+python3 scripts/stage-local-dependency.py --checkout /path/to/contracts --module :ui-builder-protocol --output build/local-dependencies/remote-export
+python3 scripts/stage-local-dependency.py --checkout /path/to/compose-ai-tools --module :remotecompose-json --output build/local-dependencies/remote-export
+VERIFY_REMOTE_DOCUMENT_EXPORTS=true ./gradlew -PlocalDependencies=build/local-dependencies/remote-export/local-dependencies.properties :server:test --tests '*RemoteDocumentExportExecutorTest' --tests '*ServeUiBuilderRoutesTest' :mcp:test --tests '*UiBuilderMcpAdapterTest' :ui-builder:jvmTest --tests '*EditorExportMenuTest' :ui-builder:wasmFrontendDist :server:installDist
+```
+
+The hosted `ui_builder_export` accepts these formats. Standalone MCP adds `export_design`, with an
+explicit revision and a format enum derived from its installed contracts; its existing source and
+image tools remain available. Catalog capabilities determine which declared formats a host supports.
+
+The staged checks pass 32 targeted tests, including a real persistent-service HTTP proof. The existing
+WASM app's actual menu downloads a 757-byte document; the revision-pinned HTTP endpoint and hosted MCP
+return identical bytes and SHA-256. The browser and hosted MCP also agree on the 1,659-byte JSON
+source. [Browser evidence and measurements](evidence/ui-builder-document-exports/README.md)
+record the sample and the distinction between delivery and preview fidelity. The released-floor
+runtime suite, ABI, 46 shared-export tests, targeted HTTP/MCP/menu checks and Wasm compilation also
+pass; new-format-only tests skip explicitly without staged contracts. Golden regeneration changes
+no committed fixtures.
+
+This completes the delivery path for the current lowering subset, not Remote Compose completeness.
+Live JSON/binary preview integration, broader component recipes and modifier mappings, independent
+String state, nullable/computed values, callbacks, loop/reusable fidelity, and the operation coverage
+remaining in the review are still required.
+
 ## Authoring state and actions
 
 The browser's Screen panel can add, edit and remove state declarations. The Layer inspector can

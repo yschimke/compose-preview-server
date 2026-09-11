@@ -2,6 +2,7 @@
 
 package ee.schimke.composeai.uibuilder.service
 
+import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.protocol.*
 import java.io.Closeable
 import java.io.IOException
@@ -4213,8 +4214,7 @@ private fun CatalogCapabilityV1.supports(format: ExportFormatV1): Boolean =
     ExportFormatV1.PNG -> exportCapabilities.png
     // Defaults to false in the contract, and no catalog here sets it, so a BUNDLE export is
     // refused as BAD_REQUEST at the gate above until the server can actually write one
-    // (yschimke/compose-preview-server#528). No `else`: the next format added should fail this
-    // compile rather than silently read as unsupported.
+    // (yschimke/compose-preview-server#528). Remote formats are optional in the staged contracts.
     ExportFormatV1.BUNDLE -> exportCapabilities.bundle
     // Added by compose-preview-contracts 2.17.0, and read the same way: the capability decides,
     // and no catalog here sets either, so both are refused at this gate until something can write

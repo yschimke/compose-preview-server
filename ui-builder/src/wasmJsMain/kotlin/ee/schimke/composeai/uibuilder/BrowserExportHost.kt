@@ -57,13 +57,17 @@ internal class BrowserExportHost(
     val outcome =
       try {
         when (format) {
-          EditorExportFormat.Svg -> awaitJsString(copySvgTextPromise(url))
+          EditorExportFormat.Svg,
+          EditorExportFormat.Json -> awaitJsString(copySvgTextPromise(url))
           EditorExportFormat.Png -> awaitJsString(copyPngImagePromise(url))
+          EditorExportFormat.Rc -> return "Use Download to save the binary document"
         }
       } catch (failure: Exception) {
         return "Copy ${format.label} failed: ${failure.message?.trimJsError() ?: "unknown error"}"
       }
-    return if (outcome.isEmpty()) "${format.label} copied — paste it into Figma" else outcome
+    return if (outcome.isNotEmpty()) outcome
+    else if (format == EditorExportFormat.Json) "JSON source copied"
+    else "${format.label} copied — paste it into Figma"
   }
 
   override suspend fun copyLink(format: EditorExportFormat): String {

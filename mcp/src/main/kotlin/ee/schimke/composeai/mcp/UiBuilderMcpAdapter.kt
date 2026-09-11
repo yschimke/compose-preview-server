@@ -30,6 +30,7 @@ import java.util.UUID
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -85,6 +86,13 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
         revisionSchema,
       ),
       tool(
+        "export_design",
+        "Export a committed design revision in a catalog-supported format. Read exportCapabilities " +
+          "from list_components first. JSON is editable Remote Compose source; RC is a compiled " +
+          "binary document. Inspect artifact diagnostics before using the content.",
+        """{"type":"object","properties":{"designId":{"type":"string"},"revision":{"type":"integer","minimum":0},"format":{"type":"string","enum":${JsonArray(ExportFormatV1.entries.map { JsonPrimitive(it.name.lowercase()) })}}},"required":["designId","revision","format"]}""",
+      ),
+      tool(
         "get_revision_diff",
         "Read durable UI-builder events after an exclusive sequence cursor.",
         """{"type":"object","properties":{"designId":{"type":"string"},"afterSequence":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":1000}},"required":["designId","afterSequence"]}""",
@@ -109,6 +117,13 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
           "render_design" -> args.exportRequest(ExportFormatV1.PNG)
           "export_svg" -> args.exportRequest(ExportFormatV1.SVG)
           "export_compose" -> args.exportRequest(ExportFormatV1.COMPOSE)
+          "export_design" -> {
+            val name = args.requiredString("format")
+            val format =
+              ExportFormatV1.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }
+                ?: throw IllegalArgumentException("unknown export format: $name")
+            args.exportRequest(format)
+          }
           "get_revision_diff" ->
             GetDeltaRequestV1(
               designId = args.requiredString("designId"),

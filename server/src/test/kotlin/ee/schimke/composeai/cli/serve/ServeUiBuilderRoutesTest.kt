@@ -451,6 +451,67 @@ class ServeUiBuilderRoutesTest {
     assertEquals(before, calls.size, "a malformed revision must not reach the service")
   }
 
+  @Test
+  fun `document routes preserve pinned bytes and refuse diagnostic errors as HTTP failures`() {
+    val formats = ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.formats
+    if (System.getenv("VERIFY_REMOTE_DOCUMENT_EXPORTS") == "true") assertEquals(2, formats.size)
+    org.junit.jupiter.api.Assumptions.assumeTrue(formats.isNotEmpty())
+    for (format in formats) {
+      val binary = format.name == "RC"
+      val bytes = if (binary) byteArrayOf(0, 127, -128, -1) else "{\"root\":{}}".toByteArray()
+      exportAnswer = { request ->
+        UiBuilderServiceResponse.Export(
+          ExportArtifactV1(
+            format = request.format,
+            mediaType = if (binary) "application/octet-stream" else "application/json",
+            encoding = if (binary) ExportEncodingV1.BASE64 else ExportEncodingV1.UTF8,
+            content =
+              if (binary) java.util.Base64.getEncoder().encodeToString(bytes)
+              else bytes.decodeToString(),
+            contentDigest = "document-digest",
+            diagnostics =
+              listOf(
+                ExportDiagnosticV1(
+                  DiagnosticSeverityV1.INFO,
+                  "REVISION_PINNED_REMOTE_EXPORT",
+                  "Exported design design-1 revision 3 (hash).",
+                )
+              ),
+          )
+        )
+      }
+      val suffix = "export.${format.name.lowercase()}?revision=3&download=1"
+      assertEquals(401, liveExport(null, suffix).use { it.code })
+      liveExport("actor", suffix).use {
+        assertEquals(200, it.code)
+        assertEquals("3", it.header(UI_BUILDER_REVISION_HEADER))
+        assertEquals("\"document-digest\"", it.header("ETag"))
+        assertTrue(bytes.contentEquals(it.body.bytes()))
+      }
+      val previous = exportAnswer
+      exportAnswer = { request ->
+        val artifact = (previous(request) as UiBuilderServiceResponse.Export).artifact
+        UiBuilderServiceResponse.Export(
+          artifact.copy(
+            diagnostics =
+              listOf(
+                ExportDiagnosticV1(
+                  DiagnosticSeverityV1.ERROR,
+                  "REMOTE_EXPORT_UNSUPPORTED",
+                  "nodes[choice]: unmapped component",
+                )
+              )
+          )
+        )
+      }
+      liveExport("actor", suffix).use {
+        assertEquals(422, it.code)
+        assertTrue(it.body.string().contains("nodes[choice]"))
+        assertNull(it.header("Content-Disposition"))
+      }
+    }
+  }
+
   private fun liveExport(
     authenticatedActor: String?,
     suffix: String,

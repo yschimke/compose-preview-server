@@ -15,6 +15,7 @@ import ee.schimke.composeai.render.session.RenderSessionException
 import ee.schimke.composeai.render.session.RenderSessionFactory
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -2632,7 +2633,7 @@ public class ServeRunner(
         assetStore = assetStore,
         publishedComponents = { systemId -> publishedRecords[systemId].orEmpty() },
       )
-    val exporter =
+    val pictureExporter =
       renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
         ?: compose
     // The published half of the catalog contract: an enabled catalog that publishes its own
@@ -2647,14 +2648,21 @@ public class ServeRunner(
     // must be handed the SAME one: a published catalog does not go through the executor's
     // `baseCatalog` copy, so a hardcoded value here would have made every published catalog
     // advertise no SVG or PNG export on a host whose renderer supports both.
-    val uiBuilderExports =
-      ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
+    val exporter = RemoteDocumentExportExecutor(pictureExporter)
+    val pictureExports =
+      ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
           ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
             composeCode = true,
             svg = false,
             png = false,
           ))
         .copy(composeCode = composeExportConfigured)
+    val uiBuilderExports =
+      RemoteDocumentExportSupport.capabilities(
+        pictureExports,
+        json = true,
+        document = exporter.supportsBinary,
+      )
     val publishedCatalogs = mutableMapOf<String, CatalogCapabilityV1>()
     // Which catalogs the operator lets read their own published file. Null is "every enabled one",
     // which is the behaviour the loader shipped with; an empty set turns the whole path off without

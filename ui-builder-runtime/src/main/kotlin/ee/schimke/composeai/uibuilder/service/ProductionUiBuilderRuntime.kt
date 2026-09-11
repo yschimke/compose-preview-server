@@ -2,6 +2,7 @@
 
 package ee.schimke.composeai.uibuilder.service
 
+import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
 import ee.schimke.composeai.uibuilder.STATE_SELECTION_CONTAINER
 import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
@@ -283,7 +284,19 @@ public class CurrentM3UiBuilderCatalogExecutor(
                   )
               },
             exportCapabilities =
-              catalog.exportCapabilities.copy(composeCode = composeExportFor(systemId)),
+              RemoteDocumentExportSupport.capabilities(
+                catalog.exportCapabilities.copy(composeCode = composeExportFor(systemId)),
+                json =
+                  catalog.platform == "remote-compose" &&
+                    RemoteDocumentExportSupport.jsonFormat?.let {
+                      RemoteDocumentExportSupport.supports(exportCapabilities, it)
+                    } == true,
+                document =
+                  catalog.platform == "remote-compose" &&
+                    RemoteDocumentExportSupport.documentFormat?.let {
+                      RemoteDocumentExportSupport.supports(exportCapabilities, it)
+                    } == true,
+              ),
           )
           .withPacks(packs.filter { it.platform == catalog.platform })
       }

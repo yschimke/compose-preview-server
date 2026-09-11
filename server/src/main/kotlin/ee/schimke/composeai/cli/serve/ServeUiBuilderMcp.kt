@@ -1379,7 +1379,7 @@ class ServeUiBuilderMcp(
           {"type":"object","properties":{
             "designId":{"type":"string"},
             "revision":{"type":"integer"},
-            "format":{"type":"string","description":"compose, svg or png. Defaults to compose."}
+            "format":{"type":"string","description":"Defaults to compose. Available formats: ${ExportFormatV1.entries.joinToString(", ") { it.name.lowercase() }}. Check the catalog exportCapabilities; JSON is authoring source and RC is a compiled Remote document."}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),

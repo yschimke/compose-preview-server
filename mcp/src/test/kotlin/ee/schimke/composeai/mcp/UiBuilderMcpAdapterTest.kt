@@ -60,7 +60,25 @@ class UiBuilderMcpAdapterTest {
   private val adapter = UiBuilderMcpAdapter(client)
 
   @Test
-  fun `advertises the exact eight UI builder tools with object schemas`() {
+  fun `generic export pins every declared format to the requested revision`() {
+    for (format in ExportFormatV1.entries) {
+      adapter.handle(
+        "export_design",
+        buildJsonObject {
+          put("designId", "screen")
+          put("revision", 42)
+          put("format", format.name.lowercase())
+        },
+      )
+      val request = requests.last().request as ExportDesignRequestV1
+      assertThat(request.format).isEqualTo(format)
+      assertThat(request.revision).isEqualTo(42L)
+      assertThat(request.designId).isEqualTo("screen")
+    }
+  }
+
+  @Test
+  fun `advertises the UI builder tools with object schemas`() {
     val tools = adapter.toolDefs()
 
     assertThat(tools.map { it.name })
@@ -72,6 +90,7 @@ class UiBuilderMcpAdapterTest {
         "render_design",
         "export_svg",
         "export_compose",
+        "export_design",
         "get_revision_diff",
       )
       .inOrder()
@@ -317,7 +336,7 @@ class UiBuilderMcpAdapterTest {
     const val ACTOR = "agent:0123456789ab"
     val READ_TOOLS = setOf("open_design", "list_components", "get_revision_diff")
     val WRITE_TOOLS = setOf("create_design", "apply_design_operations")
-    val EXPORT_TOOLS = setOf("render_design", "export_svg", "export_compose")
+    val EXPORT_TOOLS = setOf("render_design", "export_svg", "export_compose", "export_design")
     val json = Json {
       encodeDefaults = true
       explicitNulls = false

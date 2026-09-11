@@ -1,5 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
@@ -17,7 +19,7 @@ import io.ktor.server.routing.get
 import java.util.Base64
 
 /**
- * The design as a picture, at a URL.
+ * The design as an exported artifact, at a URL.
  *
  * ## Why a GET beside the protocol request
  *
@@ -29,10 +31,10 @@ import java.util.Base64
  * that reason — "Copy link" copies a URL that renders the preview as it stands — and the builder's
  * designs had no such address.
  *
- * These two routes are that address. They are the same export, reached by a URL: the handler builds
- * the very request the envelope route would have received, runs it through the same service as the
- * same actor, and serves the artifact's bytes with the artifact's media type. No second renderer,
- * no second gate, no second capability check.
+ * These routes are that address. They are the same export, reached by a URL: the handler builds the
+ * very request the envelope route would have received, runs it through the same service as the same
+ * actor, and serves the artifact's bytes with the artifact's media type. No second renderer, no
+ * second gate, no second capability check.
  *
  * ## Live, not pinned
  *
@@ -61,6 +63,11 @@ internal fun Route.installUiBuilderLiveExportRoutes(
 ) {
   get(UI_BUILDER_EXPORT_SVG_PATH) {
     call.serveLiveExport(service, authorization, ExportFormatV1.SVG)
+  }
+  RemoteDocumentExportSupport.formats.forEach { format ->
+    get("/api/ui-builder/v1/designs/{designId}/export.${format.name.lowercase()}") {
+      call.serveLiveExport(service, authorization, format)
+    }
   }
   get(UI_BUILDER_EXPORT_PNG_PATH) {
     call.serveLiveExport(service, authorization, ExportFormatV1.PNG)
@@ -127,6 +134,14 @@ private suspend fun ApplicationCall.serveLiveExport(
     )
     return
   }
+  val errors = artifact.diagnostics.filter { it.severity == DiagnosticSeverityV1.ERROR }
+  if (errors.isNotEmpty()) {
+    respondText(
+      errors.joinToString("\n") { "${it.code}: ${it.message}" },
+      status = HttpStatusCode.UnprocessableEntity,
+    )
+    return
+  }
   val bytes =
     when (artifact.encoding) {
       ExportEncodingV1.BASE64 -> Base64.getDecoder().decode(artifact.content)
@@ -151,7 +166,9 @@ private suspend fun ApplicationCall.serveLiveExport(
 private fun ExportArtifactV1.servedRevision(): String? =
   diagnostics
     .asSequence()
-    .filter { it.code == REVISION_PINNED_DIAGNOSTIC_CODE }
+    .filter {
+      it.code == REVISION_PINNED_DIAGNOSTIC_CODE || it.code == "REVISION_PINNED_REMOTE_EXPORT"
+    }
     .mapNotNull { REVISION_IN_DIAGNOSTIC.find(it.message)?.groupValues?.get(1) }
     .firstOrNull()
 
