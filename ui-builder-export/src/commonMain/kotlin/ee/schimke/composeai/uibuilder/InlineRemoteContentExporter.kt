@@ -153,6 +153,7 @@ public object InlineRemoteContentExporter {
       if (contentIds.isEmpty() && emptyBox) {
         listOf("${INDENT.repeat(depth)}RemoteBox(modifier = RemoteModifier.fillMaxSize())")
       } else contentIds.flatMap { emitter.emit(it, depth = depth) }
+    emitter.validateFunctionNames(name)
     if (refusals.isNotEmpty()) return Result.Refused(refusals.distinct())
 
     return Result.Emitted(
@@ -188,6 +189,10 @@ public object InlineRemoteContentExporter {
             body.forEach(::appendLine)
           }
           appendLine("}")
+          emitter.declarations.forEach {
+            appendLine()
+            appendLine(it)
+          }
         },
     )
   }

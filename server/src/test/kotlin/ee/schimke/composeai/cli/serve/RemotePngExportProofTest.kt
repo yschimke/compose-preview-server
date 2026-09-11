@@ -198,7 +198,7 @@ class RemotePngExportProofTest {
         catalogSystemIds = setOf("remote-m3"),
         exportCapabilities =
           ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.capabilities(
-            ExportCapabilitiesV1(png = true),
+            ExportCapabilitiesV1(png = true, composeCode = repetition),
             json = true,
             document = true,
           ),
@@ -217,7 +217,14 @@ class RemotePngExportProofTest {
     val exporter =
       RemotePngExportExecutor(
         RemoteDocumentExportExecutor(
-          UiBuilderExportExecutor { error("Remote PNG must not render the editor tree") }
+          if (repetition)
+            ScreenGeneratorComposeExportExecutor(
+              components = { ComponentRecordSource.Lookup.Unconfigured },
+              catalogPlatform = {
+                ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform.REMOTE_COMPOSE
+              },
+            )
+          else UiBuilderExportExecutor { error("Remote PNG must not render the editor tree") }
         ),
         renderer,
       )

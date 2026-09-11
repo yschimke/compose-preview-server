@@ -502,8 +502,18 @@ exact generated source compiles and matches the independent Remote JSON referenc
 at densities 1 and 2. All twelve physical clicks select the expected state. Browser-gate and service
 executor tests compare the same source, with the service's revision/provenance header checked
 separately. The staged checks pass 74 shared-export tests, 954 editor tests (one separate opt-in
-proof skipped), 60 service tests and WASM compilation. A fresh live browser/MCP check and the equivalent Remote Kotlin integration remain
-required; these shared primitives do not complete all consumer paths.
+proof skipped), 60 service tests and WASM compilation. The equivalent Remote Kotlin projection is now implemented in `RemoteContentEmitter`: authored
+rows emit typed loops, definitions emit once as `@RemoteComposable` functions, and call sites pass
+modifiers, values, state reads, images and actions explicitly. Nested lexical scopes are checked;
+missing or incompatible bindings and recursive definitions refuse the artifact. The exact production
+source compiles against AndroidX creation-compose and passes pixel equality plus twelve physical
+clicks at two densities. [Remote source and interaction evidence](evidence/ui-builder-scoped-remote-export/README.md)
+records the proof. The fresh live run also passes all six browser/MCP JSON/RC/PNG comparisons,
+six browser playback clicks, and saved MCP row authoring. The existing WASM Code pane matches the
+MCP Kotlin body after accounting for the service header/package and terminal whitespace. The run
+has no browser errors; a viewport relayout accommodates an observed stale accessibility overlay
+when switching docks. All 82 shared-export tests, 954 editor tests (one separate opt-in proof
+skipped), and WASM/server builds pass. These primitives do not complete all consumer paths.
 
 ## Remaining production work
 

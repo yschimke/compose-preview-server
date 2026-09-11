@@ -2,7 +2,7 @@ package ee.schimke.composeai.uibuilder
 
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.TargetParameter
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.*
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -332,8 +332,27 @@ internal class RemoteContentEmitter(
 
   /** The node and its subtree, as indented source lines. */
   fun emit(nodeId: String, depth: Int): List<String> {
-    val raw = document.nodes[nodeId] ?: return emptyList()
-    val node = raw.withArguments(argumentScopes.lastOrNull()) ?: return emptyList()
+    if (activeNodes.size >= 128 || !activeNodes.add(nodeId)) {
+      refusals += "nodes.$nodeId: cyclic reference or nesting exceeds 128 levels"
+      return emptyList()
+    }
+    try {
+      return emitNode(nodeId, depth)
+    } finally {
+      activeNodes.remove(nodeId)
+    }
+  }
+
+  private val activeNodes = mutableSetOf<String>()
+
+  private fun emitNode(nodeId: String, depth: Int): List<String> {
+    val node =
+      document.nodes[nodeId]
+        ?: run {
+          refusals += "nodes.$nodeId: missing node"
+          return emptyList()
+        }
+    validatePropertyBindings(node)
     node.component?.let { placement ->
       return placement(node, placement, depth)
     }
@@ -344,11 +363,7 @@ internal class RemoteContentEmitter(
       "layout/box" -> container(node, depth, "RemoteBox", boxArguments(node, pad))
       "layout/column" -> container(node, depth, "RemoteColumn", columnArguments(node, pad))
       "layout/row" -> container(node, depth, "RemoteRow", rowArguments(node, pad))
-      "layout/for-each" ->
-        emptyList<String>().also {
-          refusals +=
-            "`${node.id}` repeats authored rows: JSON and RC export support this layout; Remote Kotlin loop generation is not yet available"
-        }
+      "layout/for-each" -> repetition(node, depth)
       "remote-m3/lottie" -> lottie(node, pad)?.let { (pad + it).split("\n") } ?: emptyList()
       "asset/image" -> image(node, pad)?.let { (pad + it).split("\n") } ?: emptyList()
       // Authored refusals, not the catch-all below. `m3/surface` and `shape/linear-gradient` are
@@ -386,80 +401,347 @@ internal class RemoteContentEmitter(
     }
   }
 
-  /**
-   * The arguments each enclosing placement supplied, innermost last.
-   *
-   * A design component's body reads `{"type":"binding","value":"<key>"}` and the placement supplies
-   * the key, so a body node means something different at each placement of it. Resolved where the
-   * node is FETCHED rather than where each property is read: `emit` is the one place that turns an
-   * id into a node, so substituting there is what makes every downstream reader — the text case,
-   * the record fallback, the modifier walk — see the resolved value without any of them knowing
-   * placements exist.
-   */
-  private val argumentScopes = ArrayDeque<JsonObject>()
+  private class BoundField(
+    val name: String,
+    val type: String,
+    val convert: (JsonElement) -> String?,
+  )
 
-  /**
-   * A placed design component: its body, inlined, with the placement's arguments substituted.
-   *
-   * Inlined rather than emitted as a function, which is what the Compose lane does. A design
-   * component's body is ordinary catalog nodes, and this emitter can already write every one of
-   * them — whereas a `RemoteCustomComponent` hole would be actively wrong here: the host registers
-   * renderers by name, and nothing is registered under a design-local component key, so the widget
-   * would reserve the bounds and draw nothing.
-   *
-   * A pack component is a different thing wearing a similar shape — `<packId>/<name>`, whose
-   * picture comes from the native lane compiled against the served bundle — and it is not this: it
-   * has no body in this document to inline, so it falls through to the ordinary refusal.
-   */
+  private class Bindings(val row: String? = null) {
+    val fields = linkedMapOf<String, BoundField>()
+  }
+
+  private var bindings: Bindings? = null
+  private var function: FunctionBody? = null
+  private val functions = linkedMapOf<String, FunctionBody>()
+  private val defining = mutableSetOf<String>()
+  private var loopCount = 0
+
+  private inner class FunctionBody(val name: String) {
+    val bindings = Bindings()
+    val captures = linkedMapOf<String, Capture>()
+    var body = emptyList<String>()
+
+    fun capture(key: String, type: String, supply: () -> String?): String =
+      captures.getOrPut(key) { Capture("capture${captures.size}", type, supply) }.name
+
+    fun declaration(): String {
+      val parameters =
+        listOf("modifier: androidx.compose.remote.creation.compose.modifier.RemoteModifier") +
+          bindings.fields.values.map { "${it.name}: ${it.type}" } +
+          captures.values.map { "${it.name}: ${it.type}" }
+      return listOf(
+          "@Composable",
+          "@RemoteComposable",
+          "private fun $name(${parameters.joinToString()}) {",
+          "    RemoteBox(modifier = modifier) {",
+        )
+        .plus(body)
+        .plus(listOf("    }", "}"))
+        .joinToString("\n")
+    }
+  }
+
+  private class Capture(val name: String, val type: String, val supply: () -> String?)
+
+  private fun bound(
+    value: JsonElement,
+    type: String,
+    where: String,
+    convert: (JsonElement) -> String?,
+  ): String? {
+    val raw = value as? JsonObject
+    if (raw?.plainString("type") != "binding") return convert(value)
+    if (
+      type !in
+        setOf(
+          "kotlin.String",
+          "kotlin.Boolean",
+          "kotlin.Int",
+          "kotlin.Float",
+          REMOTE_STRING_FQN,
+          REMOTE_BOOLEAN_FQN,
+          REMOTE_FLOAT_FQN,
+          REMOTE_COLOR_FQN,
+        )
+    ) {
+      refusals += "$where: unsupported binding type `$type`"
+      return null
+    }
+    val key = raw.plainString("value")
+    val current = bindings
+    if (key == null || raw.keys != setOf("type", "value") || current == null) {
+      refusals += "$where: missing or invalid lexical binding"
+      return null
+    }
+    val field =
+      current.fields.getOrPut(key) { BoundField("argument${current.fields.size}", type, convert) }
+    if (field.type != type) {
+      refusals += "$where: binding `$key` is used as both ${field.type} and $type"
+      return null
+    }
+    return current.row?.let { "$it.${field.name}" } ?: field.name
+  }
+
+  fun validateFunctionNames(vararg topLevelNames: String) {
+    val reserved =
+      imageAssets.values +
+        topLevelNames.toSet() +
+        imports(null).map { it.substringAfterLast('.') } +
+        document.stateVariables.keys.map { it.remoteIdentifier() }
+    functions.values.forEach {
+      if (
+        it.name in reserved ||
+          it.name == "modifier" ||
+          it.name.matches(Regex("(argument|capture)[0-9]+"))
+      )
+        refusals += "component function `${it.name}` conflicts with a generated Kotlin identifier"
+    }
+  }
+
+  private fun captureValue(key: String, type: String, supply: () -> String): String =
+    function?.capture(key, type) { captureValue(key, type, supply) } ?: supply()
+
+  private val allocatedLocals = mutableSetOf<String>()
+
+  private fun localName(base: String): String {
+    val reserved =
+      document.stateVariables.keys.map { it.remoteIdentifier() }.toSet() +
+        document.components.values.mapNotNull { (it as? JsonObject)?.plainString("name") } +
+        allocatedLocals
+    var name = base
+    while (name in reserved) name += "_"
+    allocatedLocals += name
+    return name
+  }
+
+  private fun validatePropertyBindings(node: UiBuilderNode) {
+    val supported =
+      when (node.componentId) {
+        "layout/row" -> setOf("horizontalSpacingDp")
+        "layout/column",
+        "layout/for-each" -> setOf("verticalSpacingDp")
+        "m3/text" -> setOf("text")
+        else -> components[node.componentId]?.parameters?.map { it.name }?.toSet().orEmpty()
+      }
+    node.properties.forEach { (key, value) ->
+      if ((value as? JsonObject)?.plainString("type") == "binding" && key !in supported)
+        refusals += "nodes.${node.id}.$key: Remote binding lowering is not available"
+    }
+  }
+
   private fun placement(node: UiBuilderNode, placement: JsonObject, depth: Int): List<String> {
+    validateLayoutEvents(node)
     val key = placement.plainString("componentKey")
     val definition = key?.let { document.components[it] as? JsonObject }
     val root = definition?.plainString("root")
-    if (key == null || root == null || root !in document.nodes) {
+    val name = definition?.plainString("name")
+    val supplied = placement["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+    if (key == null || root == null || name == null || root !in document.nodes) {
       refusals +=
-        "`${node.id}` places `${key ?: "an unnamed component"}`, which this design does not define"
+        "nodes.${node.id} places `${key ?: "unnamed"}`: missing component definition or root"
       return emptyList()
     }
-    // A component that places itself, directly or through another, would inline for ever. The
-    // depth is small on purpose: a design component nested three deep is a design nobody wrote by
-    // accident, and an unbounded walk turns a malformed document into a hang.
-    if (argumentScopes.size >= MAX_PLACEMENT_DEPTH) {
-      refusals +=
-        "`${node.id}` places `$key` more than $MAX_PLACEMENT_DEPTH deep, which is a component " +
-          "placing itself"
+    if (
+      node.componentId != "design/component-instance" ||
+        node.properties.isNotEmpty() ||
+        node.slots.isNotEmpty() ||
+        placement.keys.any { it !in setOf("componentKey", "arguments") } ||
+        (placement["arguments"] != null && placement["arguments"] !is JsonObject)
+    ) {
+      refusals += "nodes.${node.id}: invalid component placement"
       return emptyList()
     }
-    argumentScopes.addLast(placement["arguments"] as? JsonObject ?: JsonObject(emptyMap()))
-    val body = emit(root, depth)
-    argumentScopes.removeLast()
-    return body
+    if (
+      !name.matches(Regex("[A-Za-z_][A-Za-z0-9_]*")) ||
+        name.all { it == '_' } ||
+        name in KOTLIN_HARD_KEYWORDS ||
+        document.components.any { (other, value) ->
+          other != key && (value as? JsonObject)?.plainString("name") == name
+        }
+    ) {
+      refusals += "component `$key`: invalid or duplicate Kotlin function name `$name`"
+      return emptyList()
+    }
+    if (key in defining) {
+      refusals += "component `$key`: recursive definition"
+      return emptyList()
+    }
+    val target =
+      functions[key]
+        ?: run {
+          val created = FunctionBody(name)
+          functions[key] = created
+          defining += key
+          val previousBindings = bindings
+          val previousFunction = function
+          val previousScope = scope
+          bindings = created.bindings
+          function = created
+          scope = "RemoteBox"
+          usesBox = true
+          try {
+            created.body = emit(root, 2)
+          } finally {
+            bindings = previousBindings
+            function = previousFunction
+            scope = previousScope
+            defining -= key
+          }
+          if (name in imports(null).map { it.substringAfterLast('.') })
+            refusals += "component `$key`: name `$name` conflicts with an imported symbol"
+          created
+        }
+    (supplied.keys - target.bindings.fields.keys).forEach {
+      refusals += "nodes.${node.id}: unknown component argument `$it`"
+    }
+    val arguments = mutableListOf<String>()
+    target.bindings.fields.forEach { (key, field) ->
+      val value = supplied[key]
+      if (value == null) refusals += "nodes.${node.id}: missing component argument `$key`"
+      else
+        bound(value, field.type, "nodes.${node.id}.arguments.$key", field.convert)?.let {
+          arguments += "${field.name} = $it"
+        }
+    }
+    target.captures.values.forEach { capture ->
+      capture.supply()?.let { arguments += "${capture.name} = $it" }
+    }
+    val wrapper = node.copy(componentId = "layout/box", component = null)
+    val modifier = wrapper.modifierExpression(INDENT.repeat(depth)) ?: "RemoteModifier"
+    usesModifier = true
+    arguments.add(0, "modifier = $modifier")
+    return (INDENT.repeat(depth) + call(name, arguments, INDENT.repeat(depth))).split("\n")
   }
 
-  /**
-   * [this] with every `binding` property replaced by what the placement passed for it, or null when
-   * the placement passed nothing — which is a refusal rather than an empty value, because a body
-   * that reads a key nobody supplied is a component being placed wrongly.
-   */
-  private fun UiBuilderNode.withArguments(arguments: JsonObject?): UiBuilderNode? {
-    if (arguments == null || properties.isEmpty()) return this
-    var missing: String? = null
-    val resolved = properties.mapValues { (name, value) ->
-      val binding = (value as? JsonObject)?.takeIf { it.plainString("type") == "binding" }
-      if (binding == null) value
-      else {
-        val key = binding.plainString("value")
-        val supplied = key?.let { arguments[it] }
-        if (supplied == null) {
-          missing = "`$name` reads `${key ?: "an unnamed argument"}`"
-          value
-        } else supplied
+  private fun repetition(node: UiBuilderNode, depth: Int): List<String> {
+    validateLayoutEvents(node)
+    val where = "nodes.${node.id}"
+    val template = node.slots["template"]?.singleOrNull()
+    val data = node.properties["data"] as? JsonObject
+    val rows = data?.get("values") as? JsonArray
+    if (
+      template == null ||
+        node.slots.keys != setOf("template") ||
+        rows == null ||
+        data.plainString("type") != "list" ||
+        data.keys != setOf("type", "values") ||
+        node.properties.keys.any { it !in setOf("data", "verticalSpacingDp") }
+    ) {
+      refusals += "$where: a loop needs an authored row list and exactly one template child"
+      return emptyList()
+    }
+    if (rows.size > 10000) {
+      refusals += "$where: exceeds 10000 rows"
+      return emptyList()
+    }
+    val number = loopCount++
+    val rowName = localName("uiRow$number")
+    val rowClass = localName("UiRows$number")
+    val rowBindings = Bindings(rowName)
+    val previousBindings = bindings
+    val previousScope = scope
+    bindings = rowBindings
+    scope = "RemoteColumn"
+    val body =
+      try {
+        emit(template, depth + 2)
+      } finally {
+        bindings = previousBindings
+        scope = previousScope
+      }
+    val fields = rows.mapIndexed { index, value ->
+      val row = value as? JsonObject
+      val fields = row?.get("fields") as? JsonObject
+      if (
+        row?.plainString("type") != "object" ||
+          row.keys != setOf("type", "fields") ||
+          fields == null
+      ) {
+        refusals += "$where.data[$index]: expected a row object"
+        JsonObject(emptyMap())
+      } else fields
+    }
+    fields.forEach { record ->
+      record.forEach { (key, value) ->
+        if (key !in rowBindings.fields) {
+          val type =
+            when ((value as? JsonObject)?.plainString("type")) {
+              "string" -> "kotlin.String"
+              "bool" -> "kotlin.Boolean"
+              "int" -> "kotlin.Int"
+              "float" -> "kotlin.Float"
+              else -> null
+            }
+          if (type == null) refusals += "$where.data.$key: cannot infer an unused field type"
+          else
+            rowBindings.fields[key] =
+              BoundField("argument${rowBindings.fields.size}", type) {
+                primitiveArgument(it, type, "$where.data.$key")
+              }
+        }
       }
     }
-    missing?.let {
-      refusals += "the placed component's $it, which its placement does not supply"
-      return null
+    val values = fields.mapIndexed { index, record ->
+      val values =
+        rowBindings.fields.mapNotNull { (key, field) ->
+          val raw = record[key]
+          if (raw == null) {
+            refusals += "$where.data[$index]: missing row field `$key`"
+            null
+          } else bound(raw, field.type, "$where.data[$index].$key", field.convert)
+        }
+      "$rowClass(${values.joinToString()})"
     }
-    return if (resolved == properties) this else copy(properties = JsonObject(resolved))
+    val wrapper =
+      node.copy(
+        componentId = "layout/column",
+        properties = JsonObject(node.properties - "data"),
+        slots = emptyMap(),
+      )
+    val args = columnArguments(wrapper, INDENT.repeat(depth))
+    usesColumn = true
+    val pad = INDENT.repeat(depth)
+    val parameters = rowBindings.fields.values.joinToString { "val ${it.name}: ${it.type}" }
+    val declaration =
+      if (parameters.isEmpty()) "class $rowClass" else "data class $rowClass($parameters)"
+    return (pad + call("RemoteColumn", args, pad, trailing = 2) + " {").split("\n") +
+      listOf(
+        "$pad$INDENT$declaration",
+        "$pad${INDENT}kotlin.collections.listOf<$rowClass>(${values.joinToString()}).forEach { $rowName ->",
+      ) +
+      body +
+      listOf("$pad$INDENT}", "$pad}")
+  }
+
+  private fun validateLayoutEvents(node: UiBuilderNode) {
+    node.eventBindings.forEach { (event, actions) ->
+      if (event != "click" || actions !is JsonArray)
+        refusals += "nodes.${node.id}.eventBindings.$event: expected a supported click action list"
+    }
+  }
+
+  private fun primitiveArgument(value: JsonElement, type: String, where: String): String? {
+    val raw = value as? JsonObject
+    val kind = raw?.plainString("type")
+    val literal = raw?.get("value") as? JsonPrimitive
+    val result =
+      when (type) {
+        "kotlin.Float" ->
+          literal
+            ?.takeIf { kind in setOf("int", "float") && !it.isString }
+            ?.floatOrNull
+            ?.takeIf { it.isFinite() }
+            ?.let { "${it}f" }
+        "kotlin.Int" -> literal?.takeIf { kind == "int" && !it.isString }?.intOrNull?.toString()
+        "kotlin.Boolean" ->
+          literal?.takeIf { kind == "bool" && !it.isString }?.booleanOrNull?.toString()
+        "kotlin.String" ->
+          literal?.takeIf { kind == "string" && it.isString }?.let { "\"${it.content.escaped()}\"" }
+        else -> null
+      }
+    if (result == null) refusals += "$where: expected $type"
+    return result
   }
 
   private fun refuseUnknown(node: UiBuilderNode): List<String> {
@@ -668,6 +950,11 @@ internal class RemoteContentEmitter(
     val event = parameter.name.removePrefix("on").replaceFirstChar { it.lowercaseChar() }
     val actions = (node.eventBindings[event] as? JsonArray).orEmpty()
     if (actions.isEmpty()) return lambdaActionExpression()
+    function?.let { current ->
+      return current.capture("event:${node.id}:$event", ACTION_FQN) {
+        actionExpression(node, parameter)
+      }
+    }
     val emitted = actions.map { action ->
       actionExpression(node, event, action as? JsonObject) ?: return null
     }
@@ -761,6 +1048,17 @@ internal class RemoteContentEmitter(
     ) {
       refusals += "$where state `$variable` conflicts with a generated Kotlin identifier"
       return null
+    }
+    function?.let { current ->
+      val type =
+        "androidx.compose.remote.creation.compose.state.Remote" +
+          when (expectedType) {
+            "int" -> "Int"
+            "bool" -> "Boolean"
+            "float" -> "Float"
+            else -> "String"
+          }
+      return current.capture("state:$variable", type) { remoteState(variable, expectedType, where) }
     }
     val factory = stateFactory(expectedType) ?: return null
     stateWrites.getOrPut(variable) {
@@ -944,11 +1242,66 @@ internal class RemoteContentEmitter(
    * prints a simple name, so `com.example.RemoteString` and the real one read identically, and a
    * generator that answers off the spelling writes source that does not compile.
    */
+  private fun scopedArgument(
+    node: UiBuilderNode,
+    parameter: TargetParameter,
+    value: JsonElement,
+  ): String? {
+    val type = (value as? JsonObject)?.plainString("type")
+    val expected =
+      when (parameter.typeFqn) {
+        REMOTE_STRING_FQN,
+        "kotlin.String" -> setOf("string")
+        REMOTE_BOOLEAN_FQN,
+        "kotlin.Boolean" -> setOf("bool")
+        REMOTE_FLOAT_FQN,
+        "kotlin.Float" -> setOf("int", "float")
+        "kotlin.Int" -> setOf("int")
+        REMOTE_COLOR_FQN -> setOf("color", "colorToken")
+        else -> emptySet()
+      }
+    if (type != "state" && type !in expected) {
+      refusals += "nodes.${node.id}.${parameter.name}: expected ${parameter.typeFqn} argument"
+      return null
+    }
+    if (type != "state") {
+      val primitiveType =
+        when (parameter.typeFqn) {
+          REMOTE_STRING_FQN -> "kotlin.String"
+          REMOTE_BOOLEAN_FQN -> "kotlin.Boolean"
+          REMOTE_FLOAT_FQN -> "kotlin.Float"
+          else -> parameter.typeFqn
+        }
+      if (primitiveType in setOf("kotlin.String", "kotlin.Boolean", "kotlin.Float", "kotlin.Int")) {
+        if (
+          primitiveArgument(value, primitiveType.orEmpty(), "nodes.${node.id}.${parameter.name}") ==
+            null
+        )
+          return null
+      } else if (
+        parameter.typeFqn == REMOTE_COLOR_FQN &&
+          (value.stringOrNull()?.matches(Regex("#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?")) != true)
+      ) {
+        refusals += "nodes.${node.id}.${parameter.name}: expected a literal colour argument"
+        return null
+      }
+    }
+    val expression = remoteValue(node, parameter, value)
+    if (expression == null)
+      refusals += "nodes.${node.id}.${parameter.name}: cannot emit ${parameter.typeFqn} argument"
+    return expression
+  }
+
   private fun remoteValue(
     node: UiBuilderNode,
     parameter: TargetParameter,
     value: JsonElement,
   ): String? {
+    if ((value as? JsonObject)?.plainString("type") == "binding") {
+      return bound(value, parameter.typeFqn.orEmpty(), "nodes.${node.id}.${parameter.name}") {
+        scopedArgument(node, parameter, it)
+      }
+    }
     if ((value as? JsonObject)?.plainString("type") == "state") {
       val kind =
         when (parameter.typeFqn) {
@@ -1115,13 +1468,22 @@ internal class RemoteContentEmitter(
   private fun columnArguments(node: UiBuilderNode, pad: String): List<String> {
     val arguments = mutableListOf<String>()
     node.modifierExpression(pad)?.let { arguments += "modifier = $it" }
-    node.properties["verticalSpacingDp"]
-      ?.numberOrNull()
-      ?.takeIf { it != 0f }
-      ?.let {
+    node.properties["verticalSpacingDp"]?.let { value ->
+      val expression =
+        if ((value as? JsonObject)?.plainString("type") == "binding") {
+          bound(value, "kotlin.Float", "nodes.${node.id}.verticalSpacingDp") {
+              primitiveArgument(it, "kotlin.Float", "nodes.${node.id}.verticalSpacingDp")
+            }
+            ?.let {
+              usesDp = true
+              "$it.rdp"
+            }
+        } else value.numberOrNull()?.takeIf { it != 0f }?.dpLiteral()
+      if (expression != null) {
         usesArrangement = true
-        arguments += "verticalArrangement = RemoteArrangement.spacedBy(${it.dpLiteral()})"
+        arguments += "verticalArrangement = RemoteArrangement.spacedBy($expression)"
       }
+    }
     (crossAxisAlignment(node, "alignHorizontal") ?: node.canvasHorizontalAlignment())
       .takeIf { it != "start" }
       ?.let {
@@ -1148,13 +1510,22 @@ internal class RemoteContentEmitter(
   private fun rowArguments(node: UiBuilderNode, pad: String): List<String> {
     val arguments = mutableListOf<String>()
     node.modifierExpression(pad)?.let { arguments += "modifier = $it" }
-    node.properties["horizontalSpacingDp"]
-      ?.numberOrNull()
-      ?.takeIf { it != 0f }
-      ?.let {
+    node.properties["horizontalSpacingDp"]?.let { value ->
+      val expression =
+        if ((value as? JsonObject)?.plainString("type") == "binding") {
+          bound(value, "kotlin.Float", "nodes.${node.id}.horizontalSpacingDp") {
+              primitiveArgument(it, "kotlin.Float", "nodes.${node.id}.horizontalSpacingDp")
+            }
+            ?.let {
+              usesDp = true
+              "$it.rdp"
+            }
+        } else value.numberOrNull()?.takeIf { it != 0f }?.dpLiteral()
+      if (expression != null) {
         usesArrangement = true
-        arguments += "horizontalArrangement = RemoteArrangement.spacedBy(${it.dpLiteral()})"
+        arguments += "horizontalArrangement = RemoteArrangement.spacedBy($expression)"
       }
+    }
     (crossAxisAlignment(node, "alignVertical") ?: node.canvasVerticalAlignment())
       .takeIf { it != "top" }
       ?.let {
@@ -1209,7 +1580,15 @@ internal class RemoteContentEmitter(
     usesMaterialText = true
     val authored = node.properties["text"]
     val expression =
-      if ((authored as? JsonObject)?.plainString("type") == "state")
+      if ((authored as? JsonObject)?.plainString("type") == "binding")
+        bound(authored, REMOTE_STRING_FQN, "nodes.${node.id}.text") {
+          scopedArgument(
+            node,
+            TargetParameter("text", "RemoteString", typeFqn = REMOTE_STRING_FQN),
+            it,
+          )
+        } ?: "\"\".rs"
+      else if ((authored as? JsonObject)?.plainString("type") == "state")
         remoteState(authored.plainString("variable").orEmpty(), "string", "`${node.id}`.text")
           ?: "\"\".rs"
       else "\"${authored?.stringOrNull().orEmpty().escaped()}\".rs"
@@ -1417,7 +1796,14 @@ internal class RemoteContentEmitter(
           else -> inlineBitmap(key, encoded)
         }
     usesRemoteImage = true
-    val arguments = mutableListOf("remoteBitmap = $bitmap")
+    val argument =
+      captureValue(
+        "image:$key",
+        "androidx.compose.remote.creation.compose.state.RemoteImageBitmap",
+      ) {
+        bitmap
+      }
+    val arguments = mutableListOf("remoteBitmap = $argument")
     val description = node.properties["contentDescription"]?.stringOrNull().orEmpty()
     arguments +=
       if (description.isEmpty()) "contentDescription = null"
@@ -1454,7 +1840,11 @@ internal class RemoteContentEmitter(
       return it
     }
     val base = exportedStateIdentifier(key)
-    val taken = imageAssets.values.toSet()
+    val taken =
+      imageAssets.values.toSet() +
+        allocatedLocals +
+        document.stateVariables.keys.map { it.remoteIdentifier() } +
+        functions.values.map { it.name }
     val name =
       if (base !in taken) base
       else generateSequence(2) { it + 1 }.map { "$base$it" }.first { it !in taken }
@@ -1615,7 +2005,7 @@ internal class RemoteContentEmitter(
    * expects a wall of generated bytes to be rather than in the middle of the design.
    */
   val declarations: List<String>
-    get() = lottieDeclarations.toList()
+    get() = functions.values.map { it.declaration() } + lottieDeclarations.toList()
 
   private val lottieDeclarations = mutableListOf<String>()
 
@@ -1807,6 +2197,16 @@ internal class RemoteContentEmitter(
    */
   private fun UiBuilderNode.modifierCalls(element: JsonElement): List<String> {
     val modifier = element as? JsonObject ?: return emptyList()
+    fun hasBinding(value: JsonElement): Boolean =
+      when (value) {
+        is JsonObject -> value.plainString("type") == "binding" || value.values.any(::hasBinding)
+        is JsonArray -> value.any(::hasBinding)
+        else -> false
+      }
+    if (hasBinding(modifier)) {
+      refusals += "nodes.$id.modifiers: Remote modifier bindings need a typed lowering"
+      return emptyList()
+    }
     return when (val type = modifier["type"]?.stringValue()) {
       "fillMaxSize" -> listOf(modifierCall("fillMaxSize()"))
       "fillMaxWidth" -> listOf(modifierCall("fillMaxWidth()"))
@@ -2174,7 +2574,12 @@ private val SIX_DIGIT_HEX = Regex("[0-9A-F]{6}")
  * layer named `$1` would otherwise generate a file that does not compile.
  */
 private fun String.escaped(): String =
-  replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$")
+  replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+    .replace("$", "\\$")
+    .replace("\n", "\\n")
+    .replace("\r", "\\r")
+    .replace("\t", "\\t")
 
 private fun kotlinx.serialization.json.JsonElement.stringValue(): String? =
   (this as? JsonPrimitive)?.contentOrNull
@@ -2184,9 +2589,6 @@ private fun kotlinx.serialization.json.JsonElement.numberValue(): Float? =
 
 /** The parameter names and types the record-driven fallback in [RemoteContentEmitter] knows. */
 private const val MODIFIER_PARAMETER = "modifier"
-
-/** How deeply a design component may place another before this calls it a cycle. */
-private const val MAX_PLACEMENT_DEPTH = 4
 
 private const val ACTION_FQN = "androidx.compose.remote.creation.compose.action.Action"
 private const val REMOTE_STRING_FQN = "androidx.compose.remote.creation.compose.state.RemoteString"

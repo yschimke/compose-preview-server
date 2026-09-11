@@ -43,6 +43,14 @@ try {
     await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     await page.mouse.move(60, 100);
   }
+  async function refreshViewport() {
+    // Compose's accessibility overlay can retain the previous dock while the canvas has already
+    // changed. A normal viewport relayout refreshes that overlay; preserve the evidence dimensions.
+    const viewport = page.viewportSize();
+    await page.setViewportSize({ ...viewport, width: viewport.width + 1 });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.setViewportSize(viewport);
+  }
   async function ready() {
     await page.waitForFunction(() => document.documentElement.dataset.uiBuilderReady === "true", null, { timeout: 60000 });
   }
@@ -119,6 +127,7 @@ try {
   await exportAll("repetition-initial", 10, [255, 0, 0]);
   await page.reload(); await ready();
   await click(page.getByLabel("Open screen panel"));
+  await refreshViewport();
   await click(page.getByRole("button", { name: /^State ·/ }));
   await click(page.getByLabel("Edit state page"));
   const initialValue = page.getByRole("textbox").nth(1);
@@ -156,6 +165,37 @@ try {
   await writeFile(`${output}/repetition-mcp-edited.json`, savedJson.content);
   const mcpAuthoring = { created: true, editedRows: true, revision: changed.revision,
     definitionsRetained: true, savedMatchesSupplied: true, contentDigest: savedJson.contentDigest };
+  const kotlin = (await mcp("ui_builder_export", { designId: saved.id, revision: 1, format: "compose" })).artifact;
+  assert.deepEqual(kotlin.diagnostics, []);
+  assert(kotlin.content.includes(".forEach"));
+  assert(kotlin.content.includes("private fun Pair("));
+  assert(kotlin.content.includes("UiRows0(4.0f), UiRows0(12.0f), UiRows0(20.0f)"));
+  assert(kotlin.content.includes("capture0 = valueChange(page, 10.ri)"));
+  assert.equal(kotlin.contentDigest, createHash("sha256").update(kotlin.content).digest("hex"));
+  await writeFile(`${output}/repetition-mcp-edited.kt.txt`, kotlin.content);
+  // Exercise the saved design in the actual WASM Code pane after authoring its rows through MCP.
+  await page.goto(`${origin}/ui-builder/remote-m3/${saved.id}?token=${encodeURIComponent(token)}&node=loop`);
+  await ready();
+  // The WASM runtime becomes ready before the saved document finishes loading. Wait for the
+  // MCP-authored revision so its arrival cannot replace the editor state after opening Code.
+  await page.waitForFunction(() => globalThis.__uiBuilderEditor?.revision === 1);
+  await click(page.getByLabel("Open code panel", { exact: true }));
+  await refreshViewport();
+  try {
+    await expect(page.getByText(/private fun Pair/)).toBeVisible();
+  } catch (error) {
+    await page.screenshot({ path: `${output}/repetition-code-failure.png` });
+    await writeFile(`${output}/repetition-code-failure.txt`, await page.locator("body").ariaSnapshot());
+    throw error;
+  }
+  const codeText = await page.getByText(/private fun Pair/).innerText();
+  await writeFile(`${output}/repetition-browser-code.txt`, codeText);
+  const bodyStart = kotlin.content.indexOf("// Generated from a Compose UI builder design.");
+  assert(bodyStart >= 0);
+  const expectedPane = kotlin.content.slice(bodyStart).replace("package generated.uibuilder\n\n", "");
+  assert.equal(codeText.trimEnd(), expectedPane.trimEnd());
+  await page.screenshot({ path: `${output}/repetition-remote-kotlin-code.png` });
+  mcpAuthoring.kotlin = { revision: 1, sha256: kotlin.contentDigest, typedLoop: true, reusableFunction: true, codePaneVisible: true, browserBodyMatchesMcp: true };
   assert.deepEqual(errors, []);
   await writeFile(`${output}/repetition-verification.json`, JSON.stringify({ exports, playback, localDesignSavedOnServer: false, mcpAuthoring, errors }, null, 2) + "\n");
   console.log(JSON.stringify({ exports, playback, localDesignSavedOnServer: false, mcpAuthoring, errors }));

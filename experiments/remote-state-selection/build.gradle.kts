@@ -38,6 +38,10 @@ androidComponents {
     variant.sources.kotlin?.addStaticSourceDirectory(
       "../../ui-builder-export/build/remote-state-selection"
     )
-    variant.sources.kotlin?.addStaticSourceDirectory("build/repetition-source/remote")
+    variant.sources.kotlin?.addStaticSourceDirectory(
+      if (providers.gradleProperty("scopedProjectionProof").isPresent)
+        "build/scoped-projection-source/remote"
+      else "build/repetition-source/remote"
+    )
   }
 }

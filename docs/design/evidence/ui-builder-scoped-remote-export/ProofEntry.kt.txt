@@ -1,0 +1,5 @@
+package proof.repetition.remote
+import androidx.compose.runtime.Composable
+import androidx.compose.remote.creation.compose.layout.RemoteComposable
+@Composable @RemoteComposable
+fun RemoteRepeatedContent() { RepeatedComponentExportRemoteContent() }

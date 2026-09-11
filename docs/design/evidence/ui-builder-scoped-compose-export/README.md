@@ -46,8 +46,9 @@ the projection remains compilable. Tests that require those constructs check thi
 
 ## Remaining work
 
-Remote Kotlin still needs its equivalent production integration. The initial JSON/RC/PNG export
-paths already support this fixture, but that does not establish Kotlin parity for every operation.
+The [equivalent production Remote Kotlin integration](../ui-builder-scoped-remote-export/README.md)
+now also compiles and passes its interaction proof. The initial JSON/RC/PNG export paths support
+this fixture, but that does not establish Kotlin parity for every operation.
 Runtime lists, callbacks with values or slots, per-instance state/addressing and additional binding
 types remain required. The compiled evidence establishes this production Compose projection, not
 the full Remote Compose completeness goal.
