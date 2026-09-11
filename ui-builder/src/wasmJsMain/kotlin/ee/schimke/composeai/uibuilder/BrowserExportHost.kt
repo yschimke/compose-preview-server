@@ -7,17 +7,20 @@ import kotlin.coroutines.resumeWithException
 import kotlin.js.JsString
 import kotlin.js.Promise
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * The browser half of [UiBuilderExportHost]: the clipboard, the download, the page's own origin.
  *
  * ## One address for everything
  *
- * Every verb here reads the design's **live export URL** —
- * `/api/ui-builder/v1/designs/<id>/export.svg` or `.png` — rather than posting a protocol request
- * and carrying the artifact around. That is deliberate, and it is what makes "Copy link" honest:
- * the link a person copies is the very URL the Copy and Download rows fetched, so what they pasted
- * into Figma and what a colleague opens from the link are the same bytes for the same revision. The
+ * Saved artifacts use the design's **live export URL** —
+ * `/api/ui-builder/v1/designs/<id>/export.svg` or `.png`. Current Remote drafts are submitted to
+ * `/api/ui-builder/v1/documents/export.json` or `.rc`; the supplied document is captured once per
+ * action. A local design has no Copy link row. Saved links retain the existing guarantee: the link
+ * a person copies is the very URL the Copy and Download rows fetched, so what they pasted into
+ * Figma and what a colleague opens from the link are the same bytes for the same revision. The
  * route renders the current committed revision on each request, so the address is live.
  *
  * ## What lands on the clipboard
@@ -50,15 +53,18 @@ internal class BrowserExportHost(
    * naming the right one.
    */
   private val revision: Long? = null,
+  override val supportsLinks: Boolean = true,
+  private val suppliedDocument: (() -> UiBuilderDocument?)? = null,
 ) : UiBuilderExportHost {
 
   override suspend fun copyPicture(format: EditorExportFormat): String {
-    val url = sameOriginRequestUrl(livePath(format))
+    val document = currentRemoteDocument(format)
+    val url = sameOriginRequestUrl(if (document == null) livePath(format) else suppliedPath(format))
     val outcome =
       try {
         when (format) {
           EditorExportFormat.Svg,
-          EditorExportFormat.Json -> awaitJsString(copySvgTextPromise(url))
+          EditorExportFormat.Json -> awaitJsString(copySvgTextPromise(url, document))
           EditorExportFormat.Png -> awaitJsString(copyPngImagePromise(url))
           EditorExportFormat.Rc -> return "Use Download to save the binary document"
         }
@@ -71,6 +77,7 @@ internal class BrowserExportHost(
   }
 
   override suspend fun copyLink(format: EditorExportFormat): String {
+    if (!supportsLinks) return "Save the design to share an export link"
     val link = shareableUrl(livePath(format))
     val outcome =
       try {
@@ -83,15 +90,26 @@ internal class BrowserExportHost(
   }
 
   override suspend fun download(format: EditorExportFormat): String {
-    val url = sameOriginRequestUrl(livePath(format, download = true))
+    val document = currentRemoteDocument(format)
+    val url =
+      sameOriginRequestUrl(
+        if (document == null) livePath(format, download = true) else suppliedPath(format)
+      )
     val outcome =
       try {
-        awaitJsString(downloadPromise(url, "$designId.${format.extension}"))
+        awaitJsString(downloadPromise(url, "$designId.${format.extension}", document))
       } catch (failure: Exception) {
         return "Download failed: ${failure.message?.trimJsError() ?: "unknown error"}"
       }
     return if (outcome.isEmpty()) "Downloading $designId.${format.extension}" else outcome
   }
+
+  private fun currentRemoteDocument(format: EditorExportFormat): String? =
+    if (format != EditorExportFormat.Json && format != EditorExportFormat.Rc) null
+    else suppliedDocument?.invoke()?.let { Json.encodeToString(it.toDesignDocumentV1()) }
+
+  private fun suppliedPath(format: EditorExportFormat): String =
+    "$UI_BUILDER_DOCUMENT_EXPORT_PATH/export.${format.extension}"
 
   /**
    * The export route for one format, relative to the page; see [UI_BUILDER_LIVE_EXPORT_PATH].
@@ -114,6 +132,7 @@ internal class BrowserExportHost(
 }
 
 internal const val UI_BUILDER_LIVE_EXPORT_PATH = "/api/ui-builder/v1/designs"
+internal const val UI_BUILDER_DOCUMENT_EXPORT_PATH = "/api/ui-builder/v1/documents"
 
 /**
  * Copies one design link — a node, a thread, a revision — and answers with a sentence.
@@ -178,11 +197,13 @@ private external fun copyTextPromise(text: String): Promise<JsString>
  * success.
  */
 @JsFun(
-  """(url) => {
+  """(url, document) => {
     if (!navigator.clipboard || !navigator.clipboard.writeText) {
       return Promise.resolve('the browser offers no clipboard here (is the page on https or localhost?)');
     }
-    return fetch(url).then((response) => {
+    return fetch(url, document == null ? undefined : {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: document,
+    }).then((response) => {
       if (!response.ok) {
         return response.text().then((body) => {
           throw new Error('HTTP ' + response.status + (body ? ': ' + body : ''));
@@ -195,7 +216,7 @@ private external fun copyTextPromise(text: String): Promise<JsString>
     ));
   }"""
 )
-private external fun copySvgTextPromise(url: String): Promise<JsString>
+private external fun copySvgTextPromise(url: String, document: String?): Promise<JsString>
 
 /**
  * Fetches the PNG and puts it on the clipboard as an image.
@@ -236,18 +257,33 @@ private external fun copyPngImagePromise(url: String): Promise<JsString>
  * navigation cannot report whether the save dialog was accepted.
  */
 @JsFun(
-  """(url, filename) => {
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.rel = 'noopener';
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    return Promise.resolve('');
+  """(url, filename, content) => {
+    const save = (href) => {
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = filename;
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    };
+    if (content == null) { save(url); return Promise.resolve(''); }
+    return fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: content,
+    }).then(async response => {
+      if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + await response.text());
+      const objectUrl = URL.createObjectURL(await response.blob());
+      save(objectUrl);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      return '';
+    });
   }"""
 )
-private external fun downloadPromise(url: String, filename: String): Promise<JsString>
+private external fun downloadPromise(
+  url: String,
+  filename: String,
+  document: String?,
+): Promise<JsString>
 
 private suspend fun awaitJsString(promise: Promise<JsString>): String =
   suspendCancellableCoroutine { continuation ->

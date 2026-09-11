@@ -96,8 +96,62 @@ class RemoteDocumentExportExecutorTest {
           json.decodeFromString(HttpResponseEnvelopeV1.serializer(), body).response
         }
     }
+    fun supplied(
+      doc: DesignDocumentV1,
+      format: String,
+      authenticated: Boolean = true,
+    ): Pair<Int, ByteArray> =
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/documents/export.$format")
+            .apply { if (authenticated) header(ServeHttpServer.TOKEN_HEADER, token) }
+            .post(
+              json
+                .encodeToString(DesignDocumentV1.serializer(), doc)
+                .toRequestBody("application/json".toMediaType())
+            )
+            .build()
+        )
+        .execute()
+        .use { it.code to it.body.bytes() }
     try {
+      val draft = document.copy(revision = 7)
+      val (sourceStatus, draftSource) = supplied(draft, "json")
+      assertEquals(200, sourceStatus, draftSource.decodeToString())
+      val (binaryStatus, draftBytes) = supplied(draft, "rc")
+      assertEquals(200, binaryStatus, draftBytes.decodeToString())
+      assertContentEquals(RemoteComposeJson.compile(draftSource.decodeToString()), draftBytes)
+      assertTrue(assertIs<DesignsResponseV1>(request(ListDesignsRequestV1())).designs.isEmpty())
+      assertEquals(401, supplied(draft, "rc", authenticated = false).first)
+      assertEquals(
+        409,
+        supplied(draft.copy(catalogPin = draft.catalogPin.copy(capabilityDigest = "missing")), "rc")
+          .first,
+      )
+      assertEquals(400, supplied(draft.copy(roots = listOf("missing")), "rc").first)
+      assertTrue(assertIs<DesignsResponseV1>(request(ListDesignsRequestV1())).designs.isEmpty())
       assertIs<SnapshotResponseV1>(request(CreateDesignRequestV1(document)))
+      fun storedFiles() =
+        stateDirectory
+          .toFile()
+          .walkTopDown()
+          .filter { it.isFile }
+          .associate { it.relativeTo(stateDirectory.toFile()).path to it.readBytes().toList() }
+      val beforeDraft = storedFiles()
+      // A caller-supplied draft may reuse a name; it cannot mutate the saved content or audit.
+      val changed =
+        draft.copy(
+          stateVariables =
+            draft.stateVariables.mapValues { (_, value) ->
+              value.copy(initialValue = JsonPrimitive(16777216))
+            }
+        )
+      assertEquals(200, supplied(changed, "rc").first)
+      assertEquals(beforeDraft, storedFiles())
+      val saved = assertIs<SnapshotResponseV1>(request(GetSnapshotRequestV1(document.id)))
+      assertEquals(0, saved.snapshot.state.document.revision)
+      assertEquals(document.stateVariables, saved.snapshot.state.document.stateVariables)
       val source =
         assertIs<ExportResponseV1>(request(ExportDesignRequestV1(document.id, 0, formats.first())))
           .artifact

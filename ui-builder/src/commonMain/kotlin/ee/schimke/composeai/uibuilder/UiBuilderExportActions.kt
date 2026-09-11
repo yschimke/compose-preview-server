@@ -55,6 +55,10 @@ interface UiBuilderExportHost {
    */
   val formats: List<EditorExportFormat>
 
+  /** A local document has no shareable server export URL. */
+  val supportsLinks: Boolean
+    get() = true
+
   /** Copies the rendered design to the clipboard; returns a sentence for the toolbar. */
   suspend fun copyPicture(format: EditorExportFormat): String
 
@@ -112,12 +116,15 @@ sealed interface EditorExportMenuEntry {
  * them read every row to find the verb. Within a group the catalog's order stands, and the catalog
  * lists SVG first where it has it, because the Figma route is the one this menu exists for.
  */
-fun exportMenuEntries(formats: List<EditorExportFormat>): List<List<EditorExportMenuEntry>> =
+fun exportMenuEntries(
+  formats: List<EditorExportFormat>,
+  supportsLinks: Boolean = true,
+): List<List<EditorExportMenuEntry>> =
   if (formats.isEmpty()) emptyList()
   else
     listOf(
       formats.filter { it != EditorExportFormat.Rc }.map(EditorExportMenuEntry::CopyPicture),
-      formats.map(EditorExportMenuEntry::CopyLink),
+      if (supportsLinks) formats.map(EditorExportMenuEntry::CopyLink) else emptyList(),
       formats.map(EditorExportMenuEntry::Download),
     )
 

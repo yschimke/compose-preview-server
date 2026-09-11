@@ -12,6 +12,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignsResponseV1
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportResponseV1
 import ee.schimke.composeai.uibuilder.protocol.InsertNodeMutationV1
@@ -40,6 +41,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.builtins.ListSerializer
@@ -338,6 +340,41 @@ class ServeUiBuilderMcpIntegrationTest {
         artifact.toString(),
       )
     }
+  }
+
+  @Test
+  fun `MCP compiles unsaved document content without creating a design`() {
+    val format = ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.documentFormat
+    if (System.getenv("VERIFY_REMOTE_DOCUMENT_EXPORTS") == "true") assertNotNull(format)
+    org.junit.jupiter.api.Assumptions.assumeTrue(format != null)
+    val server = start(recordFile = null, catalogSystemId = "remote-m3", withRemoteExports = true)
+    val doc =
+      json
+        .decodeFromString<DesignDocumentV1>(
+          File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
+            .readText()
+        )
+        .copy(revision = 19)
+    val result =
+      response(
+        envelope(
+          server,
+          ServeUiBuilderMcp.EXPORT_DOCUMENT,
+          """{"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)},"format":"rc"}""",
+        )
+      )
+    val artifact = assertIs<ExportResponseV1>(result).artifact
+    assertTrue(
+      artifact.diagnostics.none { it.severity == DiagnosticSeverityV1.ERROR },
+      artifact.toString(),
+    )
+    assertEquals(format, artifact.format)
+    assertTrue(artifact.content.isNotBlank())
+    assertTrue(
+      assertIs<DesignsResponseV1>(response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS)))
+        .designs
+        .isEmpty()
+    )
   }
 
   @Test
@@ -916,6 +953,7 @@ class ServeUiBuilderMcpIntegrationTest {
     withAssets: Boolean = false,
     recordFile: File? = ScreenGeneratorScreenFixture.componentsFile(),
     catalogSystemId: String = CATALOG_SYSTEM_ID,
+    withRemoteExports: Boolean = false,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -927,17 +965,26 @@ class ServeUiBuilderMcpIntegrationTest {
             CurrentM3UiBuilderCatalogExecutor(
               catalogSystemIds = setOf(catalogSystemId),
               exportCapabilities =
-                ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-                  composeCode = true,
-                  svg = false,
-                  png = false,
-                ),
+                ee.schimke.composeai.uibuilder.protocol
+                  .ExportCapabilitiesV1(
+                    composeCode = true,
+                    svg = false,
+                    png = false,
+                  )
+                  .let {
+                    ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.capabilities(
+                      it,
+                      json = withRemoteExports,
+                      document = withRemoteExports,
+                    )
+                  },
             ),
           exporter =
             ScreenGeneratorComposeExportExecutor(
-              ComponentRecordSource(recordFile?.let { mapOf(catalogSystemId to it) }.orEmpty())::
-                record
-            ),
+                ComponentRecordSource(recordFile?.let { mapOf(catalogSystemId to it) }.orEmpty())::
+                  record
+              )
+              .let { if (withRemoteExports) RemoteDocumentExportExecutor(it) else it },
           assets =
             if (withAssets) FileUiBuilderAssetStore(stateDirectory.resolve("assets")) else null,
         )

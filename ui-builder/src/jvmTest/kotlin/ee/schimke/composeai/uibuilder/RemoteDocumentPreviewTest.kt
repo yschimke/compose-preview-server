@@ -46,7 +46,12 @@ class RemoteDocumentPreviewTest {
     assertPlayback("sample-density-2")
   }
 
-  private fun assertPlayback(stem: String) {
+  @Test
+  fun `unsaved current content plays without claiming a saved revision`() {
+    assertPlayback("sample", saved = false)
+  }
+
+  private fun assertPlayback(stem: String, saved: Boolean = true) {
     val report =
       decodeRemoteComposeDocument(ready(stem = stem).documentBase64)
         .getOrThrow()
@@ -74,11 +79,12 @@ class RemoteDocumentPreviewTest {
           initialPreviewMode = true,
           onRequestDocumentPreview = {
             requested = it
-            ready(it.revision, stem)
+            ready(it.revision, stem).copy(saved = saved)
           },
         )
       }
-      onNodeWithText("Live preview · revision 0").assertExists()
+      onNodeWithText(if (saved) "Live preview · revision 0" else "Live preview · unsaved changes")
+        .assertExists()
       val target = onNodeWithContentDescription("Interactive document preview")
       assertEquals(360f, target.fetchSemanticsNode().boundsInRoot.width)
       assertEquals(360f, target.fetchSemanticsNode().boundsInRoot.height)

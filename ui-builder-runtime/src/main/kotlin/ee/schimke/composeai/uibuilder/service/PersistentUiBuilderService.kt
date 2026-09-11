@@ -615,6 +615,7 @@ public class PersistentUiBuilderService(
       is UiBuilderServiceRequest.RenameDesign -> designId
       is UiBuilderServiceRequest.DeleteDesign -> designId
       UiBuilderServiceRequest.ListCatalogs,
+      is UiBuilderServiceRequest.ExportDocument,
       is UiBuilderServiceRequest.CreateDesign,
       is UiBuilderServiceRequest.ListDesigns -> null
     }
@@ -625,7 +626,11 @@ public class PersistentUiBuilderService(
         return UiBuilderServiceResponse.Error(UiBuilderServiceError(it.code, it.reason))
       }
     }
-    if (call.request is UiBuilderServiceRequest.ExportDesign) return export(call)
+    if (
+      call.request is UiBuilderServiceRequest.ExportDesign ||
+        call.request is UiBuilderServiceRequest.ExportDocument
+    )
+      return export(call)
     val execution = lock.withLock { executeLocked(call) }
     drain(execution.mailboxes)
     return execution.response
@@ -900,7 +905,8 @@ public class PersistentUiBuilderService(
       is UiBuilderServiceRequest.GetSnapshot -> open(call.actor, request.designId, request.revision)
       is UiBuilderServiceRequest.GetDelta -> delta(call.actor, request)
       is UiBuilderServiceRequest.UpdatePresence -> presence(call.actor, request)
-      is UiBuilderServiceRequest.ExportDesign ->
+      is UiBuilderServiceRequest.ExportDesign,
+      is UiBuilderServiceRequest.ExportDocument ->
         error("export is executed outside the service lock")
       is UiBuilderServiceRequest.RenameDesign -> rename(call.actor, request)
       is UiBuilderServiceRequest.DeleteDesign -> delete(call.actor, request.designId)
@@ -1558,7 +1564,9 @@ public class PersistentUiBuilderService(
     val currentExports = activeExports.incrementAndGet()
     updatePeak(peakExports, currentExports.toLong())
     try {
-      return exportAdmitted(call)
+      return if (call.request is UiBuilderServiceRequest.ExportDocument)
+        exportDocumentAdmitted(call)
+      else exportAdmitted(call)
     } finally {
       activeExports.decrementAndGet()
       exportPermits.release()
@@ -1620,6 +1628,31 @@ public class PersistentUiBuilderService(
         )
       pinnedSequence = state.sequence
     }
+    val outcome = executeExport(pinned)
+    if (outcome !is UiBuilderServiceResponse.Export) return outcome
+    lock.withLock {
+      val design =
+        persisted.designs[request.designId]
+          ?: return UiBuilderServiceResponse.Error(notFound(request.designId))
+      val audit =
+        AuditRecordV1(
+          kind = AuditKindV1.EXPORT,
+          actorId = call.actor.actorId,
+          designId = request.designId,
+          revision = pinned.revision,
+          sequence = pinnedSequence,
+          operationId = null,
+          exportFormat = request.format,
+          atEpochMillis = clock.millis(),
+        )
+      val updated =
+        design.copy(audit = (design.audit + audit).takeLast(limits.retainedAuditRecords))
+      commitDesign(request.designId, updated)
+    }
+    return outcome
+  }
+
+  private fun executeExport(pinned: RevisionPinnedUiBuilderExport): UiBuilderServiceResponse {
     val artifact =
       try {
         exportTaskRunner.execute(limits.exportTimeoutMillis) { exporter.export(pinned) }
@@ -1663,26 +1696,56 @@ public class PersistentUiBuilderService(
         )
       )
     }
-    lock.withLock {
-      val design =
-        persisted.designs[request.designId]
-          ?: return UiBuilderServiceResponse.Error(notFound(request.designId))
-      val audit =
-        AuditRecordV1(
-          kind = AuditKindV1.EXPORT,
-          actorId = call.actor.actorId,
-          designId = request.designId,
-          revision = pinned.revision,
-          sequence = pinnedSequence,
-          operationId = null,
-          exportFormat = request.format,
-          atEpochMillis = clock.millis(),
-        )
-      val updated =
-        design.copy(audit = (design.audit + audit).takeLast(limits.retainedAuditRecords))
-      commitDesign(request.designId, updated)
-    }
     return UiBuilderServiceResponse.Export(artifact)
+  }
+
+  private fun exportDocumentAdmitted(call: UiBuilderServiceCall): UiBuilderServiceResponse {
+    val request = call.request as UiBuilderServiceRequest.ExportDocument
+    val document = request.document
+    fun invalid(message: String) =
+      UiBuilderServiceResponse.Error(UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, message))
+    if (request.format !in RemoteDocumentExportSupport.formats) {
+      return invalid("supplied documents support only Remote JSON and RC export")
+    }
+    if (document.id.isBlank() || document.revision < 0)
+      return invalid("invalid document id or revision")
+    if (document.nodes.size > limits.maximumNodesPerDesign)
+      return invalid("design node limit exceeded")
+    documentQuotaIssue(document, countRejection = true)?.let {
+      return invalid(it)
+    }
+    validateEnvironment(document.environment)?.let {
+      return invalid(it.message)
+    }
+    validateTopology(document)?.let {
+      return invalid(it.message)
+    }
+    val catalog =
+      catalogs.resolve(document.catalogPin)
+        ?: return UiBuilderServiceResponse.Error(
+          UiBuilderServiceError(
+            ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
+            "catalog pin is unavailable",
+          )
+        )
+    if (!catalog.supports(request.format))
+      return invalid("catalog does not support ${request.format} export")
+    catalogs.validate(document, catalog)?.let {
+      return UiBuilderServiceResponse.Error(it.toServiceError())
+    }
+    // The exporter receives only supplied content. No store lookup, asset resolution, audit write,
+    // collaboration notification or revision allocation happens for this operation.
+    return executeExport(
+      RevisionPinnedUiBuilderExport(
+        actor = call.actor,
+        designId = document.id,
+        revision = document.revision,
+        documentHash = documentHash(document),
+        document = document,
+        catalog = catalog,
+        format = request.format,
+      )
+    )
   }
 
   private fun reduce(

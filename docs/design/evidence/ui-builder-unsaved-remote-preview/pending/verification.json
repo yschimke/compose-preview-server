@@ -1,0 +1,209 @@
+{
+  "designId": "pending-remote-1789125537652",
+  "savedOnServer": true,
+  "saveHeldDuringPreview": true,
+  "revision": 1,
+  "initial": {
+    "bytes": 790,
+    "sha256": "105c3660935928be0976638aab9583418c427c1e100ca5e0d22f4667e20d53dd"
+  },
+  "artifacts": {
+    "json": {
+      "bytes": 1875,
+      "sha256": "e717cb1f62ad6d0cbd4ad4250edf149488773cfd1151388235a57372df79993d",
+      "downloadMatchesMcp": true
+    },
+    "rc": {
+      "bytes": 790,
+      "sha256": "8c38b6adc65002bef353b493ec7cc3296be84f6f2a3039ecf63dc96dccb62ec4",
+      "downloadMatchesMcp": true
+    }
+  },
+  "colors": [
+    {
+      "name": "local-first",
+      "expected": [
+        103,
+        80,
+        164
+      ],
+      "observed": {
+        "color": [
+          103,
+          80,
+          164
+        ],
+        "bounds": {
+          "x": 460,
+          "y": 396,
+          "width": 360,
+          "height": 360
+        },
+        "boundsSource": "current-accessibility"
+      }
+    },
+    {
+      "name": "local-second",
+      "expected": [
+        0,
+        133,
+        119
+      ],
+      "observed": {
+        "color": [
+          3,
+          125,
+          113
+        ],
+        "bounds": {
+          "x": 460,
+          "y": 396,
+          "width": 360,
+          "height": 360
+        },
+        "boundsSource": "current-accessibility"
+      }
+    },
+    {
+      "name": "local-fallback",
+      "expected": [
+        57,
+        73,
+        171
+      ],
+      "observed": {
+        "color": [
+          57,
+          73,
+          171
+        ],
+        "bounds": {
+          "x": 460,
+          "y": 396,
+          "width": 360,
+          "height": 360
+        },
+        "boundsSource": "current-accessibility"
+      }
+    },
+    {
+      "name": "local-edited",
+      "expected": [
+        0,
+        133,
+        119
+      ],
+      "observed": {
+        "color": [
+          0,
+          133,
+          119
+        ],
+        "bounds": {
+          "x": 460,
+          "y": 396,
+          "width": 360,
+          "height": 360
+        },
+        "boundsSource": "current-accessibility"
+      }
+    },
+    {
+      "name": "saved-after-pending",
+      "expected": [
+        0,
+        133,
+        119
+      ],
+      "observed": {
+        "color": [
+          0,
+          133,
+          119
+        ],
+        "bounds": {
+          "x": 460,
+          "y": 396,
+          "width": 360,
+          "height": 360
+        },
+        "boundsSource": "measured-before-popup"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/ui-builder/v1/identity"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui-builder/v1/device-presets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui-builder/v1/designs/pending-remote-1789125537652/component-drift"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui-builder/v1/designs/pending-remote-1789125537652/reference"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui-builder/v1/designs/pending-remote-1789125537652/comments"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui-builder/v1/catalogs/remote-m3/component-record"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui-builder/v1/designs/pending-remote-1789125537652/export.rc"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/documents/export.rc"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/documents/export.json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/documents/export.rc"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui-builder/v1/requests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui-builder/v1/designs/pending-remote-1789125537652/export.rc"
+    }
+  ],
+  "errors": []
+}

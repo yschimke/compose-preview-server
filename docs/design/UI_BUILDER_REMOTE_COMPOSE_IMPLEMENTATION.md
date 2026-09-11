@@ -53,11 +53,11 @@ remaining in the review are still required.
 
 ## Live document preview
 
-For saved designs whose host advertises RC export, the existing Preview button now loads the exact
-revision's compiled document into the existing CMP/WASM player. Design mode keeps the semantic
-authoring canvas. The host waits for the expected design to match its authoritative snapshot;
-revision/generation changes cancel and refresh the preview. Compilation and player-support errors
-are shown in place, without substituting the semantic renderer for a refused export.
+For designs whose host advertises RC export, the existing Preview button loads the compiled
+document into the existing CMP/WASM player. A saved design uses its exact revision; pending edits
+and local-storage designs submit their current content to the temporary document-export route.
+Design mode keeps the semantic authoring canvas. Document/generation changes cancel and refresh the
+preview. Compilation and player-support errors are shown in place.
 
 [Actual browser playback and MCP evidence](evidence/ui-builder-live-document-preview/README.md)
 shows clicks advancing through both cases and the fallback, then a live MCP edit updating the open
@@ -68,6 +68,33 @@ additional interactive pane. The released dependency floor compiles; its known e
 limitation skips the two density variants of that fixture until the local player fix is selected,
 and the four lifecycle/routing tests pass. Staged validation can require playback with
 `VERIFY_REMOTE_DOCUMENT_PREVIEW=true`.
+
+## Unsaved and local Remote documents
+
+`POST /api/ui-builder/v1/documents/export.json` and `.rc` accept the existing `DesignDocumentV1`
+payload with export authorization. `UiBuilderServiceRequest.ExportDocument` resolves the exact
+catalog pin, validates topology/environment/quotas, and uses the same bounded export runner and
+artifact checks as saved export. It reads no saved design and writes no design, revision or audit
+record. The source is self-contained Remote JSON/RC; native image/Kotlin compilation and resolution
+of saved assets are outside this operation.
+
+Hosted MCP exposes the same operation as `ui_builder_export_document`, with `document` and `format`.
+It returns the normal export artifact and located diagnostics. The standalone MCP adapter's saved
+`export_design` operation remains unchanged; forwarding supplied documents there is still pending.
+
+The existing WASM Preview button compiles the current document before a live save completes and
+also works in local-storage mode. Temporary results are labelled “unsaved changes.” Local Remote
+designs get JSON/RC copy/download actions; shareable export links remain specific to saved designs.
+[Browser proof and artifacts](evidence/ui-builder-unsaved-remote-preview/README.md) cover local
+state editing, real playback, matching browser/MCP bytes and absence from the saved-design list.
+A second browser run holds a live save: the temporary preview and both downloads use the edited
+document while revision 0 remains stored, then saved revision 1 yields identical RC bytes and the
+same displayed branch. Both runs finish with no browser errors.
+
+The combined run passes 952 editor JVM tests, 51 shared-export tests, 189 runtime tests and 34
+targeted server/MCP tests, plus runtime ABI verification and the WASM/server distribution builds.
+HTTP tests verify authentication, invalid pins/topology, real compilation and byte-for-byte unchanged
+saved state/audit files when a supplied draft reuses an existing design ID.
 
 ## Authoring state and actions
 
@@ -310,7 +337,8 @@ The delivery and saved-preview sections above describe its editor, service and M
   callbacks, preserving the same meaning in the code pane, server preview and export.
 - Extend Remote state selection to String and nullable selectors without changing authored
   semantics. Transitions and inactive-branch retention can follow.
-- Extend the saved-document preview/export integration to unsaved and local-storage designs.
+- Forward supplied-document exports through the standalone MCP adapter; the browser, HTTP and
+  hosted MCP already accept unsaved/local Remote documents.
 - Extend the native PNG compilation route to ordinary Remote roots; source, JSON, binary export
   and saved-document WASM playback already accept the same semantic tree.
 - Complete loops, reusable component parameters/callbacks and per-instance addressing through all

@@ -1,22 +1,31 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.request.receiveStream
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import java.util.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 
 /**
  * The design as an exported artifact, at a URL.
@@ -65,6 +74,9 @@ internal fun Route.installUiBuilderLiveExportRoutes(
     call.serveLiveExport(service, authorization, ExportFormatV1.SVG)
   }
   RemoteDocumentExportSupport.formats.forEach { format ->
+    post("/api/ui-builder/v1/documents/export.${format.name.lowercase()}") {
+      call.serveSuppliedDocument(service, authorization, format)
+    }
     get("/api/ui-builder/v1/designs/{designId}/export.${format.name.lowercase()}") {
       call.serveLiveExport(service, authorization, format)
     }
@@ -80,19 +92,7 @@ private suspend fun ApplicationCall.serveLiveExport(
   format: ExportFormatV1,
 ) {
   response.headers.append(HttpHeaders.CacheControl, "no-store")
-  val actor =
-    when (val decision = authorization.authorize(this, UiBuilderRouteCapability.EXPORT)) {
-      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
-      UiBuilderAuthorizationDecision.Missing -> {
-        response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
-        respondText("authentication is required", status = HttpStatusCode.Unauthorized)
-        return
-      }
-      UiBuilderAuthorizationDecision.Forbidden -> {
-        respondText("UI-builder export access required", status = HttpStatusCode.Forbidden)
-        return
-      }
-    }
+  val actor = authorizeExport(authorization) ?: return
   val designId = parameters["designId"].orEmpty()
   if (designId.isBlank()) {
     respondText("a design id is required", status = HttpStatusCode.BadRequest)
@@ -109,6 +109,14 @@ private suspend fun ApplicationCall.serveLiveExport(
       ExportDesignRequestV1(designId = designId, revision = revision, format = format),
       actor,
     )
+  serveExportArtifact(outcome, format, designId)
+}
+
+private suspend fun ApplicationCall.serveExportArtifact(
+  outcome: UiBuilderServiceResponse,
+  format: ExportFormatV1,
+  designId: String,
+) {
   val artifact =
     when (outcome) {
       is UiBuilderServiceResponse.Export -> outcome.artifact
@@ -153,6 +161,58 @@ private suspend fun ApplicationCall.serveLiveExport(
   response.headers.append(HttpHeaders.ETag, "\"${artifact.contentDigest}\"")
   artifact.servedRevision()?.let { response.headers.append(UI_BUILDER_REVISION_HEADER, it) }
   respondBytes(bytes, ContentType.parse(artifact.mediaType), HttpStatusCode.OK)
+}
+
+/** Supplied content is compiled without allocating a saved design or revision. */
+private suspend fun ApplicationCall.serveSuppliedDocument(
+  service: UiBuilderServicePort,
+  authorization: ServeUiBuilderAuthorization,
+  format: ExportFormatV1,
+) {
+  response.headers.append(HttpHeaders.CacheControl, "no-store")
+  val actor = authorizeExport(authorization) ?: return
+  val bytes =
+    withContext(Dispatchers.IO) {
+      receiveStream().use { it.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
+    }
+  if (bytes.size > MAX_UI_BUILDER_REQUEST_BYTES) {
+    respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+    return
+  }
+  val document =
+    try {
+      UI_BUILDER_JSON.decodeFromString(
+        DesignDocumentV1.serializer(),
+        bytes.toString(Charsets.UTF_8),
+      )
+    } catch (_: SerializationException) {
+      respondText("expected a DesignDocumentV1 payload", status = HttpStatusCode.BadRequest)
+      return
+    }
+  val outcome =
+    service.execute(
+      UiBuilderServiceCall(actor, UiBuilderServiceRequest.ExportDocument(document, format))
+    )
+  serveExportArtifact(outcome, format, "document")
+}
+
+private suspend fun ApplicationCall.authorizeExport(
+  authorization: ServeUiBuilderAuthorization
+): AuthenticatedUiBuilderActor? {
+  val actor =
+    when (val decision = authorization.authorize(this, UiBuilderRouteCapability.EXPORT)) {
+      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+      UiBuilderAuthorizationDecision.Missing -> {
+        response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+        respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+        return null
+      }
+      UiBuilderAuthorizationDecision.Forbidden -> {
+        respondText("UI-builder export access required", status = HttpStatusCode.Forbidden)
+        return null
+      }
+    }
+  return actor
 }
 
 /**

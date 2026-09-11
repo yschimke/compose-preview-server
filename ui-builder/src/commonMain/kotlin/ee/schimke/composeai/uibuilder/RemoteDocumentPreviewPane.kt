@@ -20,13 +20,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
-/**
- * The host either exports this exact saved revision or waits for the editor's edits to be saved.
- */
+/** The host exports either the saved revision or the supplied current document. */
 sealed interface UiBuilderDocumentPreview {
   data object WaitingForSave : UiBuilderDocumentPreview
 
-  data class Ready(val revision: Int, val documentBase64: String) : UiBuilderDocumentPreview
+  data class Ready(val revision: Int, val documentBase64: String, val saved: Boolean = true) :
+    UiBuilderDocumentPreview
 
   data class Failed(val message: String) : UiBuilderDocumentPreview
 }
@@ -88,7 +87,8 @@ internal fun RemoteDocumentPreviewPane(
               }
             Column(Modifier.fillMaxSize().padding(12.dp)) {
               Text(
-                "Live preview · revision ${current.revision}",
+                if (current.saved) "Live preview · revision ${current.revision}"
+                else "Live preview · unsaved changes",
                 style = MaterialTheme.typography.labelSmall,
               )
               BoxWithConstraints(

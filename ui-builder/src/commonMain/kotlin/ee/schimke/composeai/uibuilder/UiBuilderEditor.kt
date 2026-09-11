@@ -2594,7 +2594,10 @@ private fun EditorToolbar(
  */
 @Composable
 private fun ExportMenu(host: UiBuilderExportHost, showStatus: Boolean = true) {
-  val groups = remember(host.formats) { exportMenuEntries(host.formats) }
+  val groups =
+    remember(host.formats, host.supportsLinks) {
+      exportMenuEntries(host.formats, host.supportsLinks)
+    }
   if (groups.isEmpty()) return
   var open by remember { mutableStateOf(false) }
   var status by remember { mutableStateOf<String?>(null) }

@@ -637,6 +637,8 @@ private fun LiveSessionApp(
   // Built once the catalog is known, because what the menu offers is what the catalog's renderer
   // can draw; null until then, which is a toolbar without an Export button rather than one that
   // promises formats it has not checked.
+  var latestEditorDocument by remember(config.designId) { mutableStateOf<UiBuilderDocument?>(null) }
+  var documentPreviewAvailable by remember(config.designId) { mutableStateOf(false) }
   var exportHost by remember(config.designId) { mutableStateOf<UiBuilderExportHost?>(null) }
   var restoredReference by remember(config.designId) { mutableStateOf<RestoredReference?>(null) }
   var referenceStatus by remember(config.designId) { mutableStateOf<String?>(null) }
@@ -779,34 +781,43 @@ private fun LiveSessionApp(
         CapabilityCatalogParser.parse(
           Json.encodeToJsonElement(CatalogCapabilityV1.serializer(), capability)
         )
-      // No Export menu for a local design: every format behind it is rendered by the server, from a
-      // design the server does not have. The Code pane is unaffected — the Compose source is
-      // generated in this page from the same exporter, which is why it keeps working offline.
+      documentPreviewAvailable =
+        RemoteDocumentExportSupport.documentFormat?.let {
+          RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
+        } == true
+      // Local Remote designs send their current content to the temporary export route. Other
+      // native formats still require a saved design; their rows remain absent in local sessions.
       //
       // And where there is one, it is pinned to the same revision the canvas is drawing, because
       // the export routes render on request: without it the Export menu would answer a question
       // about history with the picture of the head, which is the one thing the banner promises it
       // is not showing.
       exportHost =
-        if (config.localStorage) null
-        else
-          BrowserExportHost(
-            designId = config.designId,
-            formats =
-              exportFormatsFor(
-                svg = capability.exportCapabilities.svg,
-                png = capability.exportCapabilities.png,
-                json =
-                  RemoteDocumentExportSupport.jsonFormat?.let {
-                    RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
-                  } == true,
-                rc =
-                  RemoteDocumentExportSupport.documentFormat?.let {
-                    RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
-                  } == true,
-              ),
-            revision = revision,
-          )
+        BrowserExportHost(
+          designId = config.designId,
+          supportsLinks = !config.localStorage,
+          suppliedDocument = {
+            val current = latestEditorDocument ?: document
+            current?.takeIf {
+              config.localStorage ||
+                (revision == null && authoritativeDocument?.toUiBuilderDocument() != it)
+            }
+          },
+          formats =
+            exportFormatsFor(
+              svg = !config.localStorage && capability.exportCapabilities.svg,
+              png = !config.localStorage && capability.exportCapabilities.png,
+              json =
+                RemoteDocumentExportSupport.jsonFormat?.let {
+                  RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
+                } == true,
+              rc =
+                RemoteDocumentExportSupport.documentFormat?.let {
+                  RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)
+                } == true,
+            ),
+          revision = revision,
+        )
     }
     installCatalog(selectedCatalog, null)
     // `?revision=` first, because a design pinned to a committed revision is a different opening:
@@ -1267,11 +1278,19 @@ private fun LiveSessionApp(
       onSyncToServer = syncToServer,
       exportHost = exportHost,
       onRequestDocumentPreview =
-        if (exportHost?.formats?.contains(EditorExportFormat.Rc) != true) null
+        if (!documentPreviewAvailable) null
         else
           { expected ->
-            if (authoritativeDocument?.toUiBuilderDocument() != expected) {
-              UiBuilderDocumentPreview.WaitingForSave
+            if (config.localStorage || authoritativeDocument?.toUiBuilderDocument() != expected) {
+              UiBuilderDocumentPreview.Ready(
+                revision = expected.revision,
+                documentBase64 =
+                  fetchBase64(
+                    "$UI_BUILDER_DOCUMENT_EXPORT_PATH/export.rc",
+                    Json.encodeToString(expected.toDesignDocumentV1()),
+                  ),
+                saved = false,
+              )
             } else {
               UiBuilderDocumentPreview.Ready(
                 revision = expected.revision,
@@ -1301,6 +1320,7 @@ private fun LiveSessionApp(
         scope.launch { commentStatus = commentHost.resolve(threadId, resolved) }
       },
       onStateChanged = {
+        latestEditorDocument = it.document
         // The address bar stops naming a node the moment the selection moves off it, so a URL
         // copied later — or restored by the browser tomorrow — cannot point at a layer nobody has
         // been looking at.
@@ -1801,22 +1821,25 @@ private suspend fun loadRemoteComposeSources(catalogSystemId: String): List<Remo
   }
 
 /** Bytes rather than text: a Remote Compose document is a binary wire format. */
-private suspend fun fetchBase64(url: String): String = suspendCancellableCoroutine { continuation ->
-  fetchBase64Promise(sameOriginRequestUrl(url))
-    .then { value ->
-      if (continuation.isActive) continuation.resume(value.toString())
-      null
-    }
-    .catch { error ->
-      if (continuation.isActive) {
-        continuation.resumeWithException(IllegalStateException(error.toString()))
+private suspend fun fetchBase64(url: String, document: String? = null): String =
+  suspendCancellableCoroutine { continuation ->
+    fetchBase64Promise(sameOriginRequestUrl(url), document)
+      .then { value ->
+        if (continuation.isActive) continuation.resume(value.toString())
+        null
       }
-      null
-    }
-}
+      .catch { error ->
+        if (continuation.isActive) {
+          continuation.resumeWithException(IllegalStateException(error.toString()))
+        }
+        null
+      }
+  }
 
 @JsFun(
-  """(url) => fetch(url).then((response) => {
+  """(url, document) => fetch(url, document == null ? undefined : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: document,
+  }).then((response) => {
     if (!response.ok) return response.text().then((body) => {
       throw new Error('HTTP ' + response.status + (body ? ': ' + body : ''));
     });
@@ -1832,7 +1855,7 @@ private suspend fun fetchBase64(url: String): String = suspendCancellableCorouti
     return btoa(binary);
   })"""
 )
-private external fun fetchBase64Promise(url: String): Promise<JsString>
+private external fun fetchBase64Promise(url: String, document: String?): Promise<JsString>
 
 private suspend fun fetchText(url: String): String = suspendCancellableCoroutine { continuation ->
   fetchTextPromise(sameOriginRequestUrl(url))
