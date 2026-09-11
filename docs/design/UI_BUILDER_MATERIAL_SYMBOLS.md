@@ -58,9 +58,31 @@ font's 10.68 MB, `gvar` (the variation deltas) is 9.28 MB and `glyf` (the defaul
 1.05 MB. Buying every axis, including the two this lane was not even going to offer, costs 3× the
 default instance rather than 42×.
 
-So: per style, one file, fetched the first time someone opens the picker or a design names that
-style, cached by the browser under a content-hashed URL, and never in the bundle. First load of
-the editor drops back to the pre-#710 8.7 MB.
+### Two tiers, because one variable font per style is not a first-load win on its own
+
+The obvious reading of that table — drop the icons from the bundle, fetch the variable font — does
+not actually pay for the common case, and the arithmetic has to be stated rather than skipped.
+Almost every design names at least one icon, so the font is fetched on first load too:
+
+| First load, gzipped | Wasm | Icons | Total |
+| --- | --- | --- | --- |
+| Today (#710) | 5.28 MB | in the Wasm | **5.28 MB** |
+| Variable font only | 2.37 MB | 4.8 MB | **7.17 MB** — worse, and worse again per extra style |
+| **Default instance, upgrading on demand** | 2.37 MB | 0.53 MB | **2.90 MB** |
+
+So the fonts come in two tiers:
+
+- **A static instance per style at the default axes** — `wght 400, FILL 0, GRAD 0, opsz 24`,
+  1.39 MB raw and **0.53 MB gzipped**, because dropping `gvar`, `fvar` and `avar` takes 9.28 MB
+  off. This is what a design that never touched a slider needs, what the grid paints with, and
+  what first load actually pays: **2.90 MB against today's 5.28 MB**. Add `FILL 1` and it is three
+  files per style, six for all three styles, ~3.2 MB of deployment.
+- **The variable font for that style**, fetched only when a design or the customise panel asks for
+  a non-default axis value. It replaces the instance in the glyph cache and everything re-resolves.
+
+That is the progressive step this design turns on, not an optimisation deferred to later: without
+it the lane makes first load worse. What is still avoided is the 42-instance matrix — six
+default-axis instances is a tier, 42 is the data-file deployment under another name.
 
 **Serve the `.ttf` with HTTP compression, not `.woff2`.** 4.8 MB gzipped and 4.0 MB as woff2 are
 close enough that it is not worth caring, and Skia decodes sfnt directly — the browser's woff2
@@ -127,6 +149,18 @@ until then search matches names, which is what the picker matches today.
 | `iconWeight` | 100–700 | `400` |
 | `iconGrade` | -25, 0, 200 | `0` |
 | `iconOpticalSize` | 20, 24, 40, 48 | `24` |
+| `iconAutoMirror` | `true`, `false` | the name's default, below |
+
+**Auto-mirroring is a property, because the font has no idea about it.** Today's inventory creates
+`autoMirrored/<style>/<name>` keys and resolves them through `Icons.AutoMirrored`
+(`MaterialIconCatalogTasks.kt`), and Compose honours that through `ImageVector.autoMirror` — which
+`UiBuilderRenderer` already reads when it draws a structured icon. Material Symbols carries no such
+flag: an arrow is one glyph, and nothing in the font says it should flip in RTL. Dropping the
+distinction would silently render every directional icon the same way in both directions, so:
+`iconAutoMirror` is a real property, its default per name comes from a generated list seeded by the
+`autoMirrored/` keys the current inventory already enumerates, and every emitted `ImageVector`
+carries `autoMirror = <that value>`. A legacy `autoMirrored/filled/arrow_back` therefore maps to
+`arrow_back` at `fill 1` with `iconAutoMirror = true`, not merely to name and style.
 
 `iconKey` stops being an 11,431-value enum and the catalog says "a name in the Material Symbols
 set", validated against the font's own name table rather than spelled out. The
@@ -155,11 +189,31 @@ chosen by which export it is rather than by a setting.
 
 `ComposeEmitter` already emits a private `builderIcon(key)` carrying only the icons a design uses.
 It keeps that shape and changes what the arms return: an `ImageVector` built with
-`ImageVector.Builder` and an `addPath(addPathNodes("…"))`, roughly **550 bytes of Kotlin per
-distinct icon**, from the same glyph-to-path call the canvas made. One file that compiles on its
-own is what a single-file export is for, and it is the only shape that can carry an arbitrary axis
-combination. The expression allowlist is unchanged — `ImageVector.Builder` and `addPathNodes` are
-both under `androidx.compose`.
+`ImageVector.Builder`, roughly **550 bytes of Kotlin per distinct icon**. One file that compiles on
+its own is what a single-file export is for, and it is the only shape that can carry an arbitrary
+axis combination. The expression allowlist is unchanged — `ImageVector.Builder` and `addPathNodes`
+are both under `androidx.compose`.
+
+**The path needs a brush, and `addPath` does not default to one.** `ImageVector.Builder.addPath`
+takes `fill` as a nullable `Brush` defaulting to null, so a path added without one is an outline
+that draws nothing and an `Icon` tints nothing — an invisible icon in every export. The emitted
+shape is therefore, following the inline vector this repository already has in
+`native-catalog-m3/…/CatalogComponents.kt`:
+
+```kotlin
+ImageVector.Builder(
+    name = "search",
+    defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 960f, viewportHeight = 960f,
+    autoMirror = false,
+  )
+  .addPath(addPathNodes("M784-120 …"), fill = SolidColor(Color.Black))
+  .build()
+```
+
+`SolidColor(Color.Black)` rather than a chosen colour because `Icon` tints it; `autoMirror` from
+the property above. A gate renders one exported icon and asserts it has ink, so "compiles" is never
+mistaken for "draws".
 
 ### 2. Bundle: `res/drawable`, which is what the site hands an Android developer
 
@@ -194,6 +248,31 @@ else takes shape 1. A gate keeps the table honest, the same way
 
 That table is also the honest answer to what `material-icons-extended` is still for: an opt-in the
 *consumer's* build already has, not a dependency of ours.
+
+### Who resolves the outline when there is no browser
+
+The browser is not the only exporter, and this is the part the design has to name rather than
+assume. `ui_builder_export`, the CLI and the native-preview lane all run
+`ScreenGeneratorComposeExportExecutor` on the JVM: it projects the saved document and calls
+`ScreenGenerator` directly, with no Compose and no Skia on that classpath — the server's
+dependencies are deliberately narrow, and its build actively filters `skiko-awt-runtime` jars out.
+A document that stores only a name and five axis values gives that lane nothing to emit, so those
+designs would export empty or refuse.
+
+**The document records the resolved outline, in a registry beside the assets.** When an icon is
+picked or an axis moved, the editor resolves the glyph once and records the path data under the
+`(name, style, fill, weight, grade, opticalSize)` it resolved for — one entry per distinct icon in
+the design, not per node, exactly the shape `assets` already has in `DesignDocumentV1`. The server
+then needs no font and no glyph engine: the outline is in the document it was handed, and export,
+native preview and the daemon render all read it from there. It also makes a design portable in the
+sense [`UI_BUILDER_DESIGN_PORTABILITY.md`](UI_BUILDER_DESIGN_PORTABILITY.md) means it — a design
+carries its own pictures rather than depending on the host's font pin.
+
+Rejected alternative: teaching the server to instance glyphs. It means a font engine and the pinned
+fonts in a process that has neither, to recompute what the editor already knows. The cost of the
+registry is ~550 bytes per distinct icon in the document and one question — what happens when the
+font pin moves — answered the same way an asset digest is: the recorded outline stays until the
+icon is re-picked, and a refresh is a visible, reviewable change rather than a silent redraw.
 
 ### Why the canvas is not affected
 
@@ -233,13 +312,12 @@ Slice 1 alone returns the 17.8 MB.
 
 ## What is deliberately not here
 
-- **A server-side glyph service.** The browser has Skia; asking the server to instance glyphs adds
-  a round trip per axis change and a font engine to a process that does not need one.
+- **A server-side glyph service.** The browser has Skia, and the document records what it resolved
+  (above), so the server never needs a font engine or a round trip per axis change.
 - **Drawing icons as text.** A ligature draw is fewer moving parts on the canvas, but the export
   needs outlines regardless, and a consumer's app would then need the font shipped with it.
-- **The static-instance fonts** (0.53 MB gz each). They are the obvious way to make the first grid
-  paint before 4.8 MB has arrived, and they are worth revisiting if that fetch is felt — but
-  shipping 42 of them is the data-file deployment again under another name.
+- **The full 42-instance matrix.** Six default-axis instances are a tier the design needs; 42 is
+  the data-file deployment under another name, and the variable font already covers the rest.
 - **Tag and category search**, per above.
 - **The legacy Material Icons set, as something we draw from.** `material-icons-extended` leaves
   *our* build — nothing in the editor, the canvas or the daemon resolves an `Icons.*` member any
