@@ -42,7 +42,13 @@ data class MaterialSymbolsKey(
   val autoMirror: Boolean = false,
 )
 
-@Serializable private data class NamesPayload(val style: String, val names: List<String>)
+@Serializable
+private data class NamesPayload(
+  val style: String,
+  /** The pin these names came from; echoed on outline requests so cached URLs expire with it. */
+  val pin: String = "",
+  val names: List<String>,
+)
 
 @Serializable
 private data class OutlinesPayload(
@@ -75,6 +81,7 @@ class MaterialSymbolsClient(
   private val vectors = mutableMapOf<MaterialSymbolsKey, ImageVector>()
   private val absent = mutableSetOf<MaterialSymbolsKey>()
   private val names = mutableMapOf<String, List<String>>()
+  private val pins = mutableMapOf<String, String>()
 
   /** The names a face carries, fetched once and filtered locally from then on. */
   suspend fun names(style: String = "outlined"): List<String> {
@@ -84,6 +91,7 @@ class MaterialSymbolsClient(
     val response = transport.get(url("$basePath/$style/names"))
     if (response.statusCode != 200) return emptyList()
     val payload = JSON.decodeFromString(NamesPayload.serializer(), response.body)
+    if (payload.pin.isNotEmpty()) pins[style] = payload.pin
     return payload.names.also { names[style] = it }
   }
 
@@ -99,15 +107,27 @@ class MaterialSymbolsClient(
       .groupBy { it.style to it.axes }
       .forEach { (group, wanted) ->
         val (style, axes) = group
-        val requested = wanted.map { it.name }.distinct()
-        val response =
-          transport.get(url("$basePath/$style?names=${requested.joinToString(",")}${axes.query()}"))
-        if (response.statusCode != 200) return@forEach
-        val payload = JSON.decodeFromString(OutlinesPayload.serializer(), response.body)
-        wanted.forEach { key ->
-          val path = payload.icons[key.name]
-          if (path == null) absent += key else pathData[key] = path
-        }
+        // Chunked to the server's own limit. One oversized request is refused wholesale, and since
+        // a refusal caches nothing, an un-chunked prefetch of a large selection would resolve
+        // nothing and repeat the same rejected call on every pass.
+        wanted
+          .distinctBy { it.name }
+          .chunked(MAXIMUM_NAMES_PER_REQUEST)
+          .forEach { batch ->
+            val requested = batch.joinToString(",") { encode(it.name) }
+            val pin = pins[style]?.let { "&v=$it" }.orEmpty()
+            val response =
+              transport.get(url("$basePath/$style?names=$requested${axes.query()}$pin"))
+            if (response.statusCode != 200) return@forEach
+            val payload = JSON.decodeFromString(OutlinesPayload.serializer(), response.body)
+            val byName = batch.associateBy { it.name }
+            wanted
+              .filter { it.name in byName }
+              .forEach { key ->
+                val path = payload.icons[key.name]
+                if (path == null) absent += key else pathData[key] = path
+              }
+          }
       }
   }
 
@@ -134,6 +154,43 @@ class MaterialSymbolsClient(
 
   companion object {
     private val JSON = Json { ignoreUnknownKeys = true }
+
+    /**
+     * Matches `MaterialSymbolsIcons.MAXIMUM_NAMES` on the server.
+     *
+     * Duplicated rather than shared because the two sides are separate modules; the server is the
+     * one that enforces it, and this only has to avoid writing a request it knows will be refused.
+     */
+    const val MAXIMUM_NAMES_PER_REQUEST = 256
+
+    /**
+     * Percent-encodes a name for the query string.
+     *
+     * Every name the pinned face carries is `[a-z0-9_]`, but a *stale* one from an older design is
+     * whatever was saved, and a `&` or `#` in it would rewrite the request rather than come back
+     * under `missing` — taking the rest of its batch down with it.
+     */
+    internal fun encode(name: String): String = buildString {
+      name.encodeToByteArray().forEach { byte ->
+        val value = byte.toInt() and 0xFF
+        val character = value.toChar()
+        if (
+          character in 'a'..'z' ||
+            character in 'A'..'Z' ||
+            character in '0'..'9' ||
+            character == '_' ||
+            character == '-' ||
+            character == '.' ||
+            character == '~'
+        ) {
+          append(character)
+        } else {
+          append('%').append(HEX[value shr 4]).append(HEX[value and 0x0F])
+        }
+      }
+    }
+
+    private const val HEX = "0123456789ABCDEF"
 
     /**
      * Builds the vector a served outline describes.

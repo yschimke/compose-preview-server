@@ -3,7 +3,13 @@ package ee.schimke.composeai.cli.serve.icons
 import kotlinx.serialization.Serializable
 
 /** The icon names a face carries, which is what the picker's search box filters. */
-@Serializable internal data class IconNamesResponse(val style: String, val names: List<String>)
+@Serializable
+internal data class IconNamesResponse(
+  val style: String,
+  /** The pin these names came from; a client echoes it so its cached URLs expire with the pin. */
+  val pin: String,
+  val names: List<String>,
+)
 
 /**
  * Outlines for the icons a caller asked for, at one axis position.
@@ -48,6 +54,9 @@ internal sealed interface IconResult<out T> {
  */
 internal class MaterialSymbolsIcons(private val source: MaterialSymbolsSource) {
 
+  /** The pin for [style], or null when the style is unknown. */
+  fun pin(style: String): String? = source.pin(style)
+
   /**
    * The names a face carries.
    *
@@ -58,7 +67,9 @@ internal class MaterialSymbolsIcons(private val source: MaterialSymbolsSource) {
     val names =
       source.names(style)
         ?: return IconResult.Refused(IconRequestFailure.UnknownStyle(style, source.styleIds))
-    return IconResult.Answered(IconNamesResponse(style, names.sorted()))
+    return IconResult.Answered(
+      IconNamesResponse(style, source.pin(style).orEmpty(), names.sorted())
+    )
   }
 
   fun outlines(

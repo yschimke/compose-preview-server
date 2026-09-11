@@ -9182,12 +9182,32 @@ class ServeHttpServer(
    * design state, on the one directory an operator already knows to keep — and because a host that
    * serves no builder has nobody to draw icons for.
    */
+  private val materialSymbolsHttpClient: okhttp3.OkHttpClient by lazy {
+    okhttp3.OkHttpClient.Builder()
+      .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+      // Generous beside the 10 s page-load fetches elsewhere, because this transfers 9-15 MB once
+      // per host; still finite, which is the whole point.
+      .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+      .build()
+  }
+
   private val materialSymbolsIcons: MaterialSymbolsIcons? by lazy {
     val dir = uiBuilderDir ?: return@lazy null
     MaterialSymbolsIcons(
       MaterialSymbolsSource(
         cacheDirectory = File(dir, "material-symbols"),
-        fetch = { url -> URI(url).toURL().openStream().use { it.readBytes() } },
+        // Bounded, because this runs under a lock every icon request shares: a host that accepts
+        // the connection and then stops sending would otherwise stall every later request behind
+        // it forever, and never reach the 503 the cold-cache path is supposed to answer with.
+        fetch = { url ->
+          materialSymbolsHttpClient
+            .newCall(okhttp3.Request.Builder().url(url).build())
+            .execute()
+            .use { response ->
+              check(response.isSuccessful) { "$url answered ${response.code}" }
+              checkNotNull(response.body) { "$url answered no body" }.bytes()
+            }
+        },
       )
     )
   }
@@ -9206,7 +9226,7 @@ class ServeHttpServer(
     when (val result = iconResultOrNull { icons.names(style) } ?: return) {
       is IconResult.Refused -> respondIconRefusal(result.failure)
       is IconResult.Answered -> {
-        call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl())
+        call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl(style))
         call.respondText(
           JSON.encodeToString(IconNamesResponse.serializer(), result.value),
           ContentType.Application.Json,
@@ -9228,7 +9248,7 @@ class ServeHttpServer(
     when (val result = iconResultOrNull { icons.outlines(style, names, axes) } ?: return) {
       is IconResult.Refused -> respondIconRefusal(result.failure)
       is IconResult.Answered -> {
-        call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl())
+        call.response.headers.append(HttpHeaders.CacheControl, iconCacheControl(style))
         call.respondText(
           JSON.encodeToString(IconOutlinesResponse.serializer(), result.value),
           ContentType.Application.Json,
@@ -9283,8 +9303,17 @@ class ServeHttpServer(
    * of shared caches; the bytes are public font data either way, so only the URL is worth
    * protecting.
    */
-  private fun RoutingContext.iconCacheControl(): String =
-    if (isPublic) UI_BUILDER_IMMUTABLE_CACHE_CONTROL else "private, max-age=31536000, immutable"
+  private fun RoutingContext.iconCacheControl(style: String): String {
+    // Only a caller that named the current pin gets an immutable answer: its URL changes when the
+    // pin does, so a year-long cache entry cannot survive a digest bump. A caller that named none —
+    // or a stale one — is answered correctly and told to revalidate.
+    val presented = call.request.queryParameters["v"]
+    val current = materialSymbolsIcons?.pin(style)
+    if (presented.isNullOrEmpty() || current.isNullOrEmpty() || presented != current)
+      return "no-cache"
+    return if (isPublic) UI_BUILDER_IMMUTABLE_CACHE_CONTROL
+    else "private, max-age=31536000, immutable"
+  }
 
   private suspend fun RoutingContext.respondIconsUnavailable() {
     call.respondText("not found", status = HttpStatusCode.NotFound)

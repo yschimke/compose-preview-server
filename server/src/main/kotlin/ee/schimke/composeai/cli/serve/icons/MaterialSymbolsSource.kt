@@ -44,6 +44,18 @@ internal class MaterialSymbolsSource(
     get() = styles.map { it.id }
 
   /**
+   * A short token identifying the pinned data a style's answers come from.
+   *
+   * It travels in the request URL so that an `immutable` response cannot outlive the pin that
+   * produced it: change a digest in a later release and every URL changes with it, rather than
+   * shared caches serving last year's outlines for the next twelve months.
+   */
+  fun pin(styleId: String): String? {
+    val style = styles.firstOrNull { it.id == styleId } ?: return null
+    return style.fontDigest.take(8) + codePointsDigest.take(8)
+  }
+
+  /**
    * The icon names, which need the 79 KB code point list and none of the 10 MB font.
    *
    * Split out because the picker asks for names the moment it opens: resolving them through

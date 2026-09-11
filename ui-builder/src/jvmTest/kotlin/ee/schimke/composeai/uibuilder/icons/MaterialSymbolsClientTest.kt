@@ -127,12 +127,58 @@ class MaterialSymbolsClientTest {
   @Test
   fun `names are fetched once`() = runBlocking {
     val transport = RecordingTransport {
-      MaterialSymbolsHttpResponse(200, """{"style":"outlined","names":["home","search"]}""")
+      MaterialSymbolsHttpResponse(
+        200,
+        """{"style":"outlined","pin":"abc123","names":["home","search"]}""",
+      )
     }
     val client = MaterialSymbolsClient(transport)
     assertEquals(listOf("home", "search"), client.names())
     assertEquals(listOf("home", "search"), client.names())
     assertEquals(1, transport.urls.size, "the name list is immutable for a pin")
+  }
+
+  @Test
+  fun `a large selection is split to the server's limit`() = runBlocking {
+    val transport = RecordingTransport { outlines("search" to square) }
+    val client = MaterialSymbolsClient(transport)
+    val keys = (1..600).map { MaterialSymbolsKey("icon_$it") }
+    client.prefetch(keys)
+    assertEquals(3, transport.urls.size, "600 names should split into three requests")
+    transport.urls.forEach {
+      val count = it.substringAfter("names=").substringBefore("&").split(",").size
+      assertTrue(
+        count <= MaterialSymbolsClient.MAXIMUM_NAMES_PER_REQUEST,
+        "a batch of $count would be refused wholesale",
+      )
+    }
+  }
+
+  @Test
+  fun `a name that could rewrite the query is encoded`() {
+    assertEquals("search", MaterialSymbolsClient.encode("search"))
+    assertEquals("bad%26FILL%3Dx", MaterialSymbolsClient.encode("bad&FILL=x"))
+    assertEquals("a%2Cb", MaterialSymbolsClient.encode("a,b"))
+    assertEquals("%C3%A9", MaterialSymbolsClient.encode("\u00e9"))
+  }
+
+  @Test
+  fun `the pin is echoed once it is known`() = runBlocking {
+    val transport = RecordingTransport { url ->
+      if (url.contains("/names"))
+        MaterialSymbolsHttpResponse(
+          200,
+          """{"style":"outlined","pin":"abc123","names":["search"]}""",
+        )
+      else outlines("search" to square)
+    }
+    val client = MaterialSymbolsClient(transport)
+    client.prefetch(listOf(MaterialSymbolsKey("search")))
+    assertTrue(!transport.urls.last().contains("v="), "no pin known yet: ${transport.urls.last()}")
+
+    client.names()
+    client.prefetch(listOf(MaterialSymbolsKey("home")))
+    assertTrue(transport.urls.last().contains("v=abc123"), transport.urls.last())
   }
 
   @Test
