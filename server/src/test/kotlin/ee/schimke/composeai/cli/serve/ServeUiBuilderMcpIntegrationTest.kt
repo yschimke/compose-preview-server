@@ -296,6 +296,80 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `MCP discovers and authors the same state selection as the inspector`() {
+    val server = start()
+    val original = document()
+    val doc =
+      original.copy(
+        nodes =
+          original.nodes +
+            ("column" to original.nodes.getValue("column").copy(componentId = "layout/box"))
+      )
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)}}""",
+      )
+    assertIs<SnapshotResponseV1>(response(created), created)
+    assertTrue("showByState" in created, created)
+    val applied =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"select-child","baseRevision":0,
+      "operations":[
+        {"type":"setStateVariable","name":"page","declaration":{"type":"value","valueType":"int","initialValue":10,"nullable":false,"persistence":"preview"}},
+        {"type":"setProperty","nodeId":"column","property":"showByState","value":{"type":"object","fields":{
+          "selector":{"type":"state","variable":"page"},
+          "cases":{"type":"object","fields":{"session":{"type":"int","value":10}}}
+        }}}
+      ]
+    }""",
+      )
+    assertIs<AcceptedOutcomeV1>(
+      assertIs<OperationOutcomeResponseV1>(response(applied), applied).outcome,
+      applied,
+    )
+    val snapshot =
+      assertIs<SnapshotResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.GET_DESIGN,
+              """{"designId":"agent-screen","includeCatalog":true}""",
+            )
+          )
+        )
+        .snapshot
+        .state
+        .document
+    val selection =
+      assertIs<ee.schimke.composeai.uibuilder.protocol.ObjectValueV1>(
+        snapshot.nodes.getValue("column").properties.getValue("showByState")
+      )
+    assertEquals(
+      "page",
+      assertIs<ee.schimke.composeai.uibuilder.protocol.StateValueV1>(
+          selection.fields.getValue("selector")
+        )
+        .variable,
+    )
+    val refused =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"remove-selector","baseRevision":1,
+      "operations":[{"type":"removeStateVariable","name":"page"}]
+    }""",
+      )
+    assertIs<RejectedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(refused)).outcome)
+    assertTrue("showByState" in refused, refused)
+  }
+
+  @Test
   fun `an agent shares a design with somebody else and takes it back`() {
     val server = start()
     envelope(

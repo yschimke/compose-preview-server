@@ -893,6 +893,9 @@ sealed interface UiBuilderEditorEvent {
 
   data class RemoveStateVariable(val name: String) : UiBuilderEditorEvent
 
+  data class SetStateSelection(val nodeId: String, val selection: StateSelection?) :
+    UiBuilderEditorEvent
+
   data class SetEventBinding(val nodeId: String, val event: String, val actions: JsonArray) :
     UiBuilderEditorEvent
 
@@ -1488,6 +1491,16 @@ class UiBuilderEditorReducer(
           state.operationSequence + 1,
           listOf(DesignOperation.RemoveStateVariable(event.name)),
           selectionAfter = state.selectedNodeId,
+        )
+      is UiBuilderEditorEvent.SetStateSelection ->
+        state.apply(
+          state.operationSequence + 1,
+          listOf(
+            event.selection?.let {
+              DesignOperation.SetProperty(event.nodeId, SHOW_BY_STATE, it.encode())
+            } ?: DesignOperation.RemoveNodeProperty(event.nodeId, SHOW_BY_STATE)
+          ),
+          selectionAfter = event.nodeId,
         )
       is UiBuilderEditorEvent.SetEventBinding ->
         state.apply(
@@ -5134,6 +5147,8 @@ private fun Map<String, UiBuilderNode>.appendDuplicateSubtree(
   taken: MutableSet<String>,
 ) {
   val source = getValue(sourceNodeId)
+  val selection = source.stateSelection()
+  val childCopies = mutableMapOf<String, String>()
   operations +=
     DesignOperation.InsertNode(
       node =
@@ -5142,7 +5157,11 @@ private fun Map<String, UiBuilderNode>.appendDuplicateSubtree(
           // A copy is a new instance, so it gets a new identity. Cloning `stableKey` put two
           // children in one lazy slot under the same `key(…)`, which Compose refuses at runtime,
           // and cloning `scrollStateKey` made two scroll containers share a position.
-          properties = source.properties.withFreshInstanceIdentity(copyNodeId),
+          properties =
+            JsonObject(
+              source.properties.withFreshInstanceIdentity(copyNodeId) -
+                (if (selection != null) setOf(SHOW_BY_STATE) else emptySet())
+            ),
           slots = source.slots.mapValues { emptyList() },
         ),
       parent = parent,
@@ -5156,6 +5175,7 @@ private fun Map<String, UiBuilderNode>.appendDuplicateSubtree(
       // root it hangs from is fresh — either way the collaboration reducer rejects the whole paste
       // as a duplicate.
       val childCopyId = freshCopyId("$copyNodeId-${childId.replace('/', '-')}", taken)
+      childCopies[childId] = childCopyId
       appendDuplicateSubtree(
         sourceNodeId = childId,
         copyNodeId = childCopyId,
@@ -5166,6 +5186,19 @@ private fun Map<String, UiBuilderNode>.appendDuplicateSubtree(
       )
       previousCopyId = childCopyId
     }
+  }
+  selection?.let {
+    operations +=
+      DesignOperation.SetProperty(
+        copyNodeId,
+        SHOW_BY_STATE,
+        it
+          .copy(
+            cases = it.cases.mapKeys { (id, _) -> childCopies.getValue(id) },
+            fallback = it.fallback?.let(childCopies::getValue),
+          )
+          .encode(),
+      )
   }
 }
 

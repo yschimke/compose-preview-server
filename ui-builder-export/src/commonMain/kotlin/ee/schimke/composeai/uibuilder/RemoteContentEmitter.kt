@@ -334,6 +334,10 @@ internal class RemoteContentEmitter(
     node.component?.let { placement ->
       return placement(node, placement, depth)
     }
+    if (SHOW_BY_STATE in node.properties) {
+      refusals += "node `${node.id}`.$SHOW_BY_STATE requires Remote StateLayout lowering"
+      return emptyList()
+    }
     val pad = INDENT.repeat(depth)
     return when (node.componentId) {
       "m3/text" -> (pad + text(node, pad)).split("\n")

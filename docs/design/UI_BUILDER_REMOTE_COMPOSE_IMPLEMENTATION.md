@@ -71,9 +71,39 @@ functional tests and Wasm compilation pass. The existing builder also passes 915
 shared-export tests, 16 targeted behavior/MCP tests and Wasm compilation against the locally staged
 generator. Those consumer tests verify compatibility; they do not yet prove selection authoring.
 
-The existing editor still needs the state-selection component, its inspector and the design
-projection into this model, followed by Remote StateLayout lowering. The generator proof does not
-claim those surfaces are implemented.
+The existing Box inspector now has a **Show by state** section. It binds a declared scalar value,
+assigns a matching value to each child, and optionally designates one child as the fallback.
+The configuration is one typed `showByState` object property, so browser edits and MCP use the
+same atomic `setProperty` mutation. Ordinary Box modifiers and child layout scopes remain intact.
+Shared validation checks every case, undeclared selectors, unassigned children, duplicate values
+(including Float narrowing), and malformed wrappers. The existing canvas draws only the selected
+child; an unmatched value without a fallback draws no child. Undo/redo preserves the configuration,
+and subtree copies remap case references to the copied children.
+
+The design projection emits the shared generator's structural selection inside the normal Box.
+Until the upstream generator is released, opt in to locally staged `screen-model` and
+`preview-discovery` artifacts. The released generator floor explicitly refuses the unsupported
+selection shape; it cannot silently turn selection into simultaneous children. Remote StateLayout
+lowering remains required, and Remote Kotlin export currently refuses this property explicitly.
+This is an implementation chunk, not completion of the Remote Compose scope.
+
+`StateSelectionInspectorTest` operates the actual inspector, changes the bound declaration, and
+asserts the canvas's selected content; it also verifies undo/redo and remapped subtree copies.
+[Before configuration](evidence/ui-builder-state-selection/before.png) and
+[configured selector](evidence/ui-builder-state-selection/configured.png) are captures of those
+production composables in the interaction harness. They are not a separate editor or a released
+website screenshot. `ServeUiBuilderMcpIntegrationTest` discovers the property through the catalog,
+authors it through MCP and proves that removing its selector declaration is rejected.
+`StateSelectionExportTest` validates the same shape and checks typed cases, fallback and padding
+through the actual shared export gate. Run that test with `VERIFY_LOCAL_STATE_SELECTION=true`
+and a manifest overriding only the generator pair to require generated code; without the override
+it verifies the released floor's explicit refusal.
+
+Verification for this chunk: 931 builder tests, 35 shared-export tests, 188 runtime tests and
+15 targeted server/MCP tests pass with released dependencies. The same 15 server/MCP tests pass
+with the local generator override. The existing Wasm target compiles, runtime ABI verification
+passes, and golden regeneration adds only the Box property to the two synthesized catalogs.
+
 
 ## Remaining production work
 
@@ -108,7 +138,7 @@ behavior/MCP tests against them. Wasm compilation and both resolved-classpath bo
 also pass. Gradle dependency reports confirm the selected snapshot versions; omitting the manifest
 restores `ui-builder-protocol:2.15.0` and `preview-discovery:2.7.0`.
 
-The first current-main contracts probe found an additional integration requirement:
-contracts 2.16.0 adds `declareComponent` and `removeComponent` mutations, which this branch does
-not yet handle in the persistent service. That remains part of the reusable-component work above;
-local build verification uses contracts source at the existing 2.15.0 pin until it is integrated.
+The first contracts probe used the then-current 2.15.0 floor. Rebasing onto main at `9f1277d5`
+brought in contracts 2.16.0 and the declaration/removal mutation integration. Selection verification
+now stages only the shared generator pair, retaining the released contracts 2.16.0 dependency;
+local overrides must not downgrade contracts to the older probe snapshot.

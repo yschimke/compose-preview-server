@@ -6555,13 +6555,16 @@ private fun InspectorBody(
     // What the export would write, plus what it would refuse without: the panel opens on the node
     // as the code has it. A bound property counts as written, and so does one being complained
     // about, because hiding the field an error names is how an error becomes unfixable.
-    val shownFields = fields.filter {
-      it.written ||
-        it.required ||
-        it.boundVariable != null ||
-        it.error != null ||
-        it.name in revealed
-    }
+    val shownFields =
+      fields
+        .filter { it.name != SHOW_BY_STATE }
+        .filter {
+          it.written ||
+            it.required ||
+            it.boundVariable != null ||
+            it.error != null ||
+            it.name in revealed
+        }
     val shownNames = shownFields.map { it.name }.toSet()
     fun matches(field: EditorPropertyField): Boolean =
       propertyQuery.isBlank() ||
@@ -6570,7 +6573,8 @@ private fun InspectorBody(
     val visibleFields = shownFields.filter(::matches)
     // Everything the component allows and this node has not been given. Offered, never listed: a
     // search reaches it in one word, and until then it is thirty controls nobody asked for.
-    val addableFields = fields.filterNot { it.name in shownNames }.filter(::matches)
+    val addableFields =
+      fields.filterNot { it.name in shownNames || it.name == SHOW_BY_STATE }.filter(::matches)
     // Open the drawer whenever a search is running, so typing a property's name finds it whether
     // or not the node already has one.
     val addOpen = addingProperty || propertyQuery.isNotBlank()
@@ -6683,6 +6687,11 @@ private fun InspectorBody(
         }
       }
       if (node.componentId in COMPOSE_EMITTED_CLICK_COMPONENTS || node.eventBindings.isNotEmpty()) {
+        if (
+          node.componentId == STATE_SELECTION_CONTAINER && fields.any { it.name == SHOW_BY_STATE }
+        ) {
+          item { StateSelectionInspector(state.document, node, onTextInputFocusChanged, dispatch) }
+        }
         item { EventActionsInspector(state.document, node, onTextInputFocusChanged, dispatch) }
       }
       if (node.modifiers.isNotEmpty()) {

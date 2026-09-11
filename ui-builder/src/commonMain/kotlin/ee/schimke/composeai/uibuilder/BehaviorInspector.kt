@@ -337,3 +337,135 @@ internal fun EventActionsInspector(
     }
   }
 }
+
+/** Edits one atomic property, using the same mutation as MCP. Drafts never change the canvas. */
+@Composable
+internal fun StateSelectionInspector(
+  document: UiBuilderDocument,
+  node: UiBuilderNode,
+  onTextInputFocusChanged: (Boolean) -> Unit,
+  dispatch: (UiBuilderEditorEvent) -> Unit,
+) {
+  val saved = node.stateSelection()
+  var expanded by remember(node.id) { mutableStateOf(saved != null) }
+  var variable by
+    remember(node.id, saved) {
+      mutableStateOf((saved?.selector?.get("variable") as? JsonPrimitive)?.contentOrNull.orEmpty())
+    }
+  val children = node.slots["children"].orEmpty()
+  var values by
+    remember(node.id, saved, children) {
+      mutableStateOf(children.associateWith { saved?.cases?.get(it)?.content.orEmpty() })
+    }
+  var fallback by remember(node.id, saved) { mutableStateOf(saved?.fallback) }
+  val declaration = document.stateVariables[variable] as? JsonObject
+  val kind =
+    StateEditorKind.entries.firstOrNull {
+      it.wire == (declaration?.get("valueType") as? JsonPrimitive)?.content
+    }
+      ?: when (val initial = declaration?.get("initialValue") as? JsonPrimitive) {
+        null,
+        JsonNull -> null
+        else ->
+          when {
+            initial.isString -> StateEditorKind.Text
+            initial.booleanOrNull != null -> StateEditorKind.Flag
+            initial.intOrNull != null -> StateEditorKind.Number
+            else -> StateEditorKind.Decimal
+          }
+      }
+  TextButton(onClick = { expanded = !expanded }) { Text("Show by state") }
+  if (!expanded) return
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text(
+      "Show one child for the current value. Use a Box or Column for a case with several layers.",
+      style = MaterialTheme.typography.bodySmall,
+    )
+    var choosing by remember { mutableStateOf(false) }
+    Box {
+      OutlinedButton(onClick = { choosing = true }) { Text(variable.ifEmpty { "Choose state" }) }
+      DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+        document.stateVariables.keys.forEach { name ->
+          DropdownMenuItem(
+            text = { Text(name) },
+            onClick = {
+              variable = name
+              choosing = false
+            },
+          )
+        }
+      }
+    }
+    if (document.stateVariables.isEmpty())
+      Text("Add a value in Screen → State first.", style = MaterialTheme.typography.bodySmall)
+    children.forEach { id ->
+      val label =
+        (document.nodes[id]?.properties?.get("text") as? JsonObject)?.get("value")?.let {
+          (it as? JsonPrimitive)?.contentOrNull
+        } ?: id
+      Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        OutlinedTextField(
+          value = values[id].orEmpty(),
+          onValueChange = { values = values + (id to it) },
+          label = { Text("$label · value") },
+          enabled = fallback != id,
+          singleLine = true,
+          modifier =
+            Modifier.weight(1f)
+              .onFocusChanged { onTextInputFocusChanged(it.isFocused) }
+              .semantics { contentDescription = "Case value $id" },
+        )
+        Checkbox(
+          checked = fallback == id,
+          onCheckedChange = { fallback = if (it) id else null },
+          modifier = Modifier.semantics { contentDescription = "Fallback $id" },
+        )
+      }
+    }
+    Text(
+      "Checked child is the fallback for other values. Without one, no child is shown.",
+      style = MaterialTheme.typography.bodySmall,
+    )
+    val parsed =
+      children.filter { it != fallback }.associateWith { kind?.parse(values[it].orEmpty()) }
+    val selection =
+      if (parsed.values.all { it != null })
+        StateSelection(
+          buildJsonObject {
+            put("type", "state")
+            put("variable", variable)
+          },
+          parsed.mapValues { requireNotNull(it.value) },
+          fallback,
+        )
+      else null
+    val issue =
+      if (selection == null)
+        "Enter a ${kind?.label?.lowercase() ?: "matching"} value for each case."
+      else
+        stateSelectionIssue(
+          node.copy(
+            properties = JsonObject(node.properties + (SHOW_BY_STATE to selection.encode()))
+          ),
+          document.stateVariables,
+        )
+    if (issue != null)
+      Text(
+        issue,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+      )
+    Row {
+      Button(
+        enabled = issue == null && selection != null,
+        onClick = { dispatch(UiBuilderEditorEvent.SetStateSelection(node.id, selection)) },
+      ) {
+        Text("Apply cases")
+      }
+      if (SHOW_BY_STATE in node.properties)
+        TextButton(onClick = { dispatch(UiBuilderEditorEvent.SetStateSelection(node.id, null)) }) {
+          Text("Show all children")
+        }
+    }
+  }
+}

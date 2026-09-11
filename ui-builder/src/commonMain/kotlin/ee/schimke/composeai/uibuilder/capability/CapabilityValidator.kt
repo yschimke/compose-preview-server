@@ -1,10 +1,12 @@
 package ee.schimke.composeai.uibuilder.capability
 
+import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
 import ee.schimke.composeai.uibuilder.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.UiBuilderNode
 import ee.schimke.composeai.uibuilder.export.PropertyValueKinds
 import ee.schimke.composeai.uibuilder.optionalString
 import ee.schimke.composeai.uibuilder.stateBindingMatchesCatalog
+import ee.schimke.composeai.uibuilder.stateSelectionIssue
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -95,6 +97,9 @@ class CapabilityValidator(private val catalog: CapabilityCatalog) {
     val issues = mutableListOf<CapabilityValidationIssue>()
     document.nodes.values.sortedBy(UiBuilderNode::id).forEach { node ->
       validateNode(document, node, issues)
+      stateSelectionIssue(node, document.stateVariables)?.let {
+        issues += issue(CapabilityIssueCode.INVALID_PROPERTY_VALUE, node, it, SHOW_BY_STATE)
+      }
     }
     return CapabilityValidationResult(issues, wasmStatuses(document))
   }

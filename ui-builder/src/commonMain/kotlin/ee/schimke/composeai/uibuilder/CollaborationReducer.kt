@@ -2075,6 +2075,18 @@ private val literalPropertyTypes =
 
 private fun propertyWrapperIssue(type: String, encodedValue: JsonObject): String? =
   when (type) {
+    "object" -> {
+      val fields = encodedValue["fields"] as? JsonObject
+      if (encodedValue.keys != setOf("type", "fields") || fields == null)
+        "object wrapper must contain exactly type and a fields object"
+      else
+        fields.entries.firstNotNullOfOrNull { (name, value) ->
+          val nested = value as? JsonObject
+          val nestedType = nested?.nonEmptyString("type")
+          if (nested == null || nestedType == null) "object field $name must be a typed value"
+          else propertyWrapperIssue(nestedType, nested)?.let { "object field $name $it" }
+        }
+    }
     in literalPropertyTypes ->
       if (encodedValue.keys == setOf("type", "value")) null
       else "literal wrapper must contain exactly type and value"

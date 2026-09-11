@@ -2,6 +2,8 @@
 
 package ee.schimke.composeai.uibuilder.service
 
+import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
+import ee.schimke.composeai.uibuilder.STATE_SELECTION_CONTAINER
 import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
 import ee.schimke.composeai.uibuilder.protocol.AssetKeyValueV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogAssetSourceV1
@@ -29,6 +31,8 @@ import ee.schimke.composeai.uibuilder.protocol.UiValueV1
 import ee.schimke.composeai.uibuilder.protocol.UploadedAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
 import ee.schimke.composeai.uibuilder.stateBindingMatchesCatalog
+import ee.schimke.composeai.uibuilder.stateSelectionIssue
+import ee.schimke.composeai.uibuilder.toUiBuilderNode
 import java.io.Closeable
 import java.nio.file.Files
 import java.nio.file.Path
@@ -261,8 +265,25 @@ public class CurrentM3UiBuilderCatalogExecutor(
           }
         catalog
           .copy(
+            components =
+              catalog.components.map { component ->
+                if (
+                  component.componentId != STATE_SELECTION_CONTAINER ||
+                    component.properties.any { it.name == SHOW_BY_STATE }
+                )
+                  component
+                else
+                  component.copy(
+                    properties =
+                      component.properties +
+                        baseCatalog.components
+                          .first { it.componentId == STATE_SELECTION_CONTAINER }
+                          .properties
+                          .first { it.name == SHOW_BY_STATE }
+                  )
+              },
             exportCapabilities =
-              catalog.exportCapabilities.copy(composeCode = composeExportFor(systemId))
+              catalog.exportCapabilities.copy(composeCode = composeExportFor(systemId)),
           )
           .withPacks(packs.filter { it.platform == catalog.platform })
       }
@@ -373,6 +394,13 @@ public class CurrentM3UiBuilderCatalogExecutor(
             "component $componentId is not in $systemId",
             nodeId,
           )
+      stateSelectionIssue(
+          document.nodes.getValue(nodeId).toUiBuilderNode(),
+          encodedDocument.objectOrEmpty("stateVariables"),
+        )
+        ?.let {
+          return issue("INVALID_PROPERTY_VALUE", it, nodeId, SHOW_BY_STATE)
+        }
       val properties = node.objectOrEmpty("properties")
       val declaredProperties = component.properties.associateBy { it.name }
       for ((name, value) in properties) {

@@ -7,6 +7,7 @@ import ee.schimke.composeai.discovery.ScreenNode
 import ee.schimke.composeai.discovery.ScreenState
 import ee.schimke.composeai.discovery.ScreenValue
 import ee.schimke.composeai.discovery.SlotItem
+import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
 import ee.schimke.composeai.uibuilder.cardContentFill
 import ee.schimke.composeai.uibuilder.exportedStateIdentifier
 import ee.schimke.composeai.uibuilder.protocol.AdaptiveGridValueV1
@@ -73,12 +74,17 @@ import ee.schimke.composeai.uibuilder.protocol.WidthInModifierV1
 import ee.schimke.composeai.uibuilder.protocol.WidthModifierV1
 import ee.schimke.composeai.uibuilder.protocol.WrapContentSizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.ZIndexModifierV1
+import ee.schimke.composeai.uibuilder.stateSelection
+import ee.schimke.composeai.uibuilder.stateSelectionIssue
 import ee.schimke.composeai.uibuilder.toUiBuilderNode
+import kotlinx.serialization.json.*
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.longOrNull
 
 /**
@@ -421,6 +427,7 @@ object ScreenDocumentProjection {
         return null
       }
       try {
+        if (SHOW_BY_STATE in node.properties) return selectionNode(node, scope)
         val variant = variantOf(node)
         return ScreenNode(
           // A variant names a **component**, so it is spent here rather than emitted as an
@@ -450,6 +457,68 @@ object ScreenDocumentProjection {
       } finally {
         visiting.remove(id)
       }
+    }
+
+    private fun selectionNode(node: DesignNodeV1, scope: String?): ScreenNode? {
+      val json = Json
+      val authored = node.toUiBuilderNode()
+      stateSelectionIssue(authored, json.encodeToJsonElement(document.stateVariables).jsonObject)
+        ?.let {
+          return refuse("node `${node.id}`.$SHOW_BY_STATE: $it")
+        }
+      val selection = requireNotNull(authored.stateSelection())
+      val variable = (selection.selector["variable"] as? JsonPrimitive)?.contentOrNull
+      val declared = variable?.let(state::get)
+      val type =
+        declared?.typeFqn
+          ?: when (selection.selector["type"]?.jsonPrimitive?.content) {
+            "string" -> "kotlin.String"
+            "bool" -> "kotlin.Boolean"
+            "int" -> "kotlin.Int"
+            "float" -> "kotlin.Float"
+            else -> return refuse("node `${node.id}` has an invalid selector")
+          }
+      val subject =
+        if (declared != null) ScreenValue.StateRead(declared.name, type)
+        else
+          stateLiteral(selection.selector["value"], "node `${node.id}` selector", type)
+            ?: return null
+      val cases =
+        selection.cases.mapValues { (id, value) ->
+          stateLiteral(value, "node `${node.id}` case `$id`", type) ?: return null
+        }
+      val branches =
+        node.slots["children"].orEmpty().associateWith { child ->
+          listOfNotNull(node(child, BOX_SCOPE))
+        }
+      // This additive model shape is decoded strictly so the released dependency floor remains
+      // buildable. A local staged generator understands it; an older generator must refuse it,
+      // never silently drop selection and emit all branches. No Kotlin source is interpolated.
+      val encoded =
+        JsonObject(
+          json.encodeToJsonElement(ScreenNode("", slots = branches)).jsonObject +
+            ("selection" to
+              buildJsonObject {
+                put("subject", json.encodeToJsonElement<ScreenValue>(subject))
+                put("cases", json.encodeToJsonElement(cases))
+                selection.fallback?.let { put("elseSlot", JsonPrimitive(it)) }
+              })
+        )
+      val selected =
+        try {
+          json.decodeFromJsonElement<ScreenNode>(encoded)
+        } catch (_: kotlinx.serialization.SerializationException) {
+          return refuse(
+            "node `${node.id}`: the shared generator needs state-selection support; use a local dependency build or a release containing it"
+          )
+        }
+      val container = node.copy(properties = node.properties - SHOW_BY_STATE)
+      return ScreenNode(
+        componentId = container.componentId,
+        arguments = arguments(container, scope, null),
+        handlers = handlers(container),
+        slots = mapOf("content" to listOf(selected)),
+      )
     }
 
     /**

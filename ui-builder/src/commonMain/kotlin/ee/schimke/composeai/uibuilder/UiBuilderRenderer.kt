@@ -930,7 +930,11 @@ private fun RenderNode(
     }
     "layout/box" ->
       Box(measured) {
-        slot("children").forEach { id ->
+        val children =
+          if (SHOW_BY_STATE in node.properties)
+            listOfNotNull(node.stateSelection()?.selectedNode(state, document.stateVariables))
+          else slot("children")
+        children.forEach { id ->
           val item = document.nodes.getValue(id)
           val parentSizing =
             if (item.hasModifier("matchParentSize")) Modifier.matchParentSize() else Modifier
