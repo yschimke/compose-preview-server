@@ -365,6 +365,9 @@ object ScreenDocumentProjection {
       node.eventBindings.entries
         .mapNotNull { (event, actions) ->
           if (actions.isEmpty()) return@mapNotNull null
+          if (event == "click" && node.componentId in MODIFIER_CLICK_COMPONENTS) {
+            return@mapNotNull null
+          }
           // The generator checks the recovered parameter's type. Unknown events and callbacks with
           // parameters stay explicit refusals; a composable content slot can never become a
           // handler.
@@ -373,6 +376,33 @@ object ScreenDocumentProjection {
           parameter to projected
         }
         .toMap()
+
+    private fun modifierClick(node: DesignNodeV1): ChainLink? {
+      if (node.componentId !in MODIFIER_CLICK_COMPONENTS) return null
+      val actions = node.eventBindings["click"].orEmpty()
+      if (actions.isEmpty()) return null
+      val projected = actions.mapNotNull { action(it, node.id, "click") }
+      val json = Json
+      // Strict decoding keeps the released generator buildable and refuses the new vocabulary
+      // there. Local generator publications can prove this path before an upstream release.
+      val callback =
+        try {
+          json.decodeFromJsonElement<ScreenValue>(
+            buildJsonObject {
+              put("type", "ee.schimke.composeai.discovery.ScreenValue.ActionLambda")
+              put("actions", json.encodeToJsonElement(projected))
+            }
+          )
+        } catch (_: kotlinx.serialization.SerializationException) {
+          return refuse(
+            "node `${node.id}`: layout clicks need action-lambda support in the shared generator; use a local dependency build or a release containing it"
+          )
+        }
+      return ChainLink(
+        "androidx.compose.foundation.clickable",
+        named = mapOf("onClick" to callback),
+      )
+    }
 
     private fun action(action: DesignActionV1, nodeId: String, event: String): ScreenAction? {
       val where = "node `$nodeId`.`eventBindings.$event`"
@@ -737,6 +767,7 @@ object ScreenDocumentProjection {
         }
         arguments[target.parameter] = retarget(target, value, node, property, variant) ?: continue
       }
+      modifierClick(node)?.let { fromProperties += it }
       if (node.modifiers.isNotEmpty() || fromProperties.isNotEmpty() || tagNodes) {
         modifiers(node, fromProperties, scope)?.let { arguments["modifier"] = it }
       }
@@ -2945,6 +2976,10 @@ object ScreenDocumentProjection {
   private const val CARD_CATALOG_ID = "m3/card"
   private const val CARD_CONTENT_SLOT = "content"
   private const val BOX_CATALOG_ID = "layout/box"
+
+  // These layout composables have a modifier parameter and no onClick parameter. Controls keep
+  // their declared callbacks, including their own enabled state and interaction behavior.
+  private val MODIFIER_CLICK_COMPONENTS = setOf("layout/box", "layout/row", "layout/column")
   private const val BOX_CHILDREN_SLOT = "children"
 
   private const val COLUMN_SCOPE = "androidx.compose.foundation.layout.ColumnScope"

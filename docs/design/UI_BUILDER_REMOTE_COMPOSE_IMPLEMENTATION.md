@@ -99,6 +99,28 @@ site. `BehaviorInspectorTest` drives the controls through the editor reducer. Th
 suite and `ServeUiBuilderMcpIntegrationTest` cover browser/local collaboration and actual MCP
 requests respectively; the browser Wasm target also compiles.
 
+## Layout click export
+
+The shared Compose projection maps clicks on Box, Row and Column to `Modifier.clickable`, after
+these layouts' authored modifier chains. Controls keep their declared event parameters. The
+nested callback uses the shared generator's `ScreenValue.ActionLambda`, with the same validation
+and ordered state writes as ordinary handlers. Local generator publications make this path
+available before a release; the released floor reports a located refusal for the missing shape.
+
+The exact emitted Kotlin is compiled by `GeneratedLayoutClicksTest`, which clicks both selected
+branches and the fallback at densities 1 and 2 and checks the authored padding. The production
+gate and hosted MCP tests compare their output with that same source. See
+[compiled interaction evidence](evidence/ui-builder-layout-clicks/README.md). The combined run passes 945 editor tests,
+46 shared-export tests, 26 targeted server/MCP tests, runtime ABI checks and the WASM build.
+The actual existing browser Code pane and live MCP export are also verified; the released floor
+passes compilation and its explicit-refusal/compiled-fixture tests. Golden regeneration changes no
+existing fixtures.
+
+The combined local profile includes contracts, both generator publications, the JSON compiler and
+the player. A real hosted MCP comparison also exposed a separate remaining gap: a plain layout
+root in a Remote catalog does not yet route to Remote Kotlin export; the existing dedicated route
+requires a Wear widget root. That route must be generalized without changing the semantic tree.
+
 ## Shared Compose export
 
 The browser code pane and the server's record-driven export now project scalar declarations,
@@ -194,7 +216,7 @@ authored Box also ensures they update during the player's ordinary paint path.
 
 The proof uses host overrides, not synthetic clicks. Transition appearance and inactive-branch
 retention are not asserted here. This adds Remote Kotlin lowering to the existing editor/MCP
-selection shape; production direct JSON and binary export still require the work below.
+selection shape; direct JSON, binary export and saved-document playback are covered by the later integration sections above.
 
 Verification: seven real-player scenarios, 39 shared-export tests, 931 existing builder tests,
 189 runtime tests, and 15 targeted server/MCP tests pass. The local generator manifest also
@@ -238,9 +260,8 @@ adjacent integers above Float's exact range, 13 cases, callbacks and density 2. 
 passes 28 JVM tests, ABI and boundary checks. The existing server compiles against the local
 publication and passes all 103 HTTP routing tests. Golden regeneration makes no changes.
 
-This is the verified compiler seam for design-to-JSON and binary export. The existing builder and
-MCP still need to generate those documents and use them for live preview; this compiler PR alone
-does not complete that integration or expand the claimed catalog coverage.
+This is the verified compiler seam for design-to-JSON and binary export. The delivery and saved-preview sections above describe its builder/MCP integration. This compiler
+profile does not expand the claimed catalog coverage.
 
 ## Shared design-to-JSON lowering
 
@@ -271,8 +292,7 @@ catalog typography/assets and reusable instances also remain to be mapped.
 
 Verification: 46 shared-export tests and 189 runtime tests pass, the shared module and existing
 editor compile for Wasm, and all 12 proof tests pass, including the ten generated-document scenarios.
-The exporter is implemented and verified; the editor download controls, revision-pinned service
-export and MCP/live-preview integration have not yet been connected to it.
+The delivery and saved-preview sections above describe its editor, service and MCP integration.
 
 ## Remaining production work
 
@@ -280,8 +300,9 @@ export and MCP/live-preview integration have not yet been connected to it.
   callbacks, preserving the same meaning in the code pane, server preview and export.
 - Extend Remote state selection to String and nullable selectors without changing authored
   semantics. Transitions and inactive-branch retention can follow.
-- Bring the proven direct JSON assembly and real player path into production preview, JSON and
-  `.rc` exports, with revision and target-profile checks.
+- Extend the saved-document preview/export integration to unsaved and local-storage designs.
+- Route ordinary layout roots in Remote catalogs to Remote Kotlin generation, retaining the same
+  semantic tree used by JSON and binary export.
 - Complete loops, reusable component parameters/callbacks and per-instance addressing through all
   preview and export lanes.
 - Extend typed values, expressions, action sequences, host events and modifier bindings using

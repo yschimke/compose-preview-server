@@ -1,0 +1,15 @@
+{
+  "designId": "layout-clicks-1789121887075",
+  "revision": 0,
+  "catalogPin": {
+    "systemId": "m3-catalog",
+    "catalogRevision": "candidate",
+    "capabilityDigest": "candidate",
+    "nativeRuntimeId": "candidate"
+  },
+  "bytes": 1549,
+  "sha256": "f63e29dcec8d4960f2cfced00d240131c364cb58cdd9e884dcdf9e69e2a4c9d3",
+  "sourceMatchesCompiledFixture": true,
+  "browserCodePaneCaptured": true,
+  "errors": []
+}

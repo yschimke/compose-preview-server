@@ -296,6 +296,51 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `MCP exports stateful layout clicks as ordinary Compose modifiers`() {
+    val server =
+      start(recordFile = File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
+    val doc =
+      json
+        .decodeFromString<DesignDocumentV1>(
+          File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
+            .readText()
+        )
+        .copy(
+          id = "agent-screen",
+          title = "Clickable state layout",
+          catalogPin = document().catalogPin,
+        )
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)}}""",
+      )
+    assertIs<SnapshotResponseV1>(response(created), created)
+    val exported =
+      envelope(
+        server,
+        ServeUiBuilderMcp.EXPORT,
+        """{"designId":"agent-screen","revision":0,"format":"compose"}""",
+      )
+    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    if (System.getenv("VERIFY_LOCAL_LAYOUT_CLICKS") == "true") {
+      assertEquals(emptyList(), artifact.diagnostics, artifact.content)
+      assertTrue(
+        artifact.content.endsWith(
+          File("../docs/design/fixtures/ui-builder/clickable-state-layout.kt.txt").readText()
+        ),
+        artifact.content,
+      )
+    } else {
+      assertTrue(
+        artifact.diagnostics.any { "action-lambda support" in it.message },
+        artifact.toString(),
+      )
+    }
+  }
+
+  @Test
   fun `MCP discovers and authors the same state selection as the inspector`() {
     val server = start()
     val original = document()

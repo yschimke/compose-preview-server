@@ -96,6 +96,9 @@ val stageBehaviorCompileFixture =
     from(rootProject.file("docs/design/fixtures/ui-builder/state-actions.kt.txt")) {
       rename { "StateActions.kt" }
     }
+    from(rootProject.file("docs/design/fixtures/ui-builder/clickable-state-layout.kt.txt")) {
+      rename { "ClickableStateLayout.kt" }
+    }
     into(layout.buildDirectory.dir("generated/behavior-fixture"))
   }
 
