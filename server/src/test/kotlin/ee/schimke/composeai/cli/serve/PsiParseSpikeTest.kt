@@ -5,6 +5,7 @@ import java.net.URLClassLoader
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.time.measureTime
+import org.jetbrains.kotlin.CoreEnvironmentDeprecation
 import org.jetbrains.kotlin.K1Deprecation
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
@@ -47,7 +48,11 @@ import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
  * Reported via `println` rather than asserted: the timings are the product, and pinning a
  * millisecond budget in CI would be a flaky test about somebody's machine.
  */
-@OptIn(CompilerConfiguration.Internals::class, K1Deprecation::class)
+@OptIn(
+  CompilerConfiguration.Internals::class,
+  K1Deprecation::class,
+  CoreEnvironmentDeprecation::class,
+)
 class PsiParseSpikeTest {
 
   /**
