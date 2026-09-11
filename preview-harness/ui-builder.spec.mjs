@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { isIgnorableConsoleError } from "./_server.mjs";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 
@@ -6,7 +7,12 @@ async function capture(page, mode) {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
-        if (message.type() === "error") errors.push(message.text());
+        if (
+            message.type() === "error" &&
+            !isIgnorableConsoleError(message.text())
+        ) {
+            errors.push(message.text());
+        }
     });
     page.on("response", (response) => {
         if (response.status() >= 400)
