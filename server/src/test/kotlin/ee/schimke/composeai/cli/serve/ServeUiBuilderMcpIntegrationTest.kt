@@ -341,6 +341,57 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `MCP exports ordinary Remote roots without a component record or widget wrapper`() {
+    val server = start(recordFile = null, catalogSystemId = "remote-m3")
+    val doc =
+      json.decodeFromString<DesignDocumentV1>(
+        File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
+          .readText()
+      )
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"${doc.id}","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)}}""",
+      )
+    assertIs<SnapshotResponseV1>(response(created), created)
+    val exported =
+      envelope(
+        server,
+        ServeUiBuilderMcp.EXPORT,
+        """{"designId":"${doc.id}","revision":0,"format":"compose"}""",
+      )
+    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    assertEquals(emptyList(), artifact.diagnostics, artifact.content)
+    assertTrue(
+      artifact.content.endsWith(
+        File("../docs/design/fixtures/ui-builder/remote-root.kt.txt").readText()
+      ),
+      artifact.content,
+    )
+    val changed =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{"designId":"${doc.id}","baseRevision":0,"operationId":"change-page","operations":[{"type":"setStateVariable","name":"page","declaration":{"type":"value","valueType":"int","initialValue":20,"persistence":"preview"}}]}""",
+      )
+    assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(changed)).outcome)
+    val next =
+      assertIs<ExportResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.EXPORT,
+              """{"designId":"${doc.id}","revision":1,"format":"compose"}""",
+            )
+          )
+        )
+        .artifact
+    assertEquals(emptyList(), next.diagnostics, next.content)
+    assertTrue("val page = rememberMutableRemoteInt(20)" in next.content, next.content)
+  }
+
+  @Test
   fun `MCP discovers and authors the same state selection as the inspector`() {
     val server = start()
     val original = document()
@@ -863,7 +914,8 @@ class ServeUiBuilderMcpIntegrationTest {
     withUiBuilder: Boolean = true,
     withAuthorization: Boolean = true,
     withAssets: Boolean = false,
-    recordFile: File = ScreenGeneratorScreenFixture.componentsFile(),
+    recordFile: File? = ScreenGeneratorScreenFixture.componentsFile(),
+    catalogSystemId: String = CATALOG_SYSTEM_ID,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -873,7 +925,7 @@ class ServeUiBuilderMcpIntegrationTest {
           storage = FileUiBuilderStateStorage(stateDirectory),
           catalogs =
             CurrentM3UiBuilderCatalogExecutor(
-              catalogSystemIds = setOf(CATALOG_SYSTEM_ID),
+              catalogSystemIds = setOf(catalogSystemId),
               exportCapabilities =
                 ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
                   composeCode = true,
@@ -883,7 +935,8 @@ class ServeUiBuilderMcpIntegrationTest {
             ),
           exporter =
             ScreenGeneratorComposeExportExecutor(
-              ComponentRecordSource(mapOf(CATALOG_SYSTEM_ID to recordFile))::record
+              ComponentRecordSource(recordFile?.let { mapOf(catalogSystemId to it) }.orEmpty())::
+                record
             ),
           assets =
             if (withAssets) FileUiBuilderAssetStore(stateDirectory.resolve("assets")) else null,

@@ -2703,7 +2703,8 @@ class UiBuilderEditorReducer(
     //
     // No package: this pane is read and pasted into a file that already has one. The export passes
     // `ScreenExportGate.PACKAGE_NAME` for the same designs, because an artifact *is* the file.
-    RecordFreeExport.generate(document, packComponents = packComponents)?.let { recordFree ->
+    RecordFreeExport.generate(document, catalog.platform, packComponents = packComponents)?.let {
+      recordFree ->
       return@runCatching when (recordFree) {
         is RecordFreeExport.Generated.Emitted -> EditorGeneratedCode.Source(recordFree.source)
         is RecordFreeExport.Generated.Refused -> EditorGeneratedCode.Refused(recordFree.reasons)
@@ -2745,7 +2746,10 @@ class UiBuilderEditorReducer(
   // editor down over the one document whose problems a designer most needs listed. The capability
   // diagnostics above already name that document's real fault.
   runCatching {
-    when (val recordFree = RecordFreeExport.generate(document, packComponents = packComponents)) {
+    when (
+      val recordFree =
+        RecordFreeExport.generate(document, catalog.platform, packComponents = packComponents)
+    ) {
       is RecordFreeExport.Generated.Refused -> recordFree.reasons
       // It generates. The gate below would still refuse it — that is the whole reason these
       // designs have their own emitter — so asking it anything here is asking the wrong question.

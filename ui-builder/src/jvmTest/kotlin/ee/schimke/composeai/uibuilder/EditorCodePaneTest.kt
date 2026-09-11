@@ -46,6 +46,33 @@ class EditorCodePaneTest {
     )
 
   @Test
+  fun `a Remote catalog shows source for a plain layout root`() {
+    val remoteCatalog =
+      catalog.copy(
+        statusSemantics =
+          JsonObject(catalog.statusSemantics + ("platform" to JsonPrimitive("remote-compose")))
+      )
+    val document = Json {
+      ignoreUnknownKeys = true
+    }
+      .decodeFromString<UiBuilderDocument>(
+        java.io
+          .File(
+            System.getProperty("uiBuilderProjectDir"),
+            "../docs/design/evidence/ui-builder-live-document-preview/sample.document.json",
+          )
+          .readText()
+      )
+    val code =
+      assertIs<EditorGeneratedCode.Source>(
+        UiBuilderEditorReducer(remoteCatalog).generatedCode(document)
+      )
+    assertTrue("RemoteStateLayout" in code.kotlin, code.kotlin)
+    assertTrue(".clickable(valueChange(page, 20.ri))" in code.kotlin, code.kotlin)
+    assertFalse("WearWidget" in code.kotlin, code.kotlin)
+  }
+
+  @Test
   fun `a new design shows the Kotlin its export would write`() {
     val code = assertIs<EditorGeneratedCode.Source>(reducer.generatedCode(blank()))
 

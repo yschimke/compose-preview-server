@@ -39,11 +39,11 @@ VERIFY_LOCAL_STATE_SELECTION=true VERIFY_LOCAL_LAYOUT_CLICKS=true ./gradlew -Plo
 The exact Kotlin fixture compiles and runs on the released consumer dependency floor too. Without
 the local generator, export tests check its explicit refusal instead of treating it as success.
 
-This closes layout-click mapping to ordinary Compose. The real combined-host probe separately found
-that a plain Remote layout root still falls through to the component-record exporter: the existing
-Remote Kotlin route requires a Wear widget root. Generalizing that route, broader component and
-operation coverage, String state, computed/nullable values and reusable-component fidelity remain
-required by the overall goal.
+This closes layout-click mapping to ordinary Compose. The combined-host probe also found that
+plain Remote layout roots fell through to the component-record exporter. The subsequent
+[ordinary-root export change](../ui-builder-remote-root-source/README.md) closes that source-export
+gap. Broader component and operation coverage, String state, computed/nullable values and
+reusable-component fidelity remain required by the overall goal.
 
 ## Combined local verification
 

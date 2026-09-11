@@ -2776,7 +2776,11 @@ public class ServeRunner(
         // imports `androidx.compose.remote.creation.compose` in its first ten lines — and the MCP
         // tool description says so too.
         composeExportFor = { systemId ->
-          systemId in uiBuilderComponents.keys || systemId in RecordFreeExport.CATALOG_SYSTEM_IDS
+          systemId in uiBuilderComponents.keys ||
+            systemId in RecordFreeExport.CATALOG_SYSTEM_IDS ||
+            publishedCatalogs[systemId]?.statusSemantics?.let {
+              UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.REMOTE_COMPOSE
+            } == true
         },
         packs = packs,
       )

@@ -185,6 +185,12 @@ class RemoteStateSelectionExportTest {
         parameters =
           listOf(
             TargetParameter(
+              name = "modifier",
+              type = "RemoteModifier",
+              typeFqn = "androidx.compose.remote.creation.compose.modifier.RemoteModifier",
+              hasDefault = true,
+            ),
+            TargetParameter(
               name = "enabled",
               type = "RemoteBoolean",
               typeFqn = "androidx.compose.remote.creation.compose.state.RemoteBoolean",
@@ -198,19 +204,29 @@ class RemoteStateSelectionExportTest {
         slots = emptyList(),
         signatureKnown = true,
       )
-    val refusals = mutableListOf<String>()
-    val emitter =
-      RemoteContentEmitter(
-        base.copy(nodes = base.nodes + ("control" to control)),
-        refusals,
-        components = mapOf(control.componentId to record),
-      )
-    emitter.emit("switch", 1)
-    val source = emitter.emit("control", 1).joinToString("\n")
-    assertTrue(refusals.isEmpty(), refusals.toString())
-    assertContains(source, "enabled = page")
-    assertContains(source, "onClick = valueChange(page, !page)")
-    assertEquals(listOf("val page = rememberMutableRemoteBoolean(false)"), emitter.stateLocals())
+    for (defaulted in listOf(false, true)) {
+      val refusals = mutableListOf<String>()
+      val withDefault =
+        record.copy(
+          parameters =
+            record.parameters.map { parameter ->
+              if (parameter.name == "onClick") parameter.copy(hasDefault = defaulted) else parameter
+            }
+        )
+      val emitter =
+        RemoteContentEmitter(
+          base.copy(nodes = base.nodes + ("control" to control)),
+          refusals,
+          components = mapOf(control.componentId to withDefault),
+        )
+      emitter.emit("switch", 1)
+      val source = emitter.emit("control", 1).joinToString("\n")
+      assertTrue(refusals.isEmpty(), refusals.toString())
+      assertContains(source, "enabled = page")
+      assertContains(source, "onClick = valueChange(page, !page)")
+      assertFalse(".clickable(" in source, source)
+      assertEquals(listOf("val page = rememberMutableRemoteBoolean(false)"), emitter.stateLocals())
+    }
   }
 
   @Test

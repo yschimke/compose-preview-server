@@ -34,6 +34,11 @@ UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true ./gradlew
   -PuiBuilderGoldens=write \
   --rerun
 
+# Remote Kotlin is compiled verbatim by the standalone Android recording proof.
+UPDATE_UI_BUILDER_REMOTE_ROOT_FIXTURE=true ./gradlew :ui-builder-export:jvmTest \
+  --tests '*RemoteRootSourceExportTest*' \
+  --rerun
+
 echo
 echo "regenerated:"
 git status --porcelain -- preview-harness/fixtures/pages 'renders/exploded-view/*.svg' \

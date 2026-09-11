@@ -6,6 +6,7 @@ import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
@@ -126,7 +127,8 @@ internal class ScreenGeneratorComposeExportExecutor(
     // And with the packs the design uses: a Wear screen may hold a `confetti-wear/…` node, whose
     // call the Wear emitter writes from that pack's record. Resolved only when the design is
     // record-free and only for the packs it names, so a plain Wear screen still touches no record.
-    if (RecordFreeExport.applies(request.document)) {
+    val platform = UiBuilderCatalogPlatform.from(request.catalog.statusSemantics)
+    if (RecordFreeExport.applies(request.document, platform)) {
       val packRecords =
         when (val packs = packRecordsFor(request.document)) {
           is PackRecords.Refused -> return refused(packs.code, packs.reasons)
@@ -134,6 +136,7 @@ internal class ScreenGeneratorComposeExportExecutor(
         }
       RecordFreeExport.generate(
           request.document,
+          platform,
           packageName,
           packComponents =
             when (val resolved = recordFreeComponents(request.document, packRecords)) {

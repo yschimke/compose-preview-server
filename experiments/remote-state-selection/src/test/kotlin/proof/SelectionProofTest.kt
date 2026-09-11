@@ -68,6 +68,54 @@ class SelectionProofTest {
       ExtremesRemoteRemoteContent()
     }
 
+  @Test fun plainLayoutRootAtDensityOne() = verifyPlainRoot(1)
+
+  @Test fun plainLayoutRootAtDensityTwo() = verifyPlainRoot(2)
+
+  private fun verifyPlainRoot(density: Int) = runTest {
+    val size = 360 * density
+    val captured =
+      captureSingleRemoteDocument(
+        ApplicationProvider.getApplicationContext<Context>(),
+        creationDisplayInfo = RemoteCreationDisplayInfo(size, size, 160 * density, 1f),
+      ) {
+        generated.uibuilder.StatefulPreviewRemoteContent()
+      }
+    val core =
+      CoreDocument().apply {
+        initFromBuffer(RemoteComposeBuffer.fromInputStream(captured.bytes.inputStream()))
+      }
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val context =
+      AndroidRemoteContext().apply {
+        useCanvas(Canvas(bitmap))
+        this.density = density.toFloat()
+      }
+    core.initializeContext(context)
+    fun flatten(operations: List<Operation>): List<Operation> = operations.flatMap {
+      listOf(it) + if (it is Component) flatten(it.list) else emptyList()
+    }
+    val layout = flatten(core.operations).filterIsInstance<StateLayout>().single()
+    val output = java.io.File("build/plain-root-evidence").apply { mkdirs() }
+    java.io.File(output, "density-$density.rc").writeBytes(captured.bytes)
+    for ((step, expected) in listOf(0, 1, 2, 0).withIndex()) {
+      core.paint(context, 0)
+      core.paint(context, 0)
+      assertEquals(
+        "selected branch after $step clicks at density $density",
+        expected,
+        layout.currentLayoutIndex,
+      )
+      val box = layout.parent as LayoutComponent
+      assertEquals(24f * density, box.paddingLeft, .01f)
+      assertEquals(312f * density, layout.getLayout(expected).width, .01f)
+      java.io.File(output, "density-$density-$step.png").outputStream().use {
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+      }
+      if (step < 3) assertTrue("recorded click action", core.onClick(context, size / 2f, size / 2f))
+    }
+  }
+
   private fun verify(
     initial: Number,
     changes: List<Pair<Number, Int>>,

@@ -563,10 +563,20 @@ internal class RemoteContentEmitter(
       val authored = node.properties[parameter.name]
       val expression =
         when {
-          parameter.name == MODIFIER_PARAMETER -> node.modifierExpression(pad)
+          parameter.name == MODIFIER_PARAMETER ->
+            node.modifierExpression(
+              pad,
+              modifierClick =
+                record.parameters.none { it.name == "onClick" && it.typeFqn == ACTION_FQN },
+            )
           authored != null -> remoteValue(node, parameter, authored)
+          parameter.typeFqn == ACTION_FQN &&
+            (!parameter.hasDefault ||
+              (node.eventBindings[
+                    parameter.name.removePrefix("on").replaceFirstChar { it.lowercaseChar() }]
+                  as? JsonArray)
+                ?.isNotEmpty() == true) -> actionExpression(node, parameter)
           parameter.hasDefault -> null
-          parameter.typeFqn == ACTION_FQN -> actionExpression(node, parameter)
           // Nullable and no default: optional to the design, mandatory to Kotlin. Omitting it
           // does not compile and refusing it would reject a design that legitimately left it
           // out, so the absence is written down as what it is.
@@ -1756,8 +1766,16 @@ internal class RemoteContentEmitter(
   private fun UiBuilderNode.modifierExpression(
     pad: String,
     leading: List<String> = emptyList(),
+    modifierClick: Boolean = true,
   ): String? {
-    val parts = leading + modifiers.flatMap { element -> modifierCalls(element) }
+    val click =
+      if (modifierClick && (eventBindings["click"] as? JsonArray)?.isNotEmpty() == true) {
+        actionExpression(this, TargetParameter("onClick", "Action"))?.let {
+          modifierCall("clickable($it)")
+        }
+      } else null
+    val parts =
+      leading + modifiers.flatMap { element -> modifierCalls(element) } + listOfNotNull(click)
     if (parts.isEmpty()) return null
     usesModifier = true
     val single = parts.joinToString(".", prefix = "RemoteModifier.")

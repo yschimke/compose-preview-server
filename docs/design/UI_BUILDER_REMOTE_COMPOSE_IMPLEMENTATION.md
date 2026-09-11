@@ -117,9 +117,17 @@ passes compilation and its explicit-refusal/compiled-fixture tests. Golden regen
 existing fixtures.
 
 The combined local profile includes contracts, both generator publications, the JSON compiler and
-the player. A real hosted MCP comparison also exposed a separate remaining gap: a plain layout
-root in a Remote catalog does not yet route to Remote Kotlin export; the existing dedicated route
-requires a Wear widget root. That route must be generalized without changing the semantic tree.
+the player. Ordinary roots now also use the Remote Kotlin emitter when the catalog declares the
+Remote Compose platform. The existing Code pane and hosted MCP export share that route; no widget
+wrapper is added to the semantic tree. Layout clicks become Remote modifier actions, and catalog
+controls with an Action callback keep their authored callback even when the parameter has a default.
+
+[Ordinary-root source evidence](evidence/ui-builder-remote-root-source/README.md) records the real
+WASM Code pane, all three MCP artifacts, and Android capture/playback of the exact exported source.
+The Android proof clicks through both states and the fallback at densities 1 and 2, checking padding
+and active layout width. This proves source export and real document capture. The server's separate
+native PNG compilation route still needs ordinary Remote-root support; saved-document WASM playback
+uses the JSON/binary export route described above.
 
 ## Shared Compose export
 
@@ -301,8 +309,8 @@ The delivery and saved-preview sections above describe its editor, service and M
 - Extend Remote state selection to String and nullable selectors without changing authored
   semantics. Transitions and inactive-branch retention can follow.
 - Extend the saved-document preview/export integration to unsaved and local-storage designs.
-- Route ordinary layout roots in Remote catalogs to Remote Kotlin generation, retaining the same
-  semantic tree used by JSON and binary export.
+- Extend the native PNG compilation route to ordinary Remote roots; source, JSON, binary export
+  and saved-document WASM playback already accept the same semantic tree.
 - Complete loops, reusable component parameters/callbacks and per-instance addressing through all
   preview and export lanes.
 - Extend typed values, expressions, action sequences, host events and modifier bindings using

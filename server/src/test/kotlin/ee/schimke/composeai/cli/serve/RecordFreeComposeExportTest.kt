@@ -27,6 +27,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 
 /**
@@ -185,6 +186,26 @@ class RecordFreeComposeExportTest {
       listOf(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD),
       export(ScreenGeneratorScreenFixture.document()).diagnostics.map { it.code },
     )
+  }
+
+  @Test
+  fun `an arbitrary Remote catalog exports ordinary roots using its declared platform`() {
+    val original =
+      json.decodeFromString<DesignDocumentV1>(
+        java.io
+          .File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
+          .readText()
+      )
+    val document = original.copy(catalogPin = original.catalogPin.copy(systemId = "custom-remote"))
+    val capabilities =
+      catalog.copy(
+        statusSemantics = JsonObject(mapOf("platform" to JsonPrimitive("remote-compose")))
+      )
+    val artifact = export(document, capabilities)
+    assertTrue(artifact.diagnostics.isEmpty(), artifact.diagnostics.toString())
+    assertTrue("RemoteStateLayout" in artifact.content, artifact.content)
+    assertTrue(".clickable(valueChange(page, 20.ri))" in artifact.content, artifact.content)
+    assertFalse("WearWidget" in artifact.content, artifact.content)
   }
 
   /**
@@ -347,7 +368,7 @@ class RecordFreeComposeExportTest {
       .toDesignDocumentV1()
   }
 
-  private fun export(document: DesignDocumentV1) =
+  private fun export(document: DesignDocumentV1, capabilities: CatalogCapabilityV1 = catalog) =
     executor.export(
       RevisionPinnedUiBuilderExport(
         actor = AuthenticatedUiBuilderActor("tester"),
@@ -355,7 +376,7 @@ class RecordFreeComposeExportTest {
         revision = document.revision,
         documentHash = "hash",
         document = document,
-        catalog = catalog,
+        catalog = capabilities,
         format = ExportFormatV1.COMPOSE,
       )
     )
