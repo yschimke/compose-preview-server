@@ -515,6 +515,17 @@ has no browser errors; a viewport relayout accommodates an observed stale access
 when switching docks. All 82 shared-export tests, 954 editor tests (one separate opt-in proof
 skipped), and WASM/server builds pass. These primitives do not complete all consumer paths.
 
+The next callback source form now has an [opt-in compiled proof](evidence/ui-builder-bound-action-proof/README.md).
+Three integer row IDs pass through two reusable component layers whose argument names differ at
+each boundary. Ordinary Compose receives `(Int) -> Unit`; creation-compose receives `(Int) -> Action`
+factories that retain the caller's mutable state target. Both targets pass initial pixel equality
+and eight out-of-order select/reset clicks at each of two densities (32 clicks total).
+`-PboundActionProof=true` includes this isolated source/test configuration; omitted or false retains
+the previous proof build. The original generator and all production routes remain unchanged.
+This proves the next implementation form. Shared typed callback parameters/invocations, production
+Remote action factories, authoritative action-binding validation, safe preview resolution and the
+existing browser/MCP authoring surfaces still need integration before enabling this feature for users.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware

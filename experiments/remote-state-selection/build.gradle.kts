@@ -35,6 +35,12 @@ tasks.withType<Test>().configureEach {
 
 androidComponents {
   onVariants { variant ->
+    if (providers.gradleProperty("boundActionProof").orNull == "true") {
+      variant.sources.kotlin?.addStaticSourceDirectory("build/bound-action-source/remote")
+      variant.hostTests.values.forEach { test ->
+        test.sources.kotlin?.addStaticSourceDirectory("src/boundActionTest/kotlin")
+      }
+    }
     variant.sources.kotlin?.addStaticSourceDirectory(
       "../../ui-builder-export/build/remote-state-selection"
     )
