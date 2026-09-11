@@ -989,6 +989,7 @@ class ServeCatalogStore(
           // read
           // the system's own choice instead of inferring it.
           stageSurface = catalog.display?.surface?.takeIf { it.isNotBlank() },
+          catalogRole = catalog.display?.role?.takeIf { it.isNotBlank() },
           declaredHero = catalog.display?.hero?.takeIf { it.isNotBlank() },
           webThemeCss = webThemeCss,
           figmaDir = figmaDir,
@@ -3240,7 +3241,26 @@ class ServeCatalogStore(
    * stickers are drawn for (`light`/`dark`) and the [hero] preview (componentId or preview id) to
    * feature on the index. Both optional; the server falls back to its own defaults when absent.
    */
-  @Serializable data class CatalogDisplay(val surface: String? = null, val hero: String? = null)
+  /**
+   * `catalog.json`'s `display`: the presentation the system declared for itself.
+   *
+   * [role] is what KIND of catalog this is, and through that what shape its component pages take.
+   * The one role that means anything today is `samples` — a catalog of call sites rather than of a
+   * design system's components — and it drops every comparison lane and stands the source beside
+   * the render ([ServeWeb.PageRole]). An unknown role reads as the default, so a catalog published
+   * by a newer producer degrades to the ordinary page rather than to an error.
+   *
+   * Declared by the CATALOG, never inferred here. Which catalogs are samples catalogs is the
+   * deployment's business and the producer's, and a server that decided it by name would be back to
+   * the knowledge this module is not allowed to hold
+   * (`.github/scripts/ui-builder-catalog-literals.sh`).
+   */
+  @Serializable
+  data class CatalogDisplay(
+    val surface: String? = null,
+    val hero: String? = null,
+    val role: String? = null,
+  )
 
   /**
    * `catalog.json`'s `compareWith`: the sibling system this catalog reproduces.

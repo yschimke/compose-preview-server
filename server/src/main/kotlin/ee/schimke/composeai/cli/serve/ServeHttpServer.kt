@@ -10273,6 +10273,9 @@ class ServeHttpServer(
           // …and the catalogs that are ABOUT this component — its samples, a rendition of it
           // elsewhere — as named directories in the same drawer subtree the variants live in.
           componentDirectories = componentRelatedDirectories(renderHost, preview, sessionId),
+          // What KIND of catalog this is, as the catalog itself declared it — which decides the
+          // shape of the page rather than any detail of it. See [ServeWeb.PageRole].
+          pageRole = ServeWeb.PageRole.of(catalogBundleHost(renderHost)?.catalogRole),
           // The catalog's declared stage surface (`display.surface`), so an unthemed preview backs
           // on the dark stage for a dark-first system instead of the default white.
           declaredSurface = catalogBundleHost(renderHost)?.stageSurface,

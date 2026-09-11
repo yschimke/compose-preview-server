@@ -2955,6 +2955,13 @@ var pendingSourceData: UsageSnippet | null | undefined;
 function sourceAvailable() {
     return !!(sourceChip && sourcePanel && usageSrc());
 }
+// The SIDE lane: a samples catalog's page, where the code stands beside the render rather than
+// behind a chip that swaps it out. Server-set, from the catalog's own declared role — see
+// `ServeWeb.PageRole`. It changes three things about the lane below and nothing else: the panel
+// opens at load, the render stays on the stage beside it, and closing is a no-op.
+function sideSourceLane() {
+    return root.getAttribute("data-source-lane") === "side";
+}
 // The radio, not `data-mode` — exactly as specActive() does. On a URL restore the radio is
 // checked before the transition paints, so reading the stage attribute here would report the
 // lane as inactive while the page was in the middle of entering it.
@@ -2977,11 +2984,16 @@ function usageSrc() {
 }
 function openSource() {
     if (!sourceAvailable()) return;
-    root.setAttribute("data-mode", "source");
-    // Out of flow rather than merely hidden, like the spec lane: the stage sizes to the panel
-    // instead of reserving the render's box underneath it.
-    img.style.display = "none";
-    canvas.hidden = true;
+    // On the side lane the render is not being replaced, so neither the mode nor the image moves:
+    // `data-mode` still says which lane the STAGE is in (snapshot, live, motion…), and claiming
+    // "source" here would take the snapshot off a page whose whole point is the pair.
+    if (!sideSourceLane()) {
+        root.setAttribute("data-mode", "source");
+        // Out of flow rather than merely hidden, like the spec lane: the stage sizes to the panel
+        // instead of reserving the render's box underneath it.
+        img.style.display = "none";
+        canvas.hidden = true;
+    }
     sourcePanel!.hidden = false;
     if (status) status.textContent = "";
     if (sourceLoaded && pendingSourceData !== undefined) {
@@ -3017,6 +3029,9 @@ function openSource() {
 }
 function closeSource() {
     if (!sourcePanel) return;
+    // Nothing to close on the side lane — the panel is part of the page there, not a lane someone
+    // entered. Returning early also keeps a mode transition from hiding it on the way past.
+    if (sideSourceLane()) return;
     // `data-mode`, not sourceActive(): by the time a transition calls this the radio for the lane
     // being entered is already checked, so the flag would say we are not on Source and the stage
     // would keep its attribute. Same split the spec lane makes for the same reason.
@@ -4547,12 +4562,22 @@ if (specChip) {
 // The Source chip: in and straight back out, like the spec chip. Leaving returns to the static
 // snapshot rather than to whichever interactive lane was up, for the same reason — the code is
 // read against the *render*, and that is the lane it was entered from.
+//
+// On the SIDE lane the chip is not a lane toggle at all — the panel is already open beside the
+// render — so it scrolls the code into view instead, which is what a reader on a phone (where the
+// two columns have wrapped into one) is actually asking for when they press it.
 if (sourceChip) {
     sourceChip.addEventListener("click", function () {
-        if (sourceActive()) setMode("png");
+        if (sideSourceLane()) {
+            if (sourcePanel) sourcePanel.scrollIntoView({ block: "nearest" });
+        } else if (sourceActive()) setMode("png");
         else if (sourceAvailable()) setMode("source");
     });
 }
+// …and on that lane the code is fetched at LOAD rather than on first entry. The usual rule — never
+// pay for a GitHub read most visitors do not want — is the opposite way round here: on a samples
+// page every visitor wants the code, because it is what they came to read.
+if (sideSourceLane()) openSource();
 // The Motion chip: in and straight back out, like the spec and Source chips, and leaving returns
 // to the static snapshot for the same reason — the recording is watched against the *still*, and
 // that is the lane it was entered from.
