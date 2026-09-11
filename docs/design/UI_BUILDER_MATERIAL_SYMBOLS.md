@@ -138,6 +138,12 @@ continuously** — weight anywhere in 100–700, and grade and optical size too,
 version would have had to refuse. The sliders in the customise panel are the font's real axes, and
 nothing has to be decided in advance about which combinations someone is allowed to want.
 
+![One icon per row across weight, fill, grade, optical size and the three styles, plus five off-grid weights](https://raw.githubusercontent.com/yschimke/compose-preview-server/EVIDENCE_SHA/docs/design/evidence/ui-builder-material-symbols/axis-options.png)
+
+Every cell there is resolved by the reader in this change from the pinned font, at request time.
+The last row is the argument against a pre-generated table in one picture: `wght 137`, `263`, `418`,
+`552` and `689` are not points anybody would have chosen to enumerate, and they cost nothing.
+
 ## Why not the live Google services
 
 fonts.google.com does this work as a service, and it is worth saying why we do not call it.
@@ -332,7 +338,15 @@ Over a 50-name sample of the 2,205 names in both:
 | over 3% | 12 | redrawn — `cast_connected` 37%, `help` 31%, `calendar_today` 24% |
 
 A blanket "defaults use `material-icons-*`" is therefore wrong for about a quarter of the set, and
-silently so. The rule is **per name, decided at build time**: the comparison runs over all 2,205
+silently so. What the numbers look like:
+
+![Legacy Material Icons against Material Symbols, twelve names side by side with a difference overlay](https://raw.githubusercontent.com/yschimke/compose-preview-server/EVIDENCE_SHA/docs/design/evidence/ui-builder-material-symbols/legacy-vs-symbols.png)
+
+`menu` is the same drawing to the pixel and `search` is within 0.7%, while `cast_connected` is
+redrawn outright at 36.9%. The middle of that range is the interesting part: the legacy *outlined*
+face is not consistently outlined — its `favorite`, `star` and `help` are solid where the Symbols
+outlined face draws a stroke — which is a change of meaning, not of weight, and exactly the kind of
+substitution an equivalence table has to refuse. The rule is **per name, decided at build time**: the comparison runs over all 2,205
 shared names and emits an equivalence table, gated the way `checkMaterialIconCatalogFixture` is.
 Two conditions on top of it:
 
