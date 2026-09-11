@@ -2,6 +2,7 @@ package ee.schimke.composeai.mcp
 
 import com.google.common.truth.Truth.assertThat
 import ee.schimke.composeai.daemon.JsonRpcServer
+import ee.schimke.composeai.daemon.RenderArtifact
 import ee.schimke.composeai.daemon.RenderHost
 import ee.schimke.composeai.daemon.RenderRequest
 import ee.schimke.composeai.daemon.RenderResult
@@ -239,7 +240,7 @@ private class CapabilityRenderHost(private val pngFile: File) : RenderHost {
       id = render.id,
       classLoaderHashCode = System.identityHashCode(javaClass.classLoader),
       classLoaderName = javaClass.classLoader?.javaClass?.name ?: "bootstrap",
-      pngPath = pngFile.absolutePath,
+      artifact = RenderArtifact(path = pngFile.absolutePath, mediaType = RenderArtifact.PNG),
       metrics = mapOf("tookMs" to 1L),
     )
   }
