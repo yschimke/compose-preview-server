@@ -4,6 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -85,6 +86,23 @@ class MaterialSymbolsIconsTest {
     val response =
       answered(icons(temp).outlines("outlined", listOf("search", "search", "search"), emptyMap()))
     assertEquals(1, response.icons.size)
+  }
+
+  @Test
+  fun `an outline is resolved once per host`(@TempDir temp: File) {
+    val icons = icons(temp)
+    val first = answered(icons.outlines("outlined", listOf("search"), mapOf("wght" to 300f)))
+    val second = answered(icons.outlines("outlined", listOf("search"), mapOf("wght" to 300f)))
+    // Same string instance: the second call must come from the memo rather than repeat the glyph
+    // read, the interpolation and the serialisation. Browser caching cannot cover this — a
+    // different visitor, or a differently-composed batch, is a different request.
+    assertSame(first.icons.getValue("search"), second.icons.getValue("search"))
+
+    val other = answered(icons.outlines("outlined", listOf("search"), mapOf("wght" to 400f)))
+    assertTrue(
+      other.icons.getValue("search") != first.icons.getValue("search"),
+      "a different axis position is a different outline, not a cache hit",
+    )
   }
 
   @Test

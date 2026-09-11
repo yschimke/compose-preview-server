@@ -36,12 +36,39 @@ internal class MaterialSymbolsCatalog(
    * Callers hand this straight to `addPathNodes`, and the result is what the design's outline
    * registry records — so this is resolved once per icon per host, not once per draw.
    */
+  @Synchronized
   fun pathData(name: String, axisValues: Map<String, Float> = emptyMap()): String? {
     val glyph = glyphId(name) ?: return null
-    return font.outline(glyph, axisValues).toPathData()
+    val key = name to axisValues.toSortedMap().toString()
+    resolved[key]?.let {
+      return it
+    }
+    val path = font.outline(glyph, axisValues).toPathData()
+    // Bounded, and oldest-first: a host serves the same few hundred icons over and over — a
+    // design's
+    // own set, and whatever the pickers are scrolling — so this is a small map with a high hit rate
+    // rather than an unbounded one. Without it every visitor, and every differently-composed batch,
+    // repeats the glyph read, the interpolation and the serialisation for outlines that cannot
+    // change while the pin is what it is.
+    if (resolved.size >= MAXIMUM_RESOLVED) {
+      resolved.keys.take(resolved.size - MAXIMUM_RESOLVED + 1).forEach(resolved::remove)
+    }
+    resolved[key] = path
+    return path
   }
 
+  private val resolved = LinkedHashMap<Pair<String, String>, String>()
+
   internal companion object {
+    /**
+     * How many resolved outlines a host keeps.
+     *
+     * Five thousand is roughly a face's whole default-axis set at ~550 bytes each — a few megabytes
+     * — which is the shape of a host whose users browse the picker; a design's own icons are a
+     * handful and never evicted in practice.
+     */
+    private const val MAXIMUM_RESOLVED = 5_000
+
     /**
      * Parses a `.codepoints` file: one `name hexcodepoint` line per icon.
      *

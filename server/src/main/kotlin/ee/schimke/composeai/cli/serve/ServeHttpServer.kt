@@ -9269,7 +9269,11 @@ class ServeHttpServer(
     block: () -> IconResult<T>
   ): IconResult<T>? =
     try {
-      block()
+      // On [Dispatchers.IO]: a cold call downloads 9-15 MB and parses a font, and the source
+      // serialises on one monitor, so leaving this on the request coroutine would let a single slow
+      // first fetch hold Ktor request threads and stall unrelated traffic — bounded by the client's
+      // timeouts, but still for as long as they allow. Same rule the render-history lane follows.
+      withContext(Dispatchers.IO) { block() }
     } catch (failure: IllegalStateException) {
       respondIconsFailed(failure)
     } catch (failure: java.io.IOException) {
