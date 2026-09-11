@@ -175,6 +175,12 @@ existing editor and MCP is still required.
 
 ## Play actual design-to-JSON exports
 
+A separate [repetition feasibility proof](../../docs/design/evidence/ui-builder-repetition-proof/README.md)
+now checks authored rows and a parameterized component through a test-only expansion, this shared
+exporter/compiler and the real player. The result matches the existing editor canvas at both
+densities, including all copies' click regions. Production loop/instance export is still refused;
+the linked evidence distinguishes what is proven from the integration still required.
+
 `RemoteDocumentJsonExporter` in the shared production `ui-builder-export` module now lowers
 authored layout documents to JSON. Generate the exact fixtures and run them through the shared
 compiler and real player:

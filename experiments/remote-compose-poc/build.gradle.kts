@@ -44,6 +44,10 @@ tasks.register<JavaExec>("compileDocument") {
 }
 
 tasks.withType<Test>().configureEach {
+  providers.gradleProperty("repetitionProofDir").orNull?.let { path ->
+    inputs.dir(path)
+    systemProperty("repetitionProofDir", file(path).absolutePath)
+  }
   providers.gradleProperty("productionStringJsonDir").orNull?.let { path ->
     inputs.dir(path)
     systemProperty("productionStringJsonDir", file(path).absolutePath)

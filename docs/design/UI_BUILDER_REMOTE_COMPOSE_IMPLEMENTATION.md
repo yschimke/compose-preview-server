@@ -427,6 +427,19 @@ two densities, covering adjacent Floats, subnormals, opposite finite extremes, o
 integer/Boolean regression cases and padding. All 53 shared-export tests and 953 editor tests pass;
 the final main-based compiler passes 35 tests and its ABI check.
 
+## Repetition feasibility, before production integration
+
+[The static expansion proof](evidence/ui-builder-repetition-proof/README.md) now establishes that
+authored rows can place a parameterized reusable body and compile into ordinary Remote layouts.
+The existing editor canvas, temporary expanded tree and real compiled document match every pixel
+at densities 1 and 2. All six expanded cells remain independently clickable and update the shared
+selection. Placement padding and row-specific spacing are retained.
+
+This is deliberately test-only. Production JSON still refuses loops and instances; the proof pins
+that fact. Validation, supported binding fields, record-driven Kotlin loops/calls and per-instance
+MCP addressing remain integration work. Static expansion does not substitute for runtime lists,
+lazy keys, scoped state or callback/slot parameters.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
