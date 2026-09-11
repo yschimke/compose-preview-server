@@ -3027,6 +3027,21 @@ cp-history-menu { display: contents; }
   background: var(--md-sys-color-surface-container);
   color: var(--md-sys-color-on-surface); }
 .cp-viewer[data-mode="source"] .cp-source-panel { display: block; }
+/* The SIDE source lane — a samples catalog's pages, where the code is what the page is for and the
+   render is what it produces. The panel is the same one the Source chip opens; this only changes
+   where it sits and that it is always there. Two columns that WRAP rather than a fixed grid: the
+   render's width is the component's, not the layout's, so on a narrow screen the code drops below
+   it instead of being squeezed into a column too narrow to read a line of Kotlin in. */
+.cp-viewer[data-source-lane="side"] .cp-stage { align-items: flex-start;
+  justify-content: flex-start; gap: 16px; flex-wrap: wrap; }
+/* `max-width` is left at the panel's own 72ch: a line of Kotlin has a readable measure and the
+   stage getting wider is not a reason to stretch one. It grows to fill the room up to that and
+   stops, which is why the flex-basis is a floor rather than a share. */
+.cp-viewer[data-source-lane="side"] .cp-source-panel { display: block; flex: 1 1 340px;
+  min-width: 0; margin: 0; }
+/* `min-width: 0` on the image too: a flex item defaults to its content's intrinsic width, so a
+   wide render would refuse to shrink and push the code column off the stage. */
+.cp-viewer[data-source-lane="side"] .cp-stage > #cp-img { flex: 0 1 auto; min-width: 0; }
 /* The stage's own backing exists to show a RENDER on a neutral field, and the backend badge names
    the engine that drew one. Neither means anything over a code panel: on a dark page the backing
    framed the panel in a white card, and the badge sat on top of the first line of source. Both are

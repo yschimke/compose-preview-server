@@ -3831,6 +3831,50 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
+   * What KIND of catalog a page belongs to, and through that what shape the page takes.
+   *
+   * Declared by the catalog (`catalog.json`'s `display.role`, carried on
+   * [ServeBundleHost.catalogRole]) and never inferred from its name — which catalogs exist is the
+   * deployment's business, not this module's.
+   *
+   * Distinct from Catalog mode ([viewerPage]'s `componentBrowser`), which is the READER's choice of
+   * how much chrome to be shown and applies to every catalog alike. A role is a property of the
+   * thing being shown: the same reader, on a samples page, is looking at something a design
+   * comparison is not a question about.
+   */
+  enum class PageRole {
+    /** A design system's own catalog: the page as it has always been. */
+    CATALOG,
+    /**
+     * A catalog of CALL SITES — the samples that use a design system, published beside it.
+     *
+     * Two differences, both following from the same fact: a sample is not a rendition of a
+     * reference, it is code someone would copy.
+     * 1. Every comparison lane goes. A design reference, the paired catalog's render, the layer
+     *    diff, the parity issues, the compare strip: each asks "does this match the reference", and
+     *    there is no reference this is meant to match. Offering the lanes anyway would invite a
+     *    reader to read a difference as a defect.
+     * 2. The source stands BESIDE the render rather than behind a chip that swaps it out. On an
+     *    ordinary component page the code is one of several things a reader might want; here it is
+     *    the thing the page is for, and the render is what it produces.
+     */
+    SAMPLES;
+
+    companion object {
+      /**
+       * The role a catalog declared, or [CATALOG] for one that declared none — and for one that
+       * declared a role this server does not know, which is a catalog published by a newer producer
+       * and must degrade to the ordinary page rather than to an error.
+       */
+      fun of(declared: String?): PageRole =
+        when (declared?.trim()?.lowercase()) {
+          "samples" -> SAMPLES
+          else -> CATALOG
+        }
+    }
+  }
+
+  /**
    * The viewer, opened on one recording — the same `?mode=motion&motion=<id>` shape the Motion
    * index's own cards link with, so the two surfaces cannot drift into two spellings of one link.
    *
@@ -14488,6 +14532,12 @@ ${scriptTag("known-differences.js")}
      */
     componentDirectories: List<ComponentDirectory> = emptyList(),
     /**
+     * What kind of catalog this page belongs to — see [PageRole], which says what each role changes
+     * and why. Defaults to [PageRole.CATALOG], so every existing caller and every catalog that
+     * declares no role renders exactly the page it did before.
+     */
+    pageRole: PageRole = PageRole.CATALOG,
+    /**
      * The catalog's declared stage surface (`catalog.json`'s `display.surface`) — decides whether
      * an unthemed preview's stage backs on dark, and with it whether the page offers a day/night
      * choice at all (a declared-dark catalog does not). Null ⇒ the system-name dark-first
@@ -14701,8 +14751,28 @@ ${scriptTag("known-differences.js")}
      */
     navThumbHash: (String) -> String? = { null },
   ): String {
+    // A SAMPLES catalog drops every comparison lane, for one reason that covers all of them: a
+    // sample is not a rendition of a reference. There is nothing this render is meant to match, so
+    // a design reference, the paired catalog's cell, the layer diff, the published parity issues
+    // and the compare strip would each invite a reader to read a difference as a defect. See
+    // [PageRole.SAMPLES].
+    //
+    // Shadowed at the top, exactly as Catalog mode's strip and the pin's are, so the rule holds by
+    // construction: there is no path below where a samples page reads a comparison input.
+    val samplesRole = pageRole == PageRole.SAMPLES
+    @Suppress("NAME_SHADOWING") val parallelSource = parallelSource?.takeUnless { samplesRole }
     @Suppress("NAME_SHADOWING")
-    val designReference = designReference?.takeUnless { componentBrowser }
+    val pairedDesignSource = pairedDesignSource?.takeUnless { samplesRole }
+    @Suppress("NAME_SHADOWING") val parallelLayers = parallelLayers && !samplesRole
+    @Suppress("NAME_SHADOWING")
+    val referenceAnnotations = if (samplesRole) emptyList() else referenceAnnotations
+    // The compare strip goes with them — it is the design comparison applied to this component's
+    // other variants, so on a samples page it is the same question asked once per row. The drawer
+    // subtree still lists those variants; navigation is not comparison.
+    @Suppress("NAME_SHADOWING")
+    val componentVariants = if (samplesRole) emptyList() else componentVariants
+    @Suppress("NAME_SHADOWING")
+    val designReference = designReference?.takeUnless { componentBrowser || samplesRole }
     @Suppress("NAME_SHADOWING") val sourceHref = sourceHref?.takeUnless { componentBrowser }
     // Deliberately NOT stripped in Catalog mode, unlike the developer affordances around it. That
     // mode is the streamlined component browser — the presentation a design reviewer is handed —
@@ -14710,7 +14780,8 @@ ${scriptTag("known-differences.js")}
     // for. It is also the ONLY reporting affordance that mode can have: Catalog mode carries no
     // site footer and no floating launcher, so with this stripped too a visitor looking at a wrong
     // render had nowhere at all to say so (issue #4704).
-    @Suppress("NAME_SHADOWING") val figmaSpec = figmaSpec?.takeUnless { componentBrowser }
+    @Suppress("NAME_SHADOWING")
+    val figmaSpec = figmaSpec?.takeUnless { componentBrowser || samplesRole }
     @Suppress("NAME_SHADOWING") val playgroundHref = playgroundHref?.takeUnless { componentBrowser }
     @Suppress("NAME_SHADOWING")
     val historyManifestUrl = historyManifestUrl?.takeUnless { componentBrowser }
@@ -14727,7 +14798,7 @@ ${scriptTag("known-differences.js")}
     val revisions =
       if (componentBrowser) CatalogRevisions(generation = revisions.generation) else revisions
     @Suppress("NAME_SHADOWING")
-    val parityIssues = if (componentBrowser) emptyList() else parityIssues
+    val parityIssues = if (componentBrowser || samplesRole) emptyList() else parityIssues
     @Suppress("NAME_SHADOWING")
     val degradations = if (componentBrowser) emptyList() else degradations
     // The session id links may carry. Null on a rooted site (and for the default session): the
@@ -15274,6 +15345,19 @@ ${scriptTag("known-differences.js")}
           "</span>"
     val sourceKnown = !usageHref.isNullOrBlank()
     val usageAvailable = sourceKnown && pinned == null
+    // The SIDE source lane: on a samples page the code stands beside the render instead of behind
+    // a chip that swaps it out.
+    //
+    // An attribute rather than a second panel, because the panel, its fetch and its editor are the
+    // same ones the chip opens — this changes where the panel sits and when it is filled, not what
+    // it is. The viewer script reads it to open the lane at load and to stop `closeSource` from
+    // putting the code away again; the stylesheet reads it to lay the stage out in two columns.
+    //
+    // Only when there IS source to stand beside: a samples catalog whose usage lane is unavailable
+    // (a pin, a preview whose source could not be derived) keeps the ordinary single-column stage
+    // rather than a column of nothing.
+    val sideSourceLane = samplesRole && usageAvailable
+    val sourceLaneAttr = if (sideSourceLane) " data-source-lane=\"side\"" else ""
     // The **Source chip** — the usage code behind this card, on the same row and for the same
     // reason the design-spec chip is there rather than inside the renderer combo: that combo is
     // headed "Switch renderer", and source is not a renderer. It answers a third question again,
@@ -16890,7 +16974,7 @@ ${scriptTag("known-differences.js")}
         </span>
       </div>
       $historyInlineHtml
-      <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel" data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$unseededAttr$wasmAttr$rcAttr$historyAttrs$pinnedAttr$generationAttr>
+      <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel" data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$sourceLaneAttr$unseededAttr$wasmAttr$rcAttr$historyAttrs$pinnedAttr$generationAttr>
         $navDrawer
         <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>
         $inspectLegendHtml

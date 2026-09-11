@@ -1779,6 +1779,49 @@ class ServeWebFixtureTest {
         canApplyOverrides = true,
         usageHref = "/usage/com.example.ProfileCardPreview",
       )
+    // The SAMPLES page role, as a PAIR of goldens built from one set of inputs.
+    //
+    // The pair is the point. A samples page is the ordinary component page with its comparison
+    // lanes gone and its source stood beside the render, and both halves of that are invisible in a
+    // single golden — `serve-viewer-samples-as-catalog.html` is the same preview, the same usage
+    // source and the same design reference rendered at [ServeWeb.PageRole.CATALOG], so the harness
+    // diffs exactly what the role does and nothing else. A regression that quietly widened or
+    // narrowed the role shows up as a change in the difference between the two.
+    //
+    // Deliberately carrying a design reference: it is the comparison the role has to drop, and a
+    // fixture with nothing to drop cannot show it dropped.
+    val samplesPreview =
+      ServePreview(
+        "com.example.ButtonSample",
+        "Button sample",
+        componentParameters =
+          listOf(
+            ServeComponentParameter("onClick", "() -> Unit"),
+            ServeComponentParameter("enabled", "Boolean", hasDefault = true),
+            ServeComponentParameter("content", "RowScope.() -> Unit", composableSlot = true),
+          ),
+      )
+    val samplesReference =
+      DesignReference(
+        id = "button-sample-figma",
+        previewId = samplesPreview.id,
+        label = "Button",
+        raster = DesignReferenceRaster(path = "references/button-sample-figma.png"),
+        source = DesignReferenceSource(provider = "figma"),
+      )
+    fun samplesFixture(role: ServeWeb.PageRole) =
+      ServeWeb.viewerPage(
+        samplesPreview,
+        token,
+        sessionId = "compose-m3-samples",
+        version = version,
+        pageRole = role,
+        usageHref = "/usage/com.example.ButtonSample",
+        designReference = samplesReference,
+        canApplyOverrides = true,
+      )
+    val samplesViewer = samplesFixture(ServeWeb.PageRole.SAMPLES)
+    val samplesViewerAsCatalog = samplesFixture(ServeWeb.PageRole.CATALOG)
     // A viewer whose preview published motion captures, on a fixture of its OWN rather than as a
     // state of the main one. The harness's extra states run in order against the same page, and
     // this one leaves a lane OPEN — the still taken out of flow, a capture on the stage — so run
@@ -4209,6 +4252,8 @@ class ServeWebFixtureTest {
         "serve-home-index.html" to homeIndex,
         "serve-viewer.html" to viewer,
         "serve-viewer-spatial.html" to spatialViewer,
+        "serve-viewer-samples.html" to samplesViewer,
+        "serve-viewer-samples-as-catalog.html" to samplesViewerAsCatalog,
         "serve-viewer-history.html" to viewerHistory,
         "serve-viewer-history-local.html" to viewerHistoryLocal,
         "serve-viewer-wasm.html" to wasmViewer,

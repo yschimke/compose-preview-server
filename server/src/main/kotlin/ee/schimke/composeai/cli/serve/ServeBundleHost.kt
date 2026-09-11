@@ -80,6 +80,15 @@ class ServeBundleHost(
    */
   val stageSurface: String? = null,
   /**
+   * What KIND of catalog this is, as it declared itself (`catalog.json`'s `display.role`), and
+   * through that what shape its component pages take — see [ServeWeb.PageRole], which parses it.
+   *
+   * Carried as the catalog's own string rather than as the parsed role so this host stays a record
+   * of what was published: an unknown role is a catalog from a newer producer, and reading it back
+   * out of here has to say so rather than report the default it degraded to.
+   */
+  val catalogRole: String? = null,
+  /**
    * The catalog's own colour palette, projected onto the serve chrome's CSS custom properties by
    * [ServeThemeCss] from the delivery branch's `tokens.dtcg.json` — so this system's pages are
    * framed in its own colours rather than the built-in indigo shell. Null for a plain uploaded
