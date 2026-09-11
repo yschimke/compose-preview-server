@@ -29,10 +29,13 @@ class RemotePngExportProofTest {
     try {
       val source =
         Json.decodeFromString<DesignDocumentV1>(
-          Files.readString(
-            Path.of("../docs/design/evidence/ui-builder-remote-native-preview/document.json")
+            Files.readString(
+              Path.of("../docs/design/evidence/ui-builder-remote-native-preview/document.json")
+            )
           )
-        )
+          .let {
+            if (System.getenv("VERIFY_REMOTE_FLOAT_BROWSER") == "true") decimalSelection(it) else it
+          }
       ServeUiBuilderRenderPort.open(work.resolve("renderer")).use { renderer ->
         for (density in listOf(1.0, 2.0)) {
           val document = source.copy(environment = source.environment.copy(density = density))
@@ -83,6 +86,60 @@ class RemotePngExportProofTest {
       if (old == null) System.clearProperty("composeai.cli.appHome")
       else System.setProperty("composeai.cli.appHome", old)
     }
+  }
+
+  private fun decimalSelection(source: DesignDocumentV1): DesignDocumentV1 {
+    val choice = source.nodes.getValue("choice")
+    return source.copy(
+      title = "Decimal state selection",
+      stateVariables =
+        source.stateVariables +
+          ("page" to
+            source.stateVariables
+              .getValue("page")
+              .copy(
+                valueType = StateValueTypeV1.DECIMAL,
+                initialValue = JsonPrimitive(2.5),
+              )),
+      nodes =
+        source.nodes.mapValues { (_, node) ->
+          node.copy(
+            properties =
+              if (node.id == choice.id)
+                mapOf(
+                  "showByState" to
+                    ObjectValueV1(
+                      mapOf(
+                        "selector" to StateValueV1("page"),
+                        "cases" to
+                          ObjectValueV1(
+                            mapOf("First" to DecimalValueV1(1.25), "Second" to DecimalValueV1(2.5))
+                          ),
+                        "fallback" to StringValueV1("Fallback"),
+                      )
+                    )
+                )
+              else node.properties,
+            eventBindings =
+              node.eventBindings.mapValues { (_, actions) ->
+                actions.map { action ->
+                  if (action is SetValueActionV1 && action.variable == "page")
+                    action.copy(
+                      value =
+                        JsonPrimitive(
+                          when (action.value.jsonPrimitive.int) {
+                            10 -> 1.25
+                            20 -> 2.5
+                            else -> 3.75
+                          }
+                        )
+                    )
+                  else action
+                }
+              },
+          )
+        },
+    )
   }
 
   private fun verifyRoutes(source: DesignDocumentV1, renderer: UiBuilderRenderPort) {

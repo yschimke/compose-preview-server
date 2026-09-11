@@ -30,6 +30,12 @@ class RemoteDocumentJsonPlayerFixturesTest {
         "Extremes" to listOf(JsonPrimitive(Int.MIN_VALUE), JsonPrimitive(Int.MAX_VALUE)),
         "Boolean" to listOf(JsonPrimitive(false), JsonPrimitive(true)),
         "ManyCases" to (10..130 step 10).map(::JsonPrimitive),
+        "Float" to listOf(JsonPrimitive(1.25f), JsonPrimitive(2.5f)),
+        "FloatAdjacent" to
+          listOf(JsonPrimitive(1f), JsonPrimitive(Float.fromBits(1f.toBits() + 1))),
+        "FloatSubnormal" to
+          listOf(JsonPrimitive(Float.MIN_VALUE), JsonPrimitive(Float.MIN_VALUE * 2)),
+        "FloatExtremes" to listOf(JsonPrimitive(-Float.MAX_VALUE), JsonPrimitive(Float.MAX_VALUE)),
       )
     val output = File("build/remote-json-selection").apply { mkdirs() }
     scenarios.forEach { (name, values) ->

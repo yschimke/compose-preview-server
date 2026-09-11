@@ -308,7 +308,7 @@ profile does not expand the claimed catalog coverage.
 
 `RemoteDocumentJsonExporter` now lives in the existing multiplatform `ui-builder-export` module.
 It lowers authored Box/Row/Column trees, their spacing and cross-axis alignment, basic ordered
-modifiers, integer/Boolean selection and numeric/Boolean action writes into authoring JSON. The
+modifiers, integer/Boolean/decimal selection and numeric/Boolean action writes into authoring JSON. The
 original Box carries its modifiers and click handler; bounded expressions precede the StateLayout
 inside it. Case order follows the authored child order. Boolean state is encoded as named integer
 0/1, with its authored kind retained in the export result for the eventual host bridge.
@@ -328,7 +328,7 @@ channel without treating that indication as a change to the authored fill.
 
 A separate compiler probe proves that equal initial String values share a text ID in the stock
 parser. The explicit state compiler profile described below now preserves independent state
-and literal IDs. Float/String selection, nullable state, dynamic dimensions, scoped child alignment,
+and literal IDs. String selection, nullable state, dynamic dimensions, scoped child alignment,
 catalog typography/assets and reusable instances also remain to be mapped.
 
 Verification: 46 shared-export tests and 189 runtime tests pass, the shared module and existing
@@ -402,9 +402,30 @@ four switching scenarios and a direct comparison against AndroidX alpha19's nume
 The owning runtime/Compose suites, ABI and WASM checks also pass.
 
 [Before/after captures and reproduction](evidence/ui-builder-float-selection-player/README.md)
-record the proof. Its parser adapter is deliberately confined to the experiment. Production
-compiler-profile support, JSON lowering, browser and MCP decimal exports remain to be integrated;
-the current production exporter continues returning its located refusal for decimal selection.
+record the proof. Its original parser adapter stays confined to the experiment. The production integration below
+now uses the shared compiler publication and exporter instead.
+
+## Decimal selection through JSON, live preview and MCP
+
+The shared JSON exporter now lowers finite decimal selectors with `floatEquals` declarations in
+`compose-preview-state-v1`. These emit the exact creation-compose comparison sequence and expose
+an integer 0/1 for the existing bounded ordinal expressions. Case order, fallback, the authored
+Box and its modifiers remain intact. Literal and state selectors retain Float precision; the
+existing regular Compose `when` and Remote Kotlin mappings remain available.
+
+The compiler validates finite operands, scalar Float references, unique names and supported fields.
+Its unextended and integer-only profiles retain their behavior. The CMP player must include the
+numeric-ID correction in rc-players#94. Both committed publications are staged locally, without
+an upstream release or another editor application.
+
+[Actual browser and export evidence](evidence/ui-builder-decimal-selection/README.md) shows the
+existing WASM Preview switching 2.5 → fallback → 1.25 → 2.5 through real clicks. The Screen editor
+then changes the local initial value from 2.5 to 3.75. JSON, RC and PNG downloads before and after
+that edit match independently requested hosted MCP artifacts. No browser errors or saved server
+designs are produced. The exact production JSON additionally passes nine real-player scenarios at
+two densities, covering adjacent Floats, subnormals, opposite finite extremes, ordered actions,
+integer/Boolean regression cases and padding. All 53 shared-export tests and 953 editor tests pass;
+the final main-based compiler passes 35 tests and its ABI check.
 
 ## Remaining production work
 

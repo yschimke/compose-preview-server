@@ -46,7 +46,7 @@ class ProductionJsonExportTest {
     }
     val files =
       File(directory!!).listFiles()!!.filter { it.extension == "json" }.sortedBy { it.name }
-    assertEquals(10, files.size, "Five production scenarios at two densities")
+    assertEquals(18, files.size, "Nine production scenarios at two densities")
     files.forEach { file ->
       val source = file.readText()
       val header = JSONObject(source).getJSONObject("header")
@@ -88,7 +88,11 @@ class ProductionJsonExportTest {
             "${file.name}: repeated toggle reads updated state",
           )
         } else {
-          runOnIdle { overrides["page"] = RcNamedValue.Integer(999) }
+          runOnIdle {
+            overrides["page"] =
+              if (file.name.startsWith("Float")) RcNamedValue.FloatValue(999f)
+              else RcNamedValue.Integer(999)
+          }
           mainClock.advanceTimeBy(1000)
           waitForIdle()
           val fallback = onRoot().captureToImage().toPixelMap()[coordinate, coordinate]

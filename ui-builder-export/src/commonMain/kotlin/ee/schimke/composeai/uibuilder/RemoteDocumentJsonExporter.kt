@@ -51,6 +51,7 @@ object RemoteDocumentJsonExporter {
     val active = mutableSetOf<String>()
     var expressionIndex = 0
     var usesIntegerProfile = false
+    var usesStateProfile = false
     var density = 1.0
 
     fun export(): Result {
@@ -78,7 +79,7 @@ object RemoteDocumentJsonExporter {
         .forEach { (name, value) -> declare(name, value) }
       val roots = document.roots.mapNotNull(::node)
       val source = buildJsonObject {
-        if (strings.isNotEmpty()) put("compilerProfile", STATE_PROFILE)
+        if (strings.isNotEmpty() || usesStateProfile) put("compilerProfile", STATE_PROFILE)
         else if (usesIntegerProfile) put("compilerProfile", INTEGER_PROFILE)
         putJsonObject("header") {
           put("width", widthPx)
@@ -285,7 +286,7 @@ object RemoteDocumentJsonExporter {
         if (selector["type"] == JsonPrimitive("state")) stateKinds[variable]
         else selector["type"]?.jsonPrimitive?.contentOrNull
       val path = "nodes.${node.id}.$SHOW_BY_STATE"
-      if (kind !in setOf("int", "bool")) {
+      if (kind !in setOf("int", "bool", "float")) {
         errors += "$path: exact $kind selection needs a supported JSON expression mapping"
         return emptyList()
       }
@@ -295,6 +296,7 @@ object RemoteDocumentJsonExporter {
         } else value.int
       val reference =
         if (variable != null) "@$variable"
+        else if (kind == "float") selector["value"]!!.jsonPrimitive.float.toString()
         else integer(selector["value"]!!.jsonPrimitive).toString()
       val result = mutableListOf<JsonObject>()
       fun expression(value: String): String {
@@ -311,15 +313,35 @@ object RemoteDocumentJsonExporter {
         return "@$name"
       }
       // Quotient/remainder halves preserve all Int bits and avoid abs(Int.MIN_VALUE) overflow.
-      val low = expression("$reference % 65536")
-      val high = expression("$reference / 65536")
+      val low = if (kind != "float") expression("$reference % 65536") else ""
+      val high = if (kind != "float") expression("$reference / 65536") else ""
       val ordered = node.slots["children"].orEmpty().filter { it in selection.cases }
       var ordinal = ordered.size.toString()
       ordered.withIndex().reversed().forEach { (index, child) ->
-        val value = integer(selection.cases.getValue(child))
-        val lowMatch = expression("1 - min(1, abs($low - (${value % 65536})))")
-        val highMatch = expression("1 - min(1, abs($high - (${value / 65536})))")
-        val match = expression("$lowMatch * $highMatch")
+        val match =
+          if (kind == "float") {
+            usesStateProfile = true
+            var name: String
+            do {
+              name = "__rc_${expressionIndex++}"
+            } while (name in stateKinds)
+            result += buildJsonObject {
+              put("type", "floatEquals")
+              put("name", name)
+              put(
+                "left",
+                if (variable != null) JsonPrimitive(reference)
+                else JsonPrimitive(reference.toFloat()),
+              )
+              put("right", selection.cases.getValue(child).float)
+            }
+            "@$name"
+          } else {
+            val value = integer(selection.cases.getValue(child))
+            val lowMatch = expression("1 - min(1, abs($low - (${value % 65536})))")
+            val highMatch = expression("1 - min(1, abs($high - (${value / 65536})))")
+            expression("$lowMatch * $highMatch")
+          }
         ordinal = expression("$match * $index + (1 - $match) * $ordinal")
       }
       result += buildJsonObject {

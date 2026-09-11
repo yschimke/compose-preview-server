@@ -3,7 +3,8 @@
 The isolated `FloatSelectionJsonTest` uses creation-compose's Float equality operation sequence:
 Float comparison → integer expression reading the comparison ID → StateLayout case ordinal.
 The test's temporary `floatEquals` parser registration is not an advertised compiler profile.
-The JSON exporter in the production builder still refuses decimal selectors.
+At this baseline, the production JSON exporter refused decimal selectors. The subsequent
+[production integration](../ui-builder-decimal-selection/README.md) uses the shared compiler.
 
 Before the correction, the CMP player's Float writes did not populate the integer view of the
 same ID. Every matching decimal case therefore selected the fallback. AndroidX alpha19's
@@ -25,8 +26,8 @@ compilation. The committed player is staged through the normal local dependency 
 953 existing editor tests pass and the WASM/server distribution builds against it. The existing
 browser/MCP padding-edit PNG proof also passes with byte-identical output digests and no page
 errors; [its verification](browser-regression.json) records that regression check, not decimal
-selection in the production UI. This establishes the player prerequisite; compiler-profile integration, production
-JSON lowering and browser/MCP decimal export are still required.
+selection in the production UI. This establishes the player prerequisite; the subsequent production integration above closes
+compiler-profile support, JSON lowering and browser/MCP decimal export.
 
 The [JSON fixture](ordinary.json), [compiled document](ordinary.rc) and
 [verification record](verification.json) accompany the captures. Reproduce from the repository root:

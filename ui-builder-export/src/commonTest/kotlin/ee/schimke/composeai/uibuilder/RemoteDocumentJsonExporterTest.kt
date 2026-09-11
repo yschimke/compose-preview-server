@@ -7,7 +7,12 @@ internal fun remoteJsonSelectionFixture(
   values: List<JsonPrimitive> = listOf(JsonPrimitive(10), JsonPrimitive(20)),
   density: Int = 1,
 ): UiBuilderDocument {
-  val kind = if (values.first().booleanOrNull != null) "bool" else "int"
+  val kind =
+    when {
+      values.first().booleanOrNull != null -> "bool"
+      values.first().intOrNull != null -> "int"
+      else -> "float"
+    }
   val ids = values.indices.map { "case$it" }
   val selection =
     StateSelection(
@@ -106,6 +111,32 @@ internal fun remoteJsonSelectionFixture(
 }
 
 class RemoteDocumentJsonExporterTest {
+  @Test
+  fun `decimal selection uses exact comparisons and the state compiler profile`() {
+    val values = listOf(JsonPrimitive(1f), JsonPrimitive(Float.fromBits(1f.toBits() + 1)))
+    val result =
+      assertIs<RemoteDocumentJsonExporter.Result.Emitted>(
+        RemoteDocumentJsonExporter.export(remoteJsonSelectionFixture(values))
+      )
+    val json = Json.parseToJsonElement(result.source).jsonObject
+    assertEquals(
+      RemoteDocumentJsonExporter.STATE_PROFILE,
+      json["compilerProfile"]!!.jsonPrimitive.content,
+    )
+    val comparisons =
+      json["root"]!!
+        .jsonArray
+        .last()
+        .jsonObject["children"]!!
+        .jsonArray
+        .map { it.jsonObject }
+        .filter { it["type"] == JsonPrimitive("floatEquals") }
+    assertEquals(2, comparisons.size)
+    assertEquals(values.reversed(), comparisons.map { it["right"] })
+    assertTrue(comparisons.all { it["left"] == JsonPrimitive("@page") })
+    assertEquals("float", result.stateKinds["page"])
+  }
+
   @Test
   fun `selection keeps the authored box and ordered actions`() {
     val document = remoteJsonSelectionFixture()

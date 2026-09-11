@@ -188,8 +188,9 @@ compiler and real player:
   jvmTest
 ```
 
-`ProductionJsonExportTest` exercises five generated scenarios at densities 1 and 2: ordinary and
-adjacent large integers, Int extremes, Boolean selection and 13 cases. It verifies the initial
+`ProductionJsonExportTest` exercises nine generated scenarios at densities 1 and 2: ordinary and
+adjacent large integers, Int extremes, Boolean selection, 13 cases, ordinary decimals, adjacent
+Floats, subnormals and opposite finite Float extremes. It verifies the initial
 branch, ordered click actions, host-driven fallback and retained padding. The Boolean bridge uses
 named integers 0/1; the export result retains the authored state kinds for its host adapter.
 The test explicitly skips when no production fixture directory is supplied.
@@ -197,7 +198,7 @@ The test explicitly skips when no production fixture directory is supplied.
 The initial mapping covers Box/Row/Column, spacing and cross-axis alignment, basic ordered
 modifiers, non-null integer/Boolean selection and numeric/Boolean state writes. Catalog-specific
 components need declared lowering recipes; typography, assets, scoped child alignment, dynamic
-dimensions, String/nullable/Float selection and reusable instances remain to be mapped. Mutable
+dimensions, String/nullable selection and reusable instances remain to be mapped. Mutable
 String declarations use the explicit state profile below; a compiler probe retains the stock
 parser's equal-initial-text identity limitation.
 
@@ -243,8 +244,9 @@ recompilation. A fifth test compares numeric writes directly with the actual And
 ```
 
 The proof writes JSON, compiled documents and PNGs to `build/evidence/float-selection`.
-Production compiler-profile and exporter support remains separate work; the current shared JSON
-exporter continues to refuse decimal selectors until that integration is verified.
+The shared compiler now supplies the production `floatEquals` declaration under its state profile.
+`ProductionJsonExportTest` exercises exact generated documents through that publication; it does
+not use this experimental adapter.
 
-This proof now consumes production-generated JSON, but download formats, revision-pinned service
-export and live editor/MCP preview still need to be connected to the shared exporter.
+The shared exporter is now connected to browser downloads, revision-pinned service export, live
+WASM playback and MCP. See the implementation tracker for current evidence and remaining coverage.
