@@ -33,8 +33,9 @@ import kotlinx.serialization.json.put
  * The answer is not symmetric, and that is the point of writing it down:
  * - it **offers** twenty-five Remote Compose components the synthesised shelf has never had, which
  *   until recently the record could not name at all (all 49 catalog ids collapsed onto the
- *   project's own `RemoteSticker` wrapper, two records for the whole module) — but not one of them
- *   can be EXPORTED, so calling them a gain would be wrong (see below);
+ *   project's own `RemoteSticker` wrapper, two records for the whole module). When this was written
+ *   not one of them could be EXPORTED, so calling them a gain would have been wrong; twenty-two of
+ *   twenty-six now can, and the four that cannot are named below with the reason;
  * - it **loses** three, and it lost five until the two that mattered most came back.
  *
  * The loss is a blocker, and nothing else states it. `ProductionUiBuilderRuntime`'s donor unions in
@@ -103,7 +104,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
     get() = result.records
 
   /**
-   * The five the published catalog cannot offer, and why each one.
+   * The three the published catalog cannot offer, and why each one.
    *
    * Asserted ABSENT rather than skipped, and with the reason spelled out, because a gap nothing
    * states is a gap that stops being noticed. If one starts composing this test fails and says to
@@ -192,21 +193,26 @@ class PublishedRemoteM3CatalogEquivalenceTest {
   }
 
   /**
-   * `remote-sticker` left the shelf above, and the one place it has not left yet.
+   * `remote-sticker` is excluded, and the exclusion now reaches every place it has to.
    *
    * It is the frame every preview in this catalog is drawn inside rather than a component anyone
    * places in a design, so wear-m3-catalog#425 excludes it and publishes the reason. The exclusion
    * takes effect where it matters: it is not served, so it cannot be inserted, and the exporter is
    * no longer asked to write it.
    *
-   * It is still on the MENU, which is the generator writing a palette entry for a component the
-   * consumer refuses to serve — an item that disappears on insert. Fixed in
-   * yschimke/compose-ai-tools#5378, not yet released, and this catalog pins the release; the same
-   * assertion stands on the m3 sibling. Delete this last check when the catalog bumps its plugin
-   * and the fixture is re-captured, rather than shortening it.
+   * It used to remain on the MENU — the generator writing a palette entry for a component the
+   * consumer refuses to serve, an item that disappeared on insert — and the third assertion here
+   * pinned that as a known defect. yschimke/compose-ai-tools#5378 fixed it, the catalog has since
+   * bumped to a release carrying the fix, and this re-capture is the first fixture written by it.
+   *
+   * That assertion's own note said to delete it once the fixture was re-captured. It is INVERTED
+   * instead, and deliberately: deleting it would leave nothing watching a seam that has already
+   * been wrong once, and the fix lives in another repository on a pin this one bumps. Inverted it
+   * costs the same line and fails if a plugin bump ever puts the entry back. That is the opposite
+   * of the shortening the note was guarding against — it asks for more than before, not less.
    */
   @Test
-  fun `an excluded component is not served, though the menu still lists it`() {
+  fun `an excluded component is not served`() {
     val semantics =
       json
         .parseToJsonElement(fixture("remote-m3-published-v1.json"))
@@ -235,10 +241,10 @@ class PublishedRemoteM3CatalogEquivalenceTest {
 
     val menu = semantics["componentMenu"]!!.jsonObject["components"]!!.jsonObject
     assertEquals(
-      excluded,
+      emptyList(),
       excluded.filter { it in menu },
-      "an excluded component left the menu — compose-ai-tools#5378 has reached this catalog, so " +
-        "delete this assertion rather than shortening it",
+      "an excluded component is back on the menu — a palette entry for something the consumer " +
+        "refuses to serve is an item that disappears on insert (compose-ai-tools#5378)",
     )
   }
 
@@ -250,10 +256,16 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * field a design depends on is compared against the frozen shelf here: what the editor calls it,
    * what other components' slots can match on, what may go inside, and what a person can set.
    *
-   * The one divergence is pinned rather than hidden. `UiBuilderBuiltinSlot` can say `required` and
-   * cannot say a maximum, so the frozen `content` slot's `max: 1` — one design per host — is
-   * unbounded here. A schema that grows a cardinality closes it; until then this states what a
-   * cutover would actually ship.
+   * There is no divergence left. The last one was the `content` slot's `max: 1` — one design per
+   * host — which a builtin could not state: `UiBuilderBuiltinSlot` said `required` and nothing
+   * about a maximum, so the frozen bound composed unbounded and this list held two lines saying so.
+   * Closed end to end: the policy schema grew `max` (yschimke/compose-ai-tools#5408), the reader
+   * carries it into `SlotCardinalityV1` (#747), and the catalog declares it
+   * (yschimke/wear-m3-catalog#446).
+   *
+   * So an empty list here is the whole of #674's first blocker: the two containers a Remote design
+   * roots itself in are on the published shelf, and they are the frozen ones rather than something
+   * that merely shares their ids.
    */
   @Test
   fun `a restored widget container matches the frozen one field by field`() {
@@ -286,10 +298,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       }
     }
     assertEquals(
-      listOf(
-        "remote-m3/widget-container-large.slots[content].cardinality.max: frozen=1 composed=null",
-        "remote-m3/widget-container-small.slots[content].cardinality.max: frozen=1 composed=null",
-      ),
+      emptyList(),
       differences.sorted(),
       "a restored container differs from the frozen one in a way nobody has reviewed",
     )
@@ -311,8 +320,8 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * than in the builder. Every one was invisible while the AAR carrying them was off the scan
    * classpath.
    *
-   * Reaching the shelf is necessary and nowhere near sufficient — none of them can be exported yet;
-   * see the test below.
+   * Reaching the shelf is necessary and not sufficient — being offered says nothing about whether
+   * an export can write the component; see the test below, which measures that separately.
    */
   @Test
   fun `the Remote Compose components the catalog draws are all offered`() {
