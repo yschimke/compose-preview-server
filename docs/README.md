@@ -62,6 +62,9 @@ The product spec and its RFC come first; everything after them is one surface or
 - [design/UI_BUILDER_EXPORT_BUNDLE.md](design/UI_BUILDER_EXPORT_BUNDLE.md) — exporting a design as
   a bundle.
 - [design/UI_BUILDER_ASSETS.md](design/UI_BUILDER_ASSETS.md) — images in a design.
+- [design/UI_BUILDER_MATERIAL_SYMBOLS.md](design/UI_BUILDER_MATERIAL_SYMBOLS.md) — **RFC**: one row
+  per icon with the Material Symbols axes as properties, and why the icons leave the Wasm bundle
+  for the variable fonts.
 - [design/UI_BUILDER_LINKS.md](design/UI_BUILDER_LINKS.md) — links between designs.
 - [design/UI_BUILDER_COMMENTS.md](design/UI_BUILDER_COMMENTS.md) — comments on a design.
 - [design/UI_BUILDER_REVISION_HISTORY.md](design/UI_BUILDER_REVISION_HISTORY.md) — the history
