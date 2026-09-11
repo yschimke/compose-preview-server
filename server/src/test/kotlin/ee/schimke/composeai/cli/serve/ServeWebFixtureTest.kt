@@ -6834,6 +6834,11 @@ class ServeWebFixtureTest {
         viewerSource().contains("fitLiveCanvas();"),
       "each frame caches its dims and re-fits",
     )
+    val painter = viewerSource().substringAfter("paintedSeq = frame.seq;")
+    assertTrue(
+      painter.indexOf("liveW = bitmap.width;") in 0 until painter.indexOf("bitmap.close();"),
+      "the frame dimensions are cached before ImageBitmap.close() zeros them",
+    )
     assertTrue(
       viewerSource().contains("if (live && live.checked && !canvas.hidden) fitLiveCanvas();"),
       "a window resize re-fits the live canvas (not a plain box fill)",

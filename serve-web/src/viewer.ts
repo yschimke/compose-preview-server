@@ -1484,16 +1484,20 @@ function decodeAndPaint(frame: ServeFrame) {
                 return;
             }
             paintedSeq = frame.seq;
-            canvas.width = bitmap.width;
-            canvas.height = bitmap.height;
+            // ImageBitmap.close() releases the decoded storage and browsers then report zero for
+            // its dimensions. Cache them while the bitmap is live: reading width/height after the
+            // close made every changed-aspect live frame fall back to filling the baked snapshot
+            // box, which visually cropped/squashed wrap-content animations.
+            liveW = bitmap.width;
+            liveH = bitmap.height;
+            canvas.width = liveW;
+            canvas.height = liveH;
             canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
             bitmap.close();
             // A <canvas> stretches its buffer to fill its CSS box, so a daemon frame whose aspect
             // differs from the pinned snapshot box would squish. Cache the buffer dims and re-fit
             // the element (contain, centred) so the frame letterboxes within the snapshot
             // footprint instead of distorting to fill it.
-            liveW = bitmap.width;
-            liveH = bitmap.height;
             fitLiveCanvas();
         },
         function () {
