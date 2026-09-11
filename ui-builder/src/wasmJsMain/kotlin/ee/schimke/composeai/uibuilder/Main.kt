@@ -1266,6 +1266,22 @@ private fun LiveSessionApp(
       onTakeOffline = takeOffline,
       onSyncToServer = syncToServer,
       exportHost = exportHost,
+      onRequestDocumentPreview =
+        if (exportHost?.formats?.contains(EditorExportFormat.Rc) != true) null
+        else
+          { expected ->
+            if (authoritativeDocument?.toUiBuilderDocument() != expected) {
+              UiBuilderDocumentPreview.WaitingForSave
+            } else {
+              UiBuilderDocumentPreview.Ready(
+                revision = expected.revision,
+                documentBase64 =
+                  fetchBase64(
+                    "$UI_BUILDER_LIVE_EXPORT_PATH/${encodeUriComponent(expected.id)}/export.rc?revision=${expected.revision}"
+                  ),
+              )
+            }
+          },
       restoredReference = restoredReference,
       onPickReference = { references.pickFile() },
       // The third lane that renders on request, and the one easiest to miss: this one *keeps* what
@@ -1801,7 +1817,9 @@ private suspend fun fetchBase64(url: String): String = suspendCancellableCorouti
 
 @JsFun(
   """(url) => fetch(url).then((response) => {
-    if (!response.ok) throw new Error('HTTP ' + response.status);
+    if (!response.ok) return response.text().then((body) => {
+      throw new Error('HTTP ' + response.status + (body ? ': ' + body : ''));
+    });
     return response.arrayBuffer();
   }).then((buffer) => {
     const bytes = new Uint8Array(buffer);

@@ -41,5 +41,6 @@ Set `CHROME_PATH` to use an installed Chrome executable. The script waits for co
 asserts the selected child's dimensions, refuses browser errors, and records the screenshot and
 inspection data. Use `before` against the pre-fix build to assert the zero-height failure.
 
-This proves canvas layout fidelity for the sample. Live playback of exported JSON/binary documents
-is a separate integration step.
+This proves canvas layout fidelity for the sample. The subsequent
+[live document preview proof](../ui-builder-live-document-preview/README.md) covers exported document
+playback through the existing Preview button.

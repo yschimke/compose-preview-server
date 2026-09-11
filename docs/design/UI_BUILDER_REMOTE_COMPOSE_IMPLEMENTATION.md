@@ -47,9 +47,27 @@ pass; new-format-only tests skip explicitly without staged contracts. Golden reg
 no committed fixtures.
 
 This completes the delivery path for the current lowering subset, not Remote Compose completeness.
-Live JSON/binary preview integration, broader component recipes and modifier mappings, independent
+Unsaved/local document compilation, broader component recipes and modifier mappings, independent
 String state, nullable/computed values, callbacks, loop/reusable fidelity, and the operation coverage
 remaining in the review are still required.
+
+## Live document preview
+
+For saved designs whose host advertises RC export, the existing Preview button now loads the exact
+revision's compiled document into the existing CMP/WASM player. Design mode keeps the semantic
+authoring canvas. The host waits for the expected design to match its authoritative snapshot;
+revision/generation changes cancel and refresh the preview. Compilation and player-support errors
+are shown in place, without substituting the semantic renderer for a refused export.
+
+[Actual browser playback and MCP evidence](evidence/ui-builder-live-document-preview/README.md)
+shows clicks advancing through both cases and the fallback, then a live MCP edit updating the open
+Preview to revision 1. Browser network bytes and hosted MCP exports agree at both revisions. The
+full staged editor suite passes 943 tests and the WASM build passes. The six new tests cover
+playback/actions at densities 1 and 2, pending saves, wrong revisions, late responses, and the
+additional interactive pane. The released dependency floor compiles; its known empty-Box player
+limitation skips the two density variants of that fixture until the local player fix is selected,
+and the four lifecycle/routing tests pass. Staged validation can require playback with
+`VERIFY_REMOTE_DOCUMENT_PREVIEW=true`.
 
 ## Authoring state and actions
 

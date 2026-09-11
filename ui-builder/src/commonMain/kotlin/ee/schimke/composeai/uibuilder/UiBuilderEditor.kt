@@ -432,6 +432,8 @@ fun UiBuilderEditor(
    * Ignored for every design whose root is not a widget container.
    */
   onRequestNativeRender: (suspend (WearWidgetHostShape) -> UiBuilderNativeRender)? = null,
+  /** Compiles the saved design to a document for the existing player's interactive Preview mode. */
+  onRequestDocumentPreview: (suspend (UiBuilderDocument) -> UiBuilderDocumentPreview)? = null,
   /** A render already in hand, for the previews that draw this pane without a host. */
   initialNativeRender: UiBuilderNativeRender? = null,
   initialPreviewSurface: EditorPreviewSurface = EditorPreviewSurface.Wasm,
@@ -1170,90 +1172,106 @@ fun UiBuilderEditor(
     remember(state.document, devicePresets, state.variantAxes) {
       state.document.variantPanes(devicePresets, state.variantAxes)
     }
+  val livePreview: @Composable (Modifier) -> Unit = { modifier ->
+    if (onRequestDocumentPreview != null) {
+      RemoteDocumentPreviewPane(
+        document = state.document,
+        authoritativeGeneration = authoritativeGeneration,
+        request = onRequestDocumentPreview,
+        modifier = modifier,
+      )
+    } else {
+      LiveWasmPreviewPane(document = state.document, modifier = modifier)
+    }
+  }
   val canvas: @Composable (Modifier, Alignment) -> Unit = { modifier, alignment ->
-    PinnedDesignCanvas(
-      document = state.document,
-      variants = variantPanes,
-      selectedNodeId = state.selectedNodeId,
-      onNodeSelected = {
-        focusEditor()
-        dispatch(UiBuilderEditorEvent.SelectNode(it))
-      },
-      onCanvasMetrics = { width, height, scale -> onCanvasMetrics(width, height, scale) },
-      onCanvasBounds = {
-        canvasBounds = it
-        onCanvasBoundsChanged(it)
-      },
-      dropHovered = canvasDropHovered,
-      dropTarget = draggedTarget,
-      dragPreview =
-        if (draggedRemoteThumbnail == null)
-          draggedComponentId?.let { reducer.previewDocument(it, draggedComponentVariant) }
-        else null,
-      dragPreviewBitmap = draggedRemoteThumbnail,
-      dragPosition = catalogDragPosition,
-      showSelectionOverlay = showSelectionOverlay && !state.previewMode,
-      reference = state.reference,
-      onMarkDrawn = { kind, points ->
-        dispatch(UiBuilderEditorEvent.AddReferenceMark(kind, points))
-      },
-      onPieceMoved = { pieceId, dx, dy ->
-        dispatch(UiBuilderEditorEvent.MoveReferencePiece(pieceId, dx, dy))
-      },
-      collaborators = collaborators,
-      commentThreads = comments.pinned(state.reference.marks),
-      selectedThreadId = selectedThreadId,
-      onCommentThreadSelected = { threadId ->
-        selectThread(threadId)
-        dispatch(UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Comments))
-      },
-      onInspectionSnapshot = { snapshot ->
-        canvasInspection = snapshot
-        onInspectionSnapshot?.invoke(snapshot)
-      },
-      onInspectionInvalidated = onInspectionInvalidated,
-      selectionMenu = selectionMenu,
-      hoverEditor =
-        if (state.previewMode || state.selection.size != 1) null
-        else {
-          {
-            SelectionHoverEditor(
-              label = selectionLabel,
-              // The same rule the panel opens on: what the node carries, which is what the export
-              // would write. A hovering card is the last place to list what a component *could*
-              // have.
-              fields =
-                reducer.propertyFields(state).filter { field ->
-                  field.written ||
-                    field.required ||
-                    field.boundVariable != null ||
-                    field.error != null
-                },
-              modifierFields = reducer.modifierFields(state),
-              focusTarget = hoverFocusTarget,
-              onFocusHandled = { hoverFocusTarget = null },
-              onCommitProperty = { name, value ->
-                state.selectedNodeId?.let {
-                  dispatch(UiBuilderEditorEvent.CommitProperty(it, name, value))
-                }
-              },
-              onCommitModifier = { type, field, value ->
-                state.selectedNodeId?.let {
-                  dispatch(UiBuilderEditorEvent.SetModifierValue(it, type, field, value))
-                }
-              },
-              onTextInputFocusChanged = { textInputFocused = it },
-            )
-          }
+    if (state.previewMode && onRequestDocumentPreview != null) {
+      livePreview(modifier)
+    } else {
+      PinnedDesignCanvas(
+        document = state.document,
+        variants = variantPanes,
+        selectedNodeId = state.selectedNodeId,
+        onNodeSelected = {
+          focusEditor()
+          dispatch(UiBuilderEditorEvent.SelectNode(it))
         },
-      zoom = canvasZoom,
-      onZoomChanged = {
-        focusEditor()
-        canvasZoom = it
-      },
-      contentAlignment = alignment,
-      modifier = modifier,
-    )
+        onCanvasMetrics = { width, height, scale -> onCanvasMetrics(width, height, scale) },
+        onCanvasBounds = {
+          canvasBounds = it
+          onCanvasBoundsChanged(it)
+        },
+        dropHovered = canvasDropHovered,
+        dropTarget = draggedTarget,
+        dragPreview =
+          if (draggedRemoteThumbnail == null)
+            draggedComponentId?.let { reducer.previewDocument(it, draggedComponentVariant) }
+          else null,
+        dragPreviewBitmap = draggedRemoteThumbnail,
+        dragPosition = catalogDragPosition,
+        showSelectionOverlay = showSelectionOverlay && !state.previewMode,
+        reference = state.reference,
+        onMarkDrawn = { kind, points ->
+          dispatch(UiBuilderEditorEvent.AddReferenceMark(kind, points))
+        },
+        onPieceMoved = { pieceId, dx, dy ->
+          dispatch(UiBuilderEditorEvent.MoveReferencePiece(pieceId, dx, dy))
+        },
+        collaborators = collaborators,
+        commentThreads = comments.pinned(state.reference.marks),
+        selectedThreadId = selectedThreadId,
+        onCommentThreadSelected = { threadId ->
+          selectThread(threadId)
+          dispatch(UiBuilderEditorEvent.ShowInspector(EditorInspectorMode.Comments))
+        },
+        onInspectionSnapshot = { snapshot ->
+          canvasInspection = snapshot
+          onInspectionSnapshot?.invoke(snapshot)
+        },
+        onInspectionInvalidated = onInspectionInvalidated,
+        selectionMenu = selectionMenu,
+        hoverEditor =
+          if (state.previewMode || state.selection.size != 1) null
+          else {
+            {
+              SelectionHoverEditor(
+                label = selectionLabel,
+                // The same rule the panel opens on: what the node carries, which is what the export
+                // would write. A hovering card is the last place to list what a component *could*
+                // have.
+                fields =
+                  reducer.propertyFields(state).filter { field ->
+                    field.written ||
+                      field.required ||
+                      field.boundVariable != null ||
+                      field.error != null
+                  },
+                modifierFields = reducer.modifierFields(state),
+                focusTarget = hoverFocusTarget,
+                onFocusHandled = { hoverFocusTarget = null },
+                onCommitProperty = { name, value ->
+                  state.selectedNodeId?.let {
+                    dispatch(UiBuilderEditorEvent.CommitProperty(it, name, value))
+                  }
+                },
+                onCommitModifier = { type, field, value ->
+                  state.selectedNodeId?.let {
+                    dispatch(UiBuilderEditorEvent.SetModifierValue(it, type, field, value))
+                  }
+                },
+                onTextInputFocusChanged = { textInputFocused = it },
+              )
+            }
+          },
+        zoom = canvasZoom,
+        onZoomChanged = {
+          focusEditor()
+          canvasZoom = it
+        },
+        contentAlignment = alignment,
+        modifier = modifier,
+      )
+    }
   }
   // Cached against the document, because it is not cheap and depends on nothing else: it walks
   // every node and every property against the catalog, traverses the graph and looks for cycles.
@@ -1765,9 +1783,8 @@ fun UiBuilderEditor(
                     )
                   } else {
                     Row(Modifier.fillMaxWidth().weight(1f)) {
-                      // The visual editor never leaves the workspace. Additional positions are
-                      // previews of the same document, not alternative renderers that replace the
-                      // authoring coordinate space.
+                      // Design mode owns the authoring coordinates; Preview plays the document in
+                      // this same position. Additional panes compare the same saved design.
                       canvas(
                         Modifier.weight(1f)
                           .fillMaxHeight()
@@ -1788,10 +1805,7 @@ fun UiBuilderEditor(
                         )
                       }
                       if (state.previewSurface == EditorPreviewSurface.Both) {
-                        LiveWasmPreviewPane(
-                          document = state.document,
-                          modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
+                        livePreview(Modifier.weight(1f).fillMaxHeight())
                       }
                     }
                   }
