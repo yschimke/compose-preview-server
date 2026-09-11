@@ -521,9 +521,9 @@ internal object PublishedUiBuilderCatalog {
         builtin.slots.map { (name, slot) ->
           SlotCapabilityV1(
             name = name,
-            // `required` is the only cardinality the schema lets a builtin state, and it means at
-            // least one child. Unbounded above, as it was.
-            cardinality = SlotCardinalityV1(min = if (slot.required) 1 else 0, max = null),
+            // `required` means at least one child; `max` bounds it above, and null there is the
+            // unbounded slot every builtin had before it could say otherwise.
+            cardinality = SlotCardinalityV1(min = if (slot.required) 1 else 0, max = slot.max),
             ordered = true,
             acceptedRoles = slot.acceptedRoles,
             acceptedTraits = slot.acceptedTraits,
@@ -728,6 +728,20 @@ internal object PublishedUiBuilderCatalog {
     val acceptedRoles: List<String> = emptyList(),
     val acceptedTraits: List<String> = emptyList(),
     val required: Boolean = false,
+    /**
+     * The most children this slot admits, or null for unbounded.
+     *
+     * The last piece of a frozen widget container a builtin could not say. `remote-m3`'s two
+     * `WidgetContainer` components are `max: 1` on their `content` slot — a widget hosts one thing
+     * — and with no way to write it they composed unbounded, so the published shelf offered a
+     * container a design could put three children into and the launcher would draw one.
+     *
+     * They are the reason builtins exist at all: `WidgetContainerPreviews.kt` draws them through
+     * `CapturingWearWidgetPreview`, a preview harness, so there is no library composable and no
+     * record entry is possible. Everything else they declare — `screen-root`, their traits, the
+     * `background` slot — a builtin already carried.
+     */
+    val max: Int? = null,
     val role: String? = null,
   )
 

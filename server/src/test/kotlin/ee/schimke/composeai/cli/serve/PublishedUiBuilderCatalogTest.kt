@@ -223,6 +223,9 @@ class PublishedUiBuilderCatalogTest {
    *   with it;
    * - `traits` was hardcoded to the empty list, so no other component's slot could accept one.
    *
+   * `max` joined them later, for the same reason and from the same case: a `remote-m3` widget
+   * container hosts exactly one child and a builtin had no way to write the bound.
+   *
    * Each is asserted here against the wire names, so the fixture is a document a catalog could
    * actually publish rather than one written to match the reader.
    */
@@ -240,6 +243,7 @@ class PublishedUiBuilderCatalogTest {
             "slots": {
               "content": {
                 "required": true,
+                "max": 1,
                 "acceptedRoles": ["Container", "Leaf"],
                 "acceptedTraits": ["AnyContent"],
                 "role": "overlay"
@@ -288,6 +292,14 @@ class PublishedUiBuilderCatalogTest {
       content.cardinality.min,
       "a required slot that accepts zero children is not required",
     )
+    // The other end, and the last thing a frozen widget container needed a builtin to say. Without
+    // it `remote-m3`'s two `WidgetContainer` components composed with an unbounded `content` slot,
+    // so the shelf offered a widget host a design could put three children into.
+    assertEquals(
+      1,
+      content.cardinality.max,
+      "a slot declaring `max` composed unbounded, so the shelf admitted children the host cannot draw",
+    )
     assertEquals(listOf("AnyContent"), content.acceptedTraits)
     assertEquals(listOf("Container", "Leaf"), content.acceptedRoles)
     assertEquals(
@@ -295,6 +307,9 @@ class PublishedUiBuilderCatalogTest {
       host.slots.single { it.name == "background" }.acceptedTraits,
     )
     assertEquals(0, host.slots.single { it.name == "background" }.cardinality.min)
+    // And a slot that says nothing is still unbounded: `max` is an opt-in bound, not a default of
+    // one that every existing builtin would silently acquire.
+    assertEquals(null, host.slots.single { it.name == "background" }.cardinality.max)
   }
 
   @Test
