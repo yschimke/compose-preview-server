@@ -463,6 +463,19 @@ confined to the clicked cell. This is an isolated generator prototype, not yet a
 route. Proceed with the proven source form in the shared generator and Remote emitter; retain the
 catalog-derived type, nested scope and callback/slot requirements rather than shipping the prototype.
 
+The shared generator now implements `ScreenRepetition` and `ScreenValue.RowRead` in
+[generator commit 39d3f93](https://github.com/yschimke/compose-ai-tools/commit/39d3f930d2841f92796ed879683869ee96a8dfcd)
+on [PR #5383](https://github.com/yschimke/compose-ai-tools/pull/5383). It emits typed row classes and
+actual `forEach` loops, checks row schemas and field types, preserves nested initializer/template
+scopes, validates empty templates and supports row values captured by checked assignment callbacks.
+Its functional test discovers Material 3, compiles the production generator's exact output and
+clicks all repeated buttons at densities 1 and 2. All 52 model and 574 discovery tests pass, as does
+WASM compilation. Both generator publications are staged locally; the existing builder/server
+compile and all 65 shared-export tests pass against them. No release is needed.
+
+This provides the shared primitive. The builder's semantic-loop projection, reusable-function
+lowering, Remote Kotlin integration and browser/MCP source parity remain required next steps.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
