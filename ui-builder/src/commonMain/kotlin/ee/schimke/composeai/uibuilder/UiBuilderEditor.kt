@@ -6686,12 +6686,12 @@ private fun InspectorBody(
           }
         }
       }
+      if (
+        node.componentId == STATE_SELECTION_CONTAINER && fields.any { it.name == SHOW_BY_STATE }
+      ) {
+        item { StateSelectionInspector(state.document, node, onTextInputFocusChanged, dispatch) }
+      }
       if (node.componentId in COMPOSE_EMITTED_CLICK_COMPONENTS || node.eventBindings.isNotEmpty()) {
-        if (
-          node.componentId == STATE_SELECTION_CONTAINER && fields.any { it.name == SHOW_BY_STATE }
-        ) {
-          item { StateSelectionInspector(state.document, node, onTextInputFocusChanged, dispatch) }
-        }
         item { EventActionsInspector(state.document, node, onTextInputFocusChanged, dispatch) }
       }
       if (node.modifiers.isNotEmpty()) {

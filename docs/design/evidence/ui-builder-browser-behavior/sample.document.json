@@ -1,0 +1,450 @@
+{
+  "schema": "compose-ui-builder-document/v1-candidate",
+  "id": "state-layout-shot",
+  "title": "Lunch delivery",
+  "revision": 0,
+  "catalogPin": {
+    "systemId": "m3-catalog",
+    "catalogRevision": "candidate",
+    "capabilityDigest": "candidate",
+    "nativeRuntimeId": "candidate"
+  },
+  "environment": {
+    "widthDp": 400,
+    "heightDp": 660,
+    "density": 1,
+    "theme": "light",
+    "dynamicColor": null,
+    "locale": "en-US",
+    "fontScale": 1,
+    "layoutDirection": "ltr",
+    "windowPosture": "flat",
+    "browserZoomPercent": null,
+    "fixedTime": null,
+    "animations": "settled",
+    "networkAccess": false,
+    "background": null,
+    "typeface": null,
+    "exportDevices": []
+  },
+  "stateVariables": {
+    "deliveryStage": {
+      "type": "value",
+      "valueType": "int",
+      "initialValue": 10,
+      "persistence": "preview"
+    }
+  },
+  "roots": [
+    "screen"
+  ],
+  "nodes": {
+    "screen": {
+      "id": "screen",
+      "componentId": "m3/surface",
+      "properties": {
+        "containerColor": {
+          "type": "color",
+          "value": "#FFFAF8FF"
+        },
+        "contentColor": {
+          "type": "color",
+          "value": "#FF1D1B20"
+        }
+      },
+      "modifiers": [
+        {
+          "type": "fillMaxSize"
+        },
+        {
+          "type": "background",
+          "color": {
+            "type": "color",
+            "value": "#FFFAF8FF"
+          }
+        }
+      ],
+      "slots": {
+        "content": [
+          "content"
+        ]
+      },
+      "eventBindings": {}
+    },
+    "content": {
+      "id": "content",
+      "componentId": "layout/column",
+      "properties": {
+        "verticalSpacingDp": {
+          "type": "int",
+          "value": 20
+        }
+      },
+      "modifiers": [
+        {
+          "type": "fillMaxWidth"
+        },
+        {
+          "type": "padding",
+          "startDp": 28,
+          "topDp": 28,
+          "endDp": 28,
+          "bottomDp": 28
+        }
+      ],
+      "slots": {
+        "children": [
+          "eyebrow",
+          "title",
+          "description",
+          "delivery-status",
+          "next",
+          "footnote"
+        ]
+      },
+      "eventBindings": {}
+    },
+    "eyebrow": {
+      "id": "eyebrow",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "YOUR ORDER"
+        },
+        "style": {
+          "type": "enum",
+          "value": "labelLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "title": {
+      "id": "title",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Something good is on its way."
+        },
+        "style": {
+          "type": "enum",
+          "value": "headlineLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "description": {
+      "id": "description",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Follow your delivery, from our kitchen to your door."
+        },
+        "style": {
+          "type": "enum",
+          "value": "bodyLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "delivery-status": {
+      "id": "delivery-status",
+      "componentId": "layout/box",
+      "properties": {
+        "showByState": {
+          "type": "object",
+          "fields": {
+            "selector": {
+              "type": "state",
+              "variable": "deliveryStage"
+            },
+            "cases": {
+              "type": "object",
+              "fields": {
+                "Preparing": {
+                  "type": "int",
+                  "value": 10
+                },
+                "On-the-way": {
+                  "type": "int",
+                  "value": 20
+                }
+              }
+            },
+            "fallback": {
+              "type": "string",
+              "value": "Delivered"
+            }
+          }
+        }
+      },
+      "modifiers": [
+        {
+          "type": "fillMaxWidth"
+        },
+        {
+          "type": "padding",
+          "startDp": 20,
+          "topDp": 20,
+          "endDp": 20,
+          "bottomDp": 20
+        },
+        {
+          "type": "background",
+          "color": {
+            "type": "color",
+            "value": "#FFECE6F4"
+          }
+        }
+      ],
+      "slots": {
+        "children": [
+          "Preparing",
+          "On-the-way",
+          "Delivered"
+        ]
+      },
+      "eventBindings": {}
+    },
+    "Preparing": {
+      "id": "Preparing",
+      "componentId": "layout/column",
+      "properties": {
+        "verticalSpacingDp": {
+          "type": "int",
+          "value": 12
+        }
+      },
+      "modifiers": [],
+      "slots": {
+        "children": [
+          "preparing-title",
+          "preparing-body"
+        ]
+      },
+      "eventBindings": {}
+    },
+    "preparing-title": {
+      "id": "preparing-title",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Made fresh for you"
+        },
+        "style": {
+          "type": "enum",
+          "value": "titleLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "preparing-body": {
+      "id": "preparing-body",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Your order is being prepared. We will let you know when it leaves."
+        },
+        "style": {
+          "type": "enum",
+          "value": "bodyLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "On-the-way": {
+      "id": "On-the-way",
+      "componentId": "layout/column",
+      "properties": {
+        "verticalSpacingDp": {
+          "type": "int",
+          "value": 12
+        }
+      },
+      "modifiers": [],
+      "slots": {
+        "children": [
+          "onway-title",
+          "onway-body"
+        ]
+      },
+      "eventBindings": {}
+    },
+    "onway-title": {
+      "id": "onway-title",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Your delivery is on its way"
+        },
+        "style": {
+          "type": "enum",
+          "value": "titleLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "onway-body": {
+      "id": "onway-body",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Alex has your order. Estimated arrival: 12:40."
+        },
+        "style": {
+          "type": "enum",
+          "value": "bodyLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "Delivered": {
+      "id": "Delivered",
+      "componentId": "layout/column",
+      "properties": {},
+      "modifiers": [],
+      "slots": {
+        "children": [
+          "delivered-title"
+        ]
+      },
+      "eventBindings": {}
+    },
+    "delivered-title": {
+      "id": "delivered-title",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Enjoy your lunch!"
+        },
+        "style": {
+          "type": "enum",
+          "value": "titleLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "next": {
+      "id": "next",
+      "componentId": "m3/button",
+      "properties": {},
+      "modifiers": [],
+      "slots": {
+        "content": [
+          "next-label"
+        ]
+      },
+      "eventBindings": {
+        "click": [
+          {
+            "type": "set",
+            "variable": "deliveryStage",
+            "value": 20
+          }
+        ]
+      }
+    },
+    "next-label": {
+      "id": "next-label",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Track delivery"
+        },
+        "style": {
+          "type": "enum",
+          "value": "labelLarge"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FFFFFFFF"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    },
+    "footnote": {
+      "id": "footnote",
+      "componentId": "m3/text",
+      "properties": {
+        "text": {
+          "type": "string",
+          "value": "Order #1042  \u00b7  2 items"
+        },
+        "style": {
+          "type": "enum",
+          "value": "bodyMedium"
+        },
+        "color": {
+          "type": "color",
+          "value": "#FF29252F"
+        }
+      },
+      "modifiers": [],
+      "slots": {},
+      "eventBindings": {}
+    }
+  },
+  "assets": {},
+  "tokenBindings": {},
+  "createdAtEpochMillis": null,
+  "updatedAtEpochMillis": null,
+  "components": {}
+}

@@ -56,6 +56,35 @@ class StateSelectionInspectorTest {
   }
 
   @Test
+  fun `the full editor offers state selection on a box with no click action`() =
+    runDesktopComposeUiTest(width = 1600, height = 1050) {
+      var latest: UiBuilderEditorState? = null
+      setContent {
+        MaterialTheme {
+          UiBuilderEditor(
+            document(),
+            catalog,
+            onStateChanged = { latest = it },
+            initialSelectedNodeId = "choice",
+            initialInspectorOpen = true,
+          )
+        }
+      }
+      onNodeWithText("Show by state").assertIsDisplayed().performClick()
+      onNodeWithText("Choose state").performClick()
+      onNodeWithText("page").performClick()
+      onNodeWithContentDescription("Case value First").performTextInput("10")
+      onNodeWithContentDescription("Case value Second").performTextInput("20")
+      onNodeWithContentDescription("Fallback Other").performClick()
+      onNodeWithText("Apply cases").performClick()
+      runOnIdle {
+        val node = assertNotNull(latest).document.nodes.getValue("choice")
+        assertNotNull(node.stateSelection())
+        assertTrue(node.eventBindings.isEmpty())
+      }
+    }
+
+  @Test
   fun `selection is undoable and duplication remaps case identities`() {
     var state = reducer.initial(document())
     val selection =
