@@ -303,6 +303,34 @@ public class PersistentUiBuilderService(
   private val iconOutlines: IconOutlineResolver? = null,
 ) :
   UiBuilderServicePort, UiBuilderServiceDiagnosticsSource, UiBuilderAdminPort, UiBuilderAssetPort {
+
+  /**
+   * The seven-argument constructor this class published before it learned about icon outlines.
+   *
+   * A Kotlin default argument does not keep the old JVM descriptor: adding the eighth parameter
+   * replaces the seven-argument constructor with an eight-argument one plus a differently shaped
+   * synthetic, so an already-compiled consumer calling the old one gets `NoSuchMethodError` after
+   * upgrading. Spelled out rather than left to the default so the published surface still has it.
+   */
+  public constructor(
+    designStore: UiBuilderDesignStateStore,
+    catalogs: UiBuilderCatalogExecutor,
+    exporter: UiBuilderExportExecutor,
+    subscriberFailureHandler: UiBuilderSubscriberFailureHandler,
+    clock: Clock,
+    limits: UiBuilderServiceLimits,
+    assets: UiBuilderAssetStore?,
+  ) : this(
+    designStore,
+    catalogs,
+    exporter,
+    subscriberFailureHandler,
+    clock,
+    limits,
+    assets,
+    iconOutlines = null,
+  )
+
   /**
    * The single-file storage this service was built on, behind the per-design port.
    *
@@ -972,10 +1000,14 @@ public class PersistentUiBuilderService(
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, "design node limit exceeded")
     }
     val now = clock.millis()
-    val document = requested.copy(createdAtEpochMillis = now, updatedAtEpochMillis = now)
-    validateEnvironment(document.environment)?.let {
+    validateEnvironment(requested.environment)?.let {
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, it.message)
     }
+    // Before the quota check, because the outlines are part of the document that gets stored:
+    // adding them afterwards can carry a design past `maximumEmbeddedAssetBytes` and have it
+    // quarantined on the next start for exceeding a limit it was accepted under.
+    val document =
+      withIconOutlines(requested.copy(createdAtEpochMillis = now, updatedAtEpochMillis = now))
     documentQuotaIssue(document, countRejection = true)?.let {
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, it)
     }
@@ -991,10 +1023,10 @@ public class PersistentUiBuilderService(
 
     val design =
       PersistedDesignV1(
-        // Outlines are filled here too, not only on the write path: a design can be created with
-        // its icons already in it — an MCP `CreateDesign`, a template, a pack — and then exported
-        // or natively previewed before anybody opens it in an editor.
-        document = withIconOutlines(document),
+        // The same `document` the snapshot below stores: a design can be created with its icons
+        // already in it — an MCP `CreateDesign`, a template, a pack — and an immediate export or
+        // `GetSnapshot(revision = 0)` must not read a retained snapshot without them.
+        document = document,
         lastSequence = 0,
         // Owned by the human when the caller is acting for one. An agent's grant is a
         // short-lived delegation of *their* authority, so a design it creates has to outlive the
@@ -1237,13 +1269,10 @@ public class PersistentUiBuilderService(
   private fun withIconOutlines(document: DesignDocumentV1): DesignDocumentV1 {
     val resolver = iconOutlines ?: return document
     val wanted = IconOutlineAssets.drawnBy(document.nodes.values)
-    if (wanted.isEmpty() && document.assets.none(::isOutline)) return document
-    val assets = IconOutlineAssets.refreshed(document.assets, wanted, resolver::pathData)
-    return if (assets == document.assets) document else document.copy(assets = assets)
+    if (wanted.isEmpty()) return document
+    val assets = IconOutlineAssets.withOutlines(document.assets, wanted, resolver::pathData)
+    return if (assets === document.assets) document else document.copy(assets = assets)
   }
-
-  private fun isOutline(entry: Map.Entry<String, *>): Boolean =
-    IconOutlineAssets.isOutlineKey(entry.key)
 
   private fun apply(
     actor: AuthenticatedUiBuilderActor,
@@ -1323,22 +1352,21 @@ public class PersistentUiBuilderService(
         )
       }
     }
-    val reduced = reduction.design.let(::withIconOutlines)
     val outcomes =
-      (reduced.operationOutcomes +
+      (reduction.design.operationOutcomes +
           (submission.operationId to OperationOutcomeRecordV1(fingerprint, reduction.outcome)))
         .entries
         .toList()
         .takeLast(limits.retainedOperationOutcomes)
         .associate { it.toPair() }
     val recorded =
-      reduced.copy(
+      reduction.design.copy(
         operationOutcomes = outcomes,
         // Two bounds, and the byte one is the load-bearing half: keeping `acceptedOperations` a
         // subset of the retained outcomes preserves the invariant those two have always had, and
         // the budget is what stops one design's undo records from being most of the store.
         acceptedOperations =
-          reduced.acceptedOperations
+          reduction.design.acceptedOperations
             .filterKeys { it in outcomes.keys }
             .retainNewestWithinBytes(
               limits.retainedUndoBytes,
@@ -1895,7 +1923,15 @@ public class PersistentUiBuilderService(
     val revision = design.document.revision + 1
     val sequence = design.lastSequence + 1
     val now = clock.millis()
-    val document = working.document.copy(revision = revision, updatedAtEpochMillis = now)
+    // Outlines are resolved HERE, on the accepted candidate, and not after `reduce` returns.
+    // Everything below reads this value — the canonical bytes, the accepted hash, the retained
+    // revision snapshot — so filling the registry afterwards would hand a client a hash and a
+    // delta for a document the host does not have, and would leave `OpenDesign` and a
+    // revision-pinned export disagreeing about what the design contains. A rejected reduction
+    // never reaches this function at all, so it can no longer change a document without
+    // advancing its revision.
+    val document =
+      withIconOutlines(working.document).copy(revision = revision, updatedAtEpochMillis = now)
     val canonical = documentCanonicalBytes(document)
     val retained = limits.retainedRevisionsFor(canonical.size)
     val outcome =
