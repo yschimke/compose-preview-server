@@ -748,6 +748,8 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       // The offline screen model and generator, reached through `:ui-builder-export`. The server
       // does not call it directly; it arrives because the export module is built on it, which is
       // the point — the generator that writes the Kotlin is a published artefact, not a copy.
+      "ee.schimke.composeai:screen-document",
+      "ee.schimke.composeai:screen-document-jvm",
       "ee.schimke.composeai:screen-model",
       "ee.schimke.composeai:screen-model-jvm",
       "ee.schimke.composeai:ui-builder-protocol",
