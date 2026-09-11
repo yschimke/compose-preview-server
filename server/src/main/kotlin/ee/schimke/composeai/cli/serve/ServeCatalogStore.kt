@@ -1045,6 +1045,31 @@ class ServeCatalogStore(
                 put(id, parallel)
               }
             },
+          // The same two lists, same order and same reason as `parallelByComponentId` above — a
+          // wholly deferred component carries its links on the deferred record and nowhere else.
+          // Normalised once here rather than per request: `declaredFor` drops blanks, self-links
+          // and duplicates, which are producer-side slips that do not change between reads.
+          relatedByComponentId = buildMap {
+              catalog.deferred.forEach { deferred ->
+                val id = deferred.componentId?.takeIf { it.isNotBlank() } ?: return@forEach
+                if (deferred.related.isEmpty()) return@forEach
+                putIfAbsent(id, deferred.related)
+              }
+              catalog.components.forEach { component ->
+                val id = component.componentId?.takeIf { it.isNotBlank() } ?: return@forEach
+                if (component.related.isEmpty()) return@forEach
+                put(id, component.related)
+              }
+            }
+              .mapValues { (_, entries) ->
+                ServeRelatedCatalogs.declaredFor(
+                  entries.map {
+                    ServeRelatedCatalogs.Declared(it.system, it.componentId, it.label)
+                  },
+                  selfSystem = system,
+                )
+              }
+              .filterValues { it.isNotEmpty() },
           degradations = degradations,
           liveOnly = liveOnly,
           // Kept in step with [scheduleRcCompareFetch]'s own guard through the shared helper: a
@@ -3180,6 +3205,8 @@ class ServeCatalogStore(
      * `compareWith` precisely to have it.
      */
     val parallel: String? = null,
+    /** As [Component.related]; a wholly deferred component carries its links here instead. */
+    val related: List<Related> = emptyList(),
     /** Why it was deferred (`entry` / `variant` / `mode`) — carried for diagnostics. */
     val reason: String? = null,
     /**
@@ -3242,6 +3269,22 @@ class ServeCatalogStore(
   @Serializable
   private data class Source(val repo: String = "", val ref: String = "", val module: String = "")
 
+  /**
+   * One entry of `components[].related` — another catalog that publishes this same component.
+   *
+   * Distinct from [Component.parallel], and see [ServeRelatedCatalogs] for why the two cannot be
+   * one field: `compareWith` + `parallel` is a single symmetric parity pairing, while this is a
+   * list of directed "is about" links, of which a component can have any number. `componentId`
+   * absent means the other catalog spells it the same way; `label` absent means the catalog
+   * authored no wording.
+   */
+  @Serializable
+  private data class Related(
+    val system: String = "",
+    val componentId: String? = null,
+    val label: String? = null,
+  )
+
   @Serializable
   private data class Component(
     val componentId: String? = null,
@@ -3253,6 +3296,14 @@ class ServeCatalogStore(
      * and for every catalog that declares no pairing at all.
      */
     val parallel: String? = null,
+    /**
+     * The other catalogs that publish this same component (`@CatalogComponent(related = …)`, or the
+     * spec's `related` entries, stamped by compose-ai-tools' `apply-related.mjs`). Empty for a
+     * catalog that declares none and for every catalog published before the field existed, which is
+     * why it is additive rather than nullable. See [ServeRelatedCatalogs] for how this differs from
+     * [parallel] and why it has to be a list.
+     */
+    val related: List<Related> = emptyList(),
     /**
      * The one-line description the catalog authored for this component (`@CatalogComponent(caption
      * = …)`, or the spec entry that overrides it) — what the component is FOR, in the design

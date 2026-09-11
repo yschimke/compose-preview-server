@@ -4132,6 +4132,64 @@ class ServeCatalogStoreTest {
   }
 
   @Test
+  fun `related links are read off both the component and the deferred record`() {
+    // The reading half of yschimke/compose-ai-tools#5398. `related` is NOT a second `parallel`: it
+    // is a LIST, because a catalog has one rendition to be compared against but any number of
+    // catalogs that are about it — here `compareWith` is already spent on the Remote rendition
+    // while the samples catalog still has to be reachable. Read from the same two lists as
+    // `parallelByComponentId`, and for the same reason: a wholly deferred component carries its
+    // links on the deferred record and nowhere else.
+    val json =
+      """
+      {"schema":"design-parity-catalog/v1","system":"wear-m3-catalog",
+       "compareWith":{"system":"remote-m3"},
+       "liveBundle":{"path":"bundle/","file":"wear-m3-bundle.png"},
+       "components":[{"componentId":"Button/Filled","section":"Components","group":"Buttons",
+         "related":[{"system":"wear-m3-samples","componentId":"Button/ButtonSample","label":"Sample"},
+                    {"system":"wear-m3-samples","componentId":"Button/ButtonSample"},
+                    {"system":"wear-m3-catalog"},
+                    {"system":"   "}],
+         "images":[
+           {"path":"images/button-filled/ideal__default__dark.png","state":"default","theme":"dark","previewId":"FilledButton_Dark"}]}],
+       "deferred":[
+         {"componentId":"Progress/Circular","section":"Components","group":"Progress","reason":"entry",
+          "related":[{"system":"wear-m3-samples"}],
+          "path":"images/progress-circular/ideal__default__light.png","state":"default","theme":"light",
+          "preview":"CircularProgress","previewId":"CircularProgress_Light",
+          "previewIds":["CircularProgress_Light"]}]}
+      """
+        .trimIndent()
+    var fronted: ServeHost? = null
+    val store =
+      ServeCatalogStore(
+        root = tempRoot(),
+        register = { n, h -> registered[n] = h },
+        trust = { trustedBranches },
+        fetch = deferredFetcher(json),
+        buildTrustedBundle = { _, _, _, _, bakedFallback, _ ->
+          fronted = bakedFallback()
+          true
+        },
+      )
+    assertTrue(store.load("wear-m3-catalog") is ServeCatalogStore.Result.Ok)
+
+    val host = fronted as ServeBundleHost
+    // `compareWith` is untouched by any of this — the two lanes coexist, which is the whole point.
+    assertEquals("remote-m3", host.compareWithSystem)
+
+    assertEquals(
+      listOf(ServeRelatedCatalogs.Declared("wear-m3-samples", "Button/ButtonSample", "Sample")),
+      host.relatedByComponentId["Button/Filled"],
+      "the duplicate, the self-link and the blank system are all dropped at load",
+    )
+    assertEquals(
+      listOf(ServeRelatedCatalogs.Declared("wear-m3-samples")),
+      host.relatedByComponentId["Progress/Circular"],
+      "a wholly deferred component's links are read off its deferred record",
+    )
+  }
+
+  @Test
   fun `a component's own pairing outranks one inherited by its deferred variant record`() {
     // A component that IS in `components[]` states its own pairing; a deferred VARIANT record
     // sharing its id only inherits one. Components win, the same way the caption lookup resolves

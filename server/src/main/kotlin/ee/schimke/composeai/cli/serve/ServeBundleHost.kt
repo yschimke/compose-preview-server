@@ -131,6 +131,24 @@ class ServeBundleHost(
    */
   val parallelByComponentId: Map<String, String> = emptyMap(),
   /**
+   * `componentId` → the OTHER catalogs that publish this same component, from each published
+   * component's `related`, normalised by [ServeRelatedCatalogs.declaredFor] at load.
+   *
+   * Not a second [parallelByComponentId]. That is one counterpart in the one [compareWithSystem]
+   * sibling and answers a parity question; this is any number of directed links to catalogs that
+   * are ABOUT this component — its AndroidX sample call sites, say — which is why it had to be a
+   * list and could not overload `compareWith`, already spent here on the Remote Compose rendition
+   * (yschimke/compose-ai-tools#5398).
+   *
+   * Declared, not resolved: an entry naming a system this box does not serve is still here.
+   * [ServeRelatedCatalogs.resolve] is what turns these into links against what is registered right
+   * now, because that changes between requests and this map must not.
+   *
+   * Empty for a catalog that declares none, and for every catalog published before the field
+   * reached the manifest.
+   */
+  val relatedByComponentId: Map<String, List<ServeRelatedCatalogs.Declared>> = emptyMap(),
+  /**
    * Why this session is snapshot-only, when it is — populated by [ServeCatalogStore] for the baked
    * host it terminally registers (e.g. a catalog with no `liveBundle`), and left empty for a plain
    * uploaded bundle or for the baked host that merely *fronts* a live daemon (that session isn't
