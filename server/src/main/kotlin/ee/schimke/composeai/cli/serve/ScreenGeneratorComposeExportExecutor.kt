@@ -426,11 +426,8 @@ internal class ScreenGeneratorComposeExportExecutor(
     // Added rather than replaced, which is where this differs from
     // `ComponentRecordPacks.aliasedRecord`: a pack component is only ever named by its pack id,
     // while a catalog's own component may still be named by a design pinned before the swap. Both
-    // ids resolve to one record entry.
-    // Two aliasings, for two different reasons. `callableAliases` lets the generator resolve what
-    // `ScreenDocumentProjection`'s variant table substituted; `aliasPublished` lets it resolve the
-    // ids the published file gave this catalog's components.
-    val aliased = aliasPublished(record.callableAliases(), publishedComponents(catalogSystemId))
+    // ids resolve to one record entry. See [resolvableRecord].
+    val aliased = resolvableRecord(record, catalogSystemId)
     val merged =
       if (packRecords.isEmpty()) aliased
       else aliased.copy(components = aliased.components + packRecords.flatMap { it.components })
@@ -599,6 +596,48 @@ internal class ScreenGeneratorComposeExportExecutor(
     }
     return RecordFreeComponents.Found(published + packRecords.byComponentId())
   }
+
+  /**
+   * The record a [catalogSystemId] design is generated from, ready for `ScreenGenerator` to resolve
+   * a node against — or null when this host cannot generate for that catalog at all.
+   *
+   * Extracted so the **browser** can be handed the same bytes. `ScreenExportGate` — the editor's
+   * code pane and problems panel — runs the same projection and the same generator, and until it
+   * could read this it judged every catalog against the one record embedded at build time. For a
+   * published catalog that is the wrong record: the shelf serves components this binary's record
+   * has never heard of, so the pane reported "no component `m3/…` in this catalog" for what the
+   * export wrote perfectly well. Two exporters that can disagree will, and the fix is one record
+   * rather than a second reading of it. Served by
+   * [installUiBuilderCatalogRecordRoutes][ee.schimke.composeai.cli.serve.installUiBuilderCatalogRecordRoutes].
+   *
+   * Null for the same three cases [generate] refuses on — no record configured, an unusable one, a
+   * schema this build does not generate from — collapsed here because a caller asking for a record
+   * gets no answer in all three, and the sentence that tells an operator which one it was belongs
+   * with the export that refused rather than with a fetch the editor makes in the background.
+   *
+   * The packs a document draws on are NOT in it. They are per-document ([packRecordsFor]), and the
+   * editor projects its own from the catalog's pack capabilities (`packComponentRecords`), which is
+   * the same projection the server composes those capabilities from.
+   */
+  fun exportRecord(catalogSystemId: String): ComponentRecordFile? {
+    val record = (components(catalogSystemId) as? ComponentRecordSource.Lookup.Found)?.record
+    if (record == null || !generatesFrom(record)) return null
+    return resolvableRecord(record, catalogSystemId)
+  }
+
+  /**
+   * [record] under every id a node may name it by: the callable the variant table substitutes, and
+   * the ids the published file gave this catalog's components.
+   *
+   * Two aliasings, for two different reasons. `callableAliases` lets the generator resolve what
+   * `ScreenDocumentProjection`'s variant table substituted; [aliasPublished] lets it resolve the
+   * ids the published file gave this catalog's components.
+   */
+  private fun resolvableRecord(
+    record: ComponentRecordFile,
+    catalogSystemId: String,
+  ): ComponentRecordFile =
+    aliasPublished(record.callableAliases(), publishedComponents(catalogSystemId))
 
   /**
    * [record] with every published builder id added to the component the published file says it
