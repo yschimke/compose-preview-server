@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { isIgnorableConsoleError } from "./_server.mjs";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 
@@ -39,7 +40,7 @@ test("sandbox semantic actions operate Jetcaster state and an independent scroll
     page.on("console", (message) => {
         if (
             message.type() === "error" &&
-            !message.text().includes("Cache storage is disabled")
+            !isIgnorableConsoleError(message.text())
         ) {
             errors.push(message.text());
         }

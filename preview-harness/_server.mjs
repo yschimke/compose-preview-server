@@ -199,3 +199,31 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // Playwright polls the configured `url`; this log is just for humans.
     console.log(`[harness] serving ${harnessRoot} at ${origin}`);
 }
+
+/**
+ * Console errors the suites ignore rather than fail on.
+ *
+ * Asserting `errors` is empty is the right default — a console error during a render is almost
+ * always a real defect. These two are not, and neither originates in this repository.
+ *
+ * - `Cache storage is disabled` — the renderer runs in a sandboxed frame with no Cache API, and
+ *   the code already falls back. Filtered in `ui-builder-renderer.spec.mjs` since before this.
+ * - `Accessing \`memory\` via \`wasmExports\`` — a Kotlin 2.4.20 deprecation notice about a
+ *   dependency (Compose Multiplatform / Skiko) reaching `wasmExports.memory`, emitted at
+ *   `console.error` severity: https://kotl.in/vr3szr. Nothing here references `wasmExports`.
+ *
+ * The real fix for the second is the dependency updating, and updating it ourselves is a bigger
+ * change than a version bump: Compose Multiplatform 1.12.0 rewrites `CanvasLayersComposeScene`
+ * (`frameRecomposer` became required, `coroutineContext` and `invalidate` are gone, `render`
+ * moved), so `JvmSkiaStructuredSvgRecorder` stops compiling and its migration would change SVG
+ * export. That is its own piece of work; this keeps the suites honest meanwhile.
+ *
+ * Delete an entry once its message stops being emitted — a stale one silently widens what every
+ * suite tolerates.
+ */
+export function isIgnorableConsoleError(text) {
+    return (
+        text.includes("Cache storage is disabled") ||
+        text.includes("Accessing `memory` via `wasmExports`")
+    );
+}
