@@ -4160,6 +4160,12 @@ private fun CatalogCapabilityV1.supports(format: ExportFormatV1): Boolean =
     // (yschimke/compose-preview-server#528). No `else`: the next format added should fail this
     // compile rather than silently read as unsupported.
     ExportFormatV1.BUNDLE -> exportCapabilities.bundle
+    // Added by compose-preview-contracts 2.17.0, and read the same way: the capability decides,
+    // and no catalog here sets either, so both are refused at this gate until something can write
+    // one. Wired rather than folded into an `else`, so the next format added still fails this
+    // compile instead of silently reading as unsupported — which is what this `when` is for.
+    ExportFormatV1.JSON -> exportCapabilities.remoteJson
+    ExportFormatV1.RC -> exportCapabilities.remoteDocument
   }
 
 private data class EnvironmentValidationIssue(

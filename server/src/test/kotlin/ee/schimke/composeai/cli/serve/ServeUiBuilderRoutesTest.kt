@@ -399,6 +399,8 @@ class ServeUiBuilderRoutesTest {
             )
           ExportFormatV1.COMPOSE -> error("the live routes never ask for Compose")
           ExportFormatV1.BUNDLE -> error("the live routes never ask for a bundle")
+          ExportFormatV1.JSON -> error("the live routes never ask for remote JSON")
+          ExportFormatV1.RC -> error("the live routes never ask for a remote document")
         }
       }
     }
