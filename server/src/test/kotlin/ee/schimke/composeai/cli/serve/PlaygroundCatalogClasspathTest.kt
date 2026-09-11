@@ -165,7 +165,7 @@ class PlaygroundCatalogClasspathTest {
 
     assertEquals(
       listOf(androidJar),
-      PlaygroundCatalogClasspath.androidPlatformJars(
+      PlaygroundCatalogClasspath.requiredAndroidPlatformJars(
         system = "remote-m3",
         backend = "android",
         resolveAndroidJar = { androidJar },
@@ -182,7 +182,7 @@ class PlaygroundCatalogClasspathTest {
     listOf("desktop", null).forEach { backend ->
       assertEquals(
         emptyList(),
-        PlaygroundCatalogClasspath.androidPlatformJars(
+        PlaygroundCatalogClasspath.requiredAndroidPlatformJars(
           system = "compose-m3",
           backend = backend,
           resolveAndroidJar = {
@@ -198,24 +198,21 @@ class PlaygroundCatalogClasspathTest {
   }
 
   @Test
-  fun `a missing SDK is logged rather than failing the classpath closed`() {
+  fun `a missing SDK makes an android catalog unavailable`() {
     val logs = mutableListOf<String>()
 
-    assertEquals(
-      emptyList(),
-      PlaygroundCatalogClasspath.androidPlatformJars(
+    assertNull(
+      PlaygroundCatalogClasspath.requiredAndroidPlatformJars(
         system = "remote-m3",
         backend = "android",
         resolveAndroidJar = { null },
         onLog = { logs.add(it) },
       ),
-      "an unresolvable coordinate fails closed; the platform does not, because the host's Android " +
-        "render lanes are already disabled without one",
+      "an Android catalog must not compile against a partial classpath",
     )
     assertTrue(
-      logs.single().let { "android.jar" in it && "ANDROID_HOME" in it },
-      "the miss names what is absent and how to supply it, because the compile error it leaves " +
-        "behind will not: $logs",
+      logs.single().let { "android.jar" in it && "ANDROID_HOME" in it && "unavailable" in it },
+      "the miss names what is absent, how to supply it, and the resulting mode state: $logs",
     )
   }
 }

@@ -98,17 +98,21 @@ object PlaygroundCatalogClasspath {
         .resolveAll(mavenCoords)
     val resolvedJars = requireAllResolved(system, resolutions, onLog) ?: return null
 
+    val platformJars =
+      requiredAndroidPlatformJars(system, manifest.backend, resolveAndroidJar, onLog) ?: return null
+
     return assemble(
       system,
       classesDir,
       libJars,
       resolvedJars,
-      platformJars = androidPlatformJars(system, manifest.backend, resolveAndroidJar, onLog),
+      platformJars = platformJars,
     )
   }
 
   /**
-   * `android.jar`, for an `android`-backend bundle, or nothing.
+   * `android.jar` for an `android`-backend bundle, no platform jars for another backend, or null
+   * when an Android bundle cannot be compiled honestly on this host.
    *
    * The framework is not a Maven coordinate and never appears in `manifest.classpath`, so nothing
    * above puts it on the compile classpath. Every `androidx.*` class does arrive — an AAR's
@@ -124,32 +128,33 @@ object PlaygroundCatalogClasspath {
    * `android.jar` on the daemon classpath and disables the Android modes when it cannot find one.
    * So this closes a compile/render asymmetry rather than adding a new requirement.
    *
-   * Absent, it is left out rather than failing the whole classpath. A host with no SDK has already
-   * had its Android render lanes disabled by the opener above, and a `desktop` bundle is unaffected
-   * either way — refusing here would take the CMP catalogs down with it.
+   * A missing platform fails this Android catalog closed, just like a missing Maven dependency.
+   * Returning a partial classpath would merely turn the host configuration error into misleading
+   * `Unresolved reference 'android'` diagnostics. The decision is scoped by [backend], so a host
+   * without an SDK still resolves every desktop catalog exactly as before.
    *
-   * What that costs is worth naming: on such a host this returns nothing and the compile fails
-   * exactly as it did before, with an `Unresolved reference 'android'` that says nothing about the
-   * SDK — the log line above is the only thing that does. The resolver is the same call
-   * `ServeRunner.buildPlaygroundAndroidDaemonOpener` makes, so in practice a host that answers null
-   * here has already reported the Android modes as disabled and offers none of the catalogs that
-   * could reach this.
+   * [AndroidBundleLaunch.resolveAndroidJar] selects the highest installed SDK stub. That is not the
+   * same jar Robolectric executes: the renderer separately selects an `android-all` runtime SDK (35
+   * by default, overrideable and clamped to Robolectric's supported range). Nor does it reproduce
+   * the catalog producer's `compileSdk`, because the bundle manifest does not carry that value. The
+   * policy here is consequently only "supply an installed Android API surface"; exact producer-SDK
+   * replay needs an additive bundle-format field and coordinated producer/consumer support rather
+   * than an inference in this server.
    */
-  internal fun androidPlatformJars(
+  internal fun requiredAndroidPlatformJars(
     system: String,
     backend: String?,
     resolveAndroidJar: () -> File?,
     onLog: (String) -> Unit,
-  ): List<File> {
+  ): List<File>? {
     if (backend != ANDROID_BACKEND) return emptyList()
     val androidJar = resolveAndroidJar()
     if (androidJar == null) {
       onLog(
-        "playground $system: this is an android bundle and no android.jar was found — set " +
-          "ANDROID_HOME / ANDROID_SDK_ROOT; a snippet naming an `android.*` framework class " +
-          "will not compile against this classpath"
+        "playground $system: this is an android bundle and no android.jar was found; mode " +
+          "unavailable — set ANDROID_HOME / ANDROID_SDK_ROOT"
       )
-      return emptyList()
+      return null
     }
     return listOf(androidJar)
   }
