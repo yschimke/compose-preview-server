@@ -15,7 +15,12 @@ kotlin {
   jvmToolchain(libs.versions.java.ui.builder.get().toInt())
 
   jvm()
-  @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class) wasmJs { browser() }
+  @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+  wasmJs {
+    browser()
+    outputModuleName.set("uiBuilderArtwork")
+    binaries.executable()
+  }
 
   sourceSets {
     commonMain.dependencies {

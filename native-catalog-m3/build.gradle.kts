@@ -8,7 +8,19 @@ plugins {
 ktfmt { googleStyle() }
 
 kotlin {
-  @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class) wasmJs { browser() }
+  // `binaries.executable()` like every other wasmJs module here. Compose 1.12.0 added
+  // `checkComposeUiTestConfigurationForWasmJs`, which fails a `wasmJs` target that declares no
+  // executable: the Skiko runtime a Compose UI test needs is bundled by webpack and there is
+  // nothing to bundle it into (CMP-4906). This module has no test source set at all, so the check
+  // is guarding a test that does not exist — declared anyway because it costs nothing here
+  // (`wasmJsTest` is NO-SOURCE, so no link is produced) and keeps the next Compose UI test added
+  // to this module from inheriting a configuration that cannot load Skiko.
+  @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+  wasmJs {
+    browser()
+    outputModuleName.set("nativeCatalogM3")
+    binaries.executable()
+  }
 
   sourceSets {
     commonMain.dependencies {
