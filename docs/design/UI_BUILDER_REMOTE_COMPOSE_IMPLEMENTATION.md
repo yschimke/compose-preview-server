@@ -53,6 +53,13 @@ remaining in the review are still required.
 
 ## Authoring state and actions
 
+The editing canvas now measures natural content height and then lays out that same composition
+within a finite extent. This fixes fill-only selected branches collapsing under unbounded measurement,
+while preserving long content and remeasuring on document or preview-state changes. The saved export
+sample now draws its 312 × 312 dp selected child inside 24 dp padding in the actual WASM app.
+[Before/after browser evidence](evidence/ui-builder-canvas-fill/README.md) includes measured bounds;
+four new rendering/interaction tests and the full 937-test UI-builder JVM suite pass.
+
 The browser's Screen panel can add, edit and remove state declarations. The Layer inspector can
 add, edit, reorder and remove actions on existing controls. Both send the released
 `setStateVariable`, `removeStateVariable` and `setEventBinding` mutations that MCP uses. Local

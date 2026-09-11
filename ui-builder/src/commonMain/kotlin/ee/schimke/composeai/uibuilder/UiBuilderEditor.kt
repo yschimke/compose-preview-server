@@ -4540,7 +4540,7 @@ internal fun PinnedDesignCanvas(
               // Where a right-click landed on the design, in the frame's own pixels, and null
               // while no menu is open.
               var menuAt by remember(document.id) { mutableStateOf<Offset?>(null) }
-              Box(
+              CanvasExtentLayout(
                 Modifier.fillMaxSize().onSecondaryClick(document.id) { position ->
                   if (!showSelectionOverlay) return@onSecondaryClick
                   // The inspection reports each box in root pixels, which is the space this press

@@ -507,6 +507,10 @@ fun UiBuilderSurface(
       }
     }
   var appliedDeclarations by remember(document.id) { mutableStateOf(document.stateVariables) }
+  LocalCanvasExtentInputs.current?.let { updateInputs ->
+    val inputs = CanvasExtentInputs(document, state.toMap())
+    SideEffect { updateInputs(inputs) }
+  }
   SideEffect {
     if (appliedDeclarations != document.stateVariables) {
       reconcilePreviewState(state, appliedDeclarations, document.stateVariables)

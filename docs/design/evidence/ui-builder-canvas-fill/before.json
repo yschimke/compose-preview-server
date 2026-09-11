@@ -1,0 +1,132 @@
+{
+  "canvas": {
+    "bounds": {
+      "left": 208,
+      "top": 132,
+      "right": 1072,
+      "bottom": 996,
+      "width": 864,
+      "height": 864
+    },
+    "sourceWidthDp": 360,
+    "sourceHeightDp": 360,
+    "scale": 2.4000000953674316
+  },
+  "inspection": {
+    "schema": "compose-ui-builder-inspection/v1",
+    "documentId": "remote-export-proof",
+    "documentRevision": 0,
+    "coordinateSpace": "root-render-pixels",
+    "coordinatePrecision": "1/64px",
+    "generation": {
+      "key": "remote-export-proof@0",
+      "completed": true,
+      "stabilityFrames": 2,
+      "expectedAuthoredNodeIds": [
+        "Fallback",
+        "First",
+        "Second",
+        "choice"
+      ],
+      "expectedAuthoredTextNodeIds": [],
+      "measuredNodeIds": [
+        "First",
+        "choice"
+      ],
+      "measuredTextNodeIds": []
+    },
+    "nodes": [
+      {
+        "nodeId": "Fallback",
+        "componentId": "layout/box",
+        "bounds": null,
+        "text": null,
+        "semantics": {
+          "source": "authored-node-properties",
+          "role": "box",
+          "label": null,
+          "contentDescription": null,
+          "enabled": null,
+          "selected": null,
+          "actions": []
+        }
+      },
+      {
+        "nodeId": "First",
+        "componentId": "layout/box",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "text": null,
+        "semantics": {
+          "source": "authored-node-properties",
+          "role": "box",
+          "label": null,
+          "contentDescription": null,
+          "enabled": null,
+          "selected": null,
+          "actions": []
+        }
+      },
+      {
+        "nodeId": "Second",
+        "componentId": "layout/box",
+        "bounds": null,
+        "text": null,
+        "semantics": {
+          "source": "authored-node-properties",
+          "role": "box",
+          "label": null,
+          "contentDescription": null,
+          "enabled": null,
+          "selected": null,
+          "actions": []
+        }
+      },
+      {
+        "nodeId": "choice",
+        "componentId": "layout/box",
+        "bounds": {
+          "x": 208,
+          "y": 132,
+          "width": 864,
+          "height": 115.203125
+        },
+        "text": null,
+        "semantics": {
+          "source": "authored-node-properties",
+          "role": "box",
+          "label": null,
+          "contentDescription": null,
+          "enabled": null,
+          "selected": null,
+          "actions": []
+        }
+      }
+    ],
+    "slots": [
+      {
+        "parentNodeId": "choice",
+        "slotName": "children",
+        "childNodeIds": [
+          "First",
+          "Second",
+          "Fallback"
+        ],
+        "measuredChildNodeIds": [
+          "First"
+        ],
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      }
+    ]
+  },
+  "errors": []
+}

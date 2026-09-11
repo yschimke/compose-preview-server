@@ -18,9 +18,10 @@ compared those bytes to the normal HTTP export pinned at revision 0. A subsequen
 credentials are not embedded in shared URLs.
 
 This capture proves the export menu and delivery path. It is **not** a claim of live binary-preview
-fidelity: the fill-only child currently collapses in this editor sample, while the compiler/player
-proof exercises generated documents separately. Reproducing and repairing that canvas behavior,
-and wiring live JSON/binary playback into the existing preview lane, remain required work.
+fidelity: the fill-only child collapsed in this capture, while the compiler/player proof exercises
+generated documents separately. The subsequent [canvas fix and browser comparison](../ui-builder-canvas-fill/README.md)
+repair that layout issue using this same saved document. Wiring live JSON/binary playback into the
+existing preview lane remains required work.
 
 Automated coverage is in `RemoteDocumentExportExecutorTest`, `ServeUiBuilderRoutesTest`,
 `UiBuilderMcpAdapterTest`, and `EditorExportMenuTest`. The first includes an actual persistent
