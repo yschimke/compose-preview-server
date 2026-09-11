@@ -16,12 +16,17 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
  * fetches into its cache, and the Material Icons inventory is a build output — so they are named on
  * the command line:
  * ```
+ * ./gradlew generateMaterialIconInventory
  * ./gradlew :server:test --tests '*LegacyIconNamesFixture*' \
- *   -Dcomposeai.materialSymbols.codePoints=<ui-builder-dir>/material-symbols/symbols.codepoints \
- *   -Dcomposeai.materialIcons.inventory=build/generated/materialIcons/material-icon-inventory.tsv
+ *   -Dcomposeai.materialSymbols.codePoints=$PWD/<ui-builder-dir>/material-symbols/symbols.codepoints \
+ *   -Dcomposeai.materialIcons.inventory=$PWD/build/generated/materialIcons/material-icon-inventory.tsv
  * ```
  *
- * Without them the regeneration is skipped and the audit below still runs, which is what CI does.
+ * **Absolute paths**: a test runs with its own project as the working directory, so a
+ * repository-root path like `build/generated/…` would resolve under `server/` and find nothing.
+ * Pass neither property and regeneration is skipped while the audit below still runs, which is what
+ * CI does. Pass one that does not resolve and it fails rather than skips — a regeneration that
+ * quietly did nothing and reported success is the failure this command exists to prevent.
  *
  * Regeneration goes through [MaterialSymbolsLegacyKeys] itself rather than restating its rules, so
  * the fixture cannot drift from the code by being produced by a second implementation of it.
@@ -30,8 +35,20 @@ class LegacyIconNamesFixtureTest {
 
   private val resources = File("src/test/resources/material-symbols")
 
+  /**
+   * The file a system property names, or null when the property is absent.
+   *
+   * A property that is set but does not resolve throws rather than returning null: that is the
+   * difference between "CI, which passes neither" and "somebody ran the documented command with a
+   * path relative to the wrong directory", and the second must not look like the first.
+   */
   private fun property(name: String): File? =
-    System.getProperty(name)?.let(::File)?.takeIf(File::isFile)
+    System.getProperty(name)?.let(::File)?.also {
+      check(it.isFile) {
+        "-D$name=$it does not resolve; the working directory is ${File("").absolutePath}, " +
+          "so pass an absolute path"
+      }
+    }
 
   @Test
   fun `regenerates the fixtures when both pinned inputs are named`() {

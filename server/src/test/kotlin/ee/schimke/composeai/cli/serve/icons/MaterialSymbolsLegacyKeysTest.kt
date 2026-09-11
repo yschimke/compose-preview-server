@@ -172,6 +172,17 @@ class MaterialSymbolsLegacyKeysTest {
     assertEquals(0f, twoTone.fill)
     assertEquals(MaterialSymbolsLegacyKeys.TWO_TONE_NOTE, twoTone.note)
     assertEquals(null, migrated("filled/star").note)
+
+    // The one key where both rules meet: two-tone says "unfilled", the name says filled. A note
+    // that contradicts the picture next to it is worse than no note.
+    val filledTwoTone = migrated("twoTone/playCircleFilled")
+    assertEquals(1f, filledTwoTone.fill)
+    assertEquals(MaterialSymbolsLegacyKeys.TWO_TONE_FILLED_NOTE, filledTwoTone.note)
+    assertTrue(!filledTwoTone.note.orEmpty().contains("unfilled"), filledTwoTone.note.orEmpty())
+    assertEquals(
+      MaterialSymbolsLegacyKeys.TWO_TONE_NOTE,
+      migrated("twoTone/playCircleOutline").note,
+    )
   }
 
   @Test
