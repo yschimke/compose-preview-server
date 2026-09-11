@@ -3653,6 +3653,16 @@ ${captureControlsHtml().prependIndent("          ")}
      * forty-by-forty pixels cannot tell `Pressed` from `Disabled`.
      */
     thumbSrc: String? = null,
+    /**
+     * Named groups of destinations, appended after the variant rows and inside the same child list:
+     * this component's recorded interactions, the samples that call it. Each is its own disclosure,
+     * so the variant rows stay the plain list they have always been.
+     *
+     * They are NOT counted into the component row's tally, which answers "how many renders of this
+     * component are there" — a recording is not a render of it, and folding the two would make the
+     * count mean nothing in particular. Each directory carries its own.
+     */
+    directories: List<ComponentDirectory> = emptyList(),
     indent: String = "        ",
   ) {
     fun current(target: String) = if (target == currentHref) " aria-current=\"page\"" else ""
@@ -3662,7 +3672,8 @@ ${captureControlsHtml().prependIndent("          ")}
     // (the landing) passes no [currentHref] at all.
     append("$indent<li role=\"none\"><a class=\"cp-tree-component cp-tree-link\"")
     append(" role=\"treeitem\" href=\"${WebEscaping.htmlEscape(href)}\"$rowAttrs")
-    if (variants.isNotEmpty()) {
+    val hasChildren = variants.isNotEmpty() || directories.isNotEmpty()
+    if (hasChildren) {
       append(" aria-expanded=\"${!collapsed}\" aria-owns=\"$variantsId\"")
     }
     append(current(href))
@@ -3679,7 +3690,7 @@ ${captureControlsHtml().prependIndent("          ")}
       append("<span class=\"cp-tree-count\">${variants.size + 1}</span>")
     }
     append("</a>\n")
-    if (variants.isNotEmpty()) {
+    if (hasChildren) {
       append("$indent  <ul class=\"cp-tree-children cp-tree-variants\" id=\"$variantsId\"")
       append(" role=\"group\">\n")
       // The default render leads, so the list reads as "the component, then how else it renders"
@@ -3696,6 +3707,38 @@ ${captureControlsHtml().prependIndent("          ")}
         append(" role=\"treeitem\" href=\"${WebEscaping.htmlEscape(v.href)}\"${current(v.href)}>")
         append(WebEscaping.htmlEscape(v.label))
         append("</a></li>\n")
+      }
+      directories.forEachIndexed { index, dir ->
+        // Open, like the subtree around it. A closed disclosure inside an open one hides the rows
+        // behind two clicks, and the whole point of moving these into the drawer was that a reader
+        // should not have to already know they exist.
+        val groupId = "$variantsId-${dir.kind}-$index"
+        append("$indent    <li role=\"none\" class=\"cp-tree-dir cp-tree-dir--${dir.kind}\">\n")
+        append("$indent      <span class=\"cp-tree-dir-head\" role=\"treeitem\"")
+        append(" aria-expanded=\"true\" aria-owns=\"$groupId\">")
+        append("<span class=\"cp-tree-label\">${WebEscaping.htmlEscape(dir.label)}</span>")
+        append("<span class=\"cp-tree-count\">${dir.rows.size}</span></span>\n")
+        append("$indent      <ul class=\"cp-tree-children\" id=\"$groupId\" role=\"group\">\n")
+        dir.rows.forEach { row ->
+          val title =
+            row.title
+              ?.takeIf { it.isNotBlank() }
+              ?.let { " title=\"${WebEscaping.htmlEscape(it)}\"" } ?: ""
+          append("$indent        <li role=\"none\">")
+          if (row.live) {
+            append("<a class=\"cp-tree-variant cp-tree-link\" role=\"treeitem\"")
+            append(" href=\"${WebEscaping.htmlEscape(row.href)}\"$title${current(row.href)}>")
+            append("${WebEscaping.htmlEscape(row.label)}</a>")
+          } else {
+            // Not a link, and said so to a screen reader as well as to the eye: the destination is
+            // registered but has no host yet, so following it now would land on a loading page.
+            append("<span class=\"cp-tree-variant cp-tree-dead\" role=\"treeitem\"")
+            append(" aria-disabled=\"true\"$title>${WebEscaping.htmlEscape(row.label)}</span>")
+          }
+          append("</li>\n")
+        }
+        append("$indent      </ul>\n")
+        append("$indent    </li>\n")
       }
       append("$indent  </ul>\n")
     }
@@ -3746,6 +3789,64 @@ ${captureControlsHtml().prependIndent("          ")}
   /** One **primary-axis** variant of a component: a distinct state or props render. */
   /** [axis] is `"state"` or `"props"` — which of the two primary axes this row varies. */
   private class TreeVariant(val label: String, val href: String, val axis: String = "state")
+
+  /**
+   * One destination inside a [ComponentDirectory] — a label and where it goes.
+   *
+   * [live] is false for a destination that is registered but has no host yet, which happens on a
+   * cold box and while a catalog reloads. Such a row is drawn disabled rather than dropped: the
+   * reader is told the thing exists and is not ready, which is the truth, where a missing row would
+   * say the component has no samples at all.
+   *
+   * [title] is the row's tooltip — the caption a catalog authored, where it wrote one. The label
+   * has to stay short enough for a drawer column; the sentence goes here.
+   */
+  data class ComponentDirectoryRow(
+    val label: String,
+    val href: String,
+    val live: Boolean = true,
+    val title: String? = null,
+  )
+
+  /**
+   * A named group of destinations under a component: its recorded interactions, the samples that
+   * call it, whatever a later lane adds.
+   *
+   * ## Why this is not more variant rows
+   *
+   * A variant is the SAME render with one axis moved — `Pressed` is the component, pressed. A
+   * directory holds a different KIND of artifact that happens to be about the same component: a
+   * recording, a call site in another catalog. Listed flat among the variants they read as the same
+   * thing, and a reader scanning for "the other states" has to step over them. A named node says
+   * what the group is, costs one line closed, and gives the next lane somewhere to go without
+   * inventing a third shape.
+   *
+   * [kind] is a slug for the CSS hook and nothing else — no behaviour keys off it, so a new
+   * directory is a producer and a stylesheet rule rather than a branch in here.
+   */
+  data class ComponentDirectory(
+    val kind: String,
+    val label: String,
+    val rows: List<ComponentDirectoryRow>,
+  )
+
+  /**
+   * The viewer, opened on one recording — the same `?mode=motion&motion=<id>` shape the Motion
+   * index's own cards link with, so the two surfaces cannot drift into two spellings of one link.
+   *
+   * [q] already carries its leading `?` when it carries anything, which is why the separator is
+   * chosen rather than written.
+   */
+  private fun motionHref(
+    basePath: String,
+    q: String,
+    previewId: String,
+    captureId: String,
+  ): String {
+    val separator = if (q.isEmpty()) "?" else "&"
+    return "$basePath/p/${WebEscaping.urlEncodeSegment(previewId)}$q$separator" +
+      "mode=motion&motion=${WebEscaping.urlEncodeSegment(captureId)}"
+  }
 
   /**
    * The viewer's **component subtree**: the same tree the catalog navigates by, filtered to the one
@@ -3881,6 +3982,12 @@ ${captureControlsHtml().prependIndent("          ")}
     basePath: String,
     q: String,
     darkFirst: Boolean,
+    /**
+     * The component's named groups — its recordings, the samples that call it — resolved by the
+     * handler, which is the half of this that needs the session registry and another catalog's
+     * previews. Empty leaves the subtree exactly the axes list it has always been.
+     */
+    directories: List<ComponentDirectory> = emptyList(),
   ): String {
     fun href(p: ServePreview) = "$basePath/p/${WebEscaping.urlEncodeSegment(p.id)}$q"
     // The subtree hangs off the component's DEFAULT render, whichever of its renders is on screen:
@@ -3903,7 +4010,10 @@ ${captureControlsHtml().prependIndent("          ")}
     // a row already naming that render. Folding it up leaves the tree saying each render once: the
     // component, then the ways it differs.
     val variants = withCurrent.filterNot { it.href == href(default) }
-    if (variants.isEmpty()) return ""
+    // A component with one render and no directories has nothing to show — the tree would be its
+    // own title. With a directory it has plenty, so the subtree is worth drawing for a component
+    // that never varies but is called by five samples.
+    if (variants.isEmpty() && directories.isEmpty()) return ""
     return buildString {
       append("<nav class=\"cp-tree cp-axes-tree\" aria-label=\"Component renders\">\n")
       append("  <ul class=\"cp-tree-list\" role=\"tree\">\n")
@@ -3918,6 +4028,7 @@ ${captureControlsHtml().prependIndent("          ")}
         collapsed = false,
         syntheticDefaultRow = false,
         currentHref = href(preview),
+        directories = directories,
         indent = "    ",
       )
       append("  </ul>\n</nav>")
@@ -14363,6 +14474,20 @@ ${scriptTag("known-differences.js")}
      */
     componentVariants: List<ComponentVariant> = emptyList(),
     /**
+     * The component's named groups for the drawer subtree — its recorded interactions, the samples
+     * that call it, whatever a later lane adds.
+     *
+     * Resolved by the handler for the same reason [componentVariants] is: a directory's rows reach
+     * another catalog's previews through the session registry, which is the host's answer and not
+     * this page's. Empty leaves the subtree the plain axes list it has always been.
+     *
+     * Keyed on the COMPONENT and not on the render on screen. A sample is written against the
+     * component — sometimes against one of its cells, but that is not worth a second lane — so the
+     * directory a reader finds on `Button` is the one they find on `Button · Pressed`, rather than
+     * vanishing the moment they step onto a variant.
+     */
+    componentDirectories: List<ComponentDirectory> = emptyList(),
+    /**
      * The catalog's declared stage surface (`catalog.json`'s `display.surface`) — decides whether
      * an unthemed preview's stage backs on dark, and with it whether the page offers a day/night
      * choice at all (a declared-dark catalog does not). Null ⇒ the system-name dark-first
@@ -16274,7 +16399,55 @@ ${scriptTag("known-differences.js")}
     // own [primaryVariants] and so always listed the same renders, only in a second shape, in a
     // second place, with the two axes torn apart into rows that never named their relationship.
     // Empty for a component with no second render, exactly as the chip rows were.
-    val axesTree = componentSubtreeHtml(preview, siblings, basePath, q, viewerDarkFirst)
+    // The component's recordings, as a directory beside the samples one.
+    //
+    // Built HERE and not by the handler, unlike [componentDirectories]: a capture already rides on
+    // the preview (`ServePreview.motion`), so the page has the whole answer and a round trip
+    // through the handler would only move it. The stage's Motion chip stays exactly as it was —
+    // that chip is a lane toggle for the render in front of you, while these rows are navigation
+    // to a recording the reader has no other way to discover exists.
+    //
+    // Every render of the component, not just the one on screen: a recording belongs to the
+    // preview that took it, so a capture declared on `Pressed` is invisible from the default page
+    // otherwise — which is the discovery problem this directory exists to fix.
+    val motionDirectory =
+      if (componentBrowser || pinned != null) null
+      else {
+        val key = componentKey(preview)
+        // [preview] FIRST and deduplicated on id, not `siblings` alone. A caller may hand this page
+        // a preview enriched past the list it also passes — the handler reads a pinned revision's
+        // own record, and the fixtures build one with `copy()` — and reading the captures off the
+        // list would then show the reader a recording set the stage is not playing from.
+        val rows =
+          (listOf(preview) + siblings)
+            .distinctBy { it.id }
+            .filter { componentKey(it) == key && it.motion.isNotEmpty() }
+            .flatMap { render ->
+              val labels = MotionCaptureLabels.of(render.motion)
+              render.motion.mapIndexed { index, capture ->
+                val label = labels[index]
+                ComponentDirectoryRow(
+                  label = label.title,
+                  href = motionHref(basePath, q, render.id, capture.id),
+                  title = label.detail.takeIf { it != label.title },
+                )
+              }
+            }
+        if (rows.isEmpty()) null else ComponentDirectory("motion", "Motion", rows)
+      }
+    val axesTree =
+      componentSubtreeHtml(
+        preview,
+        siblings,
+        basePath,
+        q,
+        viewerDarkFirst,
+        // Withheld from the component browser for the same reason its comparison chips are: that
+        // chrome is a reading surface, and a route into another catalog is one it does not offer.
+        directories =
+          if (componentBrowser) emptyList()
+          else listOfNotNull(motionDirectory) + componentDirectories,
+      )
     val navDrawer =
       navDrawerHtml(
         preview,

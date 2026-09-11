@@ -6259,6 +6259,92 @@ class ServeHttpServer(
     )
   }
 
+  /**
+   * The component's **related** directories for the viewer's drawer subtree — the other catalogs
+   * that are ABOUT the component on screen, one directory per catalog, a row per destination.
+   *
+   * Resolved here rather than in the page because every half of the answer is the registry's: which
+   * of the declared systems this box serves, whether each has a host right now, and which preview
+   * in it the declared component id names. See [ServeRelatedCatalogs] for the policy — this is the
+   * lookup it deliberately does not do.
+   *
+   * ## Keyed on the component, not on the render
+   *
+   * The declarations of EVERY render of this component are unioned, and the result is shown on all
+   * of them. A sample is written against the component; some are written against one of its cells,
+   * and the catalog is free to declare the link there. Splitting the directory per render would
+   * mean a reader on `Pressed` cannot see the samples declared on the default — and a reader on the
+   * default cannot see the one written for `Pressed`, which is the render it actually explains.
+   * Neither is worth a lane of its own: the union is a short list, and being findable from wherever
+   * the reader happens to be standing is the whole point of putting it in the drawer.
+   *
+   * Fails soft at every step, like the rest of this surface: an unregistered system is dropped by
+   * [ServeRelatedCatalogs.resolve], a registered one with no host yet keeps its rows and marks them
+   * not live, and a component id the destination does not publish is dropped here.
+   */
+  private fun RoutingContext.componentRelatedDirectories(
+    renderHost: ServeHost,
+    preview: ServePreview,
+    selfSystem: String,
+  ): List<ServeWeb.ComponentDirectory> {
+    val bundle = catalogBundleHost(renderHost) ?: return emptyList()
+    if (bundle.relatedByComponentId.isEmpty()) return emptyList()
+    val componentId = ServeIssueReport.componentIdFor(preview)
+    // Every render of this component, so a link declared on one cell is found from all of them.
+    val declared =
+      renderHost.previews
+        .filter { ServeIssueReport.componentIdFor(it) == componentId }
+        .flatMap { bundle.relatedByComponentId[ServeIssueReport.componentIdFor(it)].orEmpty() }
+    if (declared.isEmpty()) return emptyList()
+    // The registration check is asked per DECLARED system rather than off the whole session list:
+    // a catalog declares a handful of links and the registry holds every session this box serves.
+    val registered = declared.map { it.system }.filter { sessions.isKnownSession(it) }.toSet()
+    val links =
+      ServeRelatedCatalogs.resolve(
+        entries = declared,
+        componentId = componentId,
+        selfSystem = selfSystem,
+        registered = registered,
+        // peekHost, never lease: this is a metadata read while building a page, and standing a
+        // suspended catalog's daemon up to decide how to draw a drawer row would be a daemon per
+        // page view.
+        isLive = { sessions.peekHost(it) != null },
+      )
+    if (links.isEmpty()) return emptyList()
+    // One directory per destination catalog, in the order the links were declared, each named by
+    // that catalog's own heading. The name is the catalog's to choose and not this server's — the
+    // same rule the rest of this surface follows, and the reason no catalog is named in here.
+    return links
+      .groupBy { it.system }
+      .mapNotNull { (system, systemLinks) ->
+        val host = sessions.peekHost(system)
+        val heading =
+          host?.let { ServeWeb.catalogHeading(catalogBundleHost(it)?.title, it.label) } ?: system
+        val rows = systemLinks.mapNotNull { link ->
+          // A live destination is resolved to a real preview, so the row links at a page that
+          // exists and can carry that catalog's own name for the component. Without a host there
+          // is nothing to resolve against, and the row stands on what the link itself declared.
+          val target =
+            host?.previews?.firstOrNull { ServeIssueReport.componentIdFor(it) == link.componentId }
+          if (host != null && target == null) return@mapNotNull null
+          ServeWeb.ComponentDirectoryRow(
+            label = link.label ?: target?.label ?: link.componentId,
+            href =
+              "/" +
+                WebEscaping.urlEncodeSegment(system) +
+                "/p/" +
+                WebEscaping.urlEncodeSegment(target?.id ?: link.componentId) +
+                requestQuerySuffix(),
+            live = link.live && target != null,
+            // The catalog's own wording for the relationship, where the row is already showing
+            // the destination's name instead.
+            title = link.label?.takeIf { it != (target?.label ?: link.componentId) },
+          )
+        }
+        if (rows.isEmpty()) null else ServeWeb.ComponentDirectory("related", heading, rows)
+      }
+  }
+
   private fun catalogBundleHost(host: ServeHost): ServeBundleHost? =
     when (host) {
       is ServeBundleHost -> host
@@ -10184,6 +10270,9 @@ class ServeHttpServer(
                   parallelRenderUrl = parallelSpecSource(renderHost, variant)?.rasterUrl,
                 )
               },
+          // …and the catalogs that are ABOUT this component — its samples, a rendition of it
+          // elsewhere — as named directories in the same drawer subtree the variants live in.
+          componentDirectories = componentRelatedDirectories(renderHost, preview, sessionId),
           // The catalog's declared stage surface (`display.surface`), so an unthemed preview backs
           // on the dark stage for a dark-first system instead of the default white.
           declaredSurface = catalogBundleHost(renderHost)?.stageSurface,

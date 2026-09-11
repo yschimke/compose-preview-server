@@ -2305,6 +2305,22 @@ cp-history-menu { display: contents; }
    stretches the full width — a bar the length of the panel to say "this one", which reads as a
    heading rather than a selection. Shrunk to its label it reads as the chip it replaced. */
 .cp-axes-tree .cp-tree-variant { display: inline-block; }
+/* A DIRECTORY under a component: its recordings, the samples that call it. A variant row is the
+   same render with one axis moved; these are other artifacts about the same component, so they sit
+   under a named head rather than in among the variants where they would read as more states. The
+   head is a label and a count and nothing else — it is not a destination, because the group is not
+   a page. */
+.cp-tree-dir > .cp-tree-dir-head { display: flex; align-items: center; gap: 8px;
+  min-height: 26px; padding: 3px 10px;
+  font-size: var(--md-sys-typescale-label-small-size);
+  color: var(--cp-fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.cp-tree-dir > .cp-tree-children { margin: 0 0 4px 10px; }
+/* Registered, but with no host yet — a cold box, or a catalog mid-reload. Drawn rather than
+   dropped: the reader is told the thing exists and is not ready, where a missing row would say the
+   component has no samples at all. */
+.cp-tree-dead { display: inline-block; min-height: 26px; padding: 3px 10px;
+  font-size: var(--md-sys-typescale-label-small-size);
+  color: var(--cp-fg-faint); opacity: 0.6; cursor: default; }
 .cp-preview-primary { margin: 0 0 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cp-disabled-control { display: inline-flex; border-radius: var(--md-sys-shape-corner-full); }
 .cp-disabled-control:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }

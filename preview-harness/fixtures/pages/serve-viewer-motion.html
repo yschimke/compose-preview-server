@@ -76,7 +76,7 @@
         <h1 class="cp-head cp-preview-title">Switch</h1>
         <code class="cp-preview-id" title="com.example.SwitchPreview">com.example.SwitchPreview</code>
 
-        <div class="cp-head-toggles"><details class="cp-theme-menu">
+        <div class="cp-head-toggles"><button type="button" class="cp-drawer-toggle" id="cp-nav-toggle" aria-expanded="false" aria-controls="cp-nav">☰ Components</button><details class="cp-theme-menu">
   <summary class="cp-drawer-toggle cp-axis-toggle" id="cp-theme-toggle" aria-controls="cp-theme-bar">
     <span class="cp-toggle-label">Theme</span>
     <span class="cp-toggle-value" id="cp-theme-toggle-value">Light</span>
@@ -105,7 +105,29 @@
       </div>
 
       <div class="cp-viewer" data-preview-id="com.example.SwitchPreview" data-mode="snapshot" data-modes="snapshot" data-static-snapshot="true" data-can-render-overrides="false" data-snapshot-backend="Snapshot" data-live-backend="Live" data-render-density="2" data-fold-scope="compose-m3">
+              <aside class="cp-nav" id="cp-nav" aria-label="Components">
+        <div class="cp-nav-head"><span>Components</span><button type="button" class="cp-nav-close" id="cp-nav-close" aria-label="Close component navigation">×</button></div>
+        <input type="search" class="cp-nav-search" id="cp-nav-search" placeholder="Filter components" autocomplete="off" aria-label="Filter components">
+        <div class="cp-nav-current"><nav class="cp-tree cp-axes-tree" aria-label="Component renders">
+  <ul class="cp-tree-list" role="tree">
+    <li role="none"><a class="cp-tree-component cp-tree-link" role="treeitem" href="/p/com.example.SwitchPreview?token=demo-token-fixture&amp;session=compose-m3" aria-expanded="true" aria-owns="cp-axes-tree-variants" aria-current="page"><span class="cp-tree-label">Switch</span></a>
+      <ul class="cp-tree-children cp-tree-variants" id="cp-axes-tree-variants" role="group">
+        <li role="none" class="cp-tree-dir cp-tree-dir--motion">
+          <span class="cp-tree-dir-head" role="treeitem" aria-expanded="true" aria-owns="cp-axes-tree-variants-motion-0"><span class="cp-tree-label">Motion</span><span class="cp-tree-count">2</span></span>
+          <ul class="cp-tree-children" id="cp-axes-tree-variants-motion-0" role="group">
+            <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/p/com.example.SwitchPreview?token=demo-token-fixture&amp;session=compose-m3&amp;mode=motion&amp;motion=switch-on__ideal__default__light" title="Toggle on. The thumb travels the full width of the track and the container recolours to the checked state as it lands.">Toggle on</a></li>
+            <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/p/com.example.SwitchPreview?token=demo-token-fixture&amp;session=compose-m3&amp;mode=motion&amp;motion=switch-on__ideal__default__light__anim" title="Thumb settle. Released mid-travel, the thumb overshoots and settles back through the theme&#39;s spatial spring rather than snapping to the stop.">Thumb settle</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+        <ul class="cp-nav-list" id="cp-nav-list">
 
+        </ul>
+        <p class="cp-nav-empty" id="cp-nav-empty" hidden>No components match.</p>
+      </aside>
         <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="Switch"><canvas id="cp-canvas" hidden></canvas><img id="cp-motion-img" class="cp-motion-img" hidden alt="Switch — recorded interaction"><div class="cp-motion-player" id="cp-motion-player" hidden><canvas id="cp-motion-canvas" class="cp-motion-canvas" role="img" aria-label="Switch — recorded interaction"></canvas><div class="cp-motion-transport" id="cp-motion-transport" hidden><button type="button" id="cp-motion-play" class="cp-motion-transport-btn" aria-pressed="false" title="Play" aria-label="Play">▶</button><button type="button" id="cp-motion-replay" class="cp-motion-transport-btn" title="Play again from the start" aria-label="Play again from the start">↺</button><input type="range" id="cp-motion-scrub" class="cp-motion-scrub" min="0" max="0" value="0" step="1" title="Scrub to a frame" aria-label="Frame"><span class="cp-motion-time" id="cp-motion-time"></span><select id="cp-motion-rate" class="cp-motion-rate" title="Playback speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></div></div><div class="cp-error" id="cp-error" role="alert" hidden></div></div>
 
         <div class="cp-controls" id="cp-controls">
