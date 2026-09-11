@@ -476,6 +476,22 @@ compile and all 65 shared-export tests pass against them. No release is needed.
 This provides the shared primitive. The builder's semantic-loop projection, reusable-function
 lowering, Remote Kotlin integration and browser/MCP source parity remain required next steps.
 
+Shared reusable-function generation now exists in
+[generator commit 7d674b3](https://github.com/yschimke/compose-ai-tools/commit/7d674b3555de7a4a439f13e417270758a1e6f428).
+`ScreenFunction`, explicit value/callback parameters, `ScreenNode.function` and checked parameter
+reads emit one composable definition and calls from typed loops. Definitions cannot implicitly
+capture screen state, caller rows or layout receivers; recursive calls and invalid argument or
+callback bindings refuse the artifact. Functions can forward values and callbacks to other definitions.
+The real Material 3 proof physically clicks repeated function instances at densities 1 and 2 and
+checks their authored 0, 8 and 16 dp padding. All 60 model and 574 discovery tests pass, as do both
+direct-loop and function compile/interaction proofs and WASM compilation.
+
+Both committed generator publications are staged locally. The existing builder passes 954 editor
+tests (one separate opt-in proof skipped), all 65 shared-export tests and WASM/server compilation
+against them. The next consumer step is the semantic loop/component projection into these shared
+forms, followed by exact generated-source and browser/MCP parity. Remote Kotlin still requires its
+corresponding integration; these upstream primitives do not complete the consumer export paths.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
