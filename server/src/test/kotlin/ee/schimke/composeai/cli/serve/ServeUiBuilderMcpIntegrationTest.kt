@@ -292,6 +292,24 @@ class ServeUiBuilderMcpIntegrationTest {
     assertNull(text["wasm"])
     assertNull(text["svg"])
     assertNull(text["code"])
+    // A generated inventory does not get spelled out here. `m3/icon`.`iconKey` is the complete
+    // Material icon set since #710, and inlining it took this summary to 241 KB — four times the
+    // full envelope it exists to be a cheap alternative to. It reports its size and where to get
+    // the values; an agent that needs them asks for `full`, which is checked below.
+    val icon = components.single { it["id"]!!.jsonPrimitive.content == "m3/icon" }
+    val iconProperties = icon["properties"]!!.jsonArray.map { it.jsonPrimitive.content }
+    val iconKey = iconProperties.single { it.startsWith("iconKey:") }
+    assertTrue(
+      Regex("""^iconKey:string!?=<\d{3,} values; ask for full>$""").matches(iconKey),
+      iconKey,
+    )
+    // And a list a person authored is still spelled out — the cap is for inventories, not for
+    // every enumeration. `m3/text`.`style` is fifteen typography roles and stays legible.
+    assertTrue(
+      properties.any { it.startsWith("style:string=displayLarge|") && it.endsWith("|labelSmall") },
+      properties.toString(),
+    )
+
     // The whole point: on this catalog the released envelope is about 58 KB and this about 12.
     val summaryBytes = summary.toString().length
     assertTrue(summaryBytes < 16_000, "$summaryBytes bytes: $summary")

@@ -208,6 +208,50 @@ class M3CatalogComponentRecordTest {
     assertEquals(emptySet(), covered intersect uncovered.keys, "an id is both covered and not")
   }
 
+  /**
+   * The authored record and real discovery name the same JVM facade for every symbol they share.
+   *
+   * A `canonicalId` is `<module>/<jvmOwner>.<name>`, so the facade is the record's IDENTITY, not a
+   * cosmetic field: `callableAliases()` derives the alias a published catalog resolves by from it,
+   * and `ScreenDocumentProjection`'s variant table names components by the same string. Three of
+   * the thirty-four entries here named a facade that **does not exist** in Material —
+   * `HorizontalDividerKt`, `FilterChipKt` and `TextFieldKt.OutlinedTextField`, where the classes
+   * are `DividerKt`, `ChipKt` and `OutlinedTextFieldKt` — and nothing noticed, because every
+   * exported call is written from `symbol.callable` and `code.call`, which were right.
+   *
+   * It surfaced when the variant table started matching on these ids and an authored **outlined**
+   * text field refused: the projection had been written to agree with this file, so the two were
+   * consistent with each other and wrong about Material. Two artefacts agreeing is not a check.
+   *
+   * This is the check. `m3-catalog-generated-record-v1.json` is produced by discovery reading the
+   * class files, so where the two records name the same symbol they must name the same owner, and a
+   * hand edit that invents a facade fails here rather than three lanes downstream.
+   */
+  @Test
+  fun `the authored record names the facade discovery found`() {
+    val discovered =
+      json
+        .decodeFromString<ComponentRecordFile>(
+          File("../docs/design/fixtures/ui-builder/m3-catalog-generated-record-v1.json").readText()
+        )
+        .components
+        .associateBy { it.symbol.name }
+    val disagree =
+      record.components
+        .mapNotNull { authored ->
+          val found = discovered[authored.symbol.name] ?: return@mapNotNull null
+          if (authored.symbol.jvmOwner == found.symbol.jvmOwner) null
+          else
+            "${authored.symbol.name}: authored ${authored.symbol.jvmOwner}, discovered ${found.symbol.jvmOwner}"
+        }
+        .sorted()
+    assertEquals(
+      emptyList(),
+      disagree,
+      "the authored record names a JVM facade discovery did not find on the classpath",
+    )
+  }
+
   @Test
   fun `every covered record can print a call site`() {
     // `code.call` is the generator's licence to call at all: a record without one refuses, so a

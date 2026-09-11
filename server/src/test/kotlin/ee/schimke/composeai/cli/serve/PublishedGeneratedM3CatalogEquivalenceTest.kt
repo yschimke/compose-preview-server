@@ -23,10 +23,13 @@ import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -190,8 +193,13 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    * is the STATUS: a shelf that reports every component unsupported while drawing it. That is a
    * real defect — a surface lying about another surface — and it is not the canvas going blank.
    *
+   * Both halves of that were true when this test was written and the first is now fixed:
+   * m3-catalog#327 declares `canvas` for the twenty-four components the renderer has a case for, so
+   * the shelf reports what the builder actually draws and this assertion is `emptyList()` rather
+   * than the list of everything drawn.
+   *
    * The canvas gap that IS real belongs to the components this pair ADDS, and this test does not
-   * measure it: 110 published `m3/` ids, 24 with a case in the renderer, **86 falling to the `else`
+   * measure it: 108 published `m3/` ids, 24 with a case in the renderer, **84 falling to the `else`
    * branch** and drawing `UnsupportedComponentDiagnostic`. See yschimke/m3-catalog#324.
    *
    * The `code` differences are not losses and are asserted as such so they cannot quietly become
@@ -200,7 +208,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    * variants a hand-transcribed entry merged into one component.
    */
   @Test
-  fun `the published shelf reports no canvas adapter, and its calls are the frozen ones spelled out`() {
+  fun `the published shelf keeps a drawn component's canvas status, and spells its calls out`() {
     val composedById = composed.components.associateBy { it.componentId }
     val shared = frozen.components.filter { it.componentId in composedById }
 
@@ -211,13 +219,10 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         .filter { composedById.getValue(it).wasm.platformSupported == JsonPrimitive(false) }
         .sorted()
     assertEquals(
-      shared
-        .filter { it.wasm.platformSupported == JsonPrimitive(true) }
-        .map { it.componentId }
-        .sorted(),
+      emptyList(),
       lostCanvas,
-      "a drawn component kept its `wasm` status — if m3-catalog's policy started declaring " +
-        "`canvas`, this test is the one that should say so",
+      "a drawn component lost its `wasm` status — the shelf is reporting a component " +
+        "UNSUPPORTED that the builder draws, which is a surface lying about another surface",
     )
 
     for (component in shared) {
@@ -304,9 +309,49 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       val g = got[name] ?: continue
       check("properties[$name].jsonType", w.jsonType, g.jsonType)
       check("properties[$name].required", w.required, g.required)
-      check("properties[$name].allowedValues", w.allowedValues, g.allowedValues)
+      allowed(name, w, g)?.let { out += it }
     }
     return out
+  }
+
+  /**
+   * Properties whose allowed values are a GENERATED inventory rather than an authored enumeration.
+   * See [allowed].
+   */
+  private val generatedInventory = setOf("iconKey")
+
+  /**
+   * The one property field where equality is the wrong question: an **inventory**, not a choice.
+   *
+   * Every other allowed-value list on this shelf is an enumeration somebody authored —
+   * `m3/text`.`style`'s fifteen typography roles — and equality is exactly right for those: a value
+   * appearing or disappearing is a design decision, and it belongs in a diff.
+   *
+   * `m3/icon`.`iconKey` is not that. It is the Material icon set, generated, and the two sides are
+   * pinned independently: the frozen catalog is packaged in THIS repository, and the composed one
+   * is whatever m3-catalog last published. #710 exposed the complete inventory here while
+   * m3-catalog still ships the forty-six-icon hand-picked list, and equality then made this
+   * comparison red on a fact neither repository can act on from the other side — printing all
+   * 11,431 names into the failure, which is also how nobody reads it.
+   *
+   * The question worth asking survives the growth: **does the published catalog offer an icon the
+   * builder cannot draw?** That is containment. It is stable while the inventory grows, it fails on
+   * the thing that would actually break a design, and it names only the offending values.
+   */
+  private fun allowed(
+    name: String,
+    want: PropertyCapabilityV1,
+    got: PropertyCapabilityV1,
+  ): String? {
+    val field = "properties[$name].allowedValues"
+    if (name !in generatedInventory) {
+      return if (want.allowedValues == got.allowedValues) null
+      else "$field: frozen=${want.allowedValues} composed=${got.allowedValues}"
+    }
+    val undrawable = got.allowedValues.filterNot { it in want.allowedValues }
+    return if (undrawable.isEmpty()) null
+    else
+      "$field: composed offers ${undrawable.size} value(s) the frozen shelf does not: $undrawable"
   }
 
   /**
@@ -402,34 +447,55 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * Four components are on a shelf a person would not look on, and that is a decision, not a bug
-   * this test can make.
+   * What the catalog decided about the four components whose shelf nobody had chosen — and the one
+   * place that decision has not landed yet.
    *
    * One component is one SYMBOL, and a symbol several stickers draw is filed under whichever
-   * catalog id sorts first. Seven of those landed somewhere plainly wrong and m3-catalog now states
-   * the shelf outright — `Text` on Typography, `Switch` on Switch, `IconButton` and
-   * `FloatingActionButton` off Bottom app bar. These four are the remainder, and they are different
-   * in kind: the catalog has no section they belong to, so placing them means inventing a shelf
-   * rather than correcting a derivation. Pinned so the choice is visible in a diff and shortening
-   * this list is what fixing one looks like — m3-catalog#323.
+   * catalog id sorts first. Four survived every earlier correction because the catalog had no
+   * section they belonged to, so placing them meant inventing a shelf. m3-catalog#327 made all four
+   * calls: `Icons` and `Surfaces` are new headings for `m3/icon` and `m3/surface`, and the other
+   * two are **not components** — `Sticker` is the frame every preview is drawn inside and
+   * `MaterialExpressiveTheme` is the theme scope wrapping them, so both are `excluded` with the
+   * reason published.
+   *
+   * The exclusions take effect where it matters — neither is served, so neither can be placed in a
+   * design. They are still on the MENU, which is the generator writing a shelf entry for a
+   * component the consumer refuses to serve: a palette item that disappears on insert. Fixed in
+   * yschimke/compose-ai-tools#5378 and not yet released, and m3-catalog pins the released plugin —
+   * so this fixture captures the bug, and this test says so rather than leaving it unremarked. When
+   * the catalog bumps its plugin and the fixture is re-captured, the last assertion here fails and
+   * is deleted.
    */
   @Test
-  fun `the shelves nobody has chosen are the reviewed set`() {
-    val menu =
+  fun `an excluded component is not served, though the menu still lists it`() {
+    val semantics =
       json
         .parseToJsonElement(fixture("m3-catalog-generated-published-v1.json"))
         .jsonObject["statusSemantics"]!!
-        .jsonObject["componentMenu"]!!
-        .jsonObject["components"]!!
         .jsonObject
-    val actual =
-      UNDECIDED_SHELVES.keys.associateWith {
-        menu[it]?.jsonObject?.get("group")?.jsonPrimitive?.content
-      }
+    val excluded =
+      semantics["components"]!!
+        .jsonObject
+        .filterValues { component ->
+          component.jsonObject["excluded"].let { it != null && it !is JsonNull }
+        }
+        .keys
+        .sorted()
+    assertEquals(EXCLUDED, excluded, "the set of components the catalog excludes has changed")
+
+    val offered = composed.components.map { it.componentId }.toSet()
     assertEquals(
-      UNDECIDED_SHELVES,
-      actual,
-      "a component whose shelf nobody chose moved — if the catalog chose one, drop it from here",
+      emptyList(),
+      excluded.filter { it in offered },
+      "an excluded component is being served — the published reason says the catalog refuses it",
+    )
+
+    val menu = semantics["componentMenu"]!!.jsonObject["components"]!!.jsonObject
+    assertEquals(
+      EXCLUDED,
+      excluded.filter { it in menu },
+      "an excluded component left the menu — compose-ai-tools#5378 has reached this catalog, so " +
+        "delete this assertion rather than shortening it",
     )
   }
 
@@ -564,7 +630,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     }
 
     assertEquals(
-      110,
+      108,
       offered.size,
       "the number of published m3 components measured for export has changed",
     )
@@ -573,10 +639,139 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       refused.toMap(),
       "the set of published m3 components the generator cannot write has changed",
     )
+
+    // Every ALLOWED VALUE of every enumerated required property, not just the first.
+    //
+    // The loop above authors `authored(property)`, which takes `allowedValues.first()`. That is
+    // enough to ask whether a component exports at all and blind to the thing an enumeration is
+    // for: `m3/text-field` passed on `filled` while `outlined` refused, because the variant table
+    // spelled `TextFieldKt.OutlinedTextField` and Material declares that callable in
+    // `OutlinedTextFieldKt`. One wrong string, invisible to a measurement that only ever asked
+    // for the first value — the shelf advertised the variant as exportable and the server said
+    // `no component`. Raised by the review bot on #703 and true.
+    //
+    // Asserted as `emptyList()` rather than as a reviewed set: a component that exports on one
+    // value of a property and refuses on another is a defect every time, not a decision. It costs
+    // one more export per allowed value on the components that already export.
+    val variantRefusals = sortedMapOf<String, String>()
+    for (component in offered) {
+      if (component.componentId in M3_EXPORT_REFUSALS) continue
+      for (property in component.properties.filter { it.required }) {
+        val values =
+          property.allowedValues.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.drop(1)
+        for (value in values) {
+          val generated = executor.generate(screenAround(component, mapOf(property.name to value)))
+          if (generated is ScreenGeneratorComposeExportExecutor.Generated.Refused) {
+            variantRefusals["${component.componentId}.${property.name}=$value"] =
+              generated.reasons.first()
+          }
+        }
+      }
+    }
+    assertEquals(
+      emptyList(),
+      variantRefusals.keys.toList(),
+      "a component that exports on one allowed value refuses on another: $variantRefusals",
+    )
+
+    // The one component on this shelf whose properties reach a *state factory* rather than its
+    // own parameters, and the reason `M3_EXPORT_REFUSALS` is shorter than it was. Pinned as the
+    // emitted call, because "it no longer refuses" is also what a `TimePicker` that silently
+    // dropped the authored hour would look like.
+    val picker = offered.single { it.componentId == "m3/time-picker" }
+    val emitted = executor.generate(screenAround(picker))
+    assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(emitted)
+    assertContains(
+      emitted.source,
+      "TimePicker(state = rememberTimePickerState(initialHour = 1, initialMinute = 1, " +
+        "is24Hour = true))",
+      message = "a time picker's hour and minute reach `rememberTimePickerState`",
+    )
   }
 
-  /** A screen whose root IS [component], with every required property the shelf declares. */
-  private fun screenAround(component: ComponentCapabilityV1): DesignDocumentV1 =
+  /**
+   * The two things `BuilderTimePicker` does to a property before it reaches the state factory, and
+   * an export that skipped either would draw a different picture from the canvas that accepted it.
+   *
+   * `is24Hour` is OPTIONAL and the canvas defaults it to `true` (`UiBuilderRenderer`:
+   * `node.bool("is24Hour", true)`). Omitting the argument is not neutral — Material's own default
+   * is the device locale, so the same design is a 24-hour dial in the builder and a 12-hour one on
+   * a US phone. `hour` and `minute` are clamped there too (`coerceIn(0, 23)` / `coerceIn(0, 59)`),
+   * and the catalog validator only checks that a property is an integer, so 25 reaches here from an
+   * MCP client or an imported document and reaches Material as an hour it rejects at composition.
+   * Clamped rather than refused, because the builder already drew this design with the clamped
+   * value and the export that matches the picture is that one.
+   *
+   * Both raised by the review bot on #713 and both true.
+   */
+  @Test
+  fun `a time picker's state carries the canvas's default and its clamp`() {
+    val record =
+      json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-generated-record-v1.json"))
+    val executor =
+      ScreenGeneratorComposeExportExecutor(
+        { systemId ->
+          if (systemId == "m3-catalog") ComponentRecordSource.Lookup.Found(record)
+          else ComponentRecordSource.Lookup.Unconfigured
+        },
+        "generated.uibuilder",
+        publishedComponents = { systemId ->
+          if (systemId == "m3-catalog") composedRecords else emptyMap()
+        },
+      )
+    val picker = composed.components.single { it.componentId == "m3/time-picker" }
+
+    val out = screenAround(picker)
+    val subject = out.nodes.getValue("subject")
+    val outOfRange =
+      out.copy(
+        nodes =
+          linkedMapOf(
+            "subject" to
+              subject.copy(
+                properties =
+                  subject.properties +
+                    mapOf("hour" to IntegerValueV1(25), "minute" to IntegerValueV1(-1))
+              )
+          )
+      )
+    val clamped = executor.generate(outOfRange)
+    assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(clamped)
+    assertContains(
+      clamped.source,
+      "rememberTimePickerState(initialHour = 23, initialMinute = 0, is24Hour = true)",
+      message = "an hour outside 0..23 reaches Material clamped, as the canvas clamps it",
+    )
+
+    // And an authored `is24Hour` wins over the canvas's default rather than being overwritten by
+    // it — the default is a fallback, not a constant.
+    val twelveHour =
+      out.copy(
+        nodes =
+          linkedMapOf(
+            "subject" to
+              subject.copy(
+                properties = subject.properties + mapOf("is24Hour" to BooleanValueV1(false))
+              )
+          )
+      )
+    val authored = executor.generate(twelveHour)
+    assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(authored)
+    assertContains(
+      authored.source,
+      "is24Hour = false",
+      message = "an authored `is24Hour` is what reaches the state factory",
+    )
+  }
+
+  /**
+   * A screen whose root IS [component], with every required property the shelf declares — and,
+   * where [choose] names one, a specific value rather than the first allowed one.
+   */
+  private fun screenAround(
+    component: ComponentCapabilityV1,
+    choose: Map<String, String> = emptyMap(),
+  ): DesignDocumentV1 =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",
       id = "m3-export-parity",
@@ -613,7 +808,12 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
               id = "subject",
               componentId = component.componentId,
               properties =
-                component.properties.filter { it.required }.associate { it.name to authored(it) },
+                component.properties
+                  .filter { it.required }
+                  .associate { property ->
+                    property.name to
+                      (choose[property.name]?.let { EnumValueV1(it) } ?: authored(property))
+                  },
             )
         ),
     )
@@ -636,15 +836,26 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
   private companion object {
     /**
-     * The twenty-seven published m3 components the generator cannot write, each with its first
-     * reason. **Eighty-three export.** Teaching the generator one of these shortens the list, and
-     * the test above fails until it is shortened here.
+     * The twenty-six published m3 components the generator cannot write, each with its first
+     * reason. **Eighty-two of the hundred and eight export.** Teaching the generator one of these
+     * shortens the list, and the test above fails until it is shortened here.
      *
      * Twenty-five are discovery's own "no call site" judgement — a member of a `Defaults` object, a
      * scope receiver, type parameters, not public, or a required parameter of a type no design
-     * value becomes. Those are upstream API shapes rather than gaps here. The other two are ours:
-     * `m3/date-picker` and `m3/time-picker` declare a `mode` enum whose values nothing maps to
-     * Kotlin members.
+     * value becomes. Those are upstream API shapes rather than gaps here.
+     *
+     * The last one is ours: a property that configures the component's remembered STATE rather than
+     * its call. `m3/date-picker` declares `selectedDate`, which reaches
+     * `rememberDatePickerState(initialSelectedDateMillis = …)` — a date string where the factory
+     * wants a `Long`, and this projection has no vocabulary for that conversion. Its `mode` is the
+     * first reason recorded, but teaching `mode` alone would leave the date behind.
+     *
+     * `m3/time-picker` was here on the same grounds until `STATE_BUNDLES` learned it, and it is the
+     * worked precedent: `hour` and `minute` are now `rememberTimePickerState(initialHour = …,
+     * initialMinute = …)`, pinned by the test above. `mode` was a separate refusal until the
+     * variant table learned it: `dial` and `input` are `TimePicker` and `TimeInput`, two callables
+     * of identical shape, which is the `m3/progress-indicator` precedent the catalog's own note
+     * names.
      */
     val M3_EXPORT_REFUSALS =
       mapOf(
@@ -689,8 +900,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "no placeholder can be written for required parameter `directive: PaneScaffoldDirective`",
         "m3/thumb" to
           "a member of androidx.compose.material3.SliderDefaults, so a call site needs an instance of it",
-        "m3/time-picker" to
-          "node `subject`.`mode` is the enum value `dial`, and nothing maps this catalog property's values to Kotlin members",
         "m3/tonal-leading-button" to
           "a member of androidx.compose.material3.SplitButtonDefaults, so a call site needs an instance of it",
         "m3/tonal-trailing-button" to
@@ -819,7 +1028,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         "m3/linear-wavy-progress-indicator",
         "m3/list-detail-pane-scaffold",
         "m3/loading-indicator",
-        "m3/material-expressive-theme",
         "m3/medium-extended-floating-action-button",
         "m3/medium-floating-action-button",
         "m3/medium-top-app-bar",
@@ -848,7 +1056,6 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         "m3/small-floating-action-button",
         "m3/snackbar",
         "m3/split-button-layout",
-        "m3/sticker",
         "m3/suggestion-chip",
         "m3/supporting-pane-scaffold",
         "m3/text-button",
@@ -883,14 +1090,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         "m3/supporting-pane-scaffold" to "the same",
       )
 
-    /** Shelves the derivation chose and nobody confirmed; see the test above. */
-    val UNDECIDED_SHELVES =
-      mapOf(
-        "m3/icon" to "Bottom app bar",
-        "m3/material-expressive-theme" to "Badges",
-        "m3/sticker" to "Badges",
-        "m3/surface" to "Chips",
-      )
+    /** The components the catalog publishes a refusal for, rather than serving; see above. */
+    val EXCLUDED = listOf("m3/material-expressive-theme", "m3/sticker")
 
     /** Shelves the order names that no component is on today; see the test above. */
     val UNUSED_GROUPS = listOf("Bottom sheets", "Menus", "Shapes", "Side sheets", "Tooltips")
