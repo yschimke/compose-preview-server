@@ -5,6 +5,14 @@ The scope and operation census are in
 The runnable proof is in [experiments/remote-compose-poc](../../experiments/remote-compose-poc/README.md).
 This document tracks production implementation; it does not redefine completion around the proof.
 
+## Landing scope
+
+The current goal is to land the existing work behind a default-off compile-time flag, rather than
+continue extending operation coverage in this change. `-PuiBuilderRemoteCompose=true` enables the
+experimental authoring and export paths in the existing WASM app, server and MCP adapter. See the
+[build option and gated surfaces](../development/UI_BUILDER_FEATURE_FLAGS.md). The remaining production
+work below is future scope and is not a claim that the full authoring system is complete.
+
 ## Authoring boundary
 
 The visual editor focuses on layouts. Its tree remains a semantic hierarchy of components, layouts,

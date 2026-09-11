@@ -90,13 +90,15 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
           "Compose for a Wear screen.",
         revisionSchema,
       ),
-      tool(
-        "export_design",
-        "Export a committed design revision in a catalog-supported format. Read exportCapabilities " +
-          "from list_components first. JSON is editable Remote Compose source; RC is a compiled " +
-          "binary document. Inspect artifact diagnostics before using the content.",
-        """{"type":"object","properties":{"designId":{"type":"string"},"revision":{"type":"integer","minimum":0},"format":{"type":"string","enum":${JsonArray(ExportFormatV1.entries.map { JsonPrimitive(it.name.lowercase()) })}}},"required":["designId","revision","format"]}""",
-      ),
+      if (!McpBuildFeatures.remoteCompose) null
+      else
+        tool(
+          "export_design",
+          "Export a committed design revision in a catalog-supported format. Read exportCapabilities " +
+            "from list_components first. JSON is editable Remote Compose source; RC is a compiled " +
+            "binary document. Inspect artifact diagnostics before using the content.",
+          """{"type":"object","properties":{"designId":{"type":"string"},"revision":{"type":"integer","minimum":0},"format":{"type":"string","enum":${JsonArray(ExportFormatV1.entries.map { JsonPrimitive(it.name.lowercase()) })}}},"required":["designId","revision","format"]}""",
+        ),
       tool(
         "get_revision_diff",
         "Read durable UI-builder events after an exclusive sequence cursor.",
@@ -115,6 +117,8 @@ class UiBuilderMcpAdapter internal constructor(private val client: UiBuilderDesi
 
   /** Returns null when [name] is not owned by this adapter. */
   fun handle(name: String, args: JsonObject): CallToolResult? {
+    if (!McpBuildFeatures.remoteCompose && name in setOf("export_document", "export_design"))
+      return null
     if (name == "export_document" && suppliedDocumentFormats.isNotEmpty()) {
       return try {
         val document = json.decodeFromJsonElement<DesignDocumentV1>(args.required("document"))
@@ -441,7 +445,7 @@ private class JdkUiBuilderHttpTransport(baseUrl: String, private val token: Stri
 
 private val suppliedDocumentFormats =
   ExportFormatV1.entries
-    .filter { it.name == "JSON" || it.name == "RC" }
+    .filter { McpBuildFeatures.remoteCompose && (it.name == "JSON" || it.name == "RC") }
     .let { if (it.isEmpty()) it else it + ExportFormatV1.PNG }
 
 private fun UiBuilderRequestV1.requesterActorId(): String? =

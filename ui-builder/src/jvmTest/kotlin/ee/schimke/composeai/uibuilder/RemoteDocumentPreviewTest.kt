@@ -155,7 +155,9 @@ class RemoteDocumentPreviewTest {
           },
         )
       }
-      onNodeWithText("Compiled preview requested").assertExists()
+      if (UiBuilderBuildFeatures.remoteCompose)
+        onNodeWithText("Compiled preview requested").assertExists()
+      else onNodeWithText("Compiled preview requested").assertDoesNotExist()
       assertNotNull(inspection?.nodes?.firstOrNull { it.nodeId == "choice" }?.bounds)
     }
 

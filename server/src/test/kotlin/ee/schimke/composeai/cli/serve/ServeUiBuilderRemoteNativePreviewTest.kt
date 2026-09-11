@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import java.nio.file.Files
@@ -8,6 +9,14 @@ import kotlin.test.*
 import kotlinx.serialization.json.Json
 
 class ServeUiBuilderRemoteNativePreviewTest {
+  @org.junit.jupiter.api.BeforeEach
+  fun requireExperimentalBuild() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+  }
+
   private val document =
     Json.decodeFromString<DesignDocumentV1>(
         Files.readString(

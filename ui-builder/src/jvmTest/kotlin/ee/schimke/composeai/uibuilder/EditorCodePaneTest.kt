@@ -47,6 +47,10 @@ class EditorCodePaneTest {
 
   @Test
   fun `a Remote catalog shows source for a plain layout root`() {
+    org.junit.Assume.assumeTrue(
+      "Enable with -PuiBuilderRemoteCompose=true",
+      UiBuilderBuildFeatures.remoteCompose,
+    )
     val remoteCatalog =
       catalog.copy(
         statusSemantics =
@@ -74,6 +78,10 @@ class EditorCodePaneTest {
 
   @Test
   fun `the existing code pane uses production bound callback factories`() {
+    org.junit.Assume.assumeTrue(
+      "Enable with -PuiBuilderRemoteCompose=true",
+      UiBuilderBuildFeatures.remoteCompose,
+    )
     val remoteCatalog =
       catalog.copy(
         statusSemantics =

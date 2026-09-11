@@ -100,29 +100,18 @@ class ServeUiBuilderSharedComponentIntegrationTest {
         )
         .artifact
 
-    // KNOWN GAP, asserted rather than hidden: the **served** export cannot yet write a placement.
-    //
-    // Two exporters read a design. `CapabilityComposeCodeExporter` — the editor's lane, which the
-    // Issues panel and `ComponentPlacementTest` exercise — emits a function per component and a
-    // call per placement. `ScreenGenerator`, the record-driven lane this server actually serves
-    // `ExportDesignRequestV1` from, has no emitter for `design/component-instance` at all: there
-    // is not one mention of it anywhere in `ui-builder-export`. So it refuses the node as a
-    // component missing from the catalog, which is true and beside the point — a placement is a
-    // document construct and no catalog declares one.
-    //
-    // Everything before this point works: the library published the symbol, the service accepted
-    // the design that imported it, and the export gate passed it. Only the last hop is missing.
-    //
-    // This assertion is deliberately the shape of the defect, so it fails the day the lane learns
-    // to emit a placement. Whoever does that should invert it to `assertEquals(emptyList(), …)`
-    // and assert the generated function and its call sites instead.
-    assertEquals(
-      listOf("UNPROVEN_CALL_SITE"),
-      artifact.diagnostics.map { it.code },
-      "if this is now empty, the served export learned to write placements — invert the assertion",
+    // Storage accepts the published symbol's human-readable name. Source generation must still
+    // explain why it cannot export it: the released generator lacks reusable functions, the
+    // default build disables them, or an enabled generator rejects "Contribution cell" as Kotlin.
+    val diagnostic = artifact.diagnostics.single()
+    assertTrue(
+      diagnostic.code in setOf("UNEXPRESSIBLE_DOCUMENT", "UNPROVEN_CALL_SITE"),
+      artifact.diagnostics.toString(),
     )
     assertTrue(
-      artifact.diagnostics.single().message.contains("design/component-instance"),
+      listOf("shared generator support", "disabled in this build", "Contribution cell").any {
+        it in diagnostic.message
+      },
       artifact.diagnostics.toString(),
     )
   }

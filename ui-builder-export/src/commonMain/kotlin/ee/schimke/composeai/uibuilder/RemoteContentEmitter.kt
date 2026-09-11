@@ -352,6 +352,13 @@ internal class RemoteContentEmitter(
           refusals += "nodes.$nodeId: missing node"
           return emptyList()
         }
+    if (
+      !UiBuilderBuildFeatures.remoteCompose &&
+        (SHOW_BY_STATE in node.properties || node.componentId == "layout/for-each")
+    ) {
+      refusals += "nodes.$nodeId: Remote Compose authoring is disabled in this build"
+      return emptyList()
+    }
     validatePropertyBindings(node)
     node.component?.let { placement ->
       return placement(node, placement, depth)
@@ -955,6 +962,11 @@ internal class RemoteContentEmitter(
       val action = element as? JsonObject ?: return@forEachIndexed
       val value = action["value"] as? JsonObject ?: return@forEachIndexed
       if (value.plainString("type") != "binding") return@forEachIndexed
+      if (!UiBuilderBuildFeatures.remoteCompose) {
+        refusals +=
+          "nodes.${node.id}.eventBindings.$event[$index]: bound actions are disabled in this build"
+        return null
+      }
       val where = "nodes.${node.id}.eventBindings.$event[$index].value"
       val variable = action.plainString("variable")
       val kind = (document.stateVariables[variable] as? JsonObject)?.plainString("valueType")

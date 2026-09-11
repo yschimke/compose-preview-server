@@ -5,6 +5,7 @@ package ee.schimke.composeai.uibuilder.service
 import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
 import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
 import ee.schimke.composeai.uibuilder.STATE_SELECTION_CONTAINER
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.inspectUiBuilderArgumentBindings
 import ee.schimke.composeai.uibuilder.propertyMatches
 import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
@@ -271,7 +272,11 @@ public class CurrentM3UiBuilderCatalogExecutor(
           .copy(
             components =
               catalog.components.map { component ->
-                if (
+                if (!UiBuilderBuildFeatures.remoteCompose)
+                  component.copy(
+                    properties = component.properties.filterNot { it.name == SHOW_BY_STATE }
+                  )
+                else if (
                   component.componentId != STATE_SELECTION_CONTAINER ||
                     component.properties.any { it.name == SHOW_BY_STATE }
                 )

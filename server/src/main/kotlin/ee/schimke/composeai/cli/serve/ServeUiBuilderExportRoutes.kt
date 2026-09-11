@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
@@ -73,8 +74,10 @@ internal fun Route.installUiBuilderLiveExportRoutes(
   get(UI_BUILDER_EXPORT_SVG_PATH) {
     call.serveLiveExport(service, authorization, ExportFormatV1.SVG)
   }
-  post("/api/ui-builder/v1/documents/export.png") {
-    call.serveSuppliedDocument(service, authorization, ExportFormatV1.PNG)
+  if (UiBuilderBuildFeatures.remoteCompose) {
+    post("/api/ui-builder/v1/documents/export.png") {
+      call.serveSuppliedDocument(service, authorization, ExportFormatV1.PNG)
+    }
   }
   RemoteDocumentExportSupport.formats.forEach { format ->
     post("/api/ui-builder/v1/documents/export.${format.name.lowercase()}") {

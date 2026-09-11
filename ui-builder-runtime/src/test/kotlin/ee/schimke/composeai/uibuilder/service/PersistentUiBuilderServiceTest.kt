@@ -1,5 +1,6 @@
 package ee.schimke.composeai.uibuilder.service
 
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.*
 import java.io.Closeable
 import java.nio.file.Files
@@ -41,6 +42,22 @@ class PersistentUiBuilderServiceTest {
   private val owner = AuthenticatedUiBuilderActor("owner")
   private val viewer = AuthenticatedUiBuilderActor("viewer")
   private val outsider = AuthenticatedUiBuilderActor("outsider")
+
+  @Test
+  fun `disabled supplied document requests never reach an exporter`() {
+    if (UiBuilderBuildFeatures.remoteCompose) return
+    val requests = mutableListOf<RevisionPinnedUiBuilderExport>()
+    val service = service(exportRequests = requests)
+    for (format in listOf(ExportFormatV1.PNG, ExportFormatV1.JSON, ExportFormatV1.RC)) {
+      val result =
+        assertIs<UiBuilderServiceResponse.Error>(
+          execute(service, owner, UiBuilderServiceRequest.ExportDocument(document(), format))
+        )
+      assertEquals(ServiceErrorCodeV1.BAD_REQUEST, result.error.code)
+      assertContains(result.error.message, "disabled in this build")
+    }
+    assertTrue(requests.isEmpty())
+  }
 
   @Test
   fun `detached component bodies persist once while several instances reference them`() {

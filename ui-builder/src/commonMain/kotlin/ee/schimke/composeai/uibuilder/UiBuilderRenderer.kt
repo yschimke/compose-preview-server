@@ -935,7 +935,7 @@ private fun RenderNode(
     "layout/box" ->
       Box(measured) {
         val children =
-          if (SHOW_BY_STATE in node.properties)
+          if (UiBuilderBuildFeatures.remoteCompose && SHOW_BY_STATE in node.properties)
             listOfNotNull(node.stateSelection()?.selectedNode(state, document.stateVariables))
           else slot("children")
         children.forEach { id ->
@@ -3207,9 +3207,21 @@ internal fun uiBuilderStateWrite(
   action: JsonObject,
   state: Map<String, String?>,
 ): Pair<String, String?>? {
-  val variable = action.optionalString("variable") ?: return null
-  val value = action["value"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
-  return when (action.optionalString("type")) {
+  val variable =
+    (action["variable"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull ?: return null
+  val kind = (action["type"] as? JsonPrimitive)?.contentOrNull
+  // An imported experimental document may contain a binding the current preview cannot resolve.
+  // Preserve the current state for that action; neither crash nor turn an unresolved value into
+  // null.
+  val operand = action["value"]
+  if (
+    kind in setOf("set", "select", "setText", "selectOrClear") &&
+      operand != null &&
+      operand !is JsonPrimitive
+  )
+    return null
+  val value = (operand as? JsonPrimitive)?.contentOrNull
+  return when (kind) {
     "select",
     "setText",
     // `set` is the protocol's own name for an assignment and behaves exactly as `select` does:

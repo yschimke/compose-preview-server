@@ -151,6 +151,6 @@ fun exportFormatsFor(
 ): List<EditorExportFormat> = buildList {
   if (svg) add(EditorExportFormat.Svg)
   if (png) add(EditorExportFormat.Png)
-  if (json) add(EditorExportFormat.Json)
-  if (rc) add(EditorExportFormat.Rc)
+  if (UiBuilderBuildFeatures.remoteCompose && json) add(EditorExportFormat.Json)
+  if (UiBuilderBuildFeatures.remoteCompose && rc) add(EditorExportFormat.Rc)
 }

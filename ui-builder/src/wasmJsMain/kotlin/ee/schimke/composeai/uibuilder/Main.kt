@@ -799,14 +799,17 @@ private fun LiveSessionApp(
           suppliedDocument = {
             val current = latestEditorDocument ?: document
             current?.takeIf {
-              config.localStorage ||
-                (revision == null && authoritativeDocument?.toUiBuilderDocument() != it)
+              UiBuilderBuildFeatures.remoteCompose &&
+                (config.localStorage ||
+                  (revision == null && authoritativeDocument?.toUiBuilderDocument() != it))
             }
           },
           formats =
             exportFormatsFor(
               svg = !config.localStorage && capability.exportCapabilities.svg,
-              png = capability.exportCapabilities.png,
+              png =
+                capability.exportCapabilities.png &&
+                  (!config.localStorage || UiBuilderBuildFeatures.remoteCompose),
               json =
                 RemoteDocumentExportSupport.jsonFormat?.let {
                   RemoteDocumentExportSupport.supports(capability.exportCapabilities, it)

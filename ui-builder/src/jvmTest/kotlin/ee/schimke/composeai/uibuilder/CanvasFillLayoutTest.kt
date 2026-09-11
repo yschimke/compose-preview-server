@@ -42,6 +42,10 @@ class CanvasFillLayoutTest {
   @Test
   fun `preview clicks unroll a long list and restore the fill branch without editing the document`() =
     runDesktopComposeUiTest(width = 1200, height = 1200) {
+      org.junit.Assume.assumeTrue(
+        "Enable with -PuiBuilderRemoteCompose=true",
+        UiBuilderBuildFeatures.remoteCompose,
+      )
       val saved = sample(1f)
       fun setPage(value: Int) =
         Json.parseToJsonElement("""{"click":[{"type":"set","variable":"page","value":$value}]}""")
@@ -99,6 +103,10 @@ class CanvasFillLayoutTest {
   @Test
   fun `selecting a shorter branch shrinks the extent back to the frame`() =
     runDesktopComposeUiTest(width = 1200, height = 1200) {
+      org.junit.Assume.assumeTrue(
+        "Enable with -PuiBuilderRemoteCompose=true",
+        UiBuilderBuildFeatures.remoteCompose,
+      )
       val saved = sample(1f)
       val tallBranch =
         saved.nodes

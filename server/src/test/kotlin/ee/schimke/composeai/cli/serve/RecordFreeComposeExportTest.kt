@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.helloWidgetUiBuilderDocument
@@ -193,6 +194,10 @@ class RecordFreeComposeExportTest {
 
   @Test
   fun `an arbitrary Remote catalog exports ordinary roots using its declared platform`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
     val original =
       json.decodeFromString<DesignDocumentV1>(
         java.io
@@ -373,6 +378,10 @@ class RecordFreeComposeExportTest {
 
   @Test
   fun `bound row callbacks reach the revision pinned service export unchanged`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
     val document =
       json.decodeFromString<UiBuilderDocument>(
         java.io.File("../experiments/remote-state-selection/bound-actions.document.json").readText()

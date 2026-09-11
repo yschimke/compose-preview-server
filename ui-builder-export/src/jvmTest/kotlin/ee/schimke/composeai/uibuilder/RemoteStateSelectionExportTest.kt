@@ -10,6 +10,14 @@ import kotlinx.serialization.json.*
 
 /** The Android proof consumes these exact production exports, never a hand-written equivalent. */
 class RemoteStateSelectionExportTest {
+  @kotlin.test.BeforeTest
+  fun requireExperimentalBuild() {
+    org.junit.Assume.assumeTrue(
+      "Enable with -PuiBuilderRemoteCompose=true",
+      UiBuilderBuildFeatures.remoteCompose,
+    )
+  }
+
   private fun document(
     kind: String,
     values: List<JsonPrimitive>,

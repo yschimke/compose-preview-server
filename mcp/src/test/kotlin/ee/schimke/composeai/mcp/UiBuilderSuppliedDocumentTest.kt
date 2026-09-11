@@ -16,6 +16,14 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class UiBuilderSuppliedDocumentTest {
+  @org.junit.Before
+  fun requireExperimentalBuild() {
+    org.junit.Assume.assumeTrue(
+      "Enable with -PuiBuilderRemoteCompose=true",
+      McpBuildFeatures.remoteCompose,
+    )
+  }
+
   @Test
   fun `real HTTP transport sends unsaved content and preserves all compiler diagnostics`() {
     assumeTrue(formats.isNotEmpty())

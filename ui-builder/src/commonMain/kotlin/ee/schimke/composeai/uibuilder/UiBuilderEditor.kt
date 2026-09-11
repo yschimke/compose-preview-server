@@ -1173,7 +1173,7 @@ fun UiBuilderEditor(
       state.document.variantPanes(devicePresets, state.variantAxes)
     }
   val livePreview: @Composable (Modifier) -> Unit = { modifier ->
-    if (onRequestDocumentPreview != null) {
+    if (UiBuilderBuildFeatures.remoteCompose && onRequestDocumentPreview != null) {
       RemoteDocumentPreviewPane(
         document = state.document,
         authoritativeGeneration = authoritativeGeneration,
@@ -6527,8 +6527,10 @@ private fun InspectorBody(
       // section joined them below. A tab that silently clips its last control is worse than one
       // that scrolls.
       Column(Modifier.verticalScroll(rememberScrollState())) {
-        StateVariablesInspector(state.document, onTextInputFocusChanged, dispatch)
-        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        if (UiBuilderBuildFeatures.remoteCompose) {
+          StateVariablesInspector(state.document, onTextInputFocusChanged, dispatch)
+          HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        }
         ScreenEnvironmentInspector(
           document = state.document,
           devicePresets = devicePresets,
@@ -6721,84 +6723,115 @@ private fun InspectorBody(
         }
       }
       if (
-        node.componentId == STATE_SELECTION_CONTAINER && fields.any { it.name == SHOW_BY_STATE }
+        UiBuilderBuildFeatures.remoteCompose &&
+          node.componentId == STATE_SELECTION_CONTAINER &&
+          fields.any { it.name == SHOW_BY_STATE }
       ) {
         item { StateSelectionInspector(state.document, node, onTextInputFocusChanged, dispatch) }
       }
-      if (node.componentId in COMPOSE_EMITTED_CLICK_COMPONENTS || node.eventBindings.isNotEmpty()) {
+      if (
+        UiBuilderBuildFeatures.remoteCompose &&
+          (node.componentId in COMPOSE_EMITTED_CLICK_COMPONENTS || node.eventBindings.isNotEmpty())
+      ) {
         item { EventActionsInspector(state.document, node, onTextInputFocusChanged, dispatch) }
       }
-      if (node.modifiers.isNotEmpty() || modifierToggles.isNotEmpty()) {
-        item {
-          HorizontalDivider(Modifier.padding(vertical = 12.dp))
-          Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Layout", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-            var addModifier by remember(node.id) { mutableStateOf(false) }
-            val available = modifierToggles.filterNot { it.applied }
-            Box {
-              TextButton(onClick = { addModifier = true }, enabled = available.isNotEmpty()) {
-                Text("Add modifier")
-              }
-              DropdownMenu(expanded = addModifier, onDismissRequest = { addModifier = false }) {
-                available.forEach { item ->
-                  DropdownMenuItem(
-                    text = { Text(item.label) },
-                    onClick = {
-                      addModifier = false
-                      dispatch(UiBuilderEditorEvent.ToggleModifier(node.id, item.type))
-                    },
-                  )
+      if (UiBuilderBuildFeatures.remoteCompose) {
+        if (node.modifiers.isNotEmpty() || modifierToggles.isNotEmpty()) {
+          item {
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+              Text("Layout", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+              var addModifier by remember(node.id) { mutableStateOf(false) }
+              val available = modifierToggles.filterNot { it.applied }
+              Box {
+                TextButton(onClick = { addModifier = true }, enabled = available.isNotEmpty()) {
+                  Text("Add modifier")
+                }
+                DropdownMenu(expanded = addModifier, onDismissRequest = { addModifier = false }) {
+                  available.forEach { item ->
+                    DropdownMenuItem(
+                      text = { Text(item.label) },
+                      onClick = {
+                        addModifier = false
+                        dispatch(UiBuilderEditorEvent.ToggleModifier(node.id, item.type))
+                      },
+                    )
+                  }
                 }
               }
             }
           }
-        }
-        itemsIndexed(node.modifiers) { index, modifier ->
-          val type = (modifier as? JsonObject)?.get("type")?.jsonPrimitive?.content.orEmpty()
-          val editable = modifierFields.filter { it.index == index }
-          val label =
-            modifierToggles
-              .firstOrNull { it.type == type }
-              ?.label
-              ?.removePrefix("Add ")
-              ?.replaceFirstChar { it.uppercase() }
-              ?: type.replace(Regex("([a-z])([A-Z])"), "$1 $2").replaceFirstChar { it.uppercase() }
-          Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium)
-            editable.forEach { field ->
-              key(node.id, index, field.field) {
-                HoverEditorRow(
-                  label = field.label,
-                  value = field.value,
-                  control =
-                    if (field.choices.isEmpty()) EditorPropertyControl.Number
-                    else EditorPropertyControl.Enum,
-                  choices = field.choices,
-                  focused = false,
-                  onFocusHandled = {},
-                  onTextInputFocusChanged = onTextInputFocusChanged,
-                ) { value ->
-                  dispatch(
-                    UiBuilderEditorEvent.SetModifierValue(
-                      node.id,
-                      field.type,
-                      field.field,
-                      value,
-                      index,
+          itemsIndexed(node.modifiers) { index, modifier ->
+            val type = (modifier as? JsonObject)?.get("type")?.jsonPrimitive?.content.orEmpty()
+            val editable = modifierFields.filter { it.index == index }
+            val label =
+              modifierToggles
+                .firstOrNull { it.type == type }
+                ?.label
+                ?.removePrefix("Add ")
+                ?.replaceFirstChar { it.uppercase() }
+                ?: type.replace(Regex("([a-z])([A-Z])"), "$1 $2").replaceFirstChar {
+                  it.uppercase()
+                }
+            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+              Text(label, style = MaterialTheme.typography.labelMedium)
+              editable.forEach { field ->
+                key(node.id, index, field.field) {
+                  HoverEditorRow(
+                    label = field.label,
+                    value = field.value,
+                    control =
+                      if (field.choices.isEmpty()) EditorPropertyControl.Number
+                      else EditorPropertyControl.Enum,
+                    choices = field.choices,
+                    focused = false,
+                    onFocusHandled = {},
+                    onTextInputFocusChanged = onTextInputFocusChanged,
+                  ) { value ->
+                    dispatch(
+                      UiBuilderEditorEvent.SetModifierValue(
+                        node.id,
+                        field.type,
+                        field.field,
+                        value,
+                        index,
+                      )
                     )
-                  )
+                  }
                 }
               }
+              if (editable.isEmpty() && type !in modifierToggles.map { it.type }) {
+                Text(
+                  modifier.toString(),
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  maxLines = 3,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
             }
-            if (editable.isEmpty() && type !in modifierToggles.map { it.type }) {
-              Text(
-                modifier.toString(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-              )
-            }
+          }
+        }
+      } else {
+        if (node.modifiers.isNotEmpty()) {
+          item {
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            Text("Modifiers", style = MaterialTheme.typography.labelLarge)
+            Text(
+              "Shown from the document. Modifier parameter editing waits for an authoritative modifier operation.",
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.labelSmall,
+            )
+          }
+          itemsIndexed(node.modifiers) { _, modifier ->
+            Text(
+              modifier.toString(),
+              Modifier.padding(top = 6.dp),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+              maxLines = 3,
+              overflow = TextOverflow.Ellipsis,
+            )
           }
         }
       }

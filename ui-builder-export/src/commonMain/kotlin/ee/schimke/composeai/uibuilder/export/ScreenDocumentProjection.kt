@@ -8,6 +8,7 @@ import ee.schimke.composeai.discovery.ScreenState
 import ee.schimke.composeai.discovery.ScreenValue
 import ee.schimke.composeai.discovery.SlotItem
 import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.cardContentFill
 import ee.schimke.composeai.uibuilder.exportedStateIdentifier
 import ee.schimke.composeai.uibuilder.protocol.AdaptiveGridValueV1
@@ -255,6 +256,23 @@ object ScreenDocumentProjection {
     val root = pass.node(roots.single())
     val projected = root?.let {
       pass.finish(ScreenDocument(screenName, it, pass.state.values.toList()))
+    }
+    if (pass.reasons.isNotEmpty()) return Outcome.Refused(pass.reasons.distinct())
+    if (!UiBuilderBuildFeatures.remoteCompose) {
+      document.nodes.values
+        .filter {
+          SHOW_BY_STATE in it.properties ||
+            it.componentId == "layout/for-each" ||
+            it.component != null ||
+            it.eventBindings.isNotEmpty() ||
+            it.properties.values.any { value ->
+              value is StateValueV1 || value is StateEqualsValueV1
+            }
+        }
+        .forEach {
+          pass.reasons +=
+            "node `${it.id}`: stateful authoring and reusable source export are disabled in this build"
+        }
     }
     if (pass.reasons.isNotEmpty()) return Outcome.Refused(pass.reasons.distinct())
     return Outcome.Projected(

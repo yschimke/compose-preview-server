@@ -34,7 +34,10 @@ object RecordFreeExport {
     generate(document, packageName, packComponents = packComponents, assets = assets)?.let {
       return it
     }
-    if (platform != UiBuilderCatalogPlatform.REMOTE_COMPOSE) return null
+    if (
+      !UiBuilderBuildFeatures.remoteCompose || platform != UiBuilderCatalogPlatform.REMOTE_COMPOSE
+    )
+      return null
     return when (
       val result =
         InlineRemoteContentExporter.exportRoots(document, packageName, packComponents, assets)
@@ -81,7 +84,8 @@ object RecordFreeExport {
   }
 
   fun applies(document: DesignDocumentV1, platform: UiBuilderCatalogPlatform): Boolean =
-    platform == UiBuilderCatalogPlatform.REMOTE_COMPOSE || document.isRecordFree()
+    (UiBuilderBuildFeatures.remoteCompose && platform == UiBuilderCatalogPlatform.REMOTE_COMPOSE) ||
+      document.isRecordFree()
 
   /**
    * The catalog system ids whose designs export without a component record.

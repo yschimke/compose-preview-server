@@ -92,7 +92,7 @@ class UiBuilderStreamableHttpTest {
         .map { it.jsonObject.getValue("name").jsonPrimitive.content }
     assertThat(toolNames)
       .containsExactlyElementsIn(
-        listOf(
+        listOfNotNull(
           "create_design",
           "open_design",
           "list_components",
@@ -100,10 +100,11 @@ class UiBuilderStreamableHttpTest {
           "render_design",
           "export_svg",
           "export_compose",
-          "export_design",
+          "export_design".takeIf { McpBuildFeatures.remoteCompose },
           "get_revision_diff",
         ) +
-          if (ExportFormatV1.entries.any { it.name == "RC" }) listOf("export_document")
+          if (McpBuildFeatures.remoteCompose && ExportFormatV1.entries.any { it.name == "RC" })
+            listOf("export_document")
           else emptyList()
       )
       .inOrder()

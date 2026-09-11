@@ -6,6 +6,7 @@ import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
@@ -339,7 +340,9 @@ internal class ScreenGeneratorComposeExportExecutor(
     }
     val platform = catalogPlatform(document.catalogPin.systemId)
     if (
-      !RecordFreeExport.applies(document) && platform == UiBuilderCatalogPlatform.REMOTE_COMPOSE
+      UiBuilderBuildFeatures.remoteCompose &&
+        !RecordFreeExport.applies(document) &&
+        platform == UiBuilderCatalogPlatform.REMOTE_COMPOSE
     ) {
       val packs =
         when (val resolved = packRecordsFor(document)) {

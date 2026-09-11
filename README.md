@@ -103,6 +103,10 @@ iframe and receive measured node/slot geometry without placing editor overlays i
 The distribution consumes the frontend through the immutable `:ui-builder-web` archive variant;
 it no longer reaches into the frontend project's tasks or output directory.
 
+The Remote Compose authoring extension is behind the default-off compile-time option
+`-PuiBuilderRemoteCompose=true`. Build the server and WASM frontend together with that option;
+see [feature scope and verification](docs/development/UI_BUILDER_FEATURE_FLAGS.md).
+
 ## Remote catalog MCP
 
 The server can expose every hosted catalog through one aggregate Streamable HTTP MCP endpoint at

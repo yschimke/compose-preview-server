@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
@@ -236,6 +237,10 @@ class ServeUiBuilderMcpIntegrationTest {
 
   @Test
   fun `an agent wires a button and exports its state and ordered handler over MCP`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
     val server =
       start(recordFile = File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
     val initial = document()
@@ -299,6 +304,10 @@ class ServeUiBuilderMcpIntegrationTest {
 
   @Test
   fun `MCP exports stateful layout clicks as ordinary Compose modifiers`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
     val server =
       start(recordFile = File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
     val doc =
@@ -344,6 +353,10 @@ class ServeUiBuilderMcpIntegrationTest {
 
   @Test
   fun `MCP compiles unsaved document content without creating a design`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
     val format = ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.documentFormat
     if (System.getenv("VERIFY_REMOTE_DOCUMENT_EXPORTS") == "true") assertNotNull(format)
     org.junit.jupiter.api.Assumptions.assumeTrue(format != null)
@@ -379,6 +392,10 @@ class ServeUiBuilderMcpIntegrationTest {
 
   @Test
   fun `MCP exports ordinary Remote roots without a component record or widget wrapper`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
     val server = start(recordFile = null, catalogSystemId = "remote-m3")
     val doc =
       json.decodeFromString<DesignDocumentV1>(
@@ -430,6 +447,10 @@ class ServeUiBuilderMcpIntegrationTest {
 
   @Test
   fun `MCP discovers and authors the same state selection as the inspector`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
     val server = start()
     val original = document()
     val doc =

@@ -11,6 +11,14 @@ import kotlinx.serialization.json.*
 
 /** Real shared exports: also consumed by the compiled desktop interaction proof. */
 class ScopedComposeProjectionTest {
+  @kotlin.test.BeforeTest
+  fun requireExperimentalBuild() {
+    org.junit.Assume.assumeTrue(
+      "Enable with -PuiBuilderRemoteCompose=true",
+      UiBuilderBuildFeatures.remoteCompose,
+    )
+  }
+
   private val scopedGeneratorAvailable = runCatching {
     Json.decodeFromString<ee.schimke.composeai.discovery.ScreenDocument>(
       """{"name":"Probe","functions":[],"root":{"componentId":"","repetition":{"fields":{},"rows":[]}}}"""

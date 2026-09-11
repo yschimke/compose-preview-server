@@ -44,7 +44,10 @@ group = "ee.schimke.composeai"
 // the project name would get `mcp`.
 val publishedArtifactId = "compose-preview-mcp"
 
-kotlin { jvmToolchain(libs.versions.java.server.get().toInt()) }
+kotlin {
+  jvmToolchain(libs.versions.java.server.get().toInt())
+  sourceSets.named("main") { kotlin.srcDir(rootProject.tasks.named("generateMcpBuildFeatures")) }
+}
 
 ktfmt { googleStyle() }
 

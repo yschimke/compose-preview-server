@@ -5,6 +5,14 @@ import kotlin.test.*
 import kotlinx.serialization.json.*
 
 class RemoteScopedSourceExportTest {
+  @kotlin.test.BeforeTest
+  fun requireExperimentalBuild() {
+    org.junit.Assume.assumeTrue(
+      "Enable with -PuiBuilderRemoteCompose=true",
+      UiBuilderBuildFeatures.remoteCompose,
+    )
+  }
+
   private val root =
     generateSequence(File(".").absoluteFile) { it.parentFile }
       .first {

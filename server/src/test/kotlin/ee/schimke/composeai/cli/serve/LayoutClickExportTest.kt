@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.*
 import java.io.File
@@ -8,6 +9,14 @@ import kotlin.test.*
 import kotlinx.serialization.json.Json
 
 class LayoutClickExportTest {
+  @org.junit.jupiter.api.BeforeEach
+  fun requireExperimentalBuild() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+  }
+
   private val json = Json { ignoreUnknownKeys = true }
   private val record =
     json.decodeFromString<ComponentRecordFile>(

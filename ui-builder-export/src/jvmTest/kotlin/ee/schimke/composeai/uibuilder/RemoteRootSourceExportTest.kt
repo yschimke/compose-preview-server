@@ -6,6 +6,14 @@ import kotlin.test.*
 import kotlinx.serialization.json.*
 
 class RemoteRootSourceExportTest {
+  @kotlin.test.BeforeTest
+  fun requireExperimentalBuild() {
+    org.junit.Assume.assumeTrue(
+      "Enable with -PuiBuilderRemoteCompose=true",
+      UiBuilderBuildFeatures.remoteCompose,
+    )
+  }
+
   private val json = Json { ignoreUnknownKeys = true }
 
   private fun document() =

@@ -3,6 +3,7 @@
 package ee.schimke.composeai.uibuilder.service
 
 import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.*
 import java.io.Closeable
 import java.io.IOException
@@ -1704,6 +1705,8 @@ public class PersistentUiBuilderService(
     val document = request.document
     fun invalid(message: String) =
       UiBuilderServiceResponse.Error(UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, message))
+    if (!UiBuilderBuildFeatures.remoteCompose)
+      return invalid("Remote Compose authoring is disabled in this build")
     if (
       request.format != ExportFormatV1.PNG && request.format !in RemoteDocumentExportSupport.formats
     ) {
@@ -4295,8 +4298,8 @@ private fun CatalogCapabilityV1.supports(format: ExportFormatV1): Boolean =
     // and no catalog here sets either, so both are refused at this gate until something can write
     // one. Wired rather than folded into an `else`, so the next format added still fails this
     // compile instead of silently reading as unsupported — which is what this `when` is for.
-    ExportFormatV1.JSON -> exportCapabilities.remoteJson
-    ExportFormatV1.RC -> exportCapabilities.remoteDocument
+    ExportFormatV1.JSON -> UiBuilderBuildFeatures.remoteCompose && exportCapabilities.remoteJson
+    ExportFormatV1.RC -> UiBuilderBuildFeatures.remoteCompose && exportCapabilities.remoteDocument
   }
 
 private data class EnvironmentValidationIssue(

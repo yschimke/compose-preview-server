@@ -16,6 +16,7 @@ import ee.schimke.composeai.render.session.RenderSessionFactory
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.RecordFreeExport
 import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -2652,8 +2653,11 @@ public class ServeRunner(
     // must be handed the SAME one: a published catalog does not go through the executor's
     // `baseCatalog` copy, so a hardcoded value here would have made every published catalog
     // advertise no SVG or PNG export on a host whose renderer supports both.
-    val documentExporter = RemoteDocumentExportExecutor(pictureExporter)
-    val exporter = RemotePngExportExecutor(documentExporter, renderer)
+    val documentExporter =
+      if (UiBuilderBuildFeatures.remoteCompose) RemoteDocumentExportExecutor(pictureExporter)
+      else null
+    val exporter =
+      documentExporter?.let { RemotePngExportExecutor(it, renderer) } ?: pictureExporter
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
           ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
@@ -2666,7 +2670,7 @@ public class ServeRunner(
       RemoteDocumentExportSupport.capabilities(
         pictureExports,
         json = true,
-        document = documentExporter.supportsBinary,
+        document = documentExporter?.supportsBinary == true,
       )
     val publishedCatalogs = mutableMapOf<String, CatalogCapabilityV1>()
     // Which catalogs the operator lets read their own published file. Null is "every enabled one",
@@ -2783,9 +2787,10 @@ public class ServeRunner(
         composeExportFor = { systemId ->
           systemId in uiBuilderComponents.keys ||
             systemId in RecordFreeExport.CATALOG_SYSTEM_IDS ||
-            publishedCatalogs[systemId]?.statusSemantics?.let {
-              UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.REMOTE_COMPOSE
-            } == true
+            (UiBuilderBuildFeatures.remoteCompose &&
+              publishedCatalogs[systemId]?.statusSemantics?.let {
+                UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.REMOTE_COMPOSE
+              } == true)
         },
         packs = packs,
       )

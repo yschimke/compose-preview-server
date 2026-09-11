@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantScope
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
@@ -103,6 +104,24 @@ class ServeUiBuilderRoutesTest {
   fun tearDown() {
     server.stop()
     registry.close()
+  }
+
+  @Test
+  fun `disabled document routes cannot reach the service`() {
+    if (UiBuilderBuildFeatures.remoteCompose) return
+    for (format in listOf("png", "json", "rc")) {
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/documents/export.$format")
+            .header(ACTOR_HEADER, "tester")
+            .post("{}".toRequestBody())
+            .build()
+        )
+        .execute()
+        .use { assertEquals(404, it.code) }
+    }
+    assertTrue(calls.isEmpty())
   }
 
   @Test

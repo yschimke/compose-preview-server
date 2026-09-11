@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.SHOW_BY_STATE
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.*
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
@@ -10,6 +11,14 @@ import kotlin.test.*
 import kotlinx.serialization.json.*
 
 class StateSelectionExportTest {
+  @org.junit.jupiter.api.BeforeEach
+  fun requireExperimentalBuild() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+  }
+
   private val record = Json {
     ignoreUnknownKeys = true
   }

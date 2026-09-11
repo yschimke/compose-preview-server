@@ -16,6 +16,14 @@ import org.jetbrains.skia.Image
 
 @OptIn(ExperimentalTestApi::class)
 class StateSelectionInspectorTest {
+  @kotlin.test.BeforeTest
+  fun requireExperimentalBuild() {
+    org.junit.Assume.assumeTrue(
+      "Enable with -PuiBuilderRemoteCompose=true",
+      UiBuilderBuildFeatures.remoteCompose,
+    )
+  }
+
   private val catalog =
     CapabilityCatalogParser.parse(
       checkNotNull(javaClass.getResource("/m3-catalog-capabilities-v1.json")).readText()

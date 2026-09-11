@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
@@ -1378,8 +1379,10 @@ class ServeUiBuilderMcp(
             "Use `setStateVariable` with `name` and `declaration` to add or edit state, " +
             "`removeStateVariable` with `name` to remove unused state, and `setEventBinding` " +
             "with `nodeId`, `event` and an ordered `actions` array to edit behavior. " +
-            "An empty actions array removes the event handler. These are the same edits as " +
-            "Screen > State and Properties > Actions in the browser. " +
+            "An empty actions array removes the event handler. " +
+            (if (UiBuilderBuildFeatures.remoteCompose)
+              "These are the same edits as Screen > State and Properties > Actions in the browser. "
+            else "") +
             "`removeNodeProperty` (or a setProperty whose value is `{\"type\":\"null\"}`) " +
             "unsets the property — the way back after trying one — and is refused, naming the " +
             "node and the field, when the catalog requires it. When somebody has commented on " +
@@ -1406,7 +1409,7 @@ class ServeUiBuilderMcp(
           {"type":"object","properties":{
             "designId":{"type":"string"},
             "revision":{"type":"integer"},
-            "format":{"type":"string","description":"Defaults to compose. Available formats: ${ExportFormatV1.entries.joinToString(", ") { it.name.lowercase() }}. Check the catalog exportCapabilities; JSON is authoring source and RC is a compiled Remote document."}
+            "format":{"type":"string","description":"Defaults to compose. Available formats: ${ExportFormatV1.entries.filter { UiBuilderBuildFeatures.remoteCompose || it.name !in setOf("JSON", "RC") }.joinToString(", ") { it.name.lowercase() }}. Check the catalog exportCapabilities."}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),

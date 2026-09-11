@@ -61,6 +61,11 @@ class UiBuilderMcpAdapterTest {
 
   @Test
   fun `generic export pins every declared format to the requested revision`() {
+    if (!McpBuildFeatures.remoteCompose) {
+      assertThat(adapter.handle("export_design", buildJsonObject {})).isNull()
+      assertThat(requests).isEmpty()
+      return
+    }
     for (format in ExportFormatV1.entries) {
       adapter.handle(
         "export_design",
@@ -78,12 +83,22 @@ class UiBuilderMcpAdapterTest {
   }
 
   @Test
+  fun `disabled experimental tools cannot be called directly`() {
+    if (McpBuildFeatures.remoteCompose) return
+    for (name in listOf("export_document", "export_design")) {
+      assertThat(adapter.toolDefs().map { it.name }).doesNotContain(name)
+      assertThat(adapter.handle(name, buildJsonObject {})).isNull()
+    }
+    assertThat(requests).isEmpty()
+  }
+
+  @Test
   fun `advertises the UI builder tools with object schemas`() {
     val tools = adapter.toolDefs()
 
     assertThat(tools.map { it.name })
       .containsExactlyElementsIn(
-        listOf(
+        listOfNotNull(
           "create_design",
           "open_design",
           "list_components",
@@ -91,10 +106,11 @@ class UiBuilderMcpAdapterTest {
           "render_design",
           "export_svg",
           "export_compose",
-          "export_design",
+          "export_design".takeIf { McpBuildFeatures.remoteCompose },
           "get_revision_diff",
         ) +
-          if (ExportFormatV1.entries.any { it.name == "RC" }) listOf("export_document")
+          if (McpBuildFeatures.remoteCompose && ExportFormatV1.entries.any { it.name == "RC" })
+            listOf("export_document")
           else emptyList()
       )
       .inOrder()
@@ -341,8 +357,11 @@ class UiBuilderMcpAdapterTest {
     val READ_TOOLS = setOf("open_design", "list_components", "get_revision_diff")
     val WRITE_TOOLS = setOf("create_design", "apply_design_operations")
     val EXPORT_TOOLS =
-      setOf("render_design", "export_svg", "export_compose", "export_design") +
-        if (ExportFormatV1.entries.any { it.name == "RC" }) setOf("export_document") else emptySet()
+      setOf("render_design", "export_svg", "export_compose") +
+        (if (McpBuildFeatures.remoteCompose) setOf("export_design") else emptySet()) +
+        if (McpBuildFeatures.remoteCompose && ExportFormatV1.entries.any { it.name == "RC" })
+          setOf("export_document")
+        else emptySet()
     val json = Json {
       encodeDefaults = true
       explicitNulls = false
