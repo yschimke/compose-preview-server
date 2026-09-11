@@ -163,7 +163,8 @@ class PublishedM3CatalogEquivalenceTest {
     )
     // Properties by name, then field by field: "the same 5 properties" is the count mistake again,
     // and a property that changed from optional to required breaks every design that omitted it.
-    val want = expected.properties.associateBy { it.name }
+    val builderOwned = builderOwnedProperties[id].orEmpty()
+    val want = expected.properties.filterNot { it.name in builderOwned }.associateBy { it.name }
     val got = actual.properties.associateBy { it.name }
     check("properties", want.keys.sorted(), got.keys.sorted())
     for ((name, w) in want) {
@@ -174,6 +175,38 @@ class PublishedM3CatalogEquivalenceTest {
     }
     return out
   }
+
+  /**
+   * Properties the **builder** owns on `m3/icon`, which m3-catalog does not publish.
+   *
+   * The same shape of exemption as [generatedInventory] below, and for the same reason: the two
+   * shelves are pinned independently, so equality asks a question neither repository can answer
+   * from the other side. Material Symbols names an icon and positions it on four continuous axes,
+   * which is this repository's model of an icon and not something m3-catalog has a view on.
+   *
+   * The asymmetry is what makes it safe. A property the FROZEN shelf adds is one the builder offers
+   * and the published catalog has never heard of: a design authored here still validates, and the
+   * published shelf loses nothing. The reverse — the composed catalog offering a property the
+   * builder cannot handle — is the thing that would break a design, and it is still compared
+   * strictly, because `got` is never filtered.
+   *
+   * What it costs, stated rather than hidden: serving m3-catalog's shelf under
+   * `--ui-builder-published-catalogs` would offer none of these, so a design that names an icon
+   * rather than keying one could not be authored against it until m3-catalog publishes them too.
+   */
+  private val builderOwnedProperties =
+    mapOf(
+      "m3/icon" to
+        setOf(
+          "iconName",
+          "iconStyle",
+          "iconFill",
+          "iconWeight",
+          "iconGrade",
+          "iconOpticalSize",
+          "iconAutoMirror",
+        )
+    )
 
   /**
    * Properties whose allowed values are a GENERATED inventory rather than an authored enumeration.
