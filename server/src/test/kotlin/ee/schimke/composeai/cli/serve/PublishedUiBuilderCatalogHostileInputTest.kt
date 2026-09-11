@@ -288,6 +288,43 @@ class PublishedUiBuilderCatalogHostileInputTest {
     )
   }
 
+  /**
+   * The same rule over the pair a **builtin** derives, which nothing applied until a builtin could
+   * state `max`.
+   *
+   * The builtins loop checked only properties, and that was sound while `required` set the minimum
+   * and the maximum was always unbounded: no pair it could produce was impossible. A writable bound
+   * makes `required: true` with `max: 0` reachable, and it composes to the `min = 1, max = 0` the
+   * test above refuses for a component — a slot no child count satisfies, on a catalog that loaded
+   * cleanly.
+   *
+   * Raised by the review bot on compose-preview-server#747 against the change that added the field,
+   * and true: it is that change's own gap rather than a pre-existing one.
+   */
+  @Test
+  fun `a builtin slot bound no child count satisfies is refused`() {
+    val document =
+      """
+      {"schema":"compose-ui-builder-catalog/v1","catalog":{"id":"h"},
+       "record":{"file":"components.json","schemaVersion":1,"components":2},
+       "statusSemantics":{"componentIdPrefix":"h/",
+         "builtins":{"h/host":{"role":"screen-root",
+           "slots":{"content":{"required":true,"max":0}}}}}}
+      """
+        .trimIndent()
+
+    val result = PublishedUiBuilderCatalog.compose(document, record, exports)
+
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Unusable,
+      "a builtin bound below its own minimum composed into a host nobody can author",
+    )
+    assertTrue(
+      (result as PublishedUiBuilderCatalog.Result.Unusable).reason.contains("h/host.content"),
+      "the refusal does not name the slot: ${result.reason}",
+    )
+  }
+
   @Test
   fun `the collision fixture actually collides`() {
     val result = PublishedUiBuilderCatalog.compose(COLLIDING, record, exports)
