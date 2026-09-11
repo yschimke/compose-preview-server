@@ -107,13 +107,21 @@ internal class MaterialSymbolsIcons(private val source: MaterialSymbolsSource) {
     val AXES = listOf("FILL", "GRAD", "opsz", "wght")
 
     /**
-     * Splits a comma-separated `names` parameter.
+     * Reads the repeated `names` parameter: `?names=search&names=home`, one name per value.
      *
-     * Blanks are dropped rather than reported: `names=search,,home` is a client that built a query
-     * string with a trailing separator, not a request for an icon called "".
+     * One name per parameter rather than one comma-separated list, because the delimiter cannot
+     * survive the round trip. A client percent-encodes a comma inside a name, but the query is
+     * decoded before this sees it, so `%2C` and `,` arrive identical and a stale name containing a
+     * comma — whatever an older design saved — would split into two. It would then push the batch
+     * past [MAXIMUM_NAMES] and cost a whole grid page its pictures over one bad row. The query
+     * parser already keeps repeated values apart, so this borrows that instead of inventing an
+     * escape.
+     *
+     * Blanks are dropped rather than reported: an empty value is a client that built its query
+     * string with one separator too many, not a request for an icon called "".
      */
-    fun parseNames(raw: String?): List<String> =
-      raw?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
+    fun parseNames(raw: List<String>?): List<String> =
+      raw?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
 
     /**
      * Reads the axis query parameters, refusing anything that is not a number.

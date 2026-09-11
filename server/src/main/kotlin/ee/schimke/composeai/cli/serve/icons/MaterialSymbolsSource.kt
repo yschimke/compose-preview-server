@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve.icons
 
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
 
 /** One Material Symbols face, pinned by the content of its variable font. */
@@ -19,11 +20,13 @@ internal data class MaterialSymbolsStyle(
  * the way the Robolectric `android-all` jars already arrive in these repositories — downloaded on
  * first use, keyed by content, and never fetched again.
  *
- * **The digest is the pin, not the URL.** Upstream publishes these on a moving branch, so the
- * guarantee has to come from the bytes: a file whose SHA-256 does not match is discarded and the
- * fetch fails loudly. That turns an upstream redraw into an obvious, one-line failure someone
- * updates deliberately, rather than a silent change of every icon in every design — which is the
- * property
+ * **The digest is the pin; the URL is commit-pinned so the pin stays fetchable.** A file whose
+ * SHA-256 does not match is discarded and the fetch fails loudly, which turns an upstream redraw
+ * into an obvious, one-line failure someone updates deliberately rather than a silent change of
+ * every icon in every design. The URL names the commit those bytes are in for the other half of
+ * that: pointed at a moving branch, the day upstream advances is the day every cold host downloads
+ * bytes that cannot match, discards them, and answers 503 for good — a pin nobody can fetch is not
+ * determinism, it is an outage. Determinism is the property
  * [`UI_BUILDER_MATERIAL_SYMBOLS.md`](../../../../../../../../../docs/design/UI_BUILDER_MATERIAL_SYMBOLS.md)
  * calls determinism, and the reason the live Google endpoints are not the runtime source.
  *
@@ -35,7 +38,10 @@ internal class MaterialSymbolsSource(
   private val styles: List<MaterialSymbolsStyle> = STYLES,
   private val codePointsUrl: String = CODE_POINTS_URL,
   private val codePointsDigest: String = CODE_POINTS_DIGEST,
-  private val fetch: (String) -> ByteArray = { url -> error("no fetcher configured for $url") },
+  private val codePointsBytes: Int = CODE_POINTS_BYTES,
+  private val fetch: (String, Int) -> ByteArray = { url, _ ->
+    error("no fetcher configured for $url")
+  },
 ) {
 
   private val catalogs = HashMap<String, MaterialSymbolsCatalog>()
@@ -69,7 +75,7 @@ internal class MaterialSymbolsSource(
   }
 
   private fun codePointsFile(): ByteArray =
-    file("symbols", "codepoints", codePointsUrl, codePointsDigest)
+    file("symbols", "codepoints", codePointsUrl, codePointsDigest, codePointsBytes)
 
   /**
    * The catalog for [styleId], reading the cache or filling it, or null for an unknown style.
@@ -83,23 +89,36 @@ internal class MaterialSymbolsSource(
       return it
     }
     val style = styles.firstOrNull { it.id == styleId } ?: return null
-    val font = file(style.id, "ttf", style.fontUrl, style.fontDigest)
+    val font = file(style.id, "ttf", style.fontUrl, style.fontDigest, style.fontBytes)
     val codePoints = codePointsFile()
     return MaterialSymbolsCatalog.read(font, codePoints.decodeToString()).also {
       catalogs[styleId] = it
     }
   }
 
-  private fun file(styleId: String, extension: String, url: String, digest: String): ByteArray {
+  private fun file(
+    styleId: String,
+    extension: String,
+    url: String,
+    digest: String,
+    expectedBytes: Int,
+  ): ByteArray {
     val cached = File(cacheDirectory, "$styleId.$extension")
     if (cached.isFile) {
-      val bytes = cached.readBytes()
       // A cache entry is re-verified rather than trusted: the bytes may have been truncated by a
-      // host that died mid-write before this used a temporary file, or edited by hand.
-      if (sha256(bytes) == digest) return bytes
+      // host that died mid-write before this used a temporary file, or edited by hand. The length
+      // is checked first because it is free and the read is not — a file someone dropped a DVD
+      // image onto should not be pulled into the heap on the way to failing its digest.
+      if (cached.length() == expectedBytes.toLong()) {
+        val bytes = cached.readBytes()
+        if (sha256(bytes) == digest) return bytes
+      }
       cached.delete()
     }
-    val bytes = fetch(url)
+    val bytes = fetch(url, expectedBytes)
+    check(bytes.size == expectedBytes) {
+      "$styleId.$extension from $url is ${bytes.size} bytes, expected $expectedBytes"
+    }
     val actual = sha256(bytes)
     check(actual == digest) {
       "$styleId.$extension from $url has SHA-256 $actual, expected $digest; refusing to use it"
@@ -126,8 +145,38 @@ internal class MaterialSymbolsSource(
   }
 
   internal companion object {
+    /**
+     * Upstream, at the commit these digests were taken from.
+     *
+     * A branch name here would be a slow-acting outage: `master` moves, the bytes stop matching,
+     * and every host with a cold cache refuses them forever while the warm ones carry on. The
+     * commit is immutable, so updating a pin stays a deliberate three-line change — sha, digest,
+     * size — instead of something upstream can do to us.
+     */
+    private const val UPSTREAM_COMMIT = "40a7a292a79d9394157e1ea24f83d52d5e17c556"
+
     private const val FONT_BASE =
-      "https://raw.githubusercontent.com/google/material-design-icons/master/variablefont/"
+      "https://raw.githubusercontent.com/google/material-design-icons/" +
+        UPSTREAM_COMMIT +
+        "/variablefont/"
+
+    /**
+     * Reads at most [limit] bytes, and one more, so a caller can tell "exactly this" from "more".
+     *
+     * The digest cannot reject a body that was never allocated: a host that answers this URL with
+     * an endless stream would exhaust the heap long before there was anything to hash. Every file
+     * here has a known exact size, so there is no reason to read past it.
+     */
+    fun readAtMost(stream: InputStream, limit: Int): ByteArray {
+      val buffer = ByteArray(limit + 1)
+      var read = 0
+      while (read < buffer.size) {
+        val count = stream.read(buffer, read, buffer.size - read)
+        if (count < 0) break
+        read += count
+      }
+      return buffer.copyOf(read)
+    }
 
     private fun sha256(bytes: ByteArray): String =
       MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -174,5 +223,7 @@ internal class MaterialSymbolsSource(
 
     const val CODE_POINTS_DIGEST =
       "c18564f64d7d92dd3a6895a2c59ea69adfb56d6f553bcbbc88811c328159d715"
+
+    const val CODE_POINTS_BYTES = 79_029
   }
 }

@@ -9199,13 +9199,22 @@ class ServeHttpServer(
         // Bounded, because this runs under a lock every icon request shares: a host that accepts
         // the connection and then stops sending would otherwise stall every later request behind
         // it forever, and never reach the 503 the cold-cache path is supposed to answer with.
-        fetch = { url ->
+        // Bounded in size as well as time, and for the same reason: the digest can only reject
+        // bytes that have already been allocated, so a host answering this URL with an endless
+        // stream — or a captive-portal proxy answering it with a DVD image — would take the
+        // process down before there was anything to verify. Every file has a known exact size.
+        fetch = { url, expectedBytes ->
           materialSymbolsHttpClient
             .newCall(okhttp3.Request.Builder().url(url).build())
             .execute()
             .use { response ->
               check(response.isSuccessful) { "$url answered ${response.code}" }
-              checkNotNull(response.body) { "$url answered no body" }.bytes()
+              val body = checkNotNull(response.body) { "$url answered no body" }
+              val declared = body.contentLength()
+              check(declared <= expectedBytes) {
+                "$url declared $declared bytes, expected $expectedBytes; refusing to read it"
+              }
+              MaterialSymbolsSource.readAtMost(body.byteStream(), expectedBytes)
             }
         },
       )
@@ -9237,7 +9246,7 @@ class ServeHttpServer(
     if (rejectBadToken()) return
     val icons = materialSymbolsIcons ?: return respondIconsUnavailable()
     val style = call.parameters["style"].orEmpty()
-    val names = MaterialSymbolsIcons.parseNames(call.request.queryParameters["names"])
+    val names = MaterialSymbolsIcons.parseNames(call.request.queryParameters.getAll("names"))
     val axes =
       when (val parsed = MaterialSymbolsIcons.parseAxes { call.request.queryParameters[it] }) {
         is IconResult.Refused -> return respondIconRefusal(parsed.failure)

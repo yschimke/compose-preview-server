@@ -55,7 +55,8 @@ class MaterialSymbolsSourceTest {
       styles = listOf(style),
       codePointsUrl = MaterialSymbolsSource.CODE_POINTS_URL,
       codePointsDigest = sha256(codePointBytes),
-    ) { url ->
+      codePointsBytes = codePointBytes.size,
+    ) { url, _ ->
       onFetch(url)
       served[url] ?: error("nothing pinned at $url")
     }
@@ -145,6 +146,61 @@ class MaterialSymbolsSourceTest {
   }
 
   @Test
+  fun `refuses a body that is not the size the pin says`(@TempDir temp: File) {
+    // The digest would catch this too, but only after the bytes are in the heap; the size is the
+    // half of the check that can be made before reading, and an injected fetcher that ignores the
+    // bound must still not get its bytes used.
+    val longer = fontBytes + "extra".encodeToByteArray()
+    val style = this.style.copy(fontDigest = sha256(longer))
+    val failure =
+      assertFailsWith<IllegalStateException> {
+        MaterialSymbolsSource(
+            cacheDirectory = temp,
+            styles = listOf(style),
+            codePointsUrl = MaterialSymbolsSource.CODE_POINTS_URL,
+            codePointsDigest = sha256(codePointBytes),
+            codePointsBytes = codePointBytes.size,
+          ) { _, _ ->
+            longer
+          }
+          .catalog("outlined")
+      }
+    assertTrue(
+      failure.message.orEmpty().contains("expected ${style.fontBytes}"),
+      "unhelpful message: ${failure.message}",
+    )
+  }
+
+  @Test
+  fun `reads no more than the expected size`() {
+    val endless =
+      object : java.io.InputStream() {
+        var produced = 0
+
+        override fun read(): Int {
+          produced++
+          return 0
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+          produced += len
+          return len
+        }
+      }
+    val read = MaterialSymbolsSource.readAtMost(endless, 1_024)
+    // One byte past the limit, so the caller can tell "exactly this much" from "more than this",
+    // and not a byte further however long the host keeps talking.
+    assertEquals(1_025, read.size)
+    assertEquals(1_025, endless.produced)
+  }
+
+  @Test
+  fun `a short body is returned as it arrived, for the digest to reject`() {
+    val read = MaterialSymbolsSource.readAtMost("half".byteInputStream(), 1_024)
+    assertEquals(4, read.size)
+  }
+
+  @Test
   fun `the shipped pins name three faces and one code point list`() {
     val pinned = MaterialSymbolsSource.STYLES
     assertEquals(listOf("outlined", "rounded", "sharp"), pinned.map { it.id })
@@ -154,5 +210,15 @@ class MaterialSymbolsSourceTest {
       assertTrue(it.fontUrl.startsWith("https://"), "${it.id} must be fetched over TLS")
     }
     assertEquals(64, MaterialSymbolsSource.CODE_POINTS_DIGEST.length)
+    assertEquals(79_029, MaterialSymbolsSource.CODE_POINTS_BYTES)
+    // Every URL names an immutable commit. A branch here is a time bomb: it keeps working until
+    // upstream pushes, and then no cold host can ever fetch the pinned bytes again.
+    (pinned.map { it.fontUrl } + MaterialSymbolsSource.CODE_POINTS_URL).forEach {
+      assertTrue(
+        Regex("https://raw\\.githubusercontent\\.com/google/material-design-icons/[0-9a-f]{40}/")
+          .containsMatchIn(it),
+        "not pinned to a commit: $it",
+      )
+    }
   }
 }

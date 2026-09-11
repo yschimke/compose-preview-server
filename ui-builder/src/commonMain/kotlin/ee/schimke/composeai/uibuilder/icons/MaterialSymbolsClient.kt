@@ -114,7 +114,10 @@ class MaterialSymbolsClient(
           .distinctBy { it.name }
           .chunked(MAXIMUM_NAMES_PER_REQUEST)
           .forEach { batch ->
-            val requested = batch.joinToString(",") { encode(it.name) }
+            // One `names=` per icon, not one comma-separated list: the server decodes the query
+            // before it splits, so a comma inside a stale name would arrive as a delimiter no
+            // matter how it was encoded and take the rest of the batch with it.
+            val requested = batch.joinToString("&names=") { encode(it.name) }
             val pin = pins[style]?.let { "&v=$it" }.orEmpty()
             val response =
               transport.get(url("$basePath/$style?names=$requested${axes.query()}$pin"))
@@ -168,7 +171,9 @@ class MaterialSymbolsClient(
      *
      * Every name the pinned face carries is `[a-z0-9_]`, but a *stale* one from an older design is
      * whatever was saved, and a `&` or `#` in it would rewrite the request rather than come back
-     * under `missing` — taking the rest of its batch down with it.
+     * under `missing` — taking the rest of its batch down with it. A comma is encoded too, though
+     * the server no longer splits on one: the encoding is what makes the value unambiguous, and the
+     * repeated parameter is what makes the boundary survive decoding.
      */
     internal fun encode(name: String): String = buildString {
       name.encodeToByteArray().forEach { byte ->

@@ -125,6 +125,13 @@ digest into the host's cache on first use**, which is the pattern this codebase 
 the Robolectric `android-all-instrumented` jars arrive the same way, on a first daemon test rather
 than in anyone's repository. An offline host needs a warm cache, exactly as it does for those.
 
+The URL names an upstream **commit**, not a branch, and that is load-bearing rather than tidy. The
+digest alone makes wrong bytes unusable; it does nothing to keep the right bytes reachable. Pointed
+at `master`, the pin works until the day upstream pushes and then every host with a cold cache
+downloads bytes that cannot match, discards them, and answers 503 for good — while the warm hosts
+carry on, so nobody notices until a new deployment. Updating a pin is three deliberate lines: the
+commit, the digest, the size.
+
 That leaves: nothing large in the bundle, nothing large in the distribution, nothing large in git,
 and nothing regenerated when upstream moves — the pin changes, the next run fetches, and resolution
 is unchanged. [`UI_BUILDER_ASSETS.md`](UI_BUILDER_ASSETS.md)'s rule holds, because that rule is
@@ -179,7 +186,9 @@ Upstream publishes one of these per face and all three hash identically, so one 
 three.
 
 Two routes carry it: `GET /api/icons/{style}/names` for the list, and
-`GET /api/icons/{style}?names=…&wght=…&FILL=…&GRAD=…&opsz=…` for a batch of outlines. A name the
+`GET /api/icons/{style}?names=…&names=…&wght=…&FILL=…&GRAD=…&opsz=…` for a batch of outlines — one
+`names` parameter per icon, because a comma cannot survive query decoding and a stale name
+containing one would otherwise split into two. A name the
 face does not carry comes back in a `missing` field rather than failing the batch — one stale name
 in a grid page should not cost the other seventy-nine their pictures — and an axis that is not a
 number is a 400 naming the parameter, because a silently ignored `wght=heavy` looks like a broken

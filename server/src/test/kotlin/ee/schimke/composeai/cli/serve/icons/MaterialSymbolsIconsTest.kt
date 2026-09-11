@@ -33,7 +33,8 @@ class MaterialSymbolsIconsTest {
         styles = listOf(style),
         codePointsUrl = MaterialSymbolsSource.CODE_POINTS_URL,
         codePointsDigest = sha256(codePoints),
-      ) { url ->
+        codePointsBytes = codePoints.size,
+      ) { url, _ ->
         served.getValue(url)
       }
     )
@@ -147,13 +148,16 @@ class MaterialSymbolsIconsTest {
   }
 
   @Test
-  fun `names parameter splitting tolerates the separators a client actually sends`(
-    @TempDir temp: File
-  ) {
-    assertEquals(listOf("search", "home"), MaterialSymbolsIcons.parseNames("search,home"))
-    assertEquals(listOf("search", "home"), MaterialSymbolsIcons.parseNames(" search , home ,"))
+  fun `each names parameter is exactly one name`() {
+    assertEquals(
+      listOf("search", "home"),
+      MaterialSymbolsIcons.parseNames(listOf("search", " home ")),
+    )
     assertEquals(emptyList(), MaterialSymbolsIcons.parseNames(null))
-    assertEquals(emptyList(), MaterialSymbolsIcons.parseNames(" , "))
+    assertEquals(emptyList(), MaterialSymbolsIcons.parseNames(listOf("", " ")))
+    // A comma is a character in a name, not a separator. Splitting here is what turned one stale
+    // row into two, and pushed the batch it travelled in past the limit.
+    assertEquals(listOf("a,b"), MaterialSymbolsIcons.parseNames(listOf("a,b")))
   }
 
   @Test

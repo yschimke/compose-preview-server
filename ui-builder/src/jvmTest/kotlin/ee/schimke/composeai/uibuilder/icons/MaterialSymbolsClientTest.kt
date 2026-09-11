@@ -44,7 +44,7 @@ class MaterialSymbolsClientTest {
 
     client.prefetch(keys)
     assertEquals(1, transport.urls.size, "a page should batch: ${transport.urls}")
-    assertTrue(transport.urls.single().contains("names=search,home"))
+    assertTrue(transport.urls.single().contains("names=search&names=home"))
 
     client.prefetch(keys)
     assertEquals(1, transport.urls.size, "already-known icons should not be refetched")
@@ -146,12 +146,22 @@ class MaterialSymbolsClientTest {
     client.prefetch(keys)
     assertEquals(3, transport.urls.size, "600 names should split into three requests")
     transport.urls.forEach {
-      val count = it.substringAfter("names=").substringBefore("&").split(",").size
+      val count = it.split("names=").size - 1
       assertTrue(
         count <= MaterialSymbolsClient.MAXIMUM_NAMES_PER_REQUEST,
         "a batch of $count would be refused wholesale",
       )
     }
+  }
+
+  @Test
+  fun `a name with a comma stays one name`() = runBlocking {
+    val transport = RecordingTransport { outlines(missing = listOf("a,b")) }
+    val client = MaterialSymbolsClient(transport)
+    client.prefetch(listOf(MaterialSymbolsKey("a,b"), MaterialSymbolsKey("home")))
+    // Two names, two parameters: the server counts parameters, so the comma cannot inflate the
+    // batch past the limit or invent an icon called "b".
+    assertEquals("/api/icons/outlined?names=a%2Cb&names=home", transport.urls.single())
   }
 
   @Test
