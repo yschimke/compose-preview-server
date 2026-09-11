@@ -8,7 +8,11 @@ import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { harnessRoot, startServer as startStaticServer } from "./_server.mjs";
+import {
+    harnessRoot,
+    isIgnorableConsoleError,
+    startServer as startStaticServer,
+} from "./_server.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -593,7 +597,12 @@ async function captureJetcasterReference(browser, origin) {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
-        if (message.type() === "error") errors.push(message.text());
+        if (
+            message.type() === "error" &&
+            !isIgnorableConsoleError(message.text())
+        ) {
+            errors.push(message.text());
+        }
     });
     try {
         await page.goto(

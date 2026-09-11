@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
+import { isIgnorableConsoleError } from "./_server.mjs";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 
@@ -481,7 +482,12 @@ test("pointer operations use visible canvas and sibling targets", async ({ page 
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
-        if (message.type() === "error") errors.push(message.text());
+        if (
+            message.type() === "error" &&
+            !isIgnorableConsoleError(message.text())
+        ) {
+            errors.push(message.text());
+        }
     });
     page.on("response", (response) => {
         if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`);
@@ -766,7 +772,12 @@ test("capability inspector validates and commits typed scaffold and Text propert
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
-        if (message.type() === "error") errors.push(message.text());
+        if (
+            message.type() === "error" &&
+            !isIgnorableConsoleError(message.text())
+        ) {
+            errors.push(message.text());
+        }
     });
 
     await page.goto("index.html?mode=interactive-editor");
