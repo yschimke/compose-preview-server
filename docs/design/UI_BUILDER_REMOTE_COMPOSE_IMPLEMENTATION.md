@@ -139,15 +139,37 @@ exact range and both Int limits. Five checks in `IntegerSelectionJsonTest` verif
 updates and make the stock parser's limitation explicit. AndroidX alpha19 cannot declare derived
 integer expressions through authoring JSON. A small experimental component-registry adapter proves
 that bounded integer expressions work, but it is not a production or stock-parser dialect.
-Production must establish that parser capability before advertising portable JSON exports.
+The shared compiler profile below establishes that capability for this compiler. These extended
+sources still require the named profile and are not portable to the stock AndroidX parser.
 
 The proof also exposed valid AndroidX empty Boxes without `LayoutComponentContent`, which the CMP
-player rejected. [rc-players#92](https://github.com/yschimke/rc-players/pull/92) supplies the owning player's fix models Box content as nullable, preserves geometry and
+player rejected. [rc-players#92](https://github.com/yschimke/rc-players/pull/92) supplies the owning player's fix: it models Box content as nullable, preserves geometry and
 modifiers, and rejects stray child layouts. The local player passes 118 runtime tests, 216 Compose
 tests, ABI checks and Wasm compilation. The JSON probe passes with genuinely empty branches against
 that local build. The existing builder also passes all 931 JVM tests and Wasm compilation against
 the staged player stack. Both the experiment's local checkout option and the production staging
 workflow avoid waiting for a release. This dependency work supports the existing builder; it adds no editor.
+
+## Shared authoring JSON compiler profile
+
+[compose-ai-tools#5396](https://github.com/yschimke/compose-ai-tools/pull/5396) adds the explicit
+`compose-preview-integer-expressions-v1` profile to the existing plain-JVM `remotecompose-json`
+module. The document's top-level `compilerProfile` selects it; ordinary authoring JSON retains the
+stock AndroidX parser path. The profile emits standard integer-expression operations and validates
+integer references, duplicate names, infix syntax, function arity and the 32-slot wire limit.
+Unknown profiles fail compilation. This source profile is distinct from the binary header's API
+level and feature mask.
+
+The local dependency workflow stages its normal Maven publication. With
+`-PlocalJsonCompilerManifest=…`, the real-player proof calls the shared compiler's public API and
+bypasses its experimental Java adapter. All ten proof tests pass, including both Int limits,
+adjacent integers above Float's exact range, 13 cases, callbacks and density 2. The owning module
+passes 28 JVM tests, ABI and boundary checks. The existing server compiles against the local
+publication and passes all 103 HTTP routing tests. Golden regeneration makes no changes.
+
+This is the verified compiler seam for design-to-JSON and binary export. The existing builder and
+MCP still need to generate those documents and use them for live preview; this compiler PR alone
+does not complete that integration or expand the claimed catalog coverage.
 
 ## Remaining production work
 

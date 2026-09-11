@@ -12,6 +12,11 @@ fun compileRemote(source: String): ByteArray {
 
 /** The expression probe deliberately requires an extension; stock alpha19 must reject it. */
 fun compileRemoteWithIntegerExpressions(source: String): ByteArray {
+  if (java.lang.Boolean.getBoolean("verifySharedJsonCompiler")) {
+    return ee.schimke.composeai.remotecompose.json.RemoteComposeJson.compile(
+      JSONObject(source).put("compilerProfile", "compose-preview-integer-expressions-v1").toString()
+    )
+  }
   val writer =
     androidx.compose.remote.creation.RemoteComposeWriter(
       RemoteComposeJsonParser.DEFAULT_PLATFORM,

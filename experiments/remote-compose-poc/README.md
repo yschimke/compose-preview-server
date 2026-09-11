@@ -58,10 +58,9 @@ This is an isolated stateless MCP proof, not integration with the production UI-
   Tests exercise both density 1 and 2. Font scale is 1 in this proof.
 
 The isolated settings file supports `-PlocalRcPlayers=/absolute/path/to/rc-players` when an
-unpublished player change is needed. It substitutes only the named player modules. That option
-has not been exercised: this proof succeeded with released dependencies. No contracts extension
-was needed. If the next experiment needs one, add an explicit local contracts path here rather
-than requiring a publish or modifying the production build's defaults.
+unpublished player change is needed. It substitutes only the named player modules. The original
+fixture succeeded with released dependencies; the empty-Box selection proof below verifies this
+local player option. No contracts extension was needed for this experiment.
 
 ## Evidence
 
@@ -143,3 +142,33 @@ python3 scripts/stage-local-dependency.py --checkout /path/to/rc-players \
 
 The adapter is confined to this experiment. The production builder has not yet adopted a new JSON
 dialect, and this proof is not counted as completed JSON export or live document assembly.
+
+## Verify the shared compiler publication
+
+The owning `compose-ai-tools:remotecompose-json` module has an explicit
+`compose-preview-integer-expressions-v1` authoring profile in
+[compose-ai-tools#5396](https://github.com/yschimke/compose-ai-tools/pull/5396). It adds named integer
+expressions through AndroidX's component registry and validates references, expression syntax and
+the 32-slot integer operation limit. Documents declare this extension in top-level `compilerProfile`;
+it is separate from the binary header's API level and profile mask.
+
+Stage that module and test its publication without a release:
+
+```shell
+python3 scripts/stage-local-dependency.py --checkout /path/to/compose-ai-tools \
+  --module :remotecompose-json --output build/local-dependencies/json-compiler
+./gradlew -p experiments/remote-compose-poc \
+  -PlocalRcPlayers=/path/to/rc-players \
+  -PlocalJsonCompilerManifest="$PWD/build/local-dependencies/json-compiler/local-dependencies.properties" \
+  jvmTest
+```
+
+With this manifest, the selection scenarios call the shared compiler's public `compile(String)`
+API with the profile declaration. They bypass the experimental Java adapter entirely. All ten
+proof tests pass, including exact integer selection at both Int limits and above Float's exact
+range. The shared compiler itself has 28 JVM tests and passes its ABI checks. Without the manifest,
+the proof retains its original isolated adapter while the production publication is unreleased.
+
+The existing server also consumes this same artifact with its normal `-PlocalDependencies` option.
+This establishes the supported compiler path; wiring design export and live previews to it in the
+existing editor and MCP is still required.

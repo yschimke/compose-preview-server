@@ -21,6 +21,7 @@ kotlin {
     }
     jvmMain.dependencies {
       implementation(compose.desktop.currentOs)
+      implementation("ee.schimke.composeai:remotecompose-json:2.8.0")
       implementation("androidx.compose.remote:remote-creation-core:1.0.0-alpha19")
       implementation("org.json:json:20250517")
     }
@@ -43,6 +44,10 @@ tasks.register<JavaExec>("compileDocument") {
 }
 
 tasks.withType<Test>().configureEach {
+  systemProperty(
+    "verifySharedJsonCompiler",
+    providers.gradleProperty("localJsonCompilerManifest").isPresent,
+  )
   inputs.file("fixture.remote.json")
   inputs.file("fixture-density2.remote.json")
   systemProperty("java.awt.headless", "true")
