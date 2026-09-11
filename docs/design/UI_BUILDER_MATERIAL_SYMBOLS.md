@@ -138,7 +138,7 @@ continuously** — weight anywhere in 100–700, and grade and optical size too,
 version would have had to refuse. The sliders in the customise panel are the font's real axes, and
 nothing has to be decided in advance about which combinations someone is allowed to want.
 
-![One icon per row across weight, fill, grade, optical size and the three styles, plus five off-grid weights](https://raw.githubusercontent.com/yschimke/compose-preview-server/EVIDENCE_SHA/docs/design/evidence/ui-builder-material-symbols/axis-options.png)
+![One icon per row across weight, fill, grade, optical size and the three styles, plus five off-grid weights](https://raw.githubusercontent.com/yschimke/compose-preview-server/b9b6de991d63cc1d94d0ee341b893422c1964519/docs/design/evidence/ui-builder-material-symbols/axis-options.png)
 
 Every cell there is resolved by the reader in this change from the pinned font, at request time.
 The last row is the argument against a pre-generated table in one picture: `wght 137`, `263`, `418`,
@@ -340,7 +340,7 @@ Over a 50-name sample of the 2,205 names in both:
 A blanket "defaults use `material-icons-*`" is therefore wrong for about a quarter of the set, and
 silently so. What the numbers look like:
 
-![Legacy Material Icons against Material Symbols, twelve names side by side with a difference overlay](https://raw.githubusercontent.com/yschimke/compose-preview-server/EVIDENCE_SHA/docs/design/evidence/ui-builder-material-symbols/legacy-vs-symbols.png)
+![Legacy Material Icons against Material Symbols, twelve names side by side with a difference overlay](https://raw.githubusercontent.com/yschimke/compose-preview-server/b9b6de991d63cc1d94d0ee341b893422c1964519/docs/design/evidence/ui-builder-material-symbols/legacy-vs-symbols.png)
 
 `menu` is the same drawing to the pixel and `search` is within 0.7%, while `cast_connected` is
 redrawn outright at 36.9%. The middle of that range is the interesting part: the legacy *outlined*
