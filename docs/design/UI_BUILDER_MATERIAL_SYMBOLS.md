@@ -306,28 +306,33 @@ from the same unchanged document, which is precisely the canvas/export divergenc
 exists to prevent. A font refresh is then an explicit operation that replaces entries atomically and
 is visible in the revision history, not a silent redraw on next open.
 
-### The open question: who fills the registry when no editor is involved
+### Who fills the registry when no editor is involved
 
 An icon node does not only arrive through the picker. `ui_builder_apply` writes one over MCP, a
 `CreateDesign` can carry one from the start, and a design authored that way can be exported or
 natively previewed before anyone opens it in a browser. None of those paths runs the editor, so
-"the editor resolves it" leaves the registry absent exactly when the JVM lane — which has no font
-and no glyph engine — needs it. This is unresolved, and it decides how much machinery the lane
-needs:
+"the editor resolves it" would leave the registry absent exactly where the JVM lane has nothing to
+fall back on. Asking the MCP caller to supply path data was the alternative, and it is a poor thing
+to ask of an agent authoring a design.
 
-1. **Give the server a glyph resolver.** The pinned static instances plus a way to read a glyph
-   outline, in the process that already holds the fonts it serves. Honest and complete; it puts a
-   font dependency into a process whose narrow classpath is deliberate.
-2. **Make the write path supply it.** The service refuses an icon write whose outline is not in the
-   registry, the way an `asset/image` node is refused until its key is pinned
-   ([`UI_BUILDER_ASSETS.md`](UI_BUILDER_ASSETS.md)). No new dependency; it makes an agent authoring
-   a design produce path data, which is a poor thing to ask of one.
-3. **Ship the outlines as build data after all.** A generated table for the six static instances —
-   ~4.4 MB raw, ~1.5 MB gzipped, on the server only, never in the bundle — covers every default-axis
-   icon, and anything off those points still has to come from the editor.
+**So the server resolves it too, from the static instances only.** On an icon write with no
+registry entry, the service reads the glyph from the same pinned instance file it already serves to
+the browser and records the entry as part of that commit — the node and its outline land together,
+so nothing downstream sees a half-written state.
 
-The recommendation is (1), narrowly: the resolver reads the same pinned instance the browser does,
-and only ever runs for a node that arrived without an entry.
+This is deliberately not "put Skia on the server". The instances are *already interpolated at build
+time*, so resolving one needs no variable-font machinery — no `gvar`, no axis interpolation, no
+native library. It is a read of `cmap`, `loca` and `glyf`, whose quadratic outlines are the `M`/`L`/
+`Q`/`Z` the parser already accepts. That is a bounded piece of pure Kotlin, and it keeps the
+narrow classpath the server's `checkDependencyOwnership` and its `skiko-awt-runtime` filtering exist
+to protect.
+
+The consequence, stated rather than hidden: **the server can resolve only the axis points a static
+instance covers** — the three styles at `fill 0/1`, default weight, grade and optical size. A
+server-side write naming a weight, grade or optical size off those points is refused, with a message
+naming what is covered and pointing at the editor, which has the variable font and can record the
+entry itself. An agent can author any icon; it cannot author an off-axis one without a browser
+having been involved, and it is told so at the point of the write rather than at export.
 
 ### Why the canvas is not affected
 
@@ -359,18 +364,19 @@ and a typeface clone is a Skia handle, not a re-parse of 10 MB.
    the existing picker, drawing the default axis point only.
 2. The property change on `m3/icon`, the legacy-key mapping, and the catalog contract.
 3. The picker's customise panel.
-4. The export change — inline path data, the `res/drawable` bundle shape, and the build-time
-   equivalence table behind `Icons.*` — and the removal of the generated Kotlin,
-   `material-icons-extended` and `MaterialIconCatalogTasks`.
+4. The server's static-instance glyph reader, so an icon written over MCP carries its outline.
+5. The export change — inline path data, the `assets/` bundle shape, and the opt-in equivalence
+   table behind `Icons.*` — and the removal of the generated Kotlin, `material-icons-extended` and
+   `MaterialIconCatalogTasks`.
 
 Slice 1 alone returns the 17.8 MB.
 
 ## What is deliberately not here
 
 - **A glyph endpoint the browser calls per axis change.** The browser has Skia and resolves
-  locally; the registry carries the result to every other lane. Whether the *server* needs a
-  resolver of its own for documents no editor touched is the open question above, and is a
-  different thing from this round trip.
+  locally; the registry carries the result to every other lane. The server's own resolver (above)
+  is a different thing: it is a static-instance read on the write path, not a service the browser
+  talks to.
 - **Drawing icons as text.** A ligature draw is fewer moving parts on the canvas, but the export
   needs outlines regardless, and a consumer's app would then need the font shipped with it.
 - **The full 42-instance matrix.** Six default-axis instances are a tier the design needs; 42 is
