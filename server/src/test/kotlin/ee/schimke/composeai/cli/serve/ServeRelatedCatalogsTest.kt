@@ -199,6 +199,67 @@ class ServeRelatedCatalogsTest {
   }
 
   @Test
+  fun `inverse answers which components point at a catalog`() {
+    // The back-link's whole job: a samples page asks the kit catalog "does anything in you point at
+    // me?", and gets back the component to link to.
+    val out =
+      ServeRelatedCatalogs.inverse(
+        mapOf(
+          "Button" to declared("samples" to "ButtonSample", "tiles" to null),
+          "Card" to declared("samples" to "CardSample"),
+        ),
+        targetSystem = "samples",
+      )
+    assertEquals(mapOf("ButtonSample" to listOf("Button"), "CardSample" to listOf("Card")), out)
+  }
+
+  @Test
+  fun `inverse falls back to the declaring component's own id`() {
+    // The short "<system>" form means "the same component, over there", so its inverse is the same
+    // component, back here.
+    val out =
+      ServeRelatedCatalogs.inverse(
+        mapOf("Button" to declared("samples" to null)),
+        targetSystem = "samples",
+      )
+    assertEquals(mapOf("Button" to listOf("Button")), out)
+  }
+
+  @Test
+  fun `inverse collects every component pointing at one target, without duplicates`() {
+    // Two kit components can legitimately point at one sample — a shared call site — and one
+    // component restating a link must not show up twice.
+    val out =
+      ServeRelatedCatalogs.inverse(
+        mapOf(
+          "Button" to
+            listOf(
+              ServeRelatedCatalogs.Declared("samples", "ButtonSample"),
+              ServeRelatedCatalogs.Declared("samples", "ButtonSample", "again"),
+            ),
+          "IconButton" to declared("samples" to "ButtonSample"),
+        ),
+        targetSystem = "samples",
+      )
+    assertEquals(mapOf("ButtonSample" to listOf("Button", "IconButton")), out)
+  }
+
+  @Test
+  fun `inverse ignores links to other systems`() {
+    val out =
+      ServeRelatedCatalogs.inverse(
+        mapOf("Button" to declared("tiles" to "ButtonTile")),
+        targetSystem = "samples",
+      )
+    assertTrue(out.isEmpty(), out.toString())
+  }
+
+  @Test
+  fun `inverse of a catalog that declares nothing is empty`() {
+    assertTrue(ServeRelatedCatalogs.inverse(emptyMap(), targetSystem = "samples").isEmpty())
+  }
+
+  @Test
   fun `resolve of nothing is empty, not null`() {
     assertTrue(
       ServeRelatedCatalogs.resolve(

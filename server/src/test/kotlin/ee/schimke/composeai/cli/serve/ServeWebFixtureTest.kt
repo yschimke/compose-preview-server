@@ -1819,6 +1819,32 @@ class ServeWebFixtureTest {
         usageHref = "/usage/com.example.ButtonSample",
         designReference = samplesReference,
         canApplyOverrides = true,
+        // A samples catalog is a catalog of many call sites, so the fixture carries a few: with one
+        // preview the drawer is omitted entirely and the goldens would show a page shape no real
+        // samples catalog has.
+        siblings =
+          listOf(
+            samplesPreview,
+            ServePreview("com.example.ButtonWithIconSample", "Button with icon sample"),
+            ServePreview("com.example.TextButtonSample", "Text button sample"),
+          ),
+        // The BACK-LINK, as the handler derives it: the kit component this sample explains. It is
+        // the inverse of that catalog's own `related` declaration
+        // ([ServeRelatedCatalogs.inverse]) and is declared nowhere in the samples catalog, which is
+        // the point — an imported catalog regenerated on every refresh cannot carry a mapping of
+        // its own and stay true.
+        //
+        // Carried on BOTH goldens, not only the samples one: the back-link follows from the
+        // declaration and not from the role, so a reader of the pair can see which differences the
+        // role is responsible for and which it is not.
+        componentDirectories =
+          listOf(
+            ServeWeb.ComponentDirectory(
+              "about",
+              "Explains",
+              listOf(ServeWeb.ComponentDirectoryRow("Button", "/compose-m3/p/button-filled")),
+            )
+          ),
       )
     val samplesViewer = samplesFixture(ServeWeb.PageRole.SAMPLES)
     val samplesViewerAsCatalog = samplesFixture(ServeWeb.PageRole.CATALOG)
