@@ -7,10 +7,13 @@ import kotlin.test.assertTrue
 import kotlin.time.measureTime
 import org.jetbrains.kotlin.CoreEnvironmentDeprecation
 import org.jetbrains.kotlin.K1Deprecation
+import org.jetbrains.kotlin.cli.extensionsStorage
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.com.intellij.openapi.util.Disposer
 import org.jetbrains.kotlin.com.intellij.psi.PsiFileFactory
+import org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar
+import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.psi.KtCallExpression
@@ -52,8 +55,18 @@ import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
   CompilerConfiguration.Internals::class,
   K1Deprecation::class,
   CoreEnvironmentDeprecation::class,
+  ExperimentalCompilerApi::class,
 )
 class PsiParseSpikeTest {
+
+  /**
+   * Kotlin 2.4.20 made `createForProduction` read `configuration.extensionsStorage` while wiring
+   * compiler-plugin extension points, and a bare `CompilerConfiguration()` does not carry one —
+   * every parse died on `IllegalStateException: Extensions storage is not registered`. Parsing
+   * needs no plugins, so an empty storage is the whole fix.
+   */
+  private fun parseOnlyConfiguration(): CompilerConfiguration =
+    CompilerConfiguration().apply { extensionsStorage = CompilerPluginRegistrar.ExtensionStorage() }
 
   /**
    * Where `scripts/usage-corpus.sh` actually writes, which is **not** this project's `build/`.
@@ -102,7 +115,7 @@ class PsiParseSpikeTest {
         val env =
           KotlinCoreEnvironment.createForProduction(
             disposable,
-            CompilerConfiguration(),
+            parseOnlyConfiguration(),
             EnvironmentConfigFiles.JVM_CONFIG_FILES,
           )
         factory = PsiFileFactory.getInstance(env.project)
@@ -177,7 +190,7 @@ class PsiParseSpikeTest {
       val env =
         KotlinCoreEnvironment.createForProduction(
           disposable,
-          CompilerConfiguration(),
+          parseOnlyConfiguration(),
           EnvironmentConfigFiles.JVM_CONFIG_FILES,
         )
       val ktFile =
@@ -333,6 +346,25 @@ class PsiParseSpikeTest {
           .loadClass("org.jetbrains.kotlin.config.CompilerConfiguration")
           .getDeclaredConstructor()
           .newInstance()
+      // Same Kotlin 2.4.20 requirement as `parseOnlyConfiguration()` above, reached reflectively so
+      // the storage class comes from the isolated loader rather than this test's own.
+      val storage =
+        loader
+          .loadClass(
+            "org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar\u0024ExtensionStorage"
+          )
+          .getDeclaredConstructor()
+          .newInstance()
+      loader
+        .loadClass("org.jetbrains.kotlin.cli.FrontendConfigurationKeysKt")
+        .getMethod(
+          "setExtensionsStorage",
+          loader.loadClass("org.jetbrains.kotlin.config.CompilerConfiguration"),
+          loader.loadClass(
+            "org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar\u0024ExtensionStorage"
+          ),
+        )
+        .invoke(null, config, storage)
       val jvmConfigFiles =
         loader
           .loadClass("org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles")
