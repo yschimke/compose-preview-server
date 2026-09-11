@@ -1,5 +1,40 @@
 # Changelog
 
+## [3.25.0](https://github.com/yschimke/compose-preview-server/compare/v3.24.0...v3.25.0) (2026-09-11)
+
+
+### Features
+
+* **deploy:** serve the AndroidX samples catalogs, unlisted ([#752](https://github.com/yschimke/compose-preview-server/issues/752)) ([47bade9](https://github.com/yschimke/compose-preview-server/commit/47bade9147b859fecf80676e8082b7aff1980f62))
+* **serve:** a samples page role, declared by the catalog ([#757](https://github.com/yschimke/compose-preview-server/issues/757)) ([3a79626](https://github.com/yschimke/compose-preview-server/commit/3a79626a0845f7f11685955b92010a954932cfff))
+* **serve:** component directories in the viewer drawer subtree ([#755](https://github.com/yschimke/compose-preview-server/issues/755)) ([4960207](https://github.com/yschimke/compose-preview-server/commit/4960207a129ca27ed09edb0ba0148f340ea98bf3))
+* **serve:** derive the back-link from a sample to the component it explains ([#759](https://github.com/yschimke/compose-preview-server/issues/759)) ([96d6c71](https://github.com/yschimke/compose-preview-server/commit/96d6c71d7c62c072a208d4e013eea76310fd8a28))
+* **serve:** migrate stored icon keys to Material Symbols names ([#741](https://github.com/yschimke/compose-preview-server/issues/741)) ([449a4df](https://github.com/yschimke/compose-preview-server/commit/449a4df68b154baf57221d3a2f7e59114ea5c8da))
+* **serve:** read a component's `related` catalogs ([#754](https://github.com/yschimke/compose-preview-server/issues/754)) ([93a66ba](https://github.com/yschimke/compose-preview-server/commit/93a66baf92efe29bb358921a446f85d3c58fb230))
+* **serve:** read the child bound a builtin slot declares ([#747](https://github.com/yschimke/compose-preview-server/issues/747)) ([c42ae8d](https://github.com/yschimke/compose-preview-server/commit/c42ae8da02b2ca75aa938ef264ec15314d33245e))
+* **serve:** resolve Material Symbols outlines from the pinned variable font ([#738](https://github.com/yschimke/compose-preview-server/issues/738)) ([6d4c220](https://github.com/yschimke/compose-preview-server/commit/6d4c220bf938ec7df2a341023a8051f9c37d6b94))
+* **ui-builder:** carry resolved icon outlines in the design ([#745](https://github.com/yschimke/compose-preview-server/issues/745)) ([8f75dfa](https://github.com/yschimke/compose-preview-server/commit/8f75dfa217c732e40f31d1da124d59759cbe6fe4))
+* **ui-builder:** gate stateful Remote authoring behind a build flag ([#708](https://github.com/yschimke/compose-preview-server/issues/708)) ([3383250](https://github.com/yschimke/compose-preview-server/commit/338325014009a5be391151de7696c5373ccabd1f))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools ([#739](https://github.com/yschimke/compose-preview-server/issues/739)) ([7566d21](https://github.com/yschimke/compose-preview-server/commit/7566d2190332608bd22e3e162e887091dbc599d7))
+* **deps:** update compose-ai-tools ([#749](https://github.com/yschimke/compose-preview-server/issues/749)) ([9917f6b](https://github.com/yschimke/compose-preview-server/commit/9917f6bf856c36bd3f0f2050a455aa57f029be5b))
+* **deps:** update compose-multiplatform to v1.12.0 ([#731](https://github.com/yschimke/compose-preview-server/issues/731)) ([7b64d91](https://github.com/yschimke/compose-preview-server/commit/7b64d91d0866e07eac03f068b36010995d67dac6))
+* **deps:** update compose-preview-contracts to v2.17.0 ([#740](https://github.com/yschimke/compose-preview-server/issues/740)) ([2efd59d](https://github.com/yschimke/compose-preview-server/commit/2efd59d454111616fc19f126e0aaf760e93cc2af))
+* **playground:** reject android catalogs without the SDK ([#750](https://github.com/yschimke/compose-preview-server/issues/750)) ([c1f1349](https://github.com/yschimke/compose-preview-server/commit/c1f13498687baac2828c92341627d38beed52a19))
+* preserve live frame aspect after decode ([#751](https://github.com/yschimke/compose-preview-server/issues/751)) ([e2a559f](https://github.com/yschimke/compose-preview-server/commit/e2a559fbf2d46a07a606672d91ef5c9fe2af9029))
+* **release:** retry apt index updates during mirror sync ([#732](https://github.com/yschimke/compose-preview-server/issues/732)) ([337b963](https://github.com/yschimke/compose-preview-server/commit/337b96381ee5fa95d99865339e6490a5938c52d3))
+* **serve:** make the fixture command work and the two-tone note true ([#743](https://github.com/yschimke/compose-preview-server/issues/743)) ([f102040](https://github.com/yschimke/compose-preview-server/commit/f10204078b8acf5dd5da1df9db39acc6b7e82eea))
+* **serve:** migrate the icon aliases and the baked-in fills correctly ([#742](https://github.com/yschimke/compose-preview-server/issues/742)) ([8b1c92d](https://github.com/yschimke/compose-preview-server/commit/8b1c92dc46ae2bd8f464f433c297fa2e57a8b06c))
+* **server:** register an extensions storage before every PSI parse ([#728](https://github.com/yschimke/compose-preview-server/issues/728)) ([60a2d23](https://github.com/yschimke/compose-preview-server/commit/60a2d2394fe205745001e5617c44bbfcacf5f512))
+* **ui-builder:** capture a component with the catalog's ids in scope ([#734](https://github.com/yschimke/compose-preview-server/issues/734)) ([7012a87](https://github.com/yschimke/compose-preview-server/commit/7012a87ad1a59000be1b7f4514cb1314e8bbb645))
+* **ui-builder:** drive the SVG recorder's frames on Compose 1.12.0 ([#735](https://github.com/yschimke/compose-preview-server/issues/735)) ([bade1a8](https://github.com/yschimke/compose-preview-server/commit/bade1a8594f9cf7641aebbad8be54e8feeedf2f8))
+* **ui-builder:** resolve outlines on the accepted document, and name icons by name ([#746](https://github.com/yschimke/compose-preview-server/issues/746)) ([29f0d2c](https://github.com/yschimke/compose-preview-server/commit/29f0d2cf45099e33948a2a44fb464c1d5f24c02a))
+* **ui-builder:** serve the export's record to the browser's code pane ([#730](https://github.com/yschimke/compose-preview-server/issues/730)) ([ce3b1d4](https://github.com/yschimke/compose-preview-server/commit/ce3b1d4af6cfc206eaca2b90364bf4cbf0f7576e))
+* unstick main from the remaining Compose 1.12.0 fallout ([#737](https://github.com/yschimke/compose-preview-server/issues/737)) ([5334e35](https://github.com/yschimke/compose-preview-server/commit/5334e3578383af7d2c529e5ac51f950f020688a9))
+
 ## [3.24.0](https://github.com/yschimke/compose-preview-server/compare/v3.23.0...v3.24.0) (2026-09-11)
 
 
