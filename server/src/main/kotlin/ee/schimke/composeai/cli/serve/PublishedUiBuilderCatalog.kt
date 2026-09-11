@@ -217,12 +217,29 @@ internal object PublishedUiBuilderCatalog {
           unreadable += "$owner.${slot.name} (cardinality max $max is below min $min)"
       }
     }
+    // The rule `checkSlots` applies to a component's slots, over the pair a builtin derives:
+    // `required` sets the minimum, `max` bounds it above. This could not fail until a builtin
+    // could state `max` — the minimum is 0 or 1 and the maximum was always unbounded — which is
+    // why the builtins loop below checked only properties. Now that the bound is writable, an
+    // impossible one reaches the shelf the same way a component's would, and the paragraph above
+    // says what that costs: a component nobody can author, on a catalog that loaded cleanly.
+    //
+    // No duplicate-name arm, unlike its sibling: a builtin's slots are a map, so the wire cannot
+    // carry the same name twice.
+    fun checkBuiltinSlots(owner: String, slots: Map<String, UiBuilderBuiltinSlot>) {
+      for ((name, slot) in slots) {
+        val min = if (slot.required) 1 else 0
+        val max = slot.max ?: continue
+        if (max < min) unreadable += "$owner.$name (cardinality max $max is below min $min)"
+      }
+    }
     semantics.components.forEach { (componentId, policy) ->
       checkProperties(componentId, policy.propertyCapabilities.orEmpty())
       checkSlots(componentId, policy.slotCapabilities.orEmpty())
     }
     semantics.builtins.forEach { (builtinId, builtin) ->
       checkProperties(builtinId, builtin.properties.orEmpty())
+      checkBuiltinSlots(builtinId, builtin.slots)
     }
     if (unreadable.isNotEmpty()) {
       return Result.Unusable(
@@ -521,9 +538,9 @@ internal object PublishedUiBuilderCatalog {
         builtin.slots.map { (name, slot) ->
           SlotCapabilityV1(
             name = name,
-            // `required` is the only cardinality the schema lets a builtin state, and it means at
-            // least one child. Unbounded above, as it was.
-            cardinality = SlotCardinalityV1(min = if (slot.required) 1 else 0, max = null),
+            // `required` means at least one child; `max` bounds it above, and null there is the
+            // unbounded slot every builtin had before it could say otherwise.
+            cardinality = SlotCardinalityV1(min = if (slot.required) 1 else 0, max = slot.max),
             ordered = true,
             acceptedRoles = slot.acceptedRoles,
             acceptedTraits = slot.acceptedTraits,
@@ -728,6 +745,18 @@ internal object PublishedUiBuilderCatalog {
     val acceptedRoles: List<String> = emptyList(),
     val acceptedTraits: List<String> = emptyList(),
     val required: Boolean = false,
+    /**
+     * The most children this slot admits, or null for unbounded.
+     *
+     * A builtin is the only way a catalog offers a component with no call site, so what it declares
+     * is all there is — and its slots could say what they accept but not how many. A host that
+     * draws exactly one child composed unbounded either way, so the shelf offered a container a
+     * design could put three children into while the host drew one of them.
+     *
+     * Absent stays unbounded, which is what every builtin slot was before this field: no existing
+     * declaration acquires a bound it never asked for. `required` sets the other end.
+     */
+    val max: Int? = null,
     val role: String? = null,
   )
 
