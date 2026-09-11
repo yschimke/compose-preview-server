@@ -1,0 +1,20 @@
+{
+  "artifacts": [
+    {
+      "format": "json",
+      "bytes": 2138,
+      "sha256": "cf3aebf9816d07380f53daeaea0e350379104ff617227aaba56ea8e0669caec1",
+      "browserMatchesMcp": true
+    },
+    {
+      "format": "rc",
+      "bytes": 884,
+      "sha256": "4eb8b55a751ed146df436bedd4d557eff7940aaba31852d16325f16304185633",
+      "browserMatchesMcp": true
+    }
+  ],
+  "initialText": "@second",
+  "otherInitialText": "Ready",
+  "savedOnServer": false,
+  "errors": []
+}

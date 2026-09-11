@@ -198,8 +198,25 @@ The initial mapping covers Box/Row/Column, spacing and cross-axis alignment, bas
 modifiers, non-null integer/Boolean selection and numeric/Boolean state writes. Catalog-specific
 components need declared lowering recipes; typography, assets, scoped child alignment, dynamic
 dimensions, String/nullable/Float selection and reusable instances remain to be mapped. Mutable
-String declarations are explicitly refused because the stock parser can give equal initial
-strings the same text ID. A compiler probe pins that identity problem.
+String declarations use the explicit state profile below; a compiler probe retains the stock
+parser's equal-initial-text identity limitation.
+
+### Independent mutable text
+
+`MutableStringJsonTest` proves the owning compiler's `compose-preview-state-v1` profile with the
+real CMP player: two `Ready` variables and an equal literal stay independent after a click action
+and a host update. The shared exporter's exact output also preserves ordered assignments of empty,
+Unicode and reference-like strings. Run the production fixture writer first, then:
+
+```shell
+./gradlew -p experiments/remote-compose-poc \
+  -PlocalJsonCompilerManifest="$PWD/build/local-dependencies/remote-export/local-dependencies.properties" \
+  -PlocalRcPlayers=/path/to/local/rc-players \
+  -PproductionStringJsonDir="$PWD/ui-builder-export/build/remote-json-strings" \
+  jvmTest --tests '*MutableStringJsonTest'
+```
+
+This proof does not add String equality or catalog typography recipes.
 
 This proof now consumes production-generated JSON, but download formats, revision-pinned service
 export and live editor/MCP preview still need to be connected to the shared exporter.

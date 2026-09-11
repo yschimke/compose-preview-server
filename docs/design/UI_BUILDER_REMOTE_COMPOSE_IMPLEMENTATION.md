@@ -48,7 +48,7 @@ no committed fixtures.
 
 This completes the delivery path for the current lowering subset, not Remote Compose completeness.
 Unsaved/local document compilation, broader component recipes and modifier mappings, independent
-String state, nullable/computed values, callbacks, loop/reusable fidelity, and the operation coverage
+String selection, nullable/computed values, callbacks, loop/reusable fidelity, and the operation coverage
 remaining in the review are still required.
 
 ## Live document preview
@@ -327,8 +327,8 @@ The player supplies its normal click indication; branch assertions identify the 
 channel without treating that indication as a change to the authored fill.
 
 A separate compiler probe proves that equal initial String values share a text ID in the stock
-parser. Mutable String export is refused until the owning compiler can preserve independent state
-and literal IDs. Float selection, nullable state, dynamic dimensions, scoped child alignment,
+parser. The explicit state compiler profile described below now preserves independent state
+and literal IDs. Float/String selection, nullable state, dynamic dimensions, scoped child alignment,
 catalog typography/assets and reusable instances also remain to be mapped.
 
 Verification: 46 shared-export tests and 189 runtime tests pass, the shared module and existing
@@ -353,6 +353,30 @@ unsupported lowering and a local browser edit. [Evidence and reproduction instru
 evidence/ui-builder-remote-png-export/README.md) describe the exact subset exercised.
 Imported documents, custom Remote content and Wear record-free roots keep their existing rendering
 lane; combined JSON lowering of those constructs remains separate work.
+
+## Independent text state
+
+The shared exporter uses `compose-preview-state-v1` when a document declares non-null text state.
+Its `mutableString` declarations use AndroidX's named-string writer API to allocate independent IDs.
+The owning compiler extension emits ordinary NamedVariable/TextData operations. Its previous
+unextended and integer-expression profiles retain their behavior.
+
+Ordered `set`/`select` assignments emit ValueStringChange actions. An immutable literal resource
+holds each assigned value, preserving empty text, Unicode and strings beginning with `@` or `$`
+without interpreting them as references. Generated resource names avoid authored state names.
+The existing Screen text editor and action controls use these mappings through the same JSON/RC
+HTTP and MCP export paths; there is no additional Remote-only editor mode.
+
+The real-player proof shows two state variables and a literal initially containing `Ready`.
+A click changes only the first variable; a host update changes only the second. Exact production
+exports additionally exercise repeated ordered actions with six literal cases. The existing WASM
+editor proof edits a local text variable and compares its JSON/RC downloads with hosted MCP.
+[Source, screenshots and reproduction](evidence/ui-builder-remote-string-state/README.md).
+
+This enables independent declarations and literal assignments. String equality/branch selection,
+nullable text, text expressions and catalog-specific typography recipes remain separate work.
+The visual text fixture is a direct authoring-JSON player proof, not a claim that arbitrary M3 Text
+components now have a precise JSON recipe.
 
 ## Remaining production work
 

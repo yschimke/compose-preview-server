@@ -248,23 +248,57 @@ class RemoteDocumentJsonExporterTest {
   }
 
   @Test
-  fun `mutable strings require a compiler mapping that preserves identity`() {
-    val original = remoteJsonSelectionFixture()
-    val declarations =
-      JsonObject(
-        original.stateVariables +
-          ("label" to
-            buildJsonObject {
-              put("valueType", "string")
-              put("initialValue", "Ready")
-            })
+  fun `mutable strings use independent state declarations and unambiguous action literals`() {
+    val result =
+      assertIs<RemoteDocumentJsonExporter.Result.Emitted>(
+        RemoteDocumentJsonExporter.export(remoteJsonStringFixture("@second"))
       )
-    assertTrue(
-      assertIs<RemoteDocumentJsonExporter.Result.Refused>(
-          RemoteDocumentJsonExporter.export(original.copy(stateVariables = declarations))
-        )
-        .reasons
-        .any { "stateVariables.label" in it && "text IDs" in it }
+    val json = Json.parseToJsonElement(result.source).jsonObject
+    assertEquals(JsonPrimitive(RemoteDocumentJsonExporter.STATE_PROFILE), json["compilerProfile"])
+    val roots = json.getValue("root").jsonArray.map { it.jsonObject }
+    val strings = roots.filter { it["type"] == JsonPrimitive("mutableString") }
+    assertEquals(
+      setOf("first", "second", "__rc_text_0"),
+      strings.map { it.getValue("name").jsonPrimitive.content }.toSet(),
     )
+    assertTrue(strings.all { it["value"] == JsonPrimitive("Ready") })
+    val literals = roots.filter { it["type"] == JsonPrimitive("variable") }
+    assertTrue(literals.any { it["value"] == JsonPrimitive("@second") })
+    assertTrue(
+      literals.none { it["name"] == JsonPrimitive("__rc_text_0") },
+      "Generated names must not shadow state",
+    )
+    assertEquals("string", result.stateKinds["first"])
   }
+}
+
+internal fun remoteJsonStringFixture(value: String): UiBuilderDocument {
+  val original = remoteJsonSelectionFixture()
+  val declarations =
+    JsonObject(
+      original.stateVariables +
+        listOf("first", "second", "__rc_text_0").associateWith {
+          buildJsonObject {
+            put("valueType", "string")
+            put("initialValue", "Ready")
+          }
+        }
+    )
+  val root = original.nodes.getValue("switch")
+  val changed =
+    root.copy(
+      eventBindings =
+        buildJsonObject {
+          putJsonArray("click") {
+            for (text in listOf("Interim", value)) add(
+              buildJsonObject {
+                put("type", "set")
+                put("variable", "first")
+                put("value", text)
+              }
+            )
+          }
+        }
+    )
+  return original.copy(stateVariables = declarations, nodes = original.nodes + (root.id to changed))
 }

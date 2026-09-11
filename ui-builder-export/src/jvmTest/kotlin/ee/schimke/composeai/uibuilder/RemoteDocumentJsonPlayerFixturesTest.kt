@@ -7,6 +7,21 @@ import kotlinx.serialization.json.JsonPrimitive
 /** The player proof reads exact output from the shared production exporter. */
 class RemoteDocumentJsonPlayerFixturesTest {
   @Test
+  fun `write mutable string JSON for the real player proof`() {
+    val output = File("build/remote-json-strings").apply { mkdirs() }
+    listOf("Ready", "Changed", "@second", "$" + "second", "", "Résumé 👋").forEachIndexed {
+      index,
+      value ->
+      val result =
+        assertIs<RemoteDocumentJsonExporter.Result.Emitted>(
+          RemoteDocumentJsonExporter.export(remoteJsonStringFixture(value))
+        )
+      File(output, "$index.json").writeText(result.source)
+      File(output, "$index.expected.txt").writeText(value)
+    }
+  }
+
+  @Test
   fun `write production JSON for the real player proof`() {
     val scenarios =
       mapOf(

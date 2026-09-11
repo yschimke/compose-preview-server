@@ -44,6 +44,10 @@ tasks.register<JavaExec>("compileDocument") {
 }
 
 tasks.withType<Test>().configureEach {
+  providers.gradleProperty("productionStringJsonDir").orNull?.let { path ->
+    inputs.dir(path)
+    systemProperty("productionStringJsonDir", file(path).absolutePath)
+  }
   providers.gradleProperty("productionJsonDir").orNull?.let { path ->
     inputs.dir(path)
     systemProperty("productionJsonDir", file(path).absolutePath)

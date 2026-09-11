@@ -7,6 +7,7 @@ import kotlinx.serialization.json.*
 /** Design semantics lowered to authoring JSON, shared by the editor and service export lanes. */
 object RemoteDocumentJsonExporter {
   const val INTEGER_PROFILE = "compose-preview-integer-expressions-v1"
+  const val STATE_PROFILE = "compose-preview-state-v1"
 
   sealed interface Result {
     /** Boolean state uses named integers (0/1); the host bridge must use [stateKinds]. */
@@ -45,6 +46,8 @@ object RemoteDocumentJsonExporter {
     val stateKinds = linkedMapOf<String, String>()
     val integers = linkedMapOf<String, JsonElement>()
     val floats = linkedMapOf<String, JsonElement>()
+    val strings = linkedMapOf<String, JsonElement>()
+    val textLiterals = mutableListOf<JsonObject>()
     val active = mutableSetOf<String>()
     var expressionIndex = 0
     var usesIntegerProfile = false
@@ -75,7 +78,8 @@ object RemoteDocumentJsonExporter {
         .forEach { (name, value) -> declare(name, value) }
       val roots = document.roots.mapNotNull(::node)
       val source = buildJsonObject {
-        if (usesIntegerProfile) put("compilerProfile", INTEGER_PROFILE)
+        if (strings.isNotEmpty()) put("compilerProfile", STATE_PROFILE)
+        else if (usesIntegerProfile) put("compilerProfile", INTEGER_PROFILE)
         putJsonObject("header") {
           put("width", widthPx)
           put("height", heightPx)
@@ -90,6 +94,16 @@ object RemoteDocumentJsonExporter {
               put("variables", JsonObject(floats))
             }
           )
+          textLiterals.forEach(::add)
+          strings.forEach { (name, value) ->
+            add(
+              buildJsonObject {
+                put("type", "mutableString")
+                put("name", name)
+                put("value", value)
+              }
+            )
+          }
           roots.forEach(::add)
         }
       }
@@ -115,8 +129,8 @@ object RemoteDocumentJsonExporter {
         return
       }
       if (kind == "string") {
-        errors +=
-          "$path: mutable String JSON lowering needs independent text IDs; the stock parser may alias literals"
+        stateKinds[name] = kind
+        strings[name] = initial!!
         return
       }
       stateKinds[name] = kind!!
@@ -344,6 +358,25 @@ object RemoteDocumentJsonExporter {
       if (type !in setOf("set", "select") || !matches(value, kind)) {
         errors += "$path: $type needs a non-null $kind literal"
         return null
+      }
+      if (kind == "string") {
+        // Stock string actions interpret @/$ prefixes as references. Intern a separate immutable
+        // literal, then reference its ID, so every authored String remains a literal assignment.
+        var name: String
+        do {
+          name = "__rc_text_${expressionIndex++}"
+        } while (name in stateKinds)
+        textLiterals += buildJsonObject {
+          put("type", "variable")
+          put("vtype", "string")
+          put("name", name)
+          put("value", value!!)
+        }
+        return buildJsonObject {
+          put("type", "valueStringChange")
+          put("target", "@$variable")
+          put("value", "@$name")
+        }
       }
       return buildJsonObject {
         put(
