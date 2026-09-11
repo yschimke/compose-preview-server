@@ -218,5 +218,33 @@ Unicode and reference-like strings. Run the production fixture writer first, the
 
 This proof does not add String equality or catalog typography recipes.
 
+### Decimal selection and shared numeric IDs
+
+`FloatSelectionJsonTest` follows creation-compose's exact equality lowering: a Float comparison
+produces 0/1, an integer expression reads that result by ID, and StateLayout consumes the resulting
+case ordinal. An isolated `floatEquals` parser adapter makes this a feasibility test rather than
+a new advertised production JSON construct.
+
+The test exposed a CMP player defect: Float writes populated only the Float namespace, while
+AndroidX `RemoteComposeState.updateFloat` also publishes the truncated integer view. That left
+integer comparison inputs at zero and selected the fallback even when the decimal case matched.
+The local player correction publishes both numeric views for expressions, named values, actions,
+constants and measurements, while retaining exact authored integer values.
+
+The four rendering probes cover ordinary decimals, adjacent Floats, subnormal values and opposite
+finite extremes. Each selects both cases, falls back, then returns to the first case without
+recompilation. A fifth test compares numeric writes directly with the actual AndroidX alpha19
+`RemoteComposeState`, including conversion boundaries and non-finite runtime values.
+
+```shell
+./gradlew -p experiments/remote-compose-poc \
+  -PlocalRcPlayers=/path/to/local/rc-players \
+  jvmTest --tests '*FloatSelectionJsonTest'
+```
+
+The proof writes JSON, compiled documents and PNGs to `build/evidence/float-selection`.
+Production compiler-profile and exporter support remains separate work; the current shared JSON
+exporter continues to refuse decimal selectors until that integration is verified.
+
 This proof now consumes production-generated JSON, but download formats, revision-pinned service
 export and live editor/MCP preview still need to be connected to the shared exporter.

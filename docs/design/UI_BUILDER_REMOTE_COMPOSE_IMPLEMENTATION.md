@@ -392,6 +392,20 @@ The [actual WASM browser proof](evidence/ui-builder-modifier-inspector/README.md
 from 24 to 40 dp while preserving the state link and other edges. The downloaded PNG moves its
 content boundary by precisely 16 pixels at density 1 and matches hosted MCP byte for byte.
 
+## Decimal selection player prerequisite
+
+The isolated JSON proof now reproduces creation-compose's Float equality lowering and checks
+ordinary decimals, adjacent Floats, subnormals and opposite extremes in the real CMP player.
+It exposed a shared numeric-ID defect: Float writes did not publish the truncated integer view
+that AndroidX makes available to integer expressions. [The player correction](https://github.com/yschimke/rc-players/pull/94) passes those
+four switching scenarios and a direct comparison against AndroidX alpha19's numeric state.
+The owning runtime/Compose suites, ABI and WASM checks also pass.
+
+[Before/after captures and reproduction](evidence/ui-builder-float-selection-player/README.md)
+record the proof. Its parser adapter is deliberately confined to the experiment. Production
+compiler-profile support, JSON lowering, browser and MCP decimal exports remain to be integrated;
+the current production exporter continues returning its located refusal for decimal selection.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware
