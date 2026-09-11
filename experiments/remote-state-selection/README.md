@@ -1,5 +1,14 @@
 # Production Remote StateLayout export proof
 
+The separate [loop/function feasibility proof](../../docs/design/evidence/ui-builder-repetition-source/README.md)
+also runs here. Its Python prototype generates source from the committed semantic repetition design;
+it is explicitly separate from the production StateLayout emitter described below. Both ordinary
+Compose and creation-compose compile real loops, typed row classes, reusable composables and
+callbacks, then match the JSON/player pixels and all six click targets at densities 1 and 2.
+`verify.sh` regenerates both kinds of source and runs both Android and desktop checks. The desktop
+source attachment is opt-in through an init script; no production module or export route uses the
+prototype.
+
 This standalone Android project compiles the **actual output of the production
 `InlineRemoteContentExporter`**, then records it with AndroidX and plays the resulting binary
 Remote Compose document. It extends the existing builder's export path; it is not another editor.

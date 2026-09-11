@@ -1,0 +1,9 @@
+// Opt-in compilation of the experimental Compose source using the existing desktop test lane.
+gradle.projectsEvaluated {
+    def builder = rootProject.findProject(':ui-builder')
+    if (builder == null) return
+    def proof = new File(rootProject.projectDir, 'experiments/remote-state-selection')
+    def sources = builder.extensions.getByName('kotlin').sourceSets.getByName('jvmTest').kotlin
+    sources.srcDir(new File(proof, 'build/repetition-source/compose'))
+    sources.srcDir(new File(proof, 'src/desktopTest/kotlin'))
+}

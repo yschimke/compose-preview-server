@@ -453,6 +453,16 @@ Remote Kotlin loop generation, record-driven Compose loops/calls and per-instanc
 remain integration work. Static expansion does not substitute for runtime lists, lazy keys, scoped
 state or callback/slot parameters.
 
+The [Kotlin feasibility proof](evidence/ui-builder-repetition-source/README.md) now generates actual
+typed row lists, `forEach` loops and reusable composables from the same semantic fixture for both
+ordinary Compose and creation-compose. Numeric arguments, placement modifiers and explicit callbacks
+preserve layout and shared-state behavior. Four compile/interaction tests pass at densities 1 and 2;
+initial images match the independent JSON/player reference pixel for pixel, and all 24 clicks update
+the expected state. Ordinary Compose's click indication is the only measured post-click difference,
+confined to the clicked cell. This is an isolated generator prototype, not yet a production export
+route. Proceed with the proven source form in the shared generator and Remote emitter; retain the
+catalog-derived type, nested scope and callback/slot requirements rather than shipping the prototype.
+
 ## Remaining production work
 
 - Extend the shared record-driven generator to nullable state, comparisons and parameter-aware

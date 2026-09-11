@@ -38,5 +38,6 @@ androidComponents {
     variant.sources.kotlin?.addStaticSourceDirectory(
       "../../ui-builder-export/build/remote-state-selection"
     )
+    variant.sources.kotlin?.addStaticSourceDirectory("build/repetition-source/remote")
   }
 }

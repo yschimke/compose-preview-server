@@ -1,0 +1,50 @@
+// Experimental source generated from the committed semantic repetition fixture.
+@file:Suppress("RestrictedApi")
+package proof.repetition.compose
+import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+@Composable
+fun ComposeRepeatedContent() {
+    var state0 by remember { mutableIntStateOf(10) }
+    Column(modifier = Modifier) {
+        Column(modifier = Modifier, verticalArrangement = Arrangement.spacedBy(4.0f.dp)) {
+            kotlin.collections.listOf<Rows1>(Rows1(0.0f), Rows1(8.0f), Rows1(16.0f)).forEach { row ->
+                Component0(row.field0, { state0 = 10 }, { state0 = 20 }, Modifier.padding(4.0f.dp, 2.0f.dp, 4.0f.dp, 2.0f.dp))
+            }
+        }
+        Box(modifier = Modifier.size(60.0f.dp, 20.0f.dp)) {
+            when (state0) {
+                10 -> {
+                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFFF0000))) {
+                    }
+                }
+                20 -> {
+                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF00FF00))) {
+                    }
+                }
+                else -> {
+                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0000FF))) {
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable
+private fun Component0(argument0: Float, callback0: () -> Unit, callback1: () -> Unit, modifier: Modifier) {
+    Box(modifier = modifier) {
+        Row(modifier = Modifier, horizontalArrangement = Arrangement.spacedBy(argument0.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(16.0f.dp, 16.0f.dp).background(Color(0xFFFF0000)).clickable(onClick = callback0)) {
+            }
+            Box(modifier = Modifier.size(16.0f.dp, 16.0f.dp).background(Color(0xFF00FF00)).clickable(onClick = callback1)) {
+            }
+        }
+    }
+}
+private data class Rows1(val field0: Float)
