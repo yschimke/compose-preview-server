@@ -13,6 +13,7 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
 import ee.schimke.composeai.data.render.PreviewClip
 import ee.schimke.composeai.designpages.DesignPage
+import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.imagecrop.ContentCrop
 import ee.schimke.composeai.remotecompose.json.RemoteComposeJson
 import ee.schimke.composeai.remotecompose.json.RemoteComposeJsonException
@@ -387,6 +388,16 @@ class ServeHttpServer(
    * because it exposes the same projects.
    */
   private val uiBuilderComponentLibrary: ServeUiBuilderComponentLibrary? = null,
+  /**
+   * The record the Compose export generates a given catalog's designs from, so the browser's code
+   * pane can read the same one. See [installUiBuilderCatalogRecordRoutes].
+   *
+   * A function rather than a map for the reason `ScreenGeneratorComposeExportExecutor`'s published
+   * components are one: a catalog's record can arrive after this server is constructed, and a value
+   * read at startup would be the empty answer forever. The default serves none, which leaves every
+   * editor on the record embedded in its own build — the behaviour before this route.
+   */
+  private val uiBuilderCatalogRecord: (catalogSystemId: String) -> ComponentRecordFile? = { null },
   /**
    * Shared secret for the `/admin/catalogs` routes (`--admin-token`). Separate from the browsing
    * [token] on purpose: a public box hands its browse URL to everyone, so admin needs its own
@@ -1054,6 +1065,12 @@ class ServeHttpServer(
             uiBuilderComponentLibrary,
             uiBuilderDesignCatalogs,
           )
+        }
+        // What the export generates from, for the editor that has to agree with it. Outside the
+        // design-service block for the same reason the library listing is: it answers a question
+        // about a catalog, and a host serving the builder read-only still has a code pane.
+        if (uiBuilderAuthorization != null) {
+          installUiBuilderCatalogRecordRoutes(uiBuilderAuthorization, uiBuilderCatalogRecord)
         }
 
         // `/healthz` — ungated liveness: "ok" the moment the listener is up. Leaks nothing, and

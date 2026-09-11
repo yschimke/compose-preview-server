@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.BooleanValueV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -26,6 +27,7 @@ import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -762,6 +764,112 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       "is24Hour = false",
       message = "an authored `is24Hour` is what reaches the state factory",
     )
+  }
+
+  /**
+   * The **browser's** lane and the server's, asked about all 108 published components.
+   *
+   * Two exporters reach `ScreenGenerator`: this executor, and `ScreenExportGate` behind the
+   * editor's code pane and problems panel. They were never asked the same question — the gate's
+   * tests supply the build-time record directly, so both lanes only ever saw components both
+   * records carry — and under a published catalog they gave different answers for most of the
+   * shelf. The pane read `m3-catalog`'s authored 34-component record, embedded in `:ui-builder` at
+   * build time; the export reads the record the host fetched with the catalog. 78 of these 108
+   * components are not in the embedded file, so the pane said "no component `m3/…` in this catalog"
+   * about components whose Kotlin the export wrote (compose-preview-server#714).
+   *
+   * [ScreenGeneratorComposeExportExecutor.exportRecord] is the fix and this is its point: the
+   * browser is handed the record this executor generates from, so the question below has one answer
+   * rather than two. Asserted as the pair of verdicts per component rather than as a count — a
+   * disagreement in either direction is a defect, and the two are different defects. A pane that
+   * refuses what the export writes tells an author to undo work that was fine; a pane that emits
+   * what the export refuses hides the refusal until they press Export.
+   *
+   * It does not assert identical source. The gate names the screen `Screen` where the executor
+   * derives it from the design, and only the executor writes the provenance header — differences in
+   * what surrounds the call, not in whether there is one.
+   */
+  @Test
+  fun `the code pane and the export agree about every published component`() {
+    val record =
+      json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-generated-record-v1.json"))
+    val executor =
+      ScreenGeneratorComposeExportExecutor(
+        { systemId ->
+          if (systemId == "m3-catalog") ComponentRecordSource.Lookup.Found(record)
+          else ComponentRecordSource.Lookup.Unconfigured
+        },
+        "generated.uibuilder",
+        publishedComponents = { systemId ->
+          if (systemId == "m3-catalog") composedRecords else emptyMap()
+        },
+      )
+    // What the route hands the editor, from the executor that serves the export.
+    val served =
+      assertNotNull(
+        executor.exportRecord("m3-catalog"),
+        "the host serves no record for a catalog it exports",
+      )
+    val offered = composed.components.filter { it.componentId.startsWith("m3/") }
+
+    val disagreed = sortedMapOf<String, String>()
+    for (component in offered) {
+      val document = screenAround(component)
+      val exported = executor.generate(document)
+      val pane = ScreenExportGate.refusals(document, served)
+      val exportWrites = exported is ScreenGeneratorComposeExportExecutor.Generated.Emitted
+      if (exportWrites != pane.isEmpty()) {
+        disagreed[component.componentId] =
+          if (exportWrites) "the export writes it and the pane refuses: ${pane.first()}"
+          else
+            "the pane writes it and the export refuses: " +
+              (exported as ScreenGeneratorComposeExportExecutor.Generated.Refused).reasons.first()
+      }
+    }
+
+    assertEquals(
+      emptyMap(),
+      disagreed.toMap(),
+      "the browser and the server disagree about what this shelf exports",
+    )
+  }
+
+  /**
+   * The record the editor was built with, asked the same question — the measurement of the gap, and
+   * the reason serving one is worth a route.
+   *
+   * Pinned as an exact set for the reason [M3_EXPORT_REFUSALS] is: every id here is a component an
+   * author can insert from a published palette and read "no component in this catalog" about while
+   * the export writes it. Teaching the authored record one of these shortens the list and says so;
+   * a new entry is a component that just started lying to whoever cannot reach the route.
+   */
+  @Test
+  fun `the embedded record cannot answer for most of the published shelf`() {
+    val authored =
+      json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-components-v1.json"))
+    val offered = composed.components.filter { it.componentId.startsWith("m3/") }
+
+    val unknown =
+      offered
+        .map { it.componentId }
+        .filter { id ->
+          ScreenExportGate.refusals(
+              screenAround(offered.single { it.componentId == id }),
+              authored,
+            )
+            .any { it == "no component `$id` in this catalog" }
+        }
+
+    assertEquals(
+      91,
+      unknown.size,
+      "how much of the published m3 shelf the record embedded in the editor cannot name has " +
+        "changed: $unknown",
+    )
+    // Not a sample: the 26 the export itself refuses are a different list, and these two barely
+    // overlap. `m3/badge` is the plainest case — one Material callable, no arguments, exported
+    // without complaint, and invisible to the editor.
+    assertContains(unknown, "m3/badge")
   }
 
   /**

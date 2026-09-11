@@ -3270,6 +3270,10 @@ public class ServeRunner(
           uiBuilderDesignDirectories() + uiBuilderDesignCatalogCoordinates(catalogLoads)
         },
         uiBuilderComponentLibrary = uiBuilderComponentLibrary,
+        // The same executor the export runs, asked for the record rather than for Kotlin: the
+        // editor's code pane generates from it in the browser, so the two lanes cannot be reading
+        // different records. Null lane ⇒ no record, which is also no builder to serve it to.
+        uiBuilderCatalogRecord = { systemId -> uiBuilderLane?.compose?.exportRecord(systemId) },
         trustAdmin = trustAdmin,
         adminToken = adminToken,
         docStore = docStore,
