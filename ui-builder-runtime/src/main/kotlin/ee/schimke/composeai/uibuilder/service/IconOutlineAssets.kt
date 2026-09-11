@@ -156,15 +156,30 @@ public object IconOutlineAssets {
    * bytes each, and pruning becomes an explicit operation if it ever earns one.
    *
    * [resolve] answering null leaves that icon without an entry yet. It never removes one.
+   *
+   * [maximumAssets] is the design's own asset ceiling, and it binds here because keeping every
+   * outline is otherwise unbounded: change one node's icon enough times and the additions alone
+   * could pass a limit only the upload route enforces, which would then refuse somebody's next
+   * image because of pictures nobody asked for. At the ceiling this simply stops adding — an icon
+   * without a recorded outline, the same state a host with no resolver leaves — rather than
+   * evicting one, because eviction is what undo cannot survive.
    */
   public fun withOutlines(
     assets: Map<String, AssetBindingV1>,
     wanted: Set<IconOutlineKeyV1>,
+    maximumAssets: Int,
     resolve: (IconOutlineKeyV1) -> String?,
   ): Map<String, AssetBindingV1> {
+    val room = maximumAssets - assets.size
+    if (room <= 0) return assets
     val missing = wanted.filterNot { it.assetKey() in assets }
     if (missing.isEmpty()) return assets
-    val added = missing.mapNotNull { icon -> resolve(icon)?.let { icon.assetKey() to binding(it) } }
+    val added =
+      missing
+        .asSequence()
+        .mapNotNull { icon -> resolve(icon)?.let { icon.assetKey() to binding(it) } }
+        .take(room)
+        .toList()
     return if (added.isEmpty()) assets else assets + added
   }
 }

@@ -282,15 +282,14 @@ public class PersistentUiBuilderService(
   private val designStore: UiBuilderDesignStateStore,
   private val catalogs: UiBuilderCatalogExecutor,
   private val exporter: UiBuilderExportExecutor,
-  private val subscriberFailureHandler: UiBuilderSubscriberFailureHandler =
-    UiBuilderSubscriberFailureHandler {},
-  private val clock: Clock = Clock.systemUTC(),
-  private val limits: UiBuilderServiceLimits = UiBuilderServiceLimits(),
+  private val subscriberFailureHandler: UiBuilderSubscriberFailureHandler,
+  private val clock: Clock,
+  private val limits: UiBuilderServiceLimits,
   /**
    * Where uploaded asset bytes go. Null on a host with nowhere to keep them, which makes [putAsset]
    * refuse and leaves every other lane exactly as it was.
    */
-  private val assets: UiBuilderAssetStore? = null,
+  private val assets: UiBuilderAssetStore?,
   /**
    * Resolves the outline of an icon a design names, so the design can carry its own picture.
    *
@@ -300,26 +299,33 @@ public class PersistentUiBuilderService(
    * carry one from the start, and such a design can be exported or natively previewed before
    * anybody opens it.
    */
-  private val iconOutlines: IconOutlineResolver? = null,
+  private val iconOutlines: IconOutlineResolver?,
 ) :
   UiBuilderServicePort, UiBuilderServiceDiagnosticsSource, UiBuilderAdminPort, UiBuilderAssetPort {
 
   /**
-   * The seven-argument constructor this class published before it learned about icon outlines.
+   * The constructor this class published before it learned about icon outlines, defaults and all.
    *
-   * A Kotlin default argument does not keep the old JVM descriptor: adding the eighth parameter
-   * replaces the seven-argument constructor with an eight-argument one plus a differently shaped
-   * synthetic, so an already-compiled consumer calling the old one gets `NoSuchMethodError` after
-   * upgrading. Spelled out rather than left to the default so the published surface still has it.
+   * Both halves of the released shape have to come back, which is the part the first attempt got
+   * wrong. A Kotlin default argument compiles into *two* JVM constructors — the plain
+   * seven-parameter one and a synthetic `(…, int, DefaultConstructorMarker)` that a caller omitting
+   * a defaulted argument invokes — and adding an eighth parameter with a default replaces both.
+   * Restoring only the plain one still leaves `NoSuchMethodError` for every consumer compiled
+   * against `PersistentUiBuilderService(store, catalogs, exporter)`.
+   *
+   * So the defaults live here rather than on the primary constructor: this emits exactly the two
+   * descriptors 3.24 published, and the primary — which now has no defaults at all — adds the
+   * eight-parameter one beside them without touching either.
    */
   public constructor(
     designStore: UiBuilderDesignStateStore,
     catalogs: UiBuilderCatalogExecutor,
     exporter: UiBuilderExportExecutor,
-    subscriberFailureHandler: UiBuilderSubscriberFailureHandler,
-    clock: Clock,
-    limits: UiBuilderServiceLimits,
-    assets: UiBuilderAssetStore?,
+    subscriberFailureHandler: UiBuilderSubscriberFailureHandler =
+      UiBuilderSubscriberFailureHandler {},
+    clock: Clock = Clock.systemUTC(),
+    limits: UiBuilderServiceLimits = UiBuilderServiceLimits(),
+    assets: UiBuilderAssetStore? = null,
   ) : this(
     designStore,
     catalogs,
@@ -1003,22 +1009,30 @@ public class PersistentUiBuilderService(
     validateEnvironment(requested.environment)?.let {
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, it.message)
     }
-    // Before the quota check, because the outlines are part of the document that gets stored:
-    // adding them afterwards can carry a design past `maximumEmbeddedAssetBytes` and have it
-    // quarantined on the next start for exceeding a limit it was accepted under.
-    val document =
-      withIconOutlines(requested.copy(createdAtEpochMillis = now, updatedAtEpochMillis = now))
-    documentQuotaIssue(document, countRejection = true)?.let {
+    // Validate the candidate BEFORE resolving its outlines. Resolution can download and parse a
+    // 10 MB font under the lock this whole service shares, and malformed input should cost a
+    // structured error rather than a cold host's first font fetch — so the cheap guard runs on
+    // what the caller sent, and the quota is checked again below on what actually gets stored.
+    val candidate = requested.copy(createdAtEpochMillis = now, updatedAtEpochMillis = now)
+    documentQuotaIssue(candidate, countRejection = true)?.let {
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, it)
     }
-    validateTopology(document)?.let {
+    validateTopology(candidate)?.let {
       return serviceError(ServiceErrorCodeV1.BAD_REQUEST, it.message)
     }
     val catalog =
-      catalogs.resolve(document.catalogPin)
+      catalogs.resolve(candidate.catalogPin)
         ?: return serviceError(ServiceErrorCodeV1.CATALOG_UNAVAILABLE, "catalog pin is unavailable")
-    catalogs.validate(document, catalog)?.let {
+    catalogs.validate(candidate, catalog)?.let {
       return serviceError(it.toServiceError())
+    }
+    // Only now, on a document that is known to be well-formed. The outlines are part of what gets
+    // stored, so the quota is re-checked against them: adding them after the check can carry a
+    // design past `maximumEmbeddedAssetBytes` and have it quarantined on the next start for
+    // exceeding a limit it was accepted under.
+    val document = withIconOutlines(candidate)
+    documentQuotaIssue(document, countRejection = true)?.let {
+      return serviceError(ServiceErrorCodeV1.BAD_REQUEST, it)
     }
 
     val design =
@@ -1270,7 +1284,13 @@ public class PersistentUiBuilderService(
     val resolver = iconOutlines ?: return document
     val wanted = IconOutlineAssets.drawnBy(document.nodes.values)
     if (wanted.isEmpty()) return document
-    val assets = IconOutlineAssets.withOutlines(document.assets, wanted, resolver::pathData)
+    val assets =
+      IconOutlineAssets.withOutlines(
+        document.assets,
+        wanted,
+        limits.maximumAssetsPerDesign,
+        resolver::pathData,
+      )
     return if (assets === document.assets) document else document.copy(assets = assets)
   }
 
