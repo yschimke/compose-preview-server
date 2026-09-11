@@ -149,8 +149,19 @@ internal object MaterialSymbolsLegacyKeys {
       "playlistAdd" to "autoMirrored/filled/playlistAdd",
     )
 
+  /**
+   * What a two-tone key is told, which depends on where its fill came from.
+   *
+   * Two-tone has no Symbols equivalent and lands in the outlined face at `FILL 0` — except for the
+   * one key whose *name* carries a fill, `twoTone/playCircleFilled`, which stays filled. Saying
+   * "unfilled" there would be a sentence contradicting the picture beside it.
+   */
   internal const val TWO_TONE_NOTE =
     "Material Symbols has no two-tone style; this is drawn unfilled in the outlined face."
+
+  internal const val TWO_TONE_FILLED_NOTE =
+    "Material Symbols has no two-tone style; this is drawn in the outlined face, keeping the fill " +
+      "the old name carried."
 
   /**
    * Migrates one stored key, accepting a spelling only when [known] has it.
@@ -179,7 +190,12 @@ internal object MaterialSymbolsLegacyKeys {
       style = style,
       fill = renamed?.fill ?: styleFill,
       autoMirror = autoMirror,
-      note = if (styleKey == "twoTone") TWO_TONE_NOTE else null,
+      note =
+        when {
+          styleKey != "twoTone" -> null
+          (renamed?.fill ?: styleFill) == 0f -> TWO_TONE_NOTE
+          else -> TWO_TONE_FILLED_NOTE
+        },
     )
   }
 
