@@ -77,7 +77,7 @@
         <h1 class="cp-head cp-preview-title">Button sample</h1>
         <code class="cp-preview-id" title="com.example.ButtonSample">com.example.ButtonSample</code>
 
-        <div class="cp-head-toggles"><details class="cp-theme-menu">
+        <div class="cp-head-toggles"><button type="button" class="cp-drawer-toggle" id="cp-nav-toggle" aria-expanded="false" aria-controls="cp-nav">☰ Components</button><details class="cp-theme-menu">
   <summary class="cp-drawer-toggle cp-axis-toggle" id="cp-theme-toggle" aria-controls="cp-theme-bar">
     <span class="cp-toggle-label">Theme</span>
     <span class="cp-toggle-value" id="cp-theme-toggle-value">Light</span>
@@ -110,7 +110,29 @@
       </div>
 
       <div class="cp-viewer" data-preview-id="com.example.ButtonSample" data-mode="snapshot" data-modes="snapshot" data-static-snapshot="false" data-can-render-overrides="true" data-snapshot-backend="Snapshot" data-live-backend="Live" data-render-density="2" data-fold-scope="compose-m3-samples">
-
+              <aside class="cp-nav" id="cp-nav" aria-label="Components">
+        <div class="cp-nav-head"><span>Components</span><button type="button" class="cp-nav-close" id="cp-nav-close" aria-label="Close component navigation">×</button></div>
+        <input type="search" class="cp-nav-search" id="cp-nav-search" placeholder="Filter components" autocomplete="off" aria-label="Filter components">
+        <div class="cp-nav-current"><nav class="cp-tree cp-axes-tree" aria-label="Component renders">
+  <ul class="cp-tree-list" role="tree">
+    <li role="none"><a class="cp-tree-component cp-tree-link" role="treeitem" href="/p/com.example.ButtonSample?token=demo-token-fixture&amp;session=compose-m3-samples" aria-expanded="true" aria-owns="cp-axes-tree-variants" aria-current="page"><span class="cp-tree-label">Button sample</span></a>
+      <ul class="cp-tree-children cp-tree-variants" id="cp-axes-tree-variants" role="group">
+        <li role="none" class="cp-tree-dir cp-tree-dir--about">
+          <span class="cp-tree-dir-head" role="treeitem" aria-expanded="true" aria-owns="cp-axes-tree-variants-about-0"><span class="cp-tree-label">Explains</span><span class="cp-tree-count">1</span></span>
+          <ul class="cp-tree-children" id="cp-axes-tree-variants-about-0" role="group">
+            <li role="none"><a class="cp-tree-variant cp-tree-link" role="treeitem" href="/compose-m3/p/button-filled">Button</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+        <ul class="cp-nav-list" id="cp-nav-list">
+        <li><a class="cp-nav-item" href="/p/com.example.ButtonWithIconSample?token=demo-token-fixture&session=compose-m3-samples" title="com.example.ButtonWithIconSample" data-search="Button with icon sample com.example.ButtonWithIconSample"><img class="cp-nav-thumb" loading="lazy" alt="" src="/render/com.example.ButtonWithIconSample.png?token=demo-token-fixture&session=compose-m3-samples"><span class="cp-nav-name">Button with icon sample</span></a></li>
+<li><a class="cp-nav-item" href="/p/com.example.TextButtonSample?token=demo-token-fixture&session=compose-m3-samples" title="com.example.TextButtonSample" data-search="Text button sample com.example.TextButtonSample"><img class="cp-nav-thumb" loading="lazy" alt="" src="/render/com.example.TextButtonSample.png?token=demo-token-fixture&session=compose-m3-samples"><span class="cp-nav-name">Text button sample</span></a></li>
+        </ul>
+        <p class="cp-nav-empty" id="cp-nav-empty" hidden>No components match.</p>
+      </aside>
         <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="Button sample"><canvas id="cp-canvas" hidden></canvas><img id="cp-spec-img" class="cp-spec-img" hidden alt="Button sample — design spec"><div class="cp-source-panel" id="cp-source-panel" role="region" aria-label="Usage source" hidden></div><div class="cp-spec-compare" id="cp-spec-compare" hidden data-view="triptych" data-reference="/reference/button-sample-figma.png?token=demo-token-fixture&amp;session=compose-m3-samples"><figure class="cp-spec-panel" data-cp-spec-panel="reference"><canvas id="cp-spec-reference" aria-label="Imported design spec"></canvas><figcaption>Spec</figcaption></figure><figure class="cp-spec-panel" data-cp-spec-panel="diff"><canvas id="cp-spec-diff" aria-label="Pixels where the render and the spec disagree"></canvas><figcaption>Diff</figcaption></figure><figure class="cp-spec-panel" data-cp-spec-panel="actual"><canvas id="cp-spec-actual" aria-label="This preview&#39;s Compose render"></canvas><figcaption>Render</figcaption></figure><div class="cp-spec-wipe"><canvas id="cp-spec-wipe-canvas" aria-label="Spec on the left of the seam, Compose render on the right"></canvas><label class="cp-spec-wipe-control"><span>Spec</span><input id="cp-spec-wipe-range" class="cp-spec-wipe-range" type="range" min="0" max="100" value="50" aria-label="Wipe between the design spec and the Compose render"><span>Render</span></label></div></div><script type="application/json" id="cp-spec-annotations">{}</script><cp-spec-compare></cp-spec-compare><span class="cp-live-hint cp-stage-live-hint" id="cp-stage-live-hint" aria-hidden="true">click for live</span><div class="cp-error" id="cp-error" role="alert" hidden></div></div>
 
         <div class="cp-controls" id="cp-controls">

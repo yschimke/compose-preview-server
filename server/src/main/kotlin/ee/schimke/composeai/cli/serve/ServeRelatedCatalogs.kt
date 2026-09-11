@@ -116,6 +116,52 @@ object ServeRelatedCatalogs {
   }
 
   /**
+   * The INVERSE of one catalog's declared links: which of its components point at each component of
+   * [targetSystem].
+   *
+   * `related` is directed — a kit catalog declares which samples explain its components, and the
+   * samples catalog declares nothing. That is the right way round for the producer: the kit knows
+   * its own call sites, and a samples catalog imported from upstream cannot be made to know what it
+   * is a sample OF without maintaining the same mapping twice, in a file that is regenerated on
+   * every import.
+   *
+   * So the back-link is derived rather than declared. A samples page asks this of every OTHER
+   * catalog the box serves: "does anything in you point at me?" — and the answer is the component
+   * to link back to.
+   *
+   * A samples catalog served ALONE therefore has no back-links, which is correct rather than a gap:
+   * there is no kit catalog on that box to link back to. This is the whole reason the inverse is
+   * computed here instead of being stamped into the samples catalog at import time.
+   *
+   * [entries] is the source catalog's [ServeBundleHost.relatedByComponentId] — already normalised
+   * by [declaredFor], so nothing here re-checks blanks or self-links. Keys of the result are
+   * [targetSystem]'s component ids; values are the source catalog's, in the order they were
+   * declared, deduplicated.
+   */
+  fun inverse(
+    entries: Map<String, List<Declared>>,
+    targetSystem: String,
+    /**
+     * This component id when a link names none — the short `"<system>"` form means "the same
+     * component, over there", so the inverse of `Button → samples` is `samples/Button → Button`.
+     * Passed as a function rather than resolved by the caller because only the entries that
+     * actually name [targetSystem] need it.
+     */
+    fallbackComponentId: (String) -> String = { it },
+  ): Map<String, List<String>> {
+    val out = LinkedHashMap<String, MutableList<String>>()
+    entries.forEach { (sourceComponentId, declared) ->
+      declared.forEach { link ->
+        if (link.system != targetSystem) return@forEach
+        val targetComponentId = link.componentId ?: fallbackComponentId(sourceComponentId)
+        val sources = out.getOrPut(targetComponentId) { mutableListOf() }
+        if (sourceComponentId !in sources) sources.add(sourceComponentId)
+      }
+    }
+    return out
+  }
+
+  /**
    * Resolve declared links against the catalogs this box serves.
    *
    * [componentId] is this component's own id, used when a link names no counterpart — the short

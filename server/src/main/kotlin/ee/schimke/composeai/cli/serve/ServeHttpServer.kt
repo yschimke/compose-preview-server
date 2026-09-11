@@ -6282,6 +6282,71 @@ class ServeHttpServer(
    * [ServeRelatedCatalogs.resolve], a registered one with no host yet keeps its rows and marks them
    * not live, and a component id the destination does not publish is dropped here.
    */
+  /**
+   * The BACK-LINKS for one component: the catalogs that declare a `related` link pointing AT it,
+   * and which of their own components does the pointing.
+   *
+   * `related` is directed and declared in one place — a kit catalog names the samples that explain
+   * its components, and the samples catalog, which is imported from upstream and regenerated on
+   * every refresh, declares nothing. Deriving the reverse here is what lets the sample page carry
+   * "this explains Button" without a second copy of the mapping that would have to be kept true.
+   *
+   * Which also settles what happens on a box serving the samples catalog alone: nothing. There is
+   * no kit catalog there to link back to, so an absent back-link is the truth rather than a gap —
+   * the argument for deriving rather than stamping, stated as a behaviour.
+   *
+   * Resident catalogs only ([ServeSessionRegistry.peekHost], never `lease`): the index is built by
+   * walking a catalog's declarations, and a suspended catalog would have to be woken to be walked.
+   * A box that has not loaded the kit catalog yet shows no back-link and grows one when it does.
+   */
+  private fun RoutingContext.componentBackLinkDirectories(
+    preview: ServePreview,
+    selfSystem: String,
+  ): List<ServeWeb.ComponentDirectory> {
+    val componentId = ServeIssueReport.componentIdFor(preview)
+    if (componentId.isBlank()) return emptyList()
+    val memo = call.attributes.computeIfAbsent(RELATED_INVERSES) { RelatedInverses() }
+    return sessions
+      .knownSessionIds()
+      .filter { it != selfSystem }
+      .mapNotNull { system ->
+        val host = sessions.peekHost(system) ?: return@mapNotNull null
+        val bundle = catalogBundleHost(host) ?: return@mapNotNull null
+        // The cheap guard first: most catalogs declare no `related` at all, and one that does not
+        // cannot be pointing at anything.
+        if (bundle.relatedByComponentId.isEmpty()) return@mapNotNull null
+        val sourceComponentIds =
+          memo.of(system, bundle, selfSystem)[componentId].orEmpty().ifEmpty {
+            return@mapNotNull null
+          }
+        val rows = sourceComponentIds.mapNotNull { sourceComponentId ->
+          val target =
+            host.previews.firstOrNull { ServeIssueReport.componentIdFor(it) == sourceComponentId }
+              ?: return@mapNotNull null
+          ServeWeb.ComponentDirectoryRow(
+            label = target.label,
+            href =
+              "/" +
+                WebEscaping.urlEncodeSegment(system) +
+                "/p/" +
+                WebEscaping.urlEncodeSegment(target.id) +
+                requestQuerySuffix(),
+          )
+        }
+        if (rows.isEmpty()) null
+        else
+          ServeWeb.ComponentDirectory(
+            "about",
+            // What the rows ARE, not where they live: a reader on a sample is being told which
+            // component it explains, and the destination catalog's title is already the answer to a
+            // different question (the forward directories name themselves that way because there
+            // the catalog IS the subject).
+            "Explains",
+            rows,
+          )
+      }
+  }
+
   private fun RoutingContext.componentRelatedDirectories(
     renderHost: ServeHost,
     preview: ServePreview,
@@ -10272,7 +10337,12 @@ class ServeHttpServer(
               },
           // …and the catalogs that are ABOUT this component — its samples, a rendition of it
           // elsewhere — as named directories in the same drawer subtree the variants live in.
-          componentDirectories = componentRelatedDirectories(renderHost, preview, sessionId),
+          componentDirectories =
+            componentRelatedDirectories(renderHost, preview, sessionId) +
+              // …and the other way round: the components that point AT this one, derived rather
+              // than declared, so a samples catalog imported from upstream needs no mapping of its
+              // own to say what it explains.
+              componentBackLinkDirectories(preview, sessionId),
           // What KIND of catalog this is, as the catalog itself declared it — which decides the
           // shape of the page rather than any detail of it. See [ServeWeb.PageRole].
           pageRole = ServeWeb.PageRole.of(catalogBundleHost(renderHost)?.catalogRole),
@@ -12421,6 +12491,29 @@ class ServeHttpServer(
     private val candidates = HashMap<String, Map<String, List<ServePreview>>>()
   }
 
+  /**
+   * One request's INVERSE `related` indexes — "which catalog points at this component, and from
+   * which of its own components".
+   *
+   * Memoised for the length of the request for the same reason the parallel pairings are: a page
+   * asks the question once, but the index is built by walking a whole catalog's declarations, and a
+   * page that asked twice would walk it twice. Scoped to one `ApplicationCall`, so a catalog that
+   * reloads between requests is never answered from a previous request's walk.
+   */
+  private class RelatedInverses {
+    private val indexes = HashMap<Pair<String, String>, Map<String, List<String>>>()
+
+    /** [source]'s declarations, inverted onto [targetSystem]'s component ids. */
+    fun of(
+      sourceSystem: String,
+      source: ServeBundleHost,
+      targetSystem: String,
+    ): Map<String, List<String>> =
+      indexes.getOrPut(sourceSystem to targetSystem) {
+        ServeRelatedCatalogs.inverse(source.relatedByComponentId, targetSystem)
+      }
+  }
+
   private fun resolveAgentGrant(call: ApplicationCall): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
     val bearer =
@@ -14558,6 +14651,7 @@ class ServeHttpServer(
 
     /** Per-call memo for [resolveParallel], scoped like [RESOLVED_AGENT_GRANT]. */
     private val RESOLVED_PARALLELS = AttributeKey<ParallelPairings>("composeai.parallelPairings")
+    private val RELATED_INVERSES = AttributeKey<RelatedInverses>("composeai.relatedInverses")
 
     private const val MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
     private const val CATALOG_MCP_AGENT_ACCESS_HEADER = "X-Compose-Preview-Agent-Access"
