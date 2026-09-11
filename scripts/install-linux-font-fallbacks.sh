@@ -32,7 +32,23 @@ prev_sans="$(generic_family sans-serif 'DejaVu Sans')"
 prev_serif="$(generic_family serif 'DejaVu Serif')"
 prev_mono="$(generic_family monospace 'DejaVu Sans Mono')"
 
-"${root[@]}" apt-get update -qq
+# A mirror can briefly serve a Packages index that does not match its signed Release metadata.
+# Retry the whole update so apt fetches fresh metadata, while still enforcing its hash checks.
+# Error-Mode=any also rejects partial updates that apt would otherwise accept with a warning.
+for attempt in 1 2 3 4 5; do
+  if "${root[@]}" apt-get update -qq -o APT::Update::Error-Mode=any; then
+    break
+  else
+    status=$?
+  fi
+  if [[ "${attempt}" -eq 5 ]]; then
+    echo "apt-get update failed after ${attempt} attempts" >&2
+    exit "${status}"
+  fi
+  delay=$((attempt * 15))
+  echo "apt-get update failed (attempt ${attempt}/5); retrying in ${delay}s" >&2
+  sleep "${delay}"
+done
 "${root[@]}" apt-get install -y -qq --no-install-recommends \
   fontconfig fonts-dejavu-core fonts-noto-cjk fonts-noto-core fonts-noto-color-emoji "$@"
 
