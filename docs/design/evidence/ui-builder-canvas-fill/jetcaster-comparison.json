@@ -1,0 +1,50 @@
+{
+  "baselineCommit": "aafca922248121abd2737a43823c96048f50f5d9",
+  "viewport": {
+    "width": 1920,
+    "height": 1000
+  },
+  "before": {
+    "revision": 108,
+    "canvas": {
+      "bounds": {
+        "left": 76,
+        "top": 132,
+        "right": 1356,
+        "bottom": 946,
+        "width": 1280,
+        "height": 814
+      },
+      "sourceWidthDp": 1280,
+      "sourceHeightDp": 849,
+      "scale": 1
+    },
+    "completed": true
+  },
+  "after": {
+    "revision": 108,
+    "canvas": {
+      "bounds": {
+        "left": 76,
+        "top": 132,
+        "right": 1356,
+        "bottom": 946,
+        "width": 1280,
+        "height": 814
+      },
+      "sourceWidthDp": 1280,
+      "sourceHeightDp": 849,
+      "scale": 1
+    },
+    "completed": true
+  },
+  "changedPixels": 244100,
+  "totalPixels": 1920000,
+  "readonlyPaneRegion": {
+    "left": 1380,
+    "top": 0,
+    "right": 1920,
+    "bottom": 1000,
+    "changedPixels": 0
+  }
+}

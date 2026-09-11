@@ -6,6 +6,8 @@ import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.WidgetAssetBytes
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
@@ -102,6 +104,9 @@ internal class ScreenGeneratorComposeExportExecutor(
   private val publishedComponents: (catalogSystemId: String) -> Map<String, ComponentRecord> = {
     emptyMap()
   },
+  private val catalogPlatform: (String) -> UiBuilderCatalogPlatform = {
+    UiBuilderCatalogPlatform.DEFAULT
+  },
 ) : UiBuilderExportExecutor {
 
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
@@ -126,7 +131,8 @@ internal class ScreenGeneratorComposeExportExecutor(
     // And with the packs the design uses: a Wear screen may hold a `confetti-wear/…` node, whose
     // call the Wear emitter writes from that pack's record. Resolved only when the design is
     // record-free and only for the packs it names, so a plain Wear screen still touches no record.
-    if (RecordFreeExport.applies(request.document)) {
+    val platform = UiBuilderCatalogPlatform.from(request.catalog.statusSemantics)
+    if (RecordFreeExport.applies(request.document, platform)) {
       val packRecords =
         when (val packs = packRecordsFor(request.document)) {
           is PackRecords.Refused -> return refused(packs.code, packs.reasons)
@@ -134,6 +140,7 @@ internal class ScreenGeneratorComposeExportExecutor(
         }
       RecordFreeExport.generate(
           request.document,
+          platform,
           packageName,
           packComponents =
             when (val resolved = recordFreeComponents(request.document, packRecords)) {
@@ -233,6 +240,10 @@ internal class ScreenGeneratorComposeExportExecutor(
        * identifier the three are declared under.
        */
       val widgetFrame: WidgetFrame? = null,
+      /**
+       * A plain Remote body must be recorded and played; it draws nothing when composed directly.
+       */
+      val remoteContent: Boolean = false,
     ) : Generated
 
     data class Refused(val code: String, val reasons: List<String>) : Generated
@@ -325,6 +336,45 @@ internal class ScreenGeneratorComposeExportExecutor(
             preview.name,
             widgetFrame = Generated.WidgetFrame(preview.widthDp, preview.heightDp),
           )
+      }
+    }
+    val platform = catalogPlatform(document.catalogPin.systemId)
+    if (
+      UiBuilderBuildFeatures.remoteCompose &&
+        !RecordFreeExport.applies(document) &&
+        platform == UiBuilderCatalogPlatform.REMOTE_COMPOSE
+    ) {
+      val packs =
+        when (val resolved = packRecordsFor(document)) {
+          is PackRecords.Refused -> return Generated.Refused(resolved.code, resolved.reasons)
+          is PackRecords.Found -> resolved.records
+        }
+      val records =
+        when (val resolved = recordFreeComponents(document, packs)) {
+          is RecordFreeComponents.Refused ->
+            return Generated.Refused(resolved.code, resolved.reasons)
+          is RecordFreeComponents.Found -> resolved.components
+        }
+      return when (
+        val source =
+          RecordFreeExport.generate(
+            document,
+            platform,
+            packageName,
+            records,
+            document.widgetAssetBytes(),
+          )
+      ) {
+        is RecordFreeExport.Generated.Emitted ->
+          Generated.Emitted(
+            source.source,
+            requireNotNull(source.composableName),
+            remoteContent = true,
+          )
+        is RecordFreeExport.Generated.Refused ->
+          Generated.Refused(UNEXPRESSIBLE_DOCUMENT, source.reasons)
+        null ->
+          Generated.Refused(RECORD_FREE_DESIGN, listOf("no Remote emitter claimed this design"))
       }
     }
     if (RecordFreeExport.applies(document)) {

@@ -1,0 +1,25 @@
+{
+  "designId": "remote-root-1789123737142",
+  "revision": 0,
+  "catalogPin": {
+    "systemId": "remote-m3",
+    "catalogRevision": "wear-widget-scaffolds-v1",
+    "capabilityDigest": "candidate",
+    "nativeRuntimeId": "candidate"
+  },
+  "bytes": 3042,
+  "sha256": "47ebf779219b586d487e0f5fd6923465c89d6de347649369ebfec9b1ade2e4b3",
+  "sourceMatchesCompiledFixtureExceptDesignId": true,
+  "exported": {
+    "json": {
+      "bytes": 1875,
+      "sha256": "c7fac39d8487406d77f1821ea6be0a93c888b7c3770130e6606188f41d52af94"
+    },
+    "rc": {
+      "bytes": 790,
+      "sha256": "105c3660935928be0976638aab9583418c427c1e100ca5e0d22f4667e20d53dd"
+    }
+  },
+  "browserCodePaneCaptured": true,
+  "errors": []
+}

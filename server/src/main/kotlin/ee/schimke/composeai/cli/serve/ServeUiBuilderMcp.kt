@@ -1,5 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
@@ -177,6 +179,8 @@ class ServeUiBuilderMcp(
       // no `delete` capability to hand out on purpose — see [DELETE_DESIGN].
       DELETE_DESIGN -> UiBuilderRouteCapability.WRITE
       EXPORT -> UiBuilderRouteCapability.EXPORT
+      EXPORT_DOCUMENT ->
+        if (RemoteDocumentExportSupport.formats.isEmpty()) null else UiBuilderRouteCapability.EXPORT
       // A write to the design — the registry is part of the document and moves its revision —
       // gated as one, and absent where the host has nowhere to keep the bytes.
       PUT_ASSET -> if (assets == null) null else UiBuilderRouteCapability.WRITE
@@ -231,6 +235,28 @@ class ServeUiBuilderMcp(
         DESIGN_ACCESS -> GetDesignAccessRequestV1(designId = args.requiredText("designId"))
         SHARE_DESIGN -> share(args, actor)
         APPLY -> apply(args, actor)
+        EXPORT_DOCUMENT ->
+          return envelope(
+            callId,
+            service.execute(
+              UiBuilderServiceCall(
+                actor,
+                UiBuilderServiceRequest.ExportDocument(
+                  try {
+                    UI_BUILDER_JSON.decodeFromJsonElement(
+                      DesignDocumentV1.serializer(),
+                      args["document"] ?: throw McpRequestException("document is required"),
+                    )
+                  } catch (failure: kotlinx.serialization.SerializationException) {
+                    throw McpRequestException(
+                      "document is not a DesignDocumentV1: ${failure.message}"
+                    )
+                  },
+                  args.exportFormat(),
+                ),
+              )
+            ),
+          )
         EXPORT ->
           ExportDesignRequestV1(
             designId = args.requiredText("designId"),
@@ -1124,6 +1150,7 @@ class ServeUiBuilderMcp(
     const val CREATE_DESIGN = "ui_builder_create_design"
     const val APPLY = "ui_builder_apply"
     const val EXPORT = "ui_builder_export"
+    const val EXPORT_DOCUMENT = "ui_builder_export_document"
     const val RENDER_NATIVE = "ui_builder_render_native"
     const val PUT_ASSET = "ui_builder_put_asset"
 
@@ -1180,7 +1207,7 @@ class ServeUiBuilderMcp(
 
     /** Every tool this class answers to, in the order a session naturally uses them. */
     val TOOL_NAMES =
-      listOf(
+      listOfNotNull(
         LIST_CATALOGS,
         LIST_DESIGNS,
         GET_DESIGN,
@@ -1188,6 +1215,7 @@ class ServeUiBuilderMcp(
         CREATE_DESIGN,
         APPLY,
         EXPORT,
+        EXPORT_DOCUMENT.takeIf { RemoteDocumentExportSupport.formats.isNotEmpty() },
         DESIGN_ACCESS,
         SHARE_DESIGN,
         RENAME_DESIGN,
@@ -1345,9 +1373,16 @@ class ServeUiBuilderMcp(
         tool(
           APPLY,
           "Apply design mutations — insertNode, setProperty, deleteNode, moveNode and the rest of " +
-            "DesignMutationV1 — as one operation. `baseRevision` is the revision you read, and a " +
-            "mismatch is reported rather than merged, so a concurrent edit cannot be lost. This " +
+            "DesignMutationV1 — as one operation. `baseRevision` is the revision you read; " +
+            "the outcome reports conflicts or rejected edits. This " +
             "is how an agent adds a scaffold, fills its slots and sets modifiers. " +
+            "Use `setStateVariable` with `name` and `declaration` to add or edit state, " +
+            "`removeStateVariable` with `name` to remove unused state, and `setEventBinding` " +
+            "with `nodeId`, `event` and an ordered `actions` array to edit behavior. " +
+            "An empty actions array removes the event handler. " +
+            (if (UiBuilderBuildFeatures.remoteCompose)
+              "These are the same edits as Screen > State and Properties > Actions in the browser. "
+            else "") +
             "`removeNodeProperty` (or a setProperty whose value is `{\"type\":\"null\"}`) " +
             "unsets the property — the way back after trying one — and is refused, naming the " +
             "node and the field, when the catalog requires it. When somebody has commented on " +
@@ -1360,7 +1395,7 @@ class ServeUiBuilderMcp(
             "operationId":{"type":"string","description":"Your id for this operation; makes a retry idempotent."},
             "baseRevision":{"type":"integer","description":"The revision these mutations were written against."},
             "clientId":{"type":"string"},
-            "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects."}
+            "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects. State example: {\"type\":\"setStateVariable\",\"name\":\"expanded\",\"declaration\":{\"type\":\"value\",\"valueType\":\"bool\",\"initialValue\":false,\"nullable\":false,\"persistence\":\"preview\"}}. Event example: {\"type\":\"setEventBinding\",\"nodeId\":\"button\",\"event\":\"click\",\"actions\":[{\"type\":\"toggle\",\"variable\":\"expanded\"}]}. Declare state before binding it in the batch."}
           },"required":["designId","operationId","baseRevision","operations"],"additionalProperties":false}
           """,
         ),
@@ -1374,10 +1409,24 @@ class ServeUiBuilderMcp(
           {"type":"object","properties":{
             "designId":{"type":"string"},
             "revision":{"type":"integer"},
-            "format":{"type":"string","description":"compose, svg or png. Defaults to compose."}
+            "format":{"type":"string","description":"Defaults to compose. Available formats: ${ExportFormatV1.entries.filter { UiBuilderBuildFeatures.remoteCompose || it.name !in setOf("JSON", "RC") }.joinToString(", ") { it.name.lowercase() }}. Check the catalog exportCapabilities."}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
+        if (RemoteDocumentExportSupport.formats.isEmpty()) null
+        else
+          tool(
+            EXPORT_DOCUMENT,
+            "Compile supplied DesignDocumentV1 content without saving it or reading an existing design. " +
+              "Use an exact catalog pin from ui_builder_list_catalogs. Supports PNG, Remote JSON and RC; " +
+              "returns the same artifact and located diagnostics as saved-document export.",
+            """
+          {"type":"object","properties":{
+            "document":{"type":"object","description":"Complete DesignDocumentV1 content, including its catalog pin."},
+            "format":{"type":"string","enum":["png","json","rc"]}
+          },"required":["document","format"],"additionalProperties":false}
+          """,
+          ),
         if (!assets) null
         else
           tool(

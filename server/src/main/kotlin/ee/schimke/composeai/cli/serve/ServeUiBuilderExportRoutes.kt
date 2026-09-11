@@ -1,23 +1,35 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.request.receiveStream
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import java.util.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 
 /**
- * The design as a picture, at a URL.
+ * The design as an exported artifact, at a URL.
  *
  * ## Why a GET beside the protocol request
  *
@@ -29,10 +41,10 @@ import java.util.Base64
  * that reason — "Copy link" copies a URL that renders the preview as it stands — and the builder's
  * designs had no such address.
  *
- * These two routes are that address. They are the same export, reached by a URL: the handler builds
- * the very request the envelope route would have received, runs it through the same service as the
- * same actor, and serves the artifact's bytes with the artifact's media type. No second renderer,
- * no second gate, no second capability check.
+ * These routes are that address. They are the same export, reached by a URL: the handler builds the
+ * very request the envelope route would have received, runs it through the same service as the same
+ * actor, and serves the artifact's bytes with the artifact's media type. No second renderer, no
+ * second gate, no second capability check.
  *
  * ## Live, not pinned
  *
@@ -62,6 +74,19 @@ internal fun Route.installUiBuilderLiveExportRoutes(
   get(UI_BUILDER_EXPORT_SVG_PATH) {
     call.serveLiveExport(service, authorization, ExportFormatV1.SVG)
   }
+  if (UiBuilderBuildFeatures.remoteCompose) {
+    post("/api/ui-builder/v1/documents/export.png") {
+      call.serveSuppliedDocument(service, authorization, ExportFormatV1.PNG)
+    }
+  }
+  RemoteDocumentExportSupport.formats.forEach { format ->
+    post("/api/ui-builder/v1/documents/export.${format.name.lowercase()}") {
+      call.serveSuppliedDocument(service, authorization, format)
+    }
+    get("/api/ui-builder/v1/designs/{designId}/export.${format.name.lowercase()}") {
+      call.serveLiveExport(service, authorization, format)
+    }
+  }
   get(UI_BUILDER_EXPORT_PNG_PATH) {
     call.serveLiveExport(service, authorization, ExportFormatV1.PNG)
   }
@@ -73,19 +98,7 @@ private suspend fun ApplicationCall.serveLiveExport(
   format: ExportFormatV1,
 ) {
   response.headers.append(HttpHeaders.CacheControl, "no-store")
-  val actor =
-    when (val decision = authorization.authorize(this, UiBuilderRouteCapability.EXPORT)) {
-      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
-      UiBuilderAuthorizationDecision.Missing -> {
-        response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
-        respondText("authentication is required", status = HttpStatusCode.Unauthorized)
-        return
-      }
-      UiBuilderAuthorizationDecision.Forbidden -> {
-        respondText("UI-builder export access required", status = HttpStatusCode.Forbidden)
-        return
-      }
-    }
+  val actor = authorizeExport(authorization) ?: return
   val designId = parameters["designId"].orEmpty()
   if (designId.isBlank()) {
     respondText("a design id is required", status = HttpStatusCode.BadRequest)
@@ -102,6 +115,15 @@ private suspend fun ApplicationCall.serveLiveExport(
       ExportDesignRequestV1(designId = designId, revision = revision, format = format),
       actor,
     )
+  serveExportArtifact(outcome, format, designId)
+}
+
+private suspend fun ApplicationCall.serveExportArtifact(
+  outcome: UiBuilderServiceResponse,
+  format: ExportFormatV1,
+  designId: String,
+  includeArtifact: Boolean = false,
+) {
   val artifact =
     when (outcome) {
       is UiBuilderServiceResponse.Export -> outcome.artifact
@@ -127,6 +149,25 @@ private suspend fun ApplicationCall.serveLiveExport(
     )
     return
   }
+  if (includeArtifact) {
+    // Machine clients need the original diagnostics as well as content. The download response
+    // below deliberately refuses error artifacts; this representation preserves that refusal.
+    response.headers.append(HttpHeaders.ETag, "\"${artifact.contentDigest}\"")
+    artifact.servedRevision()?.let { response.headers.append(UI_BUILDER_REVISION_HEADER, it) }
+    respondText(
+      UI_BUILDER_JSON.encodeToString(ExportArtifactV1.serializer(), artifact),
+      ContentType.Application.Json,
+    )
+    return
+  }
+  val errors = artifact.diagnostics.filter { it.severity == DiagnosticSeverityV1.ERROR }
+  if (errors.isNotEmpty()) {
+    respondText(
+      errors.joinToString("\n") { "${it.code}: ${it.message}" },
+      status = HttpStatusCode.UnprocessableEntity,
+    )
+    return
+  }
   val bytes =
     when (artifact.encoding) {
       ExportEncodingV1.BASE64 -> Base64.getDecoder().decode(artifact.content)
@@ -140,6 +181,63 @@ private suspend fun ApplicationCall.serveLiveExport(
   respondBytes(bytes, ContentType.parse(artifact.mediaType), HttpStatusCode.OK)
 }
 
+/** Supplied content is compiled without allocating a saved design or revision. */
+private suspend fun ApplicationCall.serveSuppliedDocument(
+  service: UiBuilderServicePort,
+  authorization: ServeUiBuilderAuthorization,
+  format: ExportFormatV1,
+) {
+  response.headers.append(HttpHeaders.CacheControl, "no-store")
+  val actor = authorizeExport(authorization) ?: return
+  val bytes =
+    withContext(Dispatchers.IO) {
+      receiveStream().use { it.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
+    }
+  if (bytes.size > MAX_UI_BUILDER_REQUEST_BYTES) {
+    respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+    return
+  }
+  val document =
+    try {
+      UI_BUILDER_JSON.decodeFromString(
+        DesignDocumentV1.serializer(),
+        bytes.toString(Charsets.UTF_8),
+      )
+    } catch (_: SerializationException) {
+      respondText("expected a DesignDocumentV1 payload", status = HttpStatusCode.BadRequest)
+      return
+    }
+  val outcome =
+    service.execute(
+      UiBuilderServiceCall(actor, UiBuilderServiceRequest.ExportDocument(document, format))
+    )
+  serveExportArtifact(
+    outcome,
+    format,
+    "document",
+    includeArtifact = request.queryParameters["artifact"] == "true",
+  )
+}
+
+private suspend fun ApplicationCall.authorizeExport(
+  authorization: ServeUiBuilderAuthorization
+): AuthenticatedUiBuilderActor? {
+  val actor =
+    when (val decision = authorization.authorize(this, UiBuilderRouteCapability.EXPORT)) {
+      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+      UiBuilderAuthorizationDecision.Missing -> {
+        response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+        respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+        return null
+      }
+      UiBuilderAuthorizationDecision.Forbidden -> {
+        respondText("UI-builder export access required", status = HttpStatusCode.Forbidden)
+        return null
+      }
+    }
+  return actor
+}
+
 /**
  * The revision the artifact was rendered at, read from its provenance diagnostic.
  *
@@ -151,7 +249,9 @@ private suspend fun ApplicationCall.serveLiveExport(
 private fun ExportArtifactV1.servedRevision(): String? =
   diagnostics
     .asSequence()
-    .filter { it.code == REVISION_PINNED_DIAGNOSTIC_CODE }
+    .filter {
+      it.code == REVISION_PINNED_DIAGNOSTIC_CODE || it.code == "REVISION_PINNED_REMOTE_EXPORT"
+    }
     .mapNotNull { REVISION_IN_DIAGNOSTIC.find(it.message)?.groupValues?.get(1) }
     .firstOrNull()
 

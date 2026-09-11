@@ -1,0 +1,52 @@
+// Experimental source generated from the committed semantic repetition fixture.
+@file:Suppress("RestrictedApi")
+package proof.repetition.remote
+import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.remote.creation.compose.action.*
+import androidx.compose.remote.creation.compose.layout.*
+import androidx.compose.remote.creation.compose.modifier.*
+import androidx.compose.remote.creation.compose.state.*
+@Composable @RemoteComposable
+fun RemoteRepeatedContent() {
+    val state0 = rememberMutableRemoteInt(10)
+    RemoteColumn(modifier = RemoteModifier) {
+        RemoteColumn(modifier = RemoteModifier, verticalArrangement = RemoteArrangement.spacedBy(4.0f.rdp)) {
+            kotlin.collections.listOf<Rows1>(Rows1(0.0f), Rows1(8.0f), Rows1(16.0f)).forEach { row ->
+                Component0(row.field0, valueChange(state0, 10.ri), valueChange(state0, 20.ri), RemoteModifier.padding(4.0f.rdp, 2.0f.rdp, 4.0f.rdp, 2.0f.rdp))
+            }
+        }
+        RemoteBox(modifier = RemoteModifier.size(60.0f.rdp, 20.0f.rdp)) {
+            val selection1 = (state0 and 65535.ri).isEqualTo(20.ri).and((state0 shr 16.ri).isEqualTo(0.ri)).select(1.ri, 2.ri).createReference()
+            val selection0 = (state0 and 65535.ri).isEqualTo(10.ri).and((state0 shr 16.ri).isEqualTo(0.ri)).select(0.ri, selection1).createReference()
+            RemoteStateLayout(selection0, 0, 1, 2) { selected ->
+                when (selected) {
+                    0 -> RemoteBox {
+                        RemoteBox(modifier = RemoteModifier.fillMaxSize().background(Color(0xFFFF0000).rc)) {
+                        }
+                    }
+                    1 -> RemoteBox {
+                        RemoteBox(modifier = RemoteModifier.fillMaxSize().background(Color(0xFF00FF00).rc)) {
+                        }
+                    }
+                    2 -> RemoteBox {
+                        RemoteBox(modifier = RemoteModifier.fillMaxSize().background(Color(0xFF0000FF).rc)) {
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable @RemoteComposable
+private fun Component0(argument0: Float, callback0: Action, callback1: Action, modifier: RemoteModifier) {
+    RemoteBox(modifier = modifier) {
+        RemoteRow(modifier = RemoteModifier, horizontalArrangement = RemoteArrangement.spacedBy(argument0.rdp), verticalAlignment = RemoteAlignment.CenterVertically) {
+            RemoteBox(modifier = RemoteModifier.size(16.0f.rdp, 16.0f.rdp).background(Color(0xFFFF0000).rc).clickable(callback0)) {
+            }
+            RemoteBox(modifier = RemoteModifier.size(16.0f.rdp, 16.0f.rdp).background(Color(0xFF00FF00).rc).clickable(callback1)) {
+            }
+        }
+    }
+}
+private data class Rows1(val field0: Float)

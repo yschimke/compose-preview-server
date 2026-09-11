@@ -699,7 +699,7 @@ internal const val UI_BUILDER_INLINE_CAPTURE_PATH =
 private val PRECONDITION_REQUIRED = HttpStatusCode(428, "Precondition Required")
 
 private const val INVALID_REQUEST_ID = "invalid"
-private const val MAX_UI_BUILDER_REQUEST_BYTES = 8 * 1024 * 1024
+internal const val MAX_UI_BUILDER_REQUEST_BYTES = 8 * 1024 * 1024
 
 /**
  * What a native render produced.

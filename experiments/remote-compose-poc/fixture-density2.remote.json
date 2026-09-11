@@ -1,0 +1,264 @@
+{
+  "header": {
+    "width": 640,
+    "height": 520,
+    "apiLevel": 7,
+    "profiles": 513
+  },
+  "root": [
+    {
+      "type": "resources",
+      "integers": {
+        "mode": {
+          "value": 0,
+          "export": true
+        }
+      }
+    },
+    {
+      "type": "column",
+      "modifiers": [
+        "fillMaxSize",
+        {
+          "background": "#FFFFFFFF"
+        },
+        {
+          "padding": 32.0
+        }
+      ],
+      "children": [
+        {
+          "type": "text",
+          "value": "Kitchen lighting",
+          "fontSize": 48.0,
+          "color": "#FF17212B"
+        },
+        {
+          "type": "box",
+          "horizontalAlignment": "start",
+          "verticalAlignment": "top",
+          "modifiers": [
+            {
+              "height": 32.0
+            },
+            {
+              "width": 2.0
+            }
+          ],
+          "children": [
+            {
+              "type": "text",
+              "value": "",
+              "fontSize": 36.0,
+              "color": "#FF17212B"
+            }
+          ]
+        },
+        {
+          "type": "stateLayout",
+          "indexId": "@mode",
+          "modifiers": [
+            {
+              "width": 576.0
+            },
+            {
+              "height": 144.0
+            },
+            {
+              "onClick": [
+                {
+                  "type": "valueIntegerExpressionChange",
+                  "target": "@mode",
+                  "expression": "1 - @mode"
+                },
+                {
+                  "type": "hostNamedAction",
+                  "name": "lighting.changed"
+                }
+              ]
+            }
+          ],
+          "children": [
+            {
+              "type": "box",
+              "modifiers": [
+                "fillMaxSize",
+                {
+                  "background": "#FF455A64"
+                },
+                {
+                  "padding": 32.0
+                }
+              ],
+              "horizontalAlignment": "start",
+              "verticalAlignment": "top",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Off",
+                  "fontSize": 48.0,
+                  "color": "#FFFFFFFF"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "modifiers": [
+                "fillMaxSize",
+                {
+                  "background": "#FF006C4C"
+                },
+                {
+                  "padding": 32.0
+                }
+              ],
+              "horizontalAlignment": "start",
+              "verticalAlignment": "top",
+              "children": [
+                {
+                  "type": "text",
+                  "value": "On",
+                  "fontSize": 48.0,
+                  "color": "#FFFFFFFF"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "horizontalAlignment": "start",
+          "verticalAlignment": "top",
+          "modifiers": [
+            {
+              "height": 24.0
+            },
+            {
+              "width": 2.0
+            }
+          ],
+          "children": [
+            {
+              "type": "text",
+              "value": "",
+              "fontSize": 36.0,
+              "color": "#FF17212B"
+            }
+          ]
+        },
+        {
+          "type": "canvas",
+          "modifiers": [
+            {
+              "width": 576.0
+            },
+            {
+              "height": 56.0
+            }
+          ],
+          "commands": [
+            {
+              "type": "setColor",
+              "color": "#FF006C4C"
+            },
+            {
+              "type": "loop",
+              "index": "i",
+              "from": 0,
+              "until": 4,
+              "step": 1,
+              "commands": [
+                {
+                  "type": "drawCircle",
+                  "cx": "(12 + @i * 24) * 2.0",
+                  "cy": 24.0,
+                  "radius": 16.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "box",
+          "horizontalAlignment": "start",
+          "verticalAlignment": "top",
+          "modifiers": [
+            {
+              "height": 16.0
+            },
+            {
+              "width": 2.0
+            }
+          ],
+          "children": [
+            {
+              "type": "text",
+              "value": "",
+              "fontSize": 36.0,
+              "color": "#FF17212B"
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "children": [
+            {
+              "type": "box",
+              "horizontalAlignment": "start",
+              "verticalAlignment": "top",
+              "modifiers": [
+                {
+                  "width": 276.0
+                },
+                {
+                  "height": 72.0
+                },
+                {
+                  "background": "#FFE0E9E4"
+                },
+                {
+                  "padding": 16.0
+                }
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Kitchen",
+                  "fontSize": 32.0,
+                  "color": "#FF17212B"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "horizontalAlignment": "start",
+              "verticalAlignment": "top",
+              "modifiers": [
+                {
+                  "width": 276.0
+                },
+                {
+                  "height": 72.0
+                },
+                {
+                  "background": "#FFE0E9E4"
+                },
+                {
+                  "padding": 16.0
+                }
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Downstairs",
+                  "fontSize": 32.0,
+                  "color": "#FF17212B"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

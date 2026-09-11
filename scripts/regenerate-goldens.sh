@@ -20,20 +20,28 @@ cd "$(dirname "$0")/.."
 # environment variable is not one of them, so without this a regeneration straight after a green
 # run is a no-op that reads as "the goldens were already correct". `--rerun` and not
 # `--rerun-tasks`, which would additionally recompile every task `:server:test` depends on.
-UPDATE_SERVE_WEB_FIXTURES=true ./gradlew :server:test \
+UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true ./gradlew -PuiBuilderRemoteCompose=true :server:test \
   --tests '*ServeWebFixtureTest*' \
   --tests '*ExplodedSvgFixtureTest*' \
+  --tests '*BehaviorScreenExportTest*' \
   --rerun
 
 # The synthesised `wear-m3` / `remote-m3` catalogs, in a second module and behind a Gradle property
 # rather than an environment variable — `-D` on the command line reaches the Gradle JVM and not the
 # forked test JVM, which is a silent no-op and a confusing half hour. Same `--rerun` reasoning.
-./gradlew :ui-builder-runtime:test \
+./gradlew -PuiBuilderRemoteCompose=true :ui-builder-runtime:test \
   --tests '*SynthesisedCatalogGoldenTest*' \
   -PuiBuilderGoldens=write \
+  --rerun
+
+# Remote Kotlin is compiled verbatim by the standalone Android recording proof.
+UPDATE_UI_BUILDER_REMOTE_ROOT_FIXTURE=true ./gradlew -PuiBuilderRemoteCompose=true :ui-builder-export:jvmTest \
+  --tests '*RemoteRootSourceExportTest*' \
   --rerun
 
 echo
 echo "regenerated:"
 git status --porcelain -- preview-harness/fixtures/pages 'renders/exploded-view/*.svg' \
-  'docs/design/fixtures/ui-builder/*-capabilities-v1.json'
+  'docs/design/fixtures/ui-builder/*-capabilities-v1.json' \
+  'docs/design/fixtures/ui-builder/state-actions.kt.txt' \
+  'docs/design/fixtures/ui-builder/state-actions.document.json'

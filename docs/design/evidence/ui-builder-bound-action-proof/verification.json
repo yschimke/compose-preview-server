@@ -1,0 +1,368 @@
+{
+  "buildFlag": "-PboundActionProof=true",
+  "tests": [
+    "boundCallbacksAtDensityOne[jvm]",
+    "boundCallbacksAtDensityTwo[jvm]",
+    "boundCallbacksAtDensityOne",
+    "boundCallbacksAtDensityTwo"
+  ],
+  "sourceDigests": {
+    "ComposeRepeatedContent.kt.txt": "40fbfff045326ace04f13c37b19641981fd2e4f43ad0edfbf1e36c2d51948808",
+    "RemoteRepeatedContent.kt.txt": "c8eb33bb45c57c92b0e77eb2cf15bdeccef14efdadbbdb4d053f22c004838bb4"
+  },
+  "checks": [
+    {
+      "target": "compose",
+      "density": 1,
+      "initialMatchesIndependentJsonReference": true,
+      "clicks": [
+        {
+          "row": 2,
+          "action": "select",
+          "indicator": [
+            0,
+            0,
+            255
+          ],
+          "sha256": "ca32ddaef626bcf6c20dde6356a0f96c0dff7e9990f21e14246c611097581531"
+        },
+        {
+          "row": 0,
+          "action": "select",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "ab2a443bfc53467c1cac10e7d45ac89732f2f98cf6c5871d6351c87fdec5b05e"
+        },
+        {
+          "row": 1,
+          "action": "select",
+          "indicator": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "024a258bce90d590a9f8fda94e96b425f6f5506d6a7450eb7b0f95a7fb0e297a"
+        },
+        {
+          "row": 2,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "73597106e43d60a94da3f76f385966b73a20df5f971fa2ab090eba7b9b3bafaa"
+        },
+        {
+          "row": 2,
+          "action": "select",
+          "indicator": [
+            0,
+            0,
+            255
+          ],
+          "sha256": "ca32ddaef626bcf6c20dde6356a0f96c0dff7e9990f21e14246c611097581531"
+        },
+        {
+          "row": 0,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "bea8388a39c0633fc6b702e396d17a8485e62cbb5d405648901df3fb35db8ded"
+        },
+        {
+          "row": 1,
+          "action": "select",
+          "indicator": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "024a258bce90d590a9f8fda94e96b425f6f5506d6a7450eb7b0f95a7fb0e297a"
+        },
+        {
+          "row": 1,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "13bfa1b30c1181ea7c8f3871cfad37d8f27186021f8947c5a4625145186f575c"
+        }
+      ]
+    },
+    {
+      "target": "compose",
+      "density": 2,
+      "initialMatchesIndependentJsonReference": true,
+      "clicks": [
+        {
+          "row": 2,
+          "action": "select",
+          "indicator": [
+            0,
+            0,
+            255
+          ],
+          "sha256": "2fb0ddf26ec5deebdf4254c992cea28dd8d70347eeb2d8e84cae749933c96080"
+        },
+        {
+          "row": 0,
+          "action": "select",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "cbd751d63f5db8fb17e7b6d1f0c634ce6634a89d86703e40e0d2841422d9c303"
+        },
+        {
+          "row": 1,
+          "action": "select",
+          "indicator": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "295d004a23490126844768278bbeb44a24cd2bff9a9ca80dda0574559450dcfd"
+        },
+        {
+          "row": 2,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "4b16cc14a377b1abc8f4a67549b0bd3859981245df9952640e79636cf96c130d"
+        },
+        {
+          "row": 2,
+          "action": "select",
+          "indicator": [
+            0,
+            0,
+            255
+          ],
+          "sha256": "2fb0ddf26ec5deebdf4254c992cea28dd8d70347eeb2d8e84cae749933c96080"
+        },
+        {
+          "row": 0,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "13bda539c8efb59212a1469ac86cf58ba8279b2bc14fcdfd0e903d8bfd95b8de"
+        },
+        {
+          "row": 1,
+          "action": "select",
+          "indicator": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "295d004a23490126844768278bbeb44a24cd2bff9a9ca80dda0574559450dcfd"
+        },
+        {
+          "row": 1,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "3372b5cab4a2bdb3072acc328a69cf5ea45c49d4095199492af87e089515f84a"
+        }
+      ]
+    },
+    {
+      "target": "remote",
+      "density": 1,
+      "initialMatchesIndependentJsonReference": true,
+      "clicks": [
+        {
+          "row": 2,
+          "action": "select",
+          "indicator": [
+            0,
+            0,
+            255
+          ],
+          "sha256": "d719d7672f9b245d09b1484065469fd205caaf7c40ab4fccdb3e97e30c4b7fd4"
+        },
+        {
+          "row": 0,
+          "action": "select",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "a9343c52717a922f779874c938b0dc29cce0c3709bae165bea81b82c5171824d"
+        },
+        {
+          "row": 1,
+          "action": "select",
+          "indicator": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "30a37031c3f485c3630bbdac3304c98f844f3497fca9170dedc4f232723bf4ec"
+        },
+        {
+          "row": 2,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "a9343c52717a922f779874c938b0dc29cce0c3709bae165bea81b82c5171824d"
+        },
+        {
+          "row": 2,
+          "action": "select",
+          "indicator": [
+            0,
+            0,
+            255
+          ],
+          "sha256": "d719d7672f9b245d09b1484065469fd205caaf7c40ab4fccdb3e97e30c4b7fd4"
+        },
+        {
+          "row": 0,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "a9343c52717a922f779874c938b0dc29cce0c3709bae165bea81b82c5171824d"
+        },
+        {
+          "row": 1,
+          "action": "select",
+          "indicator": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "30a37031c3f485c3630bbdac3304c98f844f3497fca9170dedc4f232723bf4ec"
+        },
+        {
+          "row": 1,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "a9343c52717a922f779874c938b0dc29cce0c3709bae165bea81b82c5171824d"
+        }
+      ]
+    },
+    {
+      "target": "remote",
+      "density": 2,
+      "initialMatchesIndependentJsonReference": true,
+      "clicks": [
+        {
+          "row": 2,
+          "action": "select",
+          "indicator": [
+            0,
+            0,
+            255
+          ],
+          "sha256": "f331a0bbb53a266b3a209211760036d36e415a7a21a6d593a5be964a23e2dd1a"
+        },
+        {
+          "row": 0,
+          "action": "select",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "1567f462e451bfa011e1bc646a93d5e678ea92aed89303b39b946e5cdbea04d5"
+        },
+        {
+          "row": 1,
+          "action": "select",
+          "indicator": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "bf8e529a047859fedde41f3a8a5b14bf89197b31bf3f9e95fc62bcab47605288"
+        },
+        {
+          "row": 2,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "1567f462e451bfa011e1bc646a93d5e678ea92aed89303b39b946e5cdbea04d5"
+        },
+        {
+          "row": 2,
+          "action": "select",
+          "indicator": [
+            0,
+            0,
+            255
+          ],
+          "sha256": "f331a0bbb53a266b3a209211760036d36e415a7a21a6d593a5be964a23e2dd1a"
+        },
+        {
+          "row": 0,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "1567f462e451bfa011e1bc646a93d5e678ea92aed89303b39b946e5cdbea04d5"
+        },
+        {
+          "row": 1,
+          "action": "select",
+          "indicator": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "e5868fbefe2ebef62f0f99f82cb82c27fa20483f095ddc3d88d42ea788b6a392"
+        },
+        {
+          "row": 1,
+          "action": "reset",
+          "indicator": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "f8435502afb450a2514645435929fcbc4e34e0b220fceba329b5f99c18510003"
+        }
+      ]
+    }
+  ],
+  "documentSha256": "c541502a72a8e9e6aef26e52516700982291b7013e8edc96956f4220bc465c16",
+  "disabledBuilds": {
+    "omitted": "original Compose and Android proofs pass",
+    "false": "original proofs pass; no new callback classes remain"
+  }
+}

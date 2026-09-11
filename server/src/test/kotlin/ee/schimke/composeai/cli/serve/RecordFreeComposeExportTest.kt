@@ -3,6 +3,9 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.helloWidgetUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
@@ -23,10 +26,12 @@ import ee.schimke.composeai.uibuilder.wearScreenUiBuilderDocument
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 
 /**
@@ -185,6 +190,30 @@ class RecordFreeComposeExportTest {
       listOf(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD),
       export(ScreenGeneratorScreenFixture.document()).diagnostics.map { it.code },
     )
+  }
+
+  @Test
+  fun `an arbitrary Remote catalog exports ordinary roots using its declared platform`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+    val original =
+      json.decodeFromString<DesignDocumentV1>(
+        java.io
+          .File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
+          .readText()
+      )
+    val document = original.copy(catalogPin = original.catalogPin.copy(systemId = "custom-remote"))
+    val capabilities =
+      catalog.copy(
+        statusSemantics = JsonObject(mapOf("platform" to JsonPrimitive("remote-compose")))
+      )
+    val artifact = export(document, capabilities)
+    assertTrue(artifact.diagnostics.isEmpty(), artifact.diagnostics.toString())
+    assertTrue("RemoteStateLayout" in artifact.content, artifact.content)
+    assertTrue(".clickable(valueChange(page, 20.ri))" in artifact.content, artifact.content)
+    assertFalse("WearWidget" in artifact.content, artifact.content)
   }
 
   /**
@@ -347,7 +376,32 @@ class RecordFreeComposeExportTest {
       .toDesignDocumentV1()
   }
 
-  private fun export(document: DesignDocumentV1) =
+  @Test
+  fun `bound row callbacks reach the revision pinned service export unchanged`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+    val document =
+      json.decodeFromString<UiBuilderDocument>(
+        java.io.File("../experiments/remote-state-selection/bound-actions.document.json").readText()
+      )
+    val expected =
+      assertIs<RecordFreeExport.Generated.Emitted>(
+          RecordFreeExport.generate(document, UiBuilderCatalogPlatform.REMOTE_COMPOSE, PACKAGE_NAME)
+        )
+        .source
+    val remote =
+      catalog.copy(
+        statusSemantics = JsonObject(mapOf("platform" to JsonPrimitive("remote-compose")))
+      )
+    val artifact = export(document.toDesignDocumentV1(), remote)
+    assertEquals(emptyList(), artifact.diagnostics)
+    assertTrue(artifact.content.endsWith(expected), artifact.content)
+    assertTrue("Design bound-actions-proof revision 0" in artifact.content)
+  }
+
+  private fun export(document: DesignDocumentV1, capabilities: CatalogCapabilityV1 = catalog) =
     executor.export(
       RevisionPinnedUiBuilderExport(
         actor = AuthenticatedUiBuilderActor("tester"),
@@ -355,7 +409,7 @@ class RecordFreeComposeExportTest {
         revision = document.revision,
         documentHash = "hash",
         document = document,
-        catalog = catalog,
+        catalog = capabilities,
         format = ExportFormatV1.COMPOSE,
       )
     )

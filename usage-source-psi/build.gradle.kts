@@ -25,7 +25,12 @@ plugins {
   alias(libs.plugins.ktfmt)
 }
 
-kotlin { jvmToolchain(libs.versions.java.server.get().toInt()) }
+kotlin {
+  jvmToolchain(libs.versions.java.server.get().toInt())
+  // Kotlin 2.4.20 marks the parse-only environment for replacement. Keep the upstream-vendored
+  // parser byte-for-byte intact; this isolated adapter deliberately uses that environment.
+  compilerOptions.optIn.add("org.jetbrains.kotlin.CoreEnvironmentDeprecation")
+}
 
 ktfmt { googleStyle() }
 

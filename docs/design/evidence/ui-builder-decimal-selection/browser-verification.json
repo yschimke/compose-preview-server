@@ -1,0 +1,96 @@
+{
+  "exports": [
+    {
+      "name": "local-initial",
+      "state": 2.5,
+      "topPadding": 24,
+      "revision": 0,
+      "sha256": "70921791ae072a1399cfaca86905f156356d65f0f508b6f8d43a8eb7825a2403",
+      "browserMatchesMcp": true,
+      "formats": {
+        "json": {
+          "sha256": "a8e68f211b69c36142446ccba126f55e6aa0f1aa7b59e8a9718c772a6db7ea26",
+          "browserMatchesMcp": true
+        },
+        "rc": {
+          "sha256": "677caae3e44f3a0b97abf148b27afc67fab4c9a0a9bef36d2f1cbd9a3c00ce68",
+          "browserMatchesMcp": true
+        }
+      }
+    },
+    {
+      "name": "local-edited",
+      "state": 3.75,
+      "topPadding": 24,
+      "revision": 1,
+      "sha256": "ac3427d6123e00ea9445712e9ed381d29dbbd4d583cf42d31d8d156ee6e189ce",
+      "browserMatchesMcp": true,
+      "formats": {
+        "json": {
+          "sha256": "4bb9cd2568291c9d54a6a976343b10d18af47ee0356cf782eda153748313b42e",
+          "browserMatchesMcp": true
+        },
+        "rc": {
+          "sha256": "d917f825816da9d962bee12a8d61e49f94c97df1ff94e6073762e5b4130c42f2",
+          "browserMatchesMcp": true
+        }
+      }
+    }
+  ],
+  "savedOnServer": false,
+  "errors": [],
+  "playback": [
+    {
+      "name": "second",
+      "expected": [
+        0,
+        133,
+        119
+      ],
+      "actual": [
+        0,
+        133,
+        119
+      ]
+    },
+    {
+      "name": "fallback",
+      "expected": [
+        57,
+        73,
+        171
+      ],
+      "actual": [
+        55,
+        71,
+        164
+      ]
+    },
+    {
+      "name": "first",
+      "expected": [
+        103,
+        80,
+        164
+      ],
+      "actual": [
+        97,
+        76,
+        155
+      ]
+    },
+    {
+      "name": "second-again",
+      "expected": [
+        0,
+        133,
+        119
+      ],
+      "actual": [
+        1,
+        128,
+        115
+      ]
+    }
+  ]
+}

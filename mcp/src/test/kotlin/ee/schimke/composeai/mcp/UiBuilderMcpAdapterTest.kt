@@ -60,19 +60,58 @@ class UiBuilderMcpAdapterTest {
   private val adapter = UiBuilderMcpAdapter(client)
 
   @Test
-  fun `advertises the exact eight UI builder tools with object schemas`() {
+  fun `generic export pins every declared format to the requested revision`() {
+    if (!McpBuildFeatures.remoteCompose) {
+      assertThat(adapter.handle("export_design", buildJsonObject {})).isNull()
+      assertThat(requests).isEmpty()
+      return
+    }
+    for (format in ExportFormatV1.entries) {
+      adapter.handle(
+        "export_design",
+        buildJsonObject {
+          put("designId", "screen")
+          put("revision", 42)
+          put("format", format.name.lowercase())
+        },
+      )
+      val request = requests.last().request as ExportDesignRequestV1
+      assertThat(request.format).isEqualTo(format)
+      assertThat(request.revision).isEqualTo(42L)
+      assertThat(request.designId).isEqualTo("screen")
+    }
+  }
+
+  @Test
+  fun `disabled experimental tools cannot be called directly`() {
+    if (McpBuildFeatures.remoteCompose) return
+    for (name in listOf("export_document", "export_design")) {
+      assertThat(adapter.toolDefs().map { it.name }).doesNotContain(name)
+      assertThat(adapter.handle(name, buildJsonObject {})).isNull()
+    }
+    assertThat(requests).isEmpty()
+  }
+
+  @Test
+  fun `advertises the UI builder tools with object schemas`() {
     val tools = adapter.toolDefs()
 
     assertThat(tools.map { it.name })
-      .containsExactly(
-        "create_design",
-        "open_design",
-        "list_components",
-        "apply_design_operations",
-        "render_design",
-        "export_svg",
-        "export_compose",
-        "get_revision_diff",
+      .containsExactlyElementsIn(
+        listOfNotNull(
+          "create_design",
+          "open_design",
+          "list_components",
+          "apply_design_operations",
+          "render_design",
+          "export_svg",
+          "export_compose",
+          "export_design".takeIf { McpBuildFeatures.remoteCompose },
+          "get_revision_diff",
+        ) +
+          if (McpBuildFeatures.remoteCompose && ExportFormatV1.entries.any { it.name == "RC" })
+            listOf("export_document")
+          else emptyList()
       )
       .inOrder()
     assertThat(tools.map { it.inputSchema.jsonObject["type"]?.jsonPrimitive?.content }.distinct())
@@ -317,7 +356,12 @@ class UiBuilderMcpAdapterTest {
     const val ACTOR = "agent:0123456789ab"
     val READ_TOOLS = setOf("open_design", "list_components", "get_revision_diff")
     val WRITE_TOOLS = setOf("create_design", "apply_design_operations")
-    val EXPORT_TOOLS = setOf("render_design", "export_svg", "export_compose")
+    val EXPORT_TOOLS =
+      setOf("render_design", "export_svg", "export_compose") +
+        (if (McpBuildFeatures.remoteCompose) setOf("export_design") else emptySet()) +
+        if (McpBuildFeatures.remoteCompose && ExportFormatV1.entries.any { it.name == "RC" })
+          setOf("export_document")
+        else emptySet()
     val json = Json {
       encodeDefaults = true
       explicitNulls = false

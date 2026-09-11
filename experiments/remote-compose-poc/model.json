@@ -1,0 +1,11 @@
+{
+  "schema": "poc.interface/v1",
+  "title": "Kitchen lighting",
+  "width": 320,
+  "height": 260,
+  "padding": 16,
+  "state": {"name": "mode", "type": "int", "initial": 0, "cases": ["Off", "On"]},
+  "onClick": [{"type": "toggle", "state": "mode"}, {"type": "host", "name": "lighting.changed"}],
+  "repeat": {"count": 4},
+  "component": {"name": "Badge", "labels": ["Kitchen", "Downstairs"]}
+}

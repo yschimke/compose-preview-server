@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
@@ -12,6 +13,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.DesignsResponseV1
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportResponseV1
 import ee.schimke.composeai.uibuilder.protocol.InsertNodeMutationV1
@@ -33,12 +35,14 @@ import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
+import java.io.File
 import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.builtins.ListSerializer
@@ -160,6 +164,363 @@ class ServeUiBuilderMcpIntegrationTest {
     assertTrue(artifact.content.contains("""Text(text = "Opening keynote""""), artifact.content)
     assertTrue(artifact.content.contains("""Text(text = "Two sessions today""""), artifact.content)
     assertTrue(artifact.content.contains("Column("), artifact.content)
+  }
+
+  @Test
+  fun `MCP authors and reads the state and ordered actions edited by the browser`() {
+    val server = start()
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+    val applied =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"wire-behavior","baseRevision":0,
+      "operations":[
+        {"type":"setStateVariable","name":"expanded","declaration":{"type":"value","valueType":"bool","initialValue":false,"nullable":false,"persistence":"preview"}},
+        {"type":"setEventBinding","nodeId":"session","event":"click","actions":[{"type":"toggle","variable":"expanded"},{"type":"set","variable":"expanded","value":true}]}
+      ]
+    }""",
+      )
+    assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(applied)).outcome)
+    val snapshot =
+      assertIs<SnapshotResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.GET_DESIGN,
+              """{"designId":"agent-screen","includeCatalog":true}""",
+            )
+          )
+        )
+        .snapshot
+        .state
+        .document
+    assertEquals(
+      false,
+      snapshot.stateVariables
+        .getValue("expanded")
+        .initialValue
+        .jsonPrimitive
+        .content
+        .toBooleanStrict(),
+    )
+    val actions = snapshot.nodes.getValue("session").eventBindings.getValue("click")
+    assertEquals(2, actions.size)
+    assertIs<ee.schimke.composeai.uibuilder.protocol.ToggleActionV1>(actions.first())
+    assertIs<ee.schimke.composeai.uibuilder.protocol.SetValueActionV1>(actions.last())
+    val refused =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"remove-used","baseRevision":1,
+      "operations":[{"type":"removeStateVariable","name":"expanded"}]
+    }""",
+      )
+    assertIs<RejectedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(refused)).outcome)
+    val removed =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"clear-behavior","baseRevision":1,
+      "operations":[{"type":"setEventBinding","nodeId":"session","event":"click","actions":[]},{"type":"removeStateVariable","name":"expanded"}]
+    }""",
+      )
+    assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(removed)).outcome)
+  }
+
+  @Test
+  fun `an agent wires a button and exports its state and ordered handler over MCP`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+    val server =
+      start(recordFile = File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
+    val initial = document()
+    val doc =
+      initial.copy(
+        nodes =
+          initial.nodes +
+            mapOf(
+              "column" to
+                initial.nodes
+                  .getValue("column")
+                  .copy(slots = mapOf("children" to listOf("button"))),
+              "button" to
+                DesignNodeV1(
+                  "button",
+                  "m3/button",
+                  properties = mapOf("style" to StringValueV1("filled")),
+                  slots = mapOf("content" to listOf("session")),
+                ),
+            )
+      )
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)}}""",
+      )
+    assertIs<SnapshotResponseV1>(response(created), created)
+    val applied =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"wire-exportable-behavior","baseRevision":0,
+      "operations":[
+        {"type":"setStateVariable","name":"label","declaration":{"type":"value","valueType":"string","initialValue":"Ready","nullable":false,"persistence":"preview"}},
+        {"type":"setProperty","nodeId":"session","property":"text","value":{"type":"state","variable":"label"}},
+        {"type":"setEventBinding","nodeId":"button","event":"click","actions":[{"type":"set","variable":"label","value":"First"},{"type":"set","variable":"label","value":"Done"}]}
+      ]
+    }""",
+      )
+    assertIs<AcceptedOutcomeV1>(
+      assertIs<OperationOutcomeResponseV1>(response(applied), applied).outcome,
+      applied,
+    )
+    val exported =
+      envelope(
+        server,
+        ServeUiBuilderMcp.EXPORT,
+        """{"designId":"agent-screen","format":"compose"}""",
+      )
+    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    assertEquals(emptyList(), artifact.diagnostics, artifact.content)
+    assertTrue("mutableStateOf<kotlin.String>(\"Ready\")" in artifact.content, artifact.content)
+    assertTrue("Text(text = label.value)" in artifact.content, artifact.content)
+    assertTrue(
+      "onClick = { label.value = \"First\"; label.value = \"Done\" }" in artifact.content,
+      artifact.content,
+    )
+  }
+
+  @Test
+  fun `MCP exports stateful layout clicks as ordinary Compose modifiers`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+    val server =
+      start(recordFile = File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
+    val doc =
+      json
+        .decodeFromString<DesignDocumentV1>(
+          File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
+            .readText()
+        )
+        .copy(
+          id = "agent-screen",
+          title = "Clickable state layout",
+          catalogPin = document().catalogPin,
+        )
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)}}""",
+      )
+    assertIs<SnapshotResponseV1>(response(created), created)
+    val exported =
+      envelope(
+        server,
+        ServeUiBuilderMcp.EXPORT,
+        """{"designId":"agent-screen","revision":0,"format":"compose"}""",
+      )
+    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    if (System.getenv("VERIFY_LOCAL_LAYOUT_CLICKS") == "true") {
+      assertEquals(emptyList(), artifact.diagnostics, artifact.content)
+      assertTrue(
+        artifact.content.endsWith(
+          File("../docs/design/fixtures/ui-builder/clickable-state-layout.kt.txt").readText()
+        ),
+        artifact.content,
+      )
+    } else {
+      assertTrue(
+        artifact.diagnostics.any { "action-lambda support" in it.message },
+        artifact.toString(),
+      )
+    }
+  }
+
+  @Test
+  fun `MCP compiles unsaved document content without creating a design`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+    val format = ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.documentFormat
+    if (System.getenv("VERIFY_REMOTE_DOCUMENT_EXPORTS") == "true") assertNotNull(format)
+    org.junit.jupiter.api.Assumptions.assumeTrue(format != null)
+    val server = start(recordFile = null, catalogSystemId = "remote-m3", withRemoteExports = true)
+    val doc =
+      json
+        .decodeFromString<DesignDocumentV1>(
+          File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
+            .readText()
+        )
+        .copy(revision = 19)
+    val result =
+      response(
+        envelope(
+          server,
+          ServeUiBuilderMcp.EXPORT_DOCUMENT,
+          """{"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)},"format":"rc"}""",
+        )
+      )
+    val artifact = assertIs<ExportResponseV1>(result).artifact
+    assertTrue(
+      artifact.diagnostics.none { it.severity == DiagnosticSeverityV1.ERROR },
+      artifact.toString(),
+    )
+    assertEquals(format, artifact.format)
+    assertTrue(artifact.content.isNotBlank())
+    assertTrue(
+      assertIs<DesignsResponseV1>(response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS)))
+        .designs
+        .isEmpty()
+    )
+  }
+
+  @Test
+  fun `MCP exports ordinary Remote roots without a component record or widget wrapper`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+    val server = start(recordFile = null, catalogSystemId = "remote-m3")
+    val doc =
+      json.decodeFromString<DesignDocumentV1>(
+        File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
+          .readText()
+      )
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"${doc.id}","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)}}""",
+      )
+    assertIs<SnapshotResponseV1>(response(created), created)
+    val exported =
+      envelope(
+        server,
+        ServeUiBuilderMcp.EXPORT,
+        """{"designId":"${doc.id}","revision":0,"format":"compose"}""",
+      )
+    val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
+    assertEquals(emptyList(), artifact.diagnostics, artifact.content)
+    assertTrue(
+      artifact.content.endsWith(
+        File("../docs/design/fixtures/ui-builder/remote-root.kt.txt").readText()
+      ),
+      artifact.content,
+    )
+    val changed =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{"designId":"${doc.id}","baseRevision":0,"operationId":"change-page","operations":[{"type":"setStateVariable","name":"page","declaration":{"type":"value","valueType":"int","initialValue":20,"persistence":"preview"}}]}""",
+      )
+    assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(changed)).outcome)
+    val next =
+      assertIs<ExportResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.EXPORT,
+              """{"designId":"${doc.id}","revision":1,"format":"compose"}""",
+            )
+          )
+        )
+        .artifact
+    assertEquals(emptyList(), next.diagnostics, next.content)
+    assertTrue("val page = rememberMutableRemoteInt(20)" in next.content, next.content)
+  }
+
+  @Test
+  fun `MCP discovers and authors the same state selection as the inspector`() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
+    val server = start()
+    val original = document()
+    val doc =
+      original.copy(
+        nodes =
+          original.nodes +
+            ("column" to original.nodes.getValue("column").copy(componentId = "layout/box"))
+      )
+    val created =
+      envelope(
+        server,
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        """{"designId":"agent-screen","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)}}""",
+      )
+    assertIs<SnapshotResponseV1>(response(created), created)
+    assertTrue("showByState" in created, created)
+    val applied =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"select-child","baseRevision":0,
+      "operations":[
+        {"type":"setStateVariable","name":"page","declaration":{"type":"value","valueType":"int","initialValue":10,"nullable":false,"persistence":"preview"}},
+        {"type":"setProperty","nodeId":"column","property":"showByState","value":{"type":"object","fields":{
+          "selector":{"type":"state","variable":"page"},
+          "cases":{"type":"object","fields":{"session":{"type":"int","value":10}}}
+        }}}
+      ]
+    }""",
+      )
+    assertIs<AcceptedOutcomeV1>(
+      assertIs<OperationOutcomeResponseV1>(response(applied), applied).outcome,
+      applied,
+    )
+    val snapshot =
+      assertIs<SnapshotResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.GET_DESIGN,
+              """{"designId":"agent-screen","includeCatalog":true}""",
+            )
+          )
+        )
+        .snapshot
+        .state
+        .document
+    val selection =
+      assertIs<ee.schimke.composeai.uibuilder.protocol.ObjectValueV1>(
+        snapshot.nodes.getValue("column").properties.getValue("showByState")
+      )
+    assertEquals(
+      "page",
+      assertIs<ee.schimke.composeai.uibuilder.protocol.StateValueV1>(
+          selection.fields.getValue("selector")
+        )
+        .variable,
+    )
+    val refused =
+      envelope(
+        server,
+        ServeUiBuilderMcp.APPLY,
+        """{
+      "designId":"agent-screen","operationId":"remove-selector","baseRevision":1,
+      "operations":[{"type":"removeStateVariable","name":"page"}]
+    }""",
+      )
+    assertIs<RejectedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(response(refused)).outcome)
+    assertTrue("showByState" in refused, refused)
   }
 
   @Test
@@ -611,6 +972,9 @@ class ServeUiBuilderMcpIntegrationTest {
     withUiBuilder: Boolean = true,
     withAuthorization: Boolean = true,
     withAssets: Boolean = false,
+    recordFile: File? = ScreenGeneratorScreenFixture.componentsFile(),
+    catalogSystemId: String = CATALOG_SYSTEM_ID,
+    withRemoteExports: Boolean = false,
   ): RunningServer {
     val registry = ServeSessionRegistry(open = { null })
     val service =
@@ -620,20 +984,28 @@ class ServeUiBuilderMcpIntegrationTest {
           storage = FileUiBuilderStateStorage(stateDirectory),
           catalogs =
             CurrentM3UiBuilderCatalogExecutor(
-              catalogSystemIds = setOf(CATALOG_SYSTEM_ID),
+              catalogSystemIds = setOf(catalogSystemId),
               exportCapabilities =
-                ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
-                  composeCode = true,
-                  svg = false,
-                  png = false,
-                ),
+                ee.schimke.composeai.uibuilder.protocol
+                  .ExportCapabilitiesV1(
+                    composeCode = true,
+                    svg = false,
+                    png = false,
+                  )
+                  .let {
+                    ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport.capabilities(
+                      it,
+                      json = withRemoteExports,
+                      document = withRemoteExports,
+                    )
+                  },
             ),
           exporter =
             ScreenGeneratorComposeExportExecutor(
-              ComponentRecordSource(
-                mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
-              )::record
-            ),
+                ComponentRecordSource(recordFile?.let { mapOf(catalogSystemId to it) }.orEmpty())::
+                  record
+              )
+              .let { if (withRemoteExports) RemoteDocumentExportExecutor(it) else it },
           assets =
             if (withAssets) FileUiBuilderAssetStore(stateDirectory.resolve("assets")) else null,
         )

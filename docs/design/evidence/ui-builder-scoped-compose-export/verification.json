@@ -1,0 +1,51 @@
+{
+  "source": "ScreenDocumentProjection + ScreenGenerator",
+  "input": "../ui-builder-repetition-export/repetition-initial.document.json",
+  "proof": "RepetitionComposeProofTest using -PscopedProjectionProof",
+  "densities": [
+    1,
+    2
+  ],
+  "initialImageComparison": "pixel exact against independent Remote JSON/player reference",
+  "physicalClicksPerDensity": 6,
+  "postClickAssertion": "selected indicator colour after every click",
+  "filesSha256": {
+    "ComposeRepeatedContent.kt.txt": "f47c4a1d8ec133cedba2ebe0715cb30fd45628bdacb1004f783d5d510d6f936d",
+    "compose-initial-1.png": "5f8784b04cb41432afc66fcde5068056de2a5adea91a5aead8e806e920f1fde9",
+    "compose-initial-2.png": "646f885c41de79ac2f995ce45835ac2a893e0708bc4df5165ccd492586ea6f7a",
+    "compose-row-0-green-1.png": "67cecfe626990e113a0088cc44848bddb136b9bd2b29b0d87feb8c460a5e401a",
+    "compose-row-0-green-2.png": "9962793c96323352675889fa0cbcfb1464598596d25d1b6121fb58f1f6011d3b",
+    "compose-row-0-red-1.png": "ab2a443bfc53467c1cac10e7d45ac89732f2f98cf6c5871d6351c87fdec5b05e",
+    "compose-row-0-red-2.png": "cbd751d63f5db8fb17e7b6d1f0c634ce6634a89d86703e40e0d2841422d9c303",
+    "compose-row-1-green-1.png": "d688932b82e21c543ae65a9cd37e416eacb55a60edc3dfec8f20e621d4f8a6e6",
+    "compose-row-1-green-2.png": "f95771fbe04ec3a1107c93d306168b3af6051484861c95f2fc0e3cbcb733d903",
+    "compose-row-1-red-1.png": "3ccd0f46c0740c1dce6bc300670cfc8f0996f75d6be715856b9ab0669bcfa609",
+    "compose-row-1-red-2.png": "d0743213a3130e9b41926ee211366e1f964401a1268fc43f0389d01454c62e29",
+    "compose-row-2-green-1.png": "f9de1b0e68ada8dc7e11a5bb5a6ef6e3ba7e7ec11ceaec9980d2b9057fa395b4",
+    "compose-row-2-green-2.png": "7dd9bac2a75af590dbf07ff265664eb86a75bc24db4023dd7649b42289e64b1e",
+    "compose-row-2-red-1.png": "a767bcf59f42f01c5084d675c38b808bceb28e0bc9bc0da621c9991d5a4a59a7",
+    "compose-row-2-red-2.png": "635c2d99c03b200b2af2d72a188161d5592d63ef9561f8513ba5c14bcca305d4"
+  },
+  "stagedTests": {
+    "editor": {
+      "tests": 955,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "sharedExport": {
+      "tests": 74,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "serviceProjectionAndExport": {
+      "tests": 60,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "wasmCompilation": "passed",
+  "generatorCommit": "7d674b3555de7a4a439f13e417270758a1e6f428"
+}

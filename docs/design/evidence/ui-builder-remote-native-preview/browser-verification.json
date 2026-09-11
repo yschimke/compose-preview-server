@@ -1,0 +1,23 @@
+{
+  "existingWasmApp": true,
+  "revision": 0,
+  "nativeSize": [
+    720,
+    720
+  ],
+  "observed": [
+    {
+      "x": 112,
+      "y": 330,
+      "width": 468,
+      "height": 468
+    },
+    {
+      "x": 690,
+      "y": 182,
+      "width": 488,
+      "height": 488
+    }
+  ],
+  "errors": []
+}

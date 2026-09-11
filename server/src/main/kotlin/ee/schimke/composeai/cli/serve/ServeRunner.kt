@@ -15,6 +15,8 @@ import ee.schimke.composeai.render.session.RenderSessionException
 import ee.schimke.composeai.render.session.RenderSessionFactory
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
 import ee.schimke.composeai.uibuilder.RecordFreeExport
+import ee.schimke.composeai.uibuilder.RemoteDocumentExportSupport
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -2625,14 +2627,18 @@ public class ServeRunner(
     // `uiBuilderExports` is computed FROM that wrapper and then handed to the composition, so
     // composing first would need the capabilities the wrapper has not been built to state yet.
     val publishedRecords = mutableMapOf<String, Map<String, ComponentRecord>>()
+    val catalogPlatforms = mutableMapOf<String, UiBuilderCatalogPlatform>()
     val compose =
       ScreenGeneratorComposeExportExecutor(
         records::record,
         packs = packs.map { it.id }.toSet(),
         assetStore = assetStore,
         publishedComponents = { systemId -> publishedRecords[systemId].orEmpty() },
+        catalogPlatform = { systemId ->
+          catalogPlatforms[systemId] ?: UiBuilderCatalogPlatform.DEFAULT
+        },
       )
-    val exporter =
+    val pictureExporter =
       renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
         ?: compose
     // The published half of the catalog contract: an enabled catalog that publishes its own
@@ -2647,14 +2653,25 @@ public class ServeRunner(
     // must be handed the SAME one: a published catalog does not go through the executor's
     // `baseCatalog` copy, so a hardcoded value here would have made every published catalog
     // advertise no SVG or PNG export on a host whose renderer supports both.
-    val uiBuilderExports =
-      ((exporter as? ProductionUiBuilderExportExecutor)?.capabilities
+    val documentExporter =
+      if (UiBuilderBuildFeatures.remoteCompose) RemoteDocumentExportExecutor(pictureExporter)
+      else null
+    val exporter =
+      documentExporter?.let { RemotePngExportExecutor(it, renderer) } ?: pictureExporter
+    val pictureExports =
+      ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
           ?: ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1(
             composeCode = true,
             svg = false,
             png = false,
           ))
         .copy(composeCode = composeExportConfigured)
+    val uiBuilderExports =
+      RemoteDocumentExportSupport.capabilities(
+        pictureExports,
+        json = true,
+        document = documentExporter?.supportsBinary == true,
+      )
     val publishedCatalogs = mutableMapOf<String, CatalogCapabilityV1>()
     // Which catalogs the operator lets read their own published file. Null is "every enabled one",
     // which is the behaviour the loader shipped with; an empty set turns the whole path off without
@@ -2768,12 +2785,19 @@ public class ServeRunner(
         // imports `androidx.compose.remote.creation.compose` in its first ten lines — and the MCP
         // tool description says so too.
         composeExportFor = { systemId ->
-          systemId in uiBuilderComponents.keys || systemId in RecordFreeExport.CATALOG_SYSTEM_IDS
+          systemId in uiBuilderComponents.keys ||
+            systemId in RecordFreeExport.CATALOG_SYSTEM_IDS ||
+            (UiBuilderBuildFeatures.remoteCompose &&
+              publishedCatalogs[systemId]?.statusSemantics?.let {
+                UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.REMOTE_COMPOSE
+              } == true)
         },
         packs = packs,
       )
     val nativeBackends =
       catalogs.listCatalogs().associate { catalog ->
+        catalogPlatforms[catalog.benchmark.catalogSystemId] =
+          UiBuilderCatalogPlatform.from(catalog.statusSemantics)
         catalog.benchmark.catalogSystemId to
           UiBuilderPreviewSurfaces.from(catalog.statusSemantics).native.backend
       }

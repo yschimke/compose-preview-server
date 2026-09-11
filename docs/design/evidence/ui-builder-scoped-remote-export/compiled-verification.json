@@ -1,0 +1,138 @@
+{
+  "sourceSha256": "e3b4954042a6520e578dc7a41bd0978eb6d8d555ef73b5757799fe7ea6afbb5b",
+  "androidxCreationCompose": "1.0.0-alpha18",
+  "checks": [
+    {
+      "density": 1,
+      "initialMatchesIndependentReference": true,
+      "clicks": [
+        {
+          "row": 0,
+          "color": "green",
+          "expected": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "30a37031c3f485c3630bbdac3304c98f844f3497fca9170dedc4f232723bf4ec"
+        },
+        {
+          "row": 0,
+          "color": "red",
+          "expected": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "a9343c52717a922f779874c938b0dc29cce0c3709bae165bea81b82c5171824d"
+        },
+        {
+          "row": 1,
+          "color": "green",
+          "expected": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "30a37031c3f485c3630bbdac3304c98f844f3497fca9170dedc4f232723bf4ec"
+        },
+        {
+          "row": 1,
+          "color": "red",
+          "expected": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "a9343c52717a922f779874c938b0dc29cce0c3709bae165bea81b82c5171824d"
+        },
+        {
+          "row": 2,
+          "color": "green",
+          "expected": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "30a37031c3f485c3630bbdac3304c98f844f3497fca9170dedc4f232723bf4ec"
+        },
+        {
+          "row": 2,
+          "color": "red",
+          "expected": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "a9343c52717a922f779874c938b0dc29cce0c3709bae165bea81b82c5171824d"
+        }
+      ]
+    },
+    {
+      "density": 2,
+      "initialMatchesIndependentReference": true,
+      "clicks": [
+        {
+          "row": 0,
+          "color": "green",
+          "expected": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "bf8e529a047859fedde41f3a8a5b14bf89197b31bf3f9e95fc62bcab47605288"
+        },
+        {
+          "row": 0,
+          "color": "red",
+          "expected": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "1567f462e451bfa011e1bc646a93d5e678ea92aed89303b39b946e5cdbea04d5"
+        },
+        {
+          "row": 1,
+          "color": "green",
+          "expected": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "bf8e529a047859fedde41f3a8a5b14bf89197b31bf3f9e95fc62bcab47605288"
+        },
+        {
+          "row": 1,
+          "color": "red",
+          "expected": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "1567f462e451bfa011e1bc646a93d5e678ea92aed89303b39b946e5cdbea04d5"
+        },
+        {
+          "row": 2,
+          "color": "green",
+          "expected": [
+            0,
+            255,
+            0
+          ],
+          "sha256": "bf8e529a047859fedde41f3a8a5b14bf89197b31bf3f9e95fc62bcab47605288"
+        },
+        {
+          "row": 2,
+          "color": "red",
+          "expected": [
+            255,
+            0,
+            0
+          ],
+          "sha256": "1567f462e451bfa011e1bc646a93d5e678ea92aed89303b39b946e5cdbea04d5"
+        }
+      ]
+    }
+  ]
+}

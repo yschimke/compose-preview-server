@@ -1,0 +1,18 @@
+{
+  "reference": "androidx.compose.remote:remote-core:1.0.0-alpha19",
+  "baselinePlayer": "7b25f43",
+  "scenarios": [
+    "ordinary",
+    "adjacent",
+    "subnormal",
+    "extremes"
+  ],
+  "tests": 5,
+  "failures": 0,
+  "runtimeTests": 120,
+  "composeTests": 216,
+  "sha256": "3e20660d020c0ab72c9d441a040403336d82240b7bbcfda75fc18d4d0d3e0fc6",
+  "scope": "Isolated compiler adapter and real CMP player; production JSON export remains disabled for float selectors.",
+  "correctedPlayer": "610b15f38b9b47f277d2c990545bd8276d0cd7de",
+  "playerPr": "https://github.com/yschimke/rc-players/pull/94"
+}

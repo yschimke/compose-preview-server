@@ -45,6 +45,9 @@ The build is intentionally repository-independent. Compose Preview implementatio
 from Maven Central at the version in `gradle/libs.versions.toml`; wire contracts resolve separately
 from [`compose-preview-contracts`](https://github.com/yschimke/compose-preview-contracts). There is
 no composite build, project substitution, shared version catalog, or `mavenLocal()` repository.
+For unreleased contract or generator changes, an explicit
+[local dependency manifest](docs/development/LOCAL_DEPENDENCIES.md) selects artifacts compiled from
+local checkouts. Leaving that option unset retains the released dependency graph.
 
 ## Java
 
@@ -99,6 +102,10 @@ editor can mount an exact retained runtime under `/ui-builder/runtime/<runtimeId
 iframe and receive measured node/slot geometry without placing editor overlays in the Compose tree.
 The distribution consumes the frontend through the immutable `:ui-builder-web` archive variant;
 it no longer reaches into the frontend project's tasks or output directory.
+
+The Remote Compose authoring extension is behind the default-off compile-time option
+`-PuiBuilderRemoteCompose=true`. Build the server and WASM frontend together with that option;
+see [feature scope and verification](docs/development/UI_BUILDER_FEATURE_FLAGS.md).
 
 ## Remote catalog MCP
 

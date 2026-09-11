@@ -49,6 +49,7 @@ jobs:
       - run: .github/scripts/ui-builder-project-boundary.sh
       - name: Check tools-owned parser vendor
         run: python3 .github/scripts/check-usage-source-psi-vendor.py
+      - run: python3 scripts/local-dependencies/test_stage.py
       # The catalog names, which shrink to nothing over phases 4 and 5. Runs beside the project
       # boundary because it is the same kind of line for the same reason: an undrawn one rots.
       - run: .github/scripts/ui-builder-catalog-literals.sh
@@ -91,6 +92,28 @@ jobs:
           # what every deployed box did while this file sat in the repository unshipped.
           test -f "${dist_root}/ui-builder-components/m3-catalog-components-v1.json"
           "${dist_root}/bin/compose-preview-server" --help
+
+  ui-builder-remote-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            17
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: basic
+      # The normal Gradle job proves the shipping default. Keep the opt-in code compiled and
+      # exercised against released dependencies as well, without enabling it in distributions.
+      - run: >-
+          ./gradlew -PuiBuilderRemoteCompose=true
+          :ui-builder-export:jvmTest :ui-builder:jvmTest :ui-builder-runtime:test :mcp:test
+          :server:test :ui-builder:compileKotlinWasmJs
 
   selector-fixtures:
     runs-on: ubuntu-latest

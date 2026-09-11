@@ -1,0 +1,13 @@
+package generated.uibuilder.preview
+
+import androidx.compose.remote.creation.profile.RcPlatformProfiles
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.tooling.preview.Preview
+import ee.schimke.composeai.daemon.RemoteOverridablePreview
+import generated.uibuilder.StatefulPreviewRemoteContent as GeneratedRemoteContent
+
+@Preview(widthDp = 360, heightDp = 360)
+@Composable
+fun UiBuilderGeneratedPreview() {
+  RemoteOverridablePreview(profile = RcPlatformProfiles.ANDROIDX) { GeneratedRemoteContent() }
+}

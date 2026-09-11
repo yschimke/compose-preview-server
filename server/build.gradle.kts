@@ -544,7 +544,7 @@ tasks.withType<Test>().configureEach {
       rootProject.layout.projectDirectory
         .dir("scripts/design-artifacts/fixtures")
         .asFileTree
-        .matching { include("*.json") }
+        .matching { include("*.json", "state-actions.kt.txt") }
     )
     .withPropertyName("sharedWireFixtures")
     .withPathSensitivity(PathSensitivity.RELATIVE)
