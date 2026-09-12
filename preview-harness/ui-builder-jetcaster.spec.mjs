@@ -181,11 +181,16 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
     // bound is intentionally separate from the same-browser semantic gate and must be remeasured
     // before it is tightened.
     //
-    // Mixed provenance, deliberately. `jetcaster-discover-reference.png` is still the original
-    // macOS capture; `jetcaster-discover-builder.png` below is the runner's own, re-captured by
-    // `refresh-visual-baselines.yml` after #788 changed what the builder draws. So the bound has
-    // to cover the platform gap in whichever direction a given file crosses it -- and it does,
-    // since the macOS-captured one clears it from the far side on every run.
+    // Mixed provenance, deliberately, though less mixed than it was. Both baselines in THIS test
+    // are now the runner's own, re-captured by `refresh-visual-baselines.yml`: the builder after
+    // #788 changed what it draws, and the reference after #806 gave the oracle the real
+    // `SupportingPaneScaffold` too. The macOS-captured pair that remains is in the compact test
+    // below, which is what still exercises the platform gap this bound is sized for -- both clear
+    // it every run, which is the measurement that says the gap is comfortably inside it.
+    //
+    // The bound is unchanged. It is a raster-drift allowance, not a fidelity gate; the number that
+    // says these two surfaces agree is the independent-oracle ratio at the end of this test, which
+    // went from 7.732% to 0.144% when #806 landed.
     expect(reference).toMatchSnapshot("jetcaster-discover-reference.png", {
         threshold: 0,
         maxDiffPixelRatio: 0.04,
