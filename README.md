@@ -3,27 +3,31 @@
 The server behind `compose-preview serve`: catalog hosting, live render sessions, the playground,
 and the browser viewer surfaces. Its history was extracted from
 [`yschimke/compose-ai-tools`](https://github.com/yschimke/compose-ai-tools); the CLI remains there and
-consumes this repository's published library.
+launches this repository's distribution.
 
-The JVM API and hosted builder frontend are published as four lockstep artifacts:
+## What this repository ships
 
-```kotlin
-// The server: catalog hosting, the HTTP routes, the playground, the viewer surfaces.
-implementation("ee.schimke.composeai:compose-preview-serve:<version>")
+**Archives on each GitHub release, and nothing on Maven Central.**
 
-// Just the render host, the bundle daemon and the git-backed preview history — no web server.
-// What an OFFLINE caller (`compose-preview bundle render`, `compose-preview history manifest`)
-// needs. `compose-preview-serve` depends on this, so depending on the server still gets you both.
-implementation("ee.schimke.composeai:render-host:<version>")
+| Asset | What it is |
+| --- | --- |
+| `compose-preview-server-<v>.tar.gz` | the server: catalog hosting, the HTTP routes, the playground, the viewer surfaces. What `compose-preview serve`, `browse` and `ui-builder` launch |
+| `compose-preview-mcp-<v>.tar.gz` | the MCP server, behind `compose-preview mcp serve` |
+| `compose-preview-ui-builder-web-<v>.zip` | the Compose/Wasm frontend, for serving yourself or pointing an existing `serve` at with `--ui-builder-dir`. The server archive already carries a copy |
 
-// Persistent collaborative design service, catalog validation and export orchestration. It has no
-// Ktor server, daemon/render-host implementation, MCP SDK or Compose UI dependency.
-implementation("ee.schimke.composeai:compose-preview-ui-builder-runtime:<version>")
+Nothing here is a Maven coordinate. Six modules used to publish — `compose-preview-serve`,
+`compose-preview-mcp`, and four more that existed on Central only because the first one's POM named
+them — and the arrangement cost more than it bought. A project dependency reaches a published POM as
+a coordinate, so adding one to `:server` meant publishing the dependency too; getting that wrong
+shipped `compose-preview-server:ui-builder-export-jvm:unspecified` in 3.1.0 and an unresolvable
+`compose-preview-serve` from 3.3.0 through 3.8.0. Six releases nobody could resolve, for transitives
+nobody wanted.
 
-// Immutable Compose/Wasm application archive used by the standalone server distribution. This is
-// a deployment input rather than a JVM runtime dependency.
-// ee.schimke.composeai:compose-preview-ui-builder-web:<version>
-```
+The one library consumer was compose-ai-tools' `:cli`, which compiled two wire-drift tests against
+`compose-preview-serve`. Those tests launch the distribution now
+([compose-ai-tools#5436](https://github.com/yschimke/compose-ai-tools/pull/5436)) — the artifact
+`serve` runs anyway, so they check the wire that actually ships. Released coordinates up to and
+including 3.24.0 stay resolvable on Central; there simply will not be new ones.
 
 `render-host` exists because rendering a packed bundle and reading a preview timeline out of git
 open no sockets, and a caller doing only that should not link `ktor-server-*`, `jmdns` and
@@ -207,44 +211,26 @@ component pack (`--ui-builder-packs confetti-mobile=mobile,confetti-wear=wear`),
 author from the editor's settings; see
 [`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](docs/design/UI_BUILDER_COMPONENT_PACKS.md).
 
-Releases publish that distribution beside the Maven library, then build the production
+Releases attach that distribution to the GitHub release, then build the production
 `ghcr.io/yschimke/compose-preview-host` image. The canonical Docker and `preview.coo.ee`
 configuration lives in [`deploy/image`](deploy/image/) and
 [`deploy/preview.coo.ee`](deploy/preview.coo.ee/).
 
-## Release lanes
+## Releasing
 
-A release has two independent lanes in
-[`release.yml`](.github/workflows/release.yml):
+One lane in [`release.yml`](.github/workflows/release.yml): build
+`compose-preview-server-<v>.tar.gz`, `compose-preview-mcp-<v>.tar.gz` and
+`compose-preview-ui-builder-web-<v>.zip`, attach them to the GitHub release, then build the
+`compose-preview-host` image.
 
-| Lane | Ships | Runs |
-| --- | --- | --- |
-| Distribution | `compose-preview-server-<v>.tar.gz` and `compose-preview-mcp-<v>.tar.gz` on the GitHub release, then the `compose-preview-host` image | Always |
-| Maven | Every published module, to Maven Central | Unless opted out |
+The GitHub release stays a **draft** until that lane has succeeded, so a failed build never leaves a
+tag whose assets do not exist.
 
-The GitHub release stays a draft until every lane this release asked for has succeeded, so a failed
-Maven publish never leaves a tag whose tarballs exist and whose coordinates do not.
+There used to be a second, skippable Maven lane, with a `release:no-maven` label and a
+`publish_maven` workflow input to turn it off. Both are gone with the publication — every release is
+now what that label used to ask for.
 
-**Which modules the Maven lane publishes is derived, not listed.** Every subproject applying the
-publishing plugin is in the release, via `publishReleaseArtifacts` in the root
-[`build.gradle.kts`](build.gradle.kts);
-[`scripts/check-ui-builder-external-consumer.sh`](scripts/check-ui-builder-external-consumer.sh)
-stages that same derived set. Do not add a module list to the workflow — two hand-maintained copies
-of this set is what left `compose-preview-ui-builder-render-bundle` unpublished while a released POM
-named it at `compile` scope, making `compose-preview-serve` unresolvable from 3.3.0 to 3.8.0.
 
-### Releasing a server without Maven artifacts
-
-Because the fast lane moves far quicker than any consumer-visible library, a release can skip Maven
-Central entirely — two ways, both explicit:
-
-- add the **`release:no-maven`** label to the release-please PR before merging it; or
-- run the workflow manually with the **`publish_maven`** input unchecked.
-
-The default is to publish. Before skipping, note that compose-ai-tools' single
-`composeai-preview-serve` pin currently names *both* the tarball it downloads at runtime and a
-`testImplementation` coordinate in `:cli`, so it cannot be moved to a server-only release until that
-pin is split in two. Skip the Maven lane for releases nothing pins yet.
 
 ## Repository boundary
 

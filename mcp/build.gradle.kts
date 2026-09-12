@@ -34,13 +34,13 @@ plugins {
   alias(libs.plugins.kotlin.jvm)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.ktfmt)
-  alias(libs.plugins.maven.publish)
 }
 
 group = "ee.schimke.composeai"
 
-// Named once, for the same reason `:server` names its own: `mavenPublishing.coordinates` and
-// `archivesName` both need it, and the Gradle project is `:mcp`, so anything Gradle derives from
+// The name this module's artifacts carry, which is not the Gradle project's. `archivesName` needs
+// it, and the release asset `compose-preview mcp serve` fetches is
+// `compose-preview-mcp-<version>.tar.gz` — the Gradle project is `:mcp`, so anything derived from
 // the project name would get `mcp`.
 val publishedArtifactId = "compose-preview-mcp"
 
@@ -201,38 +201,3 @@ val checkMcpToolingApiBoundary =
 tasks.named("check") { dependsOn(checkMcpToolingApiBoundary) }
 
 tasks.named("test") { finalizedBy(checkMcpToolingApiBoundary) }
-
-mavenPublishing {
-  publishToMavenCentral(automaticRelease = true)
-  if (!project.version.toString().endsWith("SNAPSHOT")) signAllPublications()
-  coordinates(group.toString(), publishedArtifactId, project.version.toString())
-  pom {
-    name.set("Compose Preview — MCP Server")
-    description.set(
-      "Model Context Protocol server for compose-preview. Multiplexes per-(workspace, module) " +
-        "daemon JVMs spawned from launch descriptors emitted by composePreviewDaemonStart, and " +
-        "serves the UI-builder Streamable HTTP endpoint."
-    )
-    url.set("https://github.com/yschimke/compose-preview-server")
-    inceptionYear.set("2025")
-    licenses {
-      license {
-        name.set("The Apache License, Version 2.0")
-        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
-        distribution.set("repo")
-      }
-    }
-    developers {
-      developer {
-        id.set("yschimke")
-        name.set("Yuri Schimke")
-        url.set("https://github.com/yschimke")
-      }
-    }
-    scm {
-      url.set("https://github.com/yschimke/compose-preview-server")
-      connection.set("scm:git:https://github.com/yschimke/compose-preview-server.git")
-      developerConnection.set("scm:git:ssh://git@github.com/yschimke/compose-preview-server.git")
-    }
-  }
-}
