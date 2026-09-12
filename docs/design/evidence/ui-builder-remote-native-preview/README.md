@@ -22,7 +22,8 @@ Two prerequisite defects were found by inspecting the real renders:
 The final HTTP and MCP PNGs are byte-identical, 720 × 720 pixels at the daemon's default 2× density,
 with the selected green region at x=48…671 and y=48…671. The test checks the frame, selected state
 and padding boundaries. `source.kt.txt` is the generated body; `preview.kt.txt` is its capture entry.
-`browser.png` shows this result in the existing WASM editor's **2 panes** view; the browser harness
+`browser.png` shows this result in the existing WASM editor with the **Editor** and **Native** panes
+open; the browser harness
 checks its real native-preview response, two separately rendered green squares, and browser errors.
 
 Reproduce after building the existing WASM distribution and staging the local dependencies:

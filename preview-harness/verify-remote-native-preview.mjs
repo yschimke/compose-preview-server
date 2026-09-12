@@ -25,7 +25,7 @@ try {
   }
   await click(page.getByRole("button", { name: /^Workspace panes/ }));
   const response = page.waitForResponse(r => r.url().includes("/native-preview") && r.request().method() === "POST", { timeout: 120000 });
-  await click(page.getByRole("button", { name: /^2 panes/ }));
+  await click(page.getByRole("button", { name: /^Native/ }));
   const native = await response;
   assert.equal(native.status(), 200);
   const result = await native.json();
