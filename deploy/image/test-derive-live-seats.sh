@@ -49,19 +49,65 @@ check 4096 32 2 "memory bounds a core-rich box"
 # The reference 4 GB box still gets its floor.
 check 4096 4 2 "the 4 GB reference box keeps the floor of 2"
 
-# 8 GB / 4 cores: memory affords 5, cores 8 — memory governs, as it did before.
-check 8192 4 5 "an 8 GB box derives what it always did"
+# 8 GB / 4 cores: memory governs. 4 rather than the 5 this derived before the headroom reserve —
+# 5 seats implied an 84% budget, past the optimizer's resume threshold.
+check 8192 4 4 "an 8 GB box is bounded by memory, with headroom left"
 
 # A very large box is still bounded, so a runaway derivation cannot spawn daemons without limit.
 check 262144 128 32 "a huge box is capped at the ceiling"
 
 # Unknown core count must not derive zero. Falling back to memory keeps the old behaviour, which is
 # the right answer when half the inputs are missing.
-check 49152 0 32 "an unknown core count falls back to the memory figure"
-check 8192 0 5 "an unknown core count on a small box matches the old derivation"
+check 49152 0 29 "an unknown core count falls back to the memory figure"
+check 8192 0 4 "an unknown core count on a small box falls back to memory"
 
 # Unknown memory must not underflow into a negative seat count.
 check 0 8 2 "unknown memory falls back to the floor, not a negative"
+
+# ---------------------------------------------------------------------------------------------
+# The headroom invariant: a derived budget must leave the theme optimizer room to RESUME.
+# ---------------------------------------------------------------------------------------------
+#
+# This is the regression that matters most, because its symptom is silence. The old derivation was
+# `(eff_mb - 1024) / 1200`, so the implied budget landed within one seat of the entire cgroup —
+# ~93-96% utilisation by construction. The optimizer refuses to resume below 25% free
+# (`resumeMemoryAvailableFraction`), so any box where memory was the binding side sized itself into
+# permanent suspension: renders still succeeded, `status` still read ok, and background theme
+# optimisation simply never progressed. Measured on preview.coo.ee at ~11 GiB / 8 cores: 8 seats,
+# 15.5% available, 153 suspensions to 48 resumes.
+#
+# So assert the property rather than the numbers: projected utilisation stays within budget for
+# every box whose derivation is not floored.
+budget_pct() { # eff_mb cpus -> percent of eff_mb the derived seat budget implies
+  local eff="$1" seats
+  seats="$(derive_live_seats "$eff" "$2")"
+  echo $(( (SEATS_MEM_RESERVE_MB + seats * SEATS_MEM_PER_SEAT_MB) * 100 / eff ))
+}
+
+max_pct=$(( 100 - SEATS_MEM_HEADROOM_PCT ))
+for box in "8192 4" "11264 8" "16384 8" "49152 8" "49152 16" "49152 0" "131072 64" "262144 128"; do
+  # shellcheck disable=SC2086
+  pct="$(budget_pct ${box})"
+  (( pct <= max_pct )) || {
+    echo "FAIL: ${box% *}MB/${box#* }cpu budgets ${pct}% of memory, over the ${max_pct}% ceiling" >&2
+    echo "      That sizes the box past the optimizer's resume threshold — the exact wedge this reserve exists to prevent." >&2
+    exit 1
+  }
+  echo "PASS: ${box% *}MB/${box#* }cpu budgets ${pct}% (<= ${max_pct}%)"
+done
+
+# The one deliberate exception. A 4 GB reference box floors at 2 seats and DOES exceed the headroom:
+# a box that cannot run two cheap CMP sessions concurrently is worse than one whose optimizer
+# throttles. Asserted so the exception stays a decision rather than becoming a surprise.
+[[ "$(derive_live_seats 4096 4)" == "2" ]] || {
+  echo "FAIL: the 4 GB box no longer floors at 2" >&2
+  exit 1
+}
+(( $(budget_pct 4096 4) > max_pct )) || {
+  echo "FAIL: the 4 GB floor no longer exceeds the headroom — if that is now intentional, delete this check." >&2
+  exit 1
+}
+echo "PASS: the 4 GB floor still wins over the headroom reserve (a documented exception)"
 
 echo "PASS: all derive_live_seats checks"
 
@@ -120,18 +166,18 @@ CPU_MAX_FILE="${cpu_tmp}/absent" CPU_QUOTA_FILE="${cpu_tmp}/absent" CPU_PERIOD_F
 printf 'not-a-quota\n' > "${cpu_tmp}/cpu.garbage"
 CPU_MAX_FILE="${cpu_tmp}/cpu.garbage" cpucheck 4 4 "an unparseable quota is ignored"
 
-# End to end: the quota is what reaches the seat budget. 16 visible cores would have derived the
-# 32-seat ceiling on a RAM-rich box; a 2-CPU quota derives 4.
+# End to end: the quota is what reaches the seat budget. 16 visible cores on a RAM-rich box derive
+# 29 (memory governs, after the headroom reserve); a 2-CPU quota derives 4.
 seats_visible="$(derive_live_seats 49152 16)"
 seats_quota="$(derive_live_seats 49152 "$(CPU_MAX_FILE="${cpu_tmp}/cpu.max" effective_cpus 16)")"
-[[ "${seats_visible}" == "32" ]] || {
-  echo "FAIL: 16 visible cores on a 48 GB box should reach the ceiling, got ${seats_visible}" >&2
+[[ "${seats_visible}" == "29" ]] || {
+  echo "FAIL: 16 visible cores on a 48 GB box should derive 29, got ${seats_visible}" >&2
   exit 1
 }
 [[ "${seats_quota}" == "4" ]] || {
   echo "FAIL: a 2-CPU quota should derive 4 seats, got ${seats_quota}" >&2
   exit 1
 }
-echo "PASS: the quota reaches the seat budget (32 -> 4 on a 2-CPU quota)"
+echo "PASS: the quota reaches the seat budget (29 -> 4 on a 2-CPU quota)"
 
 echo "PASS: all effective-cpu checks"

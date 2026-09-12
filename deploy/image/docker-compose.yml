@@ -404,7 +404,10 @@ services:
     # Container memory limit. Default UNBOUNDED (0 = no cgroup cap) so the box's full RAM is
     # available and the live-seat budget auto-sizes to it: the entrypoint reads the container's
     # memory limit and, finding none, falls back to physical RAM (~1 GB reserved for the host,
-    # ~1.2 GB per live-seat permit). It sizes from CPU as well and takes the smaller of the two —
+    # ~1.2 GB per live-seat permit, over 75% of the limit rather than all of it — the remaining 25%
+    # is the headroom the theme optimizer needs to resume, and budgeting the whole cgroup is what
+    # used to size a box into permanent optimizer suspension). It sizes from CPU as well and takes
+    # the smaller of the two —
     # 2 permits per core, from the cgroup CPU quota where one is set rather than from `nproc`,
     # which reports the host's cores inside a `--cpus`-constrained container. Clamped [2, 32].
     # So a bigger dedicated box scales on its own — redeploy and it uses the whole machine, no
