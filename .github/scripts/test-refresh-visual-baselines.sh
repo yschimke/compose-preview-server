@@ -126,17 +126,38 @@ assert end in body, "the Commit and push step no longer ends its decision where 
 open(p, "w", encoding="utf-8").write(body[: body.index(end)] + 'echo "state=${state}"\n}\n')
 PY
 
+# The `git` stub answers the three queries the step actually asks -- what the render changed,
+# whether a path still exists in it, and whether anything is staged -- and logs every invocation,
+# so a test can assert on WHICH paths were transplanted rather than only on where they landed.
+# TOUCHED is the render's own diff, newline-separated here and fed back as the NUL-separated form
+# `git diff -z` emits. MISSING names a path the render DELETED.
 land() { # 1=simulated `gh pr view` state, 2=standalone
   local out="${tmp}/land-out"
   : > "${out}"
+  : > "${tmp}/git-log"
   env -i PATH="${PATH}" \
     STATE_SIM="$1" STANDALONE="$2" PR=808 BRANCH=agent/some-branch \
     HARNESS=ui-builder-jetcaster GITHUB_RUN_ID=99 GITHUB_RUN_ATTEMPT=2 \
     DEFAULT_BRANCH=main GITHUB_OUTPUT="${out}" files=1 \
+    GITLOG="${tmp}/git-log" \
+    TOUCHED="${TOUCHED:-preview-harness/snapshots/jetcaster-discover-reference.png}" \
+    MISSING="${MISSING:-}" DIFF_RC="${DIFF_RC:-1}" \
     bash -c '
       set -euo pipefail
       gh() { [ "${STATE_SIM}" = "LOOKUP_FAILS" ] && return 1; echo "${STATE_SIM}"; }
-      git() { case "$1" in rev-parse) echo deadbeef ;; diff) return "${DIFF_RC:-1}" ;; *) : ;; esac; }
+      git() {
+        printf "%s\n" "$*" >> "${GITLOG}"
+        case "$*" in
+          "rev-parse HEAD")        echo deadbeef ;;
+          "diff -z --name-only"*)  printf "%s" "${TOUCHED}" | tr "\n" "\0" ;;
+          "diff --cached --quiet") return "${DIFF_RC}" ;;
+          "cat-file -e"*)
+            # A path the render deleted is absent from it, so `cat-file -e` fails.
+            case "$*" in *"${MISSING:-__no_such_path__}") return 1 ;; esac
+            ;;
+        esac
+        return 0
+      }
       '"$(cat "${tmp}/push.sh")"'
     ' >/dev/null 2>&1
   tr '\n' ' ' < "${out}"
@@ -163,5 +184,50 @@ expect_land "a pull request closed unmerged publishes NOTHING" \
   "landed=none" CLOSED false
 expect_land "a failed state lookup publishes NOTHING" \
   "landed=none" LOOKUP_FAILS false
+
+# ---------------------------------------------------------------------------------------------
+# WHAT it transplants
+# ---------------------------------------------------------------------------------------------
+# The rescue rebuilds on a default branch fetched ~18 minutes after the render started, and all 16
+# harnesses share one `preview-harness/snapshots` directory while a run re-renders exactly one of
+# them. Taking the whole directory therefore carries 25 stale files along with the one that
+# changed, and stages as a REVERSION any of them that moved on the default branch meanwhile.
+# `visual-harness` runs 8 of the 16 harnesses, so such a reversion merges green.
+echo "==> what it transplants"
+
+git_log() { cat "${tmp}/git-log"; }
+expect_log() { # 1=label 2=expected-substring
+  if [[ "$(git_log)" == *"$2"* ]]; then ok "$1"; else bad "$1" "no git call matching '$2'; log: $(git_log | tr '\n' '|')"; fi
+}
+refute_log() { # 1=label 2=forbidden-substring
+  if [[ "$(git_log)" == *"$2"* ]]; then bad "$1" "git was called with '$2'; log: $(git_log | tr '\n' '|')"; else ok "$1"; fi
+}
+
+# One harness's baseline moved; another harness owns a file in the same directory and must not be
+# touched at all -- not even to rewrite it with identical bytes, which is what makes a reversion.
+TOUCHED='preview-harness/snapshots/jetcaster-discover-reference.png' \
+  land MERGED false > /dev/null
+expect_log "the changed baseline is transplanted by path" \
+  "checkout deadbeef -- preview-harness/snapshots/jetcaster-discover-reference.png"
+refute_log "the snapshots DIRECTORY is never checked out wholesale" \
+  "checkout deadbeef -- preview-harness/snapshots"$'\n'
+refute_log "a baseline this render did not touch is left alone" \
+  "ui-builder-editor-history-before.png"
+
+# Several files from one render still go one at a time, so the untouched ones stay untouched.
+TOUCHED=$'preview-harness/snapshots/a.png\npreview-harness/snapshots/b.png' \
+  land MERGED false > /dev/null
+expect_log "every changed path is transplanted (first)" "checkout deadbeef -- preview-harness/snapshots/a.png"
+expect_log "every changed path is transplanted (second)" "checkout deadbeef -- preview-harness/snapshots/b.png"
+
+# The mirror bug. `git checkout <commit> -- <path>` updates the paths the commit carries and never
+# removes one it does not, so a directory-wide transplant silently RESURRECTS a retired baseline.
+TOUCHED='preview-harness/snapshots/retired.png' \
+  MISSING='preview-harness/snapshots/retired.png' \
+  land MERGED false > /dev/null
+expect_log "a baseline the render retired is removed, not restored" \
+  "rm --quiet --ignore-unmatch -- preview-harness/snapshots/retired.png"
+refute_log "a retired baseline is not checked back out" \
+  "checkout deadbeef -- preview-harness/snapshots/retired.png"
 
 exit "${status}"

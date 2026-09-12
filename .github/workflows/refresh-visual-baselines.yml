@@ -283,9 +283,30 @@ jobs:
               refreshed="$(git rev-parse HEAD)"
               rescue="agent/refresh-${HARNESS}-baselines-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
               git fetch --quiet origin "${DEFAULT_BRANCH}"
+              # ONLY the paths this render changed, never the snapshots DIRECTORY. All 16
+              # harnesses share `preview-harness/snapshots` and a run re-renders exactly one of
+              # them, so the other 25 files in that tree are just this checkout as it stood ~18
+              # minutes ago. A directory-wide `git checkout "${refreshed}" -- <dir>` would stage
+              # every one of them, and any that moved on the default branch during the render
+              # would be committed as a REVERSION. `visual-harness` gates 8 of the 16 harnesses,
+              # so a reverted `ui-builder-editor` baseline would merge green.
+              #
+              # It would also silently drop a DELETION: `git checkout <commit> -- <path>` updates
+              # the paths the commit carries and never removes one it does not, so a baseline the
+              # render retired would come back.
+              #
+              # The render is a single commit, so its own diff is the exact change to transplant.
+              mapfile -d '' -t touched < <(
+                git diff -z --name-only "${refreshed}^" "${refreshed}" -- preview-harness/snapshots
+              )
               git checkout --quiet -B "${rescue}" "origin/${DEFAULT_BRANCH}"
-              git checkout "${refreshed}" -- preview-harness/snapshots
-              git add -- preview-harness/snapshots
+              for path in "${touched[@]}"; do
+                if git cat-file -e "${refreshed}:${path}" 2>/dev/null; then
+                  git checkout "${refreshed}" -- "${path}"
+                else
+                  git rm --quiet --ignore-unmatch -- "${path}"
+                fi
+              done
               if git diff --cached --quiet; then
                 # The default branch already carries these exact bytes.
                 echo "the refreshed baselines are already on ${DEFAULT_BRANCH}"
