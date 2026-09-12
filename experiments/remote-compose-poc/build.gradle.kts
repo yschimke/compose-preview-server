@@ -1,6 +1,6 @@
 plugins {
-  kotlin("multiplatform") version "2.4.10"
-  id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
+  kotlin("multiplatform") version "2.4.20"
+  id("org.jetbrains.kotlin.plugin.compose") version "2.4.20"
   id("org.jetbrains.compose") version "1.11.1"
 }
 
