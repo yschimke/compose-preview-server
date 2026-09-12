@@ -180,6 +180,12 @@ test("Jetcaster operations render against the independent Compose Wasm oracle", 
     // review evidence and retain a separate bound for macOS/Linux Chromium/Skia raster drift. The
     // bound is intentionally separate from the same-browser semantic gate and must be remeasured
     // before it is tightened.
+    //
+    // Mixed provenance, deliberately. `jetcaster-discover-reference.png` is still the original
+    // macOS capture; `jetcaster-discover-builder.png` below is the runner's own, re-captured by
+    // `refresh-visual-baselines.yml` after #788 changed what the builder draws. So the bound has
+    // to cover the platform gap in whichever direction a given file crosses it -- and it does,
+    // since the macOS-captured one clears it from the far side on every run.
     expect(reference).toMatchSnapshot("jetcaster-discover-reference.png", {
         threshold: 0,
         maxDiffPixelRatio: 0.04,
@@ -237,8 +243,13 @@ test("capability-generated Jetcaster Compose compiles and renders the full docum
     });
     expect(generated).toMatchSnapshot("jetcaster-discover-generated-compose.png", {
         threshold: 0,
-        // Hosted Linux Chromium currently rasterizes this full-size Compose surface ~5% away
-        // from the checked-in macOS baseline. The independent renderer comparison above remains
+        // Sized for the ~5% gap between hosted Linux Chromium and a macOS-captured baseline.
+        // This baseline is now the runner's own capture (`refresh-visual-baselines.yml`, after
+        // #788 changed what the generated app draws), so that gap is no longer what the bound
+        // absorbs and the headroom is wider than the drift it now sees. Left where it was rather
+        // than tightened to match: the note above is right that this bound must be REMEASURED
+        // before it moves, and a macOS contributor running the harness still compares their
+        // render against a Linux capture here. The independent renderer comparison above remains
         // the stricter cross-platform parity gate (currently <0.3%).
         maxDiffPixelRatio: 0.06,
     });
