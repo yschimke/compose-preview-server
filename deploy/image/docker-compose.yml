@@ -328,10 +328,12 @@ services:
       # Which of the served builder catalogs may take their definition from the catalog repository's
       # own published `ui-builder.json` instead of this server's built-in one: `all`, `none`, or a
       # comma-separated subset of SERVE_UI_BUILDER_CATALOGS. Empty keeps the entrypoint's default,
-      # which is `none` — no catalog this image serves has yet passed the equivalence gate, and
-      # m3-catalog's published file would replace a curated 41-component shelf with 104 derived
-      # components and no screen root. Name a catalog here once its gate is green. This is the
-      # per-catalog reversible lever docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
+      # which is `remote-m3` — the one catalog whose published file the equivalence gate scores
+      # clean under `--strict`. The entrypoint records, per catalog, what the other two are waiting
+      # on: wear-m3 wants acceptance entries and a gate row, m3-catalog declares no builtins and
+      # that is an open design decision rather than a gap. Name a catalog here once its gate is
+      # green, or drop one to put it back on the packaged catalog. This is the per-catalog
+      # reversible lever docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
       SERVE_UI_BUILDER_PUBLISHED_CATALOGS: "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}"
       # The component record the Compose export generates from. The image ships one for
       # `m3-catalog` and the entrypoint installs it by default, so this is an override for a box

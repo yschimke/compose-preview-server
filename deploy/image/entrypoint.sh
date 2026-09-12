@@ -256,25 +256,36 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # `ui-builder.json` rather than from the catalog this build writes in Kotlin: `all`, `none`, or a
   # subset of the list above.
   #
-  # DEFAULT `none`, deliberately, and it is not a vote against the contract — it is the contract's
-  # own readiness gate applied to the catalogs this image actually serves. Measured against the
-  # frozen goldens with .github/scripts/ui-builder-equivalence.sh, re-measured 2026-09-12:
+  # DEFAULT `remote-m3`, and the list is per catalog because the readiness question is. Measured
+  # against the frozen goldens with .github/scripts/ui-builder-equivalence.sh, re-measured
+  # 2026-09-12:
   #
-  #   remote-m3   publishes a 42 KB file and the cover sheet DOES declare `uiBuilderFile`. The note
-  #               here used to say it declared none and nothing was fetched; that stopped being
-  #               true, and all five delivery branches now stamp it.
-  #   m3-catalog  publishes a 188 KB file — not the 48 KB recorded here — and the gate now scores it
-  #               ZERO differences against the frozen catalog, where it once scored 25. It declares
-  #               110 components with a 102-entry menu over 39 shelves, so the old objection (every
-  #               id derived from the `m3/` prefix against a curated shelf of 41) is gone.
-  #               It still declares ZERO builtins, so a catalog composed from it has no screen root
-  #               to put any component in. That is the remaining blocker, and it is the reason this
-  #               stays `none` — a different reason from the one it was set for.
+  #   remote-m3   IN. The gate scores its published file 0 differences, 0 unstated facts, 0
+  #               unusable exemptions and 0 unreviewed fields, under `--strict`, against the
+  #               document the delivery branch actually carries. It declares 28 record components
+  #               and a 26-entry menu; the two it withholds are its own preview frame and a private
+  #               widget capture wrapper, both excluded by the catalog's own policy with a
+  #               published reason. That is the bar this lever was written for, so it is on.
+  #   wear-m3     NOT YET, and only for want of the gate. It publishes 2 builtins, so unlike
+  #               m3-catalog a catalog composed from it has a screen root; what is missing is
+  #               acceptance entries for the fields the frozen catalog has no opinion about and a
+  #               `--strict` row in the ui-builder-contract job beside the other two.
+  #   m3-catalog  NO, and this one is a decision rather than a gap. It publishes a 188 KB file the
+  #               gate scores ZERO differences on, declaring 110 components with a 102-entry menu
+  #               over 39 shelves — the old objection (every id derived from the `m3/` prefix
+  #               against a curated shelf of 41) is long gone. But it declares ZERO builtins, so a
+  #               catalog composed from it has no screen root to put a component into, and its own
+  #               policy argues that zero deliberately: `layout/*`, `shape/*`, `asset/image` and
+  #               `remote-compose/*` are the BUILDER's vocabulary, and "declaring them here would
+  #               be this catalog claiming to own the builder's own vocabulary". Somebody has to
+  #               decide whether the builder materialises its own builtins when a published file
+  #               declares none, or a catalog declares them anyway. Until then m3-catalog is served
+  #               from the catalog this build writes in Kotlin.
   #
-  # So the published path is off until a catalog is proven equivalent, and turning it on is one
-  # variable naming one catalog. Reversing it used to mean asking another repository to withdraw a
-  # file; that is what this lever exists to avoid.
-  args+=(--ui-builder-published-catalogs "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-none}")
+  # Naming one catalog turns it on and removing it turns it off, in this one variable. Reversing it
+  # used to mean asking another repository to withdraw a file; that is what this lever exists to
+  # avoid.
+  args+=(--ui-builder-published-catalogs "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-remote-m3}")
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")
