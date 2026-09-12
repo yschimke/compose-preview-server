@@ -240,18 +240,21 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # Catalog publication does not imply authoring support. Enable only the explicitly reviewed
   # catalog adapters; this deployment carries M3, the Remote Compose M3 catalog, and Wear M3.
   #
-  # `wear-m3` joins the default now that its canvas is checked rather than asserted: the Kotlin it
-  # generates is rendered by real Wear Compose in compose-ai-tools' `wear-m3` harness catalog, and
-  # the stitched `ScrollMode.LONG` capture matches the builder's own picture to a dp. Enabling an
-  # adapter is a claim that what an author sees is what they get, and that claim now has a render
-  # behind it.
+  # `wear-m3` is IN the default. Enabling an adapter is a claim that what an author sees is what
+  # they get, and that claim has a render behind it: the Kotlin it generates is rendered by real
+  # Wear Compose in compose-ai-tools' `wear-m3` harness catalog, and the stitched `ScrollMode.LONG`
+  # capture matches the builder's own picture to a dp.
   #
-  # `wear-m3` is OFF by default. It is a Wear/Android catalog — its previews need Robolectric and
-  # its native lane an Android SDK — and nobody is authoring against it, so the deployment stopped
-  # paying for it. A box that wants it back sets SERVE_UI_BUILDER_CATALOGS; every adapter, render
-  # and template it had still works, and the `wear-m3=wear-m3-catalog` native mapping below is kept
-  # inert precisely so that putting it back is one variable.
-  args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}")
+  # It was dropped from this list once, on the grounds that nobody was authoring against it and a
+  # Wear/Android catalog is not free — its previews need Robolectric and its native lane an Android
+  # SDK. That was a cost decision rather than a doubt about the adapter, and it is reversed here
+  # deliberately: the lane is wanted again. Every adapter, render and template it had kept working
+  # throughout, which is why putting it back is this one variable and why the
+  # `wear-m3=wear-m3-catalog` native mapping below was kept inert rather than deleted.
+  #
+  # Two paragraphs used to stand here saying the opposite things — one welcoming `wear-m3` into the
+  # default, one stating it was off. The second was current and the first was the leftover.
+  args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}")
   # Which of those may take their definition from the catalog repository's own published
   # `ui-builder.json` rather than from the catalog this build writes in Kotlin: `all`, `none`, or a
   # subset of the list above.
@@ -300,8 +303,8 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # A catalog absent from the map compiles against a served catalog of its own name, which is what
   # `m3-catalog` has always done and why it is not listed.
   #
-  # The `wear-m3` mapping is kept even though `wear-m3` is no longer served by default. It is inert
-  # while the catalog is off — nothing asks for a wear-m3 compile — and keeping it means putting
+  # The `wear-m3` mapping carried this lane through the period when `wear-m3` was not served: inert
+  # while the catalog was off — nothing asked for a wear-m3 compile — and keeping it meant putting
   # `wear-m3` back in SERVE_UI_BUILDER_CATALOGS restores the whole lane in one variable rather than
   # producing a catalog whose native render silently compiles against the wrong bundle.
   args+=(--ui-builder-native-catalog "${SERVE_UI_BUILDER_NATIVE_CATALOGS:-wear-m3=wear-m3-catalog}")
