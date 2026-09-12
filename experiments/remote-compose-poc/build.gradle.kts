@@ -17,7 +17,7 @@ kotlin {
       implementation(compose.foundation)
       implementation(compose.material3)
       implementation(compose.ui)
-      implementation("ee.schimke.composeai:rc-player-compose:1.60.1")
+      implementation("ee.schimke.composeai:rc-player-compose:1.61.1")
     }
     jvmMain.dependencies {
       implementation(compose.desktop.currentOs)
