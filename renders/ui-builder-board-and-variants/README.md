@@ -42,29 +42,34 @@ you edit on grew a row of surfaces you cannot, and the fit shrank the frame you 
 make room for them. You build the UI once; the pane beside it is where you watch it adapt. Note the
 zoom readout: the same design at 78% where the strip had it at 33%.
 
-The tablet pane is worth looking at twice: it draws the supporting pane the phone does not. **That
-adaptation is a stand-in, not the real library** — see the caveat below.
+The tablet pane is worth looking at twice: it draws the supporting pane the phone does not. **These
+renders predate the real library** — see the note below.
 
 **The frame inspector.** A true before/after of one preview across the change: `Screen environment` /
 `Device` / `Also exports as` becomes `Frame` / `Set frame from` / `Also shown and exported as`, plus
 the `Also compare` chips that switch the unstored axes on. The fields below are untouched — a board
 is measured by a frame like everything else, so nothing is hidden, only the claim changed.
 
-## What the tablet pane is not
+## What the tablet pane was, when these were captured
 
-`layout/supporting-pane-scaffold` is drawn by `DeterministicSupportingPaneScaffold`, a
-`BoxWithConstraints` in this repository's own renderer that expands when the frame is wider than
-`mainPaneWidth + supportingPaneWidth + spacing`. It is **not**
-`androidx.compose.material3.adaptive`'s `SupportingPaneScaffold`, which is on no module's dependency
-floor here, and it does not use that library's breakpoints or posture. The Kotlin export emits a
-second hand-rolled helper with a *different* threshold again (a hard `1280.dp`), and the native lane
-refuses the component outright because `layoutMode` is an authored property the real scaffold has no
-parameter for.
+At the commit these PNGs were rendered from, `layout/supporting-pane-scaffold` was drawn by
+`DeterministicSupportingPaneScaffold` — a `BoxWithConstraints` in this repository's own renderer that
+expanded when the frame was wider than `mainPaneWidth + supportingPaneWidth + spacing`. It was **not**
+`androidx.compose.material3.adaptive`'s `SupportingPaneScaffold`, and it used neither that library's
+breakpoints nor its posture. The Kotlin export emitted a second hand-rolled helper with a *different*
+threshold again (a hard `1280.dp`), and the native lane refused the component outright.
 
-So this picture shows that a frame change reaches the layout, which is what the pane is for. It does
-not show what `SupportingPaneScaffold` would do at that width. Closing that gap — the real component
-in the renderer and in the export, with the mode derived from the window rather than authored — is
-tracked separately.
+So these pictures show that a frame change reaches the layout, which is what the pane is for. They do
+not show what `SupportingPaneScaffold` would do at that width.
+
+**That gap is now mostly closed**, after these renders were captured: the variant panes and the
+capability exporter's generated Kotlin call the real scaffold, and each frame computes its own window
+size class so a row of frames can disagree. The record-driven projection still refuses the component. `layoutMode` became a `PaneScaffoldDirective` rather than a width
+comparison. The canvas keeps a stand-in on purpose — it draws every declared pane at every width so
+no subtree becomes uneditable — which is
+[`UI_BUILDER_PREVIEW_FIDELITY.md`](../../docs/design/UI_BUILDER_PREVIEW_FIDELITY.md)'s rung-1 licence,
+not a leftover. Read the pane geometry in these two PNGs as historical; everything else in them still
+holds.
 
 ## How this stays honest
 
