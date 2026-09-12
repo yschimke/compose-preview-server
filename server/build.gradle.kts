@@ -35,7 +35,6 @@ plugins {
   alias(libs.plugins.kotlin.jvm)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.ktfmt)
-  alias(libs.plugins.maven.publish)
   // `FakeRenderSession` is scaffolding this module's own tests share with `:cli`'s
   // `BundleRenderKnobTest`, which drives `bundle render --knob` against a fake session rather than
   // a daemon subprocess. A test fixture rather than a `main` source: it must not reach the server's
@@ -44,12 +43,6 @@ plugins {
 }
 
 group = "ee.schimke.composeai"
-
-// The artifactId this module publishes under. Named once, because two places need it and they
-// silently disagreed until 2.0.0 shipped: `mavenPublishing.coordinates` below, and the capability
-// on the test-fixtures variants (see `testFixturesCapabilities` further down). The Gradle project
-// is `:server`, so anything Gradle derives from the project name gets `server`, not this.
-val publishedArtifactId = "compose-preview-serve"
 
 kotlin { jvmToolchain(libs.versions.java.server.get().toInt()) }
 
@@ -758,88 +751,18 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
   )
 }
 
-// Publish the test fixtures under a capability consumers can actually ask for.
+// The test-fixtures capability wiring is gone with the publication.
 //
-// `java-test-fixtures` derives the fixtures capability from the GRADLE PROJECT name, and this
-// project is `:server` while it publishes as `compose-preview-serve`. So 2.0.0 went to Maven
-// Central
-// advertising `ee.schimke.composeai:server-test-fixtures`, while `testFixtures(...)` on the
-// consumer
-// side looks for `<group>:<artifactId>-test-fixtures`. Nothing matched, and a consumer writing the
-// one documented spelling got:
+// `java-test-fixtures` derives its capability from the GRADLE PROJECT name, and this project is
+// `:server` while it published as `compose-preview-serve`, so 2.0.0 advertised
+// `ee.schimke.composeai:server-test-fixtures` and a consumer's plain `testFixtures(...)` — which
+// looks for `<group>:<artifactId>-test-fixtures` — matched nothing. Both spellings were declared
+// here, plus `checkTestFixturesCapabilities` to stop them drifting apart again.
 //
-//     Unable to find a variant of ee.schimke.composeai:compose-preview-serve:2.0.0 with the
-//     requested capability: feature 'test-fixtures'
-//
-// which is how compose-ai-tools' `:cli` found it (yschimke/compose-ai-tools#4839) —
-// `FakeRenderSession`
-// lives in these fixtures, and the CLI's `BundleRenderKnobTest` needs it. It had to request
-// `server-test-fixtures` by name to consume 2.0.0 at all.
-//
-// BOTH names are declared, deliberately. Declaring any capability explicitly replaces the implicit
-// one, so listing only the conventional name would break every consumer already pinned to the
-// spelling 2.0.0 shipped — including that `:cli` workaround, which must keep resolving until it is
-// removed on their side. The conventional name is what new consumers get from plain
-// `testFixtures(...)`; the legacy one is kept for compatibility and can go once no consumer asks
-// for it.
-val testFixturesCapabilities =
-  listOf(
-    "$group:$publishedArtifactId-test-fixtures",
-    // Legacy: the project-name-derived spelling 2.0.0 published. Keep until consumers migrate.
-    "$group:${project.name}-test-fixtures",
-  )
-
-// `sourcesElements` too, not just the two that carry code: a sources variant left on the old
-// capability alone is one an IDE cannot attach when the consumer resolved the new one.
-//
-// `configureEach` rather than `named`: `testFixturesSourcesElements` does not exist when this file
-// is evaluated — the publishing plugin adds it later, when it wires the sources jar — so naming it
-// directly fails with "Configuration with name 'testFixturesSourcesElements' not found". This runs
-// for each of the three whenever it is created, whichever order that happens in.
-val testFixturesVariants =
-  setOf("testFixturesApiElements", "testFixturesRuntimeElements", "testFixturesSourcesElements")
-
-configurations.configureEach {
-  if (name in testFixturesVariants) {
-    outgoing { testFixturesCapabilities.forEach { capability("$it:${project.version}") } }
-  }
-}
-
-// A comment cannot fail a build, and the whole point is that this drifted unnoticed through a
-// release. What the check asserts is deliberately NOT "the declared list equals the list above" —
-// that compares the wiring to itself and passes however wrong both are. It asserts the property a
-// consumer depends on: the capability Gradle synthesises from the PUBLICATION coordinates
-// (`<group>:<artifactId>-test-fixtures`, what `testFixtures(...)` resolves) is among the ones this
-// module advertises. Derived from `publishedArtifactId`, so renaming the artifact keeps the check
-// honest rather than moving both sides together.
-//
-// Captured at configuration time so the task stays configuration-cache safe, and read from the
-// configuration's own `outgoing.capabilities` rather than generated metadata so it needs no jar.
-val requiredTestFixturesCapability = "$group:$publishedArtifactId-test-fixtures"
-
-val declaredTestFixturesCapabilities = provider {
-  configurations.getByName("testFixturesApiElements").outgoing.capabilities.map {
-    "${it.group}:${it.name}"
-  }
-}
-
-tasks.register("checkTestFixturesCapabilities") {
-  description = "Fails if the published test-fixtures capability stops matching the artifactId."
-  group = "verification"
-  val declared = declaredTestFixturesCapabilities
-  val required = requiredTestFixturesCapability
-  outputs.upToDateWhen { false }
-  doLast {
-    val actual = declared.get()
-    check(required in actual) {
-      "the test-fixtures variants advertise $actual, which does not include `$required` — the " +
-        "capability a consumer's `testFixtures(...)` resolves. Publishing without it makes the " +
-        "fixtures unreachable by their documented spelling, which is what 2.0.0 shipped."
-    }
-  }
-}
-
-tasks.named("check") { dependsOn("checkTestFixturesCapabilities") }
+// All of it was about Maven metadata. Nothing publishes now, so there is no metadata to get wrong,
+// and the one consumer it existed for stopped needing it first: `FakeRenderSession` moved to
+// compose-ai-tools' own `:render-host`, which its `:cli` takes as a project dependency
+// (compose-ai-tools#5137) — capability matching does not apply to those at all.
 
 tasks.named("check") { dependsOn("checkServeModuleBoundary") }
 
@@ -1012,36 +935,3 @@ val stageRcFontResources =
   }
 
 sourceSets.main.get().resources.srcDir(stageRcFontResources)
-
-mavenPublishing {
-  publishToMavenCentral(automaticRelease = true)
-  if (!project.version.toString().endsWith("SNAPSHOT")) signAllPublications()
-  coordinates(group.toString(), publishedArtifactId, project.version.toString())
-  pom {
-    name.set("Compose Preview — Preview Server")
-    description.set(
-      "The compose-preview server: catalog hosting, live render sessions, the playground and viewer web surfaces."
-    )
-    url.set("https://github.com/yschimke/compose-preview-server")
-    inceptionYear.set("2026")
-    licenses {
-      license {
-        name.set("The Apache License, Version 2.0")
-        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
-        distribution.set("repo")
-      }
-    }
-    developers {
-      developer {
-        id.set("yschimke")
-        name.set("Yuri Schimke")
-        url.set("https://github.com/yschimke")
-      }
-    }
-    scm {
-      url.set("https://github.com/yschimke/compose-preview-server")
-      connection.set("scm:git:https://github.com/yschimke/compose-preview-server.git")
-      developerConnection.set("scm:git:ssh://git@github.com/yschimke/compose-preview-server.git")
-    }
-  }
-}
