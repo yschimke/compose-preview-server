@@ -63,6 +63,23 @@ internal fun Route.installUiBuilderRoutes(
   nativePreview: UiBuilderNativePreviewLane? = null,
   /** The inline Remote Compose capture lane, left out on a host that cannot compile — as above. */
   inlineCapture: UiBuilderInlineCaptureLane? = null,
+  /**
+   * Turns the token a native render already minted into a live, streamed session, or null where
+   * this host cannot.
+   *
+   * The compile lane has always answered with `previewToken` and `previewUrl` — a `/pg/<token>`
+   * capability over the classes it just built — and the editor has always thrown them away and
+   * drawn the still. Redeeming here rather than making the browser follow the `/pg/` redirect and
+   * read a session id back out of its own address bar is the difference between a documented field
+   * and a client parsing a redirect: the editor is handed `{sessionId, previewId}` and opens
+   * `/{sessionId}/ws/{previewId}`, which is the same lane the viewer's Live toggle opens.
+   *
+   * Redeemed here rather than lazily on first socket because the native pane is open exactly when
+   * this route is called: a render nobody asked for is not one this lane produces. Null — and a
+   * redemption this host has no live backend for — leaves the payload's live fields absent, which
+   * the editor reads as "still only" and says so.
+   */
+  liveNativeSession: ((token: String, previewId: String) -> UiBuilderNativeLiveSession?)? = null,
 ) {
   installUiBuilderLiveExportRoutes(service, authorization)
   post(UI_BUILDER_REQUEST_PATH) {
@@ -382,6 +399,7 @@ internal fun Route.installUiBuilderRoutes(
                 previewId = result.response.previewId,
                 previewToken = result.response.previewToken,
                 previewUrl = result.response.previewUrl,
+                live = nativePreviewLiveOf(result.response, liveNativeSession),
                 imageBase64 = result.response.image,
                 taggedNodeIds = result.taggedNodeIds,
                 nodeBounds = result.nodeBounds.mapValues { (_, box) -> box.toNodeBoundsV1() },
@@ -737,7 +755,51 @@ internal data class NativePreviewResultV1(
    * the field has carried a render-side reason since it started reporting one.
    */
   val compileError: String? = null,
+  /**
+   * Where to open the live stream for this render, or null when there is none.
+   *
+   * Absent on a host with no live backend, on a compile that minted no token, and on a redemption
+   * that found no daemon for the design's mode. A client that sees it draws the streamed,
+   * interactive frame; one that does not draws [imageBase64] and says the pane is a still.
+   */
+  val live: NativePreviewLiveV1? = null,
 )
+
+/**
+ * Where this render can be streamed from, or null when it cannot be.
+ *
+ * Three ways to get null, and they are deliberately one answer to the editor rather than three: a
+ * host with no Stage-2 redemption wired, a compile that minted no token (nothing to redeem), and a
+ * redemption that found no daemon backend for the design's mode. All three mean "still only", the
+ * editor draws the still and says so, and none of them is a failure worth a sentence — the pane
+ * still has a picture of the design.
+ *
+ * Pulled out of the route so it can be tested without standing up ktor, a compiler and a catalog
+ * bundle: what is worth pinning here is the gating, not the JSON.
+ */
+internal fun nativePreviewLiveOf(
+  response: PlaygroundRunResponse,
+  liveNativeSession: ((token: String, previewId: String) -> UiBuilderNativeLiveSession?)?,
+): NativePreviewLiveV1? {
+  val redeem = liveNativeSession ?: return null
+  val token = response.previewToken?.takeIf { it.isNotBlank() } ?: return null
+  val preview = response.previewId?.takeIf { it.isNotBlank() } ?: return null
+  val session = redeem(token, preview) ?: return null
+  return NativePreviewLiveV1(sessionId = session.sessionId, previewId = session.previewId)
+}
+
+/**
+ * The live lane's coordinates: the registered session and the preview inside it.
+ *
+ * Two fields rather than a URL because the client already knows how to build one — `/{sessionId}/
+ * ws/{previewId}`, the path form the viewer uses — and a server-built absolute URL would have to
+ * guess the scheme and the host behind whatever proxy is in front of this one.
+ */
+@kotlinx.serialization.Serializable
+internal data class NativePreviewLiveV1(val sessionId: String, val previewId: String)
+
+/** What a host's redemption answers with: the live session a native render can be streamed from. */
+data class UiBuilderNativeLiveSession(val sessionId: String, val previewId: String)
 
 /**
  * One node's rectangle on the native frame, in render pixels with the origin at its top-left.

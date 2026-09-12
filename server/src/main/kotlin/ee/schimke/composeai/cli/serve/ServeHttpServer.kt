@@ -1023,6 +1023,19 @@ class ServeHttpServer(
             uiBuilderAuthorization,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
+            // The native pane's live lane, on a host that has Stage-2 redemption. The token the
+            // compile already minted is redeemed into a registered session, and the editor opens
+            // the same `/{session}/ws/{preview}` socket the viewer's Live toggle opens — no new
+            // streaming protocol, no new handler. A host with no redemption, or a design whose
+            // mode has no daemon backend here, simply answers without the live fields.
+            liveNativeSession =
+              playgroundRedeem?.let { redeem ->
+                { token, preview ->
+                  (redeem.redeem(token, preview) as? PlaygroundRedeemService.Outcome.Live)?.let {
+                    UiBuilderNativeLiveSession(sessionId = it.sessionId, previewId = it.previewId)
+                  }
+                }
+              },
           )
           if (uiBuilderReferenceStore != null) {
             installUiBuilderReferenceRoutes(
