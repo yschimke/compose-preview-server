@@ -3422,9 +3422,14 @@ internal fun EditorPane.supportingText(
     if (surfaces.wasm.fidelity.isAuthoritative) "Wasm" else "Wasm stand-in, for authoring"
   return when (this) {
     EditorPane.Editor -> "Edit the design · $wasmDescription"
-    // The two claims that matter about this pane: it does not edit, and it does not compile. The
-    // second is why it is worth switching on at all rather than waiting for the native one.
-    EditorPane.Preview -> "Devices and configurations, not editable · $wasmDescription"
+    // What it varies, and the two claims that matter: it does not edit, and it does not compile.
+    // The second is why it is worth switching on at all rather than waiting for the native one.
+    //
+    // "Devices" here means device *properties* — a width, a height and a density written over the
+    // design's environment — never a picture of a handset. Nothing in this pane draws a bezel, a
+    // notch or a rounded corner, and a mock that is not photoreal is worse than none: it invites a
+    // judgement about a screen from a drawing of a phone that is not the phone.
+    EditorPane.Preview -> "Devices, overrides and themes · not editable · $wasmDescription"
     EditorPane.Native ->
       if (surfaces.native.backend == UiBuilderPreviewSurfaces.BACKEND_ANDROID)
         "Compiled on the host · Android"
@@ -7836,7 +7841,7 @@ private fun DesignPreviewPane(
     listOf(
       UiBuilderVariantPane(
         id = "preview-design",
-        label = designFrameLabel(widthDp, heightDp),
+        label = designFrameLabel(document, widthDp, heightDp),
         widthDp = widthDp,
         heightDp = heightDp,
         document = document,
@@ -7893,11 +7898,22 @@ private fun DesignPreviewPane(
 /**
  * What the design's own frame is called in the preview row.
  *
- * Its geometry, because that is what the row is comparing: a frame labelled "Design" beside three
- * labelled `Pixel 7` is the one pane whose name says nothing about what is being compared.
+ * The same three properties a device pane states — size and density — because this pane is the
+ * baseline the others are being compared against, and a row where one label says "Design" and the
+ * rest say `412×915dp · 2.625×` hides the one number the comparison is about.
+ *
+ * Nothing here is a picture of a device: no bezel, no notch, no rounded corner. A frame is the
+ * design composed at a width, a height and a density, and the label is those.
  */
-private fun designFrameLabel(widthDp: Float, heightDp: Float): String =
-  "Design · ${widthDp.toInt()}×${heightDp.toInt()}dp"
+private fun designFrameLabel(
+  document: UiBuilderDocument,
+  widthDp: Float,
+  heightDp: Float,
+): String {
+  val density =
+    document.environment["density"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+  return "Design · ${widthDp.toInt()}×${heightDp.toInt()}dp · ${trimmedDensity(density)}×"
+}
 
 /**
  * The frame itself, with the overlay that makes it a surface rather than a picture.

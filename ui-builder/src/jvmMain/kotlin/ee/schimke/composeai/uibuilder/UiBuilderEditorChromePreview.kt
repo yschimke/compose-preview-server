@@ -356,10 +356,16 @@ fun UiBuilderPreviewModePreview() {
 @Composable
 fun UiBuilderEditorAndPreviewPanesPreview() {
   UiBuilderEditor(
-    document = editorChromePreviewDocument,
+    // Claiming a tablet and asking the Dark question of it, so the preview pane draws what it is
+    // for: the design's own frame, the device it says it ships on, and an override — each labelled
+    // with the properties being applied rather than with a picture of a handset.
+    document =
+      editorChromePreviewDocument.onDevice(PREVIEW_PHONE).claiming(PREVIEW_TABLET).inLightTheme(),
     catalog = editorChromePreviewCatalog,
     initialSelectedNodeId = EDITOR_CHROME_PREVIEW_SELECTION,
     initialPanes = setOf(EditorPane.Editor, EditorPane.Preview),
+    initialVariantAxes = setOf(EditorVariantAxis.Dark),
+    devicePresets = PREVIEW_DEVICE_PRESETS,
   )
 }
 
