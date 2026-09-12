@@ -324,14 +324,16 @@ services:
       # replacements, so a design does not disappear when preview.coo.ee updates.
       SERVE_UI_BUILDER_STATE_DIR: "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}"
       # Explicit authoring allowlist; publishing another preview catalog does not expose a builder.
-      SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}"
+      SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}"
       # Which of the served builder catalogs may take their definition from the catalog repository's
       # own published `ui-builder.json` instead of this server's built-in one: `all`, `none`, or a
       # comma-separated subset of SERVE_UI_BUILDER_CATALOGS. Empty keeps the entrypoint's default,
-      # which is `none` — no catalog this image serves has yet passed the equivalence gate, and
-      # m3-catalog's published file would replace a curated 41-component shelf with 104 derived
-      # components and no screen root. Name a catalog here once its gate is green. This is the
-      # per-catalog reversible lever docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
+      # which is `none`. That is no longer "no catalog has passed the gate": `remote-m3` scores zero
+      # differences and zero unreviewed fields, and the entrypoint records what each catalog is
+      # waiting on. m3-catalog's published file still declares no builtins, so a catalog composed
+      # from it has no screen root to put a component into. Name a catalog here once its gate is
+      # green. This is the per-catalog reversible lever
+      # docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
       SERVE_UI_BUILDER_PUBLISHED_CATALOGS: "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}"
       # The component record the Compose export generates from. The image ships one for
       # `m3-catalog` and the entrypoint installs it by default, so this is an override for a box

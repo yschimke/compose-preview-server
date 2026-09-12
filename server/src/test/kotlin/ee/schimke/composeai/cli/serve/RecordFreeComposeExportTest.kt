@@ -45,8 +45,9 @@ import kotlinx.serialization.json.encodeToJsonElement
  * had just generated for them on screen.
  *
  * Asserted through the executor with a **deliberately unconfigured** record source, because that is
- * the deployment: the packaged image runs `--ui-builder-catalogs m3-catalog,remote-m3` and passes a
- * record for the first only. An export that needed one here would be an export nobody receives.
+ * the deployment: the packaged image runs `--ui-builder-catalogs m3-catalog,remote-m3,wear-m3` and
+ * passes a record for `m3-catalog` only. An export that needed one here would be an export nobody
+ * receives.
  */
 class RecordFreeComposeExportTest {
 

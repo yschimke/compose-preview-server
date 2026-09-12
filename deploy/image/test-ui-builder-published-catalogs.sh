@@ -2,13 +2,18 @@
 # Guard two decisions the image makes about UI-builder catalogs, both of which are invisible in a
 # running container until somebody notices the shelf changed.
 #
-# 1. `wear-m3` is NOT served by default. It is a Wear/Android catalog — Robolectric previews, an
-#    Android SDK for its native lane — that nobody is authoring against. A deployment that wants it
-#    back sets SERVE_UI_BUILDER_CATALOGS; nothing about the catalog itself changed.
+# 1. The served allowlist is `m3-catalog,remote-m3,wear-m3`, and it is an ALLOWLIST: publishing
+#    another preview catalog does not expose a builder for it. `wear-m3` spent a period off this
+#    list on cost grounds — a Wear/Android catalog needs Robolectric previews and an Android SDK
+#    for its native lane, and nobody was authoring against it — so both directions are asserted
+#    here: the default carries it, and an operator can still take it out with
+#    SERVE_UI_BUILDER_CATALOGS.
 # 2. `--ui-builder-published-catalogs` defaults to `none`, so no catalog takes its definition from
-#    a published `ui-builder.json` until somebody names it. m3-catalog publishes one the
-#    equivalence gate scores 25 differences against, with zero declared components and zero
-#    builtins; remote-m3 publishes none at all. An operator naming a catalog is the opt-in.
+#    a published `ui-builder.json` until somebody names it. The reasons are per catalog and they
+#    move — this file used to say m3-catalog scored 25 differences with zero declared components
+#    and that remote-m3 published no file at all, and none of that is true any more — so the
+#    measurements live in the entrypoint beside the lever. What this asserts is only the shape:
+#    the default names no catalog, and an operator naming one is the opt-in.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -72,13 +77,16 @@ default="$(run_case)"
   echo "FAIL: the extracted block produced no arguments; the test is not exercising it" >&2
   exit 1
 }
-expect "the default serves m3-catalog and remote-m3" "m3-catalog,remote-m3" "${default}"
-refute "the default does not serve wear-m3" "wear-m3" "${default}"
+expect "the default serves m3-catalog, remote-m3 and wear-m3" "m3-catalog,remote-m3,wear-m3" \
+  "${default}"
 expect "the default withholds the published path from every catalog" \
   $'--ui-builder-published-catalogs\nnone' "${default}"
 
-overridden="$(run_case "m3-catalog,remote-m3,wear-m3")"
-expect "an operator can put wear-m3 back" "wear-m3" "${overridden}"
+# The symmetric guard, and the one the default no longer covers: a box that does not want to pay
+# for the Wear/Android lane can drop it, and dropping it must not disturb the other two.
+narrowed="$(run_case "m3-catalog,remote-m3")"
+refute "an operator can take wear-m3 out" "wear-m3" "${narrowed}"
+expect "taking wear-m3 out leaves the other two" "m3-catalog,remote-m3" "${narrowed}"
 
 all="$(run_case "" "all")"
 expect "an operator can opt every catalog back in" $'--ui-builder-published-catalogs\nall' "${all}"
