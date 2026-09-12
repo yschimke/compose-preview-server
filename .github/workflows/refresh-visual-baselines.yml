@@ -1,0 +1,262 @@
+name: Refresh visual baselines
+
+# Rewrite the committed Playwright snapshots from what the code actually renders, and push the
+# result onto a pull request's branch.
+#
+# The snapshots under `preview-harness/snapshots/` are a *derived* artifact, and the runner is the
+# only platform that gates them — so when a deliberate render change lands, the bytes that would
+# refresh the baseline exist only inside a CI job. Until `visual-harness` began uploading its
+# rejected renders there was no way to get them out at all, and #788's three Jetcaster failures sat
+# red across ten merges for exactly that reason. Uploading the evidence lets a human see what
+# moved; this lets them accept it without hand-carrying PNGs between machines.
+#
+# Modelled on `regenerate-goldens.yml`, with ONE deliberate difference: there is no automatic
+# `workflow_run` path. A stale golden on a dependency bump is never intentional, so that workflow
+# can fix itself. A changed *render* very often IS the point of the change, and a lane that
+# silently accepted new pixels would rubber-stamp the regressions these snapshots exist to catch.
+# So this only ever runs because a person with write access asked for it.
+#
+# Two ways in:
+#   * `/refresh-visual-baselines` as a pull request comment.
+#   * `workflow_dispatch` with a pull request number.
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request number whose branch should get refreshed baselines
+        required: true
+        type: string
+      harness:
+        description: Which snapshot-owning harness to refresh
+        type: choice
+        default: ui-builder-jetcaster
+        options:
+          - ui-builder-jetcaster
+          - ui-builder
+          - ui-builder-editor
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    refresh-visual-baselines-${{ github.event.inputs.pull_request
+    || github.event.issue.number }}
+  # Never cancel: a cancelled run can leave a pushed commit without the CI re-dispatch that follows
+  # it, which is the one state this workflow must not produce.
+  cancel-in-progress: false
+
+jobs:
+  # Decide whether to run, and on which branch. Split from the work so the permissions that push
+  # only exist in a job that starts after the trigger has been vetted.
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      ref: ${{ steps.decide.outputs.ref }}
+      pr: ${{ steps.decide.outputs.pr }}
+      harness: ${{ steps.decide.outputs.harness }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          # A comment body is text anyone with an account can write. Read it from the environment
+          # and compare it whole, never interpolate it into the script.
+          COMMENT: ${{ github.event.comment.body }}
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+          IS_PR_COMMENT: ${{ github.event.issue.pull_request != null }}
+          COMMENT_PR: ${{ github.event.issue.number }}
+          DISPATCH_PR: ${{ github.event.inputs.pull_request }}
+          DISPATCH_HARNESS: ${{ github.event.inputs.harness }}
+        run: |
+          set -euo pipefail
+          pr=""
+          harness="ui-builder-jetcaster"
+          case "${EVENT}" in
+            issue_comment)
+              first_line="$(printf '%s' "${COMMENT}" | head -n1 | tr -d '\r')"
+              case "${ASSOCIATION}" in
+                OWNER | MEMBER | COLLABORATOR) may_ask=true ;;
+                *) may_ask=false ;;
+              esac
+              # The whole first line, matched against a fixed set of accepted forms. A comment is
+              # never interpolated into a command, and an unrecognised trailing word does not
+              # silently fall back to "the default harness" — it does nothing, visibly.
+              case "${first_line}" in
+                "/refresh-visual-baselines") want="ui-builder-jetcaster" ;;
+                "/refresh-visual-baselines ui-builder-jetcaster") want="ui-builder-jetcaster" ;;
+                "/refresh-visual-baselines ui-builder") want="ui-builder" ;;
+                "/refresh-visual-baselines ui-builder-editor") want="ui-builder-editor" ;;
+                *) want="" ;;
+              esac
+              if [ "${IS_PR_COMMENT}" = "true" ] && [ -n "${want}" ] && [ "${may_ask}" = true ]; then
+                pr="${COMMENT_PR}"
+                harness="${want}"
+              fi
+              ;;
+            workflow_dispatch)
+              pr="${DISPATCH_PR}"
+              harness="${DISPATCH_HARNESS:-ui-builder-jetcaster}"
+              ;;
+          esac
+
+          if [ -z "${pr}" ]; then
+            echo "nothing to refresh for this event"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Resolve the head branch from the API rather than from the event payload, so neither the
+          # dispatch nor the comment path can be pointed at a branch this workflow must not push to.
+          head_repo="$(gh pr view "${pr}" --json headRepository,headRepositoryOwner \
+            --jq '"\(.headRepositoryOwner.login)/\(.headRepository.name)"')"
+          head_ref="$(gh pr view "${pr}" --json headRefName --jq .headRefName)"
+          state="$(gh pr view "${pr}" --json state --jq .state)"
+          if [ "${head_repo}" != "${GH_REPO}" ]; then
+            echo "::notice::#${pr} comes from ${head_repo}; this workflow only pushes inside ${GH_REPO}"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${state}" != "OPEN" ]; then
+            echo "::notice::#${pr} is ${state}"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "run=true"
+            echo "ref=${head_ref}"
+            echo "pr=${pr}"
+            echo "harness=${harness}"
+          } >> "$GITHUB_OUTPUT"
+
+  refresh:
+    needs: resolve
+    if: ${{ needs.resolve.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # `gh workflow run` below. A push made with GITHUB_TOKEN does not start a workflow, so
+      # without the re-dispatch the refreshed head would carry no checks at all.
+      actions: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+          # Kept, unlike every other checkout in this repository: this job's product is a commit on
+          # that branch.
+          persist-credentials: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.21.0
+          cache: npm
+          cache-dependency-path: preview-harness/package-lock.json
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          # Two JDKs, for the same two JVM floors `visual-harness` builds against: 17 last so it is
+          # JAVA_HOME and Gradle runs on the floor the distribution ships for, with 21 reached as a
+          # toolchain. The harness servers then move up to 21 below, exactly as that job does.
+          java-version: |
+            21
+            17
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - run: npm ci
+        working-directory: preview-harness
+      # Same reason as `visual-harness`: `--with-deps` runs `apt-get update`, which reads every
+      # source list on the runner image, and a third-party list this job installs nothing from has
+      # broken the browser install before a single test ran (#659).
+      - run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/microsoft-prod.list
+      - run: npx playwright install --with-deps chromium
+        working-directory: preview-harness
+      # The same five targets `visual-harness` builds. A narrower set is enough for the Jetcaster
+      # lane alone, but this workflow refreshes any of the three snapshot-owning harnesses, and CI
+      # proves this list serves all of them.
+      - run: >-
+          ./gradlew
+          :ui-builder:wasmFrontendDist
+          :ui-builder-renderer:wasmRendererDist
+          :ui-builder-reference-jetcaster:wasmFrontendDist
+          :ui-builder-generated-jetcaster:wasmFrontendDist
+          :server:installDist
+          --no-daemon
+          --no-parallel
+          --max-workers=1
+          -Pkotlin.daemon.jvmargs=-Xmx6g
+      - name: Run harness servers on the UI builder's JDK
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+      # `--update-snapshots` rewrites every baseline this harness owns. The run is expected to end
+      # non-zero when it replaced one, so the exit status is not the signal here — the staged diff
+      # below is.
+      - name: Re-render the baselines
+        continue-on-error: true
+        env:
+          HARNESS: ${{ needs.resolve.outputs.harness }}
+        run: npm run "harness:${HARNESS}" -- --update-snapshots
+        working-directory: preview-harness
+      - name: Commit and push
+        id: push
+        env:
+          BRANCH: ${{ needs.resolve.outputs.ref }}
+          HARNESS: ${{ needs.resolve.outputs.harness }}
+        run: |
+          set -euo pipefail
+          # Only the committed baselines. `test-results/` is this run's scratch output, and staging
+          # it would commit the diff images beside the snapshots.
+          git add -- preview-harness/snapshots
+          if git diff --cached --quiet; then
+            echo "the baselines already match what the code renders"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files="$(git diff --cached --name-only | wc -l | tr -d ' ')"
+          # Committed as the Actions bot, whose identity is a bot account and not an agent name —
+          # see the attribution rule in AGENTS.md.
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "test(harness): refresh the ${HARNESS} visual baselines" \
+            -m "Re-rendered by .github/workflows/refresh-visual-baselines.yml on this runner: ${files} file(s). Review the images."
+          # The branch can have moved since checkout. --force-with-lease refuses instead of
+          # clobbering.
+          git push --force-with-lease origin "HEAD:${BRANCH}"
+          {
+            echo "pushed=true"
+            echo "files=${files}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Run CI on the refreshed head
+        # A push authenticated with GITHUB_TOKEN deliberately does not trigger `on: push` or
+        # `on: pull_request`, so CI has to be asked for by name or the commit this job just made
+        # carries no checks and the pull request waits forever.
+        if: ${{ steps.push.outputs.pushed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.resolve.outputs.ref }}
+        run: gh workflow run ci.yml --ref "${BRANCH}"
+      - name: Say so on the pull request
+        if: ${{ steps.push.outputs.pushed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.resolve.outputs.pr }}
+          FILES: ${{ steps.push.outputs.files }}
+          HARNESS: ${{ needs.resolve.outputs.harness }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner and pushed them to"
+            echo "this branch; CI is re-dispatched for the new head."
+            echo
+            echo "**These are accepted pixels, not verified ones.** This lane rewrites a baseline to"
+            echo "whatever the code draws, so the review is the gate: open the images and confirm"
+            echo "every change is one the diff meant to make."
+          } > comment.md
+          gh pr comment "${PR}" --body-file comment.md
+          rm -f comment.md
