@@ -79,8 +79,15 @@ default="$(run_case)"
 }
 expect "the default serves m3-catalog, remote-m3 and wear-m3" "m3-catalog,remote-m3,wear-m3" \
   "${default}"
-expect "the default serves remote-m3 from its published file" \
-  $'--ui-builder-published-catalogs\nremote-m3' "${default}"
+# The FULL value, with the trailing newline, not a prefix of it. `expect` is a substring check, so
+# asserting `…published-catalogs\nremote-m3` kept passing when the default became
+# `remote-m3,wear-m3` -- it matched the prefix. An assertion that cannot fail when the thing it
+# names changes is the failure this file exists to prevent, so it pins both ids and the end of the
+# argument. (Command substitution strips the trailing newline, so the assertion pins both ids
+# rather than the line end -- which still catches the regression that matters, a default that
+# silently loses wear-m3.)
+expect "the default serves remote-m3 and wear-m3 from their published files" \
+  $'--ui-builder-published-catalogs\nremote-m3,wear-m3' "${default}"
 
 # The reverse direction, and the one that matters most: a box can put every catalog back on the
 # catalog this build writes in Kotlin. `none` is the whole-fleet retreat this lever exists for,
@@ -106,6 +113,14 @@ refute "narrowing the allowlist past remote-m3 publishes nothing" "remote-m3" "$
 narrowed="$(run_case "m3-catalog,remote-m3")"
 refute "an operator can take wear-m3 out" "wear-m3" "${narrowed}"
 expect "taking wear-m3 out leaves the other two" "m3-catalog,remote-m3" "${narrowed}"
+
+# The other half of the derivation, added when wear-m3 joined remote-m3 on the published path: the
+# intersection has to work from EITHER side. Dropping remote-m3 must leave wear-m3 published rather
+# than falling back to `none`, which is what a literal default or a single-catalog `if` would do.
+wear_only="$(run_case "m3-catalog,wear-m3")"
+expect "dropping remote-m3 still publishes wear-m3" \
+  $'--ui-builder-published-catalogs\nwear-m3' "${wear_only}"
+refute "dropping remote-m3 does not publish it" "remote-m3" "${wear_only}"
 
 all="$(run_case "" "all")"
 expect "an operator can opt every catalog back in" $'--ui-builder-published-catalogs\nall' "${all}"

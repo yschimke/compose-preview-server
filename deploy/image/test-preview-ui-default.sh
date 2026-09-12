@@ -65,13 +65,13 @@ built_in_builder="${install}/ui-builder"
 # and spelling the list into each of them is how adding a catalog turned into a four-file edit with
 # a test failure at the end of it.
 default_builder_catalogs='m3-catalog,remote-m3,wear-m3'
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\nremote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\nremote-m3,wear-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
   "the packaged builder is enabled at its distinct route"
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\nremote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog\n--wasm-dir\nextra=/srv/extra' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\nremote-m3,wear-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog\n--wasm-dir\nextra=/srv/extra' \
   "the builder, catalog fallback, and operator app remain additive" "extra=/srv/extra"
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\nremote-m3\n--ui-builder-state-dir\n/config/custom-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\nremote-m3,wear-m3\n--ui-builder-state-dir\n/config/custom-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
   "the builder accepts an explicit persistent state directory" "" "/config/custom-builder-state"
-expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\nremote-m3\n--ui-builder-state-dir\nnone\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
+expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\n'"${default_builder_catalogs}"$'\n--ui-builder-published-catalogs\nremote-m3,wear-m3\n--ui-builder-state-dir\nnone\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
   "the builder preserves the explicit static-only opt-out" "" "none"
 expect $'--wasm-ui-dir\n'"${built_in}"$'\n--ui-builder-dir\n'"${built_in_builder}"$'\n--ui-builder-catalogs\nremote-m3\n--ui-builder-published-catalogs\nremote-m3\n--ui-builder-state-dir\n/config/ui-builder-state\n--ui-builder-native-catalog\nwear-m3=wear-m3-catalog' \
   "the builder catalog allowlist is operator-selectable" "" "" "remote-m3"
