@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -87,6 +88,20 @@ class ScreenGeneratorComposeExportExecutorTest {
       assertTrue(
         browser is ScreenExportGate.Outcome.Refused &&
           browser.reasons.any { "shared generator support" in it }
+      )
+      return
+    }
+    // The second gate, one level below the vocabulary. `ScreenDocumentProjection` refuses ANY
+    // document carrying a repetition, a component instance, an event binding or a state-bound
+    // property unless `UiBuilderBuildFeatures.remoteCompose` is set - however well the shared
+    // generator can express one. Reading only the probe above is why this test went red on every
+    // default build while the `-PuiBuilderRemoteCompose=true` lane stayed green: the probe answers
+    // "can the vocabulary say this?", not "will this build emit it?". `GeneratedDocumentTest`
+    // already distinguishes the two; this one did not.
+    if (!UiBuilderBuildFeatures.remoteCompose) {
+      assertTrue(
+        browser is ScreenExportGate.Outcome.Refused &&
+          browser.reasons.any { "disabled in this build" in it }
       )
       return
     }
