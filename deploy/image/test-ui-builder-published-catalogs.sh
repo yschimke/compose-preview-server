@@ -90,6 +90,17 @@ withheld="$(run_case "" "none")"
 expect "an operator can withhold the published path from every catalog" \
   $'--ui-builder-published-catalogs\nnone' "${withheld}"
 
+# The case that made the published default a derived value rather than a literal. An operator may
+# narrow the served allowlist — dropping the Wear/Android lane is the documented reason — and
+# `ServeCommandOptions` REFUSES a published id the served list does not carry, with a startup
+# failure. So a narrowed allowlist that no longer serves remote-m3 must fall back to `none` on its
+# own; otherwise the box does not boot and the operator is told to narrow a second variable they
+# were never asked to think about.
+narrowed_out="$(run_case "m3-catalog")"
+expect "narrowing the allowlist past remote-m3 withholds the published path" \
+  $'--ui-builder-published-catalogs\nnone' "${narrowed_out}"
+refute "narrowing the allowlist past remote-m3 publishes nothing" "remote-m3" "${narrowed_out}"
+
 # The symmetric guard, and the one the default no longer covers: a box that does not want to pay
 # for the Wear/Android lane can drop it, and dropping it must not disturb the other two.
 narrowed="$(run_case "m3-catalog,remote-m3")"

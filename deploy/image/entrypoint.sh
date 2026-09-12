@@ -303,7 +303,23 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # Naming a catalog turns it on and removing it turns it off, in this one variable. Reversing it
   # used to mean asking another repository to withdraw a file; that is what this lever exists to
   # avoid — though see #796 before assuming a reversal is free for saved designs.
-  args+=(--ui-builder-published-catalogs "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-remote-m3}")
+  # DERIVED FROM THE SERVED LIST, not written independently of it.
+  # `ServeCommandOptions.uiBuilderPublishedCatalogs` REFUSES a published id that
+  # `--ui-builder-catalogs` does not serve — `require(unknown.isEmpty())`, so a startup failure
+  # rather than a warning, on the grounds that naming an unserved catalog is a typo with a silent
+  # failure mode. That is right, and it means these two defaults cannot be chosen separately: an
+  # operator who narrows SERVE_UI_BUILDER_CATALOGS to drop the Wear/Android lane (a supported
+  # override, and one this image's own tests exercise) would otherwise have to know that a second
+  # variable needs narrowing too, or the box would not boot.
+  ui_builder_served=",${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3},"
+  if [[ -n "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}" ]]; then
+    ui_builder_published="${SERVE_UI_BUILDER_PUBLISHED_CATALOGS}"
+  elif [[ "${ui_builder_served}" == *",remote-m3,"* ]]; then
+    ui_builder_published="remote-m3"
+  else
+    ui_builder_published="none"
+  fi
+  args+=(--ui-builder-published-catalogs "${ui_builder_published}")
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")
