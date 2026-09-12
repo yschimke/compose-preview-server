@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -57,6 +58,21 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   @Test
   fun `semantic loops and reusable components have identical browser and service source`() {
+    // Opt-in build surface, so this case belongs to the `ui-builder-remote-compose` job rather
+    // than to the shipping default. A semantic loop is a `layout/for-each`, and
+    // `ScreenDocumentProjection` refuses any document carrying one when the feature is off
+    // ("stated authoring and reusable source export are disabled in this build") — so the export
+    // comes back with a diagnostic and `assertEquals(emptyList(), artifact.diagnostics)` below
+    // fails on the refusal rather than on anything about browser/service agreement.
+    //
+    // The fifth instance of the same shape as #792, which guarded four siblings and missed this
+    // one: it fixed `:ui-builder:jvmTest` for the default build and `:server:test` for the flagged
+    // build, and this is `:server:test` in the DEFAULT build. Guarded per test rather than per
+    // class because the other eleven cases here do not need the feature.
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+      UiBuilderBuildFeatures.remoteCompose,
+      "Enable with -PuiBuilderRemoteCompose=true",
+    )
     val root =
       generateSequence(File(".").absoluteFile) { it.parentFile }
         .first { File(it, "docs/design/fixtures/ui-builder/m3-catalog-components-v1.json").isFile }
