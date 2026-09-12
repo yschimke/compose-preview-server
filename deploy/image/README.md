@@ -436,7 +436,7 @@ a box rendering flat out sits above that. The thresholds take the same units.
 | Knob | What it bounds | Default |
 | --- | --- | --- |
 | `PREVIEW_MEM_LIMIT` | Memory the whole container may use | `0` (unlimited) |
-| `SERVE_LIVE_SEATS` | Concurrent daemon *residency*, weighted (Android costs 2) | derived: `min(memory, cores × 2)`, clamped to `[2, 32]` |
+| `SERVE_LIVE_SEATS` | Concurrent daemon *residency*, weighted (Android costs 2) | derived: `min(memory over 75% of the limit, cores × 2)`, clamped to `[2, 32]` |
 | `SERVE_BACKGROUND_RENDERS` | Optimizer renders admitted at once | derived from seats, clamped to 3 |
 
 The seat budget derives from **both** memory and cores — a permit buys a render daemon and a render

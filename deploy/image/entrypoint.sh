@@ -421,10 +421,22 @@ fi
 SEATS_PER_CPU=2
 SEATS_FLOOR=2
 SEATS_CEILING=32
+# What a seat is assumed to cost, and what the host itself keeps. Named rather than inline so
+# `test-derive-live-seats.sh` can assert the headroom invariant with the same numbers.
+SEATS_MEM_RESERVE_MB=1024
+SEATS_MEM_PER_SEAT_MB=1200
+# Memory the budget must leave UNSPENT, as a percentage. Tracks the theme optimizer's
+# `resumeMemoryAvailableFraction` (0.25) — see the note above the auto-derivation below.
+SEATS_MEM_HEADROOM_PCT=25
 derive_live_seats() {
-  local eff_mb="$1" cpus="$2" mem_seats cpu_seats seats
+  local eff_mb="$1" cpus="$2" usable_mb mem_seats cpu_seats seats
   mem_seats=${SEATS_FLOOR}
-  (( eff_mb > 0 )) && mem_seats=$(( (eff_mb - 1024) / 1200 ))
+  if (( eff_mb > 0 )); then
+    # Spend only part of the cgroup. Budgeting all of it is what sized boxes past the optimizer's
+    # own resume threshold — see the note above the auto-derivation below.
+    usable_mb=$(( eff_mb * (100 - SEATS_MEM_HEADROOM_PCT) / 100 ))
+    mem_seats=$(( (usable_mb - SEATS_MEM_RESERVE_MB) / SEATS_MEM_PER_SEAT_MB ))
+  fi
   # An unknown core count must not derive zero seats. Falling back to the memory figure keeps the
   # old behaviour exactly, which is the right answer when half the inputs are missing.
   if (( cpus > 0 )); then
@@ -483,7 +495,22 @@ effective_cpus() {
 
 # When SERVE_LIVE_SEATS is unset we AUTO-DERIVE the budget from the box: reserve ~1 GB for the serve
 # host + OS, budget ~1.2 GB of headroom per permit, and take the SMALLER of what memory affords and
-# what the CPUs afford.
+# what the CPUs afford — over only PART of the cgroup, never all of it.
+#
+# **Budgeting the whole cgroup sized boxes into permanent optimizer suspension.** `mem_seats` used
+# to be `(eff_mb - 1024) / 1200`, so the implied budget (`1024 + seats*1200`) landed within one seat
+# of the entire limit: the derivation targeted ~93-96% utilisation by construction. The theme
+# optimizer refuses to resume below `resumeMemoryAvailableFraction` (0.25) of memory free, so on any
+# box where memory was the binding side those two could never both hold. Measured on preview.coo.ee
+# (~11 GiB, 8 cores, deriving 8 seats): 15.5% cgroup memory available against a 0.15 stop and a 0.25
+# resume — 153 host suspensions to 48 resumes and 2.57 h of cumulative admission wait, while the
+# HOST sat 55% free. Nothing failed; background theme optimisation simply stopped making progress.
+#
+# So spend at most `100 - SEATS_MEM_HEADROOM_PCT` percent. Because `seats*1200 <= usable - 1024`,
+# the budget is `<= usable`, which bounds projected utilisation at 75% and leaves the optimizer the
+# 25% it needs to resume. The one deliberate exception is SEATS_FLOOR: a 4 GB box still derives 2
+# seats and still exceeds the headroom, because a reference box that cannot run two cheap CMP
+# sessions is worse than one whose optimizer throttles.
 #
 # **Memory alone was the wrong input.** A permit buys a render daemon, and a render is CPU-bound —
 # so a box with plenty of RAM and few cores derived a budget it could not actually work, while the
@@ -531,8 +558,12 @@ if [[ -z "${SERVE_LIVE_SEATS:-}" ]]; then
   SERVE_LIVE_SEATS="$(derive_live_seats "${eff_mb}" "${cpus}")"
   quota_note=""
   (( cpus < visible_cpus )) && quota_note=" quota-limited from ${visible_cpus}"
+  # Publish the projected utilisation too: it is the number that decides whether the optimizer can
+  # resume, and its absence is why a box sized past its own threshold looked correctly configured.
+  util_note=""
+  (( eff_mb > 0 )) && util_note=", ~$(( (SEATS_MEM_RESERVE_MB + SERVE_LIVE_SEATS * SEATS_MEM_PER_SEAT_MB) * 100 / eff_mb ))% of memory budgeted"
   echo "entrypoint: auto live-seat budget ${SERVE_LIVE_SEATS}" \
-    "(effective mem ${eff_mb} MB, ${cpus} cpus${quota_note})" >&2
+    "(effective mem ${eff_mb} MB, ${cpus} cpus${quota_note}${util_note})" >&2
 fi
 [[ -n "${SERVE_LIVE_SEATS}" ]] && args+=(--live-seats "${SERVE_LIVE_SEATS}")
 # Background (theme-optimizer) renders admitted at once, server-wide. Unset leaves the server's own
