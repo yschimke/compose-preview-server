@@ -258,13 +258,18 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   #
   # DEFAULT `none`, deliberately, and it is not a vote against the contract — it is the contract's
   # own readiness gate applied to the catalogs this image actually serves. Measured against the
-  # frozen goldens with .github/scripts/ui-builder-equivalence.sh:
+  # frozen goldens with .github/scripts/ui-builder-equivalence.sh, re-measured 2026-09-12:
   #
-  #   remote-m3   declares no `uiBuilderFile` at all, so nothing is fetched and nothing changes.
-  #   m3-catalog  publishes a 48 KB file that the gate scores 25 differences against the frozen
-  #               catalog. It declares ZERO components and ZERO builtins — 104 record components
-  #               would each be derived from the `m3/` prefix against a curated shelf of 41, and a
-  #               catalog with no builtins has no screen root to put any of them in.
+  #   remote-m3   publishes a 42 KB file and the cover sheet DOES declare `uiBuilderFile`. The note
+  #               here used to say it declared none and nothing was fetched; that stopped being
+  #               true, and all five delivery branches now stamp it.
+  #   m3-catalog  publishes a 188 KB file — not the 48 KB recorded here — and the gate now scores it
+  #               ZERO differences against the frozen catalog, where it once scored 25. It declares
+  #               110 components with a 102-entry menu over 39 shelves, so the old objection (every
+  #               id derived from the `m3/` prefix against a curated shelf of 41) is gone.
+  #               It still declares ZERO builtins, so a catalog composed from it has no screen root
+  #               to put any component in. That is the remaining blocker, and it is the reason this
+  #               stays `none` — a different reason from the one it was set for.
   #
   # So the published path is off until a catalog is proven equivalent, and turning it on is one
   # variable naming one catalog. Reversing it used to mean asking another repository to withdraw a
