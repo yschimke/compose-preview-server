@@ -6337,11 +6337,17 @@ class ServeHttpServer(
         else
           ServeWeb.ComponentDirectory(
             "about",
-            // What the rows ARE, not where they live: a reader on a sample is being told which
-            // component it explains, and the destination catalog's title is already the answer to a
-            // different question (the forward directories name themselves that way because there
-            // the catalog IS the subject).
-            "Explains",
+            // The SOURCE catalog's own heading, exactly as a forward directory takes the
+            // destination's.
+            //
+            // A fixed word cannot work here, because `related` is directed and the page this lands
+            // on is whichever end did not declare it. "Explains" read correctly while the kit
+            // catalog was expected to declare the link and a samples page carried the inverse — and
+            // backwards the moment the samples catalog declares it instead, which is where the
+            // producer side landed: the kit component does not explain its samples. Naming the
+            // catalog the rows come FROM is true whichever end declares, and says the one thing a
+            // reader cannot see from the row labels themselves.
+            ServeWeb.catalogHeading(catalogBundleHost(host)?.title, host.label),
             rows,
           )
       }

@@ -1841,7 +1841,10 @@ class ServeWebFixtureTest {
           listOf(
             ServeWeb.ComponentDirectory(
               "about",
-              "Explains",
+              // The SOURCE catalog's own heading, not a fixed word: `related` is directed and this
+              // directory lands on whichever end did not declare it, so only the catalog's name is
+              // true in both directions.
+              "Compose Material 3",
               listOf(ServeWeb.ComponentDirectoryRow("Button", "/compose-m3/p/button-filled")),
             )
           ),
