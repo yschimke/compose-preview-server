@@ -6324,7 +6324,7 @@ class ServeHttpServer(
             host.previews.firstOrNull { ServeIssueReport.componentIdFor(it) == sourceComponentId }
               ?: return@mapNotNull null
           ServeWeb.ComponentDirectoryRow(
-            label = target.label,
+            label = ServeWeb.rowDisplayName(target),
             href =
               "/" +
                 WebEscaping.urlEncodeSegment(system) +
@@ -6337,17 +6337,22 @@ class ServeHttpServer(
         else
           ServeWeb.ComponentDirectory(
             "about",
-            // The SOURCE catalog's own heading, exactly as a forward directory takes the
-            // destination's.
+            // Named for WHAT the rows are, read off the source catalog's declared role.
             //
-            // A fixed word cannot work here, because `related` is directed and the page this lands
-            // on is whichever end did not declare it. "Explains" read correctly while the kit
-            // catalog was expected to declare the link and a samples page carried the inverse — and
-            // backwards the moment the samples catalog declares it instead, which is where the
-            // producer side landed: the kit component does not explain its samples. Naming the
-            // catalog the rows come FROM is true whichever end declares, and says the one thing a
-            // reader cannot see from the row labels themselves.
-            ServeWeb.catalogHeading(catalogBundleHost(host)?.title, host.label),
+            // A fixed word cannot work: `related` is directed, and this directory lands on
+            // whichever
+            // end did NOT declare the link, so "Explains" — correct while the kit was expected to
+            // declare it — read backwards the moment the samples catalog declared it instead. A kit
+            // component does not explain its samples.
+            //
+            // The source catalog's heading is true in both directions but says more than a reader
+            // needs: on a kit page, a group headed "Wear Material 3 Samples" spends a catalog title
+            // where one word does the work. A catalog that declares what KIND it is gets that word;
+            // anything else keeps the heading, which is the only other answer that stays true.
+            when (ServeWeb.PageRole.of(catalogBundleHost(host)?.catalogRole)) {
+              ServeWeb.PageRole.SAMPLES -> "Samples"
+              else -> ServeWeb.catalogHeading(catalogBundleHost(host)?.title, host.label)
+            },
             rows,
           )
       }
@@ -6399,7 +6404,7 @@ class ServeHttpServer(
             host?.previews?.firstOrNull { ServeIssueReport.componentIdFor(it) == link.componentId }
           if (host != null && target == null) return@mapNotNull null
           ServeWeb.ComponentDirectoryRow(
-            label = link.label ?: target?.label ?: link.componentId,
+            label = link.label ?: target?.let { ServeWeb.rowDisplayName(it) } ?: link.componentId,
             href =
               "/" +
                 WebEscaping.urlEncodeSegment(system) +
@@ -6409,7 +6414,10 @@ class ServeHttpServer(
             live = link.live && target != null,
             // The catalog's own wording for the relationship, where the row is already showing
             // the destination's name instead.
-            title = link.label?.takeIf { it != (target?.label ?: link.componentId) },
+            title =
+              link.label?.takeIf {
+                it != (target?.let { p -> ServeWeb.rowDisplayName(p) } ?: link.componentId)
+              },
           )
         }
         if (rows.isEmpty()) null else ServeWeb.ComponentDirectory("related", heading, rows)

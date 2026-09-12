@@ -4020,6 +4020,82 @@ ${captureControlsHtml().prependIndent("          ")}
     }
   }
 
+  /**
+   * The component's recordings, as a directory over the renders the TREE lists — not over every
+   * render the catalog publishes.
+   *
+   * That distinction is the whole of this function. A first cut unioned the captures of every
+   * sibling sharing the component key, and on a component like `EdgeButton` that is 64 renders —
+   * every breakpoint times every state — so the drawer grew a 64-row matrix under a variant list
+   * that deliberately holds 10. [primaryVariants] already decided which renders are worth
+   * navigating to and why (theme, breakpoint, fontScale and locale are a different rendering of the
+   * same thing, not a different thing to look at); a directory that ignored that decision was
+   * answering a question the tree had already answered better.
+   *
+   * So the render set is exactly [default] plus [variants] — the rows drawn above it, including the
+   * render on screen even when no axis would have listed it, which is how a capture that lives only
+   * on a secondary render is still reachable from the page showing it.
+   *
+   * ## Naming
+   *
+   * A capture's own title identifies it only within ONE render's set: [MotionCaptureLabels] numbers
+   * a repeat inside that set, and a caption-less capture is "Animation" in every set there is. Over
+   * a union across renders that produced 64 rows all reading `Animation`, distinguished by nothing.
+   *
+   * So the label says whichever of the two actually varies. Captures from a single render are named
+   * by their own titles, which is the fixture case and reads best ("Tap the avatar", "Header
+   * collapse"). Captures spread across renders are named by the RENDER — the same words the variant
+   * row above uses — with the capture's title appended only for a render contributing more than
+   * one, because there the render alone is ambiguous again.
+   */
+  private fun motionDirectory(
+    preview: ServePreview,
+    default: ServePreview,
+    variants: List<TreeVariant>,
+    byHref: Map<String, ServePreview>,
+    href: (ServePreview) -> String,
+    basePath: String,
+    q: String,
+  ): ComponentDirectory? {
+    class Take(val renderLabel: String, val render: ServePreview, val capture: ServeMotion)
+    // Every render resolved through [byHref], the DEFAULT included. A caller may hand this page a
+    // record enriched past the sibling list it also passes — the handler reads a pinned revision's
+    // own record, the fixtures build one with `copy()` — and that enriched record is the one
+    // holding
+    // the captures. Taking `default` as it came out of the sibling list read a preview with none,
+    // which silently emptied the directory on exactly the page whose stage was playing them.
+    val takes =
+      (listOf(previewDisplayName(default) to (byHref[href(default)] ?: default)) +
+          variants.mapNotNull { row -> byHref[row.href]?.let { row.label to it } })
+        .distinctBy { (_, render) -> render.id }
+        .flatMap { (label, render) -> render.motion.map { Take(label, render, it) } }
+    if (takes.isEmpty()) return null
+    val spansRenders = takes.distinctBy { it.render.id }.size > 1
+    val capturesPerRender = takes.groupingBy { it.render.id }.eachCount()
+    val titles =
+      takes
+        .groupBy { it.render.id }
+        .mapValues { (_, group) -> MotionCaptureLabels.of(group.map { it.capture }) }
+    val indexInRender = HashMap<String, Int>()
+    val rows = takes.map { take ->
+      val index = indexInRender.merge(take.render.id, 1, Int::plus)!! - 1
+      val title = titles.getValue(take.render.id)[index]
+      val label =
+        when {
+          !spansRenders -> title.title
+          capturesPerRender.getValue(take.render.id) > 1 -> "${take.renderLabel} · ${title.title}"
+          else -> take.renderLabel
+        }
+      ComponentDirectoryRow(
+        label = label,
+        href = motionHref(basePath, q, take.render.id, take.capture.id),
+        // The caption in full, which the label may have had to shorten or drop entirely.
+        title = title.detail.takeIf { it != label },
+      )
+    }
+    return ComponentDirectory("motion", "Motion", rows)
+  }
+
   private fun componentSubtreeHtml(
     preview: ServePreview,
     siblings: List<ServePreview>,
@@ -4027,11 +4103,14 @@ ${captureControlsHtml().prependIndent("          ")}
     q: String,
     darkFirst: Boolean,
     /**
-     * The component's named groups — its recordings, the samples that call it — resolved by the
-     * handler, which is the half of this that needs the session registry and another catalog's
-     * previews. Empty leaves the subtree exactly the axes list it has always been.
+     * The component's named groups — the catalogs that are about it — resolved by the handler,
+     * which is the half of this that needs the session registry and another catalog's previews. The
+     * recordings directory is built here instead, because it is drawn over the same render rows
+     * this function already computes ([motionDirectory] says why that matters).
      */
     directories: List<ComponentDirectory> = emptyList(),
+    /** Whether to draw the recordings directory at all — false under a pin and in Catalog mode. */
+    includeMotion: Boolean = true,
   ): String {
     fun href(p: ServePreview) = "$basePath/p/${WebEscaping.urlEncodeSegment(p.id)}$q"
     // The subtree hangs off the component's DEFAULT render, whichever of its renders is on screen:
@@ -4054,10 +4133,19 @@ ${captureControlsHtml().prependIndent("          ")}
     // a row already naming that render. Folding it up leaves the tree saying each render once: the
     // component, then the ways it differs.
     val variants = withCurrent.filterNot { it.href == href(default) }
+    // The preview ON SCREEN leads, so a caller handing this page a record enriched past the list it
+    // also passes — the handler's pinned revision, the fixtures' `copy()` — has its own captures
+    // read rather than the list's.
+    val byHref = (listOf(preview) + siblings).distinctBy { it.id }.associateBy { href(it) }
+    val allDirectories =
+      listOfNotNull(
+        if (!includeMotion) null
+        else motionDirectory(preview, default, variants, byHref, ::href, basePath, q)
+      ) + directories
     // A component with one render and no directories has nothing to show — the tree would be its
     // own title. With a directory it has plenty, so the subtree is worth drawing for a component
     // that never varies but is called by five samples.
-    if (variants.isEmpty() && directories.isEmpty()) return ""
+    if (variants.isEmpty() && allDirectories.isEmpty()) return ""
     return buildString {
       append("<nav class=\"cp-tree cp-axes-tree\" aria-label=\"Component renders\">\n")
       append("  <ul class=\"cp-tree-list\" role=\"tree\">\n")
@@ -4072,7 +4160,7 @@ ${captureControlsHtml().prependIndent("          ")}
         collapsed = false,
         syntheticDefaultRow = false,
         currentHref = href(preview),
-        directories = directories,
+        directories = allDirectories,
         indent = "    ",
       )
       append("  </ul>\n</nav>")
@@ -4191,6 +4279,16 @@ ${captureControlsHtml().prependIndent("          ")}
   /** A human family heading: a curated name, else the token title-cased (`switch` → `Switch`). */
   private fun familyDisplayName(family: String): String =
     FAMILY_DISPLAY_NAMES[family] ?: family.replace('-', ' ').replaceFirstChar { it.uppercaseChar() }
+
+  /**
+   * The name the drawer's tree gives a preview, for a row some other layer builds.
+   *
+   * Exported so a handler-built directory row reads like the variant rows beside it. Without it the
+   * related rows carried `ServePreview.label`, which for a generated catalog IS the route id — a
+   * kit row read `alertdialog__ideal__default__192dp` where the variant row one line above read
+   * `Disabled`. Two naming rules on one list is the defect; this is the one rule.
+   */
+  fun rowDisplayName(preview: ServePreview): String = previewDisplayName(preview)
 
   /**
    * Prefer catalog-authored labels; turn generated ids into readable component names as fallback.
@@ -16494,31 +16592,6 @@ ${scriptTag("known-differences.js")}
     // Every render of the component, not just the one on screen: a recording belongs to the
     // preview that took it, so a capture declared on `Pressed` is invisible from the default page
     // otherwise — which is the discovery problem this directory exists to fix.
-    val motionDirectory =
-      if (componentBrowser || pinned != null) null
-      else {
-        val key = componentKey(preview)
-        // [preview] FIRST and deduplicated on id, not `siblings` alone. A caller may hand this page
-        // a preview enriched past the list it also passes — the handler reads a pinned revision's
-        // own record, and the fixtures build one with `copy()` — and reading the captures off the
-        // list would then show the reader a recording set the stage is not playing from.
-        val rows =
-          (listOf(preview) + siblings)
-            .distinctBy { it.id }
-            .filter { componentKey(it) == key && it.motion.isNotEmpty() }
-            .flatMap { render ->
-              val labels = MotionCaptureLabels.of(render.motion)
-              render.motion.mapIndexed { index, capture ->
-                val label = labels[index]
-                ComponentDirectoryRow(
-                  label = label.title,
-                  href = motionHref(basePath, q, render.id, capture.id),
-                  title = label.detail.takeIf { it != label.title },
-                )
-              }
-            }
-        if (rows.isEmpty()) null else ComponentDirectory("motion", "Motion", rows)
-      }
     val axesTree =
       componentSubtreeHtml(
         preview,
@@ -16528,9 +16601,11 @@ ${scriptTag("known-differences.js")}
         viewerDarkFirst,
         // Withheld from the component browser for the same reason its comparison chips are: that
         // chrome is a reading surface, and a route into another catalog is one it does not offer.
-        directories =
-          if (componentBrowser) emptyList()
-          else listOfNotNull(motionDirectory) + componentDirectories,
+        directories = if (componentBrowser) emptyList() else componentDirectories,
+        // No recordings under a pin — the captures on the stage are the pinned revision's, and the
+        // rows would link at `?motion=` ids this publish may never have carried — nor in Catalog
+        // mode, which strips the motion lane entirely.
+        includeMotion = !componentBrowser && pinned == null,
       )
     val navDrawer =
       navDrawerHtml(

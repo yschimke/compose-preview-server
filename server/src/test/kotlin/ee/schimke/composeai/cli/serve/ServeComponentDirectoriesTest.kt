@@ -137,25 +137,84 @@ class ServeComponentDirectoriesTest {
   }
 
   @Test
-  fun `motion rows are built from every render of the component, not just the one on screen`() {
-    // A capture belongs to the preview that took it, so a recording declared on `Pressed` is
-    // invisible from the default page unless the directory unions the component's renders — which
-    // is exactly the discovery problem it exists to fix.
+  fun `a capture on a listed variant is reachable from the component's own page`() {
+    // The discovery this exists for: a capture belongs to the preview that took it, so one declared
+    // on a variant is invisible from the default page unless the directory reaches across renders.
+    //
+    // It reaches across the renders the TREE lists, which is a narrowing of what this test used to
+    // assert ("every render of the component"). That version was written against a two-render
+    // fixture the tree lists no variants for at all, so it pinned a row hanging off a render
+    // nothing
+    // else on the page navigates to — and the same union produced 64 rows on a real component. The
+    // half worth keeping is this one, and a listed variant is what it takes to show it.
+    val renders = states(3)
     val recorded =
-      preview(
-        "button__ideal__pressed__light",
-        "Button · Pressed",
-        state = "pressed",
-        motion = listOf(ServeMotion("press", caption = "Press and release")),
-      )
-    val subtree = tree(viewer(default, listOf(default, recorded)))
+      renders[1].copy(motion = listOf(ServeMotion("press", caption = "Press and release")))
+    val subtree = tree(viewer(renders.first(), listOf(renders[0], recorded, renders[2])))
     assertTrue(subtree.contains("cp-tree-dir--motion"), subtree)
     assertTrue(subtree.contains(">Motion</span><span class=\"cp-tree-count\">1</span>"), subtree)
     // Escaped, because it is an href in HTML and the query already carries the link token.
     assertTrue(
-      subtree.contains("/p/button__ideal__pressed__light?token=t&amp;mode=motion&amp;motion=press"),
+      subtree.contains("/p/${recorded.id}?token=t&amp;mode=motion&amp;motion=press"),
       subtree,
     )
+  }
+
+  @Test
+  fun `captures spread across renders are named by the render, not by the capture`() {
+    // The defect this pins, measured on the live server: `EdgeButton` published one caption-less
+    // capture on each of its renders, and the directory drew 64 rows every one of which read
+    // "Animation". A capture's title identifies it only within ONE render's set — caption-less
+    // means "Animation" in every set there is — so across renders the render is what varies and the
+    // render is what the row must say.
+    val renders =
+      states(3).map { p -> p.copy(motion = listOf(ServeMotion("m-${p.id}", kind = "animation"))) }
+    val subtree = tree(viewer(renders.first(), renders))
+    val labels =
+      Regex("cp-tree-dir--motion.*?</ul>", RegexOption.DOT_MATCHES_ALL).find(subtree)!!.value.let {
+        Regex(">([^<>]+)</a>").findAll(it).map { m -> m.groupValues[1] }.toList()
+      }
+    assertEquals(3, labels.size, subtree)
+    assertEquals(labels.size, labels.distinct().size, "every row names a different render: $labels")
+    assertFalse(labels.all { it == labels.first() }, labels.toString())
+  }
+
+  @Test
+  fun `captures on one render keep their own titles`() {
+    // The other half of the same rule: with nothing else varying, the capture's title is the most
+    // informative thing a row can say, and naming the render instead would print one component name
+    // twice.
+    val recorded =
+      preview(
+        "button__ideal__default__light",
+        "Button",
+        motion =
+          listOf(
+            ServeMotion("press", caption = "Press and release"),
+            ServeMotion("hold", caption = "Press and hold"),
+          ),
+      )
+    val subtree = tree(viewer(recorded, listOf(recorded, pressed)))
+    assertTrue(subtree.contains(">Press and release</a>"), subtree)
+    assertTrue(subtree.contains(">Press and hold</a>"), subtree)
+  }
+
+  @Test
+  fun `the motion directory follows the tree's renders, not every render of the component`() {
+    // [primaryVariants] already decided which renders are worth navigating to; a directory that
+    // unioned every sibling re-added the matrix that decision exists to keep out. A render the tree
+    // does not list contributes no row — unless it is the one on screen, which the tree always
+    // contains and so must this.
+    val listed = states(2)
+    val unlisted =
+      preview(
+        "button__ideal__default__light__fontscale-2",
+        "Button · Large font",
+        motion = listOf(ServeMotion("unlisted", caption = "Never listed")),
+      )
+    val subtree = tree(viewer(listed.first(), listed + unlisted))
+    assertFalse(subtree.contains("Never listed"), subtree)
+    assertFalse(subtree.contains("cp-tree-dir--motion"), subtree)
   }
 
   @Test
