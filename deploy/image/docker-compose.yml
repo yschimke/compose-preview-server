@@ -41,6 +41,25 @@ services:
     logging: *default-logging
     image: "ghcr.io/yschimke/compose-preview-host:${IMAGE_TAG:-latest}"
     restart: always
+    # Run a real init as PID 1, so ORPHANED grandchildren get reaped.
+    #
+    # Without this the JVM is PID 1: the entrypoint ends in `exec compose-preview-server`
+    # and that launcher ends in `exec "$JAVACMD"`, so nothing sits above the server. A JVM
+    # reaps only the processes IT spawned (one reaper thread per `ProcessBuilder` child);
+    # it never calls `waitpid(-1)`, so anything reparented to PID 1 stays defunct forever.
+    #
+    # That is not hypothetical, and it is not one lane. The catalog change feed keeps a
+    # PROMISOR partial clone (`remote.origin.promisor`, `--filter=blob:none` — see
+    # ServeCatalogChangeFeed), where `show`/`ls-tree`/`log` spawn background lazy fetches
+    # and `fetch` detaches a `gc --auto`. Those grandchildren outlive the direct `git` the
+    # server waits on, so they land on PID 1 and accumulate: a measured 108 `git <defunct>`
+    # in 11.5 h (~9/h). ServeProcessCensus documents the same shape earlier in the `java`
+    # lane — 2099 `[java] <defunct>` — which is the leak that census exists to make visible.
+    #
+    # `init: true` (tini) reaps them all, and is the whole fix: the leak is a missing
+    # `wait()` above the JVM, not a missing `waitFor` inside it. Zombies hold a PID and no
+    # address space, so this buys PID headroom, not memory — see `mem_limit` below for that.
+    init: true
     pull_policy: always
     environment:
       DOMAIN: "${DOMAIN:-}"
