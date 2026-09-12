@@ -375,8 +375,36 @@ private class ComposeEmitter(
    */
   private var emittingRow: Pair<String, LoopSignature>? = null
 
+  /**
+   * The body first, then the header in front of it.
+   *
+   * The import list has to be a fact about what was emitted rather than a prediction about what
+   * will be. A document can *define* a reusable component whose body holds a
+   * `layout/supporting-pane-scaffold` and never place it: `validateGraph()` treats component roots
+   * as reachable, while [emitComponentFunctions] emits only the keys a placement names, so a
+   * document-wide "does any node use it?" says yes and the emitted screen contains no call. An
+   * import of Material 3 Adaptive with nothing using it does not compile in a project that never
+   * added the dependency, so predicting wrongly is a broken export rather than a stray line.
+   *
+   * Emitting first removes the prediction: [emittedSupportingPaneScaffold] is set by
+   * [emitSupportingPane] itself, so the only thing that can turn the imports on is the call being
+   * written. The diagnostics the header quotes are complete before this class is constructed, so
+   * nothing in the header depends on the body beyond that flag.
+   */
   fun emit(): String {
     val functionName = document.exportFunctionName()
+    appendLine("@Composable")
+    appendLine("fun $functionName() {")
+    emitState(1)
+    document.roots.forEach { rootId -> emitNode(rootId, 1) }
+    appendLine("}")
+    appendLine()
+    emitComponentFunctions()
+    emitRowClasses()
+    emitCompatibilityHelpers()
+    val body = out.toString()
+
+    out.clear()
     appendLine("@file:OptIn(ExperimentalMaterial3Api::class)")
     appendLine()
     appendLine("package generated.uibuilder")
@@ -402,16 +430,7 @@ private class ComposeEmitter(
           "// TODO[${diagnostic.code.escapeComment()}] node=${diagnostic.nodeId?.escapeComment() ?: "document"}: ${diagnostic.message.escapeComment()}"
         )
       }
-    appendLine("@Composable")
-    appendLine("fun $functionName() {")
-    emitState(1)
-    document.roots.forEach { rootId -> emitNode(rootId, 1) }
-    appendLine("}")
-    appendLine()
-    emitComponentFunctions()
-    emitRowClasses()
-    emitCompatibilityHelpers()
-    return out.toString().trimEnd() + "\n"
+    return (out.toString() + body).trimEnd() + "\n"
   }
 
   /**
@@ -877,6 +896,7 @@ private class ComposeEmitter(
    * canvas's own fit still reads them, and a design that carries them exports the same layout.
    */
   private fun emitSupportingPane(node: UiBuilderNode, level: Int) {
+    emittedSupportingPaneScaffold = true
     line(level, "BuilderSupportingPaneScaffold(")
     line(level + 1, "modifier = ${node.modifierExpression()},")
     line(level + 1, "singlePane = ${node.string("layoutMode") == "singlePane"},")
@@ -1092,7 +1112,7 @@ private class ComposeEmitter(
    * predicate, so the helper and its imports cannot come apart.
    */
   private fun adaptiveImports(): List<String> =
-    if (!usesSupportingPaneScaffold) emptyList()
+    if (!emittedSupportingPaneScaffold) emptyList()
     else
       listOf(
         "androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi",
@@ -1109,8 +1129,8 @@ private class ComposeEmitter(
         "androidx.window.core.layout.WindowSizeClass",
       )
 
-  private val usesSupportingPaneScaffold: Boolean
-    get() = document.nodes.values.any { it.componentId == "layout/supporting-pane-scaffold" }
+  /** Set by [emitSupportingPane], so nothing but an emitted call can turn the adaptive code on. */
+  private var emittedSupportingPaneScaffold = false
 
   private fun additionalTextImports(): List<String> {
     val propertyNames = document.nodes.values.flatMap { it.properties.keys }.toSet()
@@ -1462,7 +1482,7 @@ private class ComposeEmitter(
    * bounds. Only the posture is still the window's, because a hinge is hardware.
    */
   private fun emitAdaptiveHelper() {
-    if (!usesSupportingPaneScaffold) return
+    if (!emittedSupportingPaneScaffold) return
     appendLine(
       "@OptIn(ExperimentalMaterial3AdaptiveApi::class) @Composable private fun BuilderSupportingPaneScaffold(modifier: Modifier, singlePane: Boolean, mainPaneVisible: Boolean, supportingPaneVisible: Boolean, mainPane: @Composable () -> Unit, supportingPane: @Composable () -> Unit) {"
     )

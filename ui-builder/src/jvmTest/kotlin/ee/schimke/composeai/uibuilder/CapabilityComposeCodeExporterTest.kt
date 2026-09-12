@@ -149,6 +149,40 @@ class CapabilityComposeCodeExporterTest {
   }
 
   @Test
+  fun `the adaptive imports appear exactly when the source calls the adaptive helper`() {
+    // The invariant rather than one escape route. A document-wide "does any node use it?" is a
+    // *prediction* about emission, and emission drops nodes for reasons a predicate has to keep up
+    // with — today an unplaced component's body, tomorrow something else. So the flag is set by
+    // `emitSupportingPane` and the header is written after the body: the only thing that can turn
+    // the imports on is the call being written. This asserts the two agree on every fixture, in
+    // both directions, so a future emitter change cannot drift them apart silently.
+    val plainRoot =
+      document.nodes.getValue("discover-grid").let { grid ->
+        document.copy(roots = listOf(grid.id))
+      }
+    listOf(document, plainRoot).forEach { candidate ->
+      val source = CapabilityComposeCodeExporter.export(candidate, catalog, artworkAdapter).source
+      if (source == null) return@forEach
+      val calls = source.contains("BuilderSupportingPaneScaffold(")
+      assertEquals(
+        calls,
+        source.contains("import androidx.compose.material3.adaptive"),
+        "adaptive imports disagree with the emitted call for ${candidate.id}",
+      )
+      assertEquals(
+        calls,
+        source.contains("import androidx.window.core.layout.WindowSizeClass"),
+        "window-core import disagrees with the emitted call for ${candidate.id}",
+      )
+      assertEquals(
+        calls,
+        source.contains("private fun BuilderSupportingPaneScaffold("),
+        "the helper disagrees with the emitted call for ${candidate.id}",
+      )
+    }
+  }
+
+  @Test
   fun `style-qualified icon export names the exact member and only ships used vectors`() {
     val icon = document.nodes.getValue("search-leading-icon")
     val styled =
