@@ -231,6 +231,7 @@ jobs:
           HARNESS: ${{ needs.resolve.outputs.harness }}
           PR: ${{ needs.resolve.outputs.pr }}
           STANDALONE: ${{ needs.resolve.outputs.standalone }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -263,21 +264,60 @@ jobs:
           else
             state="$(gh pr view "${PR}" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
           fi
-          if [ "${state}" = "OPEN" ]; then
-            # The branch can have moved since checkout. --force-with-lease refuses instead of
-            # clobbering.
-            git push --force-with-lease origin "HEAD:${BRANCH}"
-            echo "landed=branch" >> "$GITHUB_OUTPUT"
-            echo "target=${BRANCH}" >> "$GITHUB_OUTPUT"
-          else
-            # The pull request closed under us. The bytes are still good -- they are this runner's
-            # own output, which is the only place they can come from -- so they get their own
-            # branch and their own pull request rather than being thrown away.
-            rescue="agent/refresh-${HARNESS}-baselines-${GITHUB_RUN_ID}"
-            git push origin "HEAD:${rescue}"
-            echo "landed=pr" >> "$GITHUB_OUTPUT"
-            echo "target=${rescue}" >> "$GITHUB_OUTPUT"
-          fi
+          case "${state}" in
+            OPEN)
+              # The branch can have moved since checkout. --force-with-lease refuses instead of
+              # clobbering.
+              git push --force-with-lease origin "HEAD:${BRANCH}"
+              echo "landed=branch" >> "$GITHUB_OUTPUT"
+              echo "target=${BRANCH}" >> "$GITHUB_OUTPUT"
+              ;;
+            MERGED | STANDALONE)
+              # The bytes are good and their branch is gone or was never there. They get a branch
+              # and a pull request of their own rather than being thrown away.
+              #
+              # Rebuilt on the DEFAULT BRANCH carrying ONLY the snapshots, never pushed as this
+              # branch's HEAD. Pull requests here are squash-merged, so a merged branch's commits
+              # are not ancestors of the default branch and pushing HEAD would open a pull request
+              # replaying the whole original change alongside the baselines.
+              refreshed="$(git rev-parse HEAD)"
+              rescue="agent/refresh-${HARNESS}-baselines-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              git fetch --quiet origin "${DEFAULT_BRANCH}"
+              git checkout --quiet -B "${rescue}" "origin/${DEFAULT_BRANCH}"
+              git checkout "${refreshed}" -- preview-harness/snapshots
+              git add -- preview-harness/snapshots
+              if git diff --cached --quiet; then
+                # The default branch already carries these exact bytes.
+                echo "the refreshed baselines are already on ${DEFAULT_BRANCH}"
+                echo "landed=none" >> "$GITHUB_OUTPUT"
+                echo "target=" >> "$GITHUB_OUTPUT"
+              else
+                git commit --quiet \
+                  -m "test(harness): refresh the ${HARNESS} visual baselines" \
+                  -m "Re-rendered by .github/workflows/refresh-visual-baselines.yml on this runner. Review the images."
+                # A fresh branch per attempt, so re-running a run that failed after its push does
+                # not meet its own branch and fail on a non-fast-forward.
+                git push origin "${rescue}"
+                echo "landed=pr" >> "$GITHUB_OUTPUT"
+                echo "target=${rescue}" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+            *)
+              # CLOSED, or the lookup failed. Do NOT publish.
+              #
+              # A pull request closed WITHOUT merging is rejected work, and these pixels were
+              # rendered from it — they describe code that is not going to exist, so opening a
+              # pull request for them would be re-proposing a decision somebody already made. The
+              # earlier version of this step treated CLOSED like MERGED, which is wrong.
+              # UNKNOWN is refused for the same reason: it may be CLOSED.
+              #
+              # Nothing is lost that cannot be redone — dispatch this workflow with no pull
+              # request number and it renders the default branch from scratch.
+              echo "::notice::#${PR} is ${state}; not publishing baselines rendered from it"
+              echo "landed=none" >> "$GITHUB_OUTPUT"
+              echo "target=" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
           {
             echo "pushed=true"
             echo "files=${files}"
@@ -287,7 +327,7 @@ jobs:
         # A push authenticated with GITHUB_TOKEN deliberately does not trigger `on: push` or
         # `on: pull_request`, so CI has to be asked for by name or the commit this job just made
         # carries no checks and the pull request waits forever.
-        if: ${{ steps.push.outputs.pushed == 'true' }}
+        if: ${{ steps.push.outputs.pushed == 'true' && steps.push.outputs.landed != 'none' }}
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.push.outputs.target }}
@@ -336,20 +376,40 @@ jobs:
           HARNESS: ${{ needs.resolve.outputs.harness }}
           LANDED: ${{ steps.push.outputs.landed }}
           TARGET: ${{ steps.push.outputs.target }}
+          STATE: ${{ steps.push.outputs.state }}
         run: |
           set -euo pipefail
-          if [ "${LANDED}" = "branch" ]; then
-            {
-              echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner and pushed them to"
-              echo "this branch; CI is re-dispatched for the new head."
-            } > comment.md
-          else
-            {
-              echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner, but this pull"
-              echo "request had already closed by the time the render finished, so they went to"
-              echo "\`${TARGET}\` and a pull request of their own instead of here."
-            } > comment.md
-          fi
+          case "${LANDED}" in
+            branch)
+              {
+                echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner and pushed them"
+                echo "to this branch; CI is re-dispatched for the new head."
+              } > comment.md
+              ;;
+            pr)
+              {
+                echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner, but this pull"
+                echo "request had already merged by the time the render finished, so they went to"
+                echo "\`${TARGET}\` and a pull request of their own instead of here."
+              } > comment.md
+              ;;
+            *)
+              {
+                echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner and then"
+                echo "**discarded them**: this pull request was \`${STATE}\` by the time the render"
+                echo "finished."
+                echo
+                echo "A pull request closed without merging is rejected work, and these pixels were"
+                echo "rendered from it — publishing them would re-propose a decision already made."
+                echo "Nothing is lost that cannot be redone: dispatch **Refresh visual baselines**"
+                echo "with the pull request field left empty and it renders the default branch from"
+                echo "scratch."
+              } > comment.md
+              gh pr comment "${PR}" --body-file comment.md
+              rm -f comment.md
+              exit 0
+              ;;
+          esac
           {
             echo
             echo "**These are accepted pixels, not verified ones.** This lane rewrites a baseline to"
