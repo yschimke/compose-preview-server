@@ -227,7 +227,7 @@ class PublishedRemoteM3CatalogEquivalenceTest {
         .keys
         .sorted()
     assertEquals(
-      listOf("remote-m3/remote-sticker"),
+      listOf("remote-m3/capturing-wear-widget-preview", "remote-m3/remote-sticker"),
       excluded,
       "the set of components the catalog excludes has changed",
     )

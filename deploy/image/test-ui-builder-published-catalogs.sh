@@ -5,12 +5,10 @@
 # 1. `wear-m3` is NOT served by default. It is a Wear/Android catalog — Robolectric previews, an
 #    Android SDK for its native lane — that nobody is authoring against. A deployment that wants it
 #    back sets SERVE_UI_BUILDER_CATALOGS; nothing about the catalog itself changed.
-# 2. `--ui-builder-published-catalogs` defaults to `remote-m3`: that catalog takes its definition
-#    from its own published `ui-builder.json` and the other two do not. The per-catalog reasons
-#    move and live in the entrypoint beside the lever — this file used to say m3-catalog scored 25
-#    differences and that remote-m3 published no file at all, and neither is true any more. What
-#    is asserted here is the shape: the default names remote-m3 and nothing else, an operator can
-#    name more, and an operator can retreat to `none`.
+# 2. `--ui-builder-published-catalogs` defaults to `none`, so no catalog takes its definition from
+#    a published `ui-builder.json` until somebody names it. m3-catalog publishes one the
+#    equivalence gate scores 25 differences against, with zero declared components and zero
+#    builtins; remote-m3 publishes none at all. An operator naming a catalog is the opt-in.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,15 +74,8 @@ default="$(run_case)"
 }
 expect "the default serves m3-catalog and remote-m3" "m3-catalog,remote-m3" "${default}"
 refute "the default does not serve wear-m3" "wear-m3" "${default}"
-expect "the default serves remote-m3 from its published file" \
-  $'--ui-builder-published-catalogs\nremote-m3' "${default}"
-
-# The reverse direction, and the one that matters most: a box can put every catalog back on the
-# catalog this build writes in Kotlin. `none` is the whole-fleet retreat this lever exists for,
-# and it was the default until remote-m3's gate came back clean under `--strict`.
-withheld="$(run_case "" "none")"
-expect "an operator can withhold the published path from every catalog" \
-  $'--ui-builder-published-catalogs\nnone' "${withheld}"
+expect "the default withholds the published path from every catalog" \
+  $'--ui-builder-published-catalogs\nnone' "${default}"
 
 overridden="$(run_case "m3-catalog,remote-m3,wear-m3")"
 expect "an operator can put wear-m3 back" "wear-m3" "${overridden}"

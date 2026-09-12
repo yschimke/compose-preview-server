@@ -687,29 +687,16 @@ binary has never heard of. Items 15, 16, 17 and 19 remain: the platform word, th
 the canvas mapping and the `compose-preview-server ui` lane still read Kotlin, so a published catalog
 is served but a **Wear-shaped** one is not yet drawn from its own declarations.
 
-**The lever item 18 promised is now a flag, and it defaults to `remote-m3`.** Item 18 says the
-cutover is "per catalog and reversible"; as shipped, the only reversal an operator had was
+**The lever item 18 promised is now a flag, and it defaults to `none`.** Item 18 says the cutover is
+"per catalog and reversible"; as shipped, the only reversal an operator had was
 `SERVE_UI_BUILDER_CATALOGS`, which withdraws a catalog from the builder entirely rather than
 returning it to its synthesised definition. `--ui-builder-published-catalogs` is the finer lever:
 `all`, `none`, or a subset of the served catalogs, refusing an id this host does not serve so a typo
 is a startup error rather than a silent no-op. `SERVE_UI_BUILDER_PUBLISHED_CATALOGS` reaches it from
 the deployment image.
 
-**It defaults to `remote-m3`, the one catalog whose published file the gate scores clean.** It
-defaulted to `none` while no catalog was ready and one of them would have broken. `remote-m3` is
-now ready and measured: 0 differences, 0 unstated facts, 0 unusable exemptions and 0 unreviewed
-fields under `--strict`, against the document the delivery branch actually carries (28 record
-components, a 26-entry menu, the two it withholds being its own preview frame and a private widget
-capture wrapper, both excluded by the catalog's own policy with a published reason).
-
-Getting there needed one fix in the catalog rather than anything here, and the way it surfaced is
-worth keeping: the gate was green at 0/0/0/0 against a 27-component **fixture** while the live
-document had 28 and one unreviewed field — the capture wrapper, offered for insertion on the
-`Widget Container` shelf until wear-m3-catalog#485 excluded it. A gate is only as current as the
-capture under it, so re-capture after a republish rather than trusting a green run.
-
-The other two are not in, for different reasons. Measuring all three against their frozen goldens,
-rather than assuming:
+**It defaults to `none` because neither catalog this image serves is ready, and one of them would
+have broken.** Measuring the two against their frozen goldens, rather than assuming:
 
 | Builder catalog | Served from | Publishes `ui-builder.json`? | Gate |
 | --- | --- | --- | --- |
@@ -728,8 +715,7 @@ the then-104-component record derived every id from the `m3/` prefix in place of
 41 and left the rest ungrouped. **The components half has since been fixed** — the published file
 now declares 110 components with a 102-entry menu over 39 shelves, and scores 0 differences. The
 builtins half has not: it still declares **zero**, so a catalog composed from it has no screen root
-to put any component into. That is why **m3-catalog** stays off the lever rather than why it was
-set — the
+to put any component into. That is why the lever stays `none` rather than why it was set — the
 original reason is gone and this one replaces it. Nothing in the loader would say so either way: the
 file is well-formed, so `PublishedUiBuilderCatalog` composes it happily. Turning the published path
 off by default and naming a catalog to turn it on is the shape phase 4 should have shipped with.
