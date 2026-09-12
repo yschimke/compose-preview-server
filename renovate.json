@@ -3,7 +3,9 @@
   "extends": [
     "github>yschimke/renovate-config"
   ],
+  "description": "`platformAutomerge` hands the merge to GitHub's own auto-merge, which fires the moment the last REQUIRED check of the branch ruleset reports green \u2014 seconds, against the \u2248hourly wait for Renovate to come back and merge the PR itself. It is safe here because the required set includes `gradle`, which builds: native auto-merge waits only on required checks, so a ruleset that required nothing meaningful would merge without waiting for CI at all. The shared preset leaves this false for exactly that reason; turning it on is a per-repository statement that the ruleset is real. Majors are still excluded by the first rule below, so this only accelerates the minor/patch/digest/pin updates.",
   "automerge": true,
+  "platformAutomerge": true,
   "packageRules": [
     {
       "description": "Majors are never automerged. `automerge: true` above is a blanket setting \u2014 the shared preset turns automerge on for minor/patch/digest/pin only, but a top-level `true` here covers every update type, so a major would land on green CI after its 14-day soak with nobody reading the diff. Keep the soak, drop the automerge; this is the posture m3-catalog and wear-m3-catalog already carry.",
