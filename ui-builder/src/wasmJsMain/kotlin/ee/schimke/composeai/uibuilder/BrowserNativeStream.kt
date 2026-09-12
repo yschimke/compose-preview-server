@@ -19,7 +19,7 @@ import org.jetbrains.skia.Image
  * ## Nothing here is a new protocol
  *
  * `/{session}/ws/{preview}` is the socket the viewer's Live toggle has always opened: frames are
- * pushed as `{"type":"frame","image":"…"}` with a monotonic `seq`, and `{"type":"input", …}` goes
+ * pushed as `{"type":"frame","dataBase64":"…","codec":"…","seq":n}`, and `{"type":"input", …}` goes
  * the other way carrying a pointer event in the frame's own pixels. The native preview route
  * already compiled the design and redeemed its token into exactly such a session, so this class is
  * a socket and a decoder and no more than that. See `ServeStreamProtocol` for the wire shapes.
@@ -113,7 +113,10 @@ internal class BrowserNativeStream(live: UiBuilderNativeLive) : UiBuilderNativeS
       "frame" -> {
         val sequence = message["seq"]?.jsonPrimitive?.longOrNull ?: (painted + 1)
         if (sequence < painted) return
-        val encoded = message["image"]?.jsonPrimitive?.contentOrNull ?: return
+        // `dataBase64`, which is what `ServeStreamProtocol.frameMessage` writes — *not* `image`,
+        // which is the still render's field on the HTTP payload. Reading the wrong one silently
+        // dropped every frame and left the pane on "connecting…" forever.
+        val encoded = message["dataBase64"]?.jsonPrimitive?.contentOrNull ?: return
         val decoded = decode(encoded) ?: return
         painted = sequence
         failure = null

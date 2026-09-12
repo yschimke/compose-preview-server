@@ -963,15 +963,16 @@ fun UiBuilderBoardPreview() {
 }
 
 /**
- * The variant strip: one document, drawn beside itself under two other frames.
+ * The variant strip, which lives in the preview pane: one document, drawn beside itself.
  *
  * The design claims a tablet — the same `exportDevices` the Compose export writes as
- * `@Preview(device = …)`, which until now nothing drew — and the Dark axis is switched on. So the
- * workspace holds the editing pane at the design's own frame, the tablet it says it works on, and
- * the question being asked of it. Exactly one of them takes edits.
+ * `@Preview(device = …)` — and the Dark axis is switched on. The authoring canvas holds **one**
+ * frame whatever is switched on: you build the UI once, and the pane beside it is where you watch
+ * it adapt. The variants were drawn on the canvas until this change, which made the surface you
+ * edit on grow a row of surfaces you cannot edit.
  *
- * The before is [UiBuilderCanvasForwardPreview], which is the same editor on a design claiming no
- * devices: one pane, which is what every design drew before this.
+ * The before is [UiBuilderCanvasForwardPreview], which is the same editor with the preview pane
+ * shut: one frame, and the whole workspace for it.
  */
 @Preview(widthDp = 1600, heightDp = 900)
 @Composable
@@ -985,6 +986,7 @@ fun UiBuilderVariantStripPreview() {
       editorChromePreviewDocument.onDevice(PREVIEW_PHONE).claiming(PREVIEW_TABLET).inLightTheme(),
     catalog = editorChromePreviewCatalog,
     initialSelectedNodeId = "discover-grid",
+    initialPanes = setOf(EditorPane.Editor, EditorPane.Preview),
     initialVariantAxes = setOf(EditorVariantAxis.Dark),
     devicePresets = PREVIEW_DEVICE_PRESETS,
   )

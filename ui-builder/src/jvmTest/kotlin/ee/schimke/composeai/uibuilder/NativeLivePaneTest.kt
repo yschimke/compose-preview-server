@@ -291,4 +291,32 @@ class NativeLivePaneTest {
       // assertion that the streamed image is the thing being drawn.
       assertEquals(FRAME_COLOR, pixels[pixels.width / 2, pixels.height / 2])
     }
+
+  @Test
+  fun `a stream failure does not blank a still that arrived`() =
+    runDesktopComposeUiTest(width = 1400, height = 900) {
+      val stream = FakeStream()
+      stream.failure = "live preview at capacity — try again shortly"
+      val still = ImageBitmap(8, 8)
+      setContent {
+        MaterialTheme {
+          UiBuilderEditor(
+            document = blank("live-degraded"),
+            catalog = catalog(),
+            initialPanes = setOf(EditorPane.Native),
+            initialNativeRender =
+              UiBuilderNativeRender(image = still, live = UiBuilderNativeLive("s", "p")),
+            onRequestNativeRender = {
+              UiBuilderNativeRender(image = still, live = UiBuilderNativeLive("s", "p"))
+            },
+            onOpenNativeStream = { stream },
+          )
+        }
+      }
+      // The live lane is the optional half of this pane. A full live-seat budget, or a grant
+      // without live scope, must not take a compiled frame that arrived perfectly well with it.
+      onNodeWithText("live preview at capacity", substring = true).assertDoesNotExist()
+      // And the caption stops claiming to be connecting to something that has given up.
+      onNodeWithText("Native render · compiled on the host").assertExists()
+    }
 }

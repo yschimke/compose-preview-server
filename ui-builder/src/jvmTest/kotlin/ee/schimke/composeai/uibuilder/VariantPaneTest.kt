@@ -1,5 +1,13 @@
 package ee.schimke.composeai.uibuilder
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.runDesktopComposeUiTest
 import ee.schimke.composeai.uibuilder.capability.CapabilityCatalogParser
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -183,4 +191,38 @@ class VariantPaneTest {
     (value as JsonPrimitive).content
 
   private fun resource(path: String): String = checkNotNull(javaClass.getResource(path)).readText()
+
+  /**
+   * You build the UI once and watch it adapt beside you.
+   *
+   * The devices and axes used to be drawn on the authoring canvas, which made the one surface you
+   * edit on grow a row of surfaces you cannot. They are the preview pane's now and nowhere else:
+   * with that pane shut, the workspace holds one frame however many devices the design claims.
+   */
+  @OptIn(ExperimentalTestApi::class)
+  @Test
+  fun `the devices a design claims are drawn in the preview pane and nowhere else`() =
+    runDesktopComposeUiTest(width = 1600, height = 900) {
+      val claiming = withDevices("id:pixel_tablet")
+      var panes by mutableStateOf(setOf(EditorPane.Editor))
+      setContent {
+        MaterialTheme {
+          // Keyed on the pane set, because the editor reads `initialPanes` once — this stands in
+          // for the menu toggling the pane rather than testing the menu.
+          key(panes) {
+            UiBuilderEditor(
+              document = claiming,
+              catalog = catalog,
+              initialPanes = panes,
+              devicePresets = presets,
+            )
+          }
+        }
+      }
+      onNodeWithText("Pixel Tablet", substring = true).assertDoesNotExist()
+
+      runOnIdle { panes = setOf(EditorPane.Editor, EditorPane.Preview) }
+      waitForIdle()
+      onNodeWithText("Pixel Tablet", substring = true).assertExists()
+    }
 }

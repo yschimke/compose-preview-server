@@ -1263,7 +1263,6 @@ fun UiBuilderEditor(
   val canvas: @Composable (Modifier, Alignment) -> Unit = { modifier, alignment ->
     PinnedDesignCanvas(
       document = state.document,
-      variants = variantPanes,
       selectedNodeId = state.selectedNodeId,
       onNodeSelected = {
         focusEditor()
@@ -1672,11 +1671,9 @@ fun UiBuilderEditor(
         .toSet()
     } ?: emptySet()
   // `variantsDrawn` is a parameter rather than a captured value because only the layout knows it:
-  // the
-  // compact branch draws the canvas unconditionally, while the wide one hands the pane to the
-  // host's
-  // renderer when that is the chosen surface. Deciding it up here got the narrow window wrong — the
-  // strip was visibly drawn while the inspector said it was not.
+  // the compact branch has no preview pane at all, while the wide one draws the variants only when
+  // that pane is open. Deciding it up here got the narrow window wrong — the strip was visibly
+  // drawn while the inspector said it was not.
   val inspector: @Composable (Modifier, Boolean) -> Unit = { modifier, variantsDrawn ->
     PropertyInspector(
       state = state,
@@ -1992,9 +1989,10 @@ fun UiBuilderEditor(
                   else ->
                     inspector(
                       Modifier.width(INSPECTOR_WIDTH).fillMaxHeight(),
-                      // The editor canvas and its variant strip are now present in every additive
-                      // pane layout, including the two-pane editor + native preview choice.
-                      true,
+                      // The devices and axes are drawn by the preview pane and nowhere else now, so
+                      // "is the strip on screen" is exactly "is that pane open". The authoring
+                      // canvas holds one frame whatever is switched on beside it.
+                      EditorPane.Preview in state.panes,
                     )
                 }
                 EditorRail(
@@ -2069,10 +2067,9 @@ fun UiBuilderEditor(
                     .fillMaxWidth()
                     .fillMaxHeight(0.72f)
                     .padding(bottom = 56.dp),
-                  // Always, here: this branch draws the canvas whatever surface is chosen, and
-                  // never
-                  // the host's pane.
-                  true,
+                  // Never, here: the compact layout draws the authoring canvas and has no room for
+                  // a preview pane beside it, so nothing on this branch draws a device or an axis.
+                  false,
                 )
               }
               if (mobilePanel == MobileEditorPanel.Code && generatedCode != null) {
@@ -4480,17 +4477,6 @@ private fun NavigatorTab.icon(): ImageVector =
 @Composable
 internal fun PinnedDesignCanvas(
   document: UiBuilderDocument,
-  /**
-   * The read-only panes drawn beside the design, in strip order — see [UiBuilderVariantPane].
-   *
-   * Exactly one pane on this canvas takes edits, and it is the extent below: no variant carries a
-   * selection overlay, a hit-test, a drop target or a comment pin. That is the load-bearing rule of
-   * the feature rather than a limitation of it — a design has one document, so an edit made on the
-   * tablet pane would be an edit to the same tree the phone pane draws, and offering a coordinate
-   * space per pane for one shared outcome is what makes a multi-variant editor confusing
-   * ([`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../../../../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)).
-   */
-  variants: List<UiBuilderVariantPane> = emptyList(),
   selectedNodeId: String?,
   onNodeSelected: (String) -> Unit,
   onCanvasMetrics: (Int, Int, Float) -> Unit,
@@ -4570,25 +4556,13 @@ internal fun PinnedDesignCanvas(
     // Only a design that outgrows its frame gets the second pane. One that fits would be drawn
     // twice identically, and two identical pictures side by side say nothing the one said.
     val overflowsFrame = expandedHeightDp > sourceHeight + 0.5f
-    // Every pane in the strip, gap included, because fit has to frame what is actually drawn.
-    val stripWidth =
-      (if (overflowsFrame) sourceWidth + CANVAS_PANE_GAP_DP.value else 0f) +
-        variants.sumOf { (CANVAS_PANE_GAP_DP.value + it.widthDp).toDouble() }.toFloat()
-    val pairWidth = sourceWidth + stripWidth
-    // Fit frames the whole row, not the extent alone: zooming to fit a design whose companion or
-    // whose tablet variant is off the right edge is not fitting the design. Height is the tallest
-    // pane, which is the extent unless a variant's frame is longer than the design is.
-    val stripHeight = maxOf(expandedHeightDp, variants.maxOfOrNull { it.heightDp } ?: 0f)
-    // A variant's label is laid out *above* its scaled frame at a fixed size, so it does not shrink
-    // with the zoom: the room it needs comes off the workspace before the scale is worked out,
-    // rather than being scaled along with the frame. Folding it into `stripHeight` instead made the
-    // tallest variant overflow a workspace that claimed to be fitting it.
-    val labelRoom = if (variants.isEmpty()) 0f else VARIANT_LABEL_ROOM_DP
+    // The frame, plus the extent companion when the content outgrows it. Fit frames what is
+    // actually drawn rather than the frame alone: zooming to fit a design whose companion is off
+    // the right edge is not fitting the design.
+    val pairWidth =
+      sourceWidth + (if (overflowsFrame) sourceWidth + CANVAS_PANE_GAP_DP.value else 0f)
     val fitScale =
-      minOf(
-          workspaceWidth.value / pairWidth,
-          (workspaceHeight.value - labelRoom).coerceAtLeast(0f) / stripHeight,
-        )
+      minOf(workspaceWidth.value / pairWidth, workspaceHeight.value / expandedHeightDp)
         .coerceIn(MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM)
     val scale = zoom ?: fitScale
     // The frame is laid out in the design's pixels, so it is drawn back down by the same ratio it
@@ -4761,13 +4735,6 @@ internal fun PinnedDesignCanvas(
               scale = scale,
               densityRatio = densityRatio,
             )
-          }
-          // Keyed by the pane rather than by its position in the row. Every pane draws the same
-          // document id, and `UiBuilderSurface` remembers its bounds and its design state against
-          // that id, so an unkeyed loop hands a removed pane's composition — and its scroll
-          // positions — to whichever pane slid into its slot.
-          variants.forEach { variant ->
-            key(variant.id) { VariantPane(pane = variant, scale = scale, hostDensity = density) }
           }
         }
       }
@@ -7594,7 +7561,13 @@ private fun NativeRenderPane(
   Surface(modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
     Column(Modifier.fillMaxSize().padding(12.dp)) {
       Text(
-        nativePaneCaption(live = liveFrame != null, connecting = stream != null, backend = backend),
+        nativePaneCaption(
+          live = liveFrame != null,
+          // A stream that has failed is not connecting. Left true it claimed "connecting to
+          // Android…" over a still that had given up on the live lane minutes ago.
+          connecting = stream != null && liveFailure == null,
+          backend = backend,
+        ),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.labelSmall,
       )
@@ -7609,9 +7582,11 @@ private fun NativeRenderPane(
             onInput = { stream.send(it) },
             modifier = Modifier.fillMaxSize().padding(top = 8.dp),
           )
-        // A stream that has opened but not yet painted, with no still to fall back to. Said
-        // separately from a compile because they fail differently and are fixed differently.
-        liveFailure != null ->
+        // A stream that failed with no still to fall back to. Gated on the still being absent
+        // too: the live lane is the *optional* half of this pane, and a full live-seat budget or a
+        // grant without live scope would otherwise blank a compiled frame that arrived perfectly
+        // well. Said separately from a compile failure because the two are fixed differently.
+        liveFailure != null && render?.image == null ->
           SelectionContainer {
             Text(
               liveFailure,

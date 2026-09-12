@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import java.util.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -185,5 +186,29 @@ class ServeStreamProtocolTest {
 
   private fun assertContentEqualsB64(expected: ByteArray, b64: String) {
     assertEquals(expected.toList(), Base64.getDecoder().decode(b64).toList())
+  }
+
+  @Test
+  fun `a frame names its payload dataBase64, which the ui-builder client reads`() {
+    // Pinned because a second client now reads this lane: `BrowserNativeStream` in `:ui-builder`
+    // decodes `dataBase64` off every frame, and it is a Wasm source this module's tests cannot
+    // reach. Renaming the field here would leave the editor's native pane on "connecting…"
+    // forever with no compile error anywhere — which is exactly how it shipped broken once.
+    val frame =
+      Json.parseToJsonElement(
+          ServeStreamProtocol.frameMessage(
+            seq = 7,
+            widthPx = 320,
+            heightPx = 640,
+            dataBase64 = "PAYLOAD",
+            codec = "webp",
+          )
+        )
+        .jsonObject
+
+    assertEquals("frame", frame["type"]?.jsonPrimitive?.content)
+    assertEquals("PAYLOAD", frame["dataBase64"]?.jsonPrimitive?.content)
+    assertEquals(7, frame["seq"]?.jsonPrimitive?.content?.toLong())
+    assertNull(frame["image"], "the still render's field name, never the stream's")
   }
 }
