@@ -1,5 +1,39 @@
 # Changelog
 
+## [3.26.0](https://github.com/yschimke/compose-preview-server/compare/v3.25.0...v3.26.0) (2026-09-12)
+
+
+### Features
+
+* serve the two Glimmer catalogs on preview.coo.ee ([#778](https://github.com/yschimke/compose-preview-server/issues/778)) ([75d793b](https://github.com/yschimke/compose-preview-server/commit/75d793b20c48047829e28e0947917c6e8062f3d6))
+* stop publishing to Maven Central, and ship only the release archives (breaking) ([#794](https://github.com/yschimke/compose-preview-server/issues/794)) ([3c074dd](https://github.com/yschimke/compose-preview-server/commit/3c074dde50edf00cba454d4f9da55318dda02354))
+* **ui-builder:** draw the real SupportingPaneScaffold in every constrained frame ([#788](https://github.com/yschimke/compose-preview-server/issues/788)) ([e88af70](https://github.com/yschimke/compose-preview-server/commit/e88af70908502d697390f809bab027535edd394f))
+* **ui-builder:** make the workspace panes three switches, not a ladder ([#770](https://github.com/yschimke/compose-preview-server/issues/770)) ([64c2420](https://github.com/yschimke/compose-preview-server/commit/64c242078de32a1b43dc4b63976268acc0acda34))
+* **ui-builder:** serve remote-m3 from its published catalog ([#797](https://github.com/yschimke/compose-preview-server/issues/797)) ([1c160ad](https://github.com/yschimke/compose-preview-server/commit/1c160ade06c7b9bf939c4a442e44c93ef48eec12))
+* **ui-builder:** serve wear-m3 in the packaged deployment again ([#791](https://github.com/yschimke/compose-preview-server/issues/791)) ([3b2474a](https://github.com/yschimke/compose-preview-server/commit/3b2474a7bcf56dbf5fdad80911bbcb41d48d584b))
+* **ui-builder:** stream the native pane, live on Android ([#772](https://github.com/yschimke/compose-preview-server/issues/772)) ([eddb131](https://github.com/yschimke/compose-preview-server/commit/eddb131817659c36af2b49001dcdaf978dff1973))
+
+
+### Bug Fixes
+
+* **deploy:** leave the theme optimizer headroom when deriving live seats ([#771](https://github.com/yschimke/compose-preview-server/issues/771)) ([db6e821](https://github.com/yschimke/compose-preview-server/commit/db6e82150a3e94edebbc28f6a2e88633cff7a5a9))
+* **deploy:** reap orphans by running an init as PID 1 ([#766](https://github.com/yschimke/compose-preview-server/issues/766)) ([e000185](https://github.com/yschimke/compose-preview-server/commit/e000185ba92af9412ae11064ac128cbfb86bb71a))
+* **deps:** update compose-ai-tools to v2.11.1 ([#784](https://github.com/yschimke/compose-preview-server/issues/784)) ([9e2a458](https://github.com/yschimke/compose-preview-server/commit/9e2a458a9ae0edbe6d14f7ee05db0586bd11859b))
+* **deps:** update compose-preview-daemon to v3.4.3 ([#781](https://github.com/yschimke/compose-preview-server/issues/781)) ([0fe9206](https://github.com/yschimke/compose-preview-server/commit/0fe92069c1329e84883cbd2b78aa1ecddbd5b8b1))
+* **deps:** update dependency ee.schimke.composeai:rc-player-compose to v1.61.1 ([#785](https://github.com/yschimke/compose-preview-server/issues/785)) ([7d2dd61](https://github.com/yschimke/compose-preview-server/commit/7d2dd61764be18849fff35a76bffc8673d14852f))
+* **deps:** update dependency org.jetbrains.kotlinx:kotlinx-coroutines-test to v1.11.0 ([#786](https://github.com/yschimke/compose-preview-server/issues/786)) ([6b19acd](https://github.com/yschimke/compose-preview-server/commit/6b19acd8b10e674482d4ef1cafa2ccfc88afc0c4))
+* **serve:** name a back-link directory after the catalog it comes from ([#760](https://github.com/yschimke/compose-preview-server/issues/760)) ([26dc57a](https://github.com/yschimke/compose-preview-server/commit/26dc57a20964ea9eda0faaac7864321ccca4bc49))
+* **serve:** name motion rows by the render, and follow the tree's render set ([#765](https://github.com/yschimke/compose-preview-server/issues/765)) ([6f15170](https://github.com/yschimke/compose-preview-server/commit/6f15170f18aa6853f3d1e388be0eb65855a127a3))
+* **serve:** put a samples page's code beside the render's card, not inside it ([#768](https://github.com/yschimke/compose-preview-server/issues/768)) ([6f6ca2d](https://github.com/yschimke/compose-preview-server/commit/6f6ca2de521854f92356222cc980a4171b6bfd7b))
+* **ui-builder:** gate the adaptive export, and stop a supporting-only design drawing blank ([#789](https://github.com/yschimke/compose-preview-server/issues/789)) ([f2125a0](https://github.com/yschimke/compose-preview-server/commit/f2125a0e2145a34c136e897eb3d208c13e194b0a))
+* **ui-builder:** guard the semantic-loop export test on the build feature ([#798](https://github.com/yschimke/compose-preview-server/issues/798)) ([af1de38](https://github.com/yschimke/compose-preview-server/commit/af1de384b2b3aa5d985ecfee7af0788ed26e4b3b))
+* **ui-builder:** make the export tests read the build feature they depend on ([#792](https://github.com/yschimke/compose-preview-server/issues/792)) ([637deae](https://github.com/yschimke/compose-preview-server/commit/637deae5857e59248c57587c8cada4e3fde37f0e))
+* **ui-builder:** re-capture the remote-m3 published fixture ([#793](https://github.com/yschimke/compose-preview-server/issues/793)) ([de0079b](https://github.com/yschimke/compose-preview-server/commit/de0079b1230256e64f5ddba89bd0ffcedb74f727))
+* **ui-builder:** re-capture wear-m3 after the collisions were fixed at source ([#776](https://github.com/yschimke/compose-preview-server/issues/776)) ([8198f28](https://github.com/yschimke/compose-preview-server/commit/8198f28c0413ab1b4cc0725f82b340cb4ca76553))
+* **ui-builder:** re-pin wear-m3's shelf exemption, and capture its published catalog ([#767](https://github.com/yschimke/compose-preview-server/issues/767)) ([4ebc947](https://github.com/yschimke/compose-preview-server/commit/4ebc94723ce73693977001ed79e8395848c44a73))
+* **ui-builder:** read the build gate, not the vocabulary probe, in the export golden ([#799](https://github.com/yschimke/compose-preview-server/issues/799)) ([c2458e4](https://github.com/yschimke/compose-preview-server/commit/c2458e4b433535fb3d5a59e7be896de34993199f))
+* **ui-builder:** review wear-m3's 23 component differences, and correct a wrong note ([#773](https://github.com/yschimke/compose-preview-server/issues/773)) ([e6568dd](https://github.com/yschimke/compose-preview-server/commit/e6568dda5310a3779e421ef79008e6eda9d4ea59))
+
 ## [3.25.0](https://github.com/yschimke/compose-preview-server/compare/v3.24.0...v3.25.0) (2026-09-11)
 
 
