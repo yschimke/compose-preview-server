@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.27.0](https://github.com/yschimke/compose-preview-server/compare/v3.26.0...v3.27.0) (2026-09-12)
+
+
+### Features
+
+* **ci:** a baseline refresh that survives a fast merge ([#809](https://github.com/yschimke/compose-preview-server/issues/809)) ([4fdf64c](https://github.com/yschimke/compose-preview-server/commit/4fdf64c6aac4843313d80e5c8860f2cbeb632aa1))
+* **ui-builder:** serve wear-m3 from its published catalog ([#807](https://github.com/yschimke/compose-preview-server/issues/807)) ([70a5c0b](https://github.com/yschimke/compose-preview-server/commit/70a5c0be12fed894c178d4c3b85543d54cf985fb))
+
+
+### Bug Fixes
+
+* **ci:** never publish baselines rendered from a rejected pull request ([#810](https://github.com/yschimke/compose-preview-server/issues/810)) ([4d7769f](https://github.com/yschimke/compose-preview-server/commit/4d7769fbeb425c740a32f8f8937fe256b9b1a797))
+* **harness:** draw the real SupportingPaneScaffold in the Jetcaster oracle ([#806](https://github.com/yschimke/compose-preview-server/issues/806)) ([5d89429](https://github.com/yschimke/compose-preview-server/commit/5d894293f5f17cfda6297b966ed2ec4b8bcac826))
+* **harness:** measure the collapsed supporting pane, and keep the rejected renders ([#802](https://github.com/yschimke/compose-preview-server/issues/802)) ([c52a366](https://github.com/yschimke/compose-preview-server/commit/c52a366989053ae56a6cc69e3bc2d6a8a33f2ed5))
+* **harness:** re-capture the Jetcaster reference baseline after [#806](https://github.com/yschimke/compose-preview-server/issues/806) ([#808](https://github.com/yschimke/compose-preview-server/issues/808)) ([4309fc7](https://github.com/yschimke/compose-preview-server/commit/4309fc753648e629dba2262de2860892c737d271))
+* **harness:** refresh the two stale Jetcaster baselines, and say which runner captured them ([#805](https://github.com/yschimke/compose-preview-server/issues/805)) ([4a57940](https://github.com/yschimke/compose-preview-server/commit/4a57940dacd7d83100d10e760e6810d603d08a23))
+* **ui-builder:** gate the render bundle on the coordinates the renderer needs ([#813](https://github.com/yschimke/compose-preview-server/issues/813)) ([ce904d9](https://github.com/yschimke/compose-preview-server/commit/ce904d94ee080ee71e6dfe3145faa50eca9adb05))
+* **ui-builder:** repair the render-bundle gate, and record what it found ([#814](https://github.com/yschimke/compose-preview-server/issues/814)) ([f383297](https://github.com/yschimke/compose-preview-server/commit/f3832971836e34fe497246b50d2278fca8b77537))
+
 ## [3.26.0](https://github.com/yschimke/compose-preview-server/compare/v3.25.0...v3.26.0) (2026-09-12)
 
 
