@@ -8,12 +8,12 @@
 #    for its native lane, and nobody was authoring against it — so both directions are asserted
 #    here: the default carries it, and an operator can still take it out with
 #    SERVE_UI_BUILDER_CATALOGS.
-# 2. `--ui-builder-published-catalogs` defaults to `none`, so no catalog takes its definition from
-#    a published `ui-builder.json` until somebody names it. The reasons are per catalog and they
-#    move — this file used to say m3-catalog scored 25 differences with zero declared components
-#    and that remote-m3 published no file at all, and none of that is true any more — so the
-#    measurements live in the entrypoint beside the lever. What this asserts is only the shape:
-#    the default names no catalog, and an operator naming one is the opt-in.
+# 2. `--ui-builder-published-catalogs` defaults to `remote-m3`: that catalog takes its
+#    definition from its own published `ui-builder.json` and the other two do not. The
+#    per-catalog reasons move and live in the entrypoint beside the lever, together with what
+#    serving remote-m3 that way costs. What is asserted here is the shape: the default names
+#    remote-m3 and nothing else, an operator can name more, and an operator can retreat to
+#    `none`.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,8 +79,27 @@ default="$(run_case)"
 }
 expect "the default serves m3-catalog, remote-m3 and wear-m3" "m3-catalog,remote-m3,wear-m3" \
   "${default}"
-expect "the default withholds the published path from every catalog" \
-  $'--ui-builder-published-catalogs\nnone' "${default}"
+expect "the default serves remote-m3 from its published file" \
+  $'--ui-builder-published-catalogs\nremote-m3' "${default}"
+
+# The reverse direction, and the one that matters most: a box can put every catalog back on the
+# catalog this build writes in Kotlin. `none` is the whole-fleet retreat this lever exists for,
+# and it was the default until remote-m3's gate came back clean under `--strict`. See #796 before
+# assuming the retreat is free for designs already saved against the published catalog.
+withheld="$(run_case "" "none")"
+expect "an operator can withhold the published path from every catalog" \
+  $'--ui-builder-published-catalogs\nnone' "${withheld}"
+
+# The case that made the published default a derived value rather than a literal. An operator may
+# narrow the served allowlist — dropping the Wear/Android lane is the documented reason — and
+# `ServeCommandOptions` REFUSES a published id the served list does not carry, with a startup
+# failure. So a narrowed allowlist that no longer serves remote-m3 must fall back to `none` on its
+# own; otherwise the box does not boot and the operator is told to narrow a second variable they
+# were never asked to think about.
+narrowed_out="$(run_case "m3-catalog")"
+expect "narrowing the allowlist past remote-m3 withholds the published path" \
+  $'--ui-builder-published-catalogs\nnone' "${narrowed_out}"
+refute "narrowing the allowlist past remote-m3 publishes nothing" "remote-m3" "${narrowed_out}"
 
 # The symmetric guard, and the one the default no longer covers: a box that does not want to pay
 # for the Wear/Android lane can drop it, and dropping it must not disturb the other two.
