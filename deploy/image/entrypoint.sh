@@ -259,25 +259,51 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # `ui-builder.json` rather than from the catalog this build writes in Kotlin: `all`, `none`, or a
   # subset of the list above.
   #
-  # DEFAULT `none`, deliberately, and it is not a vote against the contract — it is the contract's
-  # own readiness gate applied to the catalogs this image actually serves. Measured against the
-  # frozen goldens with .github/scripts/ui-builder-equivalence.sh, re-measured 2026-09-12:
+  # DEFAULT `remote-m3`: that catalog is served from the `ui-builder.json` its own repository
+  # publishes. The other two are not, for different reasons, and all three are measured against the
+  # frozen goldens with .github/scripts/ui-builder-equivalence.sh rather than assumed:
   #
-  #   remote-m3   publishes a 42 KB file and the cover sheet DOES declare `uiBuilderFile`. The note
-  #               here used to say it declared none and nothing was fetched; that stopped being
-  #               true, and all five delivery branches now stamp it.
-  #   m3-catalog  publishes a 188 KB file — not the 48 KB recorded here — and the gate now scores it
-  #               ZERO differences against the frozen catalog, where it once scored 25. It declares
-  #               110 components with a 102-entry menu over 39 shelves, so the old objection (every
-  #               id derived from the `m3/` prefix against a curated shelf of 41) is gone.
-  #               It still declares ZERO builtins, so a catalog composed from it has no screen root
-  #               to put any component in. That is the remaining blocker, and it is the reason this
-  #               stays `none` — a different reason from the one it was set for.
+  #   remote-m3   IN. 0 differences, 0 unstated facts, 0 unusable exemptions and 0 unreviewed
+  #               fields under `--strict`, against the document the delivery branch carries. 28
+  #               record components, a 26-entry menu.
   #
-  # So the published path is off until a catalog is proven equivalent, and turning it on is one
-  # variable naming one catalog. Reversing it used to mean asking another repository to withdraw a
-  # file; that is what this lever exists to avoid.
-  args+=(--ui-builder-published-catalogs "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-none}")
+  #               IT COSTS `remote-m3/lottie`, and that is a decision rather than an oversight.
+  #               The published catalog cannot offer it — an asset player has no component call for
+  #               the record to find, and `remote-m3/` is not one of the donor namespaces
+  #               `withBuilderVocabulary` unions back in — so a new author cannot place a Lottie
+  #               animation and a document holding one fails validation as UNKNOWN_COMPONENT. The
+  #               differences list said "NOT deliberate — a stated cutover blocker" until this
+  #               change accepted the loss to get the published path serving traffic. Restoring it
+  #               is work in wear-m3-catalog: issue #795.
+  #
+  #               A SECOND COST IS UNVERIFIED AND WORTH KNOWING BEFORE YOU RESTART A BOX WITH
+  #               SAVED WORK ON IT. Changing a catalog's source changes its reference, and
+  #               `ProductionUiBuilderRuntime.resolve` accepts only the exact current one, so any
+  #               persisted `remote-m3` design pinned to the synthesised catalog becomes
+  #               CATALOG_UNAVAILABLE with no upgrade path. Whether this deployment has such
+  #               designs is not knowable from the repository. Issue #796.
+  #   wear-m3     NOT YET, and only for want of the gate. It publishes 2 builtins, so unlike
+  #               m3-catalog a catalog composed from it has a screen root; what is missing is
+  #               acceptance entries for the fields the frozen catalog has no opinion about and a
+  #               `--strict` row in the ui-builder-contract job beside the other two.
+  #   m3-catalog  NO, and a decision rather than a gap. Measured against the frozen goldens with
+  #               .github/scripts/ui-builder-equivalence.sh, re-measured 2026-09-12:
+  #
+  #               it publishes a 188 KB file the gate scores ZERO differences on, declaring 110
+  #               components with a 102-entry menu over 39 shelves, so the old objection (every id
+  #               derived from the `m3/` prefix against a curated shelf of 41) is gone. It still
+  #               declares ZERO builtins, so a catalog composed from it has no screen root to put
+  #               any component into — and its own policy argues that zero deliberately:
+  #               `layout/*`, `shape/*`, `asset/image` and `remote-compose/*` are the BUILDER's
+  #               vocabulary, and declaring them "would be this catalog claiming to own the
+  #               builder's own vocabulary". Somebody has to decide whether the builder
+  #               materialises its own builtins when a published file declares none, or a catalog
+  #               declares them anyway. Until then m3-catalog is served from Kotlin.
+  #
+  # Naming a catalog turns it on and removing it turns it off, in this one variable. Reversing it
+  # used to mean asking another repository to withdraw a file; that is what this lever exists to
+  # avoid — though see #796 before assuming a reversal is free for saved designs.
+  args+=(--ui-builder-published-catalogs "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-remote-m3}")
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")

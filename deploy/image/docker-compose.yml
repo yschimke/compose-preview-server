@@ -328,11 +328,12 @@ services:
       # Which of the served builder catalogs may take their definition from the catalog repository's
       # own published `ui-builder.json` instead of this server's built-in one: `all`, `none`, or a
       # comma-separated subset of SERVE_UI_BUILDER_CATALOGS. Empty keeps the entrypoint's default,
-      # which is `none`. That is no longer "no catalog has passed the gate": `remote-m3` scores zero
-      # differences and zero unreviewed fields, and the entrypoint records what each catalog is
-      # waiting on. m3-catalog's published file still declares no builtins, so a catalog composed
-      # from it has no screen root to put a component into. Name a catalog here once its gate is
-      # green. This is the per-catalog reversible lever
+      # which is `remote-m3` — the one catalog whose published file the gate scores clean under
+      # `--strict`. The entrypoint records, per catalog, what the other two are waiting on and what
+      # serving remote-m3 this way costs: `remote-m3/lottie` is no longer offered (#795), and a box
+      # with persisted remote-m3 designs may strand them on the restart that flips this (#796).
+      # Name a catalog here once its gate is green, or drop one to put it back on the packaged
+      # catalog. This is the per-catalog reversible lever
       # docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
       SERVE_UI_BUILDER_PUBLISHED_CATALOGS: "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}"
       # The component record the Compose export generates from. The image ships one for
