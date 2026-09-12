@@ -294,3 +294,17 @@ jobs:
         working-directory: preview-harness
       - run: npm run harness:compare
         working-directory: preview-harness
+      # Playwright writes `<name>-actual.png` and `<name>-diff.png` next to every snapshot it
+      # rejects, and until now the job threw them away. That is why a deliberate render change can
+      # leave a baseline stale indefinitely: the only platform that gates these snapshots is this
+      # runner, so the bytes needed to refresh one were never obtainable from a failing run --
+      # #788's three Jetcaster failures sat red across ten merges for exactly that reason.
+      # `!cancelled()` rather than `failure()` so a run that goes green still shows what it
+      # compared, and `if-no-files-found: ignore` because a fully green run writes nothing here.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: visual-harness-results
+          path: preview-harness/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

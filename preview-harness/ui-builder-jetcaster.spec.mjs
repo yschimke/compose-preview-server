@@ -349,10 +349,23 @@ test("the same Jetcaster document renders the compact single-pane reference", as
     expect(manifest.nodes.find((node) => node.nodeId === "main-background").bounds).toEqual(
         { x: 0, y: 0, width: 412, height: 800 },
     );
+    // Collapsed to nothing rather than absent. The real `SupportingPaneScaffold` keeps a hidden
+    // pane in the composition and measures it to zero, so the node is still in the manifest with
+    // an empty rect -- `AdaptiveSupportingPaneTest` pins the same semantics on the JVM side ("*not
+    // displayed* rather than *absent*"). Asserting absence here described the imitation layout this
+    // frame drew before #788, and asserting mere presence would pass against a scaffold that had
+    // collapsed nothing at all, so measure the area.
+    const detailScaffold = manifest.nodes.find(
+        (node) => node.nodeId === "detail-scaffold",
+    );
     expect(
-        manifest.nodes.find((node) => node.nodeId === "detail-scaffold").bounds,
-        "supporting pane stays uncomposed at compact width",
-    ).toBeNull();
+        detailScaffold.bounds,
+        "the collapsed supporting pane is still laid out at compact width",
+    ).not.toBeNull();
+    expect(
+        [detailScaffold.bounds.width, detailScaffold.bounds.height],
+        "supporting pane occupies no area at compact width",
+    ).toEqual([0, 0]);
 
     const news = manifest.nodes.find((node) => node.nodeId === "chip-news");
     await page.mouse.click(
