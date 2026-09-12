@@ -80,6 +80,10 @@ class CapabilityComposeCodeExporterTest {
     assertTrue(
       source.contains("import androidx.compose.material3.adaptive.layout.SupportingPaneScaffold")
     )
+    // The directive is the scaffold's own bounds, not the window's. A scaffold under a `width` or
+    // any narrower parent inside a wide window would otherwise ask the window, request two
+    // partitions, and disagree with the preview pane that measured the real bounds.
+    assertTrue(source.contains("WindowSizeClass.compute(maxWidth.value, maxHeight.value)"))
     assertFalse(first.diagnostics.any { it.code == "ASSET_BINDING_REQUIRED" })
     assertEquals(artworkAdapter.id, first.provenance.assetAdapterId)
     assertTrue(first.provenance.declaredFallbacks.isEmpty())
@@ -103,6 +107,45 @@ class CapabilityComposeCodeExporterTest {
     assertEquals(1280f, first.provenance.viewportWidthDp)
     assertEquals("dark", first.provenance.theme)
     assertTrue(first.provenance.environmentCanonicalJson.contains("\"fontScale\":1"))
+  }
+
+  @Test
+  fun `a design without the adaptive scaffold carries neither its helper nor its imports`() {
+    // Material 3 Adaptive is a separate artifact on a separate version line, so an unused import of
+    // it is not free the way an unused `androidx.compose.material3.*` one is: it stops the
+    // generated file compiling in a project that never added the dependency. The helper and the
+    // imports are gated on the same predicate so they cannot come apart.
+    val plain =
+      document.copy(
+        roots = listOf("solo"),
+        nodes =
+          mapOf(
+            "solo" to
+              UiBuilderNode(
+                id = "solo",
+                componentId = "m3/text",
+                properties =
+                  JsonObject(
+                    mapOf(
+                      "text" to
+                        JsonObject(
+                          mapOf(
+                            "type" to JsonPrimitive("string"),
+                            "value" to JsonPrimitive("Hello"),
+                          )
+                        )
+                    )
+                  ),
+              )
+          ),
+      )
+    val source = assertNotNull(CapabilityComposeCodeExporter.export(plain, catalog).source)
+    assertFalse(source.contains("androidx.compose.material3.adaptive"), source.take(2000))
+    assertFalse(source.contains("androidx.window.core.layout"), source.take(2000))
+    assertFalse(source.contains("BuilderSupportingPaneScaffold"))
+    // And the helpers a plain design does use are still there, so this is a gate rather than a
+    // wholesale skip of `emitCompatibilityHelpers`.
+    assertTrue(source.contains("builderCardColors"))
   }
 
   @Test
