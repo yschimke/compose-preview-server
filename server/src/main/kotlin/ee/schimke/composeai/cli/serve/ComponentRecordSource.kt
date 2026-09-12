@@ -11,11 +11,11 @@ import kotlinx.serialization.json.Json
  *
  * ## Per catalog, because a host serves several
  *
- * The packaged image runs `--ui-builder-catalogs m3-catalog,remote-m3`. One global record for both
+ * The packaged image runs `--ui-builder-catalogs m3-catalog,remote-m3,wear-m3`. One global record
  * would resolve every export against whichever record the host happened to be given: a component id
- * present in both catalogs would generate the *other* catalog's call site, and an id present in
- * neither would refuse a document that is perfectly valid against its own. Keyed by catalog system
- * id, an export either finds its own catalog's record or is told that catalog has none.
+ * present in more than one of them would generate another catalog's call site, and an id present in
+ * none of them would refuse a document that is perfectly valid against its own. Keyed by catalog
+ * system id, an export either finds its own catalog's record or is told that catalog has none.
  *
  * ## Two places a record comes from
  *

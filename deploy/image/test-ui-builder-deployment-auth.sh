@@ -28,14 +28,14 @@ grep -Fq \
 }
 
 grep -Fq \
-  'SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}"' \
+  'SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}"' \
   "${compose}" || {
   echo "FAIL: compose does not selectively enable the reviewed UI-builder catalogs" >&2
   exit 1
 }
 
 grep -Fq \
-  'args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3}")' \
+  'args+=(--ui-builder-catalogs "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3}")' \
   "${entrypoint}" || {
   echo "FAIL: entrypoint does not pass the selective UI-builder catalog allowlist" >&2
   exit 1

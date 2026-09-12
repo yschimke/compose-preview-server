@@ -101,23 +101,17 @@ class StateSelectionExportTest {
     val catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
     assertNull(catalogs.validate(document(), catalogs.listCatalogs().single()))
     val result = ScreenExportGate.export(document(), record)
-    // The opt-in local build proves the new upstream model before a release exists. The released
-    // floor must give a located refusal rather than quietly emit all three children.
-    if (System.getenv("VERIFY_LOCAL_STATE_SELECTION") == "true") {
-      val source = assertIs<ScreenExportGate.Outcome.Emitted>(result, result.toString()).source
-      assertTrue("when (page.value)" in source, source)
-      assertTrue("10 ->" in source && "20 ->" in source && "else ->" in source, source)
-      assertTrue("padding(start = 12.dp" in source, source)
-      File("build/behavior-export/StateSelection.kt").apply {
-        parentFile.mkdirs()
-        writeText(source)
-      }
-    } else {
-      val refusal = assertIs<ScreenExportGate.Outcome.Refused>(result)
-      assertTrue(
-        refusal.reasons.any { "choice" in it && "state-selection support" in it },
-        refusal.toString(),
-      )
+    // The released floor used to give a located refusal here, and `VERIFY_LOCAL_STATE_SELECTION`
+    // let a local generator publication prove the emit path ahead of it. The release carrying
+    // state-selection support has landed, so emitting IS the released behaviour and the refusal
+    // branch was asserting a limitation that no longer exists.
+    val source = assertIs<ScreenExportGate.Outcome.Emitted>(result, result.toString()).source
+    assertTrue("when (page.value)" in source, source)
+    assertTrue("10 ->" in source && "20 ->" in source && "else ->" in source, source)
+    assertTrue("padding(start = 12.dp" in source, source)
+    File("build/behavior-export/StateSelection.kt").apply {
+      parentFile.mkdirs()
+      writeText(source)
     }
   }
 

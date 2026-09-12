@@ -34,14 +34,15 @@ import org.junit.jupiter.api.io.TempDir
  *
  * ## Why the catalog list here is a literal
  *
- * `m3-catalog,remote-m3,wear-m3` was the packaged image's default until the catalog contract's
- * phase 4 took `wear-m3` out of it (`SERVE_UI_BUILDER_CATALOGS` in `deploy/image/entrypoint.sh` and
- * `docker-compose.yml`, asserted by `deploy/image/test-preview-ui-default.sh`, now defaults to
- * `m3-catalog,remote-m3`; see `docs/design/UI_BUILDER_CATALOG_CONTRACT.md` for why). It remains an
- * operator-selectable value, and the literal stays here on purpose: those scripts check that the
- * entrypoint *passes* whatever list it is given, and this checks that a server given a list naming
- * `wear-m3` can actually serve a Wear design. An allowlist that names an adapter the server then
- * refuses would pass both halves separately and fail the only question anybody asks.
+ * `m3-catalog,remote-m3,wear-m3` is the packaged image's default again. The catalog contract's
+ * phase 4 took `wear-m3` out of it on cost grounds and it is back (`SERVE_UI_BUILDER_CATALOGS` in
+ * `deploy/image/entrypoint.sh` and `docker-compose.yml`, asserted by
+ * `deploy/image/test-preview-ui-default.sh` and
+ * `deploy/image/test-ui-builder-published-catalogs.sh`). It remains an operator-selectable value in
+ * both directions, and the literal stays here on purpose: those scripts check that the entrypoint
+ * *passes* whatever list it is given, and this checks that a server given a list naming `wear-m3`
+ * can actually serve a Wear design. An allowlist that names an adapter the server then refuses
+ * would pass both halves separately and fail the only question anybody asks.
  *
  * ## What it walks
  *
