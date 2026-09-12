@@ -7,10 +7,10 @@ Which rung you are on decides what you are allowed to conclude from what you see
 |  | 1 · Visual editor | 2 · Preview | 3 · Native |
 | --- | --- | --- | --- |
 | **Components** | Mock (Wasm) | Real (Wasm) | Real (platform) |
-| **Interaction** | Live edits | Live edits | Live preview |
+| **Interaction** | Live edits | Live edits | Live preview, where the host can stream one |
 | **Frames** | Single | Multiple | Single |
 | **Costs** | nothing | nothing | a host round trip |
-| **Source of truth** | the document | the document | the generated source |
+| **Source of truth** | the document | the document | the generated source (the exported document, where there is no compile lane) |
 
 Read it left to right: fidelity goes up, and what you can *do* goes down. You author on rung 1,
 check on rung 2, and confirm on rung 3.
@@ -31,9 +31,24 @@ The same licence covers everything else the canvas puts on top of the design: th
 drop targets, the hover editor, comment pins, collaborator cursors. None of it is in the design, and
 all of it is in the way of using the design.
 
-Components on this rung may be stand-ins too. What matters on rung 1 is that a node is **there**, is
-**the right shape**, is **selectable** and **takes a drop** — not that it is the component the export
-names. A lookalike you can drag is worth more here than a faithful thing you cannot.
+Components on this rung may be **adapters or placeholders**. What matters on rung 1 is that a node is
+**there**, is **selectable** and **takes a drop** — not that it is the component the export names.
+
+This is not a licence to fabricate. `AGENTS.md` forbids hand-assembling a lookalike to stand in for a
+library the canvas cannot link, and the renderer keeps that rule with two different shapes:
+
+- an **adapter**, where the canvas has a real component that carries the same contract —
+  `CompatibleHorizontalCarousel` over a `LazyRow`, because Material's uncontained carousel is not on
+  the dependency floor. The node draws, and what it draws is a real component;
+- a **named placeholder** ([`NativeOnlyPlaceholder`](../../ui-builder/src/commonMain/kotlin/ee/schimke/composeai/uibuilder/UiBuilderRenderer.kt)),
+  where it does not. The node says what it is, keeps its children so the tree is still navigable, and
+  makes no claim about how it looks.
+
+The second is the honest answer for a component with no counterpart, and replacing it with a replica
+assembled out of Material 3 pieces would produce an impression nothing in this build can check. A
+catalog whose components the canvas cannot draw gets its fidelity from rung 3, not from a replica
+maintained here — see
+[`UI_BUILDER_WEAR_SCREEN.md`](UI_BUILDER_WEAR_SCREEN.md#the-line-a-component-is-never-faked-so-it-can-run-in-wasm).
 
 **What the editor may never lie about** is the document. Every node it draws is a node in the tree,
 at the position the tree gives it, with the properties the tree carries. The lie is always about
@@ -78,15 +93,32 @@ catalog's sentence about why.
 
 Rung 3 does not render the document at all. It generates the design's **Kotlin**, compiles it, and
 runs it on the target platform's own toolkit — Robolectric-backed Android where the catalog declares
-`native.backend = android`, the desktop daemon otherwise. Two consequences worth stating:
+`native.backend = android`, the desktop daemon otherwise.
+
+That is the full-fidelity mode, and it is not the only one the pane has. What you are looking at is
+one of three, and the pane's caption says which:
+
+| mode | what it is | when |
+| --- | --- | --- |
+| **compiled, live** | the generated Kotlin, compiled on the host, streamed from a held session with taps dispatched into it | a host with a compile lane and Stage-2 redemption |
+| **compiled, still** | the same compile, one frame, with node boxes so a click selects a layer | no live backend for the design's mode, or a full live-seat budget |
+| **played document** | the *document* exported to Remote Compose and played by the RC player **in this browser** | a host with no compile lane at all |
+
+Only the first two are "real platform". The third is the honest best available where nothing can
+compile — it is the design's own exported bytes rather than a re-render, but it runs where rungs 1
+and 2 run, so read it as a rung 2½ rather than as a rung 3. `UI_BUILDER_REMOTE_COMPOSE.md` has the
+lanes in full.
+
+Two consequences worth stating about the compiled modes:
 
 - **It is the only rung that can be wrong about the export.** Rungs 1 and 2 draw the document; rung 3
   draws the *generated source*. A design the generator refuses has no native render, and the reasons
   are the actionable half — which is why the pane lists them rather than showing an empty box.
-- **It is a live preview, not a live edit.** The frame is streamed from a held session and taps are
-  dispatched into the real composition, so you use the screen rather than the picture of it. An edit
-  re-generates and re-compiles; it does not reach the running session the way a keystroke reaches
-  rungs 1 and 2.
+- **It is a live preview, not a live edit** — in the live mode. The frame is streamed from a held
+  session and taps are dispatched into the real composition, so you use the screen rather than the
+  picture of it. An edit re-generates and re-compiles; it does not reach the running session the way
+  a keystroke reaches rungs 1 and 2. In the still mode there is nothing to interact with at all, and
+  a click selects a layer instead.
 
 **Single frame**, because each one is a daemon: multiplying frames here multiplies JVMs, live seats
 and boot time. The device question was already answered a rung down, for free.
