@@ -26,8 +26,11 @@ on:
   workflow_dispatch:
     inputs:
       pull_request:
-        description: Pull request number whose branch should get refreshed baselines
-        required: true
+        description: >-
+          Pull request whose branch should get the refreshed baselines. LEAVE EMPTY to refresh
+          from the default branch and open a pull request of its own -- the safer choice here,
+          since it is not coupled to a pull request that may merge during the ~18 minute render.
+        required: false
         type: string
       harness:
         description: Which snapshot-owning harness to refresh
@@ -56,6 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.decide.outputs.run }}
+      standalone: ${{ steps.decide.outputs.standalone }}
       ref: ${{ steps.decide.outputs.ref }}
       pr: ${{ steps.decide.outputs.pr }}
       harness: ${{ steps.decide.outputs.harness }}
@@ -74,6 +78,7 @@ jobs:
           COMMENT_PR: ${{ github.event.issue.number }}
           DISPATCH_PR: ${{ github.event.inputs.pull_request }}
           DISPATCH_HARNESS: ${{ github.event.inputs.harness }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           pr=""
@@ -103,6 +108,21 @@ jobs:
             workflow_dispatch)
               pr="${DISPATCH_PR}"
               harness="${DISPATCH_HARNESS:-ui-builder-jetcaster}"
+              # A dispatch with no pull request number is the STANDALONE refresh: render the
+              # default branch and open a pull request for whatever moved. Nothing about it
+              # depends on a pull request staying open, so the render cannot be orphaned by a
+              # merge, and it is immune to the branch-deletion cancellation a pull-request
+              # branch is exposed to. Prefer it.
+              if [ -z "${pr}" ]; then
+                {
+                  echo "run=true"
+                  echo "standalone=true"
+                  echo "ref=${DEFAULT_BRANCH}"
+                  echo "pr="
+                  echo "harness=${harness}"
+                } >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
               ;;
           esac
 
@@ -130,6 +150,7 @@ jobs:
           fi
           {
             echo "run=true"
+            echo "standalone=false"
             echo "ref=${head_ref}"
             echo "pr=${pr}"
             echo "harness=${harness}"
@@ -208,6 +229,9 @@ jobs:
         env:
           BRANCH: ${{ needs.resolve.outputs.ref }}
           HARNESS: ${{ needs.resolve.outputs.harness }}
+          PR: ${{ needs.resolve.outputs.pr }}
+          STANDALONE: ${{ needs.resolve.outputs.standalone }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Only the committed baselines. `test-results/` is this run's scratch output, and staging
@@ -225,12 +249,39 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m "test(harness): refresh the ${HARNESS} visual baselines" \
             -m "Re-rendered by .github/workflows/refresh-visual-baselines.yml on this runner: ${files} file(s). Review the images."
-          # The branch can have moved since checkout. --force-with-lease refuses instead of
-          # clobbering.
-          git push --force-with-lease origin "HEAD:${BRANCH}"
+
+          # WHERE the commit goes is decided HERE, after the render, not when the run started.
+          # A render takes ~18 minutes and pull requests in this repository are routinely merged
+          # within a minute or two of opening -- deliberately, to keep things moving. So by the
+          # time there is something to push, the branch this run was asked to refresh may belong
+          # to a pull request that has already merged. Pushing there anyway strands the bytes on a
+          # dead branch and leaves the baseline it was meant to fix still stale on main, which is
+          # exactly what happened to #808.
+          if [ "${STANDALONE}" = "true" ]; then
+            # No pull request was named, so there is nothing to race and nothing to check.
+            state="STANDALONE"
+          else
+            state="$(gh pr view "${PR}" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
+          fi
+          if [ "${state}" = "OPEN" ]; then
+            # The branch can have moved since checkout. --force-with-lease refuses instead of
+            # clobbering.
+            git push --force-with-lease origin "HEAD:${BRANCH}"
+            echo "landed=branch" >> "$GITHUB_OUTPUT"
+            echo "target=${BRANCH}" >> "$GITHUB_OUTPUT"
+          else
+            # The pull request closed under us. The bytes are still good -- they are this runner's
+            # own output, which is the only place they can come from -- so they get their own
+            # branch and their own pull request rather than being thrown away.
+            rescue="agent/refresh-${HARNESS}-baselines-${GITHUB_RUN_ID}"
+            git push origin "HEAD:${rescue}"
+            echo "landed=pr" >> "$GITHUB_OUTPUT"
+            echo "target=${rescue}" >> "$GITHUB_OUTPUT"
+          fi
           {
             echo "pushed=true"
             echo "files=${files}"
+            echo "state=${state}"
           } >> "$GITHUB_OUTPUT"
       - name: Run CI on the refreshed head
         # A push authenticated with GITHUB_TOKEN deliberately does not trigger `on: push` or
@@ -239,24 +290,71 @@ jobs:
         if: ${{ steps.push.outputs.pushed == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ needs.resolve.outputs.ref }}
+          BRANCH: ${{ steps.push.outputs.target }}
         run: gh workflow run ci.yml --ref "${BRANCH}"
+      - name: Land the rescue branch as its own pull request
+        # Only when the triggering pull request closed mid-render. The refreshed bytes are this
+        # runner's own output and cannot be reproduced anywhere else, so they get a pull request
+        # rather than being abandoned on a branch nobody will look at.
+        if: ${{ steps.push.outputs.pushed == 'true' && steps.push.outputs.landed == 'pr' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ steps.push.outputs.target }}
+          FILES: ${{ steps.push.outputs.files }}
+          HARNESS: ${{ needs.resolve.outputs.harness }}
+          PR: ${{ needs.resolve.outputs.pr }}
+          STATE: ${{ steps.push.outputs.state }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner."
+            echo
+            if [ "${STATE}" = "STANDALONE" ]; then
+              echo "Dispatched against the default branch with no pull request attached, which is"
+              echo "the mode that cannot be orphaned by a merge during the ~18 minute render."
+            else
+              echo "This was asked for on #${PR}, which was ${STATE} by the time the render"
+              echo "finished — a render takes around 18 minutes. The bytes are only producible on"
+              echo "this runner, so they are here rather than discarded."
+            fi
+            echo
+            echo "**These are accepted pixels, not verified ones.** This lane rewrites a baseline"
+            echo "to whatever the code draws, so the review is the gate: open the images and"
+            echo "confirm every change is one the diff meant to make."
+          } > body.md
+          gh pr create --base main --head "${TARGET}" \
+            --title "test(harness): refresh the ${HARNESS} visual baselines" \
+            --body-file body.md
+          rm -f body.md
       - name: Say so on the pull request
-        if: ${{ steps.push.outputs.pushed == 'true' }}
+        # Nothing to say to when the refresh was not asked for on a pull request.
+        if: ${{ steps.push.outputs.pushed == 'true' && needs.resolve.outputs.standalone != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ needs.resolve.outputs.pr }}
           FILES: ${{ steps.push.outputs.files }}
           HARNESS: ${{ needs.resolve.outputs.harness }}
+          LANDED: ${{ steps.push.outputs.landed }}
+          TARGET: ${{ steps.push.outputs.target }}
         run: |
           set -euo pipefail
+          if [ "${LANDED}" = "branch" ]; then
+            {
+              echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner and pushed them to"
+              echo "this branch; CI is re-dispatched for the new head."
+            } > comment.md
+          else
+            {
+              echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner, but this pull"
+              echo "request had already closed by the time the render finished, so they went to"
+              echo "\`${TARGET}\` and a pull request of their own instead of here."
+            } > comment.md
+          fi
           {
-            echo "Re-rendered ${FILES} \`${HARNESS}\` baseline(s) on this runner and pushed them to"
-            echo "this branch; CI is re-dispatched for the new head."
             echo
             echo "**These are accepted pixels, not verified ones.** This lane rewrites a baseline to"
             echo "whatever the code draws, so the review is the gate: open the images and confirm"
             echo "every change is one the diff meant to make."
-          } > comment.md
+          } >> comment.md
           gh pr comment "${PR}" --body-file comment.md
           rm -f comment.md
