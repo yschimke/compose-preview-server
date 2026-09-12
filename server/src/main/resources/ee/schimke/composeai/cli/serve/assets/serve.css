@@ -3034,6 +3034,48 @@ cp-history-menu { display: contents; }
    it instead of being squeezed into a column too narrow to read a line of Kotlin in. */
 .cp-viewer[data-source-lane="side"] .cp-stage { align-items: flex-start;
   justify-content: flex-start; gap: 16px; flex-wrap: wrap; }
+/* The code sits BESIDE the render's box, not inside it. The stage is one element holding both, so
+   in this lane it gives up its own surface — background, padding, shadow, min-height — and the
+   render element takes them instead. What was a single card with a picture on the left and a
+   listing on the right becomes a picture in a card with a listing next to it, which is what the
+   two things are: the code is the subject and the render is what it produces, and framing them
+   together said they were two views of one thing.
+   The stage keeps being the flex row that puts them side by side; it is only invisible now. */
+.cp-viewer[data-source-lane="side"] .cp-stage { background: transparent; box-shadow: none;
+  padding: 0; min-height: 0; }
+/* Written at the bg-theme rules' own specificity, and after them, or they win: those paint the
+   stage #1d1d20 / #fff to give a render a known field, and in this lane that field belongs to the
+   render element rather than to the row holding it and the code. Same shape as the `data-mode`
+   pair below, for the same reason. */
+html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="dark"][data-source-lane="side"] .cp-stage,
+html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"][data-source-lane="side"] .cp-stage,
+html.cp-bg-transparent .cp-viewer[data-source-lane="side"] .cp-stage { background: transparent; }
+/* Applied to the render ELEMENTS rather than to a wrapper, because the stage has no inner one and
+   adding it would move every `.cp-stage > #cp-img` rule and the script selectors that match them.
+   The list is what a samples page can actually paint into: the snapshot image, the live canvas,
+   and the motion image the Motion group opens. */
+.cp-viewer[data-source-lane="side"] .cp-stage > #cp-img,
+.cp-viewer[data-source-lane="side"] .cp-stage > #cp-canvas,
+.cp-viewer[data-source-lane="side"] .cp-stage > #cp-motion-img {
+  /* No `min-height`: on a replaced element that stretches the picture to the box rather than
+     padding around it, and the stage's 220px floor existed to stop a card collapsing, not to
+     enlarge a render. A small sample gets a small card, which is the honest size for it. */
+  box-sizing: border-box; padding: 16px;
+  border-radius: var(--md-sys-shape-corner-large);
+  background: var(--md-sys-color-surface-container-low);
+  box-shadow: var(--md-sys-elevation-level1); }
+/* The same pair as the stage's own bg-theme rules above, moved onto the element that now carries
+   the field. Without these the lane's box stayed the container colour while every other page
+   painted #1d1d20 / #fff, so a light-on-transparent Wear render went unreadable in exactly the
+   catalog this lane exists for. `cp-bg-transparent` still wins, as it does there. */
+html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="dark"][data-source-lane="side"] .cp-stage > #cp-img,
+html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="dark"][data-source-lane="side"] .cp-stage > #cp-canvas,
+html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="dark"][data-source-lane="side"] .cp-stage > #cp-motion-img {
+  background: #1d1d20; }
+html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"][data-source-lane="side"] .cp-stage > #cp-img,
+html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"][data-source-lane="side"] .cp-stage > #cp-canvas,
+html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"][data-source-lane="side"] .cp-stage > #cp-motion-img {
+  background: #fff; }
 /* `max-width` is left at the panel's own 72ch: a line of Kotlin has a readable measure and the
    stage getting wider is not a reason to stretch one. It grows to fill the room up to that and
    stops, which is why the flex-basis is a floor rather than a share. */
