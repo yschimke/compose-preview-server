@@ -6,14 +6,21 @@
   "automerge": true,
   "packageRules": [
     {
-      "description": "compose-multiplatform: pin to the 1.11.x line. Compose 1.12 changes the CanvasLayersComposeScene API used by the UI builder's structured-SVG recorder, while the standalone distribution's renderer-desktop and daemon-desktop sidecars remain governed by the deliberately held compose-ai-tools host floor. Moving to 1.12 therefore requires a coordinated source migration, full visual verification, and any intended host-floor release rather than an automated dependency bump.",
+      "description": "Majors are never automerged. `automerge: true` above is a blanket setting \u2014 the shared preset turns automerge on for minor/patch/digest/pin only, but a top-level `true` here covers every update type, so a major would land on green CI after its 14-day soak with nobody reading the diff. Keep the soak, drop the automerge; this is the posture m3-catalog and wear-m3-catalog already carry.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "minimumReleaseAge": "14 days"
+    },
+    {
+      "description": "Compose Multiplatform lands as its own PR and is never automerged: a renderer bump moves the pixels under every preview this server renders, and `visual-harness` is the review \u2014 a human reads its result. This replaces a hold at the 1.11.x line that was already dead. #731 moved the catalog to 1.12.0 deliberately (no published module here declares a Compose dependency, so the bump raises no consumer floor), which left `matchCurrentValue: /^1\\.11\\./` matching nothing \u2014 a rule that reads as a pin while allowing 1.13 straight through on automerge. The patterns are the regex form rather than `org.jetbrains.compose{/,}**`, which is the npm-scope idiom and is not how a Maven `group:artifact` coordinate is matched. The floor this deliberately does NOT encode: compose-ai-tools and compose-preview-daemon are held at 1.11.x because their published bytecode targets it, so this repository sits one Compose line above the daemon it drives \u2014 read compose-preview-daemon's docs/RENDERER_COMPATIBILITY.md before taking 1.13.",
       "matchManagers": ["gradle"],
       "matchPackageNames": [
-        "org.jetbrains.compose",
-        "org.jetbrains.compose{/,}**"
+        "/^org\\.jetbrains\\.compose($|[.:])/",
+        "/^org\\.jetbrains\\.androidx\\.lifecycle($|[.:])/",
+        "/^org\\.jetbrains\\.androidx\\.navigation($|[.:])/"
       ],
-      "matchCurrentValue": "/^1\\.11\\./",
-      "allowedVersions": "/^1\\.11\\./"
+      "groupName": "compose-multiplatform",
+      "automerge": false
     },
     {
       "description": "The design-parity packages are published in lockstep from one monorepo, so update them together in a single PR.",
