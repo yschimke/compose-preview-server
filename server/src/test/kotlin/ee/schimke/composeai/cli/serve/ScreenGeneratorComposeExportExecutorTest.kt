@@ -58,21 +58,6 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   @Test
   fun `semantic loops and reusable components have identical browser and service source`() {
-    // Opt-in build surface, so this case belongs to the `ui-builder-remote-compose` job rather
-    // than to the shipping default. A semantic loop is a `layout/for-each`, and
-    // `ScreenDocumentProjection` refuses any document carrying one when the feature is off
-    // ("stated authoring and reusable source export are disabled in this build") — so the export
-    // comes back with a diagnostic and `assertEquals(emptyList(), artifact.diagnostics)` below
-    // fails on the refusal rather than on anything about browser/service agreement.
-    //
-    // The fifth instance of the same shape as #792, which guarded four siblings and missed this
-    // one: it fixed `:ui-builder:jvmTest` for the default build and `:server:test` for the flagged
-    // build, and this is `:server:test` in the DEFAULT build. Guarded per test rather than per
-    // class because the other eleven cases here do not need the feature.
-    org.junit.jupiter.api.Assumptions.assumeTrue(
-      UiBuilderBuildFeatures.remoteCompose,
-      "Enable with -PuiBuilderRemoteCompose=true",
-    )
     val root =
       generateSequence(File(".").absoluteFile) { it.parentFile }
         .first { File(it, "docs/design/fixtures/ui-builder/m3-catalog-components-v1.json").isFile }
@@ -113,6 +98,12 @@ class ScreenGeneratorComposeExportExecutorTest {
     // default build while the `-PuiBuilderRemoteCompose=true` lane stayed green: the probe answers
     // "can the vocabulary say this?", not "will this build emit it?". `GeneratedDocumentTest`
     // already distinguishes the two; this one did not.
+    //
+    // Asserted rather than assumed, which is the difference from the four siblings #792 guarded.
+    // Skipping would give up the claim this test is named for. The claim survives the gate: with
+    // the feature off there is no source to compare, but the two halves must still AGREE, and
+    // agreeing means both refusing for the same reason. A build that dropped one gate and kept
+    // the other is exactly the drift this case exists to catch, and a skip sees none of it.
     if (!UiBuilderBuildFeatures.remoteCompose) {
       assertTrue(
         browser is ScreenExportGate.Outcome.Refused &&
