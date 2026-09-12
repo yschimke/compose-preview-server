@@ -41,6 +41,8 @@ The product spec and its RFC come first; everything after them is one surface or
   Material 3 remainder, modifiers — and which repository owns each gap.
 - [design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md](design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md) —
   the builder over a derived component record.
+- [design/UI_BUILDER_PREVIEW_FIDELITY.md](design/UI_BUILDER_PREVIEW_FIDELITY.md) — the fidelity
+  ladder the workspace's three panes are: mock → real → platform, and which rung may lie about what.
 - [design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md](design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md) — the
   canvas, the frame and the variants.
 - [design/UI_BUILDER_WEAR_SCREEN.md](design/UI_BUILDER_WEAR_SCREEN.md) — the Wear screen: one
