@@ -33,11 +33,14 @@ Run after staging `:screen-model` (the helper also stages `:gradle-plugin:previe
 
 ```sh
 python3 scripts/stage-local-dependency.py --checkout /path/to/compose-ai-tools --module :screen-model --output build/local-dependencies/remote-export
-VERIFY_LOCAL_STATE_SELECTION=true VERIFY_LOCAL_LAYOUT_CLICKS=true ./gradlew -PlocalDependencies=build/local-dependencies/remote-export/local-dependencies.properties :server:test --tests '*LayoutClickExportTest' --tests '*ServeUiBuilderMcpIntegrationTest' :ui-builder:jvmTest --tests '*GeneratedLayoutClicksTest'
+./gradlew -PuiBuilderRemoteCompose=true -PlocalDependencies=build/local-dependencies/remote-export/local-dependencies.properties :server:test --tests '*LayoutClickExportTest' --tests '*ServeUiBuilderMcpIntegrationTest' :ui-builder:jvmTest --tests '*GeneratedLayoutClicksTest'
 ```
 
-The exact Kotlin fixture compiles and runs on the released consumer dependency floor too. Without
-the local generator, export tests check its explicit refusal instead of treating it as success.
+The exact Kotlin fixture compiles and runs on the released consumer dependency floor too. Staging
+is no longer required for these tests: the released generator carries action-lambda support, so
+they assert the emitted source rather than an explicit refusal, and the
+`VERIFY_LOCAL_STATE_SELECTION` / `VERIFY_LOCAL_LAYOUT_CLICKS` variables that chose between the two
+are gone. What still selects them is `-PuiBuilderRemoteCompose=true`, the build feature itself.
 
 This closes layout-click mapping to ordinary Compose. The combined-host probe also found that
 plain Remote layout roots fell through to the component-record exporter. The subsequent

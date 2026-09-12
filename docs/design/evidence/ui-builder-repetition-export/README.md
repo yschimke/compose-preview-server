@@ -81,8 +81,10 @@ editor passes 954 tests, with the separate opt-in JVM canvas proof skipped in th
 That earlier proof remains an independent oracle: the production emitter must match its expanded
 document output exactly.
 
-The final targeted server run passes 37 catalog, JSON/PNG export and hosted MCP tests with
-`VERIFY_LOCAL_LAYOUT_CLICKS=true`, which selects the staged generator's supported callback path.
+The final targeted server run passes 37 catalog, JSON/PNG export and hosted MCP tests. It needed
+`VERIFY_LOCAL_LAYOUT_CLICKS=true` at the time to select the staged generator's supported callback
+path; the released generator carries that path now, so the variable is gone and the tests assert
+the emitted source directly.
 Kotlin formatting and the project boundary check pass. Required golden regeneration adds only the
 For each capability and its slot-acceptance entries to the existing Remote catalog fixtures.
 
