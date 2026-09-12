@@ -37,11 +37,6 @@ class LayoutClickExportTest {
   @Test
   fun `layout clicks and state selection emit the compiled interaction fixture`() {
     val result = ScreenExportGate.export(document(), record)
-    if (System.getenv("VERIFY_LOCAL_LAYOUT_CLICKS") != "true") {
-      val refused = assertIs<ScreenExportGate.Outcome.Refused>(result)
-      assertTrue(refused.reasons.any { "action-lambda support" in it }, refused.toString())
-      return
-    }
     val source = assertIs<ScreenExportGate.Outcome.Emitted>(result, result.toString()).source
     val fixture = File("../docs/design/fixtures/ui-builder/clickable-state-layout.kt.txt")
     if (System.getenv("UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE") == "true") fixture.writeText(source)
@@ -65,14 +60,10 @@ class LayoutClickExportTest {
           )
         }
       val result = ScreenExportGate.export(doc, record)
-      if (System.getenv("VERIFY_LOCAL_LAYOUT_CLICKS") == "true") {
-        val source = assertIs<ScreenExportGate.Outcome.Emitted>(result, result.toString()).source
-        assertTrue(".background(color = Color(" in source, source)
-        assertTrue(source.indexOf(".background(") < source.indexOf(".clickable("), source)
-        assertEquals(3, Regex("\\.clickable\\(").findAll(source).count())
-      } else {
-        assertIs<ScreenExportGate.Outcome.Refused>(result)
-      }
+      val source = assertIs<ScreenExportGate.Outcome.Emitted>(result, result.toString()).source
+      assertTrue(".background(color = Color(" in source, source)
+      assertTrue(source.indexOf(".background(") < source.indexOf(".clickable("), source)
+      assertEquals(3, Regex("\\.clickable\\(").findAll(source).count())
     }
   }
 }

@@ -335,20 +335,17 @@ class ServeUiBuilderMcpIntegrationTest {
         """{"designId":"agent-screen","revision":0,"format":"compose"}""",
       )
     val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
-    if (System.getenv("VERIFY_LOCAL_LAYOUT_CLICKS") == "true") {
-      assertEquals(emptyList(), artifact.diagnostics, artifact.content)
-      assertTrue(
-        artifact.content.endsWith(
-          File("../docs/design/fixtures/ui-builder/clickable-state-layout.kt.txt").readText()
-        ),
-        artifact.content,
-      )
-    } else {
-      assertTrue(
-        artifact.diagnostics.any { "action-lambda support" in it.message },
-        artifact.toString(),
-      )
-    }
+    // Emitting is the released behaviour now that the shared generator carries action-lambda
+    // support; the `VERIFY_LOCAL_LAYOUT_CLICKS` branch existed to prove this path against a local
+    // generator publication before that release, and the diagnostics it fell back to asserted a
+    // limitation that has lifted.
+    assertEquals(emptyList(), artifact.diagnostics, artifact.content)
+    assertTrue(
+      artifact.content.endsWith(
+        File("../docs/design/fixtures/ui-builder/clickable-state-layout.kt.txt").readText()
+      ),
+      artifact.content,
+    )
   }
 
   @Test
