@@ -201,8 +201,12 @@ val verifyRenderBundlePackaged =
               @Suppress("UNCHECKED_CAST")
               val classpath =
                 ((parsed as Map<String, Any?>)["classpath"] as? List<Map<String, Any?>>).orEmpty()
+              // `kind`, not `type`. `BundlePreviewTask` serializes these with
+              // `classDiscriminator = "kind"`, and a Maven entry carries its OWN `type` field
+              // holding the packaging -- so filtering on `type` matches "jar", never "maven",
+              // and the set comes back empty.
               classpath
-                .filter { it["type"] == "maven" }
+                .filter { it["kind"] == "maven" }
                 .map { "${it["group"]}:${it["artifact"]}" }
                 .toSet()
             }
