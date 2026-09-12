@@ -311,13 +311,21 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   # operator who narrows SERVE_UI_BUILDER_CATALOGS to drop the Wear/Android lane (a supported
   # override, and one this image's own tests exercise) would otherwise have to know that a second
   # variable needs narrowing too, or the box would not boot.
+  #
+  # Both published catalogs are derived the same way, by intersecting the served list with the
+  # set that HAS a usable published file. Adding wear-m3 to a literal string would have
+  # reintroduced exactly the startup failure the paragraph above describes, one catalog later.
   ui_builder_served=",${SERVE_UI_BUILDER_CATALOGS:-m3-catalog,remote-m3,wear-m3},"
   if [[ -n "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}" ]]; then
     ui_builder_published="${SERVE_UI_BUILDER_PUBLISHED_CATALOGS}"
-  elif [[ "${ui_builder_served}" == *",remote-m3,"* ]]; then
-    ui_builder_published="remote-m3"
   else
-    ui_builder_published="none"
+    ui_builder_published=""
+    for candidate in remote-m3 wear-m3; do
+      if [[ "${ui_builder_served}" == *",${candidate},"* ]]; then
+        ui_builder_published="${ui_builder_published:+${ui_builder_published},}${candidate}"
+      fi
+    done
+    ui_builder_published="${ui_builder_published:-none}"
   fi
   args+=(--ui-builder-published-catalogs "${ui_builder_published}")
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
