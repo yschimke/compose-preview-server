@@ -1015,11 +1015,7 @@ public class PersistentUiBuilderService(
       is UiBuilderServiceRequest.GetDesignAccess -> access(call.actor, request.designId)
       is UiBuilderServiceRequest.GetDesignActions -> actions(call.actor, request.designId)
       is UiBuilderServiceRequest.UpdateDesignAccess -> updateAccess(call.actor, request)
-      is UiBuilderServiceRequest.PreviewCatalogUpgrade ->
-        serviceError(
-          ServiceErrorCodeV1.BAD_REQUEST,
-          "catalog upgrade preview is not configured by this runtime",
-        )
+      is UiBuilderServiceRequest.PreviewCatalogUpgrade -> previewUpgrade(call.actor, request)
       is UiBuilderServiceRequest.ApplyOperation -> apply(call.actor, request.submission)
       is UiBuilderServiceRequest.GetSnapshot -> open(call.actor, request.designId, request.revision)
       is UiBuilderServiceRequest.GetDelta -> delta(call.actor, request)
@@ -1280,6 +1276,99 @@ public class PersistentUiBuilderService(
       if (design.ownedBy(actor)) DesignAccessActionV1.entries
       else DesignAccessActionV1.entries.filter { design.allows(actor, it) }
     return LockedExecution(UiBuilderServiceResponse.DesignActions(designId, actions))
+  }
+
+  /**
+   * What moving [request]'s design to another catalog would cost it — without moving it.
+   *
+   * Read access is enough, because this writes nothing: the stored design is untouched, and the
+   * candidate travels back to the caller to be looked at. That is the whole point of a preview on a
+   * design that has stopped opening — an owner decides whether a move that drops `letterSpacingSp`
+   * is the repair they want, rather than discovering it after the fact.
+   *
+   * BLOCKED rather than an error where the candidate still does not validate. A refusal here is an
+   * answer to the question that was asked ("can this design move?"), not a failure to answer it,
+   * and the changes and issues beside it are what say why.
+   */
+  private fun previewUpgrade(
+    actor: AuthenticatedUiBuilderActor,
+    request: UiBuilderServiceRequest.PreviewCatalogUpgrade,
+  ): LockedExecution {
+    val design =
+      persisted.designs[request.designId] ?: return serviceError(notFound(request.designId))
+    if (!design.allows(actor, DesignAccessActionV1.READ)) {
+      return serviceError(notFound(request.designId))
+    }
+    if (design.document.revision != request.baseRevision) {
+      // The candidate is only meaningful against the document it was computed from, and an apply
+      // quotes this revision back. Stale in, stale out, so it is refused rather than answered.
+      return serviceError(
+        ServiceErrorCodeV1.BAD_REQUEST,
+        "design ${request.designId} is at revision ${design.document.revision}",
+      )
+    }
+    if (design.document.catalogPin != request.sourceCatalogPin) {
+      return serviceError(
+        ServiceErrorCodeV1.BAD_REQUEST,
+        "design ${request.designId} is not pinned to the stated source catalog",
+      )
+    }
+    val target =
+      catalogs.resolve(request.targetCatalogPin)
+        ?: return serviceError(
+          ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
+          "target catalog is not served by this runtime",
+        )
+    val outcome = planCatalogUpgrade(design.document, target, request.targetCatalogPin)
+    // Validated by the same validator every write goes through rather than a second opinion here:
+    // a candidate this runtime would refuse to store is not a move worth offering.
+    val refusal =
+      catalogs.validate(outcome.candidate, target)?.let {
+        CatalogUpgradeIssueV1(
+          CatalogUpgradeIssueSeverityV1.ERROR,
+          it.code,
+          it.nodeId?.let { node -> "/nodes/$node" } ?: "/",
+          it.message,
+        )
+      }
+    val issues = outcome.issues + listOfNotNull(refusal)
+    val blocked = issues.any { it.severity == CatalogUpgradeIssueSeverityV1.ERROR }
+    val candidateHash = documentHash(outcome.candidate)
+    return LockedExecution(
+      UiBuilderServiceResponse.CatalogUpgradePreview(
+        CatalogUpgradePreviewV1(
+          designId = request.designId,
+          baseRevision = request.baseRevision,
+          sourceCatalogPin = request.sourceCatalogPin,
+          targetCatalogPin = request.targetCatalogPin,
+          sourceDocumentHash = documentHash(design.document),
+          status =
+            if (blocked) CatalogUpgradePreviewStatusV1.BLOCKED
+            else CatalogUpgradePreviewStatusV1.READY,
+          // Names this preview, not its document: an apply quotes it back, and a plan that changed
+          // between the two -- a catalog republished under the same pin, a rule edited here -- must
+          // not be accepted as the one somebody looked at. Hashing the candidate alone would miss
+          // exactly that, since two plans can land on the same document by different routes.
+          previewDigest =
+            sha256(
+              listOf(
+                  candidateHash,
+                  documentHash(design.document),
+                  request.targetCatalogPin.systemId,
+                  request.targetCatalogPin.catalogRevision,
+                  request.targetCatalogPin.capabilityDigest,
+                  issues.joinToString(",") { "${it.severity}:${it.code}@${it.path}" },
+                )
+                .joinToString("\n")
+                .encodeToByteArray()
+            ),
+          candidateDocument = outcome.candidate,
+          candidateDocumentHash = candidateHash,
+          changes = outcome.changes,
+          issues = issues,
+        )
+      )
+    )
   }
 
   private fun updateAccess(
