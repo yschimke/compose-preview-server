@@ -8222,6 +8222,8 @@ class ServeHttpServer(
                 activeMutationBuckets = diagnostics.activeMutationBuckets,
                 persistenceMigrations = diagnostics.persistenceMigrations,
                 unusableDesigns = diagnostics.unusableDesigns,
+                rePinnedDesigns = diagnostics.rePinnedDesigns,
+                rePinPersistenceFailure = diagnostics.rePinPersistenceFailure,
                 storageBytes = ceiling?.let { diagnostics.storageBytes },
                 storageMaximumBytes = ceiling,
                 storageUsedPercent =
@@ -15396,6 +15398,16 @@ private data class UiBuilderDto(
   val activeMutationBuckets: Int,
   val persistenceMigrations: Long,
   val unusableDesigns: Int = 0,
+  /**
+   * Stored designs re-pinned to the served catalog reference as they loaded, and why writing that
+   * through failed when it did.
+   *
+   * Both are how an operator sees whether a source flip has converged on disk. The count is
+   * non-zero on the first start after the flip and zero afterwards; a count that stays non-zero, or
+   * a failure string, means the stored files are still on the old pin.
+   */
+  val rePinnedDesigns: Int = 0,
+  val rePinPersistenceFailure: String? = null,
   /**
    * Durable state bytes against the ceiling a save is refused at, and the percentage between them.
    *
