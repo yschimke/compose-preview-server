@@ -166,10 +166,9 @@ class CatalogUpgradePreviewTest {
     val preview = preview(service, "widget", revision = 0)
 
     assertEquals(CatalogUpgradePreviewStatusV1.READY, preview.status)
-    assertEquals(
-      "remote-m3/remote-text",
-      preview.candidateDocument.nodes.getValue("label").componentId,
-    )
+    // Nullable on the wire, because a preview that could not build one still has to answer.
+    val candidate = assertNotNull(preview.candidateDocument)
+    assertEquals("remote-m3/remote-text", candidate.nodes.getValue("label").componentId)
     val stored =
       checkNotNull(UiBuilderDesignStateStore.open(root).store.load().designs["widget"]).document
     assertEquals(
