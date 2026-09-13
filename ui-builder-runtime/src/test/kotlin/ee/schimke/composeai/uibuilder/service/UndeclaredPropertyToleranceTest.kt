@@ -273,7 +273,11 @@ class UndeclaredPropertyToleranceTest {
             "browser",
             0,
             listOf(
-              SetPropertyMutationV1(nodeId = nodeId, property = property, value = json(value))
+              SetPropertyMutationV1(
+                nodeId = nodeId,
+                property = property,
+                value = StringValueV1(value),
+              )
             ),
           )
         ),
@@ -289,13 +293,11 @@ class UndeclaredPropertyToleranceTest {
       .state
       .document
 
-  private fun json(value: String) = JsonPrimitive(value)
-
   private fun node(id: String, componentId: String, properties: Map<String, String>) =
     DesignNodeV1(
       id = id,
       componentId = componentId,
-      properties = properties.mapValues { (_, v) -> json(v) },
+      properties = properties.mapValues { (_, v) -> StringValueV1(v) },
     )
 
   private fun DesignDocumentV1.withNode(node: DesignNodeV1): DesignDocumentV1 =
