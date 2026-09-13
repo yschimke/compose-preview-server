@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.29.0](https://github.com/yschimke/compose-preview-server/compare/v3.28.0...v3.29.0) (2026-09-13)
+
+
+### Bug Fixes
+
+* **ui-builder:** draw why a design will not open, instead of a white page ([#836](https://github.com/yschimke/compose-preview-server/issues/836)) ([fac4985](https://github.com/yschimke/compose-preview-server/commit/fac49853a2c81234934256aa82bab9a584948708))
+
 ## [3.28.0](https://github.com/yschimke/compose-preview-server/compare/v3.27.0...v3.28.0) (2026-09-13)
 
 
