@@ -38,11 +38,12 @@ class CatalogUpgradePreviewTest {
     val document =
       document("d")
         .withNode(
-          node(
-            "label",
-            "m3/text",
-            mapOf("text" to "Discover Weekly", "fontSizeSp" to "14", "color" to "#FFFFFF"),
-          )
+          node("label", "m3/text", mapOf("text" to "Discover Weekly", "color" to "#FFFFFF"))
+            // A size is a NUMBER on both sides -- `fontSizeSp` is `jsonType: number` on the
+            // borrowed component and `fontSize` is one on the published one, because
+            // `ComponentRecordPacks.jsonTypeOf` maps `RemoteTextUnit` that way. Authoring it as a
+            // string would be a design production would refuse before this plan ever ran.
+            .withProperty("label", "fontSizeSp", DecimalValueV1(14.0))
         )
 
     val outcome = planCatalogUpgrade(document, remoteM3(), TARGET)
@@ -55,7 +56,7 @@ class CatalogUpgradePreviewTest {
       "what the published catalog declares, and nothing the rename wished into it",
     )
     assertEquals(
-      StringValueV1("14"),
+      DecimalValueV1(14.0),
       moved.properties["fontSize"],
       "a rename carries the value, it does not reset it",
     )
@@ -65,7 +66,8 @@ class CatalogUpgradePreviewTest {
   fun `a property the target has no place for is reported rather than silently lost`() {
     val document =
       document("d")
-        .withNode(node("label", "m3/text", mapOf("text" to "hi", "letterSpacingSp" to "0.5")))
+        .withNode(node("label", "m3/text", mapOf("text" to "hi")))
+        .withProperty("label", "letterSpacingSp", DecimalValueV1(0.5))
 
     val outcome = planCatalogUpgrade(document, remoteM3(), TARGET)
 
@@ -86,7 +88,9 @@ class CatalogUpgradePreviewTest {
   @Test
   fun `planning does not touch the document it was given`() {
     val document =
-      document("d").withNode(node("label", "m3/text", mapOf("letterSpacingSp" to "0.5")))
+      document("d")
+        .withNode(node("label", "m3/text", emptyMap()))
+        .withProperty("label", "letterSpacingSp", DecimalValueV1(0.5))
 
     planCatalogUpgrade(document, remoteM3(), TARGET)
 
@@ -99,8 +103,15 @@ class CatalogUpgradePreviewTest {
     val document =
       document("d")
         .withNode(
-          node("panel", "m3/surface", mapOf("containerColor" to "#101010", "shapeDp" to "12"))
-            .copy(slots = mapOf("content" to listOf("label")))
+          node("panel", "m3/surface", emptyMap())
+            .copy(
+              properties =
+                mapOf(
+                  "containerColor" to StringValueV1("#101010"),
+                  "shapeDp" to DecimalValueV1(12.0),
+                ),
+              slots = mapOf("content" to listOf("label")),
+            )
         )
         .withNode(node("label", "m3/text", mapOf("text" to "hi")))
 
@@ -341,7 +352,11 @@ class CatalogUpgradePreviewTest {
       role = if (id == "layout/box") "Container" else "Leaf",
       properties =
         properties.map {
-          PropertyCapabilityV1(name = it, jsonType = JsonPrimitive("string"), required = false)
+          PropertyCapabilityV1(
+            name = it,
+            jsonType = JsonPrimitive(if (it in NUMERIC) "number" else "string"),
+            required = false,
+          )
         },
       wasm = WasmCapabilityV1(JsonPrimitive(true), WasmAdapterStatusV1.SUPPORTED),
     )
@@ -399,9 +414,9 @@ class CatalogUpgradePreviewTest {
               "component ${node.componentId} is not in ${catalog.benchmark.catalogSystemId}",
               node.id,
             )
-        val names = component.properties.mapTo(mutableSetOf()) { it.name }
+        val declaredProperties = component.properties.associateBy { it.name }
         node.properties.keys
-          .firstOrNull { it !in names }
+          .firstOrNull { it !in declaredProperties }
           ?.let {
             return UiBuilderCatalogIssue(
               "UNKNOWN_PROPERTY",
@@ -410,6 +425,21 @@ class CatalogUpgradePreviewTest {
               it,
             )
           }
+        // The type rule, because a plan that moves a value into a property of another type is a
+        // candidate production would refuse. Production compares `jsonType` against the JSON the
+        // value unwraps to; two kinds is all this fixture carries, so this compares those.
+        node.properties.forEach { (name, value) ->
+          val wants = declaredProperties.getValue(name).jsonType.toString().trim('"')
+          val isNumber = value is DecimalValueV1 || value is IntegerValueV1
+          if ((wants == "number") != isNumber) {
+            return UiBuilderCatalogIssue(
+              "INVALID_PROPERTY_VALUE",
+              "property $name on ${node.componentId} wants $wants",
+              node.id,
+              name,
+            )
+          }
+        }
       }
       return null
     }
@@ -503,7 +533,21 @@ class CatalogUpgradePreviewTest {
     return assertNotNull(completion, "suspend function did not complete").getOrThrow()
   }
 
+  private fun DesignDocumentV1.withProperty(
+    nodeId: String,
+    property: String,
+    value: UiValueV1,
+  ): DesignDocumentV1 {
+    val node = nodes.getValue(nodeId)
+    return copy(
+      nodes = nodes + (nodeId to node.copy(properties = node.properties + (property to value)))
+    )
+  }
+
   private companion object {
+    /** The properties this fixture declares as `number`, on whichever component carries them. */
+    private val NUMERIC = setOf("fontSizeSp", "fontSize", "letterSpacingSp", "shapeDp")
+
     private val SOURCE = CatalogReferenceV1("remote-m3", "candidate", "candidate", "remote-runtime")
     private val TARGET = CatalogReferenceV1("remote-m3", "published", "published", "remote-runtime")
   }
