@@ -15,6 +15,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -123,6 +124,23 @@ class CatalogUpgradePreviewTest {
   }
 
   @Test
+  fun `a modifier this build cannot write blocks, rather than losing the value it carried`() {
+    val document =
+      document("d").withNode(node("panel", "m3/surface", mapOf("containerColor" to "#101010")))
+
+    val outcome =
+      planCatalogUpgrade(document, remoteM3(containerColorBecomes = "elevation"), TARGET)
+
+    val issue = assertNotNull(outcome.issues.singleOrNull { it.code == "UNSUPPORTED_MODIFIER" })
+    assertEquals(CatalogUpgradeIssueSeverityV1.ERROR, issue.severity)
+    assertEquals(
+      StringValueV1("#101010"),
+      outcome.candidate.nodes.getValue("panel").properties["containerColor"],
+      "a colour this build cannot move is kept where it is, not quietly dropped",
+    )
+  }
+
+  @Test
   fun `a component with no successor is an error, and the node is left alone`() {
     val document = document("d").withNode(node("chip", "m3/assist-chip", mapOf("label" to "hi")))
 
@@ -198,12 +216,49 @@ class CatalogUpgradePreviewTest {
 
   // ── harness ───────────────────────────────────────────────────────────────────────────────────
 
-  /** The published catalog's vocabulary, narrowed to what these cases turn on. */
-  private fun remoteM3(): CatalogCapabilityV1 =
+  /**
+   * The published catalog's vocabulary, narrowed to what these cases turn on.
+   *
+   * The `supersedes` block is the fixture's own, and that is the point: the runtime states no
+   * catalog's successors (`ui-builder-catalog-literals.sh`), so the mapping under test is the one a
+   * catalog publishes. These two entries are the ones `remote-catalog/ui-builder.policy.json` in
+   * yschimke/wear-m3-catalog is to declare — `RemoteText` for the borrowed Material 3 text, a box
+   * with a background for the surface Remote Compose Material 3 does not publish.
+   */
+  private fun remoteM3(containerColorBecomes: String = "background"): CatalogCapabilityV1 =
     CatalogCapabilityV1(
       schema = "compose-catalog-capabilities/v1",
       benchmark =
         CatalogBenchmarkV1("remote-m3", "source", "remote-m3", "published", "remote-runtime"),
+      statusSemantics =
+        JsonObject(
+          mapOf(
+            "supersedes" to
+              JsonObject(
+                mapOf(
+                  "m3/text" to
+                    JsonObject(
+                      mapOf(
+                        "componentId" to JsonPrimitive("remote-m3/remote-text"),
+                        "properties" to
+                          JsonObject(mapOf("fontSizeSp" to JsonPrimitive("fontSize"))),
+                      )
+                    ),
+                  "m3/surface" to
+                    JsonObject(
+                      mapOf(
+                        "componentId" to JsonPrimitive("layout/box"),
+                        "slots" to JsonObject(mapOf("content" to JsonPrimitive("children"))),
+                        "modifiers" to
+                          JsonObject(
+                            mapOf("containerColor" to JsonPrimitive(containerColorBecomes))
+                          ),
+                      )
+                    ),
+                )
+              )
+          )
+        ),
       components =
         listOf(
           component(

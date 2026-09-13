@@ -15,38 +15,50 @@ import ee.schimke.composeai.uibuilder.protocol.UiValueV1
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * What moving a design from one catalog's vocabulary to another's would cost it.
  *
- * ## Why a plan rather than a rename
+ * ## Why this exists
  *
- * `remote-m3` used to be synthesised in this repository, and the synthesised catalog BORROWED two
- * Material 3 ids outright — `m3/text` and `m3/surface` — from the packaged catalog
- * (`ProductionUiBuilderRuntime.remoteM3Catalog`). The published catalog that replaced it declares
- * its own namespace and nothing else, which is the correct statement for it to make: a Remote
- * Compose catalog does not own Material 3's ids, and `wear-m3` was renamed away from exactly that
- * claim. The cost of being right landed on the designs that had already been authored against the
- * borrowed ids — they name a component the served catalog has never heard of, and an unknown
- * component is fatal in a way an undeclared property is not ([UndeclaredCatalogProperties]): there
- * is nothing to draw.
+ * A catalog that replaces another does not always spell the same components the same way. The case
+ * that forced it: a published catalog took over from a synthesised one that had BORROWED ids from a
+ * neighbouring design system, so designs already authored against the borrowed spelling named
+ * components the served catalog had never heard of. An undeclared property is survivable
+ * ([UndeclaredCatalogProperties]); an unknown component is not, and should not be — there is
+ * nothing to draw.
  *
- * So the repair is to move the document, and a move is not a rename. `m3/text` has a counterpart
- * the catalog really publishes — `remote-m3/remote-text`, which is `RemoteText` — but its
- * parameters are the Remote library's, not Material 3's, so `fontSizeSp` becomes `fontSize` and
- * `letterSpacingSp` has nowhere to go at all. `m3/surface` has no counterpart: Remote Compose
- * Material 3 publishes no `Surface`, and its `RemoteCard` takes a non-defaulted `onClick`, so
- * migrating a static container onto a card would invent an action the document never had. A box
- * with a background modifier is what the author actually drew.
+ * ## The catalog says what it replaces, and this file says nothing
+ *
+ * The mapping is `statusSemantics.supersedes` on the TARGET catalog, keyed by the id a stored
+ * document may still carry:
+ * ```jsonc
+ * "supersedes": {
+ *   "<old component id>": {
+ *     "componentId": "<what it becomes>",
+ *     "properties":  { "<old name>": "<new name>" },   // a property the target spells differently
+ *     "slots":       { "<old slot>": "<new slot>" },   // a slot the target spells differently
+ *     "modifiers":   { "<old property>": "background" } // a property the target states as a modifier
+ *   }
+ * }
+ * ```
+ *
+ * Not a table in this repository, and deliberately not:
+ * `docs/design/UI_BUILDER_CATALOG_CONTRACT.md` moves a catalog's knowledge into the catalog that
+ * owns it, and `ui-builder-catalog-literals.sh` enforces that no module here learns a catalog's
+ * name. A successor is exactly that knowledge — only the catalog that published the new component
+ * can say which old one it stands in for, and it can say so in the same release that introduces it.
  *
  * ## Declared mappings, and everything else
  *
- * A rule states only what someone had to decide: the component it moves to, the properties whose
- * NAME changed, and the properties that become modifiers. It never lists what is dropped. A
- * property the target simply does not declare falls out at the end, with a `WARNING` naming it, and
+ * A rule states only what someone had to decide: the successor, the properties whose NAME changed,
+ * and the properties the target states as modifiers instead. It never lists what is dropped. A
+ * property the target simply does not declare falls out at the end with a `WARNING` naming it, and
  * that is deliberate — a list of drops would go stale the moment the target catalog changed, and a
- * catalog that later declares `letterSpacing` should start carrying it across with no edit here.
+ * catalog that later declares the property should start carrying it across with no edit anywhere.
  *
  * ## Nothing is thrown away
  *
@@ -63,56 +75,49 @@ internal data class CatalogUpgradeOutcome(
   val issues: List<CatalogUpgradeIssueV1>,
 )
 
-/**
- * How one component becomes another.
- *
- * [renamed] is a property whose name the target spells differently for the same thing.
- * [toModifiers] is a property the target expresses as a modifier instead — the surface's
- * `containerColor` is a `background` on a box. [slots] renames a slot, since the id a node's
- * children hang under is the component's too.
- */
-private data class ComponentRewrite(
-  val to: String,
-  val renamed: Map<String, String> = emptyMap(),
-  val slots: Map<String, String> = emptyMap(),
-  val toModifiers: Map<String, (UiValueV1) -> DesignModifierV1> = emptyMap(),
+/** One `supersedes` entry, as the target catalog declared it. */
+private data class ComponentSuccessor(
+  val componentId: String,
+  val properties: Map<String, String>,
+  val slots: Map<String, String>,
+  val modifiers: Map<String, String>,
 )
 
 /**
- * The one catalog that needs this, and why each line is what it is.
+ * The modifiers an upgrade may write, by the name a catalog states.
  *
- * Keyed by the target's `catalogSystemId` rather than by a pin, because it is the vocabulary that
- * decides the mapping and a catalog's revision moves under it. The intent of
- * [#819](https://github.com/yschimke/compose-preview-server/issues/819) is that a catalog states
- * its own successors, at which point this table loads rather than declares — the same journey
- * [composeFoundationCatalog] is on.
+ * The builder's own vocabulary rather than any catalog's, which is why it is legitimately here —
+ * but closed, because a modifier this build cannot construct must not be silently skipped: the
+ * value it was carrying is the thing the move exists to preserve.
  */
-private val UPGRADES: Map<String, Map<String, ComponentRewrite>> =
-  mapOf(
-    "remote-m3" to
-      mapOf(
-        // `RemoteText`, published by the catalog as `remote-m3/remote-text` and already on its
-        // `Text` shelf. Its parameter list is the Remote library's: `fontSize` rather than
-        // `fontSizeSp`, and no letter spacing at all, which is the one value this move costs.
-        "m3/text" to
-          ComponentRewrite(
-            to = "remote-m3/remote-text",
-            renamed = mapOf("fontSizeSp" to "fontSize"),
-          ),
-        // A box, not a card. `RemoteCard`'s `onClick` has no default, so a card would give a static
-        // container an action nobody authored; `layout/box` is donated to this catalog already and
-        // `background` is one of the modifiers `RemoteContentEmitter` can write
-        // (`REMOTE_M3_MODIFIERS`). `shapeDp` is NOT mapped onto `clip`: the modifier names shapes
-        // (`medium`, `circle`), a surface states a radius in dp, and turning one into the other
-        // would be this code inventing a shape token the author did not choose.
-        "m3/surface" to
-          ComponentRewrite(
-            to = "layout/box",
-            slots = mapOf("content" to "children"),
-            toModifiers = mapOf("containerColor" to { color -> BackgroundModifierV1(color) }),
-          ),
-      )
-  )
+private val MODIFIER_WRITERS: Map<String, (UiValueV1) -> DesignModifierV1> =
+  mapOf("background" to { color -> BackgroundModifierV1(color) })
+
+private const val SUPERSEDES_KEY = "supersedes"
+
+/**
+ * The successors [catalog] declares, ignoring anything malformed.
+ *
+ * A published file is data this runtime did not write, so a broken entry must not take a design's
+ * only repair path down with it: an entry that does not name a `componentId` is not a rule, and the
+ * node it would have moved is reported as unknown exactly as if nothing had been declared.
+ */
+private fun successors(catalog: CatalogCapabilityV1): Map<String, ComponentSuccessor> {
+  val declared = catalog.statusSemantics[SUPERSEDES_KEY] as? JsonObject ?: return emptyMap()
+  return declared.entries
+    .mapNotNull { (from, entry) ->
+      val rule = entry as? JsonObject ?: return@mapNotNull null
+      val componentId = rule["componentId"]?.stringOrNull() ?: return@mapNotNull null
+      from to
+        ComponentSuccessor(
+          componentId = componentId,
+          properties = rule.stringMap("properties"),
+          slots = rule.stringMap("slots"),
+          modifiers = rule.stringMap("modifiers"),
+        )
+    }
+    .toMap()
+}
 
 /**
  * The move from [document]'s current pin to [targetPin], judged against [target].
@@ -127,30 +132,30 @@ internal fun planCatalogUpgrade(
   target: CatalogCapabilityV1,
   targetPin: CatalogReferenceV1,
 ): CatalogUpgradeOutcome {
-  val rewrites = UPGRADES[target.benchmark.catalogSystemId].orEmpty()
+  val rules = successors(target)
   val declared = target.components.associateBy { it.componentId }
   val changes = mutableListOf<CatalogUpgradeChangeV1>()
   val issues = mutableListOf<CatalogUpgradeIssueV1>()
   val nodes =
     document.nodes.mapValues { (nodeId, node) ->
-      val rewrite = rewrites[node.componentId]
-      val componentId = rewrite?.to ?: node.componentId
+      val rule = rules[node.componentId]
+      val componentId = rule?.componentId ?: node.componentId
       val component = declared[componentId]
       if (component == null && componentId !in document.components) {
-        // Nothing to move onto: no rule names a successor and the target does not declare the id
-        // itself. `ERROR` rather than a dropped node, because deleting somebody's content to make a
-        // document validate is never the repair.
+        // Nothing to move onto: the target declares no successor for this id and does not declare
+        // the id itself. `ERROR` rather than a dropped node, because deleting somebody's content to
+        // make a document validate is never the repair.
         issues +=
           CatalogUpgradeIssueV1(
             CatalogUpgradeIssueSeverityV1.ERROR,
             "UNKNOWN_COMPONENT",
             nodePath(nodeId),
-            "${target.benchmark.catalogSystemId} does not declare ${node.componentId}, " +
-              "and no successor is stated for it",
+            "the target catalog does not declare ${node.componentId}, and states no successor " +
+              "for it",
           )
         return@mapValues node
       }
-      if (rewrite != null) {
+      if (rule != null) {
         changes +=
           ReplaceCatalogUpgradeChangeV1(
             "${nodePath(nodeId)}/componentId",
@@ -162,9 +167,24 @@ internal fun planCatalogUpgrade(
       val properties = mutableMapOf<String, UiValueV1>()
       val modifiers = node.modifiers.toMutableList()
       node.properties.forEach { (name, value) ->
-        val asModifier = rewrite?.toModifiers?.get(name)
+        val asModifier = rule?.modifiers?.get(name)
         if (asModifier != null) {
-          val modifier = asModifier(value)
+          val write = MODIFIER_WRITERS[asModifier]
+          if (write == null) {
+            // The catalog asked for a modifier this build cannot write. Blocking, because the
+            // alternative is dropping the value the rule exists to carry across.
+            issues +=
+              CatalogUpgradeIssueV1(
+                CatalogUpgradeIssueSeverityV1.ERROR,
+                "UNSUPPORTED_MODIFIER",
+                propertyPath(nodeId, name),
+                "this build cannot write the `$asModifier` modifier the target catalog states " +
+                  "$name becomes",
+              )
+            properties[name] = value
+            return@forEach
+          }
+          val modifier = write(value)
           modifiers += modifier
           changes += RemoveCatalogUpgradeChangeV1(propertyPath(nodeId, name), value.encoded())
           changes += AddCatalogUpgradeChangeV1("${nodePath(nodeId)}/modifiers", modifier.encoded())
@@ -173,11 +193,11 @@ internal fun planCatalogUpgrade(
               CatalogUpgradeIssueSeverityV1.INFO,
               "PROPERTY_BECOMES_MODIFIER",
               propertyPath(nodeId, name),
-              "$name is a modifier on $componentId, and moves onto the node's modifier chain",
+              "$name is a `$asModifier` modifier on $componentId, and moves onto the node's chain",
             )
           return@forEach
         }
-        val renamed = rewrite?.renamed?.get(name) ?: name
+        val renamed = rule?.properties?.get(name) ?: name
         if (component != null && renamed !in names) {
           // The drop that is not declared anywhere: whatever the target does not have a place for.
           // The value stays in the stored document -- only the candidate is without it -- so this
@@ -201,11 +221,19 @@ internal fun planCatalogUpgrade(
       }
       val slots = mutableMapOf<String, List<String>>()
       node.slots.forEach { (slot, children) ->
-        val to = rewrite?.slots?.get(slot) ?: slot
-        // A slot rename that lands on a slot the node already fills would silently merge two lists
-        // of children into one. Nothing states such a rule today; if one ever does, it stops here
-        // rather than in a design that quietly gained a sibling.
-        require(to !in slots) { "slot rename $slot -> $to collides on $nodeId" }
+        val to = rule?.slots?.get(slot) ?: slot
+        // A slot rename landing on a slot the node already fills would merge two lists of children
+        // into one. A catalog can declare that by mistake, so it is reported rather than merged.
+        if (to in slots) {
+          issues +=
+            CatalogUpgradeIssueV1(
+              CatalogUpgradeIssueSeverityV1.ERROR,
+              "SLOT_COLLISION",
+              slotPath(nodeId, slot),
+              "the target catalog renames $slot onto $to, which this node already fills",
+            )
+          return@forEach
+        }
         slots[to] = children
         if (to != slot) {
           changes += RemoveCatalogUpgradeChangeV1(slotPath(nodeId, slot), children.encoded())
@@ -215,17 +243,22 @@ internal fun planCatalogUpgrade(
       node.copy(properties = properties, modifiers = modifiers, slots = slots)
     }
   changes +=
-    ReplaceCatalogUpgradeChangeV1(
-      "/catalogPin",
-      document.catalogPin.encoded(),
-      targetPin.encoded(),
-    )
+    ReplaceCatalogUpgradeChangeV1("/catalogPin", document.catalogPin.encoded(), targetPin.encoded())
   return CatalogUpgradeOutcome(
     candidate = document.copy(catalogPin = targetPin, nodes = nodes),
     changes = changes,
     issues = issues,
   )
 }
+
+private fun JsonElement.stringOrNull(): String? = (this as? JsonPrimitive)?.contentOrNull
+
+private fun JsonObject.stringMap(key: String): Map<String, String> =
+  (this[key] as? JsonObject)
+    ?.entries
+    ?.mapNotNull { (from, to) -> to.stringOrNull()?.let { from to it } }
+    ?.toMap()
+    .orEmpty()
 
 private fun nodePath(nodeId: String) = "/nodes/$nodeId"
 
