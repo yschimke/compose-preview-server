@@ -102,14 +102,34 @@ class CatalogSourceFlipTest {
     assertEquals(afterFlip.listCatalogs().single(), resolved)
   }
 
+  /**
+   * The direction this does NOT fix, asserted so the gap is visible rather than assumed away.
+   *
+   * The fix computes the alternate reference from a catalog that is already in the process, and
+   * that only works one way round. The synthesised catalog is generated in Kotlin and always
+   * resident, so a server on the published source can always compute the synthesised reference.
+   * The reverse is not true: `ServeRunner` fetches a catalog's published file only for the ids
+   * `--ui-builder-published-catalogs` names, so a server that has flipped BACK has never seen the
+   * published file and cannot know the reference a design was pinned to.
+   *
+   * Closing it would mean either fetching published files for catalogs deliberately withheld -- a
+   * startup network cost for a source nobody asked to serve -- or persisting a reference history,
+   * which is the state this fix exists to avoid needing. #818's re-pinning is the answer that
+   * makes the question moot, because a design re-pinned while the published source was serving
+   * carries a reference the synthesised server also refuses; the real fix there is re-pinning on
+   * every load, in whichever direction.
+   *
+   * If this test starts failing, the gap has been closed and the assertion should be inverted --
+   * not deleted.
+   */
   @Test
-  fun `a design pinned to the published catalog still resolves after a flip back to synthesised`() {
+  fun `flipping BACK to synthesised still strands a published-pinned design, for now`() {
     val pinnedBeforeFlip = referenceOf(publishedServer())
     val afterFlip = synthesisedServer()
 
-    assertNotNull(
+    assertNull(
       afterFlip.resolve(pinnedBeforeFlip),
-      "reversing the lever strands the work the forward flip created, so it is not reversible",
+      "the reverse direction now resolves -- invert this assertion and update #818",
     )
     assertEquals("synthesised", afterFlip.catalogSources["m3-catalog"])
   }

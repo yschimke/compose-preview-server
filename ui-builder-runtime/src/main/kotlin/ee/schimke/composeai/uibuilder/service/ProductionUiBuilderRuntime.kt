@@ -341,12 +341,20 @@ public class CurrentM3UiBuilderCatalogExecutor(
    * `resolve` returned null, `unusableReason` turned that into `CATALOG_UNAVAILABLE`, and the
    * runtime offered no upgrade path (#796).
    *
-   * "Reversible" has to mean the work survives the reversal, so both sources' references are
-   * accepted for the same `systemId`. No history is kept and nothing is persisted: the catalog the
-   * OTHER source would serve is already in this process -- `synthesisedCatalogs` still holds its
-   * entry while the published one is being served -- so its reference is simply computed. Neither
-   * `withPacks` nor `withBuilderVocabulary` touches `benchmark`, so the value computed here is the
-   * one that catalog would carry if it were the one being served.
+   * Both sources' references are accepted for the same `systemId`. No history is kept and nothing
+   * is persisted: the catalog the OTHER source would serve is already in this process --
+   * `synthesisedCatalogs` still holds its entry while the published one is being served -- so its
+   * reference is simply computed. Neither `withPacks` nor `withBuilderVocabulary` touches
+   * `benchmark`, so the value computed here is the one that catalog would carry if it were the one
+   * being served.
+   *
+   * ONE DIRECTION ONLY, and the asymmetry is in what the process holds rather than in this map.
+   * The synthesised catalog is generated here and always resident, so a server on the published
+   * source can always compute the synthesised reference. `ServeRunner` fetches a published file
+   * only for the ids `--ui-builder-published-catalogs` names, so a server that has flipped BACK
+   * has never seen the published file and cannot know the reference it would have produced.
+   * `CatalogSourceFlipTest` asserts that gap rather than leaving it to be discovered; #818's
+   * re-pinning is what closes it.
    *
    * This does NOT weaken the check that catches a document drifting from its catalog. The accepted
    * set is only ever the references of the SAME catalog id as this build can produce it; a pin
