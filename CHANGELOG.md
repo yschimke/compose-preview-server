@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.30.0](https://github.com/yschimke/compose-preview-server/compare/v3.29.0...v3.30.0) (2026-09-13)
+
+
+### Bug Fixes
+
+* **deps:** update compose-preview-daemon to v3.4.5 ([#843](https://github.com/yschimke/compose-preview-server/issues/843)) ([cc9414e](https://github.com/yschimke/compose-preview-server/commit/cc9414e348c1fc5ba892c76108520cdbfaf3f858))
+* **ui-builder:** let a catalog take a property away without killing the design ([#840](https://github.com/yschimke/compose-preview-server/issues/840)) ([f126ca1](https://github.com/yschimke/compose-preview-server/commit/f126ca10df1b843f18ed6e1a2235b631d52d741f))
+
 ## [3.29.0](https://github.com/yschimke/compose-preview-server/compare/v3.28.0...v3.29.0) (2026-09-13)
 
 
