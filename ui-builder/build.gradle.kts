@@ -1,3 +1,8 @@
+// Imported rather than written out at the use site: in a Kotlin build script `java` resolves to the
+// Java plugin's extension accessor, so a fully qualified `java.net.URLClassLoader` does not
+// compile.
+import java.net.URLClassLoader
+
 plugins {
   alias(libs.plugins.ktfmt)
   alias(libs.plugins.kotlin.multiplatform)
@@ -8,6 +13,78 @@ plugins {
 }
 
 ktfmt { googleStyle() }
+
+/**
+ * Formats one generated file the way `ktfmtCheck` will judge it — which is NOT `ktfmt
+ * --google-style`.
+ *
+ * Both gates resolve ktfmt 0.64 and both say `googleStyle`, so they read as interchangeable. They
+ * are not. `Formatter.GOOGLE_FORMAT`, which the CLI's `--google-style` uses as-is, carries
+ * `preserveLambdaBreaks = true`; `ktfmt-gradle` 0.27.0 builds its options through
+ * `FormattingOptionsBean`, whose six fields do not include that one, so the plugin formats with
+ * ktfmt's default of `false`. A lambda an author broke across lines and that would fit on one is
+ * therefore kept by the CLI and collapsed by the plugin — the same file, two answers, and the
+ * plugin's is the one CI enforces (#822).
+ *
+ * That mattered here because the Jetcaster fixture is formatted by one and checked by the other:
+ * this task's output is compared against
+ * `ui-builder-generated-jetcaster/.../JetcasterDiscoverExpanded.kt`, which `ktfmtCheckAll` holds to
+ * the plugin's formatting. The day `ScreenGenerator` emits such a lambda the two gates would want
+ * different bytes and neither could be satisfied.
+ *
+ * So this reproduces the plugin's options exactly rather than approximating them with a CLI flag —
+ * there is no flag: `--google-style`, `--meta-style` and `--kotlinlang-style` are the only styles
+ * the CLI exposes and none of them is what the plugin does. The numbers below are
+ * `KtfmtExtension.googleStyle()` plus that class's defaults, and the constructor chosen is the same
+ * six-argument one `KtfmtWorkAction.toFormattingOptions` calls, so anything ktfmt adds a default
+ * for lands here the way it lands there.
+ *
+ * ktfmt is loaded from the `ktfmtCli` configuration reflectively, under the platform loader: it
+ * keeps ONE version of ktfmt in the build (the version catalog's) and keeps its Kotlin runtime out
+ * of Gradle's.
+ */
+abstract class FormatLikeKtfmtPlugin : org.gradle.api.DefaultTask() {
+  @get:org.gradle.api.tasks.Classpath
+  abstract val ktfmtClasspath: org.gradle.api.file.ConfigurableFileCollection
+
+  @get:org.gradle.api.tasks.InputFile
+  @get:org.gradle.api.tasks.PathSensitive(org.gradle.api.tasks.PathSensitivity.NONE)
+  abstract val source: org.gradle.api.file.RegularFileProperty
+
+  @org.gradle.api.tasks.TaskAction
+  fun format() {
+    val urls = ktfmtClasspath.files.map { it.toURI().toURL() }.toTypedArray()
+    URLClassLoader(urls, ClassLoader.getPlatformClassLoader()).use { loader ->
+      val strategyClass =
+        loader.loadClass("com.facebook.ktfmt.format.TrailingCommaManagementStrategy")
+      val optionsClass = loader.loadClass("com.facebook.ktfmt.format.FormattingOptions")
+      val int = Int::class.javaPrimitiveType
+      val boolean = Boolean::class.javaPrimitiveType
+      val options =
+        optionsClass
+          .getConstructor(int, int, int, strategyClass, boolean, boolean)
+          .newInstance(
+            // KtfmtExtension.DEFAULT_MAX_WIDTH; googleStyle() leaves it alone.
+            100,
+            // googleStyle(): blockIndent and continuationIndent.
+            2,
+            2,
+            // googleStyle(): TrailingCommaManagementStrategy.COMPLETE.
+            strategyClass.getField("COMPLETE").get(null),
+            // KtfmtExtension.DEFAULT_REMOVE_UNUSED_IMPORTS.
+            true,
+            // KtfmtExtension.DEFAULT_DEBUGGING_PRINT_OPTS.
+            false,
+          )
+      val format =
+        loader
+          .loadClass("com.facebook.ktfmt.format.Formatter")
+          .getMethod("format", optionsClass, String::class.java)
+      val file = source.get().asFile
+      file.writeText(format.invoke(null, options, file.readText()) as String)
+    }
+  }
+}
 
 abstract class VerifyGeneratedSource : org.gradle.api.DefaultTask() {
   @get:org.gradle.api.tasks.InputFile
@@ -304,14 +381,12 @@ val generateJetcasterComposeFixtureForCheck =
   }
 
 val formatJetcasterComposeFixtureForCheck =
-  tasks.register<JavaExec>("formatJetcasterComposeFixtureForCheck") {
+  tasks.register<FormatLikeKtfmtPlugin>("formatJetcasterComposeFixtureForCheck") {
     description = "Format the isolated generated fixture exactly like checked-in Kotlin."
     group = "verification"
     dependsOn(generateJetcasterComposeFixtureForCheck)
-    classpath(ktfmtCli)
-    mainClass.set("com.facebook.ktfmt.cli.Main")
-    args("--google-style", generatedJetcasterCheckFile.get().asFile.absolutePath)
-    inputs.file(generatedJetcasterCheckFile)
+    ktfmtClasspath.from(ktfmtCli)
+    source.set(generatedJetcasterCheckFile)
     outputs.file(generatedJetcasterCheckFile)
   }
 
