@@ -978,7 +978,8 @@ sourceSets.main.get().resources.srcDir(stageRcFontResources)
 // does, so this staging cannot be dropped or renamed without a test saying so.
 val stageFoundationRecord =
   tasks.register<Sync>("stageFoundationRecord") {
-    description = "Stage the builder's own layout/, shape/ and asset/ component record into the jar."
+    description =
+      "Stage the builder's own layout/, shape/ and asset/ component record into the jar."
     from(rootProject.layout.projectDirectory.dir("docs/design/fixtures/ui-builder")) {
       include("compose-foundation-components-v1.json")
       into("ui-builder")

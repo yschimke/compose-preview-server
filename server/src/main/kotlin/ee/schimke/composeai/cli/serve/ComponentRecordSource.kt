@@ -75,16 +75,19 @@ import kotlinx.serialization.json.Json
 internal class ComponentRecordSource(
   private val files: Map<String, File>,
   /**
+   * The builder's own `layout/`, `shape/` and `asset/` components, unioned onto every record this
+   * source returns. Packaged rather than configured: it is the builder's vocabulary, not an
+   * operator's choice. Null leaves every record exactly as its file states it.
+   *
+   * Declared BEFORE [served] so that stays the last parameter: every caller passes it as a trailing
+   * lambda, and a parameter added after it silently re-binds that lambda to this one.
+   */
+  private val foundation: ComponentRecordFile? = FOUNDATION,
+  /**
    * The served catalog's own record for a catalog id, or null where none is served. Consulted only
    * for a catalog [files] does not name.
    */
   private val served: (catalogSystemId: String) -> File? = { null },
-  /**
-   * The builder's own `layout/`, `shape/` and `asset/` components, unioned onto every record this
-   * source returns. Packaged rather than configured: it is the builder's vocabulary, not an
-   * operator's choice. Null leaves every record exactly as its file states it.
-   */
-  private val foundation: ComponentRecordFile? = FOUNDATION,
 ) {
 
   private data class Parsed(val identity: Identity?, val lookup: Lookup)
