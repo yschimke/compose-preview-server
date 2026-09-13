@@ -49,9 +49,7 @@ class ComponentRecordSourceFoundationTest {
 
   private val json = Json { ignoreUnknownKeys = true }
   private val root =
-    Files.createTempDirectory("foundation-records").toFile().also {
-      it.deleteOnExit()
-    }
+    Files.createTempDirectory("foundation-records").toFile().also { it.deleteOnExit() }
 
   private fun file(name: String, body: String): File =
     File(root, "$name/components.json").also {
