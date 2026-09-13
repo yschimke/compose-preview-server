@@ -15399,12 +15399,16 @@ private data class UiBuilderDto(
   val persistenceMigrations: Long,
   val unusableDesigns: Int = 0,
   /**
-   * Stored designs re-pinned to the served catalog reference as they loaded, and why writing that
-   * through failed when it did.
+   * Stored designs re-pinned to the served catalog reference as they loaded, and the CLASS of the
+   * exception that stopped the rewrite being written when one did.
    *
    * Both are how an operator sees whether a source flip has converged on disk. The count is
    * non-zero on the first start after the flip and zero afterwards; a count that stays non-zero, or
-   * a failure string, means the stored files are still on the old pin.
+   * a failure, means the stored files are still on the old pin.
+   *
+   * The exception's message is deliberately not here. This response is unauthenticated on a
+   * `--public` host and the store names the design and the absolute state path in its own messages;
+   * the class name says which layer refused without saying whose design it was.
    */
   val rePinnedDesigns: Int = 0,
   val rePinPersistenceFailure: String? = null,
