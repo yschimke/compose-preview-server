@@ -134,8 +134,14 @@ abstract class EmbedComponentRecord : org.gradle.api.DefaultTask() {
    * [record] with [foundation]'s components appended, as JSON text.
    *
    * Parsed rather than spliced textually: both files are written by hand and a splice assuming
-   * either one's formatting would break the first time somebody reformatted it. `canonicalId` keys
-   * the skip so the concatenation stays idempotent if the two ever do share a component.
+   * either one's formatting would break the first time somebody reformatted it.
+   *
+   * The skip is `ComponentRecordSource.withFoundation`'s, rule for rule — the canonical id AND the
+   * component ids — because this constant and that union describe the same record to two readers.
+   * Keyed on the canonical id alone, a catalog that carried its own `Column` under a canonical id
+   * of its own would keep it on the server and get BOTH here, so the browser's panel would see
+   * `layout/column` claimed twice and refuse an export the server writes happily. The two files
+   * share neither key today; a rule that only holds while that is true is not the rule.
    */
   private fun merged(): String {
     @Suppress("UNCHECKED_CAST")
@@ -145,8 +151,13 @@ abstract class EmbedComponentRecord : org.gradle.api.DefaultTask() {
     @Suppress("UNCHECKED_CAST") val components = base["components"] as List<Map<String, Any?>>
     val taken = components.mapNotNull { it["canonicalId"] as? String }.toSet()
     @Suppress("UNCHECKED_CAST")
+    val claimed = components.flatMap { (it["componentIds"] as? List<String>).orEmpty() }.toSet()
+    @Suppress("UNCHECKED_CAST")
     val added =
-      (extra["components"] as List<Map<String, Any?>>).filterNot { it["canonicalId"] in taken }
+      (extra["components"] as List<Map<String, Any?>>).filterNot { candidate ->
+        candidate["canonicalId"] in taken ||
+          (candidate["componentIds"] as? List<String>).orEmpty().any { it in claimed }
+      }
     base["components"] = components + added
     return groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(base))
   }

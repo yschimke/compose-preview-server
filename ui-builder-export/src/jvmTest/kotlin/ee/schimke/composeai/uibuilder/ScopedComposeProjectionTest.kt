@@ -36,10 +36,12 @@ class ScopedComposeProjectionTest {
    * `compose-foundation-components-v1.json`. The fixture this test projects is mostly layout, so
    * reading the m3 one alone would exercise an export that refuses every node in it.
    *
-   * Concatenated rather than merged by rule: the server's `ComponentRecordSource` owns the real
-   * union (the catalog's own entry wins, by canonical id and by component id) and this module
-   * cannot see it. The two files share no component, which the server-side test asserts, so here
-   * the two spellings agree.
+   * The skip is the server's, rule for rule — `ComponentRecordSource.withFoundation` drops a
+   * foundation entry whose canonical id OR whose component id the catalog already claims, and a
+   * projection judged against a looser record would see an id claimed twice and refuse what the
+   * server writes. This module cannot see that class, so the rule is restated rather than shared;
+   * the two files share neither key today, and a rule that only holds while that is true is not the
+   * rule.
    */
   private val records = Json {
     ignoreUnknownKeys = true
@@ -50,7 +52,13 @@ class ScopedComposeProjectionTest {
           File(root, "docs/design/fixtures/ui-builder/$name").readText()
         )
       val m3 = read("m3-catalog-components-v1.json")
-      m3.copy(components = m3.components + read("compose-foundation-components-v1.json").components)
+      val taken = m3.components.map { it.canonicalId }.toSet()
+      val claimed = m3.components.flatMapTo(mutableSetOf()) { it.componentIds }
+      val extra =
+        read("compose-foundation-components-v1.json").components.filterNot { candidate ->
+          candidate.canonicalId in taken || candidate.componentIds.any { it in claimed }
+        }
+      m3.copy(components = m3.components + extra)
     }
 
   private fun fixture() =
