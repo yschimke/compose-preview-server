@@ -27,6 +27,24 @@ import kotlinx.serialization.json.Json
  * directory — a `File` captured once would be stale or absent. A catalog with neither is
  * [Lookup.Unconfigured], and the export names both ways of fixing that.
  *
+ * ## The foundation vocabulary travels with every record
+ *
+ * A design is mostly `layout/column`, `layout/box` and `asset/image`, and no catalog's record
+ * carries them: `androidx.compose.foundation` publishes one of each rather than one per design
+ * system, and m3-catalog declares no builtins at all on the stated grounds that doing so "would be
+ * this catalog claiming to own the builder's own vocabulary". `composeFoundationCatalog` already
+ * owns that vocabulary on the CAPABILITY side, per platform. This is the record side of the same
+ * ownership: [foundation] is unioned onto whatever record a catalog supplies, so the shelf offering
+ * `layout/column` and the export writing `Column(…)` come from the same place.
+ *
+ * The catalog's own entry wins any collision, and the union runs only over a record that EXISTS — a
+ * catalog with none stays [Lookup.Unconfigured] rather than acquiring an export it was deliberately
+ * kept out of, which is `remote-m3`'s case.
+ *
+ * Local for now, external eventually, for the same reason and on the same issue as the catalog:
+ * when the foundation is published like any other catalog (#819) this loads its record instead of a
+ * packaged one.
+ *
  * ## What this still does not pin
  *
  * A record is **not revision-pinned**. A design pinned to an older catalog revision exports against
@@ -61,6 +79,12 @@ internal class ComponentRecordSource(
    * for a catalog [files] does not name.
    */
   private val served: (catalogSystemId: String) -> File? = { null },
+  /**
+   * The builder's own `layout/`, `shape/` and `asset/` components, unioned onto every record this
+   * source returns. Packaged rather than configured: it is the builder's vocabulary, not an
+   * operator's choice. Null leaves every record exactly as its file states it.
+   */
+  private val foundation: ComponentRecordFile? = FOUNDATION,
 ) {
 
   private data class Parsed(val identity: Identity?, val lookup: Lookup)
@@ -118,7 +142,7 @@ internal class ComponentRecordSource(
       } else {
         runCatching { JSON.decodeFromString<ComponentRecordFile>(path.readText()) }
           .fold(
-            onSuccess = { Lookup.Found(it) },
+            onSuccess = { Lookup.Found(it.withFoundation()) },
             onFailure = {
               System.err.println(
                 "serve: UI-builder component record at $path is not readable: ${it.message}"
@@ -131,6 +155,29 @@ internal class ComponentRecordSource(
     return lookup
   }
 
+  /**
+   * This record plus the foundation components it does not already carry.
+   *
+   * The receiver wins, and "already carries" is asked of the **component ids** as well as the
+   * canonical id. The id is the load-bearing half: two entries claiming `layout/column` are two
+   * components competing for one builder id, which `PublishedUiBuilderCatalog` resolves by record
+   * order and reports as a collision — so a catalog that declares `Column` under a canonical id of
+   * its own still keeps it, which is exactly the shape while the packaged `m3-catalog` record
+   * carries its own copies of these eight.
+   *
+   * The header stays the catalog's: the merged file is still that catalog's record, with a
+   * vocabulary nobody's catalog is expected to declare added to it.
+   */
+  private fun ComponentRecordFile.withFoundation(): ComponentRecordFile {
+    val taken = components.map { it.canonicalId }.toSet()
+    val claimed = components.flatMapTo(mutableSetOf()) { it.componentIds }
+    val extra =
+      foundation?.components.orEmpty().filterNot { candidate ->
+        candidate.canonicalId in taken || candidate.componentIds.any { it in claimed }
+      }
+    return if (extra.isEmpty()) this else copy(components = components + extra)
+  }
+
   private companion object {
     /**
      * Unknown keys are ignored so a record from a **newer** producer still parses. That is not
@@ -139,5 +186,31 @@ internal class ComponentRecordSource(
      * as malformed JSON.
      */
     val JSON = Json { ignoreUnknownKeys = true }
+
+    /** The packaged foundation record, or null where the resource is missing or unreadable. */
+    val FOUNDATION: ComponentRecordFile? by
+      lazy(LazyThreadSafetyMode.PUBLICATION) {
+        val text =
+          ComponentRecordSource::class
+            .java
+            .getResourceAsStream("/ui-builder/$FOUNDATION_RECORD_RESOURCE")
+            ?.use { it.readBytes().decodeToString() }
+        if (text == null) {
+          System.err.println(
+            "serve: packaged $FOUNDATION_RECORD_RESOURCE is missing — layout/, shape/ and asset/ " +
+              "components will have no record and every export using one refuses by name"
+          )
+          return@lazy null
+        }
+        runCatching { JSON.decodeFromString<ComponentRecordFile>(text) }
+          .onFailure {
+            System.err.println(
+              "serve: packaged $FOUNDATION_RECORD_RESOURCE did not parse: ${it.message}"
+            )
+          }
+          .getOrNull()
+      }
+
+    const val FOUNDATION_RECORD_RESOURCE = "compose-foundation-components-v1.json"
   }
 }
