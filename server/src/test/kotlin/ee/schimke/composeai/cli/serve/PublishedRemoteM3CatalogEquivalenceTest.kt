@@ -4,6 +4,7 @@ import ee.schimke.composeai.discovery.ComponentRecord
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_COMPONENT_IDS
 import ee.schimke.composeai.uibuilder.REMOTE_CONTENT_MODIFIERS
+import ee.schimke.composeai.uibuilder.REMOTE_TEXT_COMPONENT_ID
 import ee.schimke.composeai.uibuilder.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.UiBuilderNode
 import ee.schimke.composeai.uibuilder.WearWidgetCodeExporter
@@ -353,9 +354,10 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    * Offered is not usable, and this measures one half of that.
    *
    * `RemoteContentEmitter.emit` is a `when` over component ids with a hand-written function each,
-   * and it knows exactly the ids in [REMOTE_CONTENT_COMPONENT_IDS] — eleven. Not one of the
-   * twenty-five the published catalog adds is among them, which was once the whole answer: a
-   * component you could insert and could not export.
+   * and it knows exactly the ids in [REMOTE_CONTENT_COMPONENT_IDS] — twelve, since
+   * `remote-m3/remote-text` joined them. Not one of the OTHER twenty-five the published catalog
+   * adds is among them, which was once the whole answer: a component you could insert and could not
+   * export.
    *
    * It is no longer the whole answer. The emitter falls back to the component RECORD for a
    * component it has no case for, and twenty-two of the twenty-six now export — measured in
@@ -402,9 +404,15 @@ class PublishedRemoteM3CatalogEquivalenceTest {
    *
    * Asserted as the exact current set rather than as `isEmpty()`, so the day the emitter learns
    * these components this test fails and says to shorten the list. Raised in review on #673.
+   *
+   * That day came for exactly one of them. `remote-m3/remote-text` now goes through the same
+   * hand-written writer as the borrowed `m3/text`, because it is the same `RemoteText` call and the
+   * record fallback could not write its type scale, its size or its alignment — six scalar types is
+   * not a typography. So the list is one shorter, and the exclusion below is the statement that it
+   * was shortened deliberately.
    */
   @Test
-  fun `the emitter has a hand-written case for none of the components the catalog adds`() {
+  fun `the emitter has a hand-written case for one of the components the catalog adds`() {
     val offered = composed.components.map { it.componentId }
     val inexportable =
       offered
@@ -415,10 +423,16 @@ class PublishedRemoteM3CatalogEquivalenceTest {
       offered
         .filter { it.startsWith("remote-m3/") }
         .filterNot { it.startsWith("remote-m3/widget-container-") }
+        .filterNot { it == REMOTE_TEXT_COMPONENT_ID }
         .sorted(),
       inexportable,
       "the set of offered-but-unexportable components has changed — if the emitter grew a case, " +
         "shorten this; if the catalog grew a component, it needs one",
+    )
+    assertTrue(
+      REMOTE_TEXT_COMPONENT_ID in offered &&
+        REMOTE_TEXT_COMPONENT_ID in REMOTE_CONTENT_COMPONENT_IDS,
+      "the one case that was shortened out has to be a component this catalog actually offers",
     )
   }
 
