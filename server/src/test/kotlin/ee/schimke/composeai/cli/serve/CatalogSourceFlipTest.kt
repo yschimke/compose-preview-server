@@ -35,8 +35,12 @@ import kotlinx.serialization.json.Json
  * holds is deployment state — which is exactly why the fix is a property to assert rather than a
  * number to look up.
  *
- * These assert the property in BOTH directions. A cutover that strands work going one way and not
- * the other is not reversible, and reversibility is the whole claim the lever makes.
+ * ONE DIRECTION is fixed, and the other is asserted as the gap it still is. Synthesised-pinned
+ * designs survive the flip to published -- the direction 3.27.0 took every catalog, and the one
+ * stranding work on a box today. The reverse cannot work the same way: the alternate reference is
+ * computed from a catalog already in the process, and a server that has flipped BACK has never
+ * fetched the published file. The lever is documented reversible; the runtime is not yet, and
+ * saying so here is cheaper than the next reader assuming it.
  */
 class CatalogSourceFlipTest {
 
