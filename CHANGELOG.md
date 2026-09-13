@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.28.0](https://github.com/yschimke/compose-preview-server/compare/v3.27.0...v3.28.0) (2026-09-13)
+
+
+### Features
+
+* **ui-builder:** introduce a compose-foundation catalog as the builder-vocabulary donor ([#821](https://github.com/yschimke/compose-preview-server/issues/821)) ([f145ad7](https://github.com/yschimke/compose-preview-server/commit/f145ad768292f7775b4052268c0183d2f13d959f))
+
+
+### Bug Fixes
+
+* **ci:** make the rollout gate check the process it just deployed ([#817](https://github.com/yschimke/compose-preview-server/issues/817)) ([a14d97a](https://github.com/yschimke/compose-preview-server/commit/a14d97acbea47e49370869064863b4f6df2b97c6))
+* **ui-builder:** accept a design pinned to the catalog's other source ([#816](https://github.com/yschimke/compose-preview-server/issues/816)) ([7325af6](https://github.com/yschimke/compose-preview-server/commit/7325af603d74fcf7efe43707d0d0fdfe6e2fb30c))
+* **ui-builder:** declare the namespace parts before the union that reads them ([#824](https://github.com/yschimke/compose-preview-server/issues/824)) ([2fd7487](https://github.com/yschimke/compose-preview-server/commit/2fd74872fa3493ef224e78860c54e40c305b5ca2))
+* **ui-builder:** keep the store's message off status.json, and regenerate the ABI dump ([#833](https://github.com/yschimke/compose-preview-server/issues/833)) ([d7af60b](https://github.com/yschimke/compose-preview-server/commit/d7af60baf0baed417aea604d90dceb7b7a36770a))
+* **ui-builder:** write the catalog re-pin through, so a synthesised source can be retired ([#832](https://github.com/yschimke/compose-preview-server/issues/832)) ([de661d0](https://github.com/yschimke/compose-preview-server/commit/de661d0ad62a2844371a77c3a3125be032fec4a2))
+* unbreak main's visual harness ([#812](https://github.com/yschimke/compose-preview-server/issues/812)), re-pin stored designs ([#818](https://github.com/yschimke/compose-preview-server/issues/818)), make the two ktfmt gates agree ([#822](https://github.com/yschimke/compose-preview-server/issues/822)) ([#828](https://github.com/yschimke/compose-preview-server/issues/828)) ([d5e5bd4](https://github.com/yschimke/compose-preview-server/commit/d5e5bd434b4e1788bc49fc939a11034b9285ba18))
+
 ## [3.27.0](https://github.com/yschimke/compose-preview-server/compare/v3.26.0...v3.27.0) (2026-09-13)
 
 
