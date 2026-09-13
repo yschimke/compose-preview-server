@@ -633,11 +633,15 @@ internal fun ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1.required
     is OpenDesignRequestV1,
     is GetDesignAccessRequestV1,
     is GetSnapshotRequestV1,
+    // A preview writes nothing: it answers what moving a design to another catalog would cost, and
+    // the service admits it on READ access. Classified WRITE while it was a stub that refused every
+    // caller, which made no difference then and would now lock a read-only caller out of the one
+    // answer a design the catalog outgrew can still give.
+    is PreviewCatalogUpgradeRequestV1,
     is GetDeltaRequestV1 -> UiBuilderRouteCapability.READ
     is ExportDesignRequestV1 -> UiBuilderRouteCapability.EXPORT
     is ApplyOperationRequestV1,
     is CreateDesignRequestV1,
-    is PreviewCatalogUpgradeRequestV1,
     is UpdateDesignAccessRequestV1,
     is UpdatePresenceRequestV1 -> UiBuilderRouteCapability.WRITE
   }

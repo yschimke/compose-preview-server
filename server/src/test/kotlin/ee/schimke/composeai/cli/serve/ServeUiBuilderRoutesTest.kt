@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
@@ -17,6 +18,7 @@ import ee.schimke.composeai.uibuilder.protocol.ListDesignsRequestV1
 import ee.schimke.composeai.uibuilder.protocol.PresenceDesignUpdateV1
 import ee.schimke.composeai.uibuilder.protocol.PresenceUpsertV1
 import ee.schimke.composeai.uibuilder.protocol.PresenceV1
+import ee.schimke.composeai.uibuilder.protocol.PreviewCatalogUpgradeRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.UpdatePresenceRequestV1
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
@@ -104,6 +106,23 @@ class ServeUiBuilderRoutesTest {
   fun tearDown() {
     server.stop()
     registry.close()
+  }
+
+  @Test
+  fun `a catalog upgrade preview needs read access, not write`() {
+    // It writes nothing -- it answers what moving a design would cost -- and the designs it exists
+    // for are ones the catalog has already refused. A WRITE classification locked a read-only
+    // caller out of the only answer such a design can still give.
+    assertEquals(
+      UiBuilderRouteCapability.READ,
+      PreviewCatalogUpgradeRequestV1(
+          "design",
+          0,
+          CatalogReferenceV1("m3", "a", "a", "runtime"),
+          CatalogReferenceV1("m3", "b", "b", "runtime"),
+        )
+        .requiredCapability(),
+    )
   }
 
   @Test
