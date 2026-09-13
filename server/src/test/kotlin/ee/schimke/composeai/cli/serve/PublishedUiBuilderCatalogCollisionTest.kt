@@ -204,4 +204,83 @@ class PublishedUiBuilderCatalogCollisionTest {
     val composed = assertIs<PublishedUiBuilderCatalog.Result.Composed>(result)
     assertEquals(listOf("m3/filled"), composed.catalog.components.map { it.componentId })
   }
+
+  /**
+   * A policy stating a record id for every component, under [prefix].
+   *
+   * The canonical id is built from [canonicalIdAt] so the joining case cannot be mis-spelled, with
+   * only the prefix varied — which is exactly the difference between the two files a deployed host
+   * paired, and the only difference this pair of tests is about.
+   */
+  private fun statingRecords(prefix: String, vararg componentIds: String): String {
+    val components =
+      componentIds.withIndex().joinToString(",") { (index, id) ->
+        val leaf = id.substringAfter('/').lowercase()
+        val canonical = prefix + canonicalIdAt(id, index).substringAfter('/')
+        """"m3/$leaf": {"record": "$canonical",
+           "propertyCapabilities": [{"name": "style", "jsonType": "string"}]}"""
+      }
+    return """
+      {
+        "schema": "compose-ui-builder-catalog/v1",
+        "catalog": { "id": "m3-shaped" },
+        "record": { "file": "components.json", "schemaVersion": 1, "components": ${componentIds.size} },
+        "statusSemantics": { "platform": "mobile", "componentIdPrefix": "m3/",
+          "components": { $components } }
+      }
+      """
+      .trimIndent()
+  }
+
+  @Test
+  fun `a published file joined to another catalog's record is refused`() {
+    // The pair a deployed `m3-catalog` host composed: the published file joins on
+    // `catalog/androidx.compose.material3.TextKt.Text` and the record staged into the image
+    // canonicalises the same callable under a different module name. Nothing above catches it —
+    // no id collides, an inventory did arrive, and every component composes under the id a saved
+    // design names it by. What is lost is the VOCABULARY: the policy is never found, so each
+    // component is served the properties derived from its call site, and the ones that travel as a
+    // `Color`, a `Dp` or a `TextStyle` are dropped for want of a JSON type. `m3/text` composed to
+    // `text, softWrap, maxLines, minLines`, and every design that set `style` or `color` on one
+    // opened with `property style is not declared by m3/text`.
+    val result =
+      PublishedUiBuilderCatalog.compose(
+        statingRecords("catalog/", "Button/Filled", "Card/Elevated", "Dialog/Basic"),
+        record("Button/Filled", "Card/Elevated", "Dialog/Basic"),
+        exports,
+      )
+    val unusable = assertIs<PublishedUiBuilderCatalog.Result.Unusable>(result)
+    // Both spellings, because the operator reading this one startup line has to be able to tell
+    // WHICH of the two files is the stale one, and neither half says that on its own.
+    assertTrue("none of the 3 component(s)" in unusable.reason, unusable.reason)
+    assertTrue("catalog/androidx.compose.material3." in unusable.reason, unusable.reason)
+    assertTrue(":m3/androidx.compose.material3." in unusable.reason, unusable.reason)
+    assertTrue("not a pair" in unusable.reason, unusable.reason)
+  }
+
+  @Test
+  fun `the same file joined to its own record keeps the vocabulary the catalog declared`() {
+    // The other half, and the reason the refusal above is worth having: when the join lands, the
+    // property a design was authored against is the one the catalog STATED — `style`, which no
+    // derivation would have produced from a parameter list of none. This arm is what keeps the new
+    // refusal from being a ban on stating records at all.
+    val result =
+      PublishedUiBuilderCatalog.compose(
+        statingRecords(":m3/", "Button/Filled", "Card/Elevated", "Dialog/Basic"),
+        record("Button/Filled", "Card/Elevated", "Dialog/Basic"),
+        exports,
+      )
+    val composed = assertIs<PublishedUiBuilderCatalog.Result.Composed>(result)
+    assertEquals(
+      listOf("m3/basic", "m3/elevated", "m3/filled"),
+      composed.catalog.components.map { it.componentId }.sorted(),
+    )
+    assertEquals(
+      listOf("style"),
+      composed.catalog.components
+        .single { it.componentId == "m3/filled" }
+        .properties
+        .map { it.name },
+    )
+  }
 }

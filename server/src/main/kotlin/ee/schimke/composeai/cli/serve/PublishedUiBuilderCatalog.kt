@@ -264,9 +264,15 @@ internal object PublishedUiBuilderCatalog {
     // where everything left collides: 100 entries, 90 excluded, the remaining 10 all deriving one
     // id is 9 collisions against an allowance of 10 — composed, with a one-component shelf.
     var eligible = 0
+    // How many record components the published file actually recognised. Zero is the
+    // mismatched-pair
+    // case refused below; it is counted here rather than derived afterwards because an excluded
+    // entry joined too, and a file whose every entry is excluded still described this record.
+    var joined = 0
 
     record?.components.orEmpty().forEach { component ->
       val declared = policyByRecordId[component.canonicalId]
+      if (declared != null) joined++
       val policy = declared?.second
       val componentId = declared?.first ?: derivedId(prefix, component)
       val excluded = policy?.excluded
@@ -338,6 +344,38 @@ internal object PublishedUiBuilderCatalog {
       return Result.Unusable(
         "ui-builder.json was generated against a $expected-component record and none is available " +
           "here, so it would compose to its builtins alone"
+      )
+    }
+    // A record arrived, for a different catalog.
+    //
+    // `policyByRecordId` joins on the canonical id the published file states for each component,
+    // and nothing downstream notices when that join finds nothing. Every component falls to
+    // [derivedId] with a null policy, keeps the id a saved design names it by, and is served the
+    // vocabulary DERIVED FROM ITS CALL SITE instead of the one the catalog declared — a shelf of
+    // roughly the right shape, under the right names, offering the wrong properties. None of the
+    // refusals above sees it: nothing collides, an inventory did arrive, and components compose.
+    //
+    // That is what a deployed `m3-catalog` host served. The published file joins on
+    // `catalog/androidx.compose.material3.TextKt.Text`; the record staged into the image
+    // canonicalises the same callable as `m3-catalog/…`. So `m3/text` composed to
+    // `text, softWrap, maxLines, minLines` — every `style`, `color`, `fontWeight` and `weight` a
+    // saved design had been authored against dropped by [ComponentRecordPacks.jsonTypeOf] for want
+    // of a policy to state them — and `m3/surface` and `m3/card` composed to no properties at all.
+    // Every design using them opened with `property style is not declared by m3/text`.
+    //
+    // Refused rather than repaired. Which record a published file describes is the producer's to
+    // state, and matching on a suffix here would make this reader a second opinion about what a
+    // component is called — the drift the stated join exists to prevent. The fallback keeps the
+    // catalog the server synthesises, which still declares the vocabulary those designs use.
+    val stated = semantics.components.values.count { it.record != null }
+    val inventory = record?.components.orEmpty()
+    if (stated > 0 && inventory.isNotEmpty() && joined == 0) {
+      return Result.Unusable(
+        "none of the $stated component(s) ui-builder.json states a record for is in the " +
+          "${inventory.size}-component record supplied here — the file joins on " +
+          "`${policyByRecordId.keys.filterNotNull().min()}` and the record canonicalises its " +
+          "components as `${inventory.minOf { it.canonicalId }}`, so the two are not a pair and " +
+          "every component would be served its call site's vocabulary rather than this catalog's"
       )
     }
 
