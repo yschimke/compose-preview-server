@@ -48,9 +48,22 @@ class UndeclaredPropertyToleranceTest {
     val found = undeclaredProperties(document, catalogDeclaring("text"))
 
     assertEquals(
-      mapOf("degraded" to setOf("tint")),
+      mapOf("degraded" to mapOf("tint" to StringValueV1("#FF0000"))),
       found,
-      "only the undeclared name, only its node",
+      "only the undeclared name, only its node, carrying the value that is tolerated",
+    )
+  }
+
+  @Test
+  fun `a property whose value has moved on is not the one that was tolerated`() {
+    val document = document("d").withNode(node("a", TEXT, mapOf("tint" to "#00FF00")))
+
+    val probe = document.withoutProperties(mapOf("a" to mapOf("tint" to StringValueV1("#FF0000"))))
+
+    assertEquals(
+      setOf("tint"),
+      probe.nodes.getValue("a").properties.keys,
+      "tolerance is for the value the design already held, not for the name",
     )
   }
 
@@ -68,7 +81,7 @@ class UndeclaredPropertyToleranceTest {
         .withNode(node("a", TEXT, mapOf("text" to "hi", "tint" to "#FF0000")))
         .withNode(node("b", TEXT, mapOf("text" to "there", "tint" to "#00FF00")))
 
-    val probe = document.withoutProperties(mapOf("a" to setOf("tint")))
+    val probe = document.withoutProperties(mapOf("a" to mapOf("tint" to StringValueV1("#FF0000"))))
 
     assertEquals(setOf("text"), probe.nodes.getValue("a").properties.keys)
     assertEquals(setOf("text", "tint"), probe.nodes.getValue("b").properties.keys, "untouched")
@@ -124,6 +137,21 @@ class UndeclaredPropertyToleranceTest {
     assertIs<AcceptedOutcomeV1>(
       outcome,
       "a pre-existing undeclared property must not block a write",
+    )
+  }
+
+  @Test
+  fun `REWRITING a tolerated property is refused`() {
+    val root = createTempDirectory("undeclared")
+    create(service(root, declares = listOf("text", "tint")), "widget", withTint = true)
+
+    val narrowed = service(root, declares = listOf("text"))
+    val outcome = applyProperty(narrowed, "widget", "label", "tint", "#00FF00")
+
+    assertIs<RejectedOutcomeV1>(
+      outcome,
+      "the old value is carried, not authored against; a new one is authoring against what the " +
+        "catalog lacks",
     )
   }
 

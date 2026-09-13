@@ -2010,11 +2010,12 @@ public class PersistentUiBuilderService(
     validateTopology(working.document)?.let {
       return rejectedReduction(design, command.operationId, it)
     }
-    // Undeclared properties this design ALREADY carried are tolerated; new ones are not. Stripping
-    // only the pre-existing set from the candidate leaves a freshly written undeclared property in
-    // the probe, where `validate` rejects it as it always has -- nobody gets to author against a
-    // property the catalog does not have. Without this the design would open and then refuse every
-    // edit, which is a worse place to be than plainly unusable.
+    // The undeclared VALUES this design already carried are tolerated; anything else is not.
+    // `withoutProperties` drops a property only where the candidate still holds the stored value,
+    // so both a freshly invented undeclared property and a rewrite of a tolerated one stay in the
+    // probe, where `validate` rejects them as it always has -- nobody gets to author against a
+    // property the catalog does not have, under cover of one it once had. Without this the design
+    // would open and then refuse every edit, which is worse than plainly unusable.
     val tolerated = undeclaredProperties(design.document, catalog)
     catalogs.validate(working.document.withoutProperties(tolerated), catalog)?.let {
       return rejectedReduction(design, command.operationId, it.toRejection())

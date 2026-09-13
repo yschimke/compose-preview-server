@@ -2,6 +2,7 @@ package ee.schimke.composeai.uibuilder.service
 
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.UiValueV1
 
 /**
  * The properties a stored design carries that its catalog no longer declares.
@@ -32,11 +33,21 @@ import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
  *
  * The probe is never stored, never handed to a client, and never exported as the design. It is a
  * question, not a document.
+ *
+ * ## Tolerated by value, not by name
+ *
+ * What is tolerated is the exact value the design already held — never the property name. Keying on
+ * the name alone would let a write rewrite a tolerated property to something new and have the
+ * rewrite stripped from its own validation, so a design would go on authoring against what the
+ * catalog lacks under cover of what it once had. So this carries the stored value, and
+ * [withoutProperties] drops a property only where the document still holds that same value: change
+ * it and it is back in the probe, refused exactly as a newly invented property is. Clearing it
+ * removes the key outright, which is the recovery a designer has without waiting for the catalog.
  */
 internal fun undeclaredProperties(
   document: DesignDocumentV1,
   catalog: CatalogCapabilityV1,
-): Map<String, Set<String>> {
+): Map<String, Map<String, UiValueV1>> {
   val declared = catalog.components.associateBy { it.componentId }
   return buildMap {
     document.nodes.forEach { (nodeId, node) ->
@@ -45,7 +56,7 @@ internal fun undeclaredProperties(
       // — `validate` already separates those two, and guessing here would answer for it.
       val component = declared[node.componentId] ?: return@forEach
       val names = component.properties.mapTo(mutableSetOf()) { it.name }
-      val undeclared = node.properties.keys.filterTo(mutableSetOf()) { it !in names }
+      val undeclared = node.properties.filterKeys { it !in names }
       if (undeclared.isNotEmpty()) put(nodeId, undeclared)
     }
   }
@@ -54,16 +65,22 @@ internal fun undeclaredProperties(
 /**
  * The same document with [drop] removed, for asking a question about it.
  *
+ * A property is dropped only where this document still holds the value [drop] carries for it: a
+ * rewritten value is not the value that was tolerated, and stays in the probe to be refused.
+ *
  * Returns the receiver unchanged when there is nothing to drop, so the common path allocates
  * nothing and the probe is the real document by identity.
  */
-internal fun DesignDocumentV1.withoutProperties(drop: Map<String, Set<String>>): DesignDocumentV1 {
+internal fun DesignDocumentV1.withoutProperties(
+  drop: Map<String, Map<String, UiValueV1>>
+): DesignDocumentV1 {
   if (drop.isEmpty()) return this
   return copy(
     nodes =
       nodes.mapValues { (nodeId, node) ->
-        val names = drop[nodeId] ?: return@mapValues node
-        node.copy(properties = node.properties.filterKeys { it !in names })
+        val tolerated = drop[nodeId] ?: return@mapValues node
+        val kept = node.properties.filterNot { (name, value) -> tolerated[name] == value }
+        if (kept.size == node.properties.size) node else node.copy(properties = kept)
       }
   )
 }
