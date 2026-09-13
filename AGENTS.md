@@ -65,6 +65,37 @@ boundaries.
   minute of the edit. Hand-fixing or re-posting to "correct" them does not work — the next write is
   mangled the same way.
 
+## Running Gradle
+
+Wrap Gradle in [`build-brief`](https://bb.staticvar.dev)
+([`static-var/build-brief`](https://github.com/static-var/build-brief), MIT, a single Go binary with
+no runtime dependencies). It writes every line Gradle emits to a log file and prints only what
+decides the next move — status, failed tasks, failed tests, warnings, build scan URLs, generated
+output paths, artifacts — and passes Gradle's exit code through unchanged, so it is safe anywhere a
+bare `./gradlew` was.
+
+```
+brew install static-var/tap/build-brief      # or: curl -fsSL https://bb.staticvar.dev/install.sh | bash
+build-brief doctor                            # read-only; never runs Gradle
+build-brief ./gradlew check
+```
+
+This repository is a good fit for it: `check` here drags in `ktfmtCheckAll`, `checkKotlinAbi` and the
+`:ui-builder-*` test lanes, and the one line that says which gate rejected you is otherwise buried.
+A failure prints the raw log path — open that when the brief is not enough.
+
+Two local notes. Report-style commands (`tasks`, `help`, `projects`, `dependencies`,
+`dependencyInsight`) keep their full bodies, so dependency debugging is unaffected. `--ci` is opt-in
+per job and never inferred; the workflows here call Gradle directly and none of them depend on the
+reduced form.
+
+The per-command rules live in the managed `build-brief` block at the end of this file;
+`build-brief --install` regenerates it, so edit it there rather than by hand.
+
+Wrapping changes none of the rules above: `ktfmtFormat`, `updateKotlinAbi` and
+`scripts/regenerate-goldens.sh` are still how those artefacts are regenerated, just run through
+`build-brief`.
+
 ## Boundary rules
 
 - Default builds resolve released coordinates from Maven Central. Do not add `mavenLocal()`, a
@@ -157,3 +188,16 @@ and the argument is what makes access you just obtained usable in the session th
 Setting `$COMPOSE_PREVIEW_TOKEN` before the session starts remains the way to skip the flow. A
 server restart drops every grant, so a token that stopped working is asked for again the same way. Designs are private to their owner and collaborators, so a grant reads only
 what its actor has been given an ACL for.
+
+<!-- build-brief:instructions:start -->
+## build-brief
+
+- Prefer `build-brief gradle ...` for PATH Gradle and `build-brief ./gradlew ...` for the project wrapper.
+- For chained shell commands, rewrite each Gradle segment individually, for example `build-brief gradle test && build-brief gradle check`.
+- Use default `build-brief` output for routine Gradle work; it stays intentionally short on clean success cases.
+- Use default `build-brief` output for report-style commands like `tasks`, `help`, `projects`, `dependencies`, and `dependencyInsight`; their report bodies are preserved.
+- Use `build-brief gradle --stacktrace ...` or `build-brief ./gradlew --stacktrace ...` when you need Gradle stack traces.
+- `build-brief` normalizes output-shaping flags like `--quiet`, `--warn`, `--warning-mode ...`, and `--console ...` so its reducer keeps working reliably.
+- Let Gradle daemon reuse happen by default; `build-brief` strips explicit `--daemon` and `--no-daemon` overrides rather than forcing daemon-off behavior.
+- Preserve the raw log path from `build-brief` output when handing build failures to another tool or agent.
+<!-- build-brief:instructions:end -->
