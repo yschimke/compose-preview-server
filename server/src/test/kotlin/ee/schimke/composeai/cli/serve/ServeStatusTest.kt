@@ -268,6 +268,8 @@ class ServeStatusTest {
         timedOutExports = 41,
         activeMutationBuckets = 43,
         persistenceMigrations = 47,
+        rePinnedDesigns = 53,
+        rePinPersistenceFailure = "state volume is read-only",
       )
     val uiBuilder =
       object : UiBuilderServicePort, UiBuilderServiceDiagnosticsSource {
@@ -300,6 +302,14 @@ class ServeStatusTest {
     assertEquals(41, pressure.getValue("timedOutExports").jsonPrimitive.long)
     assertEquals(43, pressure.getValue("activeMutationBuckets").jsonPrimitive.int)
     assertEquals(47, pressure.getValue("persistenceMigrations").jsonPrimitive.long)
+    // How an operator sees that a catalog source flip has not converged on disk. The count alone
+    // is ambiguous — non-zero is normal on the first start after a flip — so the reason travels
+    // with it, and a write that cannot land is the case where it stays non-zero.
+    assertEquals(53, pressure.getValue("rePinnedDesigns").jsonPrimitive.int)
+    assertEquals(
+      "state volume is read-only",
+      pressure.getValue("rePinPersistenceFailure").jsonPrimitive.content,
+    )
     // A storage that bounds nothing reports no ceiling, and the row stays null rather than
     // claiming a measured 0% an alert would then never fire on.
     assertTrue(pressure.getValue("storageMaximumBytes") is JsonNull, body)
