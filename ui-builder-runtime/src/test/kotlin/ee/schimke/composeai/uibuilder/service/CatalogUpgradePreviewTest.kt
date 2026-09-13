@@ -39,12 +39,12 @@ class CatalogUpgradePreviewTest {
       document("d")
         .withNode(
           node("label", "m3/text", mapOf("text" to "Discover Weekly", "color" to "#FFFFFF"))
-            // A size is a NUMBER on both sides -- `fontSizeSp` is `jsonType: number` on the
-            // borrowed component and `fontSize` is one on the published one, because
-            // `ComponentRecordPacks.jsonTypeOf` maps `RemoteTextUnit` that way. Authoring it as a
-            // string would be a design production would refuse before this plan ever ran.
-            .withProperty("label", "fontSizeSp", DecimalValueV1(14.0))
         )
+        // A size is a NUMBER on both sides -- `fontSizeSp` is `jsonType: number` on the borrowed
+        // component and `fontSize` is one on the published one, because
+        // `ComponentRecordPacks.jsonTypeOf` maps `RemoteTextUnit` that way. Authoring it as a
+        // string would be a design production would refuse before this plan ever ran.
+        .withProperty("label", "fontSizeSp", DecimalValueV1(14.0))
 
     val outcome = planCatalogUpgrade(document, remoteM3(), TARGET)
 
