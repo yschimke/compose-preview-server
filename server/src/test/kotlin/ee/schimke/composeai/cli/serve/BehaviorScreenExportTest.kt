@@ -24,12 +24,7 @@ class BehaviorScreenExportTest {
     )
   }
 
-  private val record = Json {
-    ignoreUnknownKeys = true
-  }
-    .decodeFromString<ComponentRecordFile>(
-      File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json").readText()
-    )
+  private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   private fun state(type: StateValueTypeV1, initial: JsonPrimitive) =
     StateVariableV1(

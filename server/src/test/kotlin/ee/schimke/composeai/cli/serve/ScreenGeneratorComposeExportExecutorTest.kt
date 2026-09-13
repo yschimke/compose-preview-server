@@ -1,6 +1,5 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
@@ -69,14 +68,7 @@ class ScreenGeneratorComposeExportExecutorTest {
           )
           .readText()
       )
-    val record =
-      Json.decodeFromString<ComponentRecordFile>(
-        File(
-            root,
-            "docs/design/fixtures/ui-builder/m3-catalog-components-v1.json",
-          )
-          .readText()
-      )
+    val record = ExportRecords.m3Catalog()
     val browser = ScreenExportGate.export(document, record)
     val scopedGeneratorAvailable = runCatching {
       Json.decodeFromString<ee.schimke.composeai.discovery.ScreenDocument>(

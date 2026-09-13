@@ -10,12 +10,10 @@ import ee.schimke.composeai.uibuilder.protocol.FillMaxWidthModifierV1
 import ee.schimke.composeai.uibuilder.protocol.HeightModifierV1
 import ee.schimke.composeai.uibuilder.protocol.MatchParentSizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
-import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -33,10 +31,7 @@ import kotlinx.serialization.json.JsonPrimitive
  */
 class CardContentBoxExportTest {
 
-  private val record: ComponentRecordFile = Json {
-    ignoreUnknownKeys = true
-  }
-    .decodeFromString(File(RECORD).readText())
+  private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   private val executor =
     ScreenGeneratorComposeExportExecutor(
@@ -115,9 +110,5 @@ class CardContentBoxExportTest {
             ),
         ),
     )
-  }
-
-  private companion object {
-    const val RECORD = "../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"
   }
 }

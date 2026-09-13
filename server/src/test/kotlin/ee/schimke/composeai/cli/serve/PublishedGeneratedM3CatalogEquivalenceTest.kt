@@ -878,8 +878,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
    */
   @Test
   fun `the embedded record cannot answer for most of the published shelf`() {
-    val authored =
-      json.decodeFromString<ComponentRecordFile>(fixture("m3-catalog-components-v1.json"))
+    val authored = ExportRecords.m3Catalog()
     val offered = composed.components.filter { it.componentId.startsWith("m3/") }
 
     val unknown =

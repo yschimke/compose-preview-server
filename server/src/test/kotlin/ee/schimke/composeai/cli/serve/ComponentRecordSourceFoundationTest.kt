@@ -21,18 +21,12 @@ import kotlinx.serialization.json.Json
  * catalog claiming to own the builder's own vocabulary". `composeFoundationCatalog` answers that on
  * the CAPABILITY side; this is the record side of the same ownership.
  *
- * They live inside `m3-catalog-components-v1.json` today, which is why the m3 record is the only
- * one an export can use for a layout node, and why that file has to be passed to a host whose
- * catalog has nothing to do with Material 3. Lifting them into a record of their own is what will
- * let a catalog's own DISCOVERED record be the record — the discovered one is strictly richer than
- * the authored subset it stands in for — without taking `Column` away from the exporter.
- *
- * This step packages the foundation record and unions it; it does NOT yet remove the copies from
- * the m3 record, because sixteen call sites across four modules read that file directly and each
- * would have to learn about the second one. So m3-catalog is unchanged by construction — it already
- * claims every `layout/`, `shape/` and `asset/` id, so every foundation entry is skipped for it —
- * and what changes is every OTHER catalog, which had no record for a layout node at all. The last
- * test here pins the two copies together so they cannot drift while the duplication lasts.
+ * They lived inside `m3-catalog-components-v1.json`, which is why the m3 record was the only one an
+ * export could use for a layout node, and why that file had to be passed to a host whose catalog
+ * has nothing to do with Material 3. They are their own record now and the m3 one carries the
+ * twenty-six Material 3 components alone — which is what lets a catalog's own DISCOVERED record
+ * become the record it exports from, the discovered one being strictly richer than the authored
+ * subset it stands in for, without taking `Column` away from the exporter.
  *
  * ## What is asserted, and why each arm is here
  *
@@ -142,41 +136,6 @@ class ComponentRecordSourceFoundationTest {
     val found = assertIs<ComponentRecordSource.Lookup.Found>(source.record("m3-catalog"))
     assertEquals(1, found.record.components.size, "the foundation entry was added alongside")
     assertEquals("CatalogColumn", found.record.components.single().symbol.name)
-  }
-
-  @Test
-  fun `the packaged copies of these eight agree with the m3 record's, field for field`() {
-    // The duplication is temporary and this is what stops it rotting. Until the sixteen direct
-    // readers of `m3-catalog-components-v1.json` learn about the second file, both carry these
-    // eight, and an edit to one of them would change what the server exports without changing what
-    // the browser panel judges — a divergence with no symptom until somebody's generated Kotlin
-    // stops compiling. Compared on everything but `canonicalId`, which is the one field that is
-    // deliberately different: the record they belong to is not m3-catalog's.
-    val fixtures = File("../docs/design/fixtures/ui-builder")
-    val m3 =
-      json.decodeFromString<ComponentRecordFile>(
-        File(fixtures, "m3-catalog-components-v1.json").readText()
-      )
-    val packaged =
-      json.decodeFromString<ComponentRecordFile>(
-        File(fixtures, "compose-foundation-components-v1.json").readText()
-      )
-    val byLeaf = m3.components.associateBy { it.canonicalId.substringAfter('/') }
-    assertTrue(packaged.components.isNotEmpty(), "the foundation fixture declares nothing")
-    for (component in packaged.components) {
-      val leaf = component.canonicalId.substringAfter('/')
-      val twin =
-        assertNotNull(
-          byLeaf[leaf],
-          "$leaf is in the foundation record and no longer in the m3 one — if the copies have " +
-            "been removed, this test has done its job and goes with them",
-        )
-      assertEquals(
-        twin.copy(canonicalId = ""),
-        component.copy(canonicalId = ""),
-        "the two copies of $leaf have drifted",
-      )
-    }
   }
 
   @Test
