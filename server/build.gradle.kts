@@ -279,6 +279,15 @@ abstract class CheckServerDesktopSidecarPackaging : DefaultTask() {
     check((renderer + daemon).none { it.name.startsWith("skiko-awt-runtime-") }) {
       "Portable server distribution contains a host-specific Skiko native"
     }
+    // The `androidx.window` classes the daemon force-delegates to its parent loader. Without this
+    // jar on the sidecar the UI-builder render dies on `NoClassDefFoundError:
+    // androidx/window/core/layout/WindowSizeClass` the first time a design draws a constrained
+    // frame — a 500 from `exportDesign`, visible only in the visual harness (#812). The dependency
+    // that puts it here is transitive-looking and easy to drop; this is what notices.
+    check(renderer.any { it.name.startsWith("window-core-desktop-") }) {
+      "Standalone server distribution lost window-core, which the UI-builder render needs on the " +
+        "daemon parent loader (#812)"
+    }
     listOf("lib-renderer" to renderer, "lib-daemon-desktop" to daemon).forEach { (name, jars) ->
       val duplicates = jars.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
       check(duplicates.isEmpty()) { "$name contains colliding filenames: $duplicates" }
@@ -406,6 +415,30 @@ dependencies {
     "composePreviewDaemonDesktop",
     "ee.schimke.composeai:daemon-desktop:$previewDaemonVersion",
   )
+
+  // `androidx.window` on the renderer sidecar, because the daemon's class loader forces it there.
+  //
+  // `UserClassLoaderHolder.mustDelegateToParent` keys on the PACKAGE and sends every `androidx.`
+  // class to the daemon's parent loader; `ServeBundleDaemon.shouldPrecedeDaemonSidecar` decides
+  // what gets promoted onto that parent by the GROUP, and promotes `androidx.*`,
+  // `org.jetbrains.compose*` and `org.jetbrains.skiko*`. The JetBrains AndroidX ports satisfy
+  // neither half of that pair: `org.jetbrains.androidx.window:window-core` is `androidx.window.*`
+  // by package and `org.jetbrains.androidx.*` by group, so its jar stays in the isolated child
+  // loader while its classes are force-delegated to a parent that has no copy of them. The render
+  // then dies on the first call into it — `NoClassDefFoundError: androidx/window/core/layout/
+  // WindowSizeClass`, surfacing as a 500 from `exportDesign`
+  // ([#812](https://github.com/yschimke/compose-preview-server/issues/812)).
+  //
+  // It is the same group/package mismatch `shouldPrecedeDaemonSidecar` already documents for
+  // `org.jetbrains.compose`, one family further out, and the real fix is that rule learning about
+  // `org.jetbrains.androidx.*` upstream. Until then the sidecar carries the library, which is what
+  // the parent loader needs and what every other force-delegated package already has.
+  //
+  // Nothing here linked `androidx.window` until #788 made the constrained frame draw the real
+  // `SupportingPaneScaffold`: `WindowSizeClass.compute` is the first call the render path makes
+  // into it. `checkServerDesktopSidecarPackaging` fails if this jar stops being packaged, and the
+  // version is pinned beside the one `:ui-builder` resolves — see the catalog entry.
+  add("composePreviewRenderer", libs.androidx.window.core)
 
   // BTA *interfaces only* — the playground compiler references `BtaCompileSession`'s
   // build-tools-api parameter types (`CompilerPlugin`, `KotlinLogger`, `SourcesChanges`) to drive

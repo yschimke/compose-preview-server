@@ -402,6 +402,62 @@ tasks.register<VerifyGeneratedSource>("checkJetcasterComposeFixture") {
   expected.set(generatedJetcasterCheckFile)
 }
 
+/**
+ * Fails when the `androidx.window` the server's renderer sidecar carries is not the one this
+ * module's design render actually links against.
+ *
+ * The sidecar copy exists because the daemon force-delegates `androidx.*` classes to its parent
+ * loader while promoting jars to that parent by GROUP, and the JetBrains port
+ * `org.jetbrains.androidx.window:window-core` matches the package rule but not the group rule —
+ * `server/build.gradle.kts` carries the full explanation and
+ * [#812](https://github.com/yschimke/compose-preview-server/issues/812) the failure it caused.
+ *
+ * The consequence for versions is the part worth a gate. The sidecar sits AHEAD of the bundle's own
+ * dependencies on the parent classpath, so its copy is the one the render links against whatever
+ * the bundle recorded. Pinned here and resolved there, the two can drift the next time the adaptive
+ * artifacts move — and the symptom would be a `NoSuchMethodError` in the middle of a render, on a
+ * lane only the visual harness exercises. Comparing them at build time costs nothing and names the
+ * two numbers.
+ *
+ * Lives in this module because this is where the version is decided: `window-core` arrives under
+ * `compose-material3-adaptive`, and reading it anywhere else would be reading a copy.
+ */
+abstract class CheckWindowSidecarVersion : org.gradle.api.DefaultTask() {
+  @get:org.gradle.api.tasks.Classpath
+  abstract val runtimeClasspath: org.gradle.api.file.ConfigurableFileCollection
+
+  @get:org.gradle.api.tasks.Input abstract val pinned: org.gradle.api.provider.Property<String>
+
+  @org.gradle.api.tasks.TaskAction
+  fun verify() {
+    val prefix = "window-core-desktop-"
+    val jar =
+      runtimeClasspath.files.firstOrNull {
+        it.name.startsWith(prefix) && it.name.endsWith(".jar")
+      }
+        ?: error(
+          "this module no longer resolves $prefix*.jar — if `androidx.window` has left the render " +
+            "path, drop the `androidx-window` catalog entry and the server's sidecar dependency " +
+            "with it (see #812)"
+        )
+    val resolved = jar.name.removePrefix(prefix).removeSuffix(".jar")
+    check(resolved == pinned.get()) {
+      "the renderer sidecar pins androidx.window ${pinned.get()} but this module renders against " +
+        "$resolved; the sidecar copy wins on the daemon's parent loader, so set " +
+        "`androidx-window` in gradle/libs.versions.toml to $resolved (#812)"
+    }
+  }
+}
+
+tasks.register<CheckWindowSidecarVersion>("checkWindowSidecarVersion") {
+  description = "Fail when the server's androidx.window sidecar pin drifts from this module's."
+  group = "verification"
+  runtimeClasspath.from(configurations.named("jvmRuntimeClasspath"))
+  pinned.set(libs.versions.androidx.window)
+}
+
+tasks.named("check") { dependsOn("checkWindowSidecarVersion") }
+
 tasks.register<Sync>("wasmFrontendDist") {
   description = "Assemble the standalone Compose UI builder Wasm fixture."
   group = "distribution"
