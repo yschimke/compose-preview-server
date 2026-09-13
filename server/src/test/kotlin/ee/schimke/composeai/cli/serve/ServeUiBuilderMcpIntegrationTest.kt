@@ -241,8 +241,7 @@ class ServeUiBuilderMcpIntegrationTest {
       UiBuilderBuildFeatures.remoteCompose,
       "Enable with -PuiBuilderRemoteCompose=true",
     )
-    val server =
-      start(recordFile = File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
+    val server = start(recordFile = ExportRecords.m3CatalogFile())
     val initial = document()
     val doc =
       initial.copy(
@@ -308,8 +307,7 @@ class ServeUiBuilderMcpIntegrationTest {
       UiBuilderBuildFeatures.remoteCompose,
       "Enable with -PuiBuilderRemoteCompose=true",
     )
-    val server =
-      start(recordFile = File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
+    val server = start(recordFile = ExportRecords.m3CatalogFile())
     val doc =
       json
         .decodeFromString<DesignDocumentV1>(

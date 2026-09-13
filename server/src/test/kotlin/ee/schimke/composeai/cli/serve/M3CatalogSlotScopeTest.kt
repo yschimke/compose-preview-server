@@ -2,10 +2,8 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
-import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlinx.serialization.json.Json
 
 /**
  * The projection and the record must agree about which receiver a slot's children get.
@@ -32,10 +30,7 @@ import kotlinx.serialization.json.Json
  */
 class M3CatalogSlotScopeTest {
 
-  private val record: ComponentRecordFile = Json {
-    ignoreUnknownKeys = true
-  }
-    .decodeFromString(File(RECORD).readText())
+  private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   /** Every receiver-scoped slot the shipped record attests, by capability id and parameter name. */
   private fun attested(): Map<Pair<String, String>, String> =
@@ -94,9 +89,5 @@ class M3CatalogSlotScopeTest {
     // not carry composes its children under a receiver it never learned about, so every `weight`
     // inside refuses as though the node were at the root — which reads like a missing feature.
     assertEquals(attested(), claimed())
-  }
-
-  private companion object {
-    const val RECORD = "../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"
   }
 }

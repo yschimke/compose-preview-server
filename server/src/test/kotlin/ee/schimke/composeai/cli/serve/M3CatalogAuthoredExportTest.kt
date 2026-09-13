@@ -70,7 +70,7 @@ class M3CatalogAuthoredExportTest {
 
   private val json = Json { ignoreUnknownKeys = true }
 
-  private val record: ComponentRecordFile = json.decodeFromString(File(RECORD).readText())
+  private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   private val catalog =
     CatalogCapabilityV1(
@@ -390,7 +390,6 @@ class M3CatalogAuthoredExportTest {
       }
 
   private companion object {
-    const val RECORD = "../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"
     const val CAPABILITIES = "../docs/design/fixtures/ui-builder/m3-catalog-capabilities-v1.json"
   }
 }

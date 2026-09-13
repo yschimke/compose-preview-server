@@ -26,7 +26,6 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -46,10 +45,7 @@ import kotlinx.serialization.json.JsonPrimitive
  */
 class OrdinaryScreenExportTest {
 
-  private val record: ComponentRecordFile = Json {
-    ignoreUnknownKeys = true
-  }
-    .decodeFromString(File(RECORD).readText())
+  private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   private val catalog =
     CatalogCapabilityV1(
@@ -586,9 +582,5 @@ class OrdinaryScreenExportTest {
       .also(File::mkdirs)
       .resolve("OrdinaryScreen.kt")
       .writeText(source)
-  }
-
-  private companion object {
-    const val RECORD = "../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"
   }
 }

@@ -6,11 +6,9 @@ import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.EnumValueV1
 import ee.schimke.composeai.uibuilder.protocol.StateValueV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
-import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.Json
 
 /**
  * Enum values, and what a refusal list is allowed to leave out.
@@ -29,12 +27,7 @@ import kotlinx.serialization.json.Json
  */
 class UiBuilderEnumExportTest {
 
-  private val record: ComponentRecordFile = Json {
-    ignoreUnknownKeys = true
-  }
-    .decodeFromString(
-      File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json").readText()
-    )
+  private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   private fun document(roots: List<String>, nodes: Map<String, DesignNodeV1>) =
     ScreenGeneratorScreenFixture.document().copy(roots = roots, nodes = nodes)

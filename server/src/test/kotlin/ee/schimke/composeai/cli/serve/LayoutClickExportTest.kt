@@ -18,10 +18,7 @@ class LayoutClickExportTest {
   }
 
   private val json = Json { ignoreUnknownKeys = true }
-  private val record =
-    json.decodeFromString<ComponentRecordFile>(
-      File("../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json").readText()
-    )
+  private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   private fun document() =
     json

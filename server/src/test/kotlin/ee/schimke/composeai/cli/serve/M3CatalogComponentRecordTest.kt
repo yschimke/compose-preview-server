@@ -112,7 +112,7 @@ class M3CatalogComponentRecordTest {
       exportCapabilities = ExportCapabilitiesV1(composeCode = true, svg = false, png = false),
     )
 
-  private val record: ComponentRecordFile = json.decodeFromString(File(RECORD).readText())
+  private val record: ComponentRecordFile = ExportRecords.m3Catalog()
 
   /** Capability ids the record deliberately does not cover yet, each with the reason. */
   private val uncovered =
@@ -373,7 +373,6 @@ class M3CatalogComponentRecordTest {
   }
 
   private companion object {
-    const val RECORD = "../docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"
     const val CAPABILITIES = "../docs/design/fixtures/ui-builder/m3-catalog-capabilities-v1.json"
   }
 }
