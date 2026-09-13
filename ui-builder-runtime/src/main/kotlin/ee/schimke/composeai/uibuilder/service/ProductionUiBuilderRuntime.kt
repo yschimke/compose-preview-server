@@ -146,11 +146,19 @@ public class CurrentM3UiBuilderCatalogExecutor(
    * uses one is guaranteed to fail export — a palette entry that cannot be exported is worse than a
    * missing one, because it is only discovered at the end.
    *
-   * Keyed by PLATFORM, which is the axis the curation was always along; the synthesised catalogs
-   * used to be the donors and this hop used to try their ids first. That first hop is gone on
-   * purpose — a catalog whose id happens to be `wear-m3` while declaring `platform: mobile` now
-   * gets the mobile vocabulary, which is the one its exporter can write. An unknown platform falls
-   * back to mobile, as it did when it fell back to the packaged catalog.
+   * Keyed by PLATFORM, which is the axis the curation was always along -- the synthesised catalogs
+   * used to be the donors and this hop tried their ids first.
+   *
+   * [platformFor] keeps that id hop for the one case where dropping it would change an answer: a
+   * published catalog that declares NO platform. Such a catalog is mobile everywhere else in the
+   * system, because that is what [platform] defaults to, but the old chain handed a published
+   * `wear-m3` the Wear vocabulary off its id alone, and `WearM3ScreenCatalogTest` pins that. The
+   * hop goes when `synthesisedCatalogs` does (#819 step 3), and that is a change to review on its
+   * own rather than a side effect of this one.
+   *
+   * What is NOT kept is the id winning over a platform the catalog DID declare. A catalog saying
+   * `platform: mobile` under any id now gets the mobile vocabulary, which is the one its exporter
+   * can write, and which every other reader of `statusSemantics.platform` already assumed.
    *
    * Built once, at construction, for the platforms this deployment actually publishes something for
    * -- `donorFor` is only reached from `withBuilderVocabulary`, which runs over `published` while
@@ -158,16 +166,18 @@ public class CurrentM3UiBuilderCatalogExecutor(
    * later caller outside that loop gets a donor rather than an exception.
    */
   private val composeFoundation: Map<String, CatalogCapabilityV1> =
-    published.values
-      .map { it.platform }
-      .distinct()
-      .associateWith {
-        composeFoundationCatalog(baseCatalog, it)
-      }
+    published.values.map(::platformFor).distinct().associateWith {
+      composeFoundationCatalog(baseCatalog, it)
+    }
+
+  private fun platformFor(catalog: CatalogCapabilityV1): String =
+    catalog.declaredPlatform
+      ?: synthesisedCatalogs[catalog.benchmark.catalogSystemId]?.platform
+      ?: DEFAULT_PLATFORM
 
   private fun donorFor(catalog: CatalogCapabilityV1): CatalogCapabilityV1 =
-    composeFoundation.getOrElse(catalog.platform) {
-      composeFoundationCatalog(baseCatalog, catalog.platform)
+    platformFor(catalog).let { platform ->
+      composeFoundation.getOrElse(platform) { composeFoundationCatalog(baseCatalog, platform) }
     }
 
   /**
@@ -959,13 +969,23 @@ internal const val WEAR_FOUNDATION_NOTE: String =
 
 /** The platform word a catalog declares, or the default for one that says nothing. */
 internal val CatalogCapabilityV1.platform: String
+  get() = declaredPlatform ?: CurrentM3UiBuilderCatalogExecutor.DEFAULT_PLATFORM
+
+/**
+ * The platform word a catalog declares, or null when it declares none.
+ *
+ * Separated from [platform] because the difference matters in exactly one place: choosing a catalog
+ * a published one borrows its builder vocabulary from. "Says mobile" and "says nothing" are the
+ * same answer everywhere else, and must not be here -- see `donorFor`.
+ */
+internal val CatalogCapabilityV1.declaredPlatform: String?
   get() =
     statusSemantics[CurrentM3UiBuilderCatalogExecutor.PLATFORM_KEY]
       ?.let { it as? JsonPrimitive }
       ?.contentOrNull
       ?.trim()
       ?.lowercase()
-      ?.takeIf(String::isNotEmpty) ?: CurrentM3UiBuilderCatalogExecutor.DEFAULT_PLATFORM
+      ?.takeIf(String::isNotEmpty)
 
 /**
  * This catalog with [packs] merged in, or itself when there are none.

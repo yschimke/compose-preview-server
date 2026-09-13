@@ -1,6 +1,11 @@
 package ee.schimke.composeai.uibuilder.service
 
+import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
+import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
+import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -197,6 +202,84 @@ class ComposeFoundationFaithfulnessTest {
       composeFoundationCatalog(base, "tv").components,
     )
   }
+
+  /**
+   * The one answer this change deliberately moves, pinned so it is a decision rather than a drift.
+   *
+   * The old chain picked a donor by catalog ID first, so a published catalog was handed the Wear
+   * vocabulary whenever its id was `wear-m3` -- even while declaring itself mobile, and even though
+   * `UiBuilderPreviewSurfaces` and `ComponentMenu` both read the declared platform and would have
+   * treated the same catalog as mobile. Now the declared platform wins, so the palette agrees with
+   * the exporter that has to write it.
+   *
+   * The id is still consulted when a catalog declares NO platform, which is what
+   * `WearM3ScreenCatalogTest."a published catalog wins over the synthesised one of the same id"`
+   * exercises; that hop goes with `synthesisedCatalogs` at #819 step 3.
+   */
+  @Test
+  fun `a declared platform beats the id, and no declaration still falls back to it`() {
+    val wearVocabulary =
+      synthesised(CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID).donated().map {
+        it.componentId
+      }
+
+    fun vocabularyOf(catalog: CatalogCapabilityV1) =
+      CurrentM3UiBuilderCatalogExecutor(
+          catalogSystemIds =
+            linkedSetOf(CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID),
+          published = mapOf(CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID to catalog),
+        )
+        .listCatalogs()
+        .single()
+        .donated()
+        .map { it.componentId }
+
+    assertEquals(
+      wearVocabulary.toSortedSet(),
+      vocabularyOf(stub()).toSortedSet(),
+      "a published catalog that declares no platform stopped falling back to its id",
+    )
+    assertEquals(
+      foundationFor(synthesised(DEFAULT_CATALOG_SYSTEM_ID))
+        .components
+        .map { it.componentId }
+        .toSortedSet(),
+      vocabularyOf(stub(platform = "mobile")).toSortedSet(),
+      "the catalog's own declaration lost to its id",
+    )
+  }
+
+  /** The smallest thing that is a catalog, under the Wear id, optionally declaring a platform. */
+  private fun stub(platform: String? = null) =
+    CatalogCapabilityV1(
+      schema = "compose-catalog-capabilities/v1",
+      benchmark =
+        CatalogBenchmarkV1(
+          catalogRevision = "sha256:stub",
+          sourceRevision = "ui-builder.json",
+          catalogSystemId = CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID,
+          nativeRuntimeId = "candidate",
+          id = CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID,
+        ),
+      components =
+        listOf(
+          ComponentCapabilityV1(
+            componentId = "stub/only",
+            displayName = "Only",
+            role = "Leaf",
+            wasm =
+              WasmCapabilityV1(
+                platformSupported = JsonPrimitive(false),
+                adapterStatus = WasmAdapterStatusV1.UNSUPPORTED,
+              ),
+          )
+        ),
+      statusSemantics =
+        platform?.let {
+          JsonObject(mapOf(CurrentM3UiBuilderCatalogExecutor.PLATFORM_KEY to JsonPrimitive(it)))
+        } ?: JsonObject(emptyMap()),
+      exportCapabilities = ExportCapabilitiesV1(composeCode = false, svg = false, png = false),
+    )
 
   /**
    * The two things `withBuilderVocabulary` reads out of a donor's `componentMenu`, spelled here.
