@@ -240,7 +240,15 @@ internal fun planCatalogUpgrade(
           changes += AddCatalogUpgradeChangeV1(slotPath(nodeId, to), children.encoded())
         }
       }
-      node.copy(properties = properties, modifiers = modifiers, slots = slots)
+      // `componentId` included, and it is the whole point of the move: without it the plan
+      // reported a rename it never made, the candidate still named the component the target does
+      // not declare, and every preview came back BLOCKED for the rename it had just described.
+      node.copy(
+        componentId = componentId,
+        properties = properties,
+        modifiers = modifiers,
+        slots = slots,
+      )
     }
   changes +=
     ReplaceCatalogUpgradeChangeV1("/catalogPin", document.catalogPin.encoded(), targetPin.encoded())
