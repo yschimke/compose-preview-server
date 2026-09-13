@@ -39,7 +39,7 @@ compose-material3-adaptive = "1.2.0"
 # the sidecar copy is the one the render links against, so a higher one here would silently swap the
 # library out from under the bundle. `:ui-builder:checkWindowSidecarVersion` fails the build if the
 # two ever disagree rather than leaving it to a `NoSuchMethodError` mid-render.
-androidx-window = "1.4.0"
+androidx-window = "1.5.1"
 material-icons-extended = "1.7.3"
 graphics-shapes = "1.1.0"
 # One ref for every compose-ai-tools coordinate, and for the Gradle plugin id it also drives.
