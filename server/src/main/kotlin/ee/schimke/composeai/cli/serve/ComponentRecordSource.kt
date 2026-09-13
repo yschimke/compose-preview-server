@@ -39,7 +39,8 @@ import kotlinx.serialization.json.Json
  *
  * The catalog's own entry wins any collision, and the union runs only over a record that EXISTS — a
  * catalog with none stays [Lookup.Unconfigured] rather than acquiring an export it was deliberately
- * kept out of, which is `remote-m3`'s case.
+ * kept out of, which is the Remote Compose catalog's case: it has no record on purpose, because
+ * Remote Compose is not written by the Compose exporter.
  *
  * Local for now, external eventually, for the same reason and on the same issue as the catalog:
  * when the foundation is published like any other catalog (#819) this loads its record instead of a

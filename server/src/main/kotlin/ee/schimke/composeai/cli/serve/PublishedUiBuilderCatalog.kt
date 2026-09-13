@@ -280,7 +280,7 @@ internal object PublishedUiBuilderCatalog {
       // `ProductionUiBuilderRuntime.withBuilderVocabulary`, which unions the builder's own
       // `layout/`, `shape/` and `asset/` components into every published catalog. Left in this
       // loop, the same component ALSO derives `<prefix>column` here — so the palette offers
-      // `layout/column` and `wear-m3/column` side by side, a design can be saved against the
+      // `layout/column` and `<prefix>column` side by side, a design can be saved against the
       // second, and the second vanishes the day the record stops carrying it.
       //
       // Only where the policy says nothing. A catalog that deliberately publishes a component
