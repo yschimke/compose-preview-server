@@ -348,11 +348,11 @@ public class CurrentM3UiBuilderCatalogExecutor(
    * `benchmark`, so the value computed here is the one that catalog would carry if it were the one
    * being served.
    *
-   * ONE DIRECTION ONLY, and the asymmetry is in what the process holds rather than in this map.
-   * The synthesised catalog is generated here and always resident, so a server on the published
-   * source can always compute the synthesised reference. `ServeRunner` fetches a published file
-   * only for the ids `--ui-builder-published-catalogs` names, so a server that has flipped BACK
-   * has never seen the published file and cannot know the reference it would have produced.
+   * ONE DIRECTION ONLY, and the asymmetry is in what the process holds rather than in this map. The
+   * synthesised catalog is generated here and always resident, so a server on the published source
+   * can always compute the synthesised reference. `ServeRunner` fetches a published file only for
+   * the ids `--ui-builder-published-catalogs` names, so a server that has flipped BACK has never
+   * seen the published file and cannot know the reference it would have produced.
    * `CatalogSourceFlipTest` asserts that gap rather than leaving it to be discovered; #818's
    * re-pinning is what closes it.
    *
