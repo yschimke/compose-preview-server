@@ -269,7 +269,7 @@ class ServeStatusTest {
         activeMutationBuckets = 43,
         persistenceMigrations = 47,
         rePinnedDesigns = 53,
-        rePinPersistenceFailure = "state volume is read-only",
+        rePinPersistenceFailure = "UiBuilderPersistenceException",
       )
     val uiBuilder =
       object : UiBuilderServicePort, UiBuilderServiceDiagnosticsSource {
@@ -307,7 +307,7 @@ class ServeStatusTest {
     // with it, and a write that cannot land is the case where it stays non-zero.
     assertEquals(53, pressure.getValue("rePinnedDesigns").jsonPrimitive.int)
     assertEquals(
-      "state volume is read-only",
+      "UiBuilderPersistenceException",
       pressure.getValue("rePinPersistenceFailure").jsonPrimitive.content,
     )
     // A storage that bounds nothing reports no ceiling, and the row stays null rather than
