@@ -11,6 +11,7 @@ import ee.schimke.composeai.uibuilder.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -40,6 +41,34 @@ class ComponentRecordPacksTest {
       derived.skipped,
     )
   }
+
+  @Test
+  fun `a Remote text size is a number property, and an unmapped type is still none`() {
+    // Left out, a published Remote Compose text component offered `text`, `color` and `maxLines`
+    // out of twelve parameters, so a design moving onto it lost the size it was authored with.
+    // `RemoteContentEmitter` writes it as `<Int>.rsp` and refuses a fractional one by name.
+    assertEquals(
+      "number",
+      ComponentRecordPacks.jsonTypeOf(
+        parameter("fontSize", "androidx.compose.remote.creation.compose.state.RemoteTextUnit")
+      ),
+    )
+    assertNull(
+      ComponentRecordPacks.jsonTypeOf(
+        parameter("style", "androidx.compose.remote.creation.compose.text.RemoteTextStyle")
+      ),
+      "a type with no JSON form is not a property; declaring one would be authorable and " +
+        "unexportable",
+    )
+  }
+
+  private fun parameter(name: String, typeFqn: String) =
+    TargetParameter(
+      name = name,
+      type = typeFqn.substringAfterLast('.'),
+      typeFqn = typeFqn,
+      hasDefault = true,
+    )
 
   @Test
   fun `a component's literal parameters are its properties and its lambdas are its slots`() {
