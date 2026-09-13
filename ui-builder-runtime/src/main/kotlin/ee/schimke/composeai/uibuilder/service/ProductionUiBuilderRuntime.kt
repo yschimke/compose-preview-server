@@ -934,6 +934,29 @@ internal val REMOTE_COMPOSE_BORROWED_AS_THEMSELVES =
     REMOTE_COMPOSE_CUSTOM_COMPONENT_ID,
   )
 
+/**
+ * The note a borrowed foundation component carries on a Wear palette.
+ *
+ * It says the opposite of what a borrowed MATERIAL component's note said. A borrowed Material
+ * component was a stand-in drawn by the wrong library's lookalike; Box, Column, Row and Image are
+ * the same declarations on both platforms, so there is nothing to stand in for.
+ *
+ * Shared between `wearM3Catalog` and [composeFoundationCatalog] rather than written out twice. The
+ * two have to agree exactly — `ComposeFoundationFaithfulnessTest` compares the components they
+ * donate field for field — and one constant cannot drift the way a copied string can.
+ *
+ * It lives in THIS file rather than beside the foundation because it names a catalog, and
+ * `.github/scripts/ui-builder-catalog-literals.sh` holds that name to the files that already
+ * carried one; a new file may not add one. When `wearM3Catalog` goes (#819 step 3) this constant
+ * goes with it, and the note then has to say the same thing without naming a catalog — or move into
+ * the published catalog's own data, which is where the contract puts it.
+ */
+internal const val WEAR_FOUNDATION_NOTE: String =
+  "Foundation, shared by Compose on both platforms — `androidx.compose.foundation` " +
+    "and `androidx.compose.ui` publish one of these, not two. It is the real " +
+    "component rather than a stand-in, which is why `wear-m3` borrows it and borrows " +
+    "no Material component at all."
+
 /** The platform word a catalog declares, or the default for one that says nothing. */
 internal val CatalogCapabilityV1.platform: String
   get() =
@@ -2321,17 +2344,7 @@ private fun wearM3Catalog(base: CatalogCapabilityV1): CatalogCapabilityV1 {
       // the same declarations on both platforms, which is the whole reason these are the only ones
       // left.
       if (component.componentId in REMOTE_COMPOSE_BORROWED_AS_THEMSELVES) component
-      else
-        component.copy(
-          wasm =
-            component.wasm.copy(
-              notes =
-                "Foundation, shared by Compose on both platforms — `androidx.compose.foundation` " +
-                  "and `androidx.compose.ui` publish one of these, not two. It is the real " +
-                  "component rather than a stand-in, which is why `wear-m3` borrows it and borrows " +
-                  "no Material component at all."
-            )
-        )
+      else component.copy(wasm = component.wasm.copy(notes = WEAR_FOUNDATION_NOTE))
     }
 
   return base.copy(

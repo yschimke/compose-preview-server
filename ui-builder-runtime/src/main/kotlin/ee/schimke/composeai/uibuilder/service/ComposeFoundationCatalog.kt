@@ -19,8 +19,8 @@ import kotlinx.serialization.json.JsonPrimitive
  * packaged Material 3 catalog because that is where the components are currently declared. The
  * intent of [#819](https://github.com/yschimke/compose-preview-server/issues/819) is that this
  * becomes a catalog published like any other, at which point this file loads a file instead of
- * building a list — and the synthesised `remote-m3` and `wear-m3` generators, whose only remaining
- * job is to be this donor, can go.
+ * building a list — and the two synthesised per-platform generators, whose only remaining job is to
+ * be this donor, can go.
  *
  * ## Why the set is per platform rather than one list
  *
@@ -98,24 +98,12 @@ private val FOUNDATION_CURATIONS =
             REMOTE_COMPOSE_INLINE_COMPONENT_ID,
             REMOTE_COMPOSE_CUSTOM_COMPONENT_ID,
           ),
-        // The note says the opposite of what a borrowed MATERIAL component's note said. A
-        // borrowed Material component was a stand-in drawn by the wrong library's lookalike;
-        // Box, Column, Row and Image are the same declarations on both platforms, so there is
-        // nothing to stand in for. The Remote Compose seams are already themselves and keep
-        // their own note.
+        // The Remote Compose seams are already themselves and keep their own note; everything
+        // else takes [WEAR_FOUNDATION_NOTE], which the generator this replaces still shares, so
+        // the two cannot drift apart while both exist.
         curate = { component ->
           if (component.componentId in REMOTE_COMPOSE_BORROWED_AS_THEMSELVES) component
-          else
-            component.copy(
-              wasm =
-                component.wasm.copy(
-                  notes =
-                    "Foundation, shared by Compose on both platforms — `androidx.compose.foundation` " +
-                      "and `androidx.compose.ui` publish one of these, not two. It is the real " +
-                      "component rather than a stand-in, which is why `wear-m3` borrows it and borrows " +
-                      "no Material component at all."
-                )
-            )
+          else component.copy(wasm = component.wasm.copy(notes = WEAR_FOUNDATION_NOTE))
         },
         menu = { wearComponentMenu() },
       ),
