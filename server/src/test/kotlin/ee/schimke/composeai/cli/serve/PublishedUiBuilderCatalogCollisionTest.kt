@@ -205,6 +205,79 @@ class PublishedUiBuilderCatalogCollisionTest {
     assertEquals(listOf("m3/filled"), composed.catalog.components.map { it.componentId })
   }
 
+  /** A record entry claiming [componentIds], with the canonical id spelled out. */
+  private fun entry(canonicalId: String, name: String, vararg componentIds: String) =
+    """
+    {
+      "canonicalId": "$canonicalId",
+      "componentIds": [${componentIds.joinToString(",") { "\"$it\"" }}],
+      "symbol": {
+        "name": "$name",
+        "callable": "androidx.compose.foundation.layout.$name",
+        "jvmOwner": "androidx.compose.foundation.layout.${name}Kt",
+        "origin": "LIBRARY"
+      },
+      "parameters": [],
+      "slots": [],
+      "code": { "imports": [] }
+    }
+    """
+      .trimIndent()
+
+  private fun recordOf(vararg entries: String): ComponentRecordFile = Json {
+    ignoreUnknownKeys = true
+  }
+    .decodeFromString(
+      """{"schemaVersion":1,"module":":m3","variant":"debug","components":[${entries.joinToString(",")}]}"""
+    )
+
+  @Test
+  fun `a record entry answering only to the builder's own namespaces is not this catalog's`() {
+    // `layout/column` is `androidx.compose.foundation`'s. The shelf gets it from
+    // `withBuilderVocabulary`, which unions the builder's own components into every published
+    // catalog — so deriving `m3/column` here as well would offer the same component twice under
+    // two ids, and a design saved against the derived one breaks when the record stops carrying
+    // it. `ComponentRecordSource` unions a packaged foundation record onto every catalog's, which
+    // is what puts these entries in front of this loop for catalogs that never had them.
+    val result =
+      PublishedUiBuilderCatalog.compose(
+        published(expected = 3),
+        recordOf(
+          entry("cf/l.Kt.Column", "Column", "layout/column"),
+          entry("cf/l.Kt.Box", "Box", "layout/box", "shape/colour-dot"),
+          entry("m3/b.Kt.Badge", "Badge", "Badge/Number"),
+        ),
+        exports,
+      )
+    val composed = assertIs<PublishedUiBuilderCatalog.Result.Composed>(result)
+    assertEquals(
+      listOf("m3/number"),
+      composed.catalog.components.map { it.componentId },
+      "a foundation entry was published under this catalog's prefix",
+    )
+    // Not counted as skipped either: it never competed for an id on this shelf, and putting eight
+    // of them in the startup note on every catalog would bury the skips that mean something.
+    assertTrue("skipped" !in composed.note, composed.note)
+  }
+
+  @Test
+  fun `an entry claiming no id at all is still reached, and still composed`() {
+    // The empty-`componentIds` case the filter must not swallow: `ElevatedCard` and `OutlinedCard`
+    // claim none deliberately — the catalog spells all three cards `m3/card` and picks by
+    // `variant`, and `ScreenDocumentProjection` selects them by canonical id. `all {}` over an
+    // empty list is true, so a filter without the emptiness guard would drop exactly these.
+    val result =
+      PublishedUiBuilderCatalog.compose(
+        published(expected = 1),
+        recordOf(entry("m3/c.Kt.ElevatedCard", "ElevatedCard")),
+        exports,
+      )
+    val composed = assertIs<PublishedUiBuilderCatalog.Result.Composed>(result)
+    // `derivedId` falls back to the symbol's own name where there is no component id to take a
+    // leaf from, and `slug` splits it: `ElevatedCard` is `elevated-card`.
+    assertEquals(listOf("m3/elevated-card"), composed.catalog.components.map { it.componentId })
+  }
+
   /**
    * A policy stating a record id for every component, under [prefix].
    *

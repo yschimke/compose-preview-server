@@ -968,3 +968,23 @@ val stageRcFontResources =
   }
 
 sourceSets.main.get().resources.srcDir(stageRcFontResources)
+
+// STAGED, not committed a second time, for the same reason as the faces above: the fixture is the
+// one a test reads and the one the jar carries, so "the foundation record the export generates
+// from" cannot become two files. `ComponentRecordSource` unions it onto every catalog's record —
+// the record side of the vocabulary `composeFoundationCatalog` already owns on the capability side
+// — so it is packaged rather than passed with a flag: it is the builder's own, not an operator's
+// choice. `ComponentRecordSourceFoundationTest` loads it by the same resource path the source
+// does, so this staging cannot be dropped or renamed without a test saying so.
+val stageFoundationRecord =
+  tasks.register<Sync>("stageFoundationRecord") {
+    description =
+      "Stage the builder's own layout/, shape/ and asset/ component record into the jar."
+    from(rootProject.layout.projectDirectory.dir("docs/design/fixtures/ui-builder")) {
+      include("compose-foundation-components-v1.json")
+      into("ui-builder")
+    }
+    into(layout.buildDirectory.dir("generated/foundation-record-resources"))
+  }
+
+sourceSets.main.get().resources.srcDir(stageFoundationRecord)

@@ -273,6 +273,24 @@ internal object PublishedUiBuilderCatalog {
     record?.components.orEmpty().forEach { component ->
       val declared = policyByRecordId[component.canonicalId]
       if (declared != null) joined++
+      // A record entry answering ONLY to the builder's own namespaces is not this catalog's
+      // component, and deriving an id for it publishes a second, wrong one.
+      //
+      // `layout/column` is `androidx.compose.foundation`'s, and the shelf gets it from
+      // `ProductionUiBuilderRuntime.withBuilderVocabulary`, which unions the builder's own
+      // `layout/`, `shape/` and `asset/` components into every published catalog. Left in this
+      // loop, the same component ALSO derives `<prefix>column` here — so the palette offers
+      // `layout/column` and `<prefix>column` side by side, a design can be saved against the
+      // second, and the second vanishes the day the record stops carrying it.
+      //
+      // Only where the policy says nothing. A catalog that deliberately publishes a component
+      // claiming one of these ids states it in `statusSemantics.components`, and a statement is
+      // what this whole file defers to; `declared != null` is that statement.
+      //
+      // `componentIds.isNotEmpty()` is load-bearing: an entry claiming NO id is reached by
+      // canonical id instead (`ElevatedCard`, `OutlinedCard` — see `ScreenDocumentProjection`), and
+      // an `all {}` over an empty list is true, which would drop both.
+      if (declared == null && component.isBuilderVocabulary()) return@forEach
       val policy = declared?.second
       val componentId = declared?.first ?: derivedId(prefix, component)
       val excluded = policy?.excluded
@@ -400,6 +418,20 @@ internal object PublishedUiBuilderCatalog {
         ")"
     return Result.Composed(catalog, note, recordsById)
   }
+
+  /**
+   * `layout/`, `shape/` and `asset/` — the namespaces the BUILDER owns rather than any catalog.
+   *
+   * Stated here rather than shared with `ui-builder-runtime`'s `BUILDER_NAMESPACES`, which is
+   * `internal` to that module. The two must agree, and the paragraph in [compose] that uses this
+   * says which mechanism on the other side it is agreeing with.
+   */
+  private val BUILDER_VOCABULARY_NAMESPACES = listOf("layout/", "shape/", "asset/")
+
+  /** Whether this record entry answers only to ids the builder owns; see [compose]. */
+  private fun ComponentRecord.isBuilderVocabulary(): Boolean =
+    componentIds.isNotEmpty() &&
+      componentIds.all { id -> BUILDER_VOCABULARY_NAMESPACES.any(id::startsWith) }
 
   /**
    * The builder id of a record component the published file says nothing about.
