@@ -31,7 +31,10 @@ boundaries.
 - Commit subjects and PR titles use Conventional Commits. A `!` in one does **not** bump the major:
   every release here is a minor, and why is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
 - Run `./gradlew ktfmtFormat` before committing Kotlin changes and
-  `npm --prefix serve-web run format` before committing serve-web changes.
+  `npm --prefix serve-web run format` before committing serve-web changes. `ktfmtFormat` is the only
+  formatter that is correct by construction here: a standalone `ktfmt --google-style` preserves a
+  hand-broken lambda that the Gradle plugin collapses, so it can produce files CI rejects, and the
+  failure reads like a stale checkout rather than a formatter disagreement (#822).
 - `:ui-builder-runtime` compiles under `explicitApi()` and its public API is pinned by the committed
   dump `ui-builder-runtime/api/ui-builder-runtime.api`, which `checkKotlinAbi` verifies as part of
   `check`. When that module's API changes, run `./gradlew :ui-builder-runtime:updateKotlinAbi` and
