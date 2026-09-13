@@ -8,12 +8,13 @@
 #    for its native lane, and nobody was authoring against it — so both directions are asserted
 #    here: the default carries it, and an operator can still take it out with
 #    SERVE_UI_BUILDER_CATALOGS.
-# 2. `--ui-builder-published-catalogs` defaults to `remote-m3`: that catalog takes its
-#    definition from its own published `ui-builder.json` and the other two do not. The
-#    per-catalog reasons move and live in the entrypoint beside the lever, together with what
-#    serving remote-m3 that way costs. What is asserted here is the shape: the default names
-#    remote-m3 and nothing else, an operator can name more, and an operator can retreat to
-#    `none`.
+# 2. `--ui-builder-published-catalogs` now defaults to ALL THREE: every served catalog takes its
+#    definition from its own published `ui-builder.json` rather than from the catalog this build
+#    writes in Kotlin. The per-catalog reasons live in the entrypoint beside the lever, together
+#    with what each one costs. What is asserted here is the shape: the default is DERIVED from the
+#    served list rather than written independently of it, an operator can name a subset, and an
+#    operator can retreat to `none`. The derivation is the load-bearing part -- see the narrowing
+#    cases below for why a literal default cannot work.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,8 +87,8 @@ expect "the default serves m3-catalog, remote-m3 and wear-m3" "m3-catalog,remote
 # argument. (Command substitution strips the trailing newline, so the assertion pins both ids
 # rather than the line end -- which still catches the regression that matters, a default that
 # silently loses wear-m3.)
-expect "the default serves remote-m3 and wear-m3 from their published files" \
-  $'--ui-builder-published-catalogs\nremote-m3,wear-m3' "${default}"
+expect "the default serves all three catalogs from their published files" \
+  $'--ui-builder-published-catalogs\nm3-catalog,remote-m3,wear-m3' "${default}"
 
 # The reverse direction, and the one that matters most: a box can put every catalog back on the
 # catalog this build writes in Kotlin. `none` is the whole-fleet retreat this lever exists for,
@@ -97,29 +98,39 @@ withheld="$(run_case "" "none")"
 expect "an operator can withhold the published path from every catalog" \
   $'--ui-builder-published-catalogs\nnone' "${withheld}"
 
-# The case that made the published default a derived value rather than a literal. An operator may
-# narrow the served allowlist — dropping the Wear/Android lane is the documented reason — and
-# `ServeCommandOptions` REFUSES a published id the served list does not carry, with a startup
-# failure. So a narrowed allowlist that no longer serves remote-m3 must fall back to `none` on its
-# own; otherwise the box does not boot and the operator is told to narrow a second variable they
-# were never asked to think about.
+# The case that made the published default a derived value rather than a literal, and the reason it
+# must stay derived now that all three are publishable. An operator may narrow the served allowlist
+# — dropping the Wear/Android lane is the documented reason — and `ServeCommandOptions` REFUSES a
+# published id the served list does not carry, with a startup failure rather than a warning. So the
+# published list has to shrink with the served one on its own; otherwise the box does not boot and
+# the operator is told to narrow a second variable they were never asked to think about.
 narrowed_out="$(run_case "m3-catalog")"
-expect "narrowing the allowlist past remote-m3 withholds the published path" \
-  $'--ui-builder-published-catalogs\nnone' "${narrowed_out}"
-refute "narrowing the allowlist past remote-m3 publishes nothing" "remote-m3" "${narrowed_out}"
+expect "narrowing to m3-catalog alone publishes exactly it" \
+  $'--ui-builder-published-catalogs\nm3-catalog' "${narrowed_out}"
+refute "narrowing to m3-catalog alone does not publish remote-m3" "remote-m3" "${narrowed_out}"
+refute "narrowing to m3-catalog alone does not publish wear-m3" "wear-m3" "${narrowed_out}"
+
+# The `none` fallback still has to be reachable, and after this change it is no longer reachable by
+# narrowing to one of the three — every one of them is publishable. It is reached by serving a
+# catalog this image has no published file for, which is what a future catalog looks like on the
+# day it is added to the served list and before its fixture and gate exist.
+future="$(run_case "some-future-catalog")"
+expect "a served catalog with no published file falls back to none" \
+  $'--ui-builder-published-catalogs\nnone' "${future}"
 
 # The symmetric guard, and the one the default no longer covers: a box that does not want to pay
 # for the Wear/Android lane can drop it, and dropping it must not disturb the other two.
 narrowed="$(run_case "m3-catalog,remote-m3")"
 refute "an operator can take wear-m3 out" "wear-m3" "${narrowed}"
-expect "taking wear-m3 out leaves the other two" "m3-catalog,remote-m3" "${narrowed}"
+expect "taking wear-m3 out leaves the other two published" \
+  $'--ui-builder-published-catalogs\nm3-catalog,remote-m3' "${narrowed}"
 
 # The other half of the derivation, added when wear-m3 joined remote-m3 on the published path: the
 # intersection has to work from EITHER side. Dropping remote-m3 must leave wear-m3 published rather
 # than falling back to `none`, which is what a literal default or a single-catalog `if` would do.
 wear_only="$(run_case "m3-catalog,wear-m3")"
-expect "dropping remote-m3 still publishes wear-m3" \
-  $'--ui-builder-published-catalogs\nwear-m3' "${wear_only}"
+expect "dropping remote-m3 still publishes the rest" \
+  $'--ui-builder-published-catalogs\nm3-catalog,wear-m3' "${wear_only}"
 refute "dropping remote-m3 does not publish it" "remote-m3" "${wear_only}"
 
 all="$(run_case "" "all")"

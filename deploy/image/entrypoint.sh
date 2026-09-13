@@ -282,23 +282,37 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
   #               persisted `remote-m3` design pinned to the synthesised catalog becomes
   #               CATALOG_UNAVAILABLE with no upgrade path. Whether this deployment has such
   #               designs is not knowable from the repository. Issue #796.
-  #   wear-m3     NOT YET, and only for want of the gate. It publishes 2 builtins, so unlike
-  #               m3-catalog a catalog composed from it has a screen root; what is missing is
-  #               acceptance entries for the fields the frozen catalog has no opinion about and a
-  #               `--strict` row in the ui-builder-contract job beside the other two.
-  #   m3-catalog  NO, and a decision rather than a gap. Measured against the frozen goldens with
-  #               .github/scripts/ui-builder-equivalence.sh, re-measured 2026-09-12:
+  #   wear-m3     IN, since #807. 0 differences under `--strict` against a fixture re-captured
+  #               from the catalog repository, with its 82 acceptance entries each pinning both
+  #               values, and a `--strict` row in the ui-builder-contract job beside the others.
+  #               Two of those entries record a KNOWN-WRONG shelf (`app-scaffold`, `time-text`),
+  #               a file-level `@file:CatalogGroup` collision that belongs upstream — see
+  #               wear-m3-catalog#491. They are differences to DELETE when it is fixed, not to
+  #               amend.
+  #   m3-catalog  IN. This paragraph said NO until this change, on a premise that had stopped
+  #               being true, so the reasoning is worth keeping rather than just the verdict.
   #
-  #               it publishes a 188 KB file the gate scores ZERO differences on, declaring 110
-  #               components with a 102-entry menu over 39 shelves, so the old objection (every id
-  #               derived from the `m3/` prefix against a curated shelf of 41) is gone. It still
-  #               declares ZERO builtins, so a catalog composed from it has no screen root to put
-  #               any component into — and its own policy argues that zero deliberately:
-  #               `layout/*`, `shape/*`, `asset/image` and `remote-compose/*` are the BUILDER's
-  #               vocabulary, and declaring them "would be this catalog claiming to own the
-  #               builder's own vocabulary". Somebody has to decide whether the builder
-  #               materialises its own builtins when a published file declares none, or a catalog
-  #               declares them anyway. Until then m3-catalog is served from Kotlin.
+  #               It publishes a 188 KB file the gate scores ZERO differences on under `--strict`,
+  #               declaring 110 components with a 102-entry menu over 39 shelves, and its 112
+  #               acceptance entries all carry the full `{field, why, policy, frozen}` shape — both
+  #               values pinned, so a moved value fails the gate rather than passing under a
+  #               blanket waiver. None of the 112 records a blocker.
+  #
+  #               THE OBJECTION THAT USED TO STAND HERE was that it declares ZERO builtins, so a
+  #               catalog composed from it has no screen root to put any component into, and that
+  #               somebody had to decide whether the builder materialises its own vocabulary or the
+  #               catalog declares it anyway. That decision was already made and shipped in #664:
+  #               `ProductionUiBuilderRuntime.withBuilderVocabulary` hands a published catalog every
+  #               `BUILDER_NAMESPACES` component (`layout/`, `shape/`, `asset/`, `remote-compose/`)
+  #               its donor offers and it does not — additively, catalog wins every collision, with
+  #               the donor's asset registry and menu shelves travelling along. The donor for a
+  #               published `m3-catalog` is the synthesised `m3-catalog`, which has all sixteen.
+  #
+  #               `PublishedM3CatalogEquivalenceTest."a published catalog is still served the
+  #               builder's own vocabulary"` pins exactly that, against this catalog, and asserts
+  #               the source stays `published`. The catalog's policy — that declaring `layout/box`
+  #               "would be this catalog claiming to own the builder's own vocabulary" — is right,
+  #               and the server is what honours it.
   #
   # Naming a catalog turns it on and removing it turns it off, in this one variable. Reversing it
   # used to mean asking another repository to withdraw a file; that is what this lever exists to
@@ -320,7 +334,7 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html ]]; then
     ui_builder_published="${SERVE_UI_BUILDER_PUBLISHED_CATALOGS}"
   else
     ui_builder_published=""
-    for candidate in remote-m3 wear-m3; do
+    for candidate in m3-catalog remote-m3 wear-m3; do
       if [[ "${ui_builder_served}" == *",${candidate},"* ]]; then
         ui_builder_published="${ui_builder_published:+${ui_builder_published},}${candidate}"
       fi
