@@ -50,13 +50,62 @@ class CatalogUpgradePreviewTest {
     val moved = outcome.candidate.nodes.getValue("label")
     assertEquals("remote-m3/remote-text", moved.componentId)
     assertEquals(
-      setOf("text", "fontSize", "color"),
+      setOf("text", "color"),
       moved.properties.keys,
-      "`fontSizeSp` is `fontSize` in the Remote library's signature; the rest keep their names",
+      "what the published catalog declares, and nothing the rename wished into it",
     )
+    // The size is renamed to the name the library uses and STILL does not survive, because the
+    // published catalog declares no `fontSize` at all. Reported rather than silent, which is the
+    // whole contract: a size this move cannot carry is something an owner has to agree to lose.
+    assertTrue(
+      outcome.issues.any {
+        it.path == "/nodes/label/properties/fontSizeSp" &&
+          it.severity == CatalogUpgradeIssueSeverityV1.WARNING
+      },
+      "the authored size is named as a loss",
+    )
+  }
+
+  /**
+   * The rename mechanism itself, on a catalog invented for it.
+   *
+   * Kept apart from the remote-m3 cases deliberately: today's published `remote-m3` declares no
+   * property that `m3/text` also has under another name, so a rename that LANDS cannot be shown
+   * against it without declaring capabilities that catalog does not have.
+   */
+  @Test
+  fun `a rename that the target does declare carries its value`() {
+    val target =
+      CatalogCapabilityV1(
+        schema = "compose-catalog-capabilities/v1",
+        benchmark = CatalogBenchmarkV1("x", "source", "x", "published", "runtime"),
+        statusSemantics =
+          JsonObject(
+            mapOf(
+              "supersedes" to
+                JsonObject(
+                  mapOf(
+                    "old/thing" to
+                      JsonObject(
+                        mapOf(
+                          "componentId" to JsonPrimitive("new/thing"),
+                          "properties" to JsonObject(mapOf("caption" to JsonPrimitive("label"))),
+                        )
+                      )
+                  )
+                )
+            )
+          ),
+        components = listOf(component("new/thing", listOf("label"))),
+        exportCapabilities = ExportCapabilitiesV1(composeCode = true, svg = true, png = true),
+      )
+    val document = document("d").withNode(node("n", "old/thing", mapOf("caption" to "hi")))
+
+    val outcome = planCatalogUpgrade(document, target, TARGET)
+
     assertEquals(
-      StringValueV1("14"),
-      moved.properties["fontSize"],
+      mapOf("label" to StringValueV1("hi")),
+      outcome.candidate.nodes.getValue("n").properties,
       "a rename carries the value, it does not reset it",
     )
   }
@@ -194,6 +243,65 @@ class CatalogUpgradePreviewTest {
     )
   }
 
+  /**
+   * The case the whole feature is for, and the one a service-level test has to cover: the designs
+   * that need a preview are precisely the ones already refused everywhere else.
+   */
+  @Test
+  fun `a quarantined design can still be asked what moving it would cost`() {
+    val root = createTempDirectory("upgrade")
+    create(service(root), "widget")
+
+    // Restarted against a catalog that no longer declares what the stored design names, exactly as
+    // the live box was after the published-catalog flip.
+    val narrowed = service(root, borrowedStillDeclaresText = false)
+
+    assertEquals(
+      ServiceErrorCodeV1.INTERNAL,
+      assertIs<UiBuilderServiceResponse.Error>(
+          execute(narrowed, owner, UiBuilderServiceRequest.OpenDesign("widget"))
+        )
+        .error
+        .code,
+      "the design is unusable, which is what makes this the case that matters",
+    )
+    val preview = preview(narrowed, "widget", revision = 0)
+    assertEquals(CatalogUpgradePreviewStatusV1.READY, preview.status)
+    assertEquals(
+      "remote-m3/remote-text",
+      assertNotNull(preview.candidateDocument).nodes.getValue("label").componentId,
+    )
+  }
+
+  @Test
+  fun `a design broken in itself stays refused, because no catalog move repairs it`() {
+    val root = createTempDirectory("upgrade")
+    create(service(root), "widget")
+    // A node naming itself as its own child: a topology fault, not a catalog one.
+    val store = UiBuilderDesignStateStore.open(root).store
+    val stored = checkNotNull(store.load().designs["widget"])
+    val cyclic =
+      stored.document.copy(
+        nodes =
+          stored.document.nodes.mapValues { (id, node) ->
+            node.copy(slots = mapOf("children" to listOf(id)))
+          }
+      )
+    store.commitAll(mapOf("widget" to (stored to stored.copy(document = cyclic))))
+
+    val response =
+      execute(
+        service(root),
+        owner,
+        UiBuilderServiceRequest.PreviewCatalogUpgrade("widget", 0, SOURCE, TARGET),
+      )
+
+    assertEquals(
+      ServiceErrorCodeV1.INTERNAL,
+      assertIs<UiBuilderServiceResponse.Error>(response).error.code,
+    )
+  }
+
   @Test
   fun `a stale base revision is refused, because the candidate would describe another document`() {
     val root = createTempDirectory("upgrade")
@@ -262,9 +370,13 @@ class CatalogUpgradePreviewTest {
         listOf(
           component(
             "remote-m3/remote-text",
-            // `RemoteText`'s own parameters, as the published record states them: no letter
-            // spacing, and the size is `fontSize`.
-            listOf("text", "color", "fontSize", "fontWeight", "textAlign", "overflow", "maxLines"),
+            // What the PUBLISHED catalog really declares, which is less than `RemoteText`'s
+            // signature: `ComponentRecordPacks.jsonTypeOf` maps `RemoteString`, `RemoteColor` and
+            // `kotlin.Int` and drops every parameter it has no JSON type for -- so `RemoteTextUnit`
+            // (`fontSize`), `RemoteTextStyle` and the `androidx.compose.ui.text` enums are not
+            // properties a design can author. Declaring them here would make this fixture agree
+            // with a catalog that does not exist.
+            listOf("text", "color", "maxLines"),
           ),
           component("layout/box", listOf("contentAlignment")),
         ),
@@ -283,15 +395,25 @@ class CatalogUpgradePreviewTest {
       wasm = WasmCapabilityV1(JsonPrimitive(true), WasmAdapterStatusV1.SUPPORTED),
     )
 
-  /** Serves the published catalog under [TARGET] and the borrowed vocabulary under [SOURCE]. */
-  private inner class TwoPinCatalogs : UiBuilderCatalogExecutor {
+  /**
+   * Serves the published catalog under [TARGET] and the borrowed vocabulary under [SOURCE].
+   *
+   * [borrowedStillDeclaresText] false is the live situation rather than a hypothetical: the box was
+   * flipped to the published catalogs, so the pin a stored design carries now resolves to a catalog
+   * that has never declared `m3/text`, and the design is quarantined at boot.
+   */
+  private inner class TwoPinCatalogs(private val borrowedStillDeclaresText: Boolean = true) :
+    UiBuilderCatalogExecutor {
     private val published = remoteM3()
     private val borrowed =
       published.copy(
         benchmark = published.benchmark.copy(catalogRevision = "candidate"),
         components =
           published.components +
-            component("m3/text", listOf("text", "color", "fontSizeSp", "letterSpacingSp")) +
+            listOfNotNull(
+              component("m3/text", listOf("text", "color", "fontSizeSp", "letterSpacingSp"))
+                .takeIf { borrowedStillDeclaresText }
+            ) +
             // Declared here and nowhere in the published catalog: the shape of a design authored
             // when the borrowed vocabulary was wider than what replaced it.
             component("m3/assist-chip", listOf("text")),
@@ -342,10 +464,13 @@ class CatalogUpgradePreviewTest {
     }
   }
 
-  private fun service(root: Path): PersistentUiBuilderService =
+  private fun service(
+    root: Path,
+    borrowedStillDeclaresText: Boolean = true,
+  ): PersistentUiBuilderService =
     PersistentUiBuilderService(
       designStore = UiBuilderDesignStateStore.open(root),
-      catalogs = TwoPinCatalogs(),
+      catalogs = TwoPinCatalogs(borrowedStillDeclaresText),
       exporter = UiBuilderExportExecutor { error("no export in this test") },
       clock = Clock.fixed(Instant.ofEpochMilli(1_000), ZoneOffset.UTC),
     )

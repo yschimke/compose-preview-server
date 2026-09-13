@@ -537,6 +537,15 @@ public class PersistentUiBuilderService(
      * be retired.
      */
     val storeQuarantine: Boolean = false,
+    /**
+     * True when the document is sound and the CATALOG is what moved — the pin names a revision this
+     * deployment no longer serves, or the served one refuses a document it read fine.
+     *
+     * The distinction earns its keep in [execute]: a design in this state may still be asked what
+     * moving it to another catalog would cost, because that is the only repair it has. A document
+     * that is itself broken cannot be repaired by a catalog move and stays refused.
+     */
+    val catalogFault: Boolean = false,
   )
 
   /**
@@ -702,13 +711,18 @@ public class PersistentUiBuilderService(
         ?: return UnusableDesign(
           ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
           "catalog unavailable for stored design $designId",
+          catalogFault = true,
         )
     // Judged on the probe: a property the catalog stopped declaring is a warning about this
     // design, not a reason to refuse every request naming it. What the probe still refuses is a
     // real defect -- an unknown component has nothing to draw -- and stays fatal.
     val probe = design.document.withoutProperties(undeclaredProperties(design.document, catalog))
     catalogs.validate(probe, catalog)?.let {
-      return internal("invalid stored design $designId: ${it.message}")
+      return UnusableDesign(
+        ServiceErrorCodeV1.INTERNAL,
+        "invalid stored design $designId: ${it.message}",
+        catalogFault = true,
+      )
     }
     return null
   }
@@ -741,8 +755,20 @@ public class PersistentUiBuilderService(
 
   override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
     call.request.designId()?.let { designId ->
-      unusableDesigns[designId]?.let {
-        return UiBuilderServiceResponse.Error(UiBuilderServiceError(it.code, it.reason))
+      unusableDesigns[designId]?.let { unusable ->
+        // One exception, and only one: a design the CATALOG outgrew may still be asked what moving
+        // it would cost. Refusing that refuses the only repair such a design has -- the designs the
+        // preview was written for are exactly the ones quarantined here, so a gate in front of it
+        // would put the feature permanently out of their reach. Everything the store could not
+        // read,
+        // and every document that is itself wrong -- key mismatch, node count, quota, topology --
+        // stays refused, because no catalog move repairs any of those.
+        val previewing = call.request is UiBuilderServiceRequest.PreviewCatalogUpgrade
+        if (!previewing || !unusable.catalogFault) {
+          return UiBuilderServiceResponse.Error(
+            UiBuilderServiceError(unusable.code, unusable.reason)
+          )
+        }
       }
     }
     if (
