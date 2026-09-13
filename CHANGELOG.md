@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.31.0](https://github.com/yschimke/compose-preview-server/compare/v3.30.0...v3.31.0) (2026-09-13)
+
+
+### Features
+
+* **ui-builder:** give the builder's own vocabulary a component record of its own ([#850](https://github.com/yschimke/compose-preview-server/issues/850)) ([0fa7819](https://github.com/yschimke/compose-preview-server/commit/0fa781966e8689b8b3fe5d5a8f40af0ffb7ebab8))
+* **ui-builder:** let a published Remote catalog declare a text size ([#845](https://github.com/yschimke/compose-preview-server/issues/845)) ([2b0f6ca](https://github.com/yschimke/compose-preview-server/commit/2b0f6caa03774327adbde5d237bbde57fd6609bb))
+* **ui-builder:** say what moving a design to another catalog would cost ([#844](https://github.com/yschimke/compose-preview-server/issues/844)) ([4d20c0e](https://github.com/yschimke/compose-preview-server/commit/4d20c0e550443a7770f4074b262db1fec38d7ed3))
+* **ui-builder:** write the published text component with the m3/text hand ([#848](https://github.com/yschimke/compose-preview-server/issues/848)) ([5a14a38](https://github.com/yschimke/compose-preview-server/commit/5a14a38bc3dbe90531b9d27c1397bbac255d2fdc))
+
+
+### Bug Fixes
+
+* **ui-builder:** refuse a published catalog paired with another catalog's record ([#849](https://github.com/yschimke/compose-preview-server/issues/849)) ([83a3fa0](https://github.com/yschimke/compose-preview-server/commit/83a3fa015613882860e82996d80a6ca2d4f7d1b5))
+
 ## [3.30.0](https://github.com/yschimke/compose-preview-server/compare/v3.29.0...v3.30.0) (2026-09-13)
 
 
