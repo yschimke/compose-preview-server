@@ -91,7 +91,9 @@ class RemoteTextComponentExportTest {
           .joinToString("\n")
 
       assertTrue(refusals.isEmpty(), refusals.toString())
-      assertContains(source, "fontSize = 22.rsp", "`$name` is a size either way")
+      // `message` by name: on the CharSequence overload the third positional parameter is
+      // `ignoreCase`, not the message the Iterable one takes there.
+      assertContains(source, "fontSize = 22.rsp", message = "`$name` is a size either way")
     }
   }
 
